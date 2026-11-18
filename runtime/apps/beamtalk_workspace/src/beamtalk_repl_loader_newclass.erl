@@ -126,7 +126,7 @@ The "its content already matches disk" assumption above holds only absent a
 concurrent out-of-band edit (another session, git, an editor touching the
 file while the removal sat pending) — this function does not itself guard
 against that. The caller,
-`beamtalk_workspace_interface_primitives:reinstall_reverted_class/3`, runs
+`beamtalk_workspace_revert:reinstall_reverted_class/3`, runs
 `check_no_external_drift/3` first and never calls this function at all if the
 on-disk file has drifted from the recorded `prev_source_ref` snapshot —
 see that function's doc.

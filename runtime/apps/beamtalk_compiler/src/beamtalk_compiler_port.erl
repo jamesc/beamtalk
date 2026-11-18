@@ -1051,7 +1051,7 @@ handle_scan_source_dependencies_response(Other) ->
 Build the class→module-name index for a single `src/**/*.bt` file.
 
 Backs the REPL/workspace cold-load fallback for `class_module_index' (ADR
-0050) — `beamtalk_workspace_project_sync:build_source_class_module_index/2' calls
+0050) — `beamtalk_workspace_native_build:build_source_class_module_index/2' calls
 this once per project source file instead of independently re-parsing class
 declarations with a regex and re-deriving the module-name casing rule in
 Erlang. `Source' is the file's raw text, `RelativePath' is its path relative

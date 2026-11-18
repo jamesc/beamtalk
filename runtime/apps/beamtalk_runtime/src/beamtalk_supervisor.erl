@@ -3097,17 +3097,7 @@ and must never fail or delay the supervision operation.
 """.
 -spec announce_supervision(atom(), map()) -> ok.
 announce_supervision(EventClass, Fields) ->
-    case erlang:whereis(beamtalk_announcements) of
-        undefined ->
-            ok;
-        _Pid ->
-            try
-                beamtalk_announcements:system_announce_running(EventClass, Fields)
-            catch
-                _:_ -> ok
-            end
-    end,
-    ok.
+    beamtalk_announcements:system_announce_safe(EventClass, Fields).
 
 -doc """
 Execute Fun(), translating a raw failure to reach the supervisor into a

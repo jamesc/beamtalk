@@ -155,7 +155,8 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 %% action, after the action's metadata writes commit.
 -export([
     system_announce/2,
-    system_announce_running/2
+    system_announce_running/2,
+    system_announce_safe/2
 ]).
 
 %% gen_server callbacks
@@ -1606,6 +1607,25 @@ system_announce_running(EventClass, Fields) when is_atom(EventClass), is_map(Fie
             Event = Fields#{'$beamtalk_class' => EventClass},
             Refs = walk_matching(?SYSTEM_ANNOUNCER_REF, EventClass, Matching),
             dispatch_refs(Refs, EventClass, Event)
+    end.
+
+-doc """
+Best-effort `system_announce/2` for emit points that must never fail or delay
+their caller: a no-op when the announcements worker is not running (it is a
+supervised worker brought up at boot, so a spawn/load/stop never *starts* it),
+and any failure while announcing is swallowed. Returns `ok` either way.
+""".
+-spec system_announce_safe(announcement_class(), map()) -> ok.
+system_announce_safe(EventClass, Fields) when is_atom(EventClass), is_map(Fields) ->
+    case erlang:whereis(?MODULE) of
+        undefined ->
+            ok;
+        _Pid ->
+            try
+                system_announce_running(EventClass, Fields)
+            catch
+                _:_ -> ok
+            end
     end.
 
 -doc """

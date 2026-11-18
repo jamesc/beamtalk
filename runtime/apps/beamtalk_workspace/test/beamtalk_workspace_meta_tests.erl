@@ -195,14 +195,13 @@ get_metadata_includes_all_fields_test() ->
     ?assert(maps:is_key(last_activity, M)),
     ?assert(maps:is_key(node_name, M)),
     ?assert(maps:is_key(repl_port, M)),
-    ?assert(maps:is_key(supervised_actors, M)),
+    ?assertNot(maps:is_key(supervised_actors, M)),
     ?assert(maps:is_key(loaded_modules, M)),
 
     %% Verify values
     ?assertEqual(<<"meta-test123">>, maps:get(workspace_id, M)),
     ?assertEqual(<<"/bt_test/workspace">>, maps:get(project_path, M)),
     ?assertEqual(9001, maps:get(repl_port, M)),
-    ?assertEqual([], maps:get(supervised_actors, M)),
     ?assert(is_atom(maps:get(node_name, M))),
 
     %% Cleanup
@@ -236,81 +235,6 @@ get_alias_returns_same_as_get_metadata_test() ->
     ),
     gen_server:stop(Pid).
 
-%%% Actor tracking tests
-
-register_actor_test() ->
-    stop_if_running(),
-    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
-
-    %% Initially no actors
-    ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors()),
-
-    %% Spawn a process to register
-    ActorPid = spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end),
-    ok = beamtalk_workspace_meta:register_actor(ActorPid),
-    % Let cast process
-    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
-
-    {ok, Actors} = beamtalk_workspace_meta:supervised_actors(),
-    ?assertEqual([ActorPid], Actors),
-
-    %% Registering same PID again should not duplicate
-    ok = beamtalk_workspace_meta:register_actor(ActorPid),
-    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
-    {ok, Actors2} = beamtalk_workspace_meta:supervised_actors(),
-    ?assertEqual([ActorPid], Actors2),
-
-    %% Cleanup
-    ActorPid ! stop,
-    gen_server:stop(Pid).
-
-unregister_actor_test() ->
-    stop_if_running(),
-    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
-
-    ActorPid = spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end),
-    ok = beamtalk_workspace_meta:register_actor(ActorPid),
-    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
-
-    ok = beamtalk_workspace_meta:unregister_actor(ActorPid),
-    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
-
-    ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors()),
-
-    ActorPid ! stop,
-    gen_server:stop(Pid).
-
-actor_down_cleanup_test() ->
-    stop_if_running(),
-    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
-
-    %% Spawn and register an actor that will exit
-    ActorPid = spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end),
-    ok = beamtalk_workspace_meta:register_actor(ActorPid),
-    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
-
-    {ok, [ActorPid]} = beamtalk_workspace_meta:supervised_actors(),
-
-    %% Kill the actor - DOWN message should auto-remove it
-    ActorPid ! stop,
-    beamtalk_test_wait:dead(ActorPid),
-
-    ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors()),
-
-    gen_server:stop(Pid).
-
 %%% Module tracking tests
 
 register_module_test() ->
@@ -341,17 +265,14 @@ register_module_test() ->
 
 %%% Not-started behavior tests for new APIs
 
-supervised_actors_when_not_started_test() ->
-    stop_if_running(),
-    ?assertEqual({error, not_started}, beamtalk_workspace_meta:supervised_actors()).
-
 loaded_modules_when_not_started_test() ->
     stop_if_running(),
     ?assertEqual({error, not_started}, beamtalk_workspace_meta:loaded_modules()).
 
-%% ADR 0150 (BT-4950): workspace_meta learns about spawned actors from the
-%% `ActorSpawned` announcement on the SystemAnnouncer bus, not a runtime hook.
-learns_spawned_actor_from_announcement_test() ->
+%% ADR 0150 (BT-4950): workspace_meta hears of spawned actors on the
+%% `ActorSpawned` announcement (SystemAnnouncer bus) and counts each as
+%% workspace activity; it keeps no actor registry (that is the actor scan).
+spawned_actor_announcement_is_handled_test() ->
     stop_if_running(),
     BusStarted = ensure_bus(),
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
@@ -361,17 +282,13 @@ learns_spawned_actor_from_announcement_test() ->
         end
     end),
     try
-        ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors()),
         beamtalk_announcements:system_announce('ActorSpawned', #{
             actorClass => 'Counter', pid => ActorPid
         }),
         ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
-        ?assertEqual({ok, [ActorPid]}, beamtalk_workspace_meta:supervised_actors()),
-        %% and forgets it again when it exits (monitor-based cleanup)
-        ActorPid ! stop,
-        ok = beamtalk_test_wait:dead(ActorPid),
-        ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
-        ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors())
+        ?assert(is_process_alive(Pid)),
+        {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
+        ?assertNot(maps:is_key(supervised_actors, Meta))
     after
         exit(ActorPid, kill),
         gen_server:stop(Pid),
@@ -389,11 +306,6 @@ ensure_bus() ->
         _ ->
             false
     end.
-
-register_actor_when_not_started_test() ->
-    stop_if_running(),
-    %% Should not crash
-    ?assertEqual(ok, beamtalk_workspace_meta:register_actor(self())).
 
 register_module_when_not_started_test() ->
     stop_if_running(),
@@ -477,9 +389,6 @@ persist_and_restore_modules_test() ->
     ?assertEqual({maps, "/bt_test/src/maps_test.bt"}, lists:keyfind(maps, 1, Modules)),
     %% Module registered without source should have undefined
     ?assertEqual({lists, undefined}, lists:keyfind(lists, 1, Modules)),
-
-    %% Actors should NOT be restored (always fresh)
-    ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors()),
 
     %% Cleanup
     gen_server:stop(Pid2),
@@ -809,7 +718,6 @@ load_corrupt_json_falls_back_test() ->
     %% Should have default state (not crash)
     {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
     ?assertEqual(<<"/bt_test/corrupt">>, maps:get(project_path, Meta)),
-    ?assertEqual([], maps:get(supervised_actors, Meta)),
     ?assertEqual(2000000, maps:get(created_at, Meta)),
 
     gen_server:stop(Pid),

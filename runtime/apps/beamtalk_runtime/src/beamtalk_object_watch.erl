@@ -409,18 +409,9 @@ do_publish(Pid, ActorClass, ChangedSlots, #state{watchers = Watchers}) ->
 
 -spec announce_state_changed(pid(), atom(), [atom()]) -> ok.
 announce_state_changed(Pid, ActorClass, ChangedSlots) ->
-    case erlang:whereis(beamtalk_announcements) of
-        undefined ->
-            ok;
-        _ ->
-            try
-                beamtalk_announcements:system_announce('ObjectStateChanged', #{
-                    pid => Pid,
-                    actorClass => ActorClass,
-                    changedSlots => ChangedSlots
-                })
-            catch
-                _:_ -> ok
-            end
-    end,
+    beamtalk_announcements:system_announce_safe('ObjectStateChanged', #{
+        pid => Pid,
+        actorClass => ActorClass,
+        changedSlots => ChangedSlots
+    }),
     ok.

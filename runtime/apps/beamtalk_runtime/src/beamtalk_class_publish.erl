@@ -170,17 +170,7 @@ payload and dispatches it caller-side, fire-and-forget.
 """.
 -spec announce_class_lifecycle('ClassLoaded' | 'ClassRemoved', class_name()) -> ok.
 announce_class_lifecycle(EventClass, ClassName) ->
-    case erlang:whereis(beamtalk_announcements) of
-        undefined ->
-            ok;
-        _Pid ->
-            try
-                beamtalk_announcements:system_announce(EventClass, #{className => ClassName})
-            catch
-                _:_ -> ok
-            end
-    end,
-    ok.
+    beamtalk_announcements:system_announce_safe(EventClass, #{className => ClassName}).
 
 -doc """
 Re-index a single hot-patched method in `beamtalk_xref` (ADR 0087 Phase 4).

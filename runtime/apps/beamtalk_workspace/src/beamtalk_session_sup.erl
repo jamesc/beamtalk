@@ -18,8 +18,16 @@ terminate when the connection closes.
 """.
 
 -export([start_link/0, start_session/1, start_session/2, stop_session/1]).
--export([normalize_kind/1, known_kinds/0]).
+
 -export([init/1]).
+
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
+-export([
+    normalize_kind/1,
+    known_kinds/0
+]).
+-endif.
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -77,10 +85,13 @@ start_session(SessionId, Meta) when is_map(Meta) ->
     NormalisedMeta = Meta#{kind => normalize_kind(maps:get(kind, Meta, <<"unknown">>))},
     supervisor:start_child(?MODULE, [SessionId, NormalisedMeta]).
 
+%% Only the tests call this (BT-5048).
+-ifdef(TEST).
 -doc "The allowlist of recognised client-surface kinds.".
 -spec known_kinds() -> [binary()].
 known_kinds() ->
     ?KNOWN_KINDS.
+-endif.
 
 -doc """
 Normalise a client-surface kind to a known lowercase binary.

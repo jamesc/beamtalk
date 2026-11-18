@@ -70,8 +70,12 @@ supervisor is even asked to start — see that module's doc.
 
 -export([start_link/1]).
 -export([init/1]).
-%% Exported for tests (BT-3680 directory-site agreement test).
+
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
 -export([setup_file_logger/1]).
+-endif.
+%% Exported for tests (BT-3680 directory-site agreement test).
 
 -type mode() :: beamtalk_capability:mode().
 

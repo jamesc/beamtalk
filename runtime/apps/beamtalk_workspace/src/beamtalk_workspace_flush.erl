@@ -1538,20 +1538,10 @@ complete_flush(Files, Renamed, Failed, Seqs, Skipped) ->
 announce_flush_completed([], _FileKinds) ->
     ok;
 announce_flush_completed(Files, FileKinds) ->
-    case erlang:whereis(beamtalk_announcements) of
-        undefined ->
-            ok;
-        _Pid ->
-            try
-                beamtalk_announcements:system_announce('FlushCompleted', #{
-                    files => Files,
-                    fileKinds => FileKinds
-                })
-            catch
-                _:_ -> ok
-            end
-    end,
-    ok.
+    beamtalk_announcements:system_announce_safe('FlushCompleted', #{
+        files => Files,
+        fileKinds => FileKinds
+    }).
 
 %% The `#{file => Path, kind => Kind}` wire entry for one committed
 %% `#prepared{}` record. A `'new-class'`/`'remove-class'` file

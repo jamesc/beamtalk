@@ -28,10 +28,9 @@ and can be queried by other components (e.g., idle monitor).
 
 %% Public API
 -export([new_foreground_id/0, is_foreground_id/1]).
--export([prune_stale_foreground_workspaces/3]).
+
 -export([prune_stale_foreground_workspaces_async/3]).
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
--export([register_actor/1, unregister_actor/1, supervised_actors/0]).
 -export([register_module/1, register_module/2, unregister_module/1, loaded_modules/0]).
 -export([set_class_source/2, get_class_source/1, all_class_sources/0, remove_class_source/1]).
 %% ADR 0127 §10a / BT-3593: protocol source tracking, mirroring the class
@@ -47,7 +46,7 @@ and can be queried by other components (e.g., idle monitor).
     all_protocol_source_paths/0
 ]).
 %% File mtime tracking for incremental load-project.
--export([set_file_mtime/2, get_file_mtimes/0, clear_file_mtimes/0, remove_file_mtime/1]).
+-export([set_file_mtime/2, get_file_mtimes/0, remove_file_mtime/1]).
 -export([get_package_name/0]).
 %% ADR 0082 Phase 4: workspace-scoped boolean settings (autoflush).
 -export([get_setting/2, set_setting/2]).
@@ -66,6 +65,14 @@ and can be queried by other components (e.g., idle monitor).
     terminate/2,
     code_change/3
 ]).
+
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
+-export([
+    clear_file_mtimes/0,
+    prune_stale_foreground_workspaces/3
+]).
+-endif.
 
 -define(WORKSPACE_META_TABLE, beamtalk_workspace_registry).
 % Debounce disk writes to every 2 seconds
@@ -90,7 +97,6 @@ and can be queried by other components (e.g., idle monitor).
     node_name :: atom(),
     repl_port :: inet:port_number() | undefined,
     mode :: beamtalk_capability:mode(),
-    supervised_actors :: [pid()],
     loaded_modules :: #{atom() => string() | undefined},
     class_sources :: #{binary() => string()},
     %% ADR 0127 §10a / BT-3593: protocol source tracking — see
@@ -109,8 +115,7 @@ and can be queried by other components (e.g., idle monitor).
     %% settings slot in without a schema migration.
     settings :: #{atom() => term()},
     metadata_path :: string() | undefined,
-    persist_timer :: reference() | undefined,
-    monitor_refs :: #{pid() => reference()}
+    persist_timer :: reference() | undefined
 }).
 
 %% init_metadata/0 is the input contract for start_link/1.
@@ -133,7 +138,6 @@ and can be queried by other components (e.g., idle monitor).
     last_activity => integer(),
     node_name => atom(),
     repl_port => inet:port_number() | undefined,
-    supervised_actors => [pid()],
     loaded_modules => [atom()]
 }.
 
@@ -196,36 +200,6 @@ Returns the timestamp in seconds since epoch, or {error, not_started}.
 get_last_activity() ->
     try
         gen_server:call(?MODULE, get_last_activity)
-    catch
-        exit:{noproc, _} ->
-            {error, not_started}
-    end.
-
--doc "Register a supervised actor PID.".
--spec register_actor(pid()) -> ok.
-register_actor(Pid) when is_pid(Pid) ->
-    try
-        gen_server:cast(?MODULE, {register_actor, Pid})
-    catch
-        exit:{noproc, _} ->
-            ok
-    end.
-
--doc "Unregister a supervised actor PID.".
--spec unregister_actor(pid()) -> ok.
-unregister_actor(Pid) when is_pid(Pid) ->
-    try
-        gen_server:cast(?MODULE, {unregister_actor, Pid})
-    catch
-        exit:{noproc, _} ->
-            ok
-    end.
-
--doc "Get list of supervised actor PIDs.".
--spec supervised_actors() -> {ok, [pid()]} | {error, not_started}.
-supervised_actors() ->
-    try
-        gen_server:call(?MODULE, supervised_actors)
     catch
         exit:{noproc, _} ->
             {error, not_started}
@@ -442,6 +416,8 @@ get_file_mtimes() ->
             {error, not_started}
     end.
 
+%% Only the tests call this (BT-5048).
+-ifdef(TEST).
 -doc """
 Clear all tracked file mtimes.
 Used when force-reloading a project.
@@ -454,6 +430,7 @@ clear_file_mtimes() ->
         exit:{noproc, _} ->
             ok
     end.
+-endif.
 
 -doc """
 Remove mtime tracking for a single file.
@@ -859,7 +836,6 @@ init(InitialMetadata) ->
         node_name = node(),
         repl_port = ReplPort,
         mode = Mode,
-        supervised_actors = [],
         loaded_modules = #{},
         class_sources = #{},
         protocol_sources = #{},
@@ -867,8 +843,7 @@ init(InitialMetadata) ->
         file_mtimes = #{},
         settings = #{},
         metadata_path = MetadataPath,
-        persist_timer = undefined,
-        monitor_refs = #{}
+        persist_timer = undefined
     },
 
     %% Load persisted metadata if exists
@@ -889,7 +864,6 @@ handle_call(get_metadata, _From, State) ->
         last_activity => State#state.last_activity,
         node_name => State#state.node_name,
         repl_port => State#state.repl_port,
-        supervised_actors => State#state.supervised_actors,
         loaded_modules => maps:keys(State#state.loaded_modules)
     },
     {reply, {ok, Metadata}, State};
@@ -897,8 +871,6 @@ handle_call(get_package_name, _From, State) ->
     {reply, State#state.package_name, State};
 handle_call(get_last_activity, _From, State) ->
     {reply, {ok, State#state.last_activity}, State};
-handle_call(supervised_actors, _From, State) ->
-    {reply, {ok, State#state.supervised_actors}, State};
 handle_call(loaded_modules, _From, State) ->
     {reply, {ok, maps:to_list(State#state.loaded_modules)}, State};
 handle_call({get_class_source, ClassName}, _From, State) ->
@@ -943,24 +915,6 @@ handle_call(_Request, _From, State) ->
 handle_cast(update_activity, State) ->
     Now = erlang:system_time(second),
     State2 = State#state{last_activity = Now},
-    {noreply, schedule_persist(State2)};
-handle_cast({register_actor, Pid}, State) ->
-    Actors = State#state.supervised_actors,
-    State2 =
-        case lists:member(Pid, Actors) of
-            true ->
-                State;
-            false ->
-                Ref = monitor(process, Pid),
-                MonRefs = State#state.monitor_refs,
-                State#state{
-                    supervised_actors = [Pid | Actors],
-                    monitor_refs = MonRefs#{Pid => Ref}
-                }
-        end,
-    {noreply, schedule_persist(State2)};
-handle_cast({unregister_actor, Pid}, State) ->
-    State2 = remove_actor(Pid, State),
     {noreply, schedule_persist(State2)};
 handle_cast({register_module, Module, NewSource}, State) ->
     Modules = State#state.loaded_modules,
@@ -1021,14 +975,9 @@ handle_info(persist_to_disk, State) ->
 handle_info(
     {beamtalk_announcement, _SubRef, 'ActorSpawned', _Handler, #{pid := Pid}}, State
 ) when is_pid(Pid) ->
-    %% Same bookkeeping the spawn hook did: track the actor (monitored, so a
-    %% `DOWN` removes it) and count the spawn as workspace activity.
-    {noreply, State2} = handle_cast({register_actor, Pid}, State),
-    handle_cast(update_activity, State2);
-handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
-    %% Actor exited, remove from tracked list and monitor refs
-    State2 = remove_actor(Pid, State),
-    {noreply, schedule_persist(State2)};
+    %% A spawn counts as workspace activity. The live actor set is not tracked
+    %% here: it comes from the actor scan (`beamtalk_workspace_actors:list/0`).
+    handle_cast(update_activity, State);
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -1085,10 +1034,6 @@ load_metadata_from_disk(State) ->
         {ok, Binary} ->
             try json:decode(Binary) of
                 Map ->
-                    %% Do NOT restore supervised_actors from disk - PIDs are
-                    %% not valid across node restarts. The monitor-based cleanup
-                    %% handles tracking for the current session only.
-
                     %% Restore loaded_modules with source paths (atoms persist across restarts).
                     %% Handles both old format ([binary()]) and new format ([#{name,source}]).
                     %% an entry survives only if its module is
@@ -1203,8 +1148,6 @@ load_metadata_from_disk(State) ->
                     State#state{
                         created_at = CreatedAt,
                         last_activity = LastActive,
-                        % Always start fresh
-                        supervised_actors = [],
                         loaded_modules = ValidatedModules,
                         class_sources = ClassSources,
                         %% File mtimes always start fresh — files may
@@ -1253,10 +1196,6 @@ persist_metadata_to_disk(State) ->
                 undefined -> null;
                 Port -> Port
             end,
-        <<"supervised_actors">> => [
-            list_to_binary(pid_to_list(P))
-         || P <- State#state.supervised_actors
-        ],
         <<"loaded_modules">> => [
             #{
                 <<"name">> => atom_to_binary(M, utf8),
@@ -1306,23 +1245,6 @@ persist_metadata_to_disk(State) ->
             ),
             {error, Reason}
     end.
-
--doc """
-Remove an actor PID from the supervised list and cancel its monitor.
-Used by both explicit unregister and DOWN message handling.
-""".
--spec remove_actor(pid(), #state{}) -> #state{}.
-remove_actor(Pid, State) ->
-    MonRefs = State#state.monitor_refs,
-    % elp:fixme W0032 maps:find with complex branch logic
-    case maps:find(Pid, MonRefs) of
-        {ok, Ref} -> demonitor(Ref, [flush]);
-        error -> ok
-    end,
-    State#state{
-        supervised_actors = lists:delete(Pid, State#state.supervised_actors),
-        monitor_refs = maps:remove(Pid, MonRefs)
-    }.
 
 -doc """
 Normalise a source path value to a string (list).

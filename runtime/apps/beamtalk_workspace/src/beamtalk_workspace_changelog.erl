@@ -855,7 +855,7 @@ it is spent distinguishing removal from patch); a legacy `instance`/`class`
 -kind patch entry has no stored `side` — it derives one from its own `kind`,
 exactly as `kind` always doubled for side before this ADR. This single
 accessor is what both the shared shadow key (`shadow_key/1`, used by flush) and `revert:`'s side-resolution
-(`beamtalk_workspace_interface_primitives:revert_side/1`) key/resolve on,
+(`beamtalk_workspace_revert:revert_side/1`) key/resolve on,
 per ADR 0112's required fix to ADR 0082's `(class, selector)`-only shadow key.
 """.
 -spec entry_side(entry()) -> side() | undefined.

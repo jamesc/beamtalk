@@ -40,10 +40,7 @@ Completion and hover engines behind the developer read-surface ops (ADR 0085): k
 
 -export([
     get_completions/1,
-    get_context_completions/1,
-    get_context_completions/2,
-    get_context_completions/3,
-    resolve_chain_type/2,
+    get_context_completions/1, get_context_completions/2, get_context_completions/3,
     hover_docs/5
 ]).
 
@@ -56,7 +53,8 @@ Completion and hover engines behind the developer read-surface ops (ADR 0085): k
     classify_receiver/2,
     classify_receiver/3,
     hover_docs/4,
-    hover_markdown/2
+    hover_markdown/2,
+    resolve_chain_type/2
 ]).
 -endif.
 

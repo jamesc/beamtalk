@@ -161,4 +161,4 @@ c2 increment
 
 // Unloading a non-existent class should return an error
 :unload NonExistentClass99
-// => ERROR: Class not found
+// => ERROR: Unknown class

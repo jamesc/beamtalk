@@ -20,6 +20,7 @@ standard protocol shape. The pre-0.5.0 legacy format ("type" field
 requests, "type"-keyed responses) has been removed.
 """.
 
+%% Per-finding encoder for the `reload-findings` op response, %% shared with `beamtalk_ws_handler`'s `reload_check` push frame so the
 -export([
     decode/1,
     encode_result/3, encode_result/4, encode_result/5, encode_result/6,
@@ -45,11 +46,10 @@ requests, "type"-keyed responses) has been removed.
     encode_class_list/2,
     encode_health/3,
     encode_load_project/5,
-    %% Per-finding encoder for the `reload-findings` op response,
-    %% shared with `beamtalk_ws_handler`'s `reload_check` push frame so the
     %% two wire shapes can never drift apart.
-    encode_reload_finding/1,
+
     %% The one place a warning list becomes JSON (BT-4449), shared with
+    encode_reload_finding/1,
     %% `beamtalk_repl_json`'s warning-carrying encoders.
     maybe_add_warnings/2,
     undefined_to_null/1,
@@ -57,9 +57,13 @@ requests, "type"-keyed responses) has been removed.
     get_id/1,
     get_session/1,
     get_params/1,
-    base_response/1,
     to_binary/1
 ]).
+
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
+-export([base_response/1]).
+-endif.
 
 %% Protocol request record
 -record(protocol_msg, {

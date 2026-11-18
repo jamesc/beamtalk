@@ -60,13 +60,12 @@ Includes workspace ID, project path, created_at, last_activity, actor count, and
 status() ->
     case beamtalk_workspace_meta:get_metadata() of
         {ok, Meta} ->
-            SupervisedActors = maps:get(supervised_actors, Meta, []),
             {ok, #{
                 workspace_id => maps:get(workspace_id, Meta, undefined),
                 project_path => maps:get(project_path, Meta, undefined),
                 created_at => maps:get(created_at, Meta, undefined),
                 last_activity => maps:get(last_activity, Meta, undefined),
-                actor_count => length(SupervisedActors),
+                actor_count => length(beamtalk_workspace_actors:list()),
                 loaded_modules => maps:get(loaded_modules, Meta, [])
             }};
         {error, Reason} ->

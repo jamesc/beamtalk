@@ -21,20 +21,19 @@ where generator is a zero-arity function that returns either
 `{element, NextFun}` (an element and the continuation) or `done`.
 """.
 
+%% Constructors
 -export([
-    %% Constructors
-    from/1,
-    from_by/2,
-    on/1,
     %% Stream construction (used by other modules, e.g. beamtalk_file)
-    make_stream/2,
-    make_stream/3,
+    from/1,
+    on/1,
     %% Lazy operations
+    make_stream/2, make_stream/3,
+    %% Terminal operations
     'select'/2,
     'collect'/2,
     'reject'/2,
     'drop'/2,
-    %% Terminal operations
+    %% Display
     take/2,
     do/2,
     inject_into/3,
@@ -43,9 +42,8 @@ where generator is a zero-arity function that returns either
     as_list/1,
     any_satisfy/2,
     all_satisfy/2,
-    %% Display
-    print_string/1,
     %% FFI shims for (Erlang beamtalk_stream) dispatch
+    print_string/1,
     from/2,
     inject/3,
     detect/3,
@@ -54,6 +52,11 @@ where generator is a zero-arity function that returns either
     allSatisfy/2,
     printString/1
 ]).
+
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
+-export([from_by/2]).
+-endif.
 
 -type t() :: #{'$beamtalk_class' := 'Stream', atom() => term()}.
 -export_type([t/0]).

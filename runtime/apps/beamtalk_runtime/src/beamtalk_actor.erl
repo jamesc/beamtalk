@@ -3715,17 +3715,7 @@ delay actor start/teardown.
 """.
 -spec do_announce_actor_lifecycle(atom(), map()) -> ok.
 do_announce_actor_lifecycle(EventClass, Fields) ->
-    case erlang:whereis(beamtalk_announcements) of
-        undefined ->
-            ok;
-        _Pid ->
-            try
-                beamtalk_announcements:system_announce_running(EventClass, Fields)
-            catch
-                _:_ -> ok
-            end
-    end,
-    ok.
+    beamtalk_announcements:system_announce_safe(EventClass, Fields).
 
 -doc """
 Publish a committed state change to the per-object change subscription substrate

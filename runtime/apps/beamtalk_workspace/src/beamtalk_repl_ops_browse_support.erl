@@ -15,15 +15,10 @@ Shared leaf helpers for the system-browser ops: argument/not-found error builder
 -export([
     arg_error/2,
     atom_or_null/1,
-    class_not_found_message/1,
     not_found_error/2,
     safe_bool/1,
     safe_class_call/2
 ]).
-
--spec class_not_found_message(binary()) -> binary().
-class_not_found_message(Cls) ->
-    iolist_to_binary([<<"class `">>, Cls, <<"` not found">>]).
 
 -spec atom_or_null(atom() | none) -> binary() | null.
 atom_or_null(none) -> null;
@@ -63,5 +58,5 @@ arg_error(Op, Reason) ->
         )}.
 
 -spec not_found_error(binary(), atom()) -> {error, #beamtalk_error{}}.
-not_found_error(Op, ClassName) ->
-    arg_error(Op, class_not_found_message(atom_to_binary(ClassName, utf8))).
+not_found_error(_Op, ClassName) ->
+    {error, beamtalk_repl_errors:class_not_found(ClassName, browse)}.

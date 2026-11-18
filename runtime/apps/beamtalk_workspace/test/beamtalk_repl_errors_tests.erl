@@ -374,10 +374,24 @@ ensure_structured_error_actors_exist_plural_test() ->
 ensure_structured_error_class_not_found_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({class_not_found, 'Foo'}),
     ?assertMatch(#beamtalk_error{kind = class_not_found}, Result),
+    ?assertEqual({beamtalk_string, <<"Unknown class: Foo">>}, Result#beamtalk_error.message),
     ?assertEqual(
-        {beamtalk_string, <<"Unknown class: Foo. Use Workspace classes to see loaded classes.">>},
-        Result#beamtalk_error.message
-    ).
+        {beamtalk_string, <<"Use Workspace classes to see loaded classes.">>},
+        Result#beamtalk_error.hint
+    ),
+    ?assertEqual(#{class => <<"Foo">>}, Result#beamtalk_error.details).
+
+class_not_found_contexts_test() ->
+    [
+        begin
+            E = beamtalk_repl_errors:class_not_found(<<"Bar">>, Ctx),
+            ?assertEqual(class_not_found, E#beamtalk_error.kind),
+            ?assertEqual({beamtalk_string, <<"Unknown class: Bar">>}, E#beamtalk_error.message),
+            ?assertMatch({beamtalk_string, _}, E#beamtalk_error.hint)
+        end
+     || Ctx <- [repl, browse, tracing, connect]
+    ],
+    ?assertEqual(<<"Unknown class: Baz">>, beamtalk_repl_errors:class_not_found_message('Baz')).
 
 %% DNU rendered only by
 %% beamtalk_error:generate_message/3 — the selector is quoted, and the

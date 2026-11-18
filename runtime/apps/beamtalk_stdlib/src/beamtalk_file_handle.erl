@@ -58,7 +58,12 @@ See also: beamtalk_file for File class-side methods (`open:mode:`, `readAll:`, e
 ]).
 
 %% Handle lifecycle — used by beamtalk_file's open:mode: / open:do: family.
--export([new/3, close_handle/1, is_open/1, ensure_readable/2]).
+-export([new/3, close_handle/1, ensure_readable/2]).
+
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
+-export([is_open/1]).
+-endif.
 
 -type mode() :: read | write | append | readWrite.
 -type t() :: #{

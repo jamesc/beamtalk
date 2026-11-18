@@ -10,7 +10,7 @@ EUnit tests for beamtalk_repl_ops_dev module.
 
 Tests pure parsing functions (parse_receiver_and_prefix, tokenise_send_chain),
 chain-resolution helpers (walk_chain, walk_chain_class, resolve_chain_type),
-protocol helpers (base_protocol_response, make_class_not_found_error),
+protocol helpers (base_protocol_response),
 and handle/4 operations that do not require a running workspace.
 """.
 
@@ -55,23 +55,6 @@ base_protocol_response_neither_test() ->
     Msg = beamtalk_test_repl:make_msg(<<"eval">>, undefined, undefined),
     Result = beamtalk_repl_ops_dev:base_protocol_response(Msg),
     ?assertEqual(#{}, Result).
-
-%%====================================================================
-%% make_class_not_found_error/1
-%%====================================================================
-
-make_class_not_found_error_atom_test() ->
-    Err = beamtalk_repl_ops_dev:make_class_not_found_error('NoSuchClass'),
-    ?assertEqual(class_not_found, Err#beamtalk_error.kind),
-    ?assertEqual('REPL', Err#beamtalk_error.class),
-    ?assertMatch({beamtalk_string, _}, Err#beamtalk_error.message),
-    ?assert(binary:match(element(2, Err#beamtalk_error.message), <<"NoSuchClass">>) =/= nomatch).
-
-make_class_not_found_error_binary_test() ->
-    Err = beamtalk_repl_ops_dev:make_class_not_found_error(<<"UnknownBin">>),
-    ?assertEqual(class_not_found, Err#beamtalk_error.kind),
-    ?assert(binary:match(element(2, Err#beamtalk_error.message), <<"UnknownBin">>) =/= nomatch),
-    ?assertMatch({beamtalk_string, _}, Err#beamtalk_error.hint).
 
 %%====================================================================
 %% list_class_methods_for_ws/1 -- unknown class
