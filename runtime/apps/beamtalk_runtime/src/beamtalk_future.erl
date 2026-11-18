@@ -85,7 +85,7 @@ beamtalk_future:resolve(Future, 42).
 
 -export_type([future/0]).
 
-%% Idle cap for a pending future: an orphan (nobody will ever settle it) is
+%% Orphan deadline for a pending future: an orphan (nobody will ever settle it) is
 %% rejected after this long. Far above the 30 s default await timeout.
 -define(PENDING_CAP_MS, 3600000).
 
@@ -106,8 +106,10 @@ new() ->
     new_with_cap(?PENDING_CAP_MS).
 
 -doc """
-Create a pending future that is rejected `CapMs` after creation (an absolute deadline), unless a producer registers
-(`{producer, Pid}`), which lifts the cap.
+Create a pending future that is rejected `CapMs` after creation (an absolute deadline that
+awaits and callbacks do not extend), unless a producer registers
+(`{producer, Pid}`), which lifts the cap. If that producer dies without
+settling the future, a fresh `CapMs` window starts.
 
 A pending future with no watcher (its producer died without settling it) would
 otherwise live forever. `new/0` uses ?PENDING_CAP_MS (1 hour, far above the
@@ -519,11 +521,11 @@ make_expired_error() ->
         <<"The future's process has exited: it was already settled and discarded, or was killed">>
     ).
 
--doc "Error for a pending future with no producer that hit its idle cap.".
+-doc "Error for a pending future with no producer that hit its orphan deadline.".
 make_orphaned_error() ->
     beamtalk_error:with_message(
         beamtalk_error:new(future_expired, 'Future'),
-        <<"Nothing settled this future within its idle cap; it was discarded">>
+        <<"Nothing settled this future within its orphan deadline; it was discarded">>
     ).
 
 -doc "Create a timeout error record with consistent message and hint".

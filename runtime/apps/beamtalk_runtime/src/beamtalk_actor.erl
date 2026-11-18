@@ -3397,7 +3397,10 @@ clean up promptly when the future completes normally. There is no time
 cutoff (BT-5020): the watcher ends when either process dies or the future tells it
 it settled, and a pending
 future with no producer is itself capped by beamtalk_future (?PENDING_CAP_MS),
-unless a watcher registers as its producer (done here).
+unless a watcher registers as its producer. This watcher does so, lifting
+that cap while it lives. Every cast handler must settle its `FuturePid`:
+an actor that stays alive without doing so leaves the watcher and the
+future pending.
 """.
 -spec spawn_future_watcher(pid(), pid(), atom()) -> pid().
 spawn_future_watcher(ActorPid, FuturePid, Selector) ->
