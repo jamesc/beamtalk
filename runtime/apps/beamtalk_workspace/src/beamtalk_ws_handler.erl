@@ -337,8 +337,12 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
     %% Unsubscribe from log streaming — a separate diagnostic stream,
     %% not part of the workspace push-stream facade.
     beamtalk_ws_log_handler:unsubscribe(),
-    %% Keep session alive for resume — session idle monitor handles cleanup.
-    %% Don't delete from ETS or stop the process here.
+    %% Keep the session alive so the client can resume it, but don't stop it or
+    %% delete its table row here. The shell monitors this connection process
+    %% (`beamtalk_repl_shell:attach/2`), so it notices the disconnect itself: it
+    %% stays resumable for `beamtalk_repl_shell:session_idle_seconds/0`, then
+    %% stops and removes its own row (BT-5012). The idle monitor ignores such
+    %% detached sessions when deciding whether the workspace is idle.
     ok.
 
 %%% Internal — Authentication
@@ -705,6 +709,7 @@ start_or_resume_session(ResumeId, Meta, State) when is_binary(ResumeId) ->
                             <<"session">> => ResumeId
                         })
                     ),
+                    beamtalk_repl_shell:attach(Pid, self()),
                     {[{text, AuthOk}, {text, SessionMsg}] ++ InitialActors, State#ws_state{
                         authenticated = true,
                         session_id = ResumeId,
@@ -748,6 +753,7 @@ create_session(SessionId, Meta, State) ->
                 peer => State#ws_state.peer,
                 domain => [beamtalk, runtime]
             }),
+            beamtalk_repl_shell:attach(SessionPid, self()),
             beamtalk_workspace_meta:update_activity(),
             %% Subscribe to all live push streams (Transcript, actors,
             %% classes, bindings, flush) via the stable facade. ADR 0082 Phase 3:
