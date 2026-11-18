@@ -265,6 +265,11 @@ impl CoreErlangGenerator {
     /// BT-3821: renders [`Self::lower_vt_conditional`]'s prelude, the same lowering
     /// [`Self::vt_conditional_value_producer`] splices for the conditional in value
     /// position, with the arms' values discarded.
+    ///
+    /// # Reached by
+    /// BT-5009: reached by a non-last `ifTrue:`/`ifFalse:` whose arms assign a local, e.g.
+    /// `ValueTypeConditionalFieldArmsValuePositionTest>>parenthesisedNonLast` in
+    /// `stdlib/test/value_type_conditional_field_arms_value_position_test.bt`.
     pub(in crate::core_erlang) fn generate_vt_conditional_open(
         &mut self,
         expr: &Expression,
@@ -922,6 +927,12 @@ impl CoreErlangGenerator {
     /// Letrec loop. Without it the construct's own mutated version stays
     /// scoped inside the Core Erlang `try` and every later read in the
     /// method silently sees the pre-`try` snapshot.
+    ///
+    /// # Reached by
+    /// BT-5009: reached only by codegen unit tests that bypass semantic analysis, with an
+    /// `on:do:`/`ensure:` body holding a field-writing-arm conditional that writes a local
+    /// (`core_erlang/tests/control_flow/`); the CLI rejects that source earlier. No stdlib,
+    /// example, test-package-compiler or fuzz-corpus input hits it (BT-4889 measurement).
     pub(in crate::core_erlang) fn generate_vt_exception_construct_open(
         &mut self,
         expr: &Expression,

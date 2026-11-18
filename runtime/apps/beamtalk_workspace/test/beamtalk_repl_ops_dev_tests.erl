@@ -281,13 +281,7 @@ diagnostics_non_binary_mode_passed_through_unchanged_test() ->
 %%====================================================================
 
 diagnostics_for_success_returns_diagnostics_list_test() ->
-    {ok, _} = application:ensure_all_started(compiler),
-    StartResult = application:ensure_all_started(beamtalk_compiler),
-    %% Let a freshly-started compiler port come up before compiling.
-    case StartResult of
-        {ok, [_ | _]} -> ok = beamtalk_test_wait:sync(beamtalk_compiler_server);
-        _ -> ok
-    end,
+    ok = beamtalk_test_boot:compiler(),
     Result = beamtalk_repl_ops_dev:diagnostics_for(<<"1 + 1">>, <<"expression">>, <<>>),
     %% Leave the app the way this test found it (mirrors
     %% beamtalk_repl_eval_tests.erl's eval_teardown/1 discipline) — later
@@ -304,12 +298,7 @@ diagnostics_for_success_returns_diagnostics_list_test() ->
 %%====================================================================
 
 diagnostics_op_source_path_applies_project_table_test() ->
-    {ok, _} = application:ensure_all_started(compiler),
-    StartResult = application:ensure_all_started(beamtalk_compiler),
-    case StartResult of
-        {ok, [_ | _]} -> ok = beamtalk_test_wait:sync(beamtalk_compiler_server);
-        _ -> ok
-    end,
+    ok = beamtalk_test_boot:compiler(),
     Root = filename:join(
         binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
         "bt4583_" ++ beamtalk_test_unique:id()

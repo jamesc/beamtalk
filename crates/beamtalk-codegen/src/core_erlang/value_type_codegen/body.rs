@@ -1070,6 +1070,11 @@ impl CoreErlangGenerator {
     ///
     /// The trailing `in` leaves the let chain open so subsequent `body_parts` expressions
     /// flow as the continuation, keeping `Self{N}` in scope.
+    ///
+    /// # Reached by
+    /// BT-5009: reached by a non-last `self.field := …` statement that
+    /// `lower_root_statement_with_producer` declines, e.g. `setUp => self.col := EventCollector spawn`
+    /// in `stdlib/test/actor_coordination_test.bt` (`ActorCoordinationTest`).
     fn generate_vt_field_assignment_open(
         &mut self,
         expr: &Expression,
@@ -1114,6 +1119,12 @@ impl CoreErlangGenerator {
     /// Generate an open let-chain for a non-last `[block_withmutations] value`
     /// in `ValueType` context. Each assignment in the block body becomes a top-level
     /// `let Var = val in\n` so the mutation is visible to subsequent expressions.
+    ///
+    /// # Reached by
+    /// BT-5009: reached only by a nested local-only block value inside a field-writing
+    /// block value, `x := 0. [[x := x + 1] value. self.n := x] value. x`, pinned by
+    /// `stdlib/test/bt4889nested_local_block_value_in_field_block_test.bt`. No corpus source
+    /// other than that test hits it (BT-4889 measurement).
     fn generate_vt_block_value_open(
         &mut self,
         expr: &Expression,
@@ -1295,6 +1306,10 @@ impl CoreErlangGenerator {
     /// 2. Extracts the `StateAcc` from element 2
     /// 3. Extracts each threaded local from the `StateAcc` via `maps:get`
     /// 4. Rebinds the variable names in scope so subsequent code sees the updated values
+    ///
+    /// # Reached by
+    /// BT-5009: reached by a non-last `whileTrue:`/`whileFalse:` that rebinds an outer local,
+    /// e.g. `Bt3746StatefulWhileValue>>run` in `stdlib/test/fixtures/bt3746stateful_while_value.bt`.
     pub(in crate::core_erlang) fn generate_vt_while_open(
         &mut self,
         expr: &Expression,
@@ -1337,6 +1352,11 @@ impl CoreErlangGenerator {
     ///
     /// When there are no threaded locals AND no extra family slot, falls
     /// back to sequencing the loop as a side effect (`let _seqN = <loop> in`).
+    ///
+    /// # Reached by
+    /// BT-5009: every caller below, so the same inputs as
+    /// [`Self::generate_vt_while_open`], [`Self::generate_vt_counted_loop_open`],
+    /// [`Self::generate_vt_foldl_list_op_open`] and [`Self::generate_value_type_do_open`].
     pub(super) fn emit_vt_loop_open_extraction(
         &mut self,
         loop_doc: Document<'static>,
@@ -1522,6 +1542,10 @@ impl CoreErlangGenerator {
     /// with value-type captured local threading as an **open let chain**, extracting the
     /// threaded locals from the loop's `{'nil', StateAcc}` result (see
     /// [`Self::emit_vt_loop_open_extraction`]).
+    ///
+    /// # Reached by
+    /// BT-5009: reached by a non-last `to:do:`/`timesRepeat:` that rebinds an outer local,
+    /// e.g. `Bt3947InlineBlockLoopValue>>cell0` in `stdlib/test/fixtures/bt3947inline_block_loop_value.bt`.
     pub(in crate::core_erlang) fn generate_vt_counted_loop_open(
         &mut self,
         expr: &Expression,
@@ -1589,6 +1613,11 @@ impl CoreErlangGenerator {
     ///
     /// In non-last position the list-op's logical value (element 1) is discarded; only the
     /// threaded-local mutations need to escape.
+    ///
+    /// # Reached by
+    /// BT-5009: reached by a non-last `collect:`/`select:`/`inject:into:` that rebinds an outer
+    /// local or writes a field, e.g. `Bt3956OwnDoColl>>selfCollect` in
+    /// `stdlib/test/fixtures/bt3956own_do_coll.bt`.
     pub(in crate::core_erlang) fn generate_vt_foldl_list_op_open(
         &mut self,
         expr: &Expression,
@@ -1640,6 +1669,12 @@ impl CoreErlangGenerator {
     /// tuple/bare accumulator, `maps:get` for the map accumulator) directly in
     /// the method body, ending with `in ` so the caller's next `body_part` provides the
     /// continuation.  This makes the updated locals visible to all subsequent expressions.
+    ///
+    /// # Reached by
+    /// BT-5009: reached by a non-last `do:` that rebinds an outer local, including two stdlib
+    /// methods: `Behaviour>>superclassChain` (`stdlib/src/behaviour.bt`) and
+    /// `List>>withoutDuplicatesBy:` (`stdlib/src/list.bt`). Core Erlang for both must stay
+    /// byte-identical (`just core-diff`).
     #[allow(clippy::too_many_lines)] // Document-based foldl scaffolding spans many lines
     pub(in crate::core_erlang) fn generate_value_type_do_open(
         &mut self,
@@ -1816,6 +1851,10 @@ impl CoreErlangGenerator {
     /// locals' current values (the single value for a bare accumulator), the
     /// lambda unpacks them per element, and the post-fold chain rebinds each
     /// local as an open `let` for the caller's next body part.
+    ///
+    /// # Reached by
+    /// BT-5009: reached from [`Self::generate_value_type_do_open`] whenever the `do:` threads
+    /// more than one local (or a bare accumulator); same inputs as that function.
     fn generate_value_type_do_open_tuple(
         &mut self,
         receiver: &Expression,

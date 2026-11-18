@@ -953,7 +953,7 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names test-lint-stamp test-refresh-edge test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns test-lint-stamp test-refresh-edge test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
@@ -1076,6 +1076,23 @@ lint-compiler-made-names:
 [windows]
 lint-compiler-made-names:
     @echo "lint-compiler-made-names: skipped on Windows (covered by Linux CI)"
+
+# Guard (BT-5009): ten known-bad patterns that each have a shared replacement
+# (runtime_send_call, RequestBuilder, ?assertBtError, beamtalk_test_unique,
+# BuildLayout, beamtalk_test_fs:with_tmp_home, beamtalk_test_boot:compiler,
+# Expression::is_self, is_subclass_of, beamtalk_test_proc:stop) stay at zero,
+# and every test `timer:sleep` carries a `%% sleep: <why>` note. Prints
+# file:line and the replacement. Exceptions: scripts/ci/banned-patterns-allowlist.txt
+# (an entry that matches nothing fails). --self-test proves each pattern fires.
+# Unix-only (bash); Linux CI covers it.
+[unix]
+lint-banned-patterns:
+    @bash scripts/ci/lint-banned-patterns.sh --self-test
+    @bash scripts/ci/lint-banned-patterns.sh
+
+[windows]
+lint-banned-patterns:
+    @echo "lint-banned-patterns: skipped on Windows (covered by Linux CI)"
 
 # Guard (BT-4671): every Erlang module name under runtime/apps/*/{src,test} is
 # unique — the BEAM loads one module per name, so a second copy's tests silently

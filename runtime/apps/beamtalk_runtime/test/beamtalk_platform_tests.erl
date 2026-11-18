@@ -43,43 +43,15 @@ home_dir_returns_string_test() ->
 
 %% Test fallback to USERPROFILE when HOME is unset
 home_dir_falls_back_to_userprofile_test() ->
-    OrigHome = os:getenv("HOME"),
-    OrigUserProfile = os:getenv("USERPROFILE"),
-    os:unsetenv("HOME"),
-    os:putenv("USERPROFILE", "/mock/user/profile"),
-    try
+    with_env(#{<<"USERPROFILE">> => <<"/mock/user/profile">>}, fun() ->
         ?assertEqual("/mock/user/profile", beamtalk_platform:home_dir())
-    after
-        %% Restore original state
-        case OrigUserProfile of
-            false -> os:unsetenv("USERPROFILE");
-            UP -> os:putenv("USERPROFILE", UP)
-        end,
-        case OrigHome of
-            false -> ok;
-            Val -> os:putenv("HOME", Val)
-        end
-    end.
+    end).
 
 %% Test returns false when neither HOME nor USERPROFILE is set
 home_dir_returns_false_when_no_env_test() ->
-    OrigHome = os:getenv("HOME"),
-    OrigUserProfile = os:getenv("USERPROFILE"),
-    os:unsetenv("HOME"),
-    os:unsetenv("USERPROFILE"),
-    try
+    with_env(#{}, fun() ->
         ?assertEqual(false, beamtalk_platform:home_dir())
-    after
-        %% Restore original state
-        case OrigUserProfile of
-            false -> ok;
-            UP -> os:putenv("USERPROFILE", UP)
-        end,
-        case OrigHome of
-            false -> ok;
-            H -> os:putenv("HOME", H)
-        end
-    end.
+    end).
 
 %%====================================================================
 %% BT-3680: shared ~/.beamtalk resolver

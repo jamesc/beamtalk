@@ -452,8 +452,8 @@ option and joins them itself).
 """.
 -spec unique_short_name(string()) -> atom().
 unique_short_name(Prefix) ->
-    Unique = erlang:unique_integer([positive, monotonic]),
-    %% The OS pid makes the name unique across concurrent VMs on one host
-    %% (BT-3933): `unique_integer/1` alone restarts at 1 in every VM, so two
-    %% parallel runs both picked `<Prefix>_1@localhost` and collided in epmd.
-    list_to_atom(Prefix ++ "_" ++ os:getpid() ++ "_" ++ integer_to_list(Unique)).
+    %% `beamtalk_test_unique:id/0` mixes in the OS pid, so the name is unique
+    %% across concurrent VMs on one host (BT-3933): the in-VM counter alone
+    %% restarts at 1 in every VM, so two parallel runs both picked
+    %% `<Prefix>_1@localhost` and collided in epmd.
+    list_to_atom(Prefix ++ "_" ++ beamtalk_test_unique:id()).

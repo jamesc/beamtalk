@@ -1328,8 +1328,8 @@ define_project_class(Tmp, ClassNameBin, Methods) ->
 %% the "logs not_flushable: dynamic" test and the "nothing to
 %% reinstall from" revert test below. Returns `{ClassName, ClassNameBin}`.
 define_dynamic_class(NamePrefix) ->
-    Unique = erlang:unique_integer([positive]),
-    ModAtom = list_to_atom("bt_rm_dynamic_mod_" ++ integer_to_list(Unique)),
+    Unique = beamtalk_test_unique:id(),
+    ModAtom = list_to_atom("bt_rm_dynamic_mod_" ++ Unique),
     Forms = [
         {attribute, 1, module, ModAtom},
         {attribute, 2, export, []}
@@ -1340,7 +1340,7 @@ define_dynamic_class(NamePrefix) ->
     %% signal `no_source_reason/1` reads as `"dynamic"` rather than "stdlib"
     %% (see that function's doc).
     {module, ModAtom} = code:load_binary(ModAtom, "", Bin),
-    ClassName = list_to_atom(NamePrefix ++ integer_to_list(Unique)),
+    ClassName = list_to_atom(NamePrefix ++ Unique),
     ClassNameBin = atom_to_binary(ClassName, utf8),
     ClassInfo = #{
         name => ClassName,
