@@ -2980,6 +2980,17 @@ async_send_watcher_cleans_up_on_normal_completion_test() ->
     ?assert(is_process_alive(Counter)),
     gen_server:stop(Counter).
 
+%% BT-5020: the watcher has no time cutoff, so an actor that dies while busy
+%% (however long) still rejects every in-flight future with actor_dead.
+async_send_future_rejected_when_busy_actor_killed_test() ->
+    {ok, Counter} = test_counter:start_link(1),
+    Parent = self(),
+    Future = beamtalk_future:new(),
+    beamtalk_future:when_rejected(Future, fun(E) -> Parent ! {rejected, E} end),
+    beamtalk_actor:async_send(Counter, 'slowGet:', [60000], beamtalk_future:pid(Future)),
+    exit(Counter, kill),
+    ?awaitMessage({rejected, #beamtalk_error{kind = actor_dead}}).
+
 %%% unwrap_dispatch_result error branches (exercised via self_dispatch through
 %%% sync_send self-send fast path)
 

@@ -71,6 +71,7 @@ beamtalk_future:resolve(Future, 42).
 -include_lib("kernel/include/logger.hrl").
 -export([
     new/0,
+    new_with_cap/1,
     resolve/2,
     reject/2,
     await/1, await/2,
@@ -83,6 +84,10 @@ beamtalk_future:resolve(Future, 42).
 ]).
 
 -export_type([future/0]).
+
+%% Idle cap for a pending future: an orphan (nobody will ever settle it) is
+%% rejected after this long. Far above the 30 s default await timeout.
+-define(PENDING_CAP_MS, 3600000).
 
 -doc """
 Opaque tagged tuple wrapping a future process.
@@ -98,7 +103,18 @@ by the dispatch layer for auto-awaiting in chained message sends.
 """.
 -spec new() -> future().
 new() ->
-    {beamtalk_future, spawn(fun() -> pending([]) end)}.
+    new_with_cap(?PENDING_CAP_MS).
+
+-doc """
+Create a pending future that is rejected after `CapMs` without any message.
+
+A pending future with no watcher (its producer died without settling it) would
+otherwise live forever. `new/0` uses ?PENDING_CAP_MS (1 hour, far above the
+30 s `await` default); this variant lets tests inject a short window.
+""".
+-spec new_with_cap(pos_integer()) -> future().
+new_with_cap(CapMs) ->
+    {beamtalk_future, spawn(fun() -> pending([], CapMs) end)}.
 
 -doc "Check if a value is a future.".
 -spec is_future(term()) -> boolean().
@@ -217,26 +233,38 @@ maybe_await(Value) -> Value.
 
 %%% Internal helpers
 
--doc "Core await implementation operating on a raw pid.".
+-doc """
+Core await implementation operating on a raw pid.
+
+Monitors the future process for the duration of the wait, so a future that
+has already exited (settled and idled out after 5 minutes, or never settled
+and was killed) fails at once with a structured error instead of waiting out
+the timeout — or forever with `infinity`.
+""".
 -spec await_pid(pid(), timeout()) -> term().
-await_pid(Pid, infinity) ->
-    Pid ! {await, self(), infinity},
-    receive
-        {future_resolved, Pid, Value} ->
-            Value;
-        {future_rejected, Pid, Reason} ->
-            throw({future_rejected, Reason})
-    end;
 await_pid(Pid, Timeout) ->
+    Mon = erlang:monitor(process, Pid),
     Pid ! {await, self(), Timeout},
     receive
         {future_resolved, Pid, Value} ->
+            erlang:demonitor(Mon, [flush]),
             Value;
         {future_rejected, Pid, Reason} ->
+            erlang:demonitor(Mon, [flush]),
             throw({future_rejected, Reason});
         {future_timeout, Pid} ->
-            throw(make_timeout_error())
+            erlang:demonitor(Mon, [flush]),
+            throw(make_timeout_error());
+        {'DOWN', Mon, process, Pid, _} ->
+            %% The future may have answered just before exiting.
+            receive
+                {future_resolved, Pid, Value} -> Value;
+                {future_rejected, Pid, Reason} -> throw({future_rejected, Reason})
+            after 0 ->
+                throw(make_expired_error())
+            end
     after Timeout ->
+        erlang:demonitor(Mon, [flush]),
         %% Flush any stale {future_timeout, Pid} that may arrive just after
         %% the `after` clause fires (the future process timer fires slightly later).
         receive
@@ -249,7 +277,7 @@ await_pid(Pid, Timeout) ->
 %%% Internal state machine
 
 -doc "Pending state: waiting for resolve or reject".
-pending(Waiters) ->
+pending(Waiters, Cap) ->
     receive
         {resolve, Value} ->
             %% ADR 0126 §5.1: a cross-node resolve arrives wire-encoded and
@@ -279,7 +307,7 @@ pending(Waiters) ->
             end;
         {await, Pid} ->
             %% Add to waiters list (no timeout)
-            pending([{await, Pid, infinity} | Waiters]);
+            pending([{await, Pid, infinity} | Waiters], Cap);
         {await, Pid, Timeout} ->
             %% Add to waiters list with timeout
             TRef =
@@ -287,7 +315,7 @@ pending(Waiters) ->
                     infinity -> infinity;
                     _ -> erlang:send_after(Timeout, self(), {timeout, Pid})
                 end,
-            pending([{await, Pid, TRef} | Waiters]);
+            pending([{await, Pid, TRef} | Waiters], Cap);
         {timeout, Pid} ->
             %% Send timeout message to the waiter
             Pid ! {future_timeout, self()},
@@ -299,11 +327,16 @@ pending(Waiters) ->
                 end,
                 Waiters
             ),
-            pending(NewWaiters);
+            pending(NewWaiters, Cap);
         {add_callback, resolved, Callback} ->
-            pending([{callback, resolved, Callback} | Waiters]);
+            pending([{callback, resolved, Callback} | Waiters], Cap);
         {add_callback, rejected, Callback} ->
-            pending([{callback, rejected, Callback} | Waiters])
+            pending([{callback, rejected, Callback} | Waiters], Cap)
+    after Cap ->
+        %% Orphaned: nothing settled this future within the cap.
+        Err = make_orphaned_error(),
+        notify_waiters(Waiters, rejected, Err),
+        rejected(Err)
     end.
 
 -doc """
@@ -419,6 +452,22 @@ execute_callback(Callback, Value) ->
     end).
 
 -doc "Create a timeout error record with consistent message and hint".
+make_expired_error() ->
+    beamtalk_error:new(
+        future_expired,
+        'Future',
+        undefined,
+        <<"The future's process has exited: it was already settled and discarded, or was killed">>
+    ).
+
+make_orphaned_error() ->
+    beamtalk_error:new(
+        future_expired,
+        'Future',
+        undefined,
+        <<"Nothing settled this future within its idle cap; it was discarded">>
+    ).
+
 make_timeout_error() ->
     #beamtalk_error{
         kind = timeout,

@@ -3393,8 +3393,10 @@ a `noconnection` DOWN reason (the actor's node partitioned or was never
 connected — verified empirically, see erlang:monitor/2 docs) rejects with
 `node_down` instead of `actor_dead`, matching the sync/timeout paths'
 exit mapping. The watcher also monitors the future process so it can
-clean up promptly when the future completes normally. Times out after
-30s as a safety net.
+clean up promptly when the future completes normally. There is no time
+cutoff (BT-5020): the watcher ends when either process dies, and a pending
+future with no producer is itself capped by beamtalk_future (?PENDING_CAP_MS),
+so it cannot outlive its watcher's usefulness.
 """.
 -spec spawn_future_watcher(pid(), pid(), atom()) -> pid().
 spawn_future_watcher(ActorPid, FuturePid, Selector) ->
@@ -3415,10 +3417,6 @@ spawn_future_watcher(ActorPid, FuturePid, Selector) ->
             {'DOWN', FutureRef, process, FuturePid, _Reason} ->
                 %% Future completed and its process ended — clean up
                 erlang:demonitor(ActorRef, [flush])
-        after 30000 ->
-            %% Safety cleanup: stop watching after 30s
-            erlang:demonitor(ActorRef, [flush]),
-            erlang:demonitor(FutureRef, [flush])
         end
     end).
 

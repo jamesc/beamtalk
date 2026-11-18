@@ -1006,3 +1006,25 @@ pid_extraction_test() ->
     Pid = beamtalk_future:pid(Future),
     ?assert(is_pid(Pid)),
     ?assert(is_process_alive(Pid)).
+
+%%% BT-5020: dead / orphaned futures
+
+await_on_exited_future_fails_immediately_test() ->
+    Future = beamtalk_future:new(),
+    Pid = beamtalk_future:pid(Future),
+    Mon = erlang:monitor(process, Pid),
+    exit(Pid, kill),
+    ?awaitMessage({'DOWN', Mon, process, Pid, _}),
+    %% Both finite and infinite awaits must fail at once, not wait out the timeout.
+    {Micros, _} = timer:tc(fun() ->
+        ?assertBtError(future_expired, beamtalk_future:await(Future, 5000)),
+        ?assertBtError(future_expired, beamtalk_future:await_forever(Future))
+    end),
+    ?assert(Micros < 1000000).
+
+orphaned_pending_future_is_rejected_after_cap_test() ->
+    Future = beamtalk_future:new_with_cap(50),
+    Parent = self(),
+    beamtalk_future:when_rejected(Future, fun(E) -> Parent ! {rejected, E} end),
+    ?awaitMessage({rejected, #beamtalk_error{kind = future_expired}}),
+    ?assertBtError(future_expired, beamtalk_future:await_forever(Future)).
