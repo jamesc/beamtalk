@@ -204,12 +204,16 @@ impl MethodKindMeta {
 
 /// Convert an AST method definition to `MethodMeta`; `class_side` selects the
 /// side's constant rule ([`MethodInfo::recorded_constant`]).
-fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition, class_side: bool) -> MethodMeta {
+fn method_def_to_meta(
+    class: &beamtalk_core::ast::ClassDefinition,
+    m: &beamtalk_core::ast::MethodDefinition,
+    class_side: bool,
+) -> MethodMeta {
     MethodMeta {
         selector: m.selector.name().to_string(),
         arity: m.selector.arity(),
         kind: MethodKindMeta::from_ast(m.kind),
-        is_sealed: m.is_sealed,
+        is_sealed: class.is_method_sealed(m),
         is_internal: m.is_internal,
         spawns_block: false,
         return_type: m.return_type.as_ref().map(DeclaredType::from),
@@ -719,12 +723,12 @@ pub(super) fn extract_class_metadata(
     let mut methods: Vec<MethodMeta> = class
         .methods
         .iter()
-        .map(|m| method_def_to_meta(m, false))
+        .map(|m| method_def_to_meta(class, m, false))
         .collect();
     let mut class_methods: Vec<MethodMeta> = class
         .class_methods
         .iter()
-        .map(|m| method_def_to_meta(m, true))
+        .map(|m| method_def_to_meta(class, m, true))
         .collect();
 
     let state = class

@@ -260,6 +260,20 @@ impl ClassDefinition {
         }
     }
 
+    /// Whether `method` of this class counts as sealed (cannot be overridden).
+    ///
+    /// A method is sealed when it carries the `sealed` keyword **or** when its
+    /// class is `sealed`: a sealed class cannot be subclassed, so none of its
+    /// methods can be overridden and the keyword adds nothing (BT-5008). This is
+    /// the one derivation every reader of the per-method flag goes through
+    /// (hierarchy `MethodInfo`, class metadata, `beamtalk doc`); reading
+    /// `MethodDefinition::is_sealed` directly sees only the keyword and is only
+    /// right for source-fidelity uses such as unparsing and the redundancy lint.
+    #[must_use]
+    pub fn is_method_sealed(&self, method: &MethodDefinition) -> bool {
+        self.is_sealed || method.is_sealed
+    }
+
     /// Creates a class definition with modifiers.
     #[must_use]
     pub fn with_modifiers(

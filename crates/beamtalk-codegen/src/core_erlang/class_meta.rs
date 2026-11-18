@@ -831,7 +831,7 @@ impl CoreErlangGenerator {
             .methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
-            .map(|m| Self::meta_method_entry(m, type_params))
+            .map(|m| Self::meta_method_entry(m, class, type_params))
             .collect();
         // Standalone methods are excluded from __beamtalk_meta/0 (folded into the class, BT-4721)
         // but included in BuilderState.meta so init/1 can register their return types.
@@ -841,7 +841,11 @@ impl CoreErlangGenerator {
                     && !m.is_class_method
                     && m.method.kind == MethodKind::Primary
             }) {
-                entries.push(Self::meta_method_entry(&standalone.method, type_params));
+                entries.push(Self::meta_method_entry(
+                    &standalone.method,
+                    class,
+                    type_params,
+                ));
             }
         }
         // Synthesized accessors carry the same return types the hierarchy's
@@ -897,7 +901,7 @@ impl CoreErlangGenerator {
             .class_methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
-            .map(|m| Self::meta_method_entry(m, type_params))
+            .map(|m| Self::meta_method_entry(m, class, type_params))
             .collect();
         // Standalone methods are excluded from __beamtalk_meta/0 (folded into the class, BT-4721)
         // but included in BuilderState.meta so init/1 can register their return types.
@@ -907,7 +911,11 @@ impl CoreErlangGenerator {
                     && m.is_class_method
                     && m.method.kind == MethodKind::Primary
             }) {
-                entries.push(Self::meta_method_entry(&standalone.method, type_params));
+                entries.push(Self::meta_method_entry(
+                    &standalone.method,
+                    class,
+                    type_params,
+                ));
             }
         }
         if let Some(auto) = auto
@@ -980,14 +988,15 @@ impl CoreErlangGenerator {
     /// ADR 0068: When `class_type_params` is non-empty, type annotations that reference
     /// a class-level type parameter emit `MetaTypeRepr::TypeParam` instead of a flat atom.
     ///
-    /// The serialized `is_sealed` bit is `m.is_sealed` alone — the same
-    /// per-method flag `ClassInfo::from_class_definition` (`semantic_analysis/
-    /// class_hierarchy/class_info.rs`) records for a fresh-AST compile, with no OR
-    /// against the class-level `sealed` flag, so the BEAM-metadata path (the one
-    /// the REPL uses to see an already-loaded project class) and the fresh-AST
-    /// path agree on which methods are individually `class sealed`.
+    /// The serialized `is_sealed` bit is `class.is_method_sealed(m)` — the same
+    /// derivation `ClassInfo::from_class_definition` (`semantic_analysis/
+    /// class_hierarchy/class_info.rs`) uses for a fresh-AST compile, so the
+    /// BEAM-metadata path (the one the REPL uses to see an already-loaded
+    /// project class) and the fresh-AST path agree. Every method of a `sealed`
+    /// class is sealed whether or not it carries the keyword (BT-5008).
     fn meta_method_entry(
         m: &MethodDefinition,
+        class: &ClassDefinition,
         class_type_params: &[TypeParamDecl],
     ) -> MethodInfoEntry {
         let return_type = m.return_type.as_ref().map_or(MetaTypeRepr::None, |rt| {
@@ -1007,7 +1016,7 @@ impl CoreErlangGenerator {
             m.selector.arity(),
             return_type,
             param_types,
-            m.is_sealed,
+            class.is_method_sealed(m),
             m.is_internal,
         )
     }

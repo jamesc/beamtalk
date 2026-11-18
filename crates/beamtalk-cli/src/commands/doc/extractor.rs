@@ -97,7 +97,7 @@ pub(super) fn parse_class_info(root: &Utf8Path, path: &Utf8Path) -> Result<Optio
             signature: format_signature(&m.selector, &m.parameters),
             doc_comment: m.doc_comment.clone(),
             line_number: Some(line_number),
-            is_sealed: m.is_sealed,
+            is_sealed: class.is_method_sealed(m),
         }
     };
 

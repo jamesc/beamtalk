@@ -391,6 +391,34 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_class_info_sealed_class_methods_are_sealed_without_keyword() {
+        // BT-5008: a method of a sealed class is badged sealed whether or not
+        // it carries the keyword; an open class's methods keep the keyword's meaning.
+        let temp = TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let sealed_file = dir.join("Leaf.bt");
+        fs::write(
+            &sealed_file,
+            "sealed Object subclass: Leaf\n  value => 42\n  class make => 1\n",
+        )
+        .unwrap();
+        let info = parse_class_info(&dir, &sealed_file).unwrap().unwrap();
+        assert!(info.methods[0].is_sealed);
+        assert!(info.class_methods[0].is_sealed);
+
+        let open_file = dir.join("Open.bt");
+        fs::write(
+            &open_file,
+            "Object subclass: Open\n  value => 42\n  sealed other => 1\n  class make => 1\n",
+        )
+        .unwrap();
+        let info = parse_class_info(&dir, &open_file).unwrap().unwrap();
+        assert!(!info.methods[0].is_sealed);
+        assert!(info.methods[1].is_sealed);
+        assert!(!info.class_methods[0].is_sealed);
+    }
+
+    #[test]
     fn test_parse_class_info_abstract() {
         let temp = TempDir::new().unwrap();
         let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();

@@ -4520,3 +4520,38 @@ fn state_path_keyword_constructor_carries_slot_types() {
         vec![Some(DeclaredType::simple("Integer")), None]
     );
 }
+
+// --- BT-5008: every method of a sealed class is sealed ---
+#[test]
+fn methods_of_sealed_class_are_sealed_with_or_without_keyword() {
+    let src = "sealed Object subclass: Leaf\n  plain => 1\n  sealed marked => 2\n  class makePlain => 3\n  class sealed makeMarked => 4\n\nObject subclass: Open\n  plain => 1\n  sealed marked => 2\n  class makePlain => 3\n  class sealed makeMarked => 4\n";
+    let (module, diags) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
+    assert!(diags.is_empty(), "{diags:?}");
+    let (h, _) = ClassHierarchy::build(&module);
+    let h = h.unwrap();
+    let flag = |class: &str, sel: &str, class_side: bool| {
+        let class_info = h.get_class(class).unwrap();
+        let methods = if class_side {
+            &class_info.class_methods
+        } else {
+            &class_info.methods
+        };
+        methods
+            .iter()
+            .find(|m| m.selector.as_str() == sel)
+            .unwrap_or_else(|| panic!("{class}>>{sel} not found"))
+            .is_sealed
+    };
+    for (sel, class_side) in [
+        ("plain", false),
+        ("marked", false),
+        ("makePlain", true),
+        ("makeMarked", true),
+    ] {
+        assert!(flag("Leaf", sel, class_side), "Leaf {sel} must be sealed");
+    }
+    assert!(!flag("Open", "plain", false));
+    assert!(flag("Open", "marked", false));
+    assert!(!flag("Open", "makePlain", true));
+    assert!(flag("Open", "makeMarked", true));
+}
