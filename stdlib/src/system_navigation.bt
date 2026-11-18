@@ -34,8 +34,7 @@ sealed typed Object subclass: SystemNavigation
   /// (BT-2201) will override this to filter by package or explicit class
   /// list. Wrapping the FFI in a typed instance method lets downstream
   /// block parameters infer `Class` / `Behaviour` instead of `Dynamic`.
-  class allClasses -> List(Behaviour) =>
-    (Erlang beamtalk_interface) allClasses
+  class allClasses -> List(Behaviour) => (Erlang beamtalk_interface) allClasses
 
   // ===== Tolerant Class Walk (BT-4095) =====
   //
@@ -2011,8 +2010,7 @@ sealed typed Object subclass: SystemNavigation
   /// carries the `" class"` suffix for a metaclass (so `Counter class name` is
   /// `"Counter class"`). The fallback-scope counterpart of
   /// `dnuScopeKeyForOwner:classSide:`.
-  class dnuScopeKeyFor: aScope :: Behaviour -> String =>
-    aScope name asString
+  class dnuScopeKeyFor: aScope :: Behaviour -> String => aScope name asString
 
   /// Group indexed send rows (`beamtalk_xref:all_sends_bt/0`) by their sent
   /// selector into `result` (`selector -> [sites]`), dropping any send that is

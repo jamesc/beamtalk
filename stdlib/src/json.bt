@@ -68,8 +68,7 @@ sealed typed Object subclass: Json native: beamtalk_json
   /// (Json parse: "42") unwrap          // => 42
   /// (Json parse: "null") unwrap        // => nil
   /// ```
-  class parse: jsonString :: String -> Result(JsonValue, Error) =>
-    self delegate
+  class parse: jsonString :: String -> Result(JsonValue, Error) => self delegate
 
   /// Generate a JSON string from a Beamtalk value (class method).
   ///

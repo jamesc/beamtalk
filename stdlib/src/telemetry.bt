@@ -158,8 +158,7 @@ sealed typed Object subclass: Telemetry native: beamtalk_telemetry
   /// Telemetry hasHandlers: #(#myapp, #nobodyListens)
   /// // => false
   /// ```
-  class hasHandlers: eventPrefix :: List(Symbol) -> Boolean =>
-    self delegate
+  class hasHandlers: eventPrefix :: List(Symbol) -> Boolean => self delegate
 
   /// Detach a handler. Idempotent: detaching an unknown id answers nil too.
   /// The runtime's own handlers (`Tracing`'s) are refused with `#reserved_name`.

@@ -135,8 +135,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// Counter class class localClassMethods   // => [...]
   /// ```
-  localClassMethods -> List(Symbol) =>
-    @primitive "metaclassLocalClassMethods"
+  localClassMethods -> List(Symbol) => @primitive "metaclassLocalClassMethods"
 
   /// Test whether the described class defines the given class-side selector.
   ///

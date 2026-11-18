@@ -75,8 +75,7 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
   /// ```beamtalk
   /// Binary withAll: #(104, 105)   // => _
   /// ```
-  class withAll: elements :: List -> Binary =>
-    Binary fromIolist: elements
+  class withAll: elements :: List -> Binary => Binary fromIolist: elements
 
   /// Answer the empty binary (class method).
   ///
@@ -115,8 +114,7 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
   /// (Binary fromBase64: "aGVsbG8=") unwrap asStringUnchecked   // => "hello"
   /// (Binary fromBase64: "not base64!!") isError                // => true
   /// ```
-  class fromBase64: str :: String -> Result(Binary, Error) =>
-    self delegate
+  class fromBase64: str :: String -> Result(Binary, Error) => self delegate
 
   /// Decode a URL-safe (RFC 4648 §5) base64 string to a Binary.
   ///
@@ -128,8 +126,7 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
   /// ```beamtalk
   /// (Binary fromBase64Url: "aGVsbG8h") unwrap asStringUnchecked   // => "hello!"
   /// ```
-  class fromBase64Url: str :: String -> Result(Binary, Error) =>
-    self delegate
+  class fromBase64Url: str :: String -> Result(Binary, Error) => self delegate
 
   /// Decode a hexadecimal string to a Binary.
   ///

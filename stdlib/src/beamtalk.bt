@@ -33,8 +33,7 @@ sealed typed Object subclass: Beamtalk native: beamtalk_interface
   /// ```beamtalk
   /// Beamtalk shapeManifest
   /// ```
-  class shapeManifest -> Dictionary =>
-    (Erlang beamtalk_release) shapeManifest
+  class shapeManifest -> Dictionary => (Erlang beamtalk_release) shapeManifest
 
   // === Class registry ===
 

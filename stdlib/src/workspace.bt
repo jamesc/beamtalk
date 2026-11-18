@@ -347,8 +347,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace bind: myActor as: #MyTool
   /// ```
-  class bind: value :: Object as: bindingName :: Symbol -> Nil =>
-    self delegate
+  class bind: value :: Object as: bindingName :: Symbol -> Nil => self delegate
 
   /// Remove a registered name from the workspace namespace.
   /// Raises an error if name is not found.

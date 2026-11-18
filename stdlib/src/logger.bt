@@ -140,8 +140,7 @@ sealed typed Object subclass: Logger
   /// ```beamtalk
   /// Logger logFormat
   /// ```
-  class logFormat -> LogFormat =>
-    (Erlang beamtalk_logging_config) logFormat
+  class logFormat -> LogFormat => (Erlang beamtalk_logging_config) logFormat
 
   /// Switch the log format on the file handler.
   ///
@@ -214,5 +213,4 @@ sealed typed Object subclass: Logger
   /// ```beamtalk
   /// Logger loggerInfo
   /// ```
-  class loggerInfo -> String =>
-    (Erlang beamtalk_logging_config) loggerInfo
+  class loggerInfo -> String => (Erlang beamtalk_logging_config) loggerInfo

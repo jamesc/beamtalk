@@ -203,8 +203,7 @@ sealed typed Object subclass: Tracing native: beamtalk_tracing
   /// Tracing slowMethods: 10
   /// // => _
   /// ```
-  class slowMethods: limit :: Integer -> List(Dictionary) =>
-    self delegate
+  class slowMethods: limit :: Integer -> List(Dictionary) => self delegate
 
   /// Top N methods by call count (descending).
   /// One entry per `{Class, Selector}`, covering every actor of the class.
@@ -224,8 +223,7 @@ sealed typed Object subclass: Tracing native: beamtalk_tracing
   /// Tracing errorMethods: 5
   /// // => _
   /// ```
-  class errorMethods: limit :: Integer -> List(Dictionary) =>
-    self delegate
+  class errorMethods: limit :: Integer -> List(Dictionary) => self delegate
 
   /// Top N actors by message queue length — live snapshot over every
   /// registered actor, whether or not tracing is enabled.
@@ -235,8 +233,7 @@ sealed typed Object subclass: Tracing native: beamtalk_tracing
   /// Tracing bottlenecks: 5
   /// // => _
   /// ```
-  class bottlenecks: limit :: Integer -> List(Dictionary) =>
-    self delegate
+  class bottlenecks: limit :: Integer -> List(Dictionary) => self delegate
 
   // === Live process health ===
 

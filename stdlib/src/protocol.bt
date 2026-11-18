@@ -52,8 +52,7 @@ sealed typed Object subclass: Protocol
   /// Protocol isProtocol: #Printable   // => true
   /// Protocol isProtocol: #NotReal     // => false
   /// ```
-  class isProtocol: name :: Symbol -> Boolean =>
-    @primitive "protocolIsProtocol"
+  class isProtocol: name :: Symbol -> Boolean => @primitive "protocolIsProtocol"
 
   /// Return the provided (trait) method selectors for a protocol (ADR 0127).
   ///

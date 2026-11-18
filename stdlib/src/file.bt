@@ -66,8 +66,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File readBinary: "image.png"  // => Result ok: <<...>>
   /// ```
-  class readBinary: path :: String -> Result(Binary, Error) =>
-    self delegate
+  class readBinary: path :: String -> Result(Binary, Error) => self delegate
 
   /// Write binary data to a file, creating or overwriting it (class method).
   ///
@@ -108,8 +107,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// (File lines: "data.csv") unwrap take: 5
   /// (File lines: "log.txt") unwrap select: [:l | l includesSubstring: "ERROR"]
   /// ```
-  class lines: path :: String -> Result(Stream(String), Error) =>
-    self delegate
+  class lines: path :: String -> Result(Stream(String), Error) => self delegate
 
   /// Block-scoped file handle with automatic cleanup (class method).
   ///
@@ -204,8 +202,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File lastModified: "test.txt"  // => Result ok: a DateTime(...)
   /// ```
-  class lastModified: path :: String -> Result(DateTime, Error) =>
-    self delegate
+  class lastModified: path :: String -> Result(DateTime, Error) => self delegate
 
   /// Test if a path refers to a directory (class method).
   ///
@@ -299,8 +296,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File absolutePath: "target/test.txt"
   /// ```
-  class absolutePath: path :: String -> Result(String, Error) =>
-    self delegate
+  class absolutePath: path :: String -> Result(String, Error) => self delegate
 
   /// Return the current working directory (class method).
   ///

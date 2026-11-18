@@ -59,8 +59,7 @@ sealed typed Object subclass: System native: beamtalk_system
   /// System getEnv: "BT_TEST_SET_ENV"
   /// // => "hello"
   /// ```
-  class setEnv: name :: String value: val :: String -> Boolean =>
-    self delegate
+  class setEnv: name :: String value: val :: String -> Boolean => self delegate
 
   /// Remove an environment variable. Argument must be a String.
   ///

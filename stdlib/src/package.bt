@@ -83,8 +83,7 @@ sealed typed Value subclass: Package native: beamtalk_package
   /// Package packageNameFor: #Object
   /// // => _
   /// ```
-  class packageNameFor: className :: Symbol -> String | Nil =>
-    self delegate
+  class packageNameFor: className :: Symbol -> String | Nil => self delegate
 
   // ===== Instance Methods — Accessors =====
 
