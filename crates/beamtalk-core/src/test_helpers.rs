@@ -445,6 +445,27 @@ pub mod test_support {
         *ERL.get_or_init(|| erlc_available() && tool_available("erl", "-version"))
     }
 
+    /// The installed OTP major release (e.g. `"28"`), or `None` when no working
+    /// `erl` can run here. One probe per test process: every test that gates on
+    /// the OTP release shares it instead of booting its own VM.
+    #[must_use]
+    pub fn installed_otp_release() -> Option<&'static str> {
+        static OTP: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+        OTP.get_or_init(|| {
+            let out = std::process::Command::new("erl")
+                .args([
+                    "-noshell",
+                    "-eval",
+                    "io:put_chars(erlang:system_info(otp_release)), halt().",
+                ])
+                .output()
+                .ok()?;
+            let release = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            (out.status.success() && !release.is_empty()).then_some(release)
+        })
+        .as_deref()
+    }
+
     /// Modules per `erlc` invocation. Windows caps a command line at ~32K
     /// characters and these corpora are hundreds of modules, so one `erlc`
     /// call with every path overflows it (`Os { code: 206 }`, BT-4224).
