@@ -37,7 +37,7 @@ sealed typed Object subclass: Logger
   /// Logger info: "request processed"
   /// // => nil
   /// ```
-  class sealed info: message :: String -> Nil => @intrinsic loggerInfo
+  class info: message :: String -> Nil => @intrinsic loggerInfo
 
   /// Log a message at info level with structured metadata.
   ///
@@ -46,7 +46,7 @@ sealed typed Object subclass: Logger
   /// Logger info: "request processed" metadata: #{"path" => "/api"}
   /// // => nil
   /// ```
-  class sealed info: message :: String metadata: meta :: Dictionary -> Nil =>
+  class info: message :: String metadata: meta :: Dictionary -> Nil =>
     @intrinsic loggerInfoMeta
 
   // === Warning ===
@@ -58,7 +58,7 @@ sealed typed Object subclass: Logger
   /// Logger warn: "retrying operation"
   /// // => nil
   /// ```
-  class sealed warn: message :: String -> Nil => @intrinsic loggerWarn
+  class warn: message :: String -> Nil => @intrinsic loggerWarn
 
   /// Log a message at warning level with structured metadata.
   ///
@@ -67,7 +67,7 @@ sealed typed Object subclass: Logger
   /// Logger warn: "retrying" metadata: #{"attempt" => 2}
   /// // => nil
   /// ```
-  class sealed warn: message :: String metadata: meta :: Dictionary -> Nil =>
+  class warn: message :: String metadata: meta :: Dictionary -> Nil =>
     @intrinsic loggerWarnMeta
 
   // === Error ===
@@ -79,7 +79,7 @@ sealed typed Object subclass: Logger
   /// Logger error: "connection lost"
   /// // => nil
   /// ```
-  class sealed error: message :: String -> Nil => @intrinsic loggerError
+  class error: message :: String -> Nil => @intrinsic loggerError
 
   /// Log a message at error level with structured metadata.
   ///
@@ -88,7 +88,7 @@ sealed typed Object subclass: Logger
   /// Logger error: "failed" metadata: #{"reason" => "timeout"}
   /// // => nil
   /// ```
-  class sealed error: message :: String metadata: meta :: Dictionary -> Nil =>
+  class error: message :: String metadata: meta :: Dictionary -> Nil =>
     @intrinsic loggerErrorMeta
 
   // === Debug ===
@@ -100,7 +100,7 @@ sealed typed Object subclass: Logger
   /// Logger debug: "entering loop"
   /// // => nil
   /// ```
-  class sealed debug: message :: String -> Nil => @intrinsic loggerDebug
+  class debug: message :: String -> Nil => @intrinsic loggerDebug
 
   /// Log a message at debug level with structured metadata.
   ///
@@ -109,7 +109,7 @@ sealed typed Object subclass: Logger
   /// Logger debug: "state" metadata: #{"count" => 42}
   /// // => nil
   /// ```
-  class sealed debug: message :: String metadata: meta :: Dictionary -> Nil =>
+  class debug: message :: String metadata: meta :: Dictionary -> Nil =>
     @intrinsic loggerDebugMeta
 
   // === Logging configuration (delegates to beamtalk_logging_config) ===
@@ -121,7 +121,7 @@ sealed typed Object subclass: Logger
   /// ```beamtalk
   /// Logger logLevel
   /// ```
-  class sealed logLevel -> LogLevel | #all | #none =>
+  class logLevel -> LogLevel | #all | #none =>
     (Erlang beamtalk_logging_config) logLevel
 
   /// Set the OTP primary log level. Accepts every value `logLevel` can return
@@ -131,7 +131,7 @@ sealed typed Object subclass: Logger
   /// ```beamtalk
   /// Logger logLevel: #debug
   /// ```
-  class sealed logLevel: level :: LogLevel | #all | #none -> Nil =>
+  class logLevel: level :: LogLevel | #all | #none -> Nil =>
     (Erlang beamtalk_logging_config) logLevel: level
 
   /// Return the current log format as a singleton symbol (`#text` or `#json`).
@@ -140,7 +140,7 @@ sealed typed Object subclass: Logger
   /// ```beamtalk
   /// Logger logFormat
   /// ```
-  class sealed logFormat -> LogFormat =>
+  class logFormat -> LogFormat =>
     (Erlang beamtalk_logging_config) logFormat
 
   /// Switch the log format on the file handler.
@@ -150,7 +150,7 @@ sealed typed Object subclass: Logger
   /// Logger logFormat: #json
   /// Logger logFormat: #text
   /// ```
-  class sealed logFormat: format :: LogFormat -> Nil =>
+  class logFormat: format :: LogFormat -> Nil =>
     (Erlang beamtalk_logging_config) logFormat: format
 
   /// Return the list of available debug target symbols.
@@ -159,7 +159,7 @@ sealed typed Object subclass: Logger
   /// ```beamtalk
   /// Logger debugTargets
   /// ```
-  class sealed debugTargets -> List(Symbol) =>
+  class debugTargets -> List(Symbol) =>
     (Erlang beamtalk_logging_config) debugTargets
 
   /// Enable debug logging for a subsystem, class, or actor instance.
@@ -173,7 +173,7 @@ sealed typed Object subclass: Logger
   /// Logger enableDebug: Counter
   /// Logger enableDebug: myCounter
   /// ```
-  class sealed enableDebug: target :: Object -> Nil =>
+  class enableDebug: target :: Object -> Nil =>
     (Erlang beamtalk_logging_config) enableDebug: target
 
   /// Disable debug logging for a subsystem, class, or actor instance.
@@ -187,7 +187,7 @@ sealed typed Object subclass: Logger
   /// Logger disableDebug: Counter
   /// Logger disableDebug: myCounter
   /// ```
-  class sealed disableDebug: target :: Object -> Nil =>
+  class disableDebug: target :: Object -> Nil =>
     (Erlang beamtalk_logging_config) disableDebug: target
 
   /// Return the list of currently enabled debug targets.
@@ -196,7 +196,7 @@ sealed typed Object subclass: Logger
   /// ```beamtalk
   /// Logger activeDebugTargets
   /// ```
-  class sealed activeDebugTargets -> List(Symbol) =>
+  class activeDebugTargets -> List(Symbol) =>
     (Erlang beamtalk_logging_config) activeDebugTargets
 
   /// Disable all debug targets.
@@ -205,7 +205,7 @@ sealed typed Object subclass: Logger
   /// ```beamtalk
   /// Logger disableAllDebug
   /// ```
-  class sealed disableAllDebug -> Nil =>
+  class disableAllDebug -> Nil =>
     (Erlang beamtalk_logging_config) disableAllDebug
 
   /// Return a formatted description of the current logger state.
@@ -214,5 +214,5 @@ sealed typed Object subclass: Logger
   /// ```beamtalk
   /// Logger loggerInfo
   /// ```
-  class sealed loggerInfo -> String =>
+  class loggerInfo -> String =>
     (Erlang beamtalk_logging_config) loggerInfo

@@ -44,7 +44,7 @@ sealed typed Value subclass: Node native: beamtalk_node
   /// ```beamtalk
   /// Node current isCurrent                        // => true
   /// ```
-  class sealed current -> Node => self delegate
+  class current -> Node => self delegate
 
   /// A Node value for `aName`. Pure: validates the `name@host` shape only and
   /// never touches the network. A malformed name answers an error Result with
@@ -55,7 +55,7 @@ sealed typed Value subclass: Node native: beamtalk_node
   /// (Node named: #'worker@localhost') unwrap name  // => #'worker@localhost'
   /// (Node named: #nohost) error kind              // => #invalid_node_name
   /// ```
-  class sealed named: aName :: Symbol -> Result(Node, Error) => self delegate
+  class named: aName :: Symbol -> Result(Node, Error) => self delegate
 
   /// Visible nodes this node is connected to. Hidden (tooling) nodes are
   /// excluded.
@@ -64,7 +64,7 @@ sealed typed Value subclass: Node native: beamtalk_node
   /// ```beamtalk
   /// Node connected                                // => #()
   /// ```
-  class sealed connected -> List(Node) => self delegate
+  class connected -> List(Node) => self delegate
 
   // === Connection ===
 

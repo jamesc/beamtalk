@@ -21,7 +21,7 @@ sealed typed Integer subclass: Character
   /// ```beamtalk
   /// Character value: 65      // => $A
   /// ```
-  class sealed value: codepoint :: Integer -> Character => @primitive
+  class value: codepoint :: Integer -> Character => @primitive
 
   // === Comparing ===
 

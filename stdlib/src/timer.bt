@@ -43,7 +43,7 @@ sealed typed Object subclass: Timer native: beamtalk_timer
   /// t2 := Timer after: (Duration seconds: 1) do: ['fired' printNl]
   /// t2 cancel  // => true
   /// ```
-  class sealed after: ms :: Integer | Duration do: block :: Block(R) -> Timer =>
+  class after: ms :: Integer | Duration do: block :: Block(R) -> Timer =>
     (Erlang beamtalk_timer) after: ms do: block
 
   /// Evaluate `block` every `ms` (Integer milliseconds or a Duration).
@@ -55,7 +55,7 @@ sealed typed Object subclass: Timer native: beamtalk_timer
   /// t class    // => Timer
   /// t cancel   // => true
   /// ```
-  class sealed every: ms :: Integer | Duration do: block :: Block(R) -> Timer =>
+  class every: ms :: Integer | Duration do: block :: Block(R) -> Timer =>
     self delegate
 
   /// Send `msg` to `target` once after `ms` (Integer milliseconds or a
@@ -75,7 +75,7 @@ sealed typed Object subclass: Timer native: beamtalk_timer
   /// t := Timer send: {#readTimeout, tag} to: self after: (Duration seconds: 5)
   /// t cancel   // => true if it had not fired yet
   /// ```
-  class sealed send: msg :: Object to: target :: Actor | Pid after: ms :: Integer | Duration -> Timer =>
+  class send: msg :: Object to: target :: Actor | Pid after: ms :: Integer | Duration -> Timer =>
     (Erlang beamtalk_timer)
       sendAfter: msg
       to: target
@@ -99,7 +99,7 @@ sealed typed Object subclass: Timer native: beamtalk_timer
   /// t isActive   // => true
   /// t cancel     // => true
   /// ```
-  class sealed send: msg :: Object to: target :: Actor | Pid every: ms :: Integer | Duration -> Timer =>
+  class send: msg :: Object to: target :: Actor | Pid every: ms :: Integer | Duration -> Timer =>
     (Erlang beamtalk_timer)
       sendEvery: msg
       to: target
@@ -112,7 +112,7 @@ sealed typed Object subclass: Timer native: beamtalk_timer
   /// Timer sleep: 10                            // => nil
   /// Timer sleep: (Duration milliseconds: 10)   // => nil
   /// ```
-  class sealed sleep: ms :: Integer | Duration -> Nil => self delegate
+  class sleep: ms :: Integer | Duration -> Nil => self delegate
 
   // ===== Instance Methods =====
 

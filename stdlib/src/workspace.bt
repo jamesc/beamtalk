@@ -27,7 +27,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace isAvailable   // => true (in a workspace)
   /// ```
-  class sealed isAvailable -> Boolean => self delegate
+  class isAvailable -> Boolean => self delegate
 
   // === Classes and bindings ===
 
@@ -37,7 +37,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace classes
   /// ```
-  class sealed classes -> List(Behaviour) => self delegate
+  class classes -> List(Behaviour) => self delegate
 
   /// Return classes that are TestCase subclasses.
   ///
@@ -45,7 +45,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace testClasses
   /// ```
-  class sealed testClasses -> List(Behaviour) =>
+  class testClasses -> List(Behaviour) =>
     self classes select: [:c | c inheritsFrom: TestCase]
 
   /// Return a live `BindingsView` over the project namespace (ADR 0081).
@@ -66,7 +66,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace bindings includesKey: #Transcript   // => false
   /// ```
-  class sealed bindings -> BindingsView => self delegate
+  class bindings -> BindingsView => self delegate
 
   /// Return the calling session as a `Session`, or `nil` outside a REPL eval
   /// (ADR 0081 Phase 5).
@@ -82,7 +82,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// Workspace currentSession                  // => a Session (in REPL) | nil
   /// Workspace currentSession isNil            // => false (in REPL)
   /// ```
-  class sealed currentSession -> Session | Nil => self delegate
+  class currentSession -> Session | Nil => self delegate
 
   /// Return a `List` of `Session` values, one per live shell (ADR 0081 Phase 7).
   ///
@@ -97,7 +97,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// Workspace sessions                        // => #(a Session)
   /// Workspace sessions collect: [:s | s id]   // => #("user-repl-abc-123")
   /// ```
-  class sealed sessions -> List(Session) => self delegate
+  class sessions -> List(Session) => self delegate
 
   // === Sync and change tracking ===
 
@@ -120,7 +120,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// Workspace sync           // => #{#summary => "Reloaded 2 of 5 files (3 unchanged)", ...}
   /// (Workspace sync) at: #summary  // => "Reloaded 2 of 5 files (3 unchanged)"
   /// ```
-  class sealed sync -> Dictionary => self delegate
+  class sync -> Dictionary => self delegate
 
   /// Return the workspace ChangeLog — the navigable view of pending in-memory
   /// changes (ADR 0082).
@@ -135,7 +135,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// Workspace changes notEmpty       // => false
   /// Workspace changes dirtyMethods   // => #{}
   /// ```
-  class sealed changes -> ChangeLog => self delegate
+  class changes -> ChangeLog => self delegate
 
   // === Loading and creating classes ===
 
@@ -147,7 +147,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace load: "examples/counter.bt"  // => [Counter]
   /// ```
-  class sealed load: path :: String -> List(Behaviour) => self delegate
+  class load: path :: String -> List(Behaviour) => self delegate
 
   /// Create a brand-new class from a source String at a target path (ADR 0082).
   ///
@@ -168,7 +168,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// Workspace newClass: "Object subclass: Greeter" at: "src/greeter.bt"
   /// // => [Greeter]
   /// ```
-  class sealed newClass: source :: String at: path :: String -> List(Behaviour) =>
+  class newClass: source :: String at: path :: String -> List(Behaviour) =>
     self delegate
 
   /// Move a class's `.bt` file to a new path without changing its name
@@ -195,7 +195,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// Workspace moveClass: Counter to: "src/models/counter.bt"
   /// // => Counter
   /// ```
-  class sealed moveClass: aClass :: Behaviour to: aNewPath :: String -> Behaviour =>
+  class moveClass: aClass :: Behaviour to: aNewPath :: String -> Behaviour =>
     self delegate
 
   // === Flushing changes to disk ===
@@ -235,7 +235,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace flush          // => _ (flush summary)
   /// ```
-  class sealed flush -> Dictionary => self delegate
+  class flush -> Dictionary => self delegate
 
   /// Flush the pending Tier 1 ChangeLog entries matching `filter` (ADR 0082
   /// Phase 2).
@@ -256,7 +256,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// Workspace flush: #'new-class'        // => _
   /// Workspace flush: #{ #file => "src/counter.bt" }  // => _
   /// ```
-  class sealed flush: filter :: Behaviour | Symbol | Dictionary -> Dictionary =>
+  class flush: filter :: Behaviour | Symbol | Dictionary -> Dictionary =>
     self delegate
 
   /// Flush the pending ChangeLog entries matching `filter`, additionally
@@ -273,7 +273,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace flush: Counter confirmDestructive: true   // => _
   /// ```
-  class sealed flush: filter :: Behaviour | Symbol | Dictionary confirmDestructive: confirmDestructive :: Boolean -> Dictionary =>
+  class flush: filter :: Behaviour | Symbol | Dictionary confirmDestructive: confirmDestructive :: Boolean -> Dictionary =>
     self delegate
 
   /// Flush every pending durable+flushable ChangeEntry, Tier 1 *and* Tier 2
@@ -292,7 +292,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace flushIncludingDestructive   // => _
   /// ```
-  class sealed flushIncludingDestructive -> Dictionary => self delegate
+  class flushIncludingDestructive -> Dictionary => self delegate
 
   // === Rechecking and testing ===
 
@@ -316,7 +316,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace recheckImage          // => _ (checked/stale summary)
   /// ```
-  class sealed recheckImage -> Dictionary => self delegate
+  class recheckImage -> Dictionary => self delegate
 
   /// Run all loaded test classes and return a TestResult.
   ///
@@ -324,7 +324,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace test
   /// ```
-  class sealed test -> TestResult =>
+  class test -> TestResult =>
     TestRunner runAll: (Erlang beamtalk_workspace_facade) testScope
 
   /// Run a specific test class and return a TestResult.
@@ -333,7 +333,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace test: CounterTest
   /// ```
-  class sealed test: testClass :: Class -> TestResult =>
+  class test: testClass :: Class -> TestResult =>
     TestRunner run: ((Erlang beamtalk_workspace_facade) testTarget: testClass)
 
   // === Namespace bindings ===
@@ -347,7 +347,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace bind: myActor as: #MyTool
   /// ```
-  class sealed bind: value :: Object as: bindingName :: Symbol -> Nil =>
+  class bind: value :: Object as: bindingName :: Symbol -> Nil =>
     self delegate
 
   /// Remove a registered name from the workspace namespace.
@@ -357,7 +357,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace unbind: #MyTool
   /// ```
-  class sealed unbind: bindingName :: Symbol -> Nil => self delegate
+  class unbind: bindingName :: Symbol -> Nil => self delegate
 
   // === Supervision ===
 
@@ -372,7 +372,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// Workspace startSupervisor: MySup      // => Supervisor(MySup, 0.200.0)
   /// Workspace startSupervisor: MySup      // => Supervisor(MySup, 0.200.0)  (idempotent)
   /// ```
-  class sealed startSupervisor: aClass :: Class -> Supervisor => self delegate
+  class startSupervisor: aClass :: Class -> Supervisor => self delegate
 
   /// Stop and remove a supervisor from the workspace.
   ///
@@ -384,7 +384,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace stopSupervisor: MySup       // => nil
   /// ```
-  class sealed stopSupervisor: aClass :: Class -> Nil => self delegate
+  class stopSupervisor: aClass :: Class -> Nil => self delegate
 
   // === Settings ===
 
@@ -404,7 +404,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// ```beamtalk
   /// Workspace autoflush   // => false
   /// ```
-  class sealed autoflush -> Boolean => self delegate
+  class autoflush -> Boolean => self delegate
 
   /// Set the `autoflush` workspace setting (ADR 0082 Phase 4).
   ///
@@ -417,7 +417,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// Workspace autoflush: true    // => true
   /// Workspace autoflush: false   // => false
   /// ```
-  class sealed autoflush: enabled :: Boolean -> Boolean => self delegate
+  class autoflush: enabled :: Boolean -> Boolean => self delegate
 
   /// Return a Dictionary of direct dependency packages for the current workspace.
   ///
@@ -429,4 +429,4 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// Workspace dependencies
   /// // => _
   /// ```
-  class sealed dependencies -> Dictionary(String, Package) => self delegate
+  class dependencies -> Dictionary(String, Package) => self delegate

@@ -45,7 +45,7 @@ sealed typed Object subclass: Time native: beamtalk_time
   /// ```beamtalk
   /// Time nowS   // => _
   /// ```
-  class sealed nowS -> Integer => self delegate
+  class nowS -> Integer => self delegate
 
   /// Current time in milliseconds since the Unix epoch.
   ///
@@ -55,7 +55,7 @@ sealed typed Object subclass: Time native: beamtalk_time
   /// ```beamtalk
   /// Time nowMs   // => _
   /// ```
-  class sealed nowMs -> Integer => self delegate
+  class nowMs -> Integer => self delegate
 
   /// Current time in microseconds since the Unix epoch.
   ///
@@ -65,7 +65,7 @@ sealed typed Object subclass: Time native: beamtalk_time
   /// ```beamtalk
   /// Time nowUs   // => _
   /// ```
-  class sealed nowUs -> Integer => self delegate
+  class nowUs -> Integer => self delegate
 
   /// Monotonic clock in Erlang native units, for measuring intervals.
   ///
@@ -78,7 +78,7 @@ sealed typed Object subclass: Time native: beamtalk_time
   /// // ... do work ...
   /// elapsed := Time monotonic - start       // native units
   /// ```
-  class sealed monotonic -> Integer => self delegate
+  class monotonic -> Integer => self delegate
 
   /// Monotonic clock in the given unit, for measuring intervals.
   ///
@@ -92,7 +92,7 @@ sealed typed Object subclass: Time native: beamtalk_time
   /// // ... do work ...
   /// elapsed := (Time monotonic: #millisecond) - start   // milliseconds
   /// ```
-  class sealed monotonic: unit :: TimeUnit -> Integer => self delegate
+  class monotonic: unit :: TimeUnit -> Integer => self delegate
 
   /// System clock (wall-clock time since the Unix epoch) in native units.
   ///
@@ -102,7 +102,7 @@ sealed typed Object subclass: Time native: beamtalk_time
   /// ```beamtalk
   /// Time systemTime   // => _
   /// ```
-  class sealed systemTime -> Integer => self delegate
+  class systemTime -> Integer => self delegate
 
   /// System clock (wall-clock time since the Unix epoch) in the given unit.
   ///
@@ -114,7 +114,7 @@ sealed typed Object subclass: Time native: beamtalk_time
   /// ```beamtalk
   /// Time systemTime: #millisecond   // => _
   /// ```
-  class sealed systemTime: unit :: TimeUnit -> Integer => self delegate
+  class systemTime: unit :: TimeUnit -> Integer => self delegate
 
   /// Convert a time value from one unit to another.
   ///
@@ -129,5 +129,5 @@ sealed typed Object subclass: Time native: beamtalk_time
   /// Time convertTime: 1 from: #second to: #millisecond        // => 1000
   /// Time convertTime: 1500 from: #millisecond to: #second     // => 1
   /// ```
-  class sealed convertTime: t :: Integer from: from :: TimeUnit to: to :: TimeUnit -> Integer =>
+  class convertTime: t :: Integer from: from :: TimeUnit to: to :: TimeUnit -> Integer =>
     self delegate

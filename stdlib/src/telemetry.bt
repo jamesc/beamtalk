@@ -58,7 +58,7 @@ sealed typed Object subclass: Telemetry native: beamtalk_telemetry
   /// Telemetry execute: #(#myapp, #request, #stop) measurements: #{#duration => 120} metadata: #{#path => "/"}
   /// // => nil
   /// ```
-  class sealed execute: eventName :: List(Symbol) measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> Nil =>
+  class execute: eventName :: List(Symbol) measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> Nil =>
     self delegate
 
   /// Run `aBlock` inside a span and answer its value.
@@ -83,7 +83,7 @@ sealed typed Object subclass: Telemetry native: beamtalk_telemetry
   /// Telemetry span: #(#myapp, #query) metadata: #{#table => #users} do: [3 + 4]
   /// // => 7
   /// ```
-  class sealed span: eventPrefix :: List(Symbol) metadata: metadata :: Dictionary do: aBlock :: Block(T) -> T =>
+  class span: eventPrefix :: List(Symbol) metadata: metadata :: Dictionary do: aBlock :: Block(T) -> T =>
     self delegate
 
   /// Attach a Beamtalk handler block to one event.
@@ -117,7 +117,7 @@ sealed typed Object subclass: Telemetry native: beamtalk_telemetry
   /// Telemetry detach: #docExample
   /// // => nil
   /// ```
-  class sealed attach: handlerId :: Symbol | String to: eventName :: List(Symbol) do: handler :: Block(List(Symbol), Dictionary, Dictionary, Object) -> Result(Nil, Error) =>
+  class attach: handlerId :: Symbol | String to: eventName :: List(Symbol) do: handler :: Block(List(Symbol), Dictionary, Dictionary, Object) -> Result(Nil, Error) =>
     self delegate
 
   /// Attach one handler block to several events (`telemetry:attach_many/4`).
@@ -132,7 +132,7 @@ sealed typed Object subclass: Telemetry native: beamtalk_telemetry
   /// Telemetry detach: "doc-many"
   /// // => nil
   /// ```
-  class sealed attach: handlerId :: Symbol | String toAll: eventNames :: List(List(Symbol)) do: handler :: Block(List(Symbol), Dictionary, Dictionary, Object) -> Result(Nil, Error) =>
+  class attach: handlerId :: Symbol | String toAll: eventNames :: List(List(Symbol)) do: handler :: Block(List(Symbol), Dictionary, Dictionary, Object) -> Result(Nil, Error) =>
     self
       attachMany: handlerId
       to: eventNames
@@ -141,7 +141,7 @@ sealed typed Object subclass: Telemetry native: beamtalk_telemetry
   /// The `self delegate` target of `attach:toAll:do:`, which cannot delegate
   /// itself: its first keyword, `attach`, is already `attach:to:do:`'s
   /// backing function (`beamtalk_telemetry:attach/3`). Use `attach:toAll:do:`.
-  class internal sealed attachMany: handlerId :: Symbol | String to: eventNames :: List(List(Symbol)) do: handler :: Block(List(Symbol), Dictionary, Dictionary, Object) -> Result(Nil, Error) =>
+  class internal attachMany: handlerId :: Symbol | String to: eventNames :: List(List(Symbol)) do: handler :: Block(List(Symbol), Dictionary, Dictionary, Object) -> Result(Nil, Error) =>
     self delegate
 
   /// Answer whether any handler is attached to an event under `eventPrefix`.
@@ -158,7 +158,7 @@ sealed typed Object subclass: Telemetry native: beamtalk_telemetry
   /// Telemetry hasHandlers: #(#myapp, #nobodyListens)
   /// // => false
   /// ```
-  class sealed hasHandlers: eventPrefix :: List(Symbol) -> Boolean =>
+  class hasHandlers: eventPrefix :: List(Symbol) -> Boolean =>
     self delegate
 
   /// Detach a handler. Idempotent: detaching an unknown id answers nil too.
@@ -171,4 +171,4 @@ sealed typed Object subclass: Telemetry native: beamtalk_telemetry
   /// Telemetry detach: #notAttached
   /// // => nil
   /// ```
-  class sealed detach: handlerId :: Symbol | String -> Nil => self delegate
+  class detach: handlerId :: Symbol | String -> Nil => self delegate

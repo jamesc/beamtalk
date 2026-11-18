@@ -47,7 +47,7 @@ sealed typed Value subclass: Uuid native: beamtalk_uuid
   /// ```beamtalk
   /// Uuid v4 version                             // => 4
   /// ```
-  class sealed v4 -> Uuid => self delegate
+  class v4 -> Uuid => self delegate
 
   /// Generate a time-ordered (version 7) Uuid.
   ///
@@ -60,7 +60,7 @@ sealed typed Value subclass: Uuid native: beamtalk_uuid
   /// ```beamtalk
   /// Uuid v7 version                             // => 7
   /// ```
-  class sealed v7 -> Uuid => self delegate
+  class v7 -> Uuid => self delegate
 
   /// Parse the canonical `8-4-4-4-12` hyphenated hex string form.
   ///
@@ -74,7 +74,7 @@ sealed typed Value subclass: Uuid native: beamtalk_uuid
   /// (Uuid fromString: "not-a-uuid") isError
   /// // => true
   /// ```
-  class sealed fromString: str :: String -> Result(Uuid, Error) => self delegate
+  class fromString: str :: String -> Result(Uuid, Error) => self delegate
 
   /// True if `str` is a syntactically valid canonical Uuid string.
   ///
@@ -83,7 +83,7 @@ sealed typed Value subclass: Uuid native: beamtalk_uuid
   /// Uuid isValid: "550e8400-e29b-41d4-a716-446655440000"   // => true
   /// Uuid isValid: "not-a-uuid"                              // => false
   /// ```
-  class sealed isValid: str :: String -> Boolean => self delegate
+  class isValid: str :: String -> Boolean => self delegate
 
   // ===== Instance Methods — Conversion =====
 

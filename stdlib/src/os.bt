@@ -23,7 +23,7 @@ sealed typed Object subclass: OS
   /// ```beamtalk
   /// OS run: "echo hello"   // => "hello"
   /// ```
-  class sealed run: cmd :: String -> String => (Erlang beamtalk_os) run: cmd
+  class run: cmd :: String -> String => (Erlang beamtalk_os) run: cmd
 
   /// Execute a shell command with an explicit wall-clock timeout in milliseconds.
   ///
@@ -34,5 +34,5 @@ sealed typed Object subclass: OS
   /// ```beamtalk
   /// OS run: "sleep 1" timeout: 5000   // => ""
   /// ```
-  class sealed run: cmd :: String timeout: ms :: Integer -> String =>
+  class run: cmd :: String timeout: ms :: Integer -> String =>
     (Erlang beamtalk_os) run: cmd timeout: ms

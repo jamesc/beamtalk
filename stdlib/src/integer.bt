@@ -38,7 +38,7 @@ sealed typed Number subclass: Integer
   /// (Integer parse: "zz" radix: 16) isError   // => true
   /// (Integer parse: "" radix: 10) isError     // => true
   /// ```
-  class sealed parse: text :: Binary radix: base :: Integer -> Result(Integer, Error) =>
+  class parse: text :: Binary radix: base :: Integer -> Result(Integer, Error) =>
     @primitive
 
   // === Arithmetic ===

@@ -43,7 +43,7 @@ sealed typed Value subclass: Random native: beamtalk_random
   /// ```beamtalk
   /// Random next                  // => a Float between 0.0 and 1.0
   /// ```
-  class sealed next -> Float => self delegate
+  class next -> Float => self delegate
 
   /// Return a random integer between 1 and max (inclusive).
   ///
@@ -54,7 +54,7 @@ sealed typed Value subclass: Random native: beamtalk_random
   /// Random nextInteger: 6        // => 1..6
   /// Random nextInteger: 100      // => 1..100
   /// ```
-  class sealed nextInteger: max :: Integer -> Integer => self delegate
+  class nextInteger: max :: Integer -> Integer => self delegate
 
   // === Instance Construction ===
 
@@ -67,7 +67,7 @@ sealed typed Value subclass: Random native: beamtalk_random
   /// rng := Random new
   /// rng next                     // => 0.0..1.0
   /// ```
-  class sealed new -> Random => self delegate
+  class new -> Random => self delegate
 
   /// Create a new Random instance with a specific seed for reproducibility.
   ///
@@ -79,7 +79,7 @@ sealed typed Value subclass: Random native: beamtalk_random
   /// rng := Random seed: 42
   /// rng next                     // => deterministic value
   /// ```
-  class sealed seed: seed :: Integer -> Random => self delegate
+  class seed: seed :: Integer -> Random => self delegate
 
   // === Display ===
 

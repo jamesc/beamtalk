@@ -34,7 +34,7 @@ sealed typed Object subclass: System native: beamtalk_system
   /// System getEnv: "NONEXISTENT_VAR_12345"
   /// // => nil
   /// ```
-  class sealed getEnv: name :: String -> String | Nil => self delegate
+  class getEnv: name :: String -> String | Nil => self delegate
 
   /// Read an environment variable with a default fallback.
   ///
@@ -45,7 +45,7 @@ sealed typed Object subclass: System native: beamtalk_system
   /// System getEnv: "NONEXISTENT_VAR_12345" default: "8080"
   /// // => "8080"
   /// ```
-  class sealed getEnv: name :: String default: fallback :: String -> String =>
+  class getEnv: name :: String default: fallback :: String -> String =>
     self delegate
 
   /// Set an environment variable. Both arguments must be Strings.
@@ -59,7 +59,7 @@ sealed typed Object subclass: System native: beamtalk_system
   /// System getEnv: "BT_TEST_SET_ENV"
   /// // => "hello"
   /// ```
-  class sealed setEnv: name :: String value: val :: String -> Boolean =>
+  class setEnv: name :: String value: val :: String -> Boolean =>
     self delegate
 
   /// Remove an environment variable. Argument must be a String.
@@ -75,7 +75,7 @@ sealed typed Object subclass: System native: beamtalk_system
   /// System getEnv: "BT_TEST_UNSET_ENV"
   /// // => nil
   /// ```
-  class sealed unsetEnv: name :: String -> Boolean => self delegate
+  class unsetEnv: name :: String -> Boolean => self delegate
 
   // === Platform and process info ===
 
@@ -86,7 +86,7 @@ sealed typed Object subclass: System native: beamtalk_system
   /// System osPlatform
   /// // => _
   /// ```
-  class sealed osPlatform -> String => self delegate
+  class osPlatform -> String => self delegate
 
   /// Return the OS family: "unix" or "win32".
   ///
@@ -95,7 +95,7 @@ sealed typed Object subclass: System native: beamtalk_system
   /// System osFamily
   /// // => _
   /// ```
-  class sealed osFamily -> String => self delegate
+  class osFamily -> String => self delegate
 
   /// Return the system architecture string (e.g., "x86_64-pc-linux-gnu").
   ///
@@ -104,7 +104,7 @@ sealed typed Object subclass: System native: beamtalk_system
   /// System architecture
   /// // => _
   /// ```
-  class sealed architecture -> String => self delegate
+  class architecture -> String => self delegate
 
   /// Return the hostname of the current machine.
   ///
@@ -113,7 +113,7 @@ sealed typed Object subclass: System native: beamtalk_system
   /// System hostname
   /// // => _
   /// ```
-  class sealed hostname -> String => self delegate
+  class hostname -> String => self delegate
 
   /// Return the OTP/Erlang version string (e.g., "27").
   ///
@@ -122,7 +122,7 @@ sealed typed Object subclass: System native: beamtalk_system
   /// System erlangVersion
   /// // => _
   /// ```
-  class sealed erlangVersion -> String => self delegate
+  class erlangVersion -> String => self delegate
 
   /// Return the OS process ID as an Integer.
   ///
@@ -131,7 +131,7 @@ sealed typed Object subclass: System native: beamtalk_system
   /// System pid
   /// // => _
   /// ```
-  class sealed pid -> Integer => self delegate
+  class pid -> Integer => self delegate
 
   /// Return a unique positive monotonic integer.
   ///
@@ -143,7 +143,7 @@ sealed typed Object subclass: System native: beamtalk_system
   /// System uniqueId
   /// // => _
   /// ```
-  class sealed uniqueId -> Integer => self delegate
+  class uniqueId -> Integer => self delegate
 
   // === Halting the VM ===
 
@@ -157,7 +157,7 @@ sealed typed Object subclass: System native: beamtalk_system
   /// System halt
   /// // => _
   /// ```
-  class sealed halt -> Nil => self delegate
+  class halt -> Nil => self delegate
 
   /// Halt the whole VM with status `code` (ADR 0099) — the nuclear option.
   /// Does not return.
@@ -177,4 +177,4 @@ sealed typed Object subclass: System native: beamtalk_system
   /// System halt: 1
   /// // => _
   /// ```
-  class sealed halt: code :: Integer -> Nil => self delegate
+  class halt: code :: Integer -> Nil => self delegate

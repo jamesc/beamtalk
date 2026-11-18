@@ -34,7 +34,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// Metaclass new   // => Error: 'Use x class class to obtain a metaclass'
   /// ```
-  class sealed new => @primitive "metaclassNew"
+  class new => @primitive "metaclassNew"
 
   // === Identity predicates ===
 
@@ -44,7 +44,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// 42 class class isMeta   // => true
   /// ```
-  sealed isMeta -> Boolean => true
+  isMeta -> Boolean => true
 
   /// Test whether this is a Class (not a Metaclass). Always false.
   ///
@@ -52,7 +52,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// 42 class class isClass   // => false
   /// ```
-  sealed isClass -> Boolean => false
+  isClass -> Boolean => false
 
   /// Test whether this is a Metaclass. Always true.
   ///
@@ -60,7 +60,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// 42 class class isMetaclass   // => true
   /// ```
-  sealed isMetaclass -> Boolean => true
+  isMetaclass -> Boolean => true
 
   // === Metaclass protocol ===
 
@@ -70,7 +70,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// 42 class class thisClass   // => Integer
   /// ```
-  sealed thisClass -> Class => @primitive "metaclassThisClass"
+  thisClass -> Class => @primitive "metaclassThisClass"
 
   /// Return the name of this metaclass as a Symbol (e.g. `#'Integer class'`).
   ///
@@ -82,7 +82,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// 42 class class name   // => #'Integer class'
   /// ```
-  sealed name -> Symbol => (self thisClass name asString ++ " class") asAtom
+  name -> Symbol => (self thisClass name asString ++ " class") asAtom
 
   /// Return a human-readable string representation of this metaclass.
   ///
@@ -90,7 +90,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// 42 class class printString   // => 'Integer class'
   /// ```
-  sealed printString -> String => self name asString
+  printString -> String => self name asString
 
   /// Return the superclass in the parallel metaclass hierarchy.
   ///
@@ -100,7 +100,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// Counter class class superclass == Actor class class   // => true
   /// ```
-  sealed superclass => @primitive "metaclassSuperclass"
+  superclass => @primitive "metaclassSuperclass"
 
   // === Method introspection ===
 
@@ -117,7 +117,7 @@ sealed typed Class subclass: Metaclass
   /// Counter class allMethods includes: #reload     // => true
   /// Counter class allMethods includes: #superclass // => true
   /// ```
-  sealed allMethods -> List(Symbol) => @primitive "metaclassAllMethods"
+  allMethods -> List(Symbol) => @primitive "metaclassAllMethods"
 
   // === Class-side method introspection ===
 
@@ -127,7 +127,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// Counter class class classMethods   // => [...]
   /// ```
-  sealed classMethods -> List(Symbol) => @primitive "metaclassClassMethods"
+  classMethods -> List(Symbol) => @primitive "metaclassClassMethods"
 
   /// Return class-side selectors defined locally in the described class.
   ///
@@ -135,7 +135,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// Counter class class localClassMethods   // => [...]
   /// ```
-  sealed localClassMethods -> List(Symbol) =>
+  localClassMethods -> List(Symbol) =>
     @primitive "metaclassLocalClassMethods"
 
   /// Test whether the described class defines the given class-side selector.
@@ -144,7 +144,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// Integer class class classIncludesSelector: #new   // => true
   /// ```
-  sealed classIncludesSelector: selector -> Boolean =>
+  classIncludesSelector: selector -> Boolean =>
     @primitive "metaclassIncludesSelector"
 
   // === Package reflection (ADR 0070 Phase 5) ===
@@ -158,7 +158,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// Integer class packageName   // => "stdlib"
   /// ```
-  sealed packageName -> String | Nil =>
+  packageName -> String | Nil =>
     (Erlang beamtalk_package) packageNameFor: self thisClass name
 
   /// Return the Package that owns the described class.
@@ -169,7 +169,7 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// Integer class package   // => _
   /// ```
-  sealed package -> Package | Nil =>
+  package -> Package | Nil =>
     name := self packageName
     name isNil ifTrue: [^nil]
     Package named: name
