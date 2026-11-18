@@ -169,24 +169,33 @@ load_class_module(ClassInfo, Expression, State) ->
     %% activate_module/4's doc for why.
     case beamtalk_repl_loader_support:load_class_binary(ClassModName, "", Binary, Classes) of
         {ok, NewlyNonLeafSuperclasses} ->
-            beamtalk_repl_loader_activate:activate_module(
-                ClassModName, Classes, undefined, NewlyNonLeafSuperclasses
-            ),
-            NewState1 = beamtalk_repl_loader_support:maybe_add_loaded_module(ClassModName, State),
-            {ClassName, NewState2} = store_class_sources(
-                Classes, ClassModName, Expression, NewState1
-            ),
-            %% Log a pending 'class-def' ChangeLog entry for each
-            %% class in this eval that redefined an already-loaded class (the
-            %% cockpit `:def` tab's "Compile" action against an *existing*
-            %% class). Best-effort: a ChangeLog write must never fail or undo
-            %% the in-memory install, which already succeeded above.
-            case emit_class_def_entries(Classes, Expression, PrevSources) of
-                true -> beamtalk_repl_loader_methods:maybe_autoflush(durable);
-                false -> ok
-            end,
-            TrailingInfo = extract_trailing_info(ClassInfo),
-            {ok, ClassName, TrailingInfo, NewState2};
+            %% BT-5015: a failed `register_class/0` fails the load.
+            case
+                beamtalk_repl_loader_activate:activate_module(
+                    ClassModName, Classes, undefined, NewlyNonLeafSuperclasses
+                )
+            of
+                ok ->
+                    NewState1 = beamtalk_repl_loader_support:maybe_add_loaded_module(
+                        ClassModName, State
+                    ),
+                    {ClassName, NewState2} = store_class_sources(
+                        Classes, ClassModName, Expression, NewState1
+                    ),
+                    %% Log a pending 'class-def' ChangeLog entry for each
+                    %% class in this eval that redefined an already-loaded class (the
+                    %% cockpit `:def` tab's "Compile" action against an *existing*
+                    %% class). Best-effort: a ChangeLog write must never fail or undo
+                    %% the in-memory install, which already succeeded above.
+                    case emit_class_def_entries(Classes, Expression, PrevSources) of
+                        true -> beamtalk_repl_loader_methods:maybe_autoflush(durable);
+                        false -> ok
+                    end,
+                    TrailingInfo = extract_trailing_info(ClassInfo),
+                    {ok, ClassName, TrailingInfo, NewState2};
+                {error, ActivateError} ->
+                    {error, ActivateError, State}
+            end;
         {error, Reason} ->
             ClassAtoms = beamtalk_repl_loader_support:class_name_atoms(Classes),
             case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of
@@ -304,15 +313,23 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
     %% ADR 0107 Phase A: see load_class_binary/4's doc.
     case beamtalk_repl_loader_support:load_class_binary(ModuleName, LoadPath, Binary, ClassNames) of
         {ok, NewlyNonLeafSuperclasses} ->
-            beamtalk_repl_loader_activate:activate_module(
-                ModuleName, ClassNames, SourcePath, NewlyNonLeafSuperclasses
-            ),
-            NewState1 = beamtalk_repl_loader_support:maybe_add_loaded_module(ModuleName, State),
-            NewState2 = beamtalk_repl_loader_support:track_module_source(
-                ModuleName, SourcePath, NewState1
-            ),
-            store_file_class_sources(ClassNames, Source, NewState2),
-            {ok, ClassNames, NewState2};
+            case
+                beamtalk_repl_loader_activate:activate_module(
+                    ModuleName, ClassNames, SourcePath, NewlyNonLeafSuperclasses
+                )
+            of
+                ok ->
+                    NewState1 = beamtalk_repl_loader_support:maybe_add_loaded_module(
+                        ModuleName, State
+                    ),
+                    NewState2 = beamtalk_repl_loader_support:track_module_source(
+                        ModuleName, SourcePath, NewState1
+                    ),
+                    store_file_class_sources(ClassNames, Source, NewState2),
+                    {ok, ClassNames, NewState2};
+                {error, ActivateError} ->
+                    {error, ActivateError, State}
+            end;
         {error, Reason} ->
             ClassAtoms = beamtalk_repl_loader_support:class_name_atoms(ClassNames),
             case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of
@@ -345,12 +362,20 @@ load_protocol_module(ProtocolInfo, Path, State) ->
     of
         {module, ModuleName} ->
             %% activate_module calls register_class/0 which registers the protocol
-            beamtalk_repl_loader_activate:activate_module(ModuleName, ProtocolClassNames, Path),
-            NewState1 = beamtalk_repl_loader_support:maybe_add_loaded_module(ModuleName, State),
-            NewState2 = beamtalk_repl_loader_support:track_module_source(
-                ModuleName, Path, NewState1
-            ),
-            {ok, ProtocolClassNames, NewState2};
+            case
+                beamtalk_repl_loader_activate:activate_module(ModuleName, ProtocolClassNames, Path)
+            of
+                ok ->
+                    NewState1 = beamtalk_repl_loader_support:maybe_add_loaded_module(
+                        ModuleName, State
+                    ),
+                    NewState2 = beamtalk_repl_loader_support:track_module_source(
+                        ModuleName, Path, NewState1
+                    ),
+                    {ok, ProtocolClassNames, NewState2};
+                {error, ActivateError} ->
+                    {error, ActivateError, State}
+            end;
         {error, Reason} ->
             ClassAtoms = beamtalk_repl_loader_support:class_name_atoms(ProtocolClassNames),
             case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of

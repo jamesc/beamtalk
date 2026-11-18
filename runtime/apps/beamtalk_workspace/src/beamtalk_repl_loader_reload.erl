@@ -92,8 +92,12 @@ load_protocol_module_stateless(ProtocolInfo, Path) ->
         )
     of
         {module, ModuleName} ->
-            beamtalk_repl_loader_activate:activate_module(ModuleName, ProtocolClassNames, Path),
-            {ok, ProtocolClassNames};
+            case
+                beamtalk_repl_loader_activate:activate_module(ModuleName, ProtocolClassNames, Path)
+            of
+                ok -> {ok, ProtocolClassNames};
+                {error, _} = ActivateError -> ActivateError
+            end;
         {error, Reason} ->
             ClassAtoms = beamtalk_repl_loader_support:class_name_atoms(ProtocolClassNames),
             case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of
@@ -309,10 +313,14 @@ install_reload_result({ok, compiled, Binary, ClassNames, ModuleName}, Path) ->
     %% ADR 0107 Phase A: see load_class_binary/4's doc.
     case beamtalk_repl_loader_support:load_class_binary(ModuleName, Path, Binary, ClassNames) of
         {ok, NewlyNonLeafSuperclasses} ->
-            beamtalk_repl_loader_activate:activate_module(
-                ModuleName, ClassNames, Path, NewlyNonLeafSuperclasses
-            ),
-            {ok, ClassNames};
+            case
+                beamtalk_repl_loader_activate:activate_module(
+                    ModuleName, ClassNames, Path, NewlyNonLeafSuperclasses
+                )
+            of
+                ok -> {ok, ClassNames};
+                {error, _} = ActivateError -> ActivateError
+            end;
         {error, Reason} ->
             %% BT-3722: surface a structured refusal (e.g. `abi_mismatch`)
             %% parked during the module's `-on_load` instead of `on_load_failure`.
