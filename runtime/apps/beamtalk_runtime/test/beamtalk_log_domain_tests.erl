@@ -39,16 +39,22 @@ undomained_calls(File) ->
 
 %% `[{Line, CallText}]` for every `?LOG_<LEVEL>(...)` with balanced parens.
 log_calls(Src) ->
-    {match, Matches} = re:run(Src, "\\?LOG_(ERROR|WARNING|INFO|DEBUG|NOTICE|CRITICAL)\\(", [
-        global, {capture, first, index}
-    ]),
-    [
-        {
-            1 + length([C || C <- lists:sublist(Src, Start), C =:= $\n]),
-            balanced(lists:nthtail(Start + Len, Src), 1, [])
-        }
-     || [{Start, Len}] <- Matches
-    ].
+    case
+        re:run(Src, "\\?LOG_(ERROR|WARNING|INFO|DEBUG|NOTICE|CRITICAL)\\(", [
+            global, {capture, first, index}
+        ])
+    of
+        nomatch ->
+            [];
+        {match, Matches} ->
+            [
+                {
+                    1 + length([C || C <- lists:sublist(Src, Start), C =:= $\n]),
+                    balanced(lists:nthtail(Start + Len, Src), 1, [])
+                }
+             || [{Start, Len}] <- Matches
+            ]
+    end.
 
 balanced([], _Depth, Acc) -> lists:reverse(Acc);
 balanced([$( | T], D, Acc) -> balanced(T, D + 1, [$( | Acc]);
