@@ -1,7 +1,7 @@
 # ADR 0038: `subclass:` Grammar Desugaring to ClassBuilder Protocol
 
 ## Status
-Accepted | Implemented (2026-02-24) — Path 2 (dynamic/closure-based) removed (BT-873, 2026-02-25) — programmatic builder restored as a first-class user API on the compiled path (epic [BT-2259](https://linear.app/beamtalk/issue/BT-2259), [ADR 0084](0084-class-side-runtime-method-fun-dispatch.md), 2026-05-25)
+Implemented (2026-02-24) — Path 2 (dynamic/closure-based) removed (BT-873, 2026-02-25) — programmatic builder restored as a first-class user API on the compiled path (epic [BT-2259](https://linear.app/beamtalk/issue/BT-2259), [ADR 0084](0084-class-side-runtime-method-fun-dispatch.md), 2026-05-25)
 
 > **Open question resolved (BT-2271): is the builder a first-class *user* API?**
 > **Yes.** BT-873 removed Path 2 (the closure-based dynamic path) because its

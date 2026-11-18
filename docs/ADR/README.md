@@ -80,7 +80,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0051](0051-subprocess-execution.md) | Subprocess Execution — System Commands and Interactive Subprocess Actor | Accepted \| Implemented | 2026-03-05 |
 | [0052](0052-recursive-descent-pratt-parsing.md) | Recursive Descent Parser with Pratt Parsing for Binary Operators | Accepted \| Implemented | 2026-03-05 |
 | [0053](0053-double-colon-type-annotation-syntax.md) | Double-Colon Type Annotation Syntax | Implemented | 2026-03-05 |
-| [0054](0054-communication-protocols.md) | Communication Protocols | Accepted \| Implemented | 2026-03-05 |
+| [0054](0054-communication-protocols.md) | Communication Protocols | Implemented | 2026-03-05 |
 | [0055](0055-erlang-backed-class-authoring-protocol.md) | Erlang-Backed Class Authoring Protocol | Implemented | 2026-03-06 |
 | [0056](0056-native-erlang-backed-actors.md) | `@native` — Erlang-Backed Actors | Implemented (2026-04-01) | 2026-03-07 |
 | [0057](0057-authoritative-superclass-source.md) | Authoritative Superclass Source for Abstract Stdlib Classes | Implemented | 2026-03-07 |
@@ -95,7 +95,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0066](0066-open-class-extension-methods.md) | Open Class Extension Methods (`>>` Syntax) | Implemented | 2026-03-18 |
 | [0067](0067-separate-state-field-keywords-by-class-kind.md) | Separate state:/field: Keywords by Class Kind | Implemented | 2026-03-18 |
 | [0068](0068-parametric-types-and-protocols.md) | Parametric Types and Protocols | Accepted \| Implemented | 2026-03-20 |
-| [0069](0069-actor-observability-and-tracing.md) | Actor Observability and Tracing | Accepted \| Implemented (amended 2026-10-21: `Telemetry` application events, BT-4025) | 2026-03-21 |
+| [0069](0069-actor-observability-and-tracing.md) | Actor Observability and Tracing | Implemented (amended 2026-10-21: `Telemetry` application events, BT-4025) | 2026-03-21 |
 | [0070](0070-package-namespaces-and-dependencies.md) | Package Namespaces and Dependencies | Implemented | 2026-03-24 |
 | [0071](0071-class-visibility-internal-modifier.md) | Class Visibility — `internal` Modifier for Package-Scoped Access Control | Implemented | 2026-03-28 |
 | [0072](0072-user-erlang-sources-in-packages.md) | User Erlang Sources in Beamtalk Packages | Implemented | 2026-03-29 |
@@ -128,7 +128,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0099](0099-cli-application-story.md) | CLI Application Story — Console, Arguments, Exit, and Packaging | Implemented | 2026-06-26 |
 | [0100](0100-open-world-diagnostic-policy.md) | Open-World Diagnostic Policy for Unresolved Selectors and Classes | Implemented (2026-11-10) | 2026-06-27 |
 | [0101](0101-unified-erlang-interop-native-objects.md) | Unified Erlang Interop — `native:` for Stateless Objects, Wrap-by-Default FFI, Clean `@primitive`/`@intrinsic`/`native:` Split | Implemented | 2026-06-28 |
-| [0102](0102-set-theoretic-type-operators.md) | Set-Theoretic Type Operators (Intersection and Negation) for Narrowing and Atom Exhaustiveness | Implemented (Phases 1, 2, 4, 5; Phase 1b deferred) | 2026-07-06 |
+| [0102](0102-set-theoretic-type-operators.md) | Set-Theoretic Type Operators (Intersection and Negation) for Narrowing and Atom Exhaustiveness | Implemented (Phases 1, 2, 4, 5 and 1b) | 2026-07-06 |
 | [0103](0103-sendability-typing-from-class-kinds.md) | Sendability Typing from Class Kinds | Implemented (Phases 0–3) | 2026-07-05 |
 | [0104](0104-typed-actor-protocols.md) | Typed Actor Protocols — the Class Interface Is the Protocol | Implemented | 2026-07-07 |
 | [0105](0105-live-image-recheck-on-reload.md) | Live Image Re-Checking on Hot Reload | Implemented | 2026-07-11 |
@@ -144,7 +144,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0115](0115-xref-receiver-type-key.md) | Receiver-Type Key for `senders_of/1` Lookup | Implemented | 2026-08-20 |
 | [0116](0116-number-on-the-left-arithmetic-coercion.md) | Double-Dispatch Coercion for Number-on-the-Left Arithmetic | Implemented (2026-08-25) | 2026-08-25 |
 | [0117](0117-beamtalk-core-crate-split.md) | Splitting `beamtalk-core` into Sub-Crates | Implemented | 2026-08-30 |
-| [0118](0118-expression-level-state-threading-preludes.md) | Expression-Level State Threading via ThreadedIr Preludes | Accepted | 2026-09-03 |
+| [0118](0118-expression-level-state-threading-preludes.md) | Expression-Level State Threading via ThreadedIr Preludes | Implemented (2026-09-05) | 2026-09-03 |
 | [0119](0119-class-module-name-resolution-registry.md) | Class-Name↔Module-Name Resolution Registry | Implemented (2026-09-06) | 2026-09-05 |
 | [0120](0120-value-type-self-threading-scope.md) | Value-Type `Self` Threading — Patch the Remaining Gaps, or Generalize `ThreadedIr`'s Storage Families? | Implemented | 2026-09-09 |
 | [0121](0121-lone-ok-error-atom-specs-as-result.md) | Lone `ok`/`error` Atom Return Specs Map to `Result` in FFI Type Inference | Implemented (2026-09-15) | 2026-09-14 |
@@ -169,7 +169,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0140](0140-text-default-binaries.md) | Text-Default Binaries — a String Is the Raw Binary, Binary Is Explicit | Rejected | 2026-10-28 |
 | [0141](0141-bitstring-sealed-class-for-unaligned-bitstrings.md) | Bitstring — a Sealed Class for Unaligned Bitstrings | Implemented | 2026-10-28 |
 | [0142](0142-class-process-owns-only-class-state.md) | The Class Process Only Owns Class State — Stateless Class Methods Run in the Caller | Implemented (2026-10-30) | 2026-10-29 |
-| [0143](0143-binary-construction-syntax.md) | Binary Construction Syntax — Reuse `<<...>>` in Expression Position | Accepted | 2026-11-01 |
+| [0143](0143-binary-construction-syntax.md) | Binary Construction Syntax — Reuse `<<...>>` in Expression Position | Implemented (2026-11-03) | 2026-11-01 |
 | [0144](0144-class-side-protocol-types.md) | Class-Side Protocol Types — `P class` Means "a Class Conforming to `P`" | Implemented | 2026-11-04 |
 | [0145](0145-cascade-pipeline-semantics.md) | Cascade Semantics for Immutable Values — Keep `;` Fan-Out, Add a `\|>` Pipeline | Implemented (2026-11-10) | 2026-11-06 |
 | [0146](0146-non-local-return-through-ensure.md) | A `^` Commits the Actor's Cell, Not a Copy | Implemented (2026-11-11) | 2026-11-06 |

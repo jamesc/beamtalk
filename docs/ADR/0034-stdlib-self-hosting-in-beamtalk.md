@@ -493,7 +493,7 @@ Testing strategy:
 ## Implementation Tracking
 
 **Epic:** [BT-812](https://linear.app/beamtalk/issue/BT-812)
-**Status:** Planned
+**Status:** Done
 
 | Issue | Phase | Title | Size | Deps |
 |-------|-------|-------|------|------|

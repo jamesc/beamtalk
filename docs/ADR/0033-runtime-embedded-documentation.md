@@ -422,7 +422,7 @@ The MCP `info` tool also benefits — its `documentation` field in the response 
 
 **Epic:** BT-768
 **Issues:** BT-769, BT-770, BT-771, BT-772
-**Status:** Planned
+**Status:** Done
 
 | Phase | Issue | Title | Size |
 |-------|-------|-------|------|

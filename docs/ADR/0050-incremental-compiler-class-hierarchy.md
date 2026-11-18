@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted | Implemented (2026-03-04)
+Implemented (2026-03-04)
 
 ## Context
 
@@ -367,7 +367,7 @@ The `__beamtalk_meta/0` format change is managed across two phases:
 
 **Epic:** BT-1073 — Incremental Compiler ClassHierarchy via BEAM Metadata Streaming (ADR 0050)
 **Issues:** BT-1074 (Phase 1), BT-1075 (Phase 2), BT-1076 (Phase 3), BT-1077 (Phase 4), BT-1078 (Phase 5)
-**Status:** Planned
+**Status:** Done
 
 | Phase | Issue | Title | Size |
 |-------|-------|-------|------|

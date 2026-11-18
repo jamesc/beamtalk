@@ -1,7 +1,7 @@
 # ADR 0082: Method-Level Edit and Save in the Live Workspace
 
 ## Status
-Accepted (2026-05-17) — **Shipped 2026-05-26** (all phases 0–5 merged to main, BT-2281 through BT-2292).
+Implemented (2026-05-26) — accepted 2026-05-17 (all phases 0–5 merged to main, BT-2281 through BT-2292).
 
 ## Context
 

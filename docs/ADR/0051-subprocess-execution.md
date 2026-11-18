@@ -1,7 +1,7 @@
 # ADR 0051: Subprocess Execution — System Commands and Interactive Subprocess Actor
 
 ## Status
-Accepted | Implemented (2026-03-05)
+Implemented (2026-03-05)
 
 ## Context
 

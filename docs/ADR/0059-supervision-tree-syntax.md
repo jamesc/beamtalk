@@ -935,11 +935,11 @@ Not applicable. This ADR introduces new syntax only (`Supervisor subclass:`, `su
 
 | Issue | Title | Phase | Size | Status |
 |-------|-------|-------|------|--------|
-| BT-1217 | Bootstrap Supervisor, DynamicSupervisor, SupervisionSpec stdlib classes | 0 | S | Backlog |
-| BT-1218 | AST supervisor_kind + semantic analysis + supervisionSpec synthesis | 1a | S | Backlog |
-| BT-1219 | beamtalk_supervisor.erl runtime helper + dispatch routing + REPL display | 1b | S | Backlog |
-| BT-1220 | supervisor_codegen.rs — generate -behaviour(supervisor) + start_link/0 + init/1 | 2 | M | Backlog |
-| BT-1222 | BUnit tests for Supervisor, DynamicSupervisor, and SupervisionSpec stdlib classes | 3 | M | Backlog |
-| BT-1223 | E2E tests and language feature docs for supervision tree syntax | 4 | S | Backlog |
+| BT-1217 | Bootstrap Supervisor, DynamicSupervisor, SupervisionSpec stdlib classes | 0 | S | Done |
+| BT-1218 | AST supervisor_kind + semantic analysis + supervisionSpec synthesis | 1a | S | Done |
+| BT-1219 | beamtalk_supervisor.erl runtime helper + dispatch routing + REPL display | 1b | S | Done |
+| BT-1220 | supervisor_codegen.rs — generate -behaviour(supervisor) + start_link/0 + init/1 | 2 | M | Done |
+| BT-1222 | BUnit tests for Supervisor, DynamicSupervisor, and SupervisionSpec stdlib classes | 3 | M | Done |
+| BT-1223 | E2E tests and language feature docs for supervision tree syntax | 4 | S | Done |
 
 **Recommended start:** BT-1217 (Phase 0, no dependencies)
