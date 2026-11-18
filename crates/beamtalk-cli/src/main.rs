@@ -533,6 +533,32 @@ enum Command {
 /// everything there so every platform gets the same headroom.
 const STACK_SIZE: usize = 8 * 1024 * 1024;
 
+/// Crates (as `tracing` targets) that `-v` turns on: this binary and every
+/// in-process Beamtalk library that emits events. Targets are Rust module
+/// paths — `beamtalk=…` would only match `beamtalk::*`.
+const VERBOSE_TRACING_TARGETS: &[&str] = &[
+    "beamtalk_cli",
+    "beamtalk_core",
+    "beamtalk_codegen",
+    "beamtalk_language_service",
+    "beamtalk_lint",
+    "beamtalk_package",
+    "beamtalk_project",
+    "beamtalk_repl",
+    "beamtalk_repl_protocol",
+    "beamtalk_workspace",
+];
+
+/// The `EnvFilter` directive for `-v` (`debug`) and `-vv` (`trace`).
+fn verbose_filter_directive(verbose: u8) -> String {
+    let level = if verbose == 1 { "debug" } else { "trace" };
+    VERBOSE_TRACING_TARGETS
+        .iter()
+        .map(|target| format!("{target}={level}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn main() {
     let result = std::thread::Builder::new()
         .stack_size(STACK_SIZE)
@@ -601,13 +627,7 @@ fn run() -> Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"))
         } else {
-            // Target must match Rust module paths (`beamtalk_cli`, `beamtalk_core`).
-            // `beamtalk=…` only matches `beamtalk::*`, not `beamtalk_cli`.
-            let directive = if cli.verbose == 1 {
-                "beamtalk_cli=debug,beamtalk_core=debug"
-            } else {
-                "beamtalk_cli=trace,beamtalk_core=trace"
-            };
+            let directive = verbose_filter_directive(cli.verbose);
             tracing_subscriber::EnvFilter::new(directive)
         };
 
@@ -861,6 +881,34 @@ fn dispatch_command(command: Command) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verbose_filter_covers_every_beamtalk_dependency_of_the_cli() {
+        // Every `beamtalk-*` library this binary links must be traceable with
+        // `-v`, or its events are silently dropped. Dev-only and out-of-process
+        // crates are not in `[dependencies]`, so they are not required here.
+        let manifest: toml::Value = toml::from_str(include_str!("../Cargo.toml")).unwrap();
+        let deps = manifest["dependencies"].as_table().unwrap();
+        // Crates that emit no tracing events and are not worth a directive.
+        let silent = [
+            "beamtalk-env",
+            "beamtalk-exec",
+            "beamtalk-lsp",
+            "beamtalk-mcp",
+        ];
+        let directive = verbose_filter_directive(1);
+        for name in deps.keys().filter(|k| k.starts_with("beamtalk-")) {
+            if silent.contains(&name.as_str()) {
+                continue;
+            }
+            let target = name.replace('-', "_");
+            assert!(
+                directive.split(',').any(|d| d == format!("{target}=debug")),
+                "`-v` does not enable tracing for `{target}`: {directive}"
+            );
+        }
+        assert!(verbose_filter_directive(2).contains("beamtalk_core=trace"));
+    }
 
     // --- sysroot_from_exe_path_or_fallback ---
     //
