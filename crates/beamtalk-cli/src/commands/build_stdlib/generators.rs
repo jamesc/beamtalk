@@ -11,6 +11,7 @@
 
 use super::metadata::{ClassMeta, MethodMeta, sorted_by_class_name};
 use super::orchestrate::{STDLIB_APP_FILE, STDLIB_SOURCE_DIR, module_name_from_path};
+use crate::beam_compiler::escape_erlang_string;
 use crate::commands::app_file;
 use crate::commands::util::format_sorted_atom_list;
 use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
@@ -868,13 +869,7 @@ pub(super) fn declared_type_to_rust_expr(dt: &DeclaredType) -> String {
 /// argument to a `DeclaredType` compact constructor (`impl Into<EcoString>`
 /// parameters accept a bare `&str` literal directly).
 fn rust_str_lit(s: &str) -> String {
-    let escaped = s
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\r', "\\r")
-        .replace('\n', "\\n")
-        .replace('\t', "\\t");
-    format!("\"{escaped}\"")
+    format!("\"{}\"", escape_erlang_string(s))
 }
 
 /// Escaped Rust string literal with a trailing `.into()` — for direct

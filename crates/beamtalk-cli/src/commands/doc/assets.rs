@@ -10,6 +10,7 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
 use tracing::debug;
 
+use crate::beam_compiler::escape_erlang_string;
 use super::extractor::ClassInfo;
 use super::renderer::method_anchor;
 
@@ -760,8 +761,8 @@ pub(super) fn write_search_js(output_dir: &Utf8Path, classes: &[ClassInfo]) -> R
             .unwrap_or("");
         index_entries.push(format!(
             "{{\"t\":\"class\",\"n\":\"{}\",\"s\":\"{}\",\"u\":\"{}.html\"}}",
-            json_escape(&class.name),
-            json_escape(summary),
+            escape_erlang_string(&class.name),
+            escape_erlang_string(summary),
             class.name,
         ));
 
@@ -770,8 +771,8 @@ pub(super) fn write_search_js(output_dir: &Utf8Path, classes: &[ClassInfo]) -> R
             let anchor = method_anchor(&method.signature);
             index_entries.push(format!(
                 "{{\"t\":\"method\",\"n\":\"{}\",\"c\":\"{}\",\"u\":\"{}.html#{}\"}}",
-                json_escape(&method.signature),
-                json_escape(&class.name),
+                escape_erlang_string(&method.signature),
+                escape_erlang_string(&class.name),
                 class.name,
                 anchor,
             ));
@@ -790,15 +791,6 @@ pub(super) fn write_search_js(output_dir: &Utf8Path, classes: &[ClassInfo]) -> R
         .wrap_err("Failed to write search.js")?;
     debug!("Generated {}", js_path);
     Ok(())
-}
-
-/// Escape string for JSON embedding.
-fn json_escape(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
 }
 
 /// Client-side search JavaScript.
