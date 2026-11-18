@@ -4576,3 +4576,15 @@ fn abstract_sealed_class_methods_are_sealed_only_with_the_keyword() {
     assert!(!flag("plain"));
     assert!(flag("marked"));
 }
+
+#[test]
+fn subclassing_sealed_class_reports_one_error_not_one_per_overridden_method() {
+    // BT-5008: every method of a sealed class counts as sealed, but a subclass
+    // of it is one mistake, reported once at the superclass.
+    let src = "Integer subclass: MyInt\n  + other => 1\n  - other => 2\n  class make => 3\n";
+    let (module, diags) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
+    assert!(diags.is_empty(), "{diags:?}");
+    let (_, diags) = ClassHierarchy::build(&module);
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert!(diags[0].message.contains("Cannot subclass sealed class"));
+}

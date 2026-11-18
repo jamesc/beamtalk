@@ -1099,9 +1099,13 @@ impl ClassHierarchy {
             // Check sealed class enforcement (skip for root classes with no superclass).
             // Still register the class so downstream passes (codegen routing,
             // completions) can reason about it despite the error.
-            if let Some(diag) = self.check_sealed_superclass(class, stdlib_mode) {
-                diagnostics.push(diag);
-            }
+            let sealed_superclass_reported =
+                if let Some(diag) = self.check_sealed_superclass(class, stdlib_mode) {
+                    diagnostics.push(diag);
+                    true
+                } else {
+                    false
+                };
             // Check sealed method override enforcement.
             // Built-in stdlib classes (e.g. Metaclass) are allowed to override
             // sealed methods when compiling in stdlib mode.
@@ -1109,7 +1113,10 @@ impl ClassHierarchy {
             // sealed methods, as they provide class-side dispatch methods whose
             // selectors coincide with sealed instance-side methods on Object, but are
             // dispatched through a separate runtime namespace.
-            if let Some(ref superclass) = class.superclass {
+            // Every method of a sealed class counts as sealed (BT-5008), so when
+            // the superclass is itself sealed and already reported, a per-method
+            // override error would repeat the same mistake once per method.
+            if !sealed_superclass_reported && let Some(ref superclass) = class.superclass {
                 let is_stdlib_builtin =
                     stdlib_mode && Self::is_builtin_class(class.name.name.as_str());
                 let is_abstract_stdlib = stdlib_mode && class.is_abstract;
