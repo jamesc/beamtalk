@@ -58,5 +58,5 @@ arg_error(Op, Reason) ->
         )}.
 
 -spec not_found_error(binary(), atom()) -> {error, #beamtalk_error{}}.
-not_found_error(_Op, ClassName) ->
-    {error, beamtalk_repl_errors:class_not_found(ClassName, browse)}.
+not_found_error(Op, ClassName) ->
+    arg_error(Op, beamtalk_repl_errors:class_not_found_message(ClassName)).

@@ -71,7 +71,7 @@ Used by protocol handlers and op modules.
     resolve_qualified_class_name/1
 ]).
 
--type class_not_found_context() :: repl | browse | tracing | connect.
+-type class_not_found_context() :: repl | tracing | connect.
 -export_type([class_not_found_context/0]).
 
 %%% Public API
@@ -119,7 +119,7 @@ The one constructor for a `class_not_found` error, used by every op.
 The message is always `Unknown class: Name` and `details` carries the class
 name. The hint depends on where the lookup failed (`Context`):
 
-- `repl` / `browse`: point at `Workspace classes`
+- `repl`: point at `Workspace classes`
 - `tracing`: the filter must name an existing actor class
 - `connect`: the class must be loaded into the running workspace first
 """.

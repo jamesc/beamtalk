@@ -389,7 +389,7 @@ class_not_found_contexts_test() ->
             ?assertEqual({beamtalk_string, <<"Unknown class: Bar">>}, E#beamtalk_error.message),
             ?assertMatch({beamtalk_string, _}, E#beamtalk_error.hint)
         end
-     || Ctx <- [repl, browse, tracing, connect]
+     || Ctx <- [repl, tracing, connect]
     ],
     ?assertEqual(<<"Unknown class: Baz">>, beamtalk_repl_errors:class_not_found_message('Baz')).
 
