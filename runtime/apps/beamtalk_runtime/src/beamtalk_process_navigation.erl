@@ -646,6 +646,9 @@ Return `true` if `Pid` is runtime infrastructure — i.e. it is registered under
 a name in the infra deny-list (`infra_deny_list/0`). A pid with no registered
 name, or one registered under a name not in the deny-list, is not infra.
 """.
+%% The non-pid clause is only reachable from tests now that `is_infra/1` is
+%% exported under TEST; the one production caller always passes a pid.
+-dialyzer({nowarn_function, is_infra/1}).
 -spec is_infra(term()) -> boolean().
 is_infra(Pid) when is_pid(Pid) ->
     case registered_name(Pid) of
