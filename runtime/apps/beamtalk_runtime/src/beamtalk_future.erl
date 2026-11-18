@@ -106,7 +106,8 @@ new() ->
     new_with_cap(?PENDING_CAP_MS).
 
 -doc """
-Create a pending future that is rejected after `CapMs` without any message.
+Create a pending future that is rejected after `CapMs` without any message, unless a producer registers
+(`{producer, Pid}`), which lifts the cap.
 
 A pending future with no watcher (its producer died without settling it) would
 otherwise live forever. `new/0` uses ?PENDING_CAP_MS (1 hour, far above the
@@ -261,7 +262,7 @@ await_pid(Pid, Timeout) ->
                 {future_resolved, Pid, Value} -> Value;
                 {future_rejected, Pid, Reason} -> throw({future_rejected, Reason})
             after 0 ->
-                throw(make_expired_error())
+                throw({future_rejected, make_expired_error()})
             end
     after Timeout ->
         erlang:demonitor(Mon, [flush]),
@@ -331,7 +332,13 @@ pending(Waiters, Cap) ->
         {add_callback, resolved, Callback} ->
             pending([{callback, resolved, Callback} | Waiters], Cap);
         {add_callback, rejected, Callback} ->
-            pending([{callback, rejected, Callback} | Waiters], Cap)
+            pending([{callback, rejected, Callback} | Waiters], Cap);
+        {producer, _Watcher} ->
+            %% A live producer (the actor's watcher) guarantees settlement:
+            %% it rejects this future if the actor dies. The orphan cap only
+            %% guards futures nobody is working on, so a slow producer is
+            %% never cut off.
+            pending(Waiters, infinity)
     after Cap ->
         %% Orphaned: nothing settled this future within the cap.
         Err = make_orphaned_error(),
@@ -451,23 +458,21 @@ execute_callback(Callback, Value) ->
         end
     end).
 
--doc "Create a timeout error record with consistent message and hint".
+-doc "Error for a future whose process has exited before it could answer.".
 make_expired_error() ->
-    beamtalk_error:new(
-        future_expired,
-        'Future',
-        undefined,
+    beamtalk_error:with_message(
+        beamtalk_error:new(future_expired, 'Future'),
         <<"The future's process has exited: it was already settled and discarded, or was killed">>
     ).
 
+-doc "Error for a pending future with no producer that hit its idle cap.".
 make_orphaned_error() ->
-    beamtalk_error:new(
-        future_expired,
-        'Future',
-        undefined,
+    beamtalk_error:with_message(
+        beamtalk_error:new(future_expired, 'Future'),
         <<"Nothing settled this future within its idle cap; it was discarded">>
     ).
 
+-doc "Create a timeout error record with consistent message and hint".
 make_timeout_error() ->
     #beamtalk_error{
         kind = timeout,

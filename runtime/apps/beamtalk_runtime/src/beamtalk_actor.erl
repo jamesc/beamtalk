@@ -3396,13 +3396,15 @@ exit mapping. The watcher also monitors the future process so it can
 clean up promptly when the future completes normally. There is no time
 cutoff (BT-5020): the watcher ends when either process dies, and a pending
 future with no producer is itself capped by beamtalk_future (?PENDING_CAP_MS),
-so it cannot outlive its watcher's usefulness.
+unless a watcher registers as its producer (done here).
 """.
 -spec spawn_future_watcher(pid(), pid(), atom()) -> pid().
 spawn_future_watcher(ActorPid, FuturePid, Selector) ->
     spawn(fun() ->
         ActorRef = erlang:monitor(process, ActorPid),
         FutureRef = erlang:monitor(process, FuturePid),
+        %% Tell the future a live producer exists: lifts its orphan cap.
+        FuturePid ! {producer, self()},
         receive
             {'DOWN', ActorRef, process, ActorPid, Reason} ->
                 %% Actor died (or its node went away) — reject future
