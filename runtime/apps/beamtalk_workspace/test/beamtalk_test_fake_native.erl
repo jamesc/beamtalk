@@ -4,8 +4,9 @@
 -module(beamtalk_test_fake_native).
 -behaviour(gen_server).
 
--moduledoc """
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
+
+-moduledoc """
 Fixture for the workspace actor-list tests (BT-4960): a fake `native:` backing
 gen_server (ADR 0056: no `'$beamtalk_actor'` marker, found by its
 `'$initial_call'` through the backing-module index) and a stand-in
