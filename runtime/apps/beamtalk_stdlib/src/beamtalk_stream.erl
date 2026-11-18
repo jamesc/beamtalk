@@ -21,19 +21,19 @@ where generator is a zero-arity function that returns either
 `{element, NextFun}` (an element and the continuation) or `done`.
 """.
 
-%% Constructors
 -export([
-    %% Stream construction (used by other modules, e.g. beamtalk_file)
+    %% Constructors
     from/1,
     on/1,
+    %% Stream construction (used by other modules, e.g. beamtalk_file)
+    make_stream/2,
+    make_stream/3,
     %% Lazy operations
-    make_stream/2, make_stream/3,
-    %% Terminal operations
     'select'/2,
     'collect'/2,
     'reject'/2,
     'drop'/2,
-    %% Display
+    %% Terminal operations
     take/2,
     do/2,
     inject_into/3,
@@ -42,8 +42,9 @@ where generator is a zero-arity function that returns either
     as_list/1,
     any_satisfy/2,
     all_satisfy/2,
-    %% FFI shims for (Erlang beamtalk_stream) dispatch
+    %% Display
     print_string/1,
+    %% FFI shims for (Erlang beamtalk_stream) dispatch
     from/2,
     inject/3,
     detect/3,

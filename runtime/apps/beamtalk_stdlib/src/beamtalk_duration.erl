@@ -60,8 +60,6 @@ Erlang BIFs without dispatching (ADR 0002).
 -export([is_duration/1]).
 -endif.
 
-%% Cross-module helper (beamtalk_timer, beamtalk_datetime)
-
 -type t() :: #{'$beamtalk_class' := 'Duration', millis := integer()}.
 -export_type([t/0]).
 

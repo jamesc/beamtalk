@@ -54,7 +54,9 @@ resolve_class_reference(Locals, Name) ->
 
 -doc """
 Return a summary of the current workspace state.
-Includes workspace ID, project path, created_at, last_activity, actor count, and loaded modules.
+Includes workspace ID, project path, created_at, last_activity, actor count (live
+user actors from the actor scan; runtime-owned system actors are not counted), and
+loaded modules.
 """.
 -spec status() -> {ok, map()} | {error, term()}.
 status() ->
@@ -65,7 +67,10 @@ status() ->
                 project_path => maps:get(project_path, Meta, undefined),
                 created_at => maps:get(created_at, Meta, undefined),
                 last_activity => maps:get(last_activity, Meta, undefined),
-                actor_count => length(beamtalk_workspace_actors:list()),
+                actor_count => length([
+                    A
+                 || #{system := false} = A <- beamtalk_workspace_actors:list()
+                ]),
                 loaded_modules => maps:get(loaded_modules, Meta, [])
             }};
         {error, Reason} ->

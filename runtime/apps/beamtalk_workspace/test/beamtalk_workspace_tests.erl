@@ -45,7 +45,10 @@ status_returns_ok_map_when_meta_started_test() ->
         ?assert(is_integer(maps:get(created_at, Status))),
         ?assert(is_integer(maps:get(last_activity, Status))),
         %% The count comes from the actor scan, not a tracked registry.
-        ?assertEqual(length(beamtalk_workspace_actors:list()), maps:get(actor_count, Status)),
+        ?assertEqual(
+            length([A || #{system := false} = A <- beamtalk_workspace_actors:list()]),
+            maps:get(actor_count, Status)
+        ),
         ?assertEqual([], maps:get(loaded_modules, Status))
     after
         gen_server:stop(Pid)

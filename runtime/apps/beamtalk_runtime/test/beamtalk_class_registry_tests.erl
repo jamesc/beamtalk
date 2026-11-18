@@ -2288,7 +2288,7 @@ bt4646_with_announce_spy(Name, Fun) ->
                 undefined
         end,
     ok = meck:new(beamtalk_announcements, [passthrough, no_link]),
-    ok = meck:expect(beamtalk_announcements, system_announce, fun
+    ok = meck:expect(beamtalk_announcements, system_announce_running, fun
         ('ClassRemoved', #{className := N}) when N =:= Name ->
             Self ! {bt4646_removed, N},
             ok;
