@@ -13,8 +13,8 @@ multi-site rewrites).
 Extracted from `beamtalk_repl_loader` (BT-4683). The loader installs a change
 in memory first and then calls one of the `emit_*` functions here; each one
 builds the entry and appends it to `beamtalk_workspace_changelog`. Appending
-is best effort: a failure is logged and swallowed by
-`best_effort_changelog_append/3`, because the change is already live and a
+is best effort: a failure is logged and never raised by
+`best_effort_changelog_append/3` / `append_entry/3`, because the change is already live and a
 ChangeLog write must never undo it.
 
 Flushability (does the entry name an in-project `.bt` file and a resolvable
@@ -61,6 +61,11 @@ fails. Each entry kind passes its own span resolver as a fun.
 
 -include_lib("kernel/include/logger.hrl").
 
+%% Outcome of recording one ChangeLog entry: `ok`, or a user-visible warning
+%% when the live change was not recorded.
+-type emit_result() :: ok | {warning, binary()}.
+-export_type([emit_result/0]).
+
 %% An entry kind's span resolver for `resolve_flushability/4,5`: given the
 %% in-project `SourceFile` and its current on-disk contents, return the
 %% finished entry (flushable with a span, or downgraded with a reason).
@@ -82,13 +87,38 @@ On failure this logs `Label` at warning level with `Meta` plus
 """.
 -spec best_effort_changelog_append(string(), map(), fun(() -> map())) -> ok.
 best_effort_changelog_append(Label, Meta, BuildFun) ->
+    _ = append_entry(Label, Meta, BuildFun),
+    ok.
+
+-doc """
+Like `best_effort_changelog_append/3`, but reports whether the entry was
+recorded.
+
+Returns `ok` when the entry was appended, or `{warning, Text}` when it was not
+(the build raised, or `beamtalk_workspace_changelog:append/1` returned
+`{error, _}`, e.g. a full or read-only changes directory). The failure is
+always logged (ERROR for an `{error, _}` return, WARNING for a raise); callers
+whose reply can carry warnings add `Text` to it, so a live edit that has no
+ChangeLog entry (and would be missing from the next flush) is visible to the
+user instead of silent.
+""".
+-spec append_entry(string(), map(), fun(() -> map())) -> emit_result().
+append_entry(Label, Meta, BuildFun) ->
     %% bt-catcher-audit: not-applicable-no-block - BuildFun is an Erlang closure
     %% from this module's emit_* functions that builds the entry map; it never
     %% runs a Beamtalk block.
-    try
-        Entry = BuildFun(),
-        _ = beamtalk_workspace_changelog:append(Entry),
-        ok
+    try BuildFun() of
+        Entry ->
+            case beamtalk_workspace_changelog:append(Entry) of
+                {ok, _Seq} ->
+                    ok;
+                {error, Reason} ->
+                    ?LOG_ERROR(Label, Meta#{
+                        reason => Reason,
+                        domain => [beamtalk, runtime]
+                    }),
+                    {warning, unrecorded_warning(Meta)}
+            end
     catch
         Class:Reason:Stack ->
             ?LOG_WARNING(Label, Meta#{
@@ -97,8 +127,16 @@ best_effort_changelog_append(Label, Meta, BuildFun) ->
                 stack => Stack,
                 domain => [beamtalk, runtime]
             }),
-            ok
+            {warning, unrecorded_warning(Meta)}
     end.
+
+-spec unrecorded_warning(map()) -> binary().
+unrecorded_warning(_Meta) ->
+    <<
+        "The change is live but could not be recorded in the ChangeLog, so a later "
+        "`Workspace flush` will not include it. Check that the workspace changes/ "
+        "directory is writable; see the workspace log for details."
+    >>.
 
 -doc """
 Decide whether an entry for `ClassNameBin` can be flushed, and add the
@@ -244,13 +282,14 @@ new_class_author_kind() ->
 %% ChangeEntry"). A disk-read or span-resolution failure downgrades the entry to
 %% non-flushable rather than failing the install.
 %%
-%% Best-effort: every failure path is logged and swallowed. The method is already
+%% Best-effort: every failure path is logged and never raised; the caller gets
+%% `{warning, Text}` to put on the reply (BT-5013). The method is already
 %% live; a ChangeLog write must not undo or block that (the all-or-nothing rule
 %% only requires that the entry is emitted *after* a successful install — if
 %% emission itself fails, the patch still stands).
--spec emit_change_entry(map()) -> ok.
+-spec emit_change_entry(map()) -> emit_result().
 emit_change_entry(MethodInfo) ->
-    best_effort_changelog_append(
+    append_entry(
         "Failed to emit ChangeLog entry for live patch (patch still installed)",
         #{method_info => maps:with([class_name, selector], MethodInfo)},
         fun() -> change_entry(MethodInfo) end
