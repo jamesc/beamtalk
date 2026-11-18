@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright 2026 James Casey
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for vs_elixir_nightly.py (BT-4844)."""
+"""Tests for vs_elixir_nightly.py (BT-4844, BT-4853)."""
 import json
 import os
 import tempfile
@@ -124,6 +124,99 @@ class Compare(unittest.TestCase):
         cur["rows"]["7a"]["bt_red"] = 1000.0
         code, _ = self.run_cmp(cur, results(**{"7a": 100.0}))
         self.assertEqual(code, 0)
+
+
+class Confirm(unittest.TestCase):
+    """Two measurements (BT-4853): a row fails only when both are over the threshold."""
+
+    def run_confirm(self, first, second, base, threshold=25.0):
+        with tempfile.TemporaryDirectory() as d:
+            paths = {}
+            for name, data in (("first", first), ("second", second), ("base", base)):
+                paths[name] = os.path.join(d, name + ".json")
+                json.dump(data, open(paths[name], "w"))
+            merged = os.path.join(d, "merged.json")
+            code = v.main(["confirm", paths["second"], "--first", paths["first"],
+                           "--baseline", paths["base"], "--threshold", str(threshold),
+                           "--summary", os.path.join(d, "s.md"), "--merged-out", merged])
+            return code, open(os.path.join(d, "s.md")).read(), json.load(open(merged))
+
+    def test_over_in_both_fails(self):
+        base = results(**{"7a": 100.0, "7b": 100.0})
+        code, s, merged = self.run_confirm(results(**{"7a": 140.0, "7b": 100.0}),
+                                           results(**{"7a": 130.0, "7b": 100.0}), base)
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL (confirmed in both measurements):** 7a", s)
+        self.assertNotIn("Not confirmed", s)
+
+    def test_over_in_first_only_passes_and_is_reported(self):
+        base = results(**{"7a": 100.0, "7b": 100.0})
+        code, s, _ = self.run_confirm(results(**{"7a": 140.0, "7b": 100.0}),
+                                      results(**{"7a": 110.0, "7b": 100.0}), base)
+        self.assertEqual(code, 0)
+        self.assertIn("Not confirmed:** 7a", s)
+        self.assertIn("PASS", s)
+
+    def test_over_in_neither_passes(self):
+        base = results(**{"7a": 100.0})
+        code, s, merged = self.run_confirm(results(**{"7a": 110.0}), results(**{"7a": 105.0}), base)
+        self.assertEqual(code, 0)
+        self.assertNotIn("Not confirmed", s)
+        self.assertEqual(merged["rows"]["7a"]["bt_ns"], 110.0)
+        self.assertNotIn("held_at_baseline", merged["meta"])
+
+    def test_only_the_confirmed_row_fails(self):
+        base = results(**{"7a": 100.0, "7b": 100.0})
+        code, s, _ = self.run_confirm(results(**{"7a": 150.0, "7b": 150.0}),
+                                      results(**{"7a": 150.0, "7b": 100.0}), base)
+        self.assertEqual(code, 1)
+        self.assertIn("confirmed in both measurements):** 7a.", s)
+        self.assertIn("Not confirmed:** 7b", s)
+
+    def test_unconfirmed_row_keeps_baseline_figures(self):
+        # A slow drift must not ratchet the baseline up: 7a passes tonight only
+        # because it was not confirmed, so the stored 7a stays at the old figure.
+        base = results(**{"7a": 100.0, "7b": 100.0})
+        first = results(**{"7a": 140.0, "7b": 105.0})
+        code, _, merged = self.run_confirm(first, results(**{"7a": 110.0, "7b": 105.0}), base)
+        self.assertEqual(code, 0)
+        self.assertEqual(merged["rows"]["7a"]["bt_ns"], 100.0)
+        self.assertEqual(merged["rows"]["7b"]["bt_ns"], 105.0)
+        self.assertEqual(merged["meta"]["held_at_baseline"], "7a")
+
+    def test_row_missing_in_both_is_confirmed(self):
+        base = results(**{"7a": 100.0, "7b": 100.0})
+        code, s, _ = self.run_confirm(results(**{"7a": 100.0}), results(**{"7a": 100.0}), base)
+        self.assertEqual(code, 1)
+        self.assertIn("7b", s)
+
+    def test_row_missing_in_first_only_keeps_baseline_row(self):
+        base = results(**{"7a": 100.0, "7b": 100.0})
+        code, _, merged = self.run_confirm(results(**{"7a": 100.0}),
+                                           results(**{"7a": 100.0, "7b": 100.0}), base)
+        self.assertEqual(code, 0)
+        self.assertEqual(merged["rows"]["7b"]["bt_ns"], 100.0)
+
+
+class Defer(unittest.TestCase):
+    def test_defer_reports_but_exits_zero_and_lists_rows(self):
+        with tempfile.TemporaryDirectory() as d:
+            c, b, o, s = (os.path.join(d, n) for n in ("c.json", "b.json", "o.txt", "s.md"))
+            json.dump(results(**{"7a": 150.0, "7b": 100.0}), open(c, "w"))
+            json.dump(results(**{"7a": 100.0, "7b": 100.0}), open(b, "w"))
+            code = v.main(["compare", c, "--baseline", b, "--threshold", "25", "--defer",
+                           "--over-out", o, "--summary", s])
+            self.assertEqual(code, 0)
+            self.assertEqual(open(o).read(), "7a\n")
+            self.assertIn("OVER THE THRESHOLD", open(s).read())
+
+    def test_defer_with_nothing_over_writes_an_empty_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            c, b, o = (os.path.join(d, n) for n in ("c.json", "b.json", "o.txt"))
+            json.dump(results(**{"7a": 100.0}), open(c, "w"))
+            json.dump(results(**{"7a": 100.0}), open(b, "w"))
+            self.assertEqual(v.main(["compare", c, "--baseline", b, "--defer", "--over-out", o]), 0)
+            self.assertEqual(open(o).read(), "")
 
 
 if __name__ == "__main__":
