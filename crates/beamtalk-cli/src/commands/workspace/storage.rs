@@ -8,7 +8,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fs2::FileExt;
 use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 
@@ -346,15 +345,9 @@ pub(super) fn acquire_workspace_lock(workspace_id: &str) -> Result<fs::File> {
     let lockfile_path = workspace_lockfile_path(workspace_id)?;
     fs::create_dir_all(workspaces_base_dir()?).into_diagnostic()?;
 
-    let lockfile = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lockfile_path)
-        .into_diagnostic()?;
-
-    lockfile.lock_exclusive().into_diagnostic()?;
-    Ok(lockfile)
+    // Shared with the directory locks: logs a "waiting" message when another
+    // process holds the lock (workspace startup can hold it for minutes).
+    crate::commands::dir_lock::lock_file(&lockfile_path, "workspace")
 }
 
 #[cfg(test)]
