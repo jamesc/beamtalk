@@ -25,7 +25,6 @@ use beamtalk_core::semantic_analysis;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use camino::Utf8PathBuf;
 use std::fs;
-use std::process::Command;
 
 /// Helper function to read test case source files
 fn read_test_case(case_name: &str) -> String {
@@ -197,6 +196,39 @@ fn test_codegen_snapshot(case_name: &str) {
 ///
 /// Uses workspace mode for code generation.
 fn generate_core_erlang(case_name: &str) -> (String, String) {
+    generated_cases()
+        .get(case_name)
+        .unwrap_or_else(|| panic!("unknown test case '{case_name}'"))
+        .clone()
+        .unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// Case name -> `(module_name, core_erlang)` or the generation failure message.
+type GeneratedCases = std::collections::HashMap<String, Result<(String, String), String>>;
+
+/// Every case's `(module_name, core_erlang)`, generated once per test run and
+/// shared by the codegen snapshot and `erlc` tests. A failed generation is
+/// stored as its panic message so the one test for that case reports it.
+fn generated_cases() -> &'static GeneratedCases {
+    static CACHE: std::sync::OnceLock<GeneratedCases> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| {
+        ALL_CASES
+            .iter()
+            .map(|case| {
+                let generated = std::panic::catch_unwind(|| generate_core_erlang_uncached(case))
+                    .map_err(|p| {
+                        p.downcast_ref::<String>()
+                            .cloned()
+                            .or_else(|| p.downcast_ref::<&str>().map(ToString::to_string))
+                            .unwrap_or_else(|| format!("Codegen panicked for '{case}'"))
+                    });
+                ((*case).to_string(), generated)
+            })
+            .collect()
+    })
+}
+
+fn generate_core_erlang_uncached(case_name: &str) -> (String, String) {
     let source = read_test_case(case_name);
     let tokens = lex_with_eof(&source);
     let (mut module, _diagnostics) = parse(tokens);
@@ -234,13 +266,27 @@ fn generate_core_erlang(case_name: &str) -> (String, String) {
     (module_name, core_erlang)
 }
 
+/// Per-case `erlc` verdict. All cases' Core Erlang is compiled once per run
+/// with `erlc_batched` (batches of 32) instead of one `erlc` spawn per case;
+/// `Err` carries the combined output of every failing batch.
+fn batched_erlc_verdict() -> &'static Result<(), String> {
+    static VERDICT: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+    VERDICT.get_or_init(|| {
+        let modules: Vec<(String, String)> = ALL_CASES
+            .iter()
+            .filter_map(|case| generated_cases().get(*case)?.as_ref().ok().cloned())
+            .collect();
+        let dir = tempfile::TempDir::new().expect("Failed to create temp dir");
+        beamtalk_core::test_helpers::test_support::erlc_batched(dir.path(), &modules)
+    })
+}
+
 /// Test that the generated Core Erlang compiles successfully with erlc.
 ///
 /// This test is skipped if `erlc` is not available on the system PATH.
-/// The test writes the generated Core Erlang to a temp file and runs
-/// `erlc +from_core` to verify the syntax is valid.
+/// `erlc` runs once for the whole corpus (see [`batched_erlc_verdict`]); each
+/// case's test only recompiles its own module when that batch run failed.
 fn test_codegen_compiles(case_name: &str) {
-    // Check if erlc is available
     if !beamtalk_core::test_helpers::test_support::erlc_available() {
         eprintln!(
             "Skipping {} compilation test - erlc not available",
@@ -251,31 +297,23 @@ fn test_codegen_compiles(case_name: &str) {
 
     let (module_name, core_erlang) = generate_core_erlang(case_name);
 
-    // Write to a unique per-test temp dir so parallel runs never collide.
-    // Dropping `scratch` removes the directory (including any .beam output).
-    let scratch = tempfile::TempDir::new().expect("Failed to create temp dir");
-    let temp_dir = scratch.path().to_path_buf();
-    let core_file = temp_dir.join(format!("{}.core", module_name));
-    fs::write(&core_file, &core_erlang)
-        .unwrap_or_else(|e| panic!("Failed to write temp file: {}", e));
-
-    // Compile with erlc
-    let output = Command::new("erlc")
-        .arg("+from_core")
-        .arg(&core_file)
-        .current_dir(&temp_dir)
-        .output()
-        .expect("Failed to run erlc");
-
-    // Check result
-    assert!(
-        output.status.success(),
-        "erlc compilation failed for '{}':\nstdout: {}\nstderr: {}\n\nGenerated Core Erlang:\n{}",
-        case_name,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-        core_erlang
-    );
+    // The batch is only the fast path: `erlc` stops at the first failing file
+    // of a batch, and its output cannot be attributed reliably by substring.
+    // So when the batch failed, recompile this case alone: every failing case
+    // then reports its own diagnostics, and a passing case stays green.
+    if batched_erlc_verdict().is_err() {
+        let result = beamtalk_core::test_helpers::test_support::erlc_batched_in_temp_dir(
+            "package_compiler_case",
+            &[(module_name, core_erlang.clone())],
+        );
+        assert!(
+            result.is_ok(),
+            "erlc compilation failed for '{}':\n{}\n\nGenerated Core Erlang:\n{}",
+            case_name,
+            result.unwrap_err(),
+            core_erlang
+        );
+    }
 }
 
 /// Shared helper for semantic analysis diagnostic snapshots.

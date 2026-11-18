@@ -595,21 +595,10 @@ mod tests {
         // (a CI leg on an older supported release). Once Erlang runs, a
         // generator failure — such as a curated module this OTP lacks — fails
         // the test rather than skipping it.
-        let probe = std::process::Command::new("erl")
-            .args([
-                "-noshell",
-                "-eval",
-                "io:put_chars(erlang:system_info(otp_release)), halt().",
-            ])
-            .output();
-        let installed_major = match probe {
-            Ok(out) if out.status.success() => {
-                String::from_utf8_lossy(&out.stdout).trim().to_string()
-            }
-            _ => {
-                eprintln!("skipping: no working Erlang runtime");
-                return;
-            }
+        let Some(installed_major) = crate::test_helpers::test_support::installed_otp_release()
+        else {
+            eprintln!("skipping: no working Erlang runtime");
+            return;
         };
         if installed_major != fixture_otp_major(OTP_EXPORTS) {
             eprintln!("skipping: installed OTP {installed_major} differs from the fixture's");
