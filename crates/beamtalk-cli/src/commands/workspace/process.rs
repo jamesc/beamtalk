@@ -17,7 +17,6 @@ use std::time::Duration;
 
 use beamtalk_cli::repl_startup::BeamPaths;
 
-#[cfg(target_os = "linux")]
 use super::storage::read_proc_start_time;
 use super::storage::{
     NodeInfo, get_workspace_metadata, read_port_file, read_workspace_cookie, remove_file_if_exists,
