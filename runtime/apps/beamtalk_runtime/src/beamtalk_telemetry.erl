@@ -665,8 +665,7 @@ list_handlers(Prefix) ->
     try
         telemetry:list_handlers(Prefix)
     catch
-        error:undef -> [];
-        exit:{noproc, _} -> []
+        error:undef -> []
     end.
 
 %% Whether any of these event names is an event of the family.
