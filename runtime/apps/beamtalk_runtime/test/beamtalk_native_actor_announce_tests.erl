@@ -164,7 +164,6 @@ stray_message_rehibernates() ->
 %% time, so a loaded runner only makes it slower and a real failure (the
 %% observer never hibernating) still fails, just after the deadline.
 -define(AWAIT_DEADLINE_MS, 30000).
--define(AWAIT_POLL_MS, 5).
 
 %% The observer is spawned by the start path and sets its monitor when it is first
 %% scheduled, which can be after the start has returned (BT-5000), so
@@ -178,7 +177,7 @@ await_hibernated_observer(Pid) ->
             [] -> false
         end
     end,
-    await_value(Probe).
+    {ok, beamtalk_test_wait:value(Probe, ?AWAIT_DEADLINE_MS)}.
 
 is_hibernated(Pid) ->
     is_pid(Pid) andalso
@@ -191,28 +190,7 @@ is_rehibernated(Pid) ->
     end.
 
 await(Cond) ->
-    case await_value(fun() -> Cond() andalso {ok, ok} end) of
-        {ok, ok} -> ok;
-        timeout -> timeout
-    end.
-
-%% Poll `Probe` until it answers `{ok, _}`; `timeout` once the deadline passes.
-await_value(Probe) ->
-    await_value(Probe, erlang:monotonic_time(millisecond) + ?AWAIT_DEADLINE_MS).
-
-await_value(Probe, Deadline) ->
-    case Probe() of
-        {ok, _} = Found ->
-            Found;
-        _ ->
-            case erlang:monotonic_time(millisecond) >= Deadline of
-                true ->
-                    timeout;
-                false ->
-                    timer:sleep(?AWAIT_POLL_MS),
-                    await_value(Probe, Deadline)
-            end
-    end.
+    beamtalk_test_wait:until(Cond, ?AWAIT_DEADLINE_MS).
 
 observer_leaves_no_trace() ->
     TablesBefore = lists:sort(ets:all()),

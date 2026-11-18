@@ -728,13 +728,13 @@ fn test_value_subclass_synthetic_accessor_metadata_injected() {
     let class_sigs = map_body(&code, "'classMethodSignatures' => ~{");
     assert_has(
         "class-side signatures should carry the keyword constructor",
-        &class_sigs,
+        class_sigs,
         &["'x:y:' =>"],
     );
     let class_docs = map_body(&code, "'classMethodDocs' => ~{");
     assert_has(
         "class-side docs should carry the keyword constructor doc",
-        &class_docs,
+        class_docs,
         &["'x:y:' =>"],
     );
 }
@@ -750,7 +750,7 @@ fn test_value_subclass_synthetic_accessor_metadata_gated_to_value_kind() {
     let sigs = map_body(&code, "'methodSignatures' => ~{");
     assert_lacks(
         "object subclass should not synthesize accessor signatures",
-        &sigs,
+        sigs,
         &["'withX:' =>"],
     );
 }

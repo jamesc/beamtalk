@@ -553,8 +553,7 @@ with_trace_fixture(Fun) ->
         {attribute, 1, module, ?TRACE_FIXTURE_MOD},
         {attribute, 2, beamtalk_source, [list_to_binary(AbsPath)]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms, [binary]),
-    {module, Mod} = code:load_binary(Mod, "trace_fixture_test.beam", Bin),
+    Mod = beamtalk_test_module:load(Forms),
     try
         Fun(filename:join("test", "trace_fixture_test.bt"))
     after

@@ -28,318 +28,245 @@ teardown(_) ->
 %% Session Lifecycle Tests
 %%====================================================================
 
-start_stop_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-session-1">>),
-                ?assert(is_process_alive(Pid)),
-                beamtalk_repl_shell:stop(Pid),
-                beamtalk_test_wait:dead(Pid),
-                ?assertNot(is_process_alive(Pid))
-            end)
-        ]
-    end}.
+shell_test_() ->
+    {foreach, fun setup/0, fun teardown/1, [
+        fun start_stop/0,
+        fun bindings_initially_empty/0,
+        fun get_session_id_returns_started_id/0,
+        fun clear_bindings/0,
+        fun eval_empty_expression/0,
+        fun show_codegen_returns_core_erlang/0,
+        fun show_codegen_rejects_during_eval/0,
+        fun handle_call_unknown_request/0,
+        fun handle_cast_ignored/0,
+        fun handle_info_ignored/0,
+        fun code_change_preserves_state/0,
+        fun multiple_sessions_independent/0,
+        fun unload_module_removes_from_tracker/0,
+        fun unload_module_not_loaded_returns_error/0,
+        fun unload_module_not_in_tracker/0
+    ]}.
+
+start_stop() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-session-1">>),
+    ?assert(is_process_alive(Pid)),
+    beamtalk_repl_shell:stop(Pid),
+    beamtalk_test_wait:dead(Pid),
+    ?assertNot(is_process_alive(Pid)).
 
 %%====================================================================
 %% Bindings Tests
 %%====================================================================
 
-bindings_initially_empty_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-bindings-1">>),
-                {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
-                %% ADR 0019: Workspace bindings are injected automatically;
-                %% verify no USER bindings are present.
-                UserBindings = maps:without(
-                    ['Transcript', 'Workspace'], Bindings
-                ),
-                ?assertEqual(#{}, UserBindings),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+bindings_initially_empty() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-bindings-1">>),
+    {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
+    %% ADR 0019: Workspace bindings are injected automatically;
+    %% verify no USER bindings are present.
+    UserBindings = maps:without(
+        ['Transcript', 'Workspace'], Bindings
+    ),
+    ?assertEqual(#{}, UserBindings),
+    beamtalk_repl_shell:stop(Pid).
 
 %% ADR 0081 Phase 7: the shell answers its own protocol session id so
 %% liveSessions/0 can mint Session values with the id withId/1 would resolve.
-get_session_id_returns_started_id_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-session-id-1">>),
-                ?assertEqual(
-                    {ok, <<"test-session-id-1">>}, beamtalk_repl_shell:get_session_id(Pid)
-                ),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+get_session_id_returns_started_id() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-session-id-1">>),
+    ?assertEqual(
+        {ok, <<"test-session-id-1">>}, beamtalk_repl_shell:get_session_id(Pid)
+    ),
+    beamtalk_repl_shell:stop(Pid).
 
-clear_bindings_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-clear-1">>),
-                %% Clear on empty bindings should be ok
-                ok = beamtalk_repl_shell:clear_bindings(Pid),
-                {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
-                %% ADR 0019: Workspace bindings re-injected after clear
-                UserBindings = maps:without(
-                    ['Transcript', 'Workspace'], Bindings
-                ),
-                ?assertEqual(#{}, UserBindings),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+clear_bindings() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-clear-1">>),
+    %% Clear on empty bindings should be ok
+    ok = beamtalk_repl_shell:clear_bindings(Pid),
+    {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
+    %% ADR 0019: Workspace bindings re-injected after clear
+    UserBindings = maps:without(
+        ['Transcript', 'Workspace'], Bindings
+    ),
+    ?assertEqual(#{}, UserBindings),
+    beamtalk_repl_shell:stop(Pid).
 
 %%====================================================================
 %% Eval Tests (basic - without compiler daemon)
 %%====================================================================
 
-eval_empty_expression_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-eval-1">>),
-                %% Empty expression should return error
-                Result = beamtalk_repl_shell:eval(Pid, ""),
-                ?assertMatch({error, _, _, _}, Result),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+eval_empty_expression() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-eval-1">>),
+    %% Empty expression should return error
+    Result = beamtalk_repl_shell:eval(Pid, ""),
+    ?assertMatch({error, _, _, _}, Result),
+    beamtalk_repl_shell:stop(Pid).
 
 %%====================================================================
 %% Show Codegen Tests
 %%====================================================================
 
-show_codegen_returns_core_erlang_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-codegen-1">>),
-                Result = beamtalk_repl_shell:show_codegen(Pid, "1 + 2"),
-                ?assertMatch({ok, _, _}, Result),
-                {ok, CoreErlang, Warnings} = Result,
-                ?assert(is_binary(CoreErlang)),
-                ?assert(byte_size(CoreErlang) > 0),
-                ?assert(is_list(Warnings)),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+show_codegen_returns_core_erlang() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-codegen-1">>),
+    Result = beamtalk_repl_shell:show_codegen(Pid, "1 + 2"),
+    ?assertMatch({ok, _, _}, Result),
+    {ok, CoreErlang, Warnings} = Result,
+    ?assert(is_binary(CoreErlang)),
+    ?assert(byte_size(CoreErlang) > 0),
+    ?assert(is_list(Warnings)),
+    beamtalk_repl_shell:stop(Pid).
 
-show_codegen_rejects_during_eval_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-codegen-busy">>),
-                %% Start a long-running eval to occupy the worker slot
-                Self = self(),
-                Caller = spawn(fun() ->
-                    Res = beamtalk_repl_shell:eval(Pid, "1 + 2"),
-                    Self ! {eval_done, Res}
-                end),
-                %% Wait until the eval request is in flight (caller blocked on
-                %% the reply) or already finished
-                ok = beamtalk_test_wait:idle(Caller),
-                %% Try show_codegen - if eval is still in progress, should get eval_busy
-                Result = beamtalk_repl_shell:show_codegen(Pid, "42"),
-                case Result of
-                    {error, #beamtalk_error{kind = eval_busy}, _} ->
-                        ok;
-                    _ ->
-                        %% Eval may have completed before show_codegen ran
-                        %% (race condition in test - both outcomes are valid)
-                        ok
-                end,
-                %% Drain eval result
-                receive
-                    {eval_done, _} -> ok
-                after 5000 -> ok
-                end,
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+show_codegen_rejects_during_eval() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-codegen-busy">>),
+    %% Start a long-running eval to occupy the worker slot
+    Self = self(),
+    Caller = spawn(fun() ->
+        Res = beamtalk_repl_shell:eval(Pid, "1 + 2"),
+        Self ! {eval_done, Res}
+    end),
+    %% Wait until the eval request is in flight (caller blocked on
+    %% the reply) or already finished
+    ok = beamtalk_test_wait:idle(Caller),
+    %% Try show_codegen - if eval is still in progress, should get eval_busy
+    Result = beamtalk_repl_shell:show_codegen(Pid, "42"),
+    case Result of
+        {error, #beamtalk_error{kind = eval_busy}, _} ->
+            ok;
+        _ ->
+            %% Eval may have completed before show_codegen ran
+            %% (race condition in test - both outcomes are valid)
+            ok
+    end,
+    %% Drain eval result
+    receive
+        {eval_done, _} -> ok
+    after 5000 -> ok
+    end,
+    beamtalk_repl_shell:stop(Pid).
 
 %%====================================================================
 %% gen_server Callback Tests
 %%====================================================================
 
-handle_call_unknown_request_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-unknown-1">>),
-                Result = gen_server:call(Pid, unknown_request),
-                ?assertEqual({error, unknown_request}, Result),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+handle_call_unknown_request() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-unknown-1">>),
+    Result = gen_server:call(Pid, unknown_request),
+    ?assertEqual({error, unknown_request}, Result),
+    beamtalk_repl_shell:stop(Pid).
 
-handle_cast_ignored_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-cast-1">>),
-                gen_server:cast(Pid, some_message),
-                ok = beamtalk_test_wait:sync(Pid),
-                ?assert(is_process_alive(Pid)),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+handle_cast_ignored() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-cast-1">>),
+    gen_server:cast(Pid, some_message),
+    ok = beamtalk_test_wait:sync(Pid),
+    ?assert(is_process_alive(Pid)),
+    beamtalk_repl_shell:stop(Pid).
 
-handle_info_ignored_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-info-1">>),
-                Pid ! random_info,
-                ok = beamtalk_test_wait:sync(Pid),
-                ?assert(is_process_alive(Pid)),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+handle_info_ignored() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-info-1">>),
+    Pid ! random_info,
+    ok = beamtalk_test_wait:sync(Pid),
+    ?assert(is_process_alive(Pid)),
+    beamtalk_repl_shell:stop(Pid).
 
-code_change_preserves_state_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-code-1">>),
-                State = sys:get_state(Pid),
-                {ok, NewState} = beamtalk_repl_shell:code_change(old_vsn, State, extra),
-                ?assertEqual(State, NewState),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+code_change_preserves_state() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-code-1">>),
+    State = sys:get_state(Pid),
+    {ok, NewState} = beamtalk_repl_shell:code_change(old_vsn, State, extra),
+    ?assertEqual(State, NewState),
+    beamtalk_repl_shell:stop(Pid).
 
 %%====================================================================
 %% Session Independence Tests
 %%====================================================================
 
-multiple_sessions_independent_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid1} = beamtalk_repl_shell:start_link(<<"session-a">>),
-                {ok, Pid2} = beamtalk_repl_shell:start_link(<<"session-b">>),
-                ?assertNotEqual(Pid1, Pid2),
-                %% ADR 0019: Both have only workspace bindings (no user bindings)
-                {ok, B1} = beamtalk_repl_shell:get_bindings(Pid1),
-                {ok, B2} = beamtalk_repl_shell:get_bindings(Pid2),
-                UserB1 = maps:without(
-                    ['Transcript', 'Workspace'], B1
-                ),
-                UserB2 = maps:without(
-                    ['Transcript', 'Workspace'], B2
-                ),
-                ?assertEqual(#{}, UserB1),
-                ?assertEqual(#{}, UserB2),
-                beamtalk_repl_shell:stop(Pid1),
-                beamtalk_repl_shell:stop(Pid2)
-            end)
-        ]
-    end}.
+multiple_sessions_independent() ->
+    {ok, Pid1} = beamtalk_repl_shell:start_link(<<"session-a">>),
+    {ok, Pid2} = beamtalk_repl_shell:start_link(<<"session-b">>),
+    ?assertNotEqual(Pid1, Pid2),
+    %% ADR 0019: Both have only workspace bindings (no user bindings)
+    {ok, B1} = beamtalk_repl_shell:get_bindings(Pid1),
+    {ok, B2} = beamtalk_repl_shell:get_bindings(Pid2),
+    UserB1 = maps:without(
+        ['Transcript', 'Workspace'], B1
+    ),
+    UserB2 = maps:without(
+        ['Transcript', 'Workspace'], B2
+    ),
+    ?assertEqual(#{}, UserB1),
+    ?assertEqual(#{}, UserB2),
+    beamtalk_repl_shell:stop(Pid1),
+    beamtalk_repl_shell:stop(Pid2).
 
 %%====================================================================
 %% Unload Module Tests
 %%====================================================================
 
-unload_module_removes_from_tracker_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-unload-1">>),
-                %% Create a dummy module in the code server
-                DummyMod = 'bt519_test_dummy',
-                Forms = [
-                    {attribute, 1, module, DummyMod},
-                    {attribute, 2, export, [{hello, 0}]},
-                    {function, 3, hello, 0, [{clause, 3, [], [], [{atom, 3, world}]}]}
-                ],
-                {ok, DummyMod, Binary} = compile:forms(Forms),
-                {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
-                %% Inject module into the session's tracker
-                sys:replace_state(Pid, fun({SId, State, Worker}) ->
-                    Tracker = beamtalk_repl_state:get_module_tracker(State),
-                    NewTracker = beamtalk_repl_modules:add_module(
-                        DummyMod, "test.bt", Tracker
-                    ),
-                    {SId, beamtalk_repl_state:set_module_tracker(NewTracker, State), Worker}
-                end),
-                try
-                    %% Verify module is in tracker
-                    {ok, Tracker1} = beamtalk_repl_shell:get_module_tracker(Pid),
-                    ?assert(beamtalk_repl_modules:module_exists(DummyMod, Tracker1)),
-                    %% Unload the module
-                    ok = beamtalk_repl_shell:unload_module(Pid, DummyMod),
-                    %% Verify module is removed from tracker
-                    {ok, Tracker2} = beamtalk_repl_shell:get_module_tracker(Pid),
-                    ?assertNot(beamtalk_repl_modules:module_exists(DummyMod, Tracker2)),
-                    %% Verify module is no longer loaded in code server
-                    ?assertEqual(false, code:is_loaded(DummyMod))
-                after
-                    _ = code:soft_purge(DummyMod),
-                    _ = code:delete(DummyMod),
-                    beamtalk_repl_shell:stop(Pid)
-                end
-            end)
-        ]
-    end}.
+unload_module_removes_from_tracker() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-unload-1">>),
+    %% Create a dummy module in the code server
+    DummyMod = 'bt519_test_dummy',
+    Forms = [
+        {attribute, 1, module, DummyMod},
+        {attribute, 2, export, [{hello, 0}]},
+        {function, 3, hello, 0, [{clause, 3, [], [], [{atom, 3, world}]}]}
+    ],
+    ok = beamtalk_test_module:load(DummyMod, Forms),
+    %% Inject module into the session's tracker
+    sys:replace_state(Pid, fun({SId, State, Worker}) ->
+        Tracker = beamtalk_repl_state:get_module_tracker(State),
+        NewTracker = beamtalk_repl_modules:add_module(
+            DummyMod, "test.bt", Tracker
+        ),
+        {SId, beamtalk_repl_state:set_module_tracker(NewTracker, State), Worker}
+    end),
+    try
+        %% Verify module is in tracker
+        {ok, Tracker1} = beamtalk_repl_shell:get_module_tracker(Pid),
+        ?assert(beamtalk_repl_modules:module_exists(DummyMod, Tracker1)),
+        %% Unload the module
+        ok = beamtalk_repl_shell:unload_module(Pid, DummyMod),
+        %% Verify module is removed from tracker
+        {ok, Tracker2} = beamtalk_repl_shell:get_module_tracker(Pid),
+        ?assertNot(beamtalk_repl_modules:module_exists(DummyMod, Tracker2)),
+        %% Verify module is no longer loaded in code server
+        ?assertEqual(false, code:is_loaded(DummyMod))
+    after
+        _ = code:soft_purge(DummyMod),
+        _ = code:delete(DummyMod),
+        beamtalk_repl_shell:stop(Pid)
+    end.
 
-unload_module_not_loaded_returns_error_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-unload-2">>),
-                try
-                    Result = beamtalk_repl_shell:unload_module(Pid, 'nonexistent_module_xyz'),
-                    ?assertMatch({error, #beamtalk_error{kind = module_not_loaded}}, Result)
-                after
-                    beamtalk_repl_shell:stop(Pid)
-                end
-            end)
-        ]
-    end}.
+unload_module_not_loaded_returns_error() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-unload-2">>),
+    try
+        Result = beamtalk_repl_shell:unload_module(Pid, 'nonexistent_module_xyz'),
+        ?assertMatch({error, #beamtalk_error{kind = module_not_loaded}}, Result)
+    after
+        beamtalk_repl_shell:stop(Pid)
+    end.
 
-unload_module_not_in_tracker_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-unload-3">>),
-                %% Create and load a module without adding to tracker
-                DummyMod = 'bt519_test_untracked',
-                Forms = [
-                    {attribute, 1, module, DummyMod},
-                    {attribute, 2, export, [{hello, 0}]},
-                    {function, 3, hello, 0, [{clause, 3, [], [], [{atom, 3, world}]}]}
-                ],
-                {ok, DummyMod, Binary} = compile:forms(Forms),
-                {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
-                try
-                    %% Unload succeeds even though module isn't tracked
-                    ok = beamtalk_repl_shell:unload_module(Pid, DummyMod),
-                    %% Module is purged from code server
-                    ?assertEqual(false, code:is_loaded(DummyMod)),
-                    %% Tracker is still empty (no crash from removing non-existent entry)
-                    {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(Pid),
-                    ?assertEqual(#{}, Tracker)
-                after
-                    _ = code:soft_purge(DummyMod),
-                    _ = code:delete(DummyMod),
-                    beamtalk_repl_shell:stop(Pid)
-                end
-            end)
-        ]
-    end}.
+unload_module_not_in_tracker() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-unload-3">>),
+    %% Create and load a module without adding to tracker
+    DummyMod = 'bt519_test_untracked',
+    Forms = [
+        {attribute, 1, module, DummyMod},
+        {attribute, 2, export, [{hello, 0}]},
+        {function, 3, hello, 0, [{clause, 3, [], [], [{atom, 3, world}]}]}
+    ],
+    ok = beamtalk_test_module:load(DummyMod, Forms),
+    try
+        %% Unload succeeds even though module isn't tracked
+        ok = beamtalk_repl_shell:unload_module(Pid, DummyMod),
+        %% Module is purged from code server
+        ?assertEqual(false, code:is_loaded(DummyMod)),
+        %% Tracker is still empty (no crash from removing non-existent entry)
+        {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(Pid),
+        ?assertEqual(#{}, Tracker)
+    after
+        _ = code:soft_purge(DummyMod),
+        _ = code:delete(DummyMod),
+        beamtalk_repl_shell:stop(Pid)
+    end.
 
 %% {class_removed, ClassName, Module} info message removes module from tracker.
 class_removed_event_updates_tracker_test_() ->
@@ -413,87 +340,81 @@ class_removed_event_updates_tracker_test_() ->
         ]
     end}.
 
+class_removed_drained_test_() ->
+    {foreach, fun setup/0, fun teardown/1, [
+        fun class_removed_drained_on_interrupt/0,
+        fun class_removed_drained_on_worker_crash/0
+    ]}.
+
 %% Pending removals are drained on interrupt (worker killed by user).
-class_removed_drained_on_interrupt_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-interrupt-drain-1">>),
-                DummyMod = bt1242_interrupt_drain_mod,
-                %% Inject module into tracker + a fake worker + a pending removal.
-                FakeWorkerPid = spawn(fun() ->
-                    receive
-                        _ -> ok
-                    end
-                end),
-                %% Use {async, Self} so reply_eval sends a message rather than
-                %% calling gen_server:reply (which requires a {Pid,Tag} tuple).
-                FakeFrom = {async, self()},
-                sys:replace_state(Pid, fun({SId, State, _W}) ->
-                    Tracker = beamtalk_repl_state:get_module_tracker(State),
-                    T2 = beamtalk_repl_modules:add_module(DummyMod, undefined, Tracker),
-                    State2 = beamtalk_repl_state:set_module_tracker(T2, State),
-                    State3 = beamtalk_repl_state:add_pending_module_removal(DummyMod, State2),
-                    {SId, State3, {FakeWorkerPid, make_ref(), FakeFrom}}
-                end),
-                %% Interrupt — should kill FakeWorkerPid and drain pending removals
-                ok = beamtalk_repl_shell:interrupt(Pid),
-                %% Module must be removed from tracker
-                {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(Pid),
-                ?assertNot(beamtalk_repl_modules:module_exists(DummyMod, Tracker)),
-                %% Pending list must be empty
-                {_SId, CleanState, undefined} = sys:get_state(Pid),
-                ?assertEqual([], beamtalk_repl_state:get_pending_module_removals(CleanState)),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+class_removed_drained_on_interrupt() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-interrupt-drain-1">>),
+    DummyMod = bt1242_interrupt_drain_mod,
+    %% Inject module into tracker + a fake worker + a pending removal.
+    FakeWorkerPid = spawn(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
+    %% Use {async, Self} so reply_eval sends a message rather than
+    %% calling gen_server:reply (which requires a {Pid,Tag} tuple).
+    FakeFrom = {async, self()},
+    sys:replace_state(Pid, fun({SId, State, _W}) ->
+        Tracker = beamtalk_repl_state:get_module_tracker(State),
+        T2 = beamtalk_repl_modules:add_module(DummyMod, undefined, Tracker),
+        State2 = beamtalk_repl_state:set_module_tracker(T2, State),
+        State3 = beamtalk_repl_state:add_pending_module_removal(DummyMod, State2),
+        {SId, State3, {FakeWorkerPid, make_ref(), FakeFrom}}
+    end),
+    %% Interrupt — should kill FakeWorkerPid and drain pending removals
+    ok = beamtalk_repl_shell:interrupt(Pid),
+    %% Module must be removed from tracker
+    {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(Pid),
+    ?assertNot(beamtalk_repl_modules:module_exists(DummyMod, Tracker)),
+    %% Pending list must be empty
+    {_SId, CleanState, undefined} = sys:get_state(Pid),
+    ?assertEqual([], beamtalk_repl_state:get_pending_module_removals(CleanState)),
+    beamtalk_repl_shell:stop(Pid).
 
 %% Pending removals are drained when the worker crashes (DOWN message).
-class_removed_drained_on_worker_crash_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-crash-drain-1">>),
-                DummyMod = bt1242_crash_drain_mod,
-                %% Spawn a real worker process we can kill to trigger DOWN
-                Self = self(),
-                {FakeWorkerPid, MonRef} = spawn_monitor(fun() ->
-                    receive
-                        _ -> ok
-                    end
-                end),
-                erlang:demonitor(MonRef, [flush]),
-                %% Inject module + pending removal + the real worker pid.
-                %% Use {async, Self} so reply_eval sends a message rather than
-                %% calling gen_server:reply (which requires a {Pid,Tag} tuple).
-                sys:replace_state(Pid, fun({SId, State, _W}) ->
-                    Tracker = beamtalk_repl_state:get_module_tracker(State),
-                    T2 = beamtalk_repl_modules:add_module(DummyMod, undefined, Tracker),
-                    State2 = beamtalk_repl_state:set_module_tracker(T2, State),
-                    State3 = beamtalk_repl_state:add_pending_module_removal(DummyMod, State2),
-                    WorkerMonRef = erlang:monitor(process, FakeWorkerPid),
-                    {SId, State3, {FakeWorkerPid, WorkerMonRef, {async, Self}}}
-                end),
-                %% Kill the fake worker — shell receives DOWN
-                exit(FakeWorkerPid, kill),
-                %% Wait for the shell to handle the worker's DOWN, not merely for
-                %% the worker to die: the DOWN reaches the shell on its own signal
-                %% path, unordered against this process's calls. The shell clears
-                %% its worker slot in the same step that drains the removals.
-                beamtalk_test_wait:until(fun() ->
-                    element(3, sys:get_state(Pid)) =:= undefined
-                end),
-                %% Module must be removed from tracker
-                {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(Pid),
-                ?assertNot(beamtalk_repl_modules:module_exists(DummyMod, Tracker)),
-                %% Pending list must be empty
-                {_SId, CleanState, undefined} = sys:get_state(Pid),
-                ?assertEqual([], beamtalk_repl_state:get_pending_module_removals(CleanState)),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+class_removed_drained_on_worker_crash() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-crash-drain-1">>),
+    DummyMod = bt1242_crash_drain_mod,
+    %% Spawn a real worker process we can kill to trigger DOWN
+    Self = self(),
+    {FakeWorkerPid, MonRef} = spawn_monitor(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
+    erlang:demonitor(MonRef, [flush]),
+    %% Inject module + pending removal + the real worker pid.
+    %% Use {async, Self} so reply_eval sends a message rather than
+    %% calling gen_server:reply (which requires a {Pid,Tag} tuple).
+    sys:replace_state(Pid, fun({SId, State, _W}) ->
+        Tracker = beamtalk_repl_state:get_module_tracker(State),
+        T2 = beamtalk_repl_modules:add_module(DummyMod, undefined, Tracker),
+        State2 = beamtalk_repl_state:set_module_tracker(T2, State),
+        State3 = beamtalk_repl_state:add_pending_module_removal(DummyMod, State2),
+        WorkerMonRef = erlang:monitor(process, FakeWorkerPid),
+        {SId, State3, {FakeWorkerPid, WorkerMonRef, {async, Self}}}
+    end),
+    %% Kill the fake worker — shell receives DOWN
+    exit(FakeWorkerPid, kill),
+    %% Wait for the shell to handle the worker's DOWN, not merely for
+    %% the worker to die: the DOWN reaches the shell on its own signal
+    %% path, unordered against this process's calls. The shell clears
+    %% its worker slot in the same step that drains the removals.
+    beamtalk_test_wait:until(fun() ->
+        element(3, sys:get_state(Pid)) =:= undefined
+    end),
+    %% Module must be removed from tracker
+    {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(Pid),
+    ?assertNot(beamtalk_repl_modules:module_exists(DummyMod, Tracker)),
+    %% Pending list must be empty
+    {_SId, CleanState, undefined} = sys:get_state(Pid),
+    ?assertEqual([], beamtalk_repl_state:get_pending_module_removals(CleanState)),
+    beamtalk_repl_shell:stop(Pid).
 
 %%====================================================================
 %% Pending session-local mutations (ADR 0081 Phase 2)
@@ -519,163 +440,132 @@ setup_shell_with_mutations(SessionId, Locals, Mutations) ->
     end),
     {Pid, FakeWorkerPid}.
 
+pending_mutations_test_() ->
+    {foreach, fun setup/0, fun teardown/1, [
+        fun enqueue_mutation_appends/0,
+        fun pending_mutations_applied_on_success/0,
+        fun pending_clear_applied_on_success/0,
+        fun pending_clear_dropped_on_error/0,
+        fun pending_mutations_drained_on_interrupt/0,
+        fun pending_mutations_discarded_on_crash/0,
+        fun pending_clear_then_put_ordering/0
+    ]}.
+
 %% enqueue_mutation/2 appends to the pending queue (handle_call path).
-enqueue_mutation_appends_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-enqueue-1">>),
-                ok = beamtalk_repl_shell:enqueue_mutation(Pid, {put, x, 1}),
-                ok = beamtalk_repl_shell:enqueue_mutation(Pid, {put, y, 2}),
-                {_SId, State, _W} = sys:get_state(Pid),
-                ?assertEqual(
-                    [{put, x, 1}, {put, y, 2}],
-                    beamtalk_repl_state:get_pending_mutations(State)
-                ),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+enqueue_mutation_appends() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-enqueue-1">>),
+    ok = beamtalk_repl_shell:enqueue_mutation(Pid, {put, x, 1}),
+    ok = beamtalk_repl_shell:enqueue_mutation(Pid, {put, y, 2}),
+    {_SId, State, _W} = sys:get_state(Pid),
+    ?assertEqual(
+        [{put, x, 1}, {put, y, 2}],
+        beamtalk_repl_state:get_pending_mutations(State)
+    ),
+    beamtalk_repl_shell:stop(Pid).
 
 %% Success path: removals + all mutations apply on top of the worker's locals.
-pending_mutations_applied_on_success_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {Pid, FakeWorker} = setup_shell_with_mutations(
-                    <<"test-mut-success-1">>,
-                    #{},
-                    [{put, x, 1}, {put, y, 2}, {remove, z, undefined}]
-                ),
-                %% Worker returns locals carrying z (to be removed) and its own w.
-                WorkerState = worker_state_with_bindings(#{z => 99, w => 7}),
-                Pid ! {eval_result, FakeWorker, {ok, nil, <<>>, [], WorkerState}},
-                ok = beamtalk_test_wait:sync(Pid),
-                {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
-                ?assertEqual(#{x => 1, y => 2, w => 7}, Bindings),
-                {_SId, CleanState, undefined} = sys:get_state(Pid),
-                ?assertEqual([], beamtalk_repl_state:get_pending_mutations(CleanState)),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+pending_mutations_applied_on_success() ->
+    {Pid, FakeWorker} = setup_shell_with_mutations(
+        <<"test-mut-success-1">>,
+        #{},
+        [{put, x, 1}, {put, y, 2}, {remove, z, undefined}]
+    ),
+    %% Worker returns locals carrying z (to be removed) and its own w.
+    WorkerState = worker_state_with_bindings(#{z => 99, w => 7}),
+    Pid ! {eval_result, FakeWorker, {ok, nil, <<>>, [], WorkerState}},
+    ok = beamtalk_test_wait:sync(Pid),
+    {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
+    ?assertEqual(#{x => 1, y => 2, w => 7}, Bindings),
+    {_SId, CleanState, undefined} = sys:get_state(Pid),
+    ?assertEqual([], beamtalk_repl_state:get_pending_mutations(CleanState)),
+    beamtalk_repl_shell:stop(Pid).
 
 %% Success path: a queued `clear` empties the worker's locals.
-pending_clear_applied_on_success_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {Pid, FakeWorker} = setup_shell_with_mutations(
-                    <<"test-mut-clear-success-1">>,
-                    #{},
-                    [{clear, undefined, undefined}]
-                ),
-                WorkerState = worker_state_with_bindings(#{a => 1, b => 2}),
-                Pid ! {eval_result, FakeWorker, {ok, nil, <<>>, [], WorkerState}},
-                ok = beamtalk_test_wait:sync(Pid),
-                {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
-                ?assertEqual(#{}, Bindings),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+pending_clear_applied_on_success() ->
+    {Pid, FakeWorker} = setup_shell_with_mutations(
+        <<"test-mut-clear-success-1">>,
+        #{},
+        [{clear, undefined, undefined}]
+    ),
+    WorkerState = worker_state_with_bindings(#{a => 1, b => 2}),
+    Pid ! {eval_result, FakeWorker, {ok, nil, <<>>, [], WorkerState}},
+    ok = beamtalk_test_wait:sync(Pid),
+    {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
+    ?assertEqual(#{}, Bindings),
+    beamtalk_repl_shell:stop(Pid).
 
 %% Error path: put/remove apply, but a queued `clear` is DROPPED.
-pending_clear_dropped_on_error_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {Pid, FakeWorker} = setup_shell_with_mutations(
-                    <<"test-mut-error-1">>,
-                    #{},
-                    [{put, x, 1}, {clear, undefined, undefined}]
-                ),
-                %% Worker carries an existing local; clear must NOT wipe it.
-                WorkerState = worker_state_with_bindings(#{keep => 42}),
-                Err = beamtalk_error:new(runtime_error, 'Test'),
-                Pid ! {eval_result, FakeWorker, {error, Err, <<>>, [], WorkerState}},
-                ok = beamtalk_test_wait:sync(Pid),
-                {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
-                %% put applied, keep preserved, clear dropped
-                ?assertEqual(#{keep => 42, x => 1}, Bindings),
-                {_SId, CleanState, undefined} = sys:get_state(Pid),
-                ?assertEqual([], beamtalk_repl_state:get_pending_mutations(CleanState)),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+pending_clear_dropped_on_error() ->
+    {Pid, FakeWorker} = setup_shell_with_mutations(
+        <<"test-mut-error-1">>,
+        #{},
+        [{put, x, 1}, {clear, undefined, undefined}]
+    ),
+    %% Worker carries an existing local; clear must NOT wipe it.
+    WorkerState = worker_state_with_bindings(#{keep => 42}),
+    Err = beamtalk_error:new(runtime_error, 'Test'),
+    Pid ! {eval_result, FakeWorker, {error, Err, <<>>, [], WorkerState}},
+    ok = beamtalk_test_wait:sync(Pid),
+    {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
+    %% put applied, keep preserved, clear dropped
+    ?assertEqual(#{keep => 42, x => 1}, Bindings),
+    {_SId, CleanState, undefined} = sys:get_state(Pid),
+    ?assertEqual([], beamtalk_repl_state:get_pending_mutations(CleanState)),
+    beamtalk_repl_shell:stop(Pid).
 
 %% Interrupt path: all mutations drain over the shell's own state.
-pending_mutations_drained_on_interrupt_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {Pid, _FakeWorker} = setup_shell_with_mutations(
-                    <<"test-mut-interrupt-1">>,
-                    #{existing => 5},
-                    [{put, x, 1}, {clear, undefined, undefined}, {put, y, 2}]
-                ),
-                ok = beamtalk_repl_shell:interrupt(Pid),
-                {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
-                %% clear wipes existing+x, then y is set after clear
-                ?assertEqual(#{y => 2}, Bindings),
-                {_SId, CleanState, undefined} = sys:get_state(Pid),
-                ?assertEqual([], beamtalk_repl_state:get_pending_mutations(CleanState)),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+pending_mutations_drained_on_interrupt() ->
+    {Pid, _FakeWorker} = setup_shell_with_mutations(
+        <<"test-mut-interrupt-1">>,
+        #{existing => 5},
+        [{put, x, 1}, {clear, undefined, undefined}, {put, y, 2}]
+    ),
+    ok = beamtalk_repl_shell:interrupt(Pid),
+    {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
+    %% clear wipes existing+x, then y is set after clear
+    ?assertEqual(#{y => 2}, Bindings),
+    {_SId, CleanState, undefined} = sys:get_state(Pid),
+    ?assertEqual([], beamtalk_repl_state:get_pending_mutations(CleanState)),
+    beamtalk_repl_shell:stop(Pid).
 
 %% Worker-crash path: the mutation queue is DISCARDED.
-pending_mutations_discarded_on_crash_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-mut-crash-1">>),
-                {FakeWorkerPid, MonRef} = spawn_monitor(fun() ->
-                    receive
-                        _ -> ok
-                    end
-                end),
-                erlang:demonitor(MonRef, [flush]),
-                sys:replace_state(Pid, fun({SId, State, _W}) ->
-                    State1 = beamtalk_repl_state:set_bindings(#{existing => 5}, State),
-                    State2 = beamtalk_repl_state:add_pending_mutation({put, x, 1}, State1),
-                    WorkerMonRef = erlang:monitor(process, FakeWorkerPid),
-                    {SId, State2, {FakeWorkerPid, WorkerMonRef, {async, self()}}}
-                end),
-                exit(FakeWorkerPid, kill),
-                beamtalk_test_wait:dead(FakeWorkerPid),
-                {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
-                %% Mutation discarded: existing preserved, x NOT applied
-                ?assertEqual(#{existing => 5}, Bindings),
-                {_SId, CleanState, undefined} = sys:get_state(Pid),
-                ?assertEqual([], beamtalk_repl_state:get_pending_mutations(CleanState)),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+pending_mutations_discarded_on_crash() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-mut-crash-1">>),
+    {FakeWorkerPid, MonRef} = spawn_monitor(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
+    erlang:demonitor(MonRef, [flush]),
+    sys:replace_state(Pid, fun({SId, State, _W}) ->
+        State1 = beamtalk_repl_state:set_bindings(#{existing => 5}, State),
+        State2 = beamtalk_repl_state:add_pending_mutation({put, x, 1}, State1),
+        WorkerMonRef = erlang:monitor(process, FakeWorkerPid),
+        {SId, State2, {FakeWorkerPid, WorkerMonRef, {async, self()}}}
+    end),
+    exit(FakeWorkerPid, kill),
+    beamtalk_test_wait:dead(FakeWorkerPid),
+    {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
+    %% Mutation discarded: existing preserved, x NOT applied
+    ?assertEqual(#{existing => 5}, Bindings),
+    {_SId, CleanState, undefined} = sys:get_state(Pid),
+    ?assertEqual([], beamtalk_repl_state:get_pending_mutations(CleanState)),
+    beamtalk_repl_shell:stop(Pid).
 
 %% clear-then-put ordering: clear empties, then the later put survives (success).
-pending_clear_then_put_ordering_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {Pid, FakeWorker} = setup_shell_with_mutations(
-                    <<"test-mut-clear-put-1">>,
-                    #{},
-                    [{put, a, 1}, {clear, undefined, undefined}, {put, b, 2}]
-                ),
-                WorkerState = worker_state_with_bindings(#{old => 99}),
-                Pid ! {eval_result, FakeWorker, {ok, nil, <<>>, [], WorkerState}},
-                ok = beamtalk_test_wait:sync(Pid),
-                {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
-                %% a set, then clear wipes (old + a), then b set
-                ?assertEqual(#{b => 2}, Bindings),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+pending_clear_then_put_ordering() ->
+    {Pid, FakeWorker} = setup_shell_with_mutations(
+        <<"test-mut-clear-put-1">>,
+        #{},
+        [{put, a, 1}, {clear, undefined, undefined}, {put, b, 2}]
+    ),
+    WorkerState = worker_state_with_bindings(#{old => 99}),
+    Pid ! {eval_result, FakeWorker, {ok, nil, <<>>, [], WorkerState}},
+    ok = beamtalk_test_wait:sync(Pid),
+    {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
+    %% a set, then clear wipes (old + a), then b set
+    ?assertEqual(#{b => 2}, Bindings),
+    beamtalk_repl_shell:stop(Pid).
 
 %% Build a worker-result state record carrying the given locals map.  The worker
 %% always returns pending_mutations = [] (it never enqueues into its own snapshot).
@@ -687,92 +577,86 @@ worker_state_with_bindings(Bindings) ->
 %% Connected-session Program exit: (ADR 0099 §3 / Phase 5)
 %%====================================================================
 
+shell_exit_and_unload_test_() ->
+    {foreach, fun setup/0, fun teardown/1, [
+        fun script_exit_replies_and_terminates_session/0,
+        fun unload_module_in_use_returns_error/0
+    ]}.
+
 %% A {script_exit, Code, Output, Warnings} eval result surfaces the exit status to
 %% the caller and then terminates the session shell (normal stop), leaving the
 %% shared node up. Mirrors the worker-injection pattern above: a fake worker +
 %% an {async, self()} From so reply_eval sends us a message we can match.
-script_exit_replies_and_terminates_session_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-script-exit-1">>),
-                MonRef = erlang:monitor(process, Pid),
-                FakeWorkerPid = spawn(fun() ->
-                    receive
-                        _ -> ok
-                    end
-                end),
-                %% Capture the test pid here: the replace_state fun runs in the
-                %% gen_server process, so `self()` inside it would be the shell.
-                Self = self(),
-                sys:replace_state(Pid, fun({SId, State, _W}) ->
-                    {SId, State, {FakeWorkerPid, make_ref(), {async, Self}}}
-                end),
-                %% The worker→shell result is the 5-tuple
-                %% {script_exit, Code, Output, Warnings, WorkerState}.
-                WorkerState = worker_state_with_bindings(#{}),
-                Pid ! {eval_result, FakeWorkerPid, {script_exit, 5, <<>>, [], WorkerState}},
-                %% The shell surfaces the exit status to the caller...
-                receive
-                    {eval_script_exit, Code, Output, Warnings} ->
-                        ?assertEqual(5, Code),
-                        ?assertEqual(<<>>, Output),
-                        ?assertEqual([], Warnings)
-                after 2000 ->
-                    ?assert(false)
-                end,
-                %% ...and then ends the session with a normal stop.
-                receive
-                    {'DOWN', MonRef, process, Pid, Reason} ->
-                        ?assertEqual(normal, Reason)
-                after 2000 ->
-                    ?assert(false)
-                end,
-                ?assertNot(is_process_alive(Pid)),
-                %% Tidy up the stand-in worker (harmless if already gone).
-                exit(FakeWorkerPid, kill)
-            end)
-        ]
-    end}.
+script_exit_replies_and_terminates_session() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-script-exit-1">>),
+    MonRef = erlang:monitor(process, Pid),
+    FakeWorkerPid = spawn(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
+    %% Capture the test pid here: the replace_state fun runs in the
+    %% gen_server process, so `self()` inside it would be the shell.
+    Self = self(),
+    sys:replace_state(Pid, fun({SId, State, _W}) ->
+        {SId, State, {FakeWorkerPid, make_ref(), {async, Self}}}
+    end),
+    %% The worker→shell result is the 5-tuple
+    %% {script_exit, Code, Output, Warnings, WorkerState}.
+    WorkerState = worker_state_with_bindings(#{}),
+    Pid ! {eval_result, FakeWorkerPid, {script_exit, 5, <<>>, [], WorkerState}},
+    %% The shell surfaces the exit status to the caller...
+    receive
+        {eval_script_exit, Code, Output, Warnings} ->
+            ?assertEqual(5, Code),
+            ?assertEqual(<<>>, Output),
+            ?assertEqual([], Warnings)
+    after 2000 ->
+        ?assert(false)
+    end,
+    %% ...and then ends the session with a normal stop.
+    receive
+        {'DOWN', MonRef, process, Pid, Reason} ->
+            ?assertEqual(normal, Reason)
+    after 2000 ->
+        ?assert(false)
+    end,
+    ?assertNot(is_process_alive(Pid)),
+    %% Tidy up the stand-in worker (harmless if already gone).
+    exit(FakeWorkerPid, kill).
 
-unload_module_in_use_returns_error_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-unload-4">>),
-                %% Create a module with a long-running function
-                DummyMod = 'bt519_test_in_use',
-                Forms = [
-                    {attribute, 1, module, DummyMod},
-                    {attribute, 2, export, [{loop, 0}]},
-                    {function, 3, loop, 0, [
-                        {clause, 3, [], [], [{call, 3, {atom, 3, receive_loop}, []}]}
-                    ]},
-                    {function, 4, receive_loop, 0, [
-                        {clause, 4, [], [], [
-                            {'receive', 4, [{clause, 4, [{atom, 4, stop}], [], [{atom, 4, ok}]}]}
-                        ]}
-                    ]}
-                ],
-                {ok, DummyMod, Binary} = compile:forms(Forms),
-                {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
-                %% Spawn a process running old code, then load new version
-                %% so soft_purge will fail (old code still in use)
-                LoopPid = spawn(DummyMod, loop, []),
-                %% Load a new version to make the running process use "old" code
-                {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
-                try
-                    %% Now soft_purge should fail because LoopPid runs old code
-                    Result = beamtalk_repl_shell:unload_module(Pid, DummyMod),
-                    ?assertMatch({error, #beamtalk_error{kind = module_in_use}}, Result)
-                after
-                    LoopPid ! stop,
-                    beamtalk_test_wait:dead(LoopPid),
-                    _ = code:soft_purge(DummyMod),
-                    _ = code:delete(DummyMod),
-                    _ = code:soft_purge(DummyMod),
-                    beamtalk_repl_shell:stop(Pid)
-                end
-            end)
-        ]
-    end}.
+unload_module_in_use_returns_error() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-unload-4">>),
+    %% Create a module with a long-running function
+    DummyMod = 'bt519_test_in_use',
+    Forms = [
+        {attribute, 1, module, DummyMod},
+        {attribute, 2, export, [{loop, 0}]},
+        {function, 3, loop, 0, [
+            {clause, 3, [], [], [{call, 3, {atom, 3, receive_loop}, []}]}
+        ]},
+        {function, 4, receive_loop, 0, [
+            {clause, 4, [], [], [
+                {'receive', 4, [{clause, 4, [{atom, 4, stop}], [], [{atom, 4, ok}]}]}
+            ]}
+        ]}
+    ],
+    {DummyMod, Binary} = beamtalk_test_module:compile(Forms),
+    ok = beamtalk_test_module:load_binary(DummyMod, Binary),
+    %% Spawn a process running old code, then load new version
+    %% so soft_purge will fail (old code still in use)
+    LoopPid = spawn(DummyMod, loop, []),
+    %% Load a new version to make the running process use "old" code
+    ok = beamtalk_test_module:load_binary(DummyMod, Binary),
+    try
+        %% Now soft_purge should fail because LoopPid runs old code
+        Result = beamtalk_repl_shell:unload_module(Pid, DummyMod),
+        ?assertMatch({error, #beamtalk_error{kind = module_in_use}}, Result)
+    after
+        LoopPid ! stop,
+        beamtalk_test_wait:dead(LoopPid),
+        _ = code:soft_purge(DummyMod),
+        _ = code:delete(DummyMod),
+        _ = code:soft_purge(DummyMod),
+        beamtalk_repl_shell:stop(Pid)
+    end.

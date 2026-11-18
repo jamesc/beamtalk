@@ -135,31 +135,32 @@ send_shared_selector_on_non_utf8_binary_test_() ->
 %% through it when a String extension shadows the selector — that would let
 %% String-only logic run against bytes `class_of/1` reports as Binary.
 send_shared_selector_with_string_extension_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
+    {foreach,
         fun() ->
             beamtalk_extensions:init(),
             ExtFun = fun(_Args, _Self) -> string_extension_fired end,
             ok = beamtalk_extensions:register('String', 'byteAt:', ExtFun, bt3033_test)
         end,
-        fun(_) -> beamtalk_extensions:unregister('String', 'byteAt:') end, fun() ->
-            %% A genuine Binary must still hit Binary's own byteAt: primitive
-            %% — the String extension must not fire for it, even when the
-            %% bytes are valid UTF-8 (BT-4173: no sniffing).
-            NonUtf8 = <<255, 254, 253, 0, 200>>,
-            ?assertEqual('Binary', beamtalk_primitive:class_of(NonUtf8)),
-            ?assertEqual(255, beamtalk_primitive:send(NonUtf8, 'byteAt:', [0])),
-            Utf8Bin = <<"hello">>,
-            ?assertEqual('Binary', beamtalk_primitive:class_of(Utf8Bin)),
-            ?assertEqual(104, beamtalk_primitive:send(Utf8Bin, 'byteAt:', [0])),
-            %% A genuine (tagged) String is correctly still subject to
-            %% the extension it was registered on.
-            Utf8Str = {beamtalk_string, <<"hello">>},
-            ?assertEqual('String', beamtalk_primitive:class_of(Utf8Str)),
-            ?assertEqual(
-                string_extension_fired, beamtalk_primitive:send(Utf8Str, 'byteAt:', [0])
-            )
-        end}.
+        fun(_) -> beamtalk_extensions:unregister('String', 'byteAt:') end, [
+            fun() ->
+                %% A genuine Binary must still hit Binary's own byteAt: primitive
+                %% — the String extension must not fire for it, even when the
+                %% bytes are valid UTF-8 (BT-4173: no sniffing).
+                NonUtf8 = <<255, 254, 253, 0, 200>>,
+                ?assertEqual('Binary', beamtalk_primitive:class_of(NonUtf8)),
+                ?assertEqual(255, beamtalk_primitive:send(NonUtf8, 'byteAt:', [0])),
+                Utf8Bin = <<"hello">>,
+                ?assertEqual('Binary', beamtalk_primitive:class_of(Utf8Bin)),
+                ?assertEqual(104, beamtalk_primitive:send(Utf8Bin, 'byteAt:', [0])),
+                %% A genuine (tagged) String is correctly still subject to
+                %% the extension it was registered on.
+                Utf8Str = {beamtalk_string, <<"hello">>},
+                ?assertEqual('String', beamtalk_primitive:class_of(Utf8Str)),
+                ?assertEqual(
+                    string_extension_fired, beamtalk_primitive:send(Utf8Str, 'byteAt:', [0])
+                )
+            end
+        ]}.
 
 class_of_supervisor_tuple_test() ->
     Pid = spawn(fun() -> ok end),
@@ -266,14 +267,8 @@ responds_to_beamtalk_object_test() ->
 %% responds_to for actor instances delegates to beamtalk_dispatch:responds_to
 %% which walks the full hierarchy, so inherited methods are detected correctly.
 responds_to_actor_inherited_method_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
+    {foreach, fun runtime_setup/0, fun noop_cleanup/1, [
         fun() ->
-            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
             %% Hard failure (not a skip) if the stdlib never registers Counter.
             ok = beamtalk_test_class:ensure_fixture_loaded('Counter', 'bt@counter'),
             case beamtalk_class_registry:whereis_class('Counter') of
@@ -292,7 +287,8 @@ responds_to_actor_inherited_method_test_() ->
                     %% Non-existent method
                     ?assertEqual(false, beamtalk_primitive:responds_to(CounterObj, 'noSuchMethod'))
             end
-        end}.
+        end
+    ]}.
 
 %% BT-4679: the former responds_to_{integer,string,boolean,nil,block,tuple,float,symbol,
 %% list,reference}_test_ generators ({Label, Expected, Receiver, Selector} rows).
@@ -655,8 +651,7 @@ create_mock_value_type_module(ModuleName, _ClassName, FieldMethods) ->
     ExportForm = {attribute, 1, export, [{Name, 1} || {Name, _} <- FieldMethods]},
     FunForms = [maps_get_form(Name, Field) || {Name, Field} <- FieldMethods],
     AllForms = [ModuleForm, ExportForm | FunForms],
-    {ok, ModuleName, Binary} = compile:forms(AllForms),
-    code:load_binary(ModuleName, atom_to_list(ModuleName) ++ ".erl", Binary),
+    ok = beamtalk_test_module:load(ModuleName, AllForms),
     ModuleName.
 
 maps_get_form(Name, Field) ->
@@ -704,20 +699,13 @@ print_string_beamtalk_error_test() ->
     ?assert(byte_size(Result) > 0).
 
 print_string_plain_map_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
+    {foreach, fun bootstrap_setup/0, fun noop_cleanup/1, [
         fun() ->
-            beamtalk_test_boot:registry(),
-            beamtalk_extensions:init(),
-            {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
             %% Plain map (Dictionary) — should use beamtalk_map format
             Result = beamtalk_primitive:print_string(#{a => 1}),
             ?assert(is_binary(Result))
-        end}.
+        end
+    ]}.
 
 %%% ============================================================================
 %%% class_of_object/1 Tests
@@ -731,36 +719,28 @@ class_of_object_metaclass_sentinel_test() ->
 
 class_of_object_primitive_test_() ->
     %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            beamtalk_test_boot:registry(),
-            beamtalk_extensions:init(),
-            {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, [
-            {"class_of_object for integer returns class object", fun() ->
-                Result = beamtalk_primitive:class_of_object(42),
-                ?assertMatch({beamtalk_object, _, _, _}, Result)
-            end},
-            {"class_of_object for string returns class object", fun() ->
-                Result = beamtalk_primitive:class_of_object(<<"hello">>),
-                ?assertMatch({beamtalk_object, _, _, _}, Result)
-            end},
-            {"class_of_object for class object returns real metaclass object", fun() ->
-                IntegerPid = beamtalk_class_registry:whereis_class('Integer'),
-                %% Class objects have class field ending in " class"
-                ClassObj = #beamtalk_object{
-                    class = 'Integer class', class_mod = beamtalk_object_class, pid = IntegerPid
-                },
-                Result = beamtalk_primitive:class_of_object(ClassObj),
-                %% ADR 0036: Returns real metaclass object (not sentinel atom).
-                ?assertMatch(
-                    {beamtalk_object, 'Metaclass', beamtalk_metaclass_bt, IntegerPid}, Result
-                )
-            end}
-        ]}.
+    {setup, fun bootstrap_setup/0, fun noop_cleanup/1, [
+        {"class_of_object for integer returns class object", fun() ->
+            Result = beamtalk_primitive:class_of_object(42),
+            ?assertMatch({beamtalk_object, _, _, _}, Result)
+        end},
+        {"class_of_object for string returns class object", fun() ->
+            Result = beamtalk_primitive:class_of_object(<<"hello">>),
+            ?assertMatch({beamtalk_object, _, _, _}, Result)
+        end},
+        {"class_of_object for class object returns real metaclass object", fun() ->
+            IntegerPid = beamtalk_class_registry:whereis_class('Integer'),
+            %% Class objects have class field ending in " class"
+            ClassObj = #beamtalk_object{
+                class = 'Integer class', class_mod = beamtalk_object_class, pid = IntegerPid
+            },
+            Result = beamtalk_primitive:class_of_object(ClassObj),
+            %% ADR 0036: Returns real metaclass object (not sentinel atom).
+            ?assertMatch(
+                {beamtalk_object, 'Metaclass', beamtalk_metaclass_bt, IntegerPid}, Result
+            )
+        end}
+    ]}.
 
 %%% ============================================================================
 %%% class_of_object_by_name/1 Tests
@@ -768,149 +748,141 @@ class_of_object_primitive_test_() ->
 
 class_of_object_by_name_test_() ->
     %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            beamtalk_test_boot:registry(),
-            beamtalk_extensions:init(),
-            {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, [
-            {"known class returns class object", fun() ->
+    {setup, fun bootstrap_setup/0, fun noop_cleanup/1, [
+        {"known class returns class object", fun() ->
+            Result = beamtalk_primitive:class_of_object_by_name('Integer'),
+            ?assertMatch({beamtalk_object, _, _, _}, Result)
+        end},
+        {"unknown class returns atom", fun() ->
+            Result = beamtalk_primitive:class_of_object_by_name('NonExistentClass'),
+            ?assertEqual('NonExistentClass', Result)
+        end},
+        {"resolves module via beamtalk_class_metadata, matching the metadata row (BT-3052)",
+            fun() ->
+                %% class_of_object_by_name/1 resolves the module via
+                %% beamtalk_object_class:module_name/1 (a gen_server:call to the class's
+                %% own pid), which deadlocks when called from a process that class's pid
+                %% is itself synchronously blocked waiting on (e.g. `self new class`
+                %% inside a block ADR 0109 runs in a different class's process). The fix
+                %% reads beamtalk_class_metadata's ETS-backed row instead — no message
+                %% send, so no such cycle. Pin that the resolved module actually matches
+                %% the metadata table's row, not just that a result comes back.
+                {ok, ExpectedModule} = beamtalk_class_metadata:lookup_module('Integer'),
+                {beamtalk_object, _, ActualModule, _} =
+                    beamtalk_primitive:class_of_object_by_name('Integer'),
+                ?assertEqual(ExpectedModule, ActualModule)
+            end},
+        {"falls back to gen_server:call when the metadata row is missing (BT-3052)", fun() ->
+            %% Flagged by the Claude review bot: the not_found fallback branch (still
+            %% the old beamtalk_object_class:module_name/1 gen_server:call) had no
+            %% direct coverage — it was only indirectly "covered" by being currently
+            %% unreachable. Delete 'Integer's live metadata row to force the fallback,
+            %% and confirm it still resolves correctly via the gen_server call, so a
+            %% future change that breaks the fallback doesn't go unnoticed. Save and
+            %% restore the row (in an after-clause, so it survives an assertion
+            %% failure) since 'Integer' is a shared bootstrap class other tests in
+            %% this suite depend on.
+            {ok, SavedModule} = beamtalk_class_metadata:lookup_module('Integer'),
+            {ok, SavedSuperclass} = beamtalk_class_metadata:lookup_superclass('Integer'),
+            {ok, _, SavedSelectors} = beamtalk_class_metadata:lookup_methods('Integer'),
+            {ok, SavedIsAbstract} = beamtalk_class_metadata:lookup_is_abstract('Integer'),
+            beamtalk_class_metadata:delete('Integer'),
+            try
+                ?assertEqual(not_found, beamtalk_class_metadata:lookup_module('Integer')),
                 Result = beamtalk_primitive:class_of_object_by_name('Integer'),
-                ?assertMatch({beamtalk_object, _, _, _}, Result)
-            end},
-            {"unknown class returns atom", fun() ->
-                Result = beamtalk_primitive:class_of_object_by_name('NonExistentClass'),
-                ?assertEqual('NonExistentClass', Result)
-            end},
-            {"resolves module via beamtalk_class_metadata, matching the metadata row (BT-3052)",
-                fun() ->
-                    %% class_of_object_by_name/1 resolves the module via
-                    %% beamtalk_object_class:module_name/1 (a gen_server:call to the class's
-                    %% own pid), which deadlocks when called from a process that class's pid
-                    %% is itself synchronously blocked waiting on (e.g. `self new class`
-                    %% inside a block ADR 0109 runs in a different class's process). The fix
-                    %% reads beamtalk_class_metadata's ETS-backed row instead — no message
-                    %% send, so no such cycle. Pin that the resolved module actually matches
-                    %% the metadata table's row, not just that a result comes back.
-                    {ok, ExpectedModule} = beamtalk_class_metadata:lookup_module('Integer'),
-                    {beamtalk_object, _, ActualModule, _} =
-                        beamtalk_primitive:class_of_object_by_name('Integer'),
-                    ?assertEqual(ExpectedModule, ActualModule)
-                end},
-            {"falls back to gen_server:call when the metadata row is missing (BT-3052)", fun() ->
-                %% Flagged by the Claude review bot: the not_found fallback branch (still
-                %% the old beamtalk_object_class:module_name/1 gen_server:call) had no
-                %% direct coverage — it was only indirectly "covered" by being currently
-                %% unreachable. Delete 'Integer's live metadata row to force the fallback,
-                %% and confirm it still resolves correctly via the gen_server call, so a
-                %% future change that breaks the fallback doesn't go unnoticed. Save and
-                %% restore the row (in an after-clause, so it survives an assertion
-                %% failure) since 'Integer' is a shared bootstrap class other tests in
-                %% this suite depend on.
-                {ok, SavedModule} = beamtalk_class_metadata:lookup_module('Integer'),
-                {ok, SavedSuperclass} = beamtalk_class_metadata:lookup_superclass('Integer'),
-                {ok, _, SavedSelectors} = beamtalk_class_metadata:lookup_methods('Integer'),
-                {ok, SavedIsAbstract} = beamtalk_class_metadata:lookup_is_abstract('Integer'),
-                beamtalk_class_metadata:delete('Integer'),
-                try
-                    ?assertEqual(not_found, beamtalk_class_metadata:lookup_module('Integer')),
-                    Result = beamtalk_primitive:class_of_object_by_name('Integer'),
-                    ?assertMatch({beamtalk_object, _, SavedModule, _}, Result)
-                after
-                    beamtalk_class_metadata:insert(
-                        'Integer', SavedModule, SavedSelectors, SavedSuperclass, SavedIsAbstract
-                    )
-                end
-            end},
-            {"class object is cached: repeated calls are structurally equal (BT-4117)", fun() ->
-                {_, Pid} = beamtalk_test_dynamic_class:register('Bt4117Cached'),
-                try
-                    First = beamtalk_primitive:class_of_object_by_name('Bt4117Cached'),
-                    ?assertMatch({beamtalk_object, 'Bt4117Cached class', _, Pid}, First),
-                    lists:foreach(
-                        fun(_) ->
-                            ?assertEqual(
-                                First, beamtalk_primitive:class_of_object_by_name('Bt4117Cached')
-                            )
-                        end,
-                        lists:seq(1, 5)
-                    )
-                after
-                    stop_named_class('Bt4117Cached')
-                end
-            end},
-            {"redefinition is seen by the next call (BT-4117)", fun() ->
-                {_, Pid} = beamtalk_test_dynamic_class:register('Bt4117Redefined'),
-                try
-                    {beamtalk_object, Tag, _, Pid} =
-                        beamtalk_primitive:class_of_object_by_name('Bt4117Redefined'),
-                    ok = beamtalk_class_metadata:merge_identity(
-                        'Bt4117Redefined', 'bt@redefined@mod', [], 'Object', false
-                    ),
-                    ?assertEqual(
-                        {beamtalk_object, Tag, 'bt@redefined@mod', Pid},
-                        beamtalk_primitive:class_of_object_by_name('Bt4117Redefined')
-                    )
-                after
-                    stop_named_class('Bt4117Redefined')
-                end
-            end},
-            {"restart with a new pid is seen by the next call (BT-4117)", fun() ->
-                {_, Pid1} = beamtalk_test_dynamic_class:register('Bt4117Restarted'),
-                {beamtalk_object, _, _, Pid1} =
-                    beamtalk_primitive:class_of_object_by_name('Bt4117Restarted'),
-                ok = stop_named_class('Bt4117Restarted'),
-                {_, Pid2} = beamtalk_test_dynamic_class:register('Bt4117Restarted'),
-                try
-                    ?assertNotEqual(Pid1, Pid2),
-                    {beamtalk_object, _, _, Pid2} =
-                        beamtalk_primitive:class_of_object_by_name('Bt4117Restarted')
-                after
-                    stop_named_class('Bt4117Restarted')
-                end
-            end},
-            {"untrappable kill is repaired by the next call (BT-4117)", fun() ->
-                {_, Pid} = beamtalk_test_dynamic_class:register('Bt4117Killed'),
-                Stale = beamtalk_primitive:class_of_object_by_name('Bt4117Killed'),
-                ?assertMatch({beamtalk_object, _, _, Pid}, Stale),
-                %% Unwatch first: otherwise the class monitor would eagerly
-                %% restart the class and the next call could answer the fresh
-                %% object instead of the bare atom (both are correct; the atom
-                %% pins the repair deterministically).
-                ok = beamtalk_class_monitor:unwatch('Bt4117Killed'),
-                MRef = monitor(process, Pid),
-                exit(Pid, kill),
-                receive
-                    {'DOWN', MRef, process, Pid, _} -> ok
-                after 5000 ->
-                    error(bt4117_kill_timeout)
-                end,
-                try
-                    %% The cached object names a dead pid; it must not be
-                    %% served. Nothing revives the class (unwatched, and
-                    %% supervisor children are temporary), so the answer is
-                    %% the bare atom — exactly what the uncached code answers
-                    %% for an unregistered class.
-                    ?assertEqual(
-                        'Bt4117Killed',
-                        beamtalk_primitive:class_of_object_by_name('Bt4117Killed')
-                    )
-                after
-                    %% No terminate/2 ran, so drop the rows it would have.
-                    ok = beamtalk_class_metadata:delete('Bt4117Killed'),
-                    _ =
-                        (try
-                            ets:delete(beamtalk_class_pids, Pid)
-                        catch
-                            _:_ -> ok
-                        end),
-                    ok
-                end
-            end}
-        ]}.
+                ?assertMatch({beamtalk_object, _, SavedModule, _}, Result)
+            after
+                beamtalk_class_metadata:insert(
+                    'Integer', SavedModule, SavedSelectors, SavedSuperclass, SavedIsAbstract
+                )
+            end
+        end},
+        {"class object is cached: repeated calls are structurally equal (BT-4117)", fun() ->
+            {_, Pid} = beamtalk_test_dynamic_class:register('Bt4117Cached'),
+            try
+                First = beamtalk_primitive:class_of_object_by_name('Bt4117Cached'),
+                ?assertMatch({beamtalk_object, 'Bt4117Cached class', _, Pid}, First),
+                lists:foreach(
+                    fun(_) ->
+                        ?assertEqual(
+                            First, beamtalk_primitive:class_of_object_by_name('Bt4117Cached')
+                        )
+                    end,
+                    lists:seq(1, 5)
+                )
+            after
+                stop_named_class('Bt4117Cached')
+            end
+        end},
+        {"redefinition is seen by the next call (BT-4117)", fun() ->
+            {_, Pid} = beamtalk_test_dynamic_class:register('Bt4117Redefined'),
+            try
+                {beamtalk_object, Tag, _, Pid} =
+                    beamtalk_primitive:class_of_object_by_name('Bt4117Redefined'),
+                ok = beamtalk_class_metadata:merge_identity(
+                    'Bt4117Redefined', 'bt@redefined@mod', [], 'Object', false
+                ),
+                ?assertEqual(
+                    {beamtalk_object, Tag, 'bt@redefined@mod', Pid},
+                    beamtalk_primitive:class_of_object_by_name('Bt4117Redefined')
+                )
+            after
+                stop_named_class('Bt4117Redefined')
+            end
+        end},
+        {"restart with a new pid is seen by the next call (BT-4117)", fun() ->
+            {_, Pid1} = beamtalk_test_dynamic_class:register('Bt4117Restarted'),
+            {beamtalk_object, _, _, Pid1} =
+                beamtalk_primitive:class_of_object_by_name('Bt4117Restarted'),
+            ok = stop_named_class('Bt4117Restarted'),
+            {_, Pid2} = beamtalk_test_dynamic_class:register('Bt4117Restarted'),
+            try
+                ?assertNotEqual(Pid1, Pid2),
+                {beamtalk_object, _, _, Pid2} =
+                    beamtalk_primitive:class_of_object_by_name('Bt4117Restarted')
+            after
+                stop_named_class('Bt4117Restarted')
+            end
+        end},
+        {"untrappable kill is repaired by the next call (BT-4117)", fun() ->
+            {_, Pid} = beamtalk_test_dynamic_class:register('Bt4117Killed'),
+            Stale = beamtalk_primitive:class_of_object_by_name('Bt4117Killed'),
+            ?assertMatch({beamtalk_object, _, _, Pid}, Stale),
+            %% Unwatch first: otherwise the class monitor would eagerly
+            %% restart the class and the next call could answer the fresh
+            %% object instead of the bare atom (both are correct; the atom
+            %% pins the repair deterministically).
+            ok = beamtalk_class_monitor:unwatch('Bt4117Killed'),
+            MRef = monitor(process, Pid),
+            exit(Pid, kill),
+            receive
+                {'DOWN', MRef, process, Pid, _} -> ok
+            after 5000 ->
+                error(bt4117_kill_timeout)
+            end,
+            try
+                %% The cached object names a dead pid; it must not be
+                %% served. Nothing revives the class (unwatched, and
+                %% supervisor children are temporary), so the answer is
+                %% the bare atom — exactly what the uncached code answers
+                %% for an unregistered class.
+                ?assertEqual(
+                    'Bt4117Killed',
+                    beamtalk_primitive:class_of_object_by_name('Bt4117Killed')
+                )
+            after
+                %% No terminate/2 ran, so drop the rows it would have.
+                ok = beamtalk_class_metadata:delete('Bt4117Killed'),
+                _ =
+                    (try
+                        ets:delete(beamtalk_class_pids, Pid)
+                    catch
+                        _:_ -> ok
+                    end),
+                ok
+            end
+        end}
+    ]}.
 
 stop_named_class(Name) ->
     case beamtalk_class_registry:whereis_class(Name) of
@@ -1000,15 +972,12 @@ send_boolean_not_test_() ->
 %% compiler-generated call sites; they cannot be called reflectively via send/3.
 %% Use valueWithArguments: or test directly via the block module exports instead.
 
-send_block_valueWithArguments_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        Block = fun(X, Y) -> X + Y end,
-        ?assertEqual(7, beamtalk_primitive:send(Block, 'valueWithArguments:', [[3, 4]]))
-    end}.
-
 send_block_arity_test_() ->
     {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+        fun() ->
+            Block = fun(X, Y) -> X + Y end,
+            ?assertEqual(7, beamtalk_primitive:send(Block, 'valueWithArguments:', [[3, 4]]))
+        end,
         fun() ->
             ?assertEqual(0, beamtalk_primitive:send(fun() -> ok end, 'arity', [])),
             ?assertEqual(1, beamtalk_primitive:send(fun(_) -> ok end, 'arity', [])),
@@ -1238,160 +1207,94 @@ print_string_port_uses_opaque_ops_test() ->
         gen_tcp:close(Port)
     end.
 
-print_string_plain_map_empty_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            beamtalk_test_boot:registry(),
-            beamtalk_extensions:init(),
-            {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
-            Result = beamtalk_primitive:print_string(#{}),
-            ?assertEqual(<<"#{}">>, Result)
-        end}.
+print_and_display_string_test_() ->
+    {foreach, fun bootstrap_setup/0, fun noop_cleanup/1, [
+        fun print_string_plain_map_empty/0,
+        fun print_string_plain_map_sorted/0,
+        fun print_string_beamtalk_object_instance/0,
+        fun print_string_class_object/0,
+        fun display_string_map_dispatch/0,
+        fun display_string_beamtalk_object_instance/0,
+        fun display_string_class_object/0
+    ]}.
 
-print_string_plain_map_sorted_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            beamtalk_test_boot:registry(),
-            beamtalk_extensions:init(),
-            {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
-            %% Plain map keys are sorted in the output
-            Result = beamtalk_primitive:print_string(#{b => 2, a => 1}),
-            ?assert(is_binary(Result)),
-            %% Result should contain both key-value pairs
-            ?assertMatch(<<"#{", _/binary>>, Result)
-        end}.
+print_string_plain_map_empty() ->
+    Result = beamtalk_primitive:print_string(#{}),
+    ?assertEqual(<<"#{}">>, Result).
 
-print_string_beamtalk_object_instance_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            beamtalk_test_boot:registry(),
-            beamtalk_extensions:init(),
-            {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
-            %% ADR 0094: a non-class beamtalk_object is a live actor instance and
-            %% prints kind-headed as Actor(ClassName, pid).
+print_string_plain_map_sorted() ->
+    %% Plain map keys are sorted in the output
+    Result = beamtalk_primitive:print_string(#{b => 2, a => 1}),
+    ?assert(is_binary(Result)),
+    %% Result should contain both key-value pairs
+    ?assertMatch(<<"#{", _/binary>>, Result).
+
+print_string_beamtalk_object_instance() ->
+    %% ADR 0094: a non-class beamtalk_object is a live actor instance and
+    %% prints kind-headed as Actor(ClassName, pid).
+    Obj = #beamtalk_object{
+        class = 'UnknownNonClass999',
+        class_mod = 'nonexistent_module',
+        pid = self()
+    },
+    ?assertMatch(
+        <<"Actor(UnknownNonClass999, ", _/binary>>, beamtalk_primitive:print_string(Obj)
+    ).
+
+print_string_class_object() ->
+    %% Class object (registered class name) prints as the display name
+    ok = beamtalk_test_wait:class('Integer'),
+    case beamtalk_class_registry:whereis_class('Integer') of
+        undefined ->
+            error({class_not_registered, 'Integer'});
+        _Pid ->
             Obj = #beamtalk_object{
-                class = 'UnknownNonClass999',
-                class_mod = 'nonexistent_module',
-                pid = self()
+                class = 'Integer class',
+                class_mod = beamtalk_object_class,
+                pid = _Pid
             },
-            ?assertMatch(
-                <<"Actor(UnknownNonClass999, ", _/binary>>, beamtalk_primitive:print_string(Obj)
-            )
-        end}.
-
-print_string_class_object_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            beamtalk_test_boot:registry(),
-            beamtalk_extensions:init(),
-            {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
-            %% Class object (registered class name) prints as the display name
-            ok = beamtalk_test_wait:class('Integer'),
-            case beamtalk_class_registry:whereis_class('Integer') of
-                undefined ->
-                    error({class_not_registered, 'Integer'});
-                _Pid ->
-                    Obj = #beamtalk_object{
-                        class = 'Integer class',
-                        class_mod = beamtalk_object_class,
-                        pid = _Pid
-                    },
-                    Result = beamtalk_primitive:print_string(Obj),
-                    ?assert(is_binary(Result)),
-                    ?assert(byte_size(Result) > 0)
-            end
-        end}.
+            Result = beamtalk_primitive:print_string(Obj),
+            ?assert(is_binary(Result)),
+            ?assert(byte_size(Result) > 0)
+    end.
 
 %%% ============================================================================
 %%% display_string/1 — Additional edge cases
 %%% ============================================================================
 
-display_string_map_dispatch_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            beamtalk_test_boot:registry(),
-            beamtalk_extensions:init(),
-            {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
-            %% Plain map display uses beamtalk_tagged_map:format_for_display
-            Result = beamtalk_primitive:display_string(#{a => 1}),
-            ?assert(is_binary(Result))
-        end}.
+display_string_map_dispatch() ->
+    %% Plain map display uses beamtalk_tagged_map:format_for_display
+    Result = beamtalk_primitive:display_string(#{a => 1}),
+    ?assert(is_binary(Result)).
 
-display_string_beamtalk_object_instance_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            beamtalk_test_boot:registry(),
-            beamtalk_extensions:init(),
-            {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
-            %% ADR 0094: a non-class beamtalk_object is a live actor instance and
-            %% displays kind-headed as Actor(ClassName, pid).
+display_string_beamtalk_object_instance() ->
+    %% ADR 0094: a non-class beamtalk_object is a live actor instance and
+    %% displays kind-headed as Actor(ClassName, pid).
+    Obj = #beamtalk_object{
+        class = 'UnknownNonClass999',
+        class_mod = 'nonexistent_module',
+        pid = self()
+    },
+    ?assertMatch(
+        <<"Actor(UnknownNonClass999, ", _/binary>>,
+        beamtalk_primitive:display_string(Obj)
+    ).
+
+display_string_class_object() ->
+    ok = beamtalk_test_wait:class('Integer'),
+    case beamtalk_class_registry:whereis_class('Integer') of
+        undefined ->
+            error({class_not_registered, 'Integer'});
+        _Pid ->
             Obj = #beamtalk_object{
-                class = 'UnknownNonClass999',
-                class_mod = 'nonexistent_module',
-                pid = self()
+                class = 'Integer class',
+                class_mod = beamtalk_object_class,
+                pid = _Pid
             },
-            ?assertMatch(
-                <<"Actor(UnknownNonClass999, ", _/binary>>,
-                beamtalk_primitive:display_string(Obj)
-            )
-        end}.
-
-display_string_class_object_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            beamtalk_test_boot:registry(),
-            beamtalk_extensions:init(),
-            {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
-            ok = beamtalk_test_wait:class('Integer'),
-            case beamtalk_class_registry:whereis_class('Integer') of
-                undefined ->
-                    error({class_not_registered, 'Integer'});
-                _Pid ->
-                    Obj = #beamtalk_object{
-                        class = 'Integer class',
-                        class_mod = beamtalk_object_class,
-                        pid = _Pid
-                    },
-                    Result = beamtalk_primitive:display_string(Obj),
-                    ?assert(is_binary(Result)),
-                    ?assert(byte_size(Result) > 0)
-            end
-        end}.
+            Result = beamtalk_primitive:display_string(Obj),
+            ?assert(is_binary(Result)),
+            ?assert(byte_size(Result) > 0)
+    end.
 
 display_string_tuple_fallback_test() ->
     %% Tuples go through the catch-all io_lib:format path
@@ -1463,52 +1366,36 @@ class_of_object_metaclass_self_grounding_test() ->
     Result = beamtalk_primitive:class_of_object(MetaObj),
     ?assertEqual(MetaObj, Result).
 
-class_of_object_non_class_beamtalk_object_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            beamtalk_test_boot:registry(),
-            beamtalk_extensions:init(),
-            {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
-            %% Non-class beamtalk_object returns via class_of_object_by_name
-            Obj = #beamtalk_object{
-                class = 'UnregisteredClassForTest',
-                class_mod = 'nonexistent_module',
-                pid = self()
-            },
-            Result = beamtalk_primitive:class_of_object(Obj),
-            %% Unknown class returns the atom (no pid in registry)
-            ?assertEqual('UnregisteredClassForTest', Result)
-        end}.
+non_class_beamtalk_object_test_() ->
+    {foreach, fun bootstrap_setup/0, fun noop_cleanup/1, [
+        fun class_of_object_non_class_beamtalk_object/0,
+        fun responds_to_beamtalk_object_unknown_tag/0
+    ]}.
+
+class_of_object_non_class_beamtalk_object() ->
+    %% Non-class beamtalk_object returns via class_of_object_by_name
+    Obj = #beamtalk_object{
+        class = 'UnregisteredClassForTest',
+        class_mod = 'nonexistent_module',
+        pid = self()
+    },
+    Result = beamtalk_primitive:class_of_object(Obj),
+    %% Unknown class returns the atom (no pid in registry)
+    ?assertEqual('UnregisteredClassForTest', Result).
 
 %%% ============================================================================
 %%% class_name_from_tag — tested indirectly via responds_to on beamtalk_object
 %%% ============================================================================
 
-responds_to_beamtalk_object_unknown_tag_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            beamtalk_test_boot:registry(),
-            beamtalk_extensions:init(),
-            {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
-            %% Unknown class tag causes class_name_from_tag to return undefined,
-            %% which means responds_to returns false for everything.
-            Obj = #beamtalk_object{
-                class = 'NonExistentClassTag99',
-                class_mod = 'nonexistent_module',
-                pid = self()
-            },
-            ?assertEqual(false, beamtalk_primitive:responds_to(Obj, 'class'))
-        end}.
+responds_to_beamtalk_object_unknown_tag() ->
+    %% Unknown class tag causes class_name_from_tag to return undefined,
+    %% which means responds_to returns false for everything.
+    Obj = #beamtalk_object{
+        class = 'NonExistentClassTag99',
+        class_mod = 'nonexistent_module',
+        pid = self()
+    },
+    ?assertEqual(false, beamtalk_primitive:responds_to(Obj, 'class')).
 
 %%% ============================================================================
 %%% camel_to_snake — Edge cases (tested via class_name_to_module)
@@ -1575,22 +1462,15 @@ class_of_future_autoawait_test() ->
     ?assertEqual('Integer', beamtalk_primitive:class_of(F)).
 
 class_of_object_future_autoawait_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
+    {foreach, fun bootstrap_setup/0, fun noop_cleanup/1, [
         fun() ->
-            beamtalk_test_boot:registry(),
-            beamtalk_extensions:init(),
-            {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
             F = beamtalk_future:new(),
             beamtalk_future:resolve(F, 42),
             %% Integer is a registered class — returns a class object tuple.
             Result = beamtalk_primitive:class_of_object(F),
             ?assertMatch({beamtalk_object, _, _, _}, Result)
-        end}.
+        end
+    ]}.
 
 print_string_future_autoawait_test() ->
     F = beamtalk_future:new(),
@@ -1609,19 +1489,13 @@ send_future_autoawait_test() ->
     ?assertEqual(8, beamtalk_primitive:send(F, '+', [3])).
 
 responds_to_future_autoawait_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
+    {foreach, fun runtime_ext_setup/0, fun noop_cleanup/1, [
         fun() ->
-            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            beamtalk_extensions:init(),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
             F = beamtalk_future:new(),
             beamtalk_future:resolve(F, 42),
             ?assert(beamtalk_primitive:responds_to(F, '+'))
-        end}.
+        end
+    ]}.
 
 %%% ============================================================================
 %%% send_pid Future protocol selectors
@@ -1707,29 +1581,23 @@ class_name_to_module_unknown_class_test() ->
 %%% ============================================================================
 
 value_type_responds_to_via_exports_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
+    {foreach, fun runtime_setup/0, fun noop_cleanup/1, [
         fun() ->
-            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
             %% For a tagged map type like Regex, responds_to should report
             %% true for selectors its module handles. This exercises the
             %% has_method/module_info fallback path.
             Tagged = #{'$beamtalk_class' => 'Regex'},
             %% Unknown selector should be false without crashing.
             ?assertNot(beamtalk_primitive:responds_to(Tagged, totallyFakeSelector))
-        end}.
+        end
+    ]}.
 
 %% BT-4067: module_info/0,1 is the BEAM's predefined reflection function,
 %% never a Beamtalk method — on the exports fallback (a class module with no
 %% has_method/1 or dispatch/3) it is neither understood nor sent.
 value_type_module_info_is_not_a_method_test_() ->
     Module = 'bt@mod_info_plain_value',
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
+    {foreach,
         fun() ->
             {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
             beamtalk_test_boot:boot_real_stdlib('Integer'),
@@ -1738,23 +1606,27 @@ value_type_module_info_is_not_a_method_test_() ->
                 "-export([size/1]).",
                 "size(_Self) -> 3."
             ]),
-            {ok, Module, Bin} = compile:forms(Forms, []),
-            {module, Module} = code:load_binary(Module, "mod_info_plain_value.erl", Bin),
+            ok = beamtalk_test_module:load(Module, Forms),
             ok
         end,
         fun(_) ->
             beamtalk_test_module:unload(Module)
         end,
-        fun() ->
-            Value = #{'$beamtalk_class' => 'ModInfoPlainValue'},
-            ?assert(erlang:function_exported(Module, module_info, 1)),
-            ?assert(beamtalk_primitive:responds_to(Value, size)),
-            ?assertNot(beamtalk_primitive:responds_to(Value, module_info)),
-            ?assertEqual(3, beamtalk_primitive:send(Value, size, [])),
-            ?assertBtError(
-                does_not_understand, _, module_info, beamtalk_primitive:send(Value, module_info, [])
-            )
-        end}.
+        [
+            fun() ->
+                Value = #{'$beamtalk_class' => 'ModInfoPlainValue'},
+                ?assert(erlang:function_exported(Module, module_info, 1)),
+                ?assert(beamtalk_primitive:responds_to(Value, size)),
+                ?assertNot(beamtalk_primitive:responds_to(Value, module_info)),
+                ?assertEqual(3, beamtalk_primitive:send(Value, size, [])),
+                ?assertBtError(
+                    does_not_understand,
+                    _,
+                    module_info,
+                    beamtalk_primitive:send(Value, module_info, [])
+                )
+            end
+        ]}.
 
 %%% ============================================================================
 %%% module_for_value — tagged map variants
@@ -1764,14 +1636,8 @@ value_type_module_info_is_not_a_method_test_() ->
 %%% ============================================================================
 
 module_for_value_tagged_variants_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
+    {foreach, fun runtime_setup/0, fun noop_cleanup/1, [
         fun() ->
-            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
             %% responds_to on each tagged map class returns false for a fake
             %% selector but exercises the module_for_value clause.
             Classes = [
@@ -1797,7 +1663,8 @@ module_for_value_tagged_variants_test_() ->
                 end,
                 Classes
             )
-        end}.
+        end
+    ]}.
 
 %%% ============================================================================
 %%% print_string_map — Set / Array / Stream
@@ -1808,21 +1675,15 @@ module_for_value_tagged_variants_test_() ->
 %%% ============================================================================
 
 responds_to_beamtalk_object_non_class_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
+    {foreach, fun runtime_ext_setup/0, fun noop_cleanup/1, [
         fun() ->
-            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-            beamtalk_test_boot:boot_real_stdlib('Integer'),
-            beamtalk_extensions:init(),
-            ok
-        end,
-        fun(_) -> ok end, fun() ->
             %% A non-class beamtalk_object (instance-like) — route through
             %% class_name_from_tag → beamtalk_dispatch:responds_to.
             Obj = #beamtalk_object{class = 'Object', class_mod = bt@object, pid = self()},
             Result = beamtalk_primitive:responds_to(Obj, 'class'),
             ?assert(is_boolean(Result))
-        end}.
+        end
+    ]}.
 
 %%% ============================================================================
 %%% ADR 0094: process_label/1 — kind-headed positional labels
@@ -2117,3 +1978,31 @@ class_of_table_test_() ->
             {"nested tuples", 'Tuple', {{a, b}, {c, d}}}
         ]
     ].
+
+%%% ============================================================================
+%%% Fixtures
+%%% ============================================================================
+
+%% Registry, bootstrap classes and the real Integer class (class-object and
+%% printing tests).
+bootstrap_setup() ->
+    beamtalk_test_boot:registry(),
+    beamtalk_extensions:init(),
+    {ok, _} = beamtalk_bootstrap:start_link(),
+    beamtalk_test_boot:boot_real_stdlib('Integer'),
+    ok.
+
+%% The runtime application and the real Integer class.
+runtime_setup() ->
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
+    beamtalk_test_boot:boot_real_stdlib('Integer'),
+    ok.
+
+%% As runtime_setup/0, plus an initialised extension registry.
+runtime_ext_setup() ->
+    ok = runtime_setup(),
+    beamtalk_extensions:init(),
+    ok.
+
+noop_cleanup(_) ->
+    ok.

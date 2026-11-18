@@ -13,8 +13,9 @@ modules. Replaces the per-file `erl_scan` -> `parse_form` -> `compile:forms`
 `code:purge` / `code:delete` / `code:purge` teardown triplets.
 
 `SourceOrForms` is either Erlang source text (a string, binary or iolist of
-complete top-level forms; no preprocessor, so no macros or records) or a list
-of abstract forms.
+complete top-level forms; no preprocessor, so no macros or records), a list
+of abstract forms, or a parsed Core Erlang module (compile it with
+`compile/2` and the `from_core` option).
 """.
 
 -export_type([forms/0]).
@@ -24,8 +25,11 @@ of abstract forms.
 -export([
     compile/1,
     compile/2,
+    load/1,
     load/2,
     load_binary/2,
+    write_beam/2,
+    load_from_dir/2,
     unload/1,
     with_module/3,
     meta_forms/2,
@@ -36,15 +40,25 @@ of abstract forms.
 Compile source text or abstract forms to `{Module, Binary}`. Compile errors
 raise (a `badmatch` carrying the `compile:forms/2` error list).
 """.
--spec compile(iodata() | forms()) -> {module(), binary()}.
+-spec compile(iodata() | forms() | tuple()) -> {module(), binary()}.
 compile(SourceOrForms) ->
     compile(SourceOrForms, []).
 
--spec compile(iodata() | forms(), [compile:option()]) ->
+-spec compile(iodata() | forms() | tuple(), [compile:option()]) ->
     {module(), binary()}.
 compile(SourceOrForms, Opts) ->
     {ok, Module, Bin} = compile:forms(forms(SourceOrForms), [binary, return_errors | Opts]),
     {Module, Bin}.
+
+-doc """
+Compile and load `SourceOrForms`; returns the module name the forms declare.
+Pair with `unload/1`.
+""".
+-spec load(iodata() | forms()) -> module().
+load(SourceOrForms) ->
+    {Module, Bin} = compile(SourceOrForms),
+    ok = load_binary(Module, Bin),
+    Module.
 
 -doc """
 Compile and load `SourceOrForms` as `Name`. The module declared by the source
@@ -60,6 +74,27 @@ load(Name, SourceOrForms) ->
 load_binary(Name, Bin) ->
     {module, Name} = code:load_binary(Name, atom_to_list(Name) ++ ".erl", Bin),
     ok.
+
+-doc """
+Compile `SourceOrForms` and write it to `Dir/<Module>.beam` without loading
+it (for code that reads beams from a directory). Returns the module name.
+""".
+-spec write_beam(file:filename_all(), iodata() | forms()) -> module().
+write_beam(Dir, SourceOrForms) ->
+    {Module, Bin} = compile(SourceOrForms),
+    ok = file:write_file(filename:join(Dir, atom_to_list(Module) ++ ".beam"), Bin),
+    Module.
+
+-doc """
+Compile `SourceOrForms`, write it to `Dir/<Module>.beam` and load it from
+there, so `code:which/1` answers that file. Returns the module name; pair
+with `unload/1`.
+""".
+-spec load_from_dir(file:filename_all(), iodata() | forms()) -> module().
+load_from_dir(Dir, SourceOrForms) ->
+    Module = write_beam(Dir, SourceOrForms),
+    {module, Module} = code:load_abs(filename:join(Dir, atom_to_list(Module))),
+    Module.
 
 -doc "Purge and delete `Name` (idempotent; fine if it was never loaded).".
 -spec unload(module()) -> ok.
@@ -103,7 +138,10 @@ meta_module(Name, Meta) ->
     ok = load(Name, meta_forms(Name, Meta)),
     Name.
 
-%% Source text -> abstract forms; a list of tuples is already forms.
+%% Source text -> abstract forms; a list of tuples is already forms, and a
+%% bare tuple is a parsed Core Erlang module (`from_core`).
+forms(Core) when is_tuple(Core) ->
+    Core;
 forms([]) ->
     [];
 forms(Forms = [First | _]) when is_tuple(First) ->

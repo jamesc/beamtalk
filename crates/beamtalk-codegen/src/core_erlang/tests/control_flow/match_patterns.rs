@@ -372,7 +372,7 @@ fn test_match_type_pattern_true_false_nil_use_exact_atom_match() {
         .expect("generated code should contain a 'test:'/2 function");
     assert_lacks(
         "None of True/False/Nil/UndefinedObject should use the tagged-class is_map check. Got 'test:'/2 body",
-        &test_fn,
+        test_fn,
         &["is_map"],
     );
     assert!(

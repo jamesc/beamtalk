@@ -335,7 +335,7 @@ compile_activation_fixture(ModName, ClassName, Superclass) ->
             ]}
         ]}
     ],
-    {ok, ModName, BeamBin} = compile:forms(Forms, []),
+    {ModName, BeamBin} = beamtalk_test_module:compile(Forms),
     BeamBin.
 
 %%====================================================================
@@ -563,7 +563,7 @@ activate_project_modules_activation_error_test_() ->
                             ]}
                         ]}
                     ],
-                    {ok, ModName, BeamBin} = compile:forms(Forms, []),
+                    {ModName, BeamBin} = beamtalk_test_module:compile(Forms),
                     {ProjDir, EbinDir} = make_temp_project_dir(),
                     try
                         BeamFile = filename:join(EbinDir, "bt@BT_FailActivation.beam"),
@@ -722,7 +722,7 @@ compile_activation_fixture_with_source(ModName, ClassName, SourcePath) ->
             ]}
         ]}
     ],
-    {ok, ModName, BeamBin} = compile:forms(Forms, []),
+    {ModName, BeamBin} = beamtalk_test_module:compile(Forms),
     BeamBin.
 
 cleanup_test_source_class(ClassName) ->

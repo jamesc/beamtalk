@@ -672,8 +672,7 @@ build_delegate_proxy(RealMod, StubMod, OverrideSources) ->
     Forms = beamtalk_test_erl_forms:parse_forms(
         ["-module(" ++ atom_to_list(StubMod) ++ ")." | [ExportsDecl | Bodies]]
     ),
-    {ok, StubMod, Bin} = compile:forms(Forms, [return_errors]),
-    {module, StubMod} = code:load_binary(StubMod, atom_to_list(StubMod) ++ ".erl", Bin),
+    ok = beamtalk_test_module:load(StubMod, Forms),
     ok.
 
 %% Source text for a single delegate-proxy function body that forwards its

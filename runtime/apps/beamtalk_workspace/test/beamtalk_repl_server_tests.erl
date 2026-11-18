@@ -561,11 +561,11 @@ tcp_unload_in_use_test(Port) ->
             ]}
         ]}
     ],
-    {ok, DummyMod, Binary} = compile:forms(Forms),
-    {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
+    {DummyMod, Binary} = beamtalk_test_module:compile(Forms),
+    ok = beamtalk_test_module:load_binary(DummyMod, Binary),
     LoopPid = spawn(DummyMod, loop, []),
     %% Load new version so running process uses "old" code
-    {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
+    ok = beamtalk_test_module:load_binary(DummyMod, Binary),
     try
         Msg = iolist_to_binary(
             json:encode(#{

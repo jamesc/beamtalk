@@ -370,12 +370,12 @@ fn test_late_state_omitted_from_init_state_literal() {
 
     assert_lacks(
         "Unassigned `late` slot 'proc' must be absent from DefaultState entirely. Got DefaultState body",
-        &default_state,
+        default_state,
         &["'proc'"],
     );
     assert_has(
         "Eager field 'id' must still get its default in DefaultState. Got DefaultState body",
-        &default_state,
+        default_state,
         &["'id' => 0"],
     );
 }
@@ -404,12 +404,12 @@ fn test_late_classstate_omitted_from_classstate_map() {
 
     assert_lacks(
         "Unassigned `late classState:` slot 'current' must be absent from the classState map entirely. Got classState body",
-        &class_state,
+        class_state,
         &["'current'"],
     );
     assert_has(
         "Eager class var 'total' must still get its default in the classState map. Got classState body",
-        &class_state,
+        class_state,
         &["'total' => 0"],
     );
 }

@@ -112,181 +112,152 @@ info_for_includes_id_and_meta_test() ->
 %% Kind round-trips from the shell into minted Session values
 %%====================================================================
 
-with_id_carries_shell_kind_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid} = beamtalk_repl_shell:start_link(
-                    <<"prim-kind-1">>, #{kind => <<"mcp">>}
-                ),
-                beamtalk_session_table:insert(<<"prim-kind-1">>, Pid),
-                Session = beamtalk_session_primitives:withId(<<"prim-kind-1">>),
-                ?assertEqual(<<"mcp">>, beamtalk_session_primitives:kind(Session)),
-                ?assertEqual(
-                    <<"Session(mcp: prim-kind-1)">>,
-                    beamtalk_session_primitives:printString(Session)
-                ),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+session_primitives_test_() ->
+    {foreach, fun setup/0, fun teardown/1, [
+        fun with_id_carries_shell_kind/0,
+        fun current_outside_eval_returns_nil/0,
+        fun current_in_eval_returns_session/0,
+        fun with_id_live_returns_session/0,
+        fun with_id_missing_returns_nil/0,
+        fun with_id_dead_returns_nil/0,
+        fun with_id_accepts_string/0,
+        fun bindings_view_reads_own_locals/0,
+        fun bindings_view_cross_session_read/0,
+        fun bindings_view_read_unknown_name_is_safe/0,
+        fun bindings_view_includes_key_session/0,
+        fun bindings_view_includes_key_workspace/0,
+        fun bindings_view_includes_key_unknown_name_is_safe/0,
+        fun cross_session_write_rejected/0,
+        fun own_session_put_enqueues/0,
+        fun resolve_for_finds_local/0,
+        fun bindings_view_write_through/0,
+        fun dead_session_raises_session_not_found/0,
+        fun session_id_type_error/0,
+        fun class_current_sees_caller_session_context/0,
+        fun class_current_explicit_context_no_leak/0,
+        fun class_current_malformed_context_degrades/0,
+        fun live_sessions_no_supervisor_returns_empty/0
+    ]}.
+
+with_id_carries_shell_kind() ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(
+        <<"prim-kind-1">>, #{kind => <<"mcp">>}
+    ),
+    beamtalk_session_table:insert(<<"prim-kind-1">>, Pid),
+    Session = beamtalk_session_primitives:withId(<<"prim-kind-1">>),
+    ?assertEqual(<<"mcp">>, beamtalk_session_primitives:kind(Session)),
+    ?assertEqual(
+        <<"Session(mcp: prim-kind-1)">>,
+        beamtalk_session_primitives:printString(Session)
+    ),
+    beamtalk_repl_shell:stop(Pid).
 
 %%====================================================================
 %% current/0
 %%====================================================================
 
-current_outside_eval_returns_nil_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_assertEqual(nil, beamtalk_session_primitives:current())
-        ]
-    end}.
+current_outside_eval_returns_nil() ->
+    ?assertEqual(nil, beamtalk_session_primitives:current()).
 
-current_in_eval_returns_session_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Pid = start_session(<<"prim-current-1">>),
-                seed_context(Pid, <<"prim-current-1">>),
-                Session = beamtalk_session_primitives:current(),
-                ?assertMatch(#{'$beamtalk_class' := 'Session'}, Session),
-                ?assertEqual(
-                    {beamtalk_string, <<"prim-current-1">>}, beamtalk_session_primitives:id(Session)
-                ),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+current_in_eval_returns_session() ->
+    Pid = start_session(<<"prim-current-1">>),
+    seed_context(Pid, <<"prim-current-1">>),
+    Session = beamtalk_session_primitives:current(),
+    ?assertMatch(#{'$beamtalk_class' := 'Session'}, Session),
+    ?assertEqual(
+        {beamtalk_string, <<"prim-current-1">>}, beamtalk_session_primitives:id(Session)
+    ),
+    beamtalk_repl_shell:stop(Pid).
 
 %%====================================================================
 %% withId/1
 %%====================================================================
 
-with_id_live_returns_session_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Pid = start_session(<<"prim-withid-1">>),
-                Session = beamtalk_session_primitives:withId(<<"prim-withid-1">>),
-                ?assertMatch(#{'$beamtalk_class' := 'Session'}, Session),
-                ?assertEqual(
-                    {beamtalk_string, <<"prim-withid-1">>}, beamtalk_session_primitives:id(Session)
-                ),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+with_id_live_returns_session() ->
+    Pid = start_session(<<"prim-withid-1">>),
+    Session = beamtalk_session_primitives:withId(<<"prim-withid-1">>),
+    ?assertMatch(#{'$beamtalk_class' := 'Session'}, Session),
+    ?assertEqual(
+        {beamtalk_string, <<"prim-withid-1">>}, beamtalk_session_primitives:id(Session)
+    ),
+    beamtalk_repl_shell:stop(Pid).
 
-with_id_missing_returns_nil_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_assertEqual(nil, beamtalk_session_primitives:withId(<<"prim-no-such">>))
-        ]
-    end}.
+with_id_missing_returns_nil() ->
+    ?assertEqual(nil, beamtalk_session_primitives:withId(<<"prim-no-such">>)).
 
-with_id_dead_returns_nil_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Pid = start_session(<<"prim-withid-dead">>),
-                beamtalk_repl_shell:stop(Pid),
-                beamtalk_test_wait:dead(Pid),
-                %% Entry still in table but PID dead → liveness check returns nil.
-                ?assertEqual(nil, beamtalk_session_primitives:withId(<<"prim-withid-dead">>))
-            end)
-        ]
-    end}.
+with_id_dead_returns_nil() ->
+    Pid = start_session(<<"prim-withid-dead">>),
+    beamtalk_repl_shell:stop(Pid),
+    beamtalk_test_wait:dead(Pid),
+    %% Entry still in table but PID dead → liveness check returns nil.
+    ?assertEqual(nil, beamtalk_session_primitives:withId(<<"prim-withid-dead">>)).
 
-with_id_accepts_string_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Pid = start_session(<<"prim-withid-str">>),
-                %% A string (list) id resolves the same as the binary id.
-                Session = beamtalk_session_primitives:withId("prim-withid-str"),
-                ?assertMatch(#{'$beamtalk_class' := 'Session'}, Session),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+with_id_accepts_string() ->
+    Pid = start_session(<<"prim-withid-str">>),
+    %% A string (list) id resolves the same as the binary id.
+    Session = beamtalk_session_primitives:withId("prim-withid-str"),
+    ?assertMatch(#{'$beamtalk_class' := 'Session'}, Session),
+    beamtalk_repl_shell:stop(Pid).
 
 %%====================================================================
 %% bindings/1 + cross-session read
 %%====================================================================
 
-bindings_view_reads_own_locals_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Pid = start_session(<<"prim-bv-own">>),
-                set_locals(Pid, #{x => 1, y => 2}),
-                seed_context(Pid, <<"prim-bv-own">>),
-                Session = beamtalk_session_primitives:current(),
-                View = beamtalk_session_primitives:bindings(Session),
-                ?assertMatch(#{'$beamtalk_class' := 'BindingsView', scope := session}, View),
-                ?assertEqual(1, beamtalk_session_primitives:at(View, x)),
-                ?assertEqual(2, beamtalk_session_primitives:size(View)),
-                ?assertEqual(
-                    lists:sort([x, y]), lists:sort(beamtalk_session_primitives:keys(View))
-                ),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+bindings_view_reads_own_locals() ->
+    Pid = start_session(<<"prim-bv-own">>),
+    set_locals(Pid, #{x => 1, y => 2}),
+    seed_context(Pid, <<"prim-bv-own">>),
+    Session = beamtalk_session_primitives:current(),
+    View = beamtalk_session_primitives:bindings(Session),
+    ?assertMatch(#{'$beamtalk_class' := 'BindingsView', scope := session}, View),
+    ?assertEqual(1, beamtalk_session_primitives:at(View, x)),
+    ?assertEqual(2, beamtalk_session_primitives:size(View)),
+    ?assertEqual(
+        lists:sort([x, y]), lists:sort(beamtalk_session_primitives:keys(View))
+    ),
+    beamtalk_repl_shell:stop(Pid).
 
-bindings_view_cross_session_read_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Caller = start_session(<<"prim-bv-caller">>),
-                Other = start_session(<<"prim-bv-other">>),
-                set_locals(Other, #{remote => 99}),
-                seed_context(Caller, <<"prim-bv-caller">>),
-                OtherSession = beamtalk_session_primitives:withId(<<"prim-bv-other">>),
-                View = beamtalk_session_primitives:bindings(OtherSession),
-                %% Cross-session READ is supported.
-                ?assertEqual(99, beamtalk_session_primitives:at(View, remote)),
-                beamtalk_repl_shell:stop(Caller),
-                beamtalk_repl_shell:stop(Other)
-            end)
-        ]
-    end}.
+bindings_view_cross_session_read() ->
+    Caller = start_session(<<"prim-bv-caller">>),
+    Other = start_session(<<"prim-bv-other">>),
+    set_locals(Other, #{remote => 99}),
+    seed_context(Caller, <<"prim-bv-caller">>),
+    OtherSession = beamtalk_session_primitives:withId(<<"prim-bv-other">>),
+    View = beamtalk_session_primitives:bindings(OtherSession),
+    %% Cross-session READ is supported.
+    ?assertEqual(99, beamtalk_session_primitives:at(View, remote)),
+    beamtalk_repl_shell:stop(Caller),
+    beamtalk_repl_shell:stop(Other).
 
 %% Reading a never-interned name returns nil without minting a fresh atom
 %% (atom-exhaustion safety for introspection over arbitrary user strings).
-bindings_view_read_unknown_name_is_safe_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Pid = start_session(<<"prim-bv-unknown">>),
-                seed_context(Pid, <<"prim-bv-unknown">>),
-                Session = beamtalk_session_primitives:current(),
-                View = beamtalk_session_primitives:bindings(Session),
-                %% Warm the code path first: the first call loads modules and
-                %% interns their atoms, which is not what is under test (BT-4934).
-                nil = beamtalk_session_primitives:at(View, <<"warmup_unknown_bt4934_one">>),
-                nil = beamtalk_session_primitives:removeKey(View, <<"warmup_unknown_bt4934_two">>),
-                Before = erlang:system_info(atom_count),
-                %% A binary that has never been an atom must not become one.
-                ?assertEqual(
-                    nil,
-                    beamtalk_session_primitives:at(
-                        View, <<"definitely_not_an_atom_bt2366_xyz">>
-                    )
-                ),
-                %% Removing it is a no-op (returns nil).
-                ?assertEqual(
-                    nil,
-                    beamtalk_session_primitives:removeKey(
-                        View, <<"another_unknown_bt2366_abc">>
-                    )
-                ),
-                After = erlang:system_info(atom_count),
-                ?assertEqual(Before, After),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+bindings_view_read_unknown_name_is_safe() ->
+    Pid = start_session(<<"prim-bv-unknown">>),
+    seed_context(Pid, <<"prim-bv-unknown">>),
+    Session = beamtalk_session_primitives:current(),
+    View = beamtalk_session_primitives:bindings(Session),
+    %% Warm the code path first: the first call loads modules and
+    %% interns their atoms, which is not what is under test (BT-4934).
+    nil = beamtalk_session_primitives:at(View, <<"warmup_unknown_bt4934_one">>),
+    nil = beamtalk_session_primitives:removeKey(View, <<"warmup_unknown_bt4934_two">>),
+    Before = erlang:system_info(atom_count),
+    %% A binary that has never been an atom must not become one.
+    ?assertEqual(
+        nil,
+        beamtalk_session_primitives:at(
+            View, <<"definitely_not_an_atom_bt2366_xyz">>
+        )
+    ),
+    %% Removing it is a no-op (returns nil).
+    ?assertEqual(
+        nil,
+        beamtalk_session_primitives:removeKey(
+            View, <<"another_unknown_bt2366_abc">>
+        )
+    ),
+    After = erlang:system_info(atom_count),
+    ?assertEqual(Before, After),
+    beamtalk_repl_shell:stop(Pid).
 
 %%====================================================================
 %% includesKey/2 — O(1) membership, atom + String key parity
@@ -294,230 +265,178 @@ bindings_view_read_unknown_name_is_safe_test_() ->
 
 %% Session scope: present/absent for both atom and String keys. The String key
 %% must match the same binding `at:` resolves (parity with the lenient read).
-bindings_view_includes_key_session_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Pid = start_session(<<"prim-bv-inc-session">>),
-                set_locals(Pid, #{x => 1}),
-                seed_context(Pid, <<"prim-bv-inc-session">>),
-                Session = beamtalk_session_primitives:current(),
-                View = beamtalk_session_primitives:bindings(Session),
-                %% Atom key: present / absent.
-                ?assertEqual(true, beamtalk_session_primitives:includesKey(View, x)),
-                ?assertEqual(false, beamtalk_session_primitives:includesKey(View, y)),
-                %% String key: parity with at/2.
-                ?assertEqual(1, beamtalk_session_primitives:at(View, "x")),
-                ?assertEqual(true, beamtalk_session_primitives:includesKey(View, "x")),
-                %% Binary key parity too.
-                ?assertEqual(true, beamtalk_session_primitives:includesKey(View, <<"x">>)),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+bindings_view_includes_key_session() ->
+    Pid = start_session(<<"prim-bv-inc-session">>),
+    set_locals(Pid, #{x => 1}),
+    seed_context(Pid, <<"prim-bv-inc-session">>),
+    Session = beamtalk_session_primitives:current(),
+    View = beamtalk_session_primitives:bindings(Session),
+    %% Atom key: present / absent.
+    ?assertEqual(true, beamtalk_session_primitives:includesKey(View, x)),
+    ?assertEqual(false, beamtalk_session_primitives:includesKey(View, y)),
+    %% String key: parity with at/2.
+    ?assertEqual(1, beamtalk_session_primitives:at(View, "x")),
+    ?assertEqual(true, beamtalk_session_primitives:includesKey(View, "x")),
+    %% Binary key parity too.
+    ?assertEqual(true, beamtalk_session_primitives:includesKey(View, <<"x">>)),
+    beamtalk_repl_shell:stop(Pid).
 
 %% Workspace scope: present/absent against the bind:as: ETS.
-bindings_view_includes_key_workspace_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                beamtalk_workspace_interface_primitives:create_bindings_table(),
-                maybe_register_meta(),
-                try
-                    View = beamtalk_session_primitives:bindingsView(),
-                    ?assertMatch(
-                        #{'$beamtalk_class' := 'BindingsView', scope := workspace}, View
-                    ),
-                    ?assertEqual(
-                        false, beamtalk_session_primitives:includesKey(View, inc_ws_name)
-                    ),
-                    ?assertEqual(
-                        7, beamtalk_session_primitives:at(View, inc_ws_name, 7)
-                    ),
-                    %% Atom key present.
-                    ?assertEqual(
-                        true, beamtalk_session_primitives:includesKey(View, inc_ws_name)
-                    ),
-                    %% String key parity.
-                    ?assertEqual(
-                        true, beamtalk_session_primitives:includesKey(View, "inc_ws_name")
-                    )
-                after
-                    maybe_unregister_meta()
-                end
-            end)
-        ]
-    end}.
+bindings_view_includes_key_workspace() ->
+    beamtalk_workspace_interface_primitives:create_bindings_table(),
+    maybe_register_meta(),
+    try
+        View = beamtalk_session_primitives:bindingsView(),
+        ?assertMatch(
+            #{'$beamtalk_class' := 'BindingsView', scope := workspace}, View
+        ),
+        ?assertEqual(
+            false, beamtalk_session_primitives:includesKey(View, inc_ws_name)
+        ),
+        ?assertEqual(
+            7, beamtalk_session_primitives:at(View, inc_ws_name, 7)
+        ),
+        %% Atom key present.
+        ?assertEqual(
+            true, beamtalk_session_primitives:includesKey(View, inc_ws_name)
+        ),
+        %% String key parity.
+        ?assertEqual(
+            true, beamtalk_session_primitives:includesKey(View, "inc_ws_name")
+        )
+    after
+        maybe_unregister_meta()
+    end.
 
 %% A never-interned String must return false without minting a fresh atom
 %% (atom-exhaustion safety, matching the at/2 read-path guard).
-bindings_view_includes_key_unknown_name_is_safe_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Pid = start_session(<<"prim-bv-inc-unknown">>),
-                seed_context(Pid, <<"prim-bv-inc-unknown">>),
-                Session = beamtalk_session_primitives:current(),
-                View = beamtalk_session_primitives:bindings(Session),
-                Before = erlang:system_info(atom_count),
-                ?assertEqual(
-                    false,
-                    beamtalk_session_primitives:includesKey(
-                        View, "definitely_not_an_atom_bt2380_xyz"
-                    )
-                ),
-                ?assertEqual(
-                    false,
-                    beamtalk_session_primitives:includesKey(
-                        View, <<"another_unknown_bt2380_abc">>
-                    )
-                ),
-                After = erlang:system_info(atom_count),
-                ?assertEqual(Before, After),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+bindings_view_includes_key_unknown_name_is_safe() ->
+    Pid = start_session(<<"prim-bv-inc-unknown">>),
+    seed_context(Pid, <<"prim-bv-inc-unknown">>),
+    Session = beamtalk_session_primitives:current(),
+    View = beamtalk_session_primitives:bindings(Session),
+    Before = erlang:system_info(atom_count),
+    ?assertEqual(
+        false,
+        beamtalk_session_primitives:includesKey(
+            View, "definitely_not_an_atom_bt2380_xyz"
+        )
+    ),
+    ?assertEqual(
+        false,
+        beamtalk_session_primitives:includesKey(
+            View, <<"another_unknown_bt2380_abc">>
+        )
+    ),
+    After = erlang:system_info(atom_count),
+    ?assertEqual(Before, After),
+    beamtalk_repl_shell:stop(Pid).
 
 %%====================================================================
 %% Cross-session write rejection
 %%====================================================================
 
-cross_session_write_rejected_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Caller = start_session(<<"prim-xw-caller">>),
-                Other = start_session(<<"prim-xw-other">>),
-                seed_context(Caller, <<"prim-xw-caller">>),
-                OtherSession = beamtalk_session_primitives:withId(<<"prim-xw-other">>),
-                View = beamtalk_session_primitives:bindings(OtherSession),
-                ?assertBtError(
-                    cross_session_mutation_unsupported, beamtalk_session_primitives:at(View, x, 1)
-                ),
-                ?assertBtError(
-                    cross_session_mutation_unsupported,
-                    beamtalk_session_primitives:removeKey(View, x)
-                ),
-                ?assertBtError(
-                    cross_session_mutation_unsupported,
-                    beamtalk_session_primitives:clear(OtherSession)
-                ),
-                beamtalk_repl_shell:stop(Caller),
-                beamtalk_repl_shell:stop(Other)
-            end)
-        ]
-    end}.
+cross_session_write_rejected() ->
+    Caller = start_session(<<"prim-xw-caller">>),
+    Other = start_session(<<"prim-xw-other">>),
+    seed_context(Caller, <<"prim-xw-caller">>),
+    OtherSession = beamtalk_session_primitives:withId(<<"prim-xw-other">>),
+    View = beamtalk_session_primitives:bindings(OtherSession),
+    ?assertBtError(
+        cross_session_mutation_unsupported, beamtalk_session_primitives:at(View, x, 1)
+    ),
+    ?assertBtError(
+        cross_session_mutation_unsupported,
+        beamtalk_session_primitives:removeKey(View, x)
+    ),
+    ?assertBtError(
+        cross_session_mutation_unsupported,
+        beamtalk_session_primitives:clear(OtherSession)
+    ),
+    beamtalk_repl_shell:stop(Caller),
+    beamtalk_repl_shell:stop(Other).
 
 %%====================================================================
 %% Own-session writes enqueue
 %%====================================================================
 
-own_session_put_enqueues_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Pid = start_session(<<"prim-put-own">>),
-                seed_context(Pid, <<"prim-put-own">>),
-                Session = beamtalk_session_primitives:current(),
-                View = beamtalk_session_primitives:bindings(Session),
-                %% at:put: returns the value put and enqueues a put mutation.
-                ?assertEqual(42, beamtalk_session_primitives:at(View, foo, 42)),
-                %% removeKey: returns nil and enqueues a remove.
-                ?assertEqual(nil, beamtalk_session_primitives:removeKey(View, bar)),
-                %% clear enqueues a clear and returns nil.
-                ?assertEqual(nil, beamtalk_session_primitives:clear(Session)),
-                {_SId, State, _W} = sys:get_state(Pid),
-                ?assertEqual(
-                    [{put, foo, 42}, {remove, bar, undefined}, {clear, undefined, undefined}],
-                    beamtalk_repl_state:get_pending_mutations(State)
-                ),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+own_session_put_enqueues() ->
+    Pid = start_session(<<"prim-put-own">>),
+    seed_context(Pid, <<"prim-put-own">>),
+    Session = beamtalk_session_primitives:current(),
+    View = beamtalk_session_primitives:bindings(Session),
+    %% at:put: returns the value put and enqueues a put mutation.
+    ?assertEqual(42, beamtalk_session_primitives:at(View, foo, 42)),
+    %% removeKey: returns nil and enqueues a remove.
+    ?assertEqual(nil, beamtalk_session_primitives:removeKey(View, bar)),
+    %% clear enqueues a clear and returns nil.
+    ?assertEqual(nil, beamtalk_session_primitives:clear(Session)),
+    {_SId, State, _W} = sys:get_state(Pid),
+    ?assertEqual(
+        [{put, foo, 42}, {remove, bar, undefined}, {clear, undefined, undefined}],
+        beamtalk_repl_state:get_pending_mutations(State)
+    ),
+    beamtalk_repl_shell:stop(Pid).
 
 %%====================================================================
 %% resolve/2
 %%====================================================================
 
-resolve_for_finds_local_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Pid = start_session(<<"prim-resolve-1">>),
-                set_locals(Pid, #{myvar => 7}),
-                seed_context(Pid, <<"prim-resolve-1">>),
-                Session = beamtalk_session_primitives:current(),
-                ?assertEqual(7, beamtalk_session_primitives:resolve(Session, myvar)),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+resolve_for_finds_local() ->
+    Pid = start_session(<<"prim-resolve-1">>),
+    set_locals(Pid, #{myvar => 7}),
+    seed_context(Pid, <<"prim-resolve-1">>),
+    Session = beamtalk_session_primitives:current(),
+    ?assertEqual(7, beamtalk_session_primitives:resolve(Session, myvar)),
+    beamtalk_repl_shell:stop(Pid).
 
 %%====================================================================
 %% bindingsView/0 — workspace scope read + write-through
 %%====================================================================
 
-bindings_view_write_through_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                beamtalk_workspace_interface_primitives:create_bindings_table(),
-                %% get_session_bindings/0 gates reads on the workspace-meta
-                %% sentinel; register this process as that sentinel so reads see
-                %% the bind:as: ETS (the production path always has meta up).
-                maybe_register_meta(),
-                try
-                    View = beamtalk_session_primitives:bindingsView(),
-                    ?assertMatch(
-                        #{'$beamtalk_class' := 'BindingsView', scope := workspace}, View
-                    ),
-                    %% Write through to bind:as: ETS.
-                    ?assertEqual(
-                        123, beamtalk_session_primitives:at(View, gv_test_name, 123)
-                    ),
-                    ?assertEqual(123, beamtalk_session_primitives:at(View, gv_test_name)),
-                    %% Remove through unbind.
-                    ?assertEqual(nil, beamtalk_session_primitives:removeKey(View, gv_test_name)),
-                    ?assertEqual(nil, beamtalk_session_primitives:at(View, gv_test_name))
-                after
-                    maybe_unregister_meta()
-                end
-            end)
-        ]
-    end}.
+bindings_view_write_through() ->
+    beamtalk_workspace_interface_primitives:create_bindings_table(),
+    %% get_session_bindings/0 gates reads on the workspace-meta
+    %% sentinel; register this process as that sentinel so reads see
+    %% the bind:as: ETS (the production path always has meta up).
+    maybe_register_meta(),
+    try
+        View = beamtalk_session_primitives:bindingsView(),
+        ?assertMatch(
+            #{'$beamtalk_class' := 'BindingsView', scope := workspace}, View
+        ),
+        %% Write through to bind:as: ETS.
+        ?assertEqual(
+            123, beamtalk_session_primitives:at(View, gv_test_name, 123)
+        ),
+        ?assertEqual(123, beamtalk_session_primitives:at(View, gv_test_name)),
+        %% Remove through unbind.
+        ?assertEqual(nil, beamtalk_session_primitives:removeKey(View, gv_test_name)),
+        ?assertEqual(nil, beamtalk_session_primitives:at(View, gv_test_name))
+    after
+        maybe_unregister_meta()
+    end.
 
 %%====================================================================
 %% Dead-session liveness error
 %%====================================================================
 
-dead_session_raises_session_not_found_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Pid = start_session(<<"prim-dead-send">>),
-                Session = beamtalk_session_primitives:withId(<<"prim-dead-send">>),
-                %% Build a view while alive, then kill the shell.
-                View = beamtalk_session_primitives:bindings(Session),
-                beamtalk_repl_shell:stop(Pid),
-                beamtalk_test_wait:dead(Pid),
-                %% A read against the dead session raises rather than blocking.
-                ?assertBtError(session_not_found, beamtalk_session_primitives:at(View, x))
-            end)
-        ]
-    end}.
+dead_session_raises_session_not_found() ->
+    Pid = start_session(<<"prim-dead-send">>),
+    Session = beamtalk_session_primitives:withId(<<"prim-dead-send">>),
+    %% Build a view while alive, then kill the shell.
+    View = beamtalk_session_primitives:bindings(Session),
+    beamtalk_repl_shell:stop(Pid),
+    beamtalk_test_wait:dead(Pid),
+    %% A read against the dead session raises rather than blocking.
+    ?assertBtError(session_not_found, beamtalk_session_primitives:at(View, x)).
 
 %%====================================================================
 %% Type errors
 %%====================================================================
 
-session_id_type_error_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(?assertBtError(type_error, beamtalk_session_primitives:withId(42)))
-        ]
-    end}.
+session_id_type_error() ->
+    ?assertBtError(type_error, beamtalk_session_primitives:withId(42)).
 
 %%====================================================================
 %% Class-method dispatch propagates the caller's session context
@@ -526,163 +445,128 @@ session_id_type_error_test_() ->
 %% seeded session context must be mirrored there for the duration of the call.
 %%====================================================================
 
-class_current_sees_caller_session_context_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Pid = start_session(<<"prim-class-current">>),
-                ok = beamtalk_test_wait:class('Session', 1000),
-                ClassPid = beamtalk_class_registry:whereis_class('Session'),
-                %% A caller with seeded context, dispatching `current` through the
-                %% real class gen_server, gets a Session value back.
-                Session = dispatch_class_method_with_context(
-                    ClassPid, current, [], Pid, <<"prim-class-current">>
-                ),
-                ?assertMatch(#{'$beamtalk_class' := 'Session'}, Session),
-                ?assertEqual(<<"prim-class-current">>, maps:get(id, Session)),
-                %% The class process dict must NOT leak the mirrored context to a
-                %% subsequent unseeded caller — it returns nil, not the prior id.
-                NilSession = dispatch_class_method_no_context(ClassPid, current, []),
-                ?assertEqual(nil, NilSession),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+class_current_sees_caller_session_context() ->
+    Pid = start_session(<<"prim-class-current">>),
+    ok = beamtalk_test_wait:class('Session', 1000),
+    ClassPid = beamtalk_class_registry:whereis_class('Session'),
+    %% A caller with seeded context, dispatching `current` through the
+    %% real class gen_server, gets a Session value back.
+    Session = dispatch_class_method_with_context(
+        ClassPid, current, [], Pid, <<"prim-class-current">>
+    ),
+    ?assertMatch(#{'$beamtalk_class' := 'Session'}, Session),
+    ?assertEqual(<<"prim-class-current">>, maps:get(id, Session)),
+    %% The class process dict must NOT leak the mirrored context to a
+    %% subsequent unseeded caller — it returns nil, not the prior id.
+    NilSession = dispatch_class_method_no_context(ClassPid, current, []),
+    ?assertEqual(nil, NilSession),
+    beamtalk_repl_shell:stop(Pid).
 
 %% The explicit 4-tuple message shape carries the caller's session
 %% context in the message itself (no `process_info` dictionary copy). The class
 %% gen_server must seed from the tuple, resolve `current` correctly, and still
 %% not leak the mirrored context to a later call that carries no context.
-class_current_explicit_context_no_leak_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Pid = start_session(<<"prim-explicit-ctx">>),
-                ok = beamtalk_test_wait:class('Session', 1000),
-                ClassPid = beamtalk_class_registry:whereis_class('Session'),
-                %% Explicit context tuple in the message → resolves to that session.
-                Session = unwrap_class_reply(
-                    gen_server:call(
-                        ClassPid,
-                        {class_method_call, current, [], {Pid, <<"prim-explicit-ctx">>}}
-                    )
-                ),
-                ?assertMatch(#{'$beamtalk_class' := 'Session'}, Session),
-                ?assertEqual(<<"prim-explicit-ctx">>, maps:get(id, Session)),
-                %% A subsequent call carrying an empty explicit context must see
-                %% nil — the prior call's context must not have leaked.
-                NilSession = unwrap_class_reply(
-                    gen_server:call(
-                        ClassPid, {class_method_call, current, [], {undefined, undefined}}
-                    )
-                ),
-                ?assertEqual(nil, NilSession),
-                beamtalk_repl_shell:stop(Pid)
-            end)
-        ]
-    end}.
+class_current_explicit_context_no_leak() ->
+    Pid = start_session(<<"prim-explicit-ctx">>),
+    ok = beamtalk_test_wait:class('Session', 1000),
+    ClassPid = beamtalk_class_registry:whereis_class('Session'),
+    %% Explicit context tuple in the message → resolves to that session.
+    Session = unwrap_class_reply(
+        gen_server:call(
+            ClassPid,
+            {class_method_call, current, [], {Pid, <<"prim-explicit-ctx">>}}
+        )
+    ),
+    ?assertMatch(#{'$beamtalk_class' := 'Session'}, Session),
+    ?assertEqual(<<"prim-explicit-ctx">>, maps:get(id, Session)),
+    %% A subsequent call carrying an empty explicit context must see
+    %% nil — the prior call's context must not have leaked.
+    NilSession = unwrap_class_reply(
+        gen_server:call(
+            ClassPid, {class_method_call, current, [], {undefined, undefined}}
+        )
+    ),
+    ?assertEqual(nil, NilSession),
+    beamtalk_repl_shell:stop(Pid).
 
 %% A malformed explicit context (a non-pair 4th element) must degrade
 %% to "no context" (nil), not crash the class gen_server. The 4-tuple clause has
 %% no `is_tuple` guard; `beamtalk_class_session:seed_session_context_from/1` no-ops on unrecognised
 %% shapes. We assert the gen_server survives and still serves a later call.
-class_current_malformed_context_degrades_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ok = beamtalk_test_wait:class('Session', 1000),
-                ClassPid = beamtalk_class_registry:whereis_class('Session'),
-                %% A bare atom (not a {Pid, Id} pair) as the context: no crash,
-                %% resolves to nil because no session context is seeded.
-                NilSession = unwrap_class_reply(
-                    gen_server:call(ClassPid, {class_method_call, current, [], not_a_pair})
-                ),
-                ?assertEqual(nil, NilSession),
-                %% The gen_server is still alive and serving after the malformed call.
-                ?assert(is_process_alive(ClassPid))
-            end)
-        ]
-    end}.
+class_current_malformed_context_degrades() ->
+    ok = beamtalk_test_wait:class('Session', 1000),
+    ClassPid = beamtalk_class_registry:whereis_class('Session'),
+    %% A bare atom (not a {Pid, Id} pair) as the context: no crash,
+    %% resolves to nil because no session context is seeded.
+    NilSession = unwrap_class_reply(
+        gen_server:call(ClassPid, {class_method_call, current, [], not_a_pair})
+    ),
+    ?assertEqual(nil, NilSession),
+    %% The gen_server is still alive and serving after the malformed call.
+    ?assert(is_process_alive(ClassPid)).
 
 %%====================================================================
 %% liveSessions/0 (Workspace sessions, ADR 0081 Phase 7)
 %%====================================================================
 
 %% No session supervisor running → empty list, never a crash.
-live_sessions_no_supervisor_returns_empty_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                undefined = whereis(beamtalk_session_sup),
-                ?assertEqual([], beamtalk_session_primitives:liveSessions())
-            end)
-        ]
-    end}.
+live_sessions_no_supervisor_returns_empty() ->
+    undefined = whereis(beamtalk_session_sup),
+    ?assertEqual([], beamtalk_session_primitives:liveSessions()).
+
+live_sessions_test_() ->
+    {foreach, fun setup_with_sup/0, fun teardown_with_sup/1, [
+        fun live_sessions_lists_live_shells/0,
+        fun live_sessions_value_rejects_cross_session_write/0,
+        fun live_sessions_skips_dead_shell/0
+    ]}.
 
 %% One Session value per live supervised shell; ids and pids match the shells,
 %% and the values are usable with the instance reads (id/1, bindings/1).
-live_sessions_lists_live_shells_test_() ->
-    {setup, fun setup_with_sup/0, fun teardown_with_sup/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, Pid1} = beamtalk_session_sup:start_session(<<"live-a">>),
-                {ok, Pid2} = beamtalk_session_sup:start_session(<<"live-b">>),
-                Sessions = beamtalk_session_primitives:liveSessions(),
-                ?assertEqual(2, length(Sessions)),
-                lists:foreach(
-                    fun(S) -> ?assertMatch(#{'$beamtalk_class' := 'Session'}, S) end, Sessions
-                ),
-                Ids = lists:sort([beamtalk_session_primitives:id(S) || S <- Sessions]),
-                ?assertEqual(
-                    [{beamtalk_string, <<"live-a">>}, {beamtalk_string, <<"live-b">>}], Ids
-                ),
-                %% PIDs carried by the minted values match the live shells.
-                Pids = lists:sort([maps:get(pid, S) || S <- Sessions]),
-                ?assertEqual(lists:sort([Pid1, Pid2]), Pids),
-                %% A minted value works with the bindings read (cross-session read).
-                [S1 | _] = Sessions,
-                View = beamtalk_session_primitives:bindings(S1),
-                ?assertMatch(#{'$beamtalk_class' := 'BindingsView'}, View),
-                ?assertEqual([], beamtalk_session_primitives:keys(View))
-            end)
-        ]
-    end}.
+live_sessions_lists_live_shells() ->
+    {ok, Pid1} = beamtalk_session_sup:start_session(<<"live-a">>),
+    {ok, Pid2} = beamtalk_session_sup:start_session(<<"live-b">>),
+    Sessions = beamtalk_session_primitives:liveSessions(),
+    ?assertEqual(2, length(Sessions)),
+    lists:foreach(
+        fun(S) -> ?assertMatch(#{'$beamtalk_class' := 'Session'}, S) end, Sessions
+    ),
+    Ids = lists:sort([beamtalk_session_primitives:id(S) || S <- Sessions]),
+    ?assertEqual(
+        [{beamtalk_string, <<"live-a">>}, {beamtalk_string, <<"live-b">>}], Ids
+    ),
+    %% PIDs carried by the minted values match the live shells.
+    Pids = lists:sort([maps:get(pid, S) || S <- Sessions]),
+    ?assertEqual(lists:sort([Pid1, Pid2]), Pids),
+    %% A minted value works with the bindings read (cross-session read).
+    [S1 | _] = Sessions,
+    View = beamtalk_session_primitives:bindings(S1),
+    ?assertMatch(#{'$beamtalk_class' := 'BindingsView'}, View),
+    ?assertEqual([], beamtalk_session_primitives:keys(View)).
 
 %% A minted value rejects cross-session writes when the caller is a different
 %% session (the cross-session-mutation guard, same as withId/1 values).
-live_sessions_value_rejects_cross_session_write_test_() ->
-    {setup, fun setup_with_sup/0, fun teardown_with_sup/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, _Pid} = beamtalk_session_sup:start_session(<<"live-target">>),
-                [Session | _] = beamtalk_session_primitives:liveSessions(),
-                View = beamtalk_session_primitives:bindings(Session),
-                %% Caller is a *different* session than the target → rejected.
-                seed_context(self(), <<"live-caller">>),
-                ?assertBtError(
-                    cross_session_mutation_unsupported, beamtalk_session_primitives:at(View, x, 1)
-                )
-            end)
-        ]
-    end}.
+live_sessions_value_rejects_cross_session_write() ->
+    {ok, _Pid} = beamtalk_session_sup:start_session(<<"live-target">>),
+    [Session | _] = beamtalk_session_primitives:liveSessions(),
+    View = beamtalk_session_primitives:bindings(Session),
+    %% Caller is a *different* session than the target → rejected.
+    seed_context(self(), <<"live-caller">>),
+    ?assertBtError(
+        cross_session_mutation_unsupported, beamtalk_session_primitives:at(View, x, 1)
+    ).
 
 %% A shell that dies between which_children/1 and the id query is skipped, not
 %% minted into a Session value carrying a dead PID.
-live_sessions_skips_dead_shell_test_() ->
-    {setup, fun setup_with_sup/0, fun teardown_with_sup/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, AlivePid} = beamtalk_session_sup:start_session(<<"live-alive">>),
-                {ok, DeadPid} = beamtalk_session_sup:start_session(<<"live-dead">>),
-                exit(DeadPid, kill),
-                beamtalk_test_wait:dead(DeadPid),
-                Sessions = beamtalk_session_primitives:liveSessions(),
-                Pids = [maps:get(pid, S) || S <- Sessions],
-                ?assert(lists:member(AlivePid, Pids)),
-                ?assertNot(lists:member(DeadPid, Pids))
-            end)
-        ]
-    end}.
+live_sessions_skips_dead_shell() ->
+    {ok, AlivePid} = beamtalk_session_sup:start_session(<<"live-alive">>),
+    {ok, DeadPid} = beamtalk_session_sup:start_session(<<"live-dead">>),
+    exit(DeadPid, kill),
+    beamtalk_test_wait:dead(DeadPid),
+    Sessions = beamtalk_session_primitives:liveSessions(),
+    Pids = [maps:get(pid, S) || S <- Sessions],
+    ?assert(lists:member(AlivePid, Pids)),
+    ?assertNot(lists:member(DeadPid, Pids)).
 
 %%====================================================================
 %% Helpers

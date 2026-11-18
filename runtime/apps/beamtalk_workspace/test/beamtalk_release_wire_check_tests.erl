@@ -35,7 +35,7 @@ install already has them, resolvable without staging.
 A minimal fixture OTP application (`wc_fixture`) stands in for "one project
 app": a hand-compiled `bt@wc_fixture@*` class module (built the same way
 `beamtalk_workspace_bootstrap_tests` builds its activation fixtures — via
-`compile:forms/2`, not the real Beamtalk compiler, since this suite proves
+`beamtalk_test_module`, not the real Beamtalk compiler, since this suite proves
 the *wire*, not the compiler) plus a root supervisor whose one child records,
 at `init/1` time, whether the class was already registered — the literal
 ADR 0125 ordering claim, not just "registered by the time boot finishes".
@@ -166,7 +166,7 @@ stage_app_ebin(Stage, App, Vsn, SrcAppDir) ->
 -doc """
 Build the fixture project app: one `bt@*` class module (compiled the way
 `beamtalk_workspace_bootstrap_tests:compile_activation_fixture/3` does —
-abstract forms through `compile:forms/2`, calling
+abstract forms through `beamtalk_test_module:write_beam/2`, calling
 `beamtalk_object_class:start/2` from `register_class/0`), a supervisor whose
 one worker records — at its own `init/1`, the earliest moment the fixture
 app's own code runs — whether the class was already registered, and the
@@ -263,13 +263,13 @@ write_fixture_class_beam(Ebin) ->
             ]}
         ]}
     ],
-    {ok, ModName, BeamBin} = compile:forms(Forms, []),
-    file:write_file(filename:join(Ebin, atom_to_list(ModName) ++ ".beam"), BeamBin).
+    _ = beamtalk_test_module:write_beam(Ebin, Forms),
+    ok.
 
 -doc "Compile a hand-written module source (test-only: no epp, so no macros/records).".
 write_compiled_module(Ebin, ExpectedModule, Src) ->
-    {ExpectedModule, BeamBin} = beamtalk_test_module:compile(Src),
-    file:write_file(filename:join(Ebin, atom_to_list(ExpectedModule) ++ ".beam"), BeamBin).
+    ExpectedModule = beamtalk_test_module:write_beam(Ebin, Src),
+    ok.
 
 %%====================================================================
 %% .rel / boot script / sys.config

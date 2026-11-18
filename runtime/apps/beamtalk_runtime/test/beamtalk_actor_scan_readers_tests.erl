@@ -186,10 +186,9 @@ init(_) ->
 native_fallback_is_listing_only_test() ->
     beamtalk_class_registry:ensure_backing_module_index_table(),
     ModAtom = bt4947_removable_mod,
-    {ok, ModAtom, Bin} = compile:forms(
-        [{attribute, 1, module, ModAtom}, {attribute, 2, export, []}], [return_errors]
-    ),
-    {module, ModAtom} = code:load_binary(ModAtom, "bt4947_removable_mod.erl", Bin),
+    ok = beamtalk_test_module:load(ModAtom, [
+        {attribute, 1, module, ModAtom}, {attribute, 2, export, []}
+    ]),
     ClassA = 'Bt4947NativeA',
     ClassB = 'Bt4947NativeB',
     PidA = beamtalk_test_class:start(ClassA, #{

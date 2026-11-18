@@ -297,6 +297,7 @@ is_duration_test() ->
 %%% ============================================================================
 
 timer_sleep_duration_test() ->
+    %% sleep: the code under test is the sleep itself
     ?assertEqual(nil, beamtalk_timer:sleep(ms(1))).
 
 timer_after_duration_test() ->

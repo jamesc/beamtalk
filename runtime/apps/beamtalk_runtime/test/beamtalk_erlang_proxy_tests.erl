@@ -1403,7 +1403,7 @@ direct_call_handle_undefined_function_test() ->
     %% sees unknown calls like it would from plain Erlang. When it re-raises via
     %% error_handler, the old missing-function error comes back.
     Mod = bt4021_handle_undef_probe,
-    {ok, Mod, Bin} = compile:forms(
+    {Mod, Bin} = beamtalk_test_module:compile(
         [
             {attribute, 1, module, Mod},
             {attribute, 2, export, [{'$handle_undefined_function', 2}]},
@@ -1418,11 +1418,10 @@ direct_call_handle_undefined_function_test() ->
                         ]}
                 ]}
             ]}
-        ],
-        []
+        ]
     ),
     try
-        {module, Mod} = code:load_binary(Mod, "bt4021_handle_undef_probe.erl", Bin),
+        ok = beamtalk_test_module:load_binary(Mod, Bin),
         ?assertEqual({handled, [1]}, beamtalk_erlang_proxy:direct_call(Mod, magic, [1])),
         ?assertBtErrorWith(
             does_not_understand,
@@ -1451,10 +1450,8 @@ load_hot_module(Mod, Funs) ->
          || {Name, Ret} <- Funs
         ]
     ],
-    {ok, Mod, Bin} = compile:forms(Forms, []),
     _ = code:purge(Mod),
-    {module, Mod} = code:load_binary(Mod, "bt4021_hot_reload_probe.erl", Bin),
-    ok.
+    ok = beamtalk_test_module:load(Mod, Forms).
 
 direct_call_tracks_hot_reload_and_purge_test() ->
     Mod = bt4021_hot_reload_probe,
@@ -1506,7 +1503,7 @@ load_bt_raiser() ->
     load_bt_raiser('bt@bt4055@raiser').
 
 load_bt_raiser(Mod) ->
-    {ok, Mod, Bin} = compile:forms(
+    Forms =
         [
             {attribute, 1, module, Mod},
             {attribute, 2, export, [{boom, 1}, {count_badarg, 0}]},
@@ -1529,10 +1526,8 @@ load_bt_raiser(Mod) ->
                 ]}
             ]}
         ],
-        []
-    ),
     _ = code:purge(Mod),
-    {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".erl", Bin),
+    ok = beamtalk_test_module:load(Mod, Forms),
     Mod.
 
 unload_bt_raiser(Mod) ->

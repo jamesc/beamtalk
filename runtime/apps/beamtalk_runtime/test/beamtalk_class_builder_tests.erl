@@ -608,10 +608,7 @@ register_missing_classname_key_test_() ->
                     ]}
                 ]}
             ],
-            {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-            {module, Mod} = code:load_binary(
-                Mod, "bt1982_callback_raiser.erl", Bin
-            ),
+            Mod = beamtalk_test_module:load(Forms),
             application:set_env(
                 beamtalk_runtime, class_load_callback, Mod
             ),

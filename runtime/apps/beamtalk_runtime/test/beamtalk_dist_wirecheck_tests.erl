@@ -182,7 +182,7 @@ invoke_and_capture(Fun, Arg) ->
     end.
 
 -doc """
-Compiles a tiny module in memory (`compile:forms/2`, never touching disk —
+Compiles a tiny module in memory (`beamtalk_test_module:compile/1`, never touching disk —
 no temp-file path needed) exporting `make_block/0`, which returns a closure
 over `X`. `Suffix` is baked into the closure's body as a literal so two
 calls with different suffixes produce genuinely different bytecode (a

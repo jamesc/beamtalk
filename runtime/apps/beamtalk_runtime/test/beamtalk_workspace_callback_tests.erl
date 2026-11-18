@@ -187,8 +187,7 @@ load_crashing_workspace() ->
             ]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, "bt4792_crashing_workspace.erl", Bin),
+    Mod = beamtalk_test_module:load(Forms),
     Mod.
 
 unload_crashing_workspace(Mod) ->

@@ -948,8 +948,7 @@ test_module_without_dispatch() ->
         {attribute, 2, export, [{hello, 0}]},
         {function, 3, hello, 0, [{clause, 3, [], [], [{atom, 3, world}]}]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, "bt_test_no_dispatch_stub.beam", Bin),
+    _ = beamtalk_test_module:load(Forms),
 
     %% Register a class with this stub module.
     %% The class has stubMethod in instance_methods (has_method returns true),
@@ -990,8 +989,7 @@ test_dispatch_throws_wrapped() ->
                 ]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, "bt_test_dispatch_throws_stub.beam", Bin),
+    _ = beamtalk_test_module:load(Forms),
 
     %% Register a class with the crashing module
     {ok, Pid} = beamtalk_object_class:start_link('ThrowingDispatchClass', #{
@@ -1038,8 +1036,7 @@ test_actor_instance_bypass_throwing_module() ->
                 ]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, "bt_test_actor_dispatch_throws_stub.beam", Bin),
+    _ = beamtalk_test_module:load(Forms),
 
     {ok, Pid} = beamtalk_object_class:start_link('ActorDispatchThrowsClass', #{
         module => bt_test_actor_dispatch_throws_stub,
@@ -1189,8 +1186,7 @@ test_continue_to_superclass_missing_registry() ->
         {attribute, 2, export, [{hello, 0}]},
         {function, 3, hello, 0, [{clause, 3, [], [], [{atom, 3, world}]}]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, "bt_test_nodisp_leaf.beam", Bin),
+    _ = beamtalk_test_module:load(Forms),
 
     {ok, Pid} = beamtalk_object_class:start_link('NoDispLeafClass', #{
         module => bt_test_nodisp_leaf,
@@ -1260,8 +1256,7 @@ test_invoke_method_module_undefined_continues() ->
             {clause, 4, [{var, 4, '_'}], [], [{atom, 4, true}]}
         ]}
     ],
-    {ok, ParentModule, Bin} = compile:forms(Forms),
-    {module, ParentModule} = code:load_binary(ParentModule, "bt_test_parent_dispatch.beam", Bin),
+    ParentModule = beamtalk_test_module:load(Forms),
 
     ParentName = 'BT1981ModUndefParent',
     ChildName = 'BT1981ModUndefChild',
@@ -1329,8 +1324,7 @@ test_compiled_dispatch_returns_error_tuple() ->
                 ]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, "bt_test_dispatch_err_stub.beam", Bin),
+    _ = beamtalk_test_module:load(Forms),
 
     {ok, Pid} = beamtalk_object_class:start_link('DispatchErrTupleClass', #{
         module => bt_test_dispatch_err_stub,
@@ -1506,8 +1500,7 @@ bt3482_start_class(I, Depth, Names, Mods) ->
             _ -> lists:nth(I + 1, Names)
         end,
     Forms = bt3482_stub_forms(ModName, ClassName, Superclass, IsDefiner),
-    {ok, ModName, Bin} = compile:forms(Forms),
-    {module, ModName} = code:load_binary(ModName, atom_to_list(ModName) ++ ".beam", Bin),
+    ModName = beamtalk_test_module:load(Forms),
     {ok, _Pid} = beamtalk_object_class:start_link(ClassName, #{
         module => ModName,
         superclass => Superclass,
@@ -1917,8 +1910,7 @@ test_purged_module_recomputes_past_owner() ->
         %% `get_object_code` cannot fetch the binary) before teardown.
         (try
             Forms = bt3482_stub_forms(BaseMod, Base, none, true),
-            {ok, BaseMod, Bin} = compile:forms(Forms),
-            {module, BaseMod} = code:load_binary(BaseMod, "defmethod_test", Bin)
+            BaseMod = beamtalk_test_module:load(Forms)
         catch
             _:_ -> error
         end),

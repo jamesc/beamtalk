@@ -63,6 +63,7 @@ compile_forms_error_implies_no_warnings_test() ->
     CoreErlangStr = binary_to_list(CoreErlang),
     {ok, Tokens, _} = core_scan:string(CoreErlangStr),
     {ok, CoreModule} = core_parse:parse(Tokens),
+    %% compile:forms kept: pins OTP's own from_core error/warning return shape.
     Result = compile:forms(CoreModule, [
         from_core, binary, return_errors, return_warnings, debug_info, clint
     ]),

@@ -131,19 +131,19 @@ fn assert_direct(code: &str, module: &str, function: &str, mode: &str) {
     );
     assert_has(
         "a direct call keeps the proxy's error translation",
-        &code,
+        code,
         &["call 'beamtalk_erlang_proxy':'ffi_call_raised'("],
     );
     // The catch variable is the raw stacktrace; the helper takes the list,
     // plus the call site's frame, read only on the error path.
     assert_has(
         "the raw stacktrace is built before the hand-off",
-        &code,
+        code,
         &["primop 'build_stacktrace'(_FfiStk"],
     );
     assert_has(
         "the call site is read in the catch",
-        &code,
+        code,
         &["call 'erlang':'process_info'(_FfiSelf"],
     );
     let tail = format!("'{module}', '{function}', [");
@@ -158,7 +158,7 @@ fn assert_direct(code: &str, module: &str, function: &str, mode: &str) {
 /// A direct call with arguments checks them at run time and falls back to
 /// the proxy for a value its static type did not promise.
 fn assert_guarded(code: &str, module: &str, function: &str) {
-    assert_has("expected a guard in", &code, &["case <> of <> when "]);
+    assert_has("expected a guard in", code, &["case <> of <> when "]);
     for bif in beamtalk_core::semantic_analysis::type_checker::FFI_ARG_RUNTIME_GUARDS {
         let test = format!("call 'erlang':'{bif}'(_FfiArg");
         assert!(code.contains(&test), "expected `{test}` in:\n{code}");
@@ -177,7 +177,7 @@ fn assert_proxied(code: &str, module: &str, function: &str) {
     assert!(code.contains(&call), "expected `{call}` in:\n{code}");
     assert_lacks(
         "an unproved call stays on the proxy",
-        &code,
+        code,
         &["'ffi_call_raised'("],
     );
 }

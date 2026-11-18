@@ -529,8 +529,7 @@ extract_source_path_with_attribute_test() ->
         {attribute, 2, beamtalk_source, ["src/Foo.bt"]},
         {attribute, 3, export, []}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-    {module, Mod} = code:load_binary(Mod, "bt_test_source_attr_mod.beam", Bin),
+    ok = beamtalk_test_module:load(Mod, Forms),
     try
         %% BT-4940: the embedded package-relative path is resolved at run time.
         Path = beamtalk_module_activation:extract_source_path(Mod),
@@ -552,8 +551,7 @@ extract_class_names_with_attribute_test() ->
         {attribute, 2, beamtalk_class, [{'MyClass', 'Object'}]},
         {attribute, 3, export, []}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-    {module, Mod} = code:load_binary(Mod, "bt_test_class_attr_mod.beam", Bin),
+    ok = beamtalk_test_module:load(Mod, Forms),
     try
         ?assertEqual(['MyClass'], beamtalk_module_activation:extract_class_names(Mod))
     after
@@ -577,8 +575,7 @@ sort_modules_multi_class_attribute_test() ->
             {attribute, 2, beamtalk_class, [{'SrtFirst', 'Object'}, {'SrtSecond', 'SrtFirst'}]},
             {attribute, 3, export, []}
         ],
-        {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-        ok = file:write_file(filename:join(TmpDir, ModName ++ ".beam"), Bin),
+        Mod = beamtalk_test_module:write_beam(TmpDir, Forms),
         Sorted = beamtalk_module_activation:sort_modules_by_dependency(TmpDir, [Mod]),
         ?assertEqual([Mod], Sorted)
     after
@@ -600,8 +597,7 @@ activate_module_register_class_unexpected_return_test() ->
             {clause, 3, [], [], [{atom, 3, surprise}]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-    {module, Mod} = code:load_binary(Mod, "bt_test_unexpected_register.beam", Bin),
+    ok = beamtalk_test_module:load(Mod, Forms),
     try
         ?assertEqual(ok, beamtalk_module_activation:activate_module(Mod))
     after
@@ -645,8 +641,7 @@ write_class_beam(Dir, ModName, ClassName, Superclass) ->
         {attribute, 2, beamtalk_class, [{ClassName, Superclass}]},
         {attribute, 3, export, []}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-    ok = file:write_file(filename:join(Dir, ModName ++ ".beam"), Bin),
+    Mod = beamtalk_test_module:write_beam(Dir, Forms),
     Mod.
 
 %% Compile and write a plain beam (no beamtalk_class attribute) into Dir.
@@ -656,8 +651,7 @@ write_plain_beam(Dir, ModName) ->
         {attribute, 1, module, Mod},
         {attribute, 2, export, []}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-    ok = file:write_file(filename:join(Dir, ModName ++ ".beam"), Bin),
+    Mod = beamtalk_test_module:write_beam(Dir, Forms),
     Mod.
 
 %% Compile and write a beam exporting register_class/0 -> ok into Dir.
@@ -668,8 +662,7 @@ write_registering_beam(Dir, ModName) ->
         {attribute, 2, export, [{register_class, 0}]},
         {function, 3, register_class, 0, [{clause, 3, [], [], [{atom, 3, ok}]}]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-    ok = file:write_file(filename:join(Dir, ModName ++ ".beam"), Bin),
+    Mod = beamtalk_test_module:write_beam(Dir, Forms),
     Mod.
 
 %% Compile and write a beam whose register_class/0 crashes into Dir.
@@ -686,8 +679,7 @@ write_crashing_register_beam(Dir, ModName) ->
             ]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-    ok = file:write_file(filename:join(Dir, ModName ++ ".beam"), Bin),
+    Mod = beamtalk_test_module:write_beam(Dir, Forms),
     Mod.
 
 purge_mod(ModName) when is_list(ModName) ->

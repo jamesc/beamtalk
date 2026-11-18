@@ -158,12 +158,12 @@ fn test_native_facade_has_method_includes_all_selectors() {
         extract_core_fn(&code, "'has_method'/1 = fun").expect("has_method/1 not found");
     assert_has(
         "has_method/1 body should include 'doWork'",
-        &has_method_fn,
+        has_method_fn,
         &["'doWork'"],
     );
     assert_has(
         "has_method/1 body should include 'process:'",
-        &has_method_fn,
+        has_method_fn,
         &["'process:'"],
     );
 }
@@ -179,12 +179,12 @@ fn test_native_facade_meta_includes_native_flag() {
         extract_core_fn(&code, "'__beamtalk_meta'/0 = fun").expect("__beamtalk_meta/0 not found");
     assert_has(
         "__beamtalk_meta/0 body should include native => true",
-        &meta_fn,
+        meta_fn,
         &["'native' => 'true'"],
     );
     assert_has(
         "__beamtalk_meta/0 body should include backing_module",
-        &meta_fn,
+        meta_fn,
         &["'backing_module' => 'test_backing_mod'"],
     );
 }
@@ -201,12 +201,12 @@ fn test_meta_superclass_is_single_quoted_atom() {
         extract_core_fn(&code, "'__beamtalk_meta'/0 = fun").expect("__beamtalk_meta/0 not found");
     assert_has(
         "__beamtalk_meta/0 body should include 'superclass' => 'Actor'",
-        &meta_fn,
+        meta_fn,
         &["'superclass' => 'Actor'"],
     );
     assert_lacks(
         "__beamtalk_meta/0 must not emit doubled-quote atoms (e.g. ''Actor')",
-        &meta_fn,
+        meta_fn,
         &["=> ''"],
     );
 }
@@ -254,23 +254,23 @@ fn test_native_facade_register_class_includes_meta() {
         extract_core_fn(&code, "'register_class'/0 = fun").expect("register_class/0 not found");
     assert_has(
         "register_class/0 should call beamtalk_class_builder:register",
-        &register_fn,
+        register_fn,
         &["'beamtalk_class_builder':'register'"],
     );
     assert_has(
         "BuilderState should mark native actors as not constructible",
-        &register_fn,
+        register_fn,
         &["'isConstructible' => 'false'"],
     );
     // BuilderState.meta should contain native-specific keys
     assert_has(
         "BuilderState.meta should include native => true",
-        &register_fn,
+        register_fn,
         &["'native' => 'true'"],
     );
     assert_has(
         "BuilderState.meta should include backing_module",
-        &register_fn,
+        register_fn,
         &["'backing_module' => 'test_backing_mod'"],
     );
 }
@@ -290,29 +290,29 @@ fn test_native_facade_register_class_bakes_method_xref() {
     // The methodXref field is present and a list (not a `~{ }~` map).
     assert_has(
         "native register_class/0 should bake a methodXref list",
-        &register_fn,
+        register_fn,
         &["'methodXref' => ["],
     );
     // The instance methods `doWork` and `process:` are recorded, instance-side,
     // and tagged indexed (they carry analysable Beamtalk source).
     assert_has(
         "doWork xref entry missing",
-        &register_fn,
+        register_fn,
         &["'selector' => 'doWork'"],
     );
     assert_has(
         "process: xref entry missing",
-        &register_fn,
+        register_fn,
         &["'selector' => 'process:'"],
     );
     assert_has(
         "instance-side entries should carry 'class_side' => 'false'",
-        &register_fn,
+        register_fn,
         &["'class_side' => 'false'"],
     );
     assert_has(
         "native instance-method rows should be tagged indexed",
-        &register_fn,
+        register_fn,
         &["'source_status' => 'indexed'"],
     );
 }
@@ -649,7 +649,7 @@ fn test_native_facade_dispatch_extracts_pid() {
         .expect("dispatch_doWork function body should exist");
     assert_has(
         "dispatch should extract pid via element(4, Self)",
-        &dispatch_dowork,
+        dispatch_dowork,
         &["call 'erlang':'element'(4, Self)"],
     );
 }
@@ -789,12 +789,12 @@ fn test_bt_2998_native_class_with_own_class_new_keeps_it() {
     let new_body = extract_core_fn(&code, "'new'/0 = fun").expect("should have new/0");
     assert_has(
         "new/0 must delegate to the declared class method",
-        &new_body,
+        new_body,
         &["'class_new'('undefined')"],
     );
     assert_lacks(
         "a class with its own `new` must not get the refusal",
-        &new_body,
+        new_body,
         &["instantiation_error"],
     );
 }

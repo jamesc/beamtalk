@@ -942,9 +942,8 @@ read_meta_autoload_loads_unloaded_module_test() ->
             ]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+    Mod = beamtalk_test_module:write_beam(Dir, Forms),
     BeamFile = filename:join(Dir, atom_to_list(Mod) ++ ".beam"),
-    ok = file:write_file(BeamFile, Bin),
     true = code:add_patha(Dir),
     try
         beamtalk_test_module:unload(Mod),

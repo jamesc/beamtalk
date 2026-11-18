@@ -793,8 +793,7 @@ compile_bt525_test_module() ->
             {clause, 3, [], [], [{map, 3, []}]}
         ]}
     ],
-    {ok, ModName, Binary} = compile:forms(Forms, []),
-    {module, ModName} = code:load_binary(ModName, "bt525_test_mod.erl", Binary),
+    ok = beamtalk_test_module:load(ModName, Forms),
     ModName.
 
 %% Test that new: with a non-map argument raises a singly-wrapped
@@ -1871,7 +1870,7 @@ crash_recovery_restart_group() ->
         %% (`class_field_kinds => #{current => late}`) to take the "declared late"
         %% branch — a bare `module => test_class` fixture (as every other test in
         %% this section uses) has none and always degrades to `eager`/`nil`, so this
-        %% builds a real meta-carrying module via `compile:forms/2`, mirroring
+        %% builds a real meta-carrying module via `beamtalk_test_module:meta_module/2`, mirroring
         %% `bt1982_has_class_new_in_chain_test_` above.
         ?_test(begin
             Mod = beamtalk_test_module:meta_module(
@@ -2120,10 +2119,7 @@ bt1982_code_change_delegates_group() ->
                     ]}
                 ]}
             ],
-            {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-            {module, Mod} = code:load_binary(
-                Mod, "bt1982_new_colon_mod.erl", Bin
-            ),
+            Mod = beamtalk_test_module:load(Forms),
             ClassInfo = #{
                 name => 'BT1982HasClassNew',
                 module => Mod,

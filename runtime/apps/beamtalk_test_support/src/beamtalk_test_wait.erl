@@ -14,12 +14,23 @@ with different tries and sleeps. Budgets are expressed in **milliseconds**,
 not retries, so the worst case of a wait is explicit and a test's EUnit
 timeout can be checked against it directly (see `default_timeout/0`).
 
-Every waiter returns `ok` or raises `error({wait_timeout, Reason})`; none
-returns an atom like `timeout` for the caller to forget to check.
+Every waiter returns `ok` (`value/2`: the value it found) or raises
+`error({wait_timeout, Reason})`; none returns an atom like `timeout` for the
+caller to forget to check.
 """.
 
 -export([
-    idle/1, until/1, until/2, until/3, dead/1, dead/2, class/1, class/2, sync/1, default_timeout/0
+    idle/1,
+    until/1,
+    until/2,
+    until/3,
+    value/2,
+    dead/1,
+    dead/2,
+    class/1,
+    class/2,
+    sync/1,
+    default_timeout/0
 ]).
 
 -define(DEFAULT_TIMEOUT_MS, 6000).
@@ -47,21 +58,41 @@ becomes true just as the budget ends still passes.
 """.
 -spec until(fun(() -> boolean()), non_neg_integer(), pos_integer()) -> ok.
 until(Pred, TimeoutMs, IntervalMs) when is_function(Pred, 0) ->
-    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
-    poll(Pred, Deadline, IntervalMs).
+    Step = fun() ->
+        case Pred() of
+            true -> {done, ok};
+            Other -> {pending, Other}
+        end
+    end,
+    poll(Step, erlang:monotonic_time(millisecond) + TimeoutMs, IntervalMs).
 
-poll(Pred, Deadline, IntervalMs) ->
-    case Pred() of
-        true ->
-            ok;
-        Other ->
+-doc """
+Poll `Probe` every 5 ms until it returns `{ok, Value}`, and return `Value`
+(for a wait whose condition also finds what the test needs next). Raises
+`error({wait_timeout, {predicate, LastResult}})` after `TimeoutMs`.
+""".
+-spec value(fun(() -> {ok, T} | term()), non_neg_integer()) -> T.
+value(Probe, TimeoutMs) when is_function(Probe, 0) ->
+    Step = fun() ->
+        case Probe() of
+            {ok, Value} -> {done, Value};
+            Other -> {pending, Other}
+        end
+    end,
+    poll(Step, erlang:monotonic_time(millisecond) + TimeoutMs, ?DEFAULT_INTERVAL_MS).
+
+poll(Step, Deadline, IntervalMs) ->
+    case Step() of
+        {done, Value} ->
+            Value;
+        {pending, Last} ->
             Now = erlang:monotonic_time(millisecond),
             case Now >= Deadline of
                 true ->
-                    error({wait_timeout, {predicate, Other}});
+                    error({wait_timeout, {predicate, Last}});
                 false ->
                     timer:sleep(min(IntervalMs, Deadline - Now)),
-                    poll(Pred, Deadline, IntervalMs)
+                    poll(Step, Deadline, IntervalMs)
             end
     end.
 

@@ -332,21 +332,7 @@ load_probe_module(Name) ->
             [Name]
         )
     ),
-    {ok, Toks, _} = erl_scan:string(Src),
-    Forms = split_forms(Toks),
-    {ok, Name, Bin} = compile:forms(Forms, [return_errors]),
-    {module, Name} = code:load_binary(Name, "", Bin),
-    ok.
-
-split_forms(Toks) ->
-    split_forms(Toks, [], []).
-split_forms([], [], Acc) ->
-    lists:reverse(Acc);
-split_forms([{dot, _} = D | Rest], Cur, Acc) ->
-    {ok, Form} = erl_parse:parse_form(lists:reverse([D | Cur])),
-    split_forms(Rest, [], [Form | Acc]);
-split_forms([T | Rest], Cur, Acc) ->
-    split_forms(Rest, [T | Cur], Acc).
+    beamtalk_test_module:load(Name, Src).
 
 probe_name() ->
     list_to_atom("bt4945_probe_" ++ integer_to_list(erlang:unique_integer([positive]))).
@@ -1315,7 +1301,7 @@ handle_protocol_definition_register_class_failure_returns_structured_error_test(
             ]}
         ]}
     ],
-    {ok, ModuleName, Binary} = compile:forms(Forms),
+    {ModuleName, Binary} = beamtalk_test_module:compile(Forms),
     ProtocolInfo = #{
         binary => Binary,
         module_name => ModuleName,
@@ -1352,7 +1338,7 @@ handle_protocol_definition_register_class_returns_error_tuple_test() ->
             ]}
         ]}
     ],
-    {ok, ModuleName, Binary} = compile:forms(Forms),
+    {ModuleName, Binary} = beamtalk_test_module:compile(Forms),
     ProtocolInfo = #{
         binary => Binary,
         module_name => ModuleName,
@@ -1385,7 +1371,7 @@ handle_protocol_definition_success_test() ->
             ]}
         ]}
     ],
-    {ok, ModuleName, Binary} = compile:forms(Forms),
+    {ModuleName, Binary} = beamtalk_test_module:compile(Forms),
     %% Clear the flag before the test
     erlang:erase('__bt_test_register_called'),
     ProtocolInfo = #{
@@ -1410,7 +1396,7 @@ handle_protocol_definition_no_register_class_test() ->
         {attribute, 1, module, ModuleName},
         {attribute, 2, export, []}
     ],
-    {ok, ModuleName, Binary} = compile:forms(Forms),
+    {ModuleName, Binary} = beamtalk_test_module:compile(Forms),
     ProtocolInfo = #{
         binary => Binary,
         module_name => ModuleName,
@@ -1449,7 +1435,7 @@ handle_protocol_definition_surfaces_structured_load_refusal_test() ->
             ]}
         ]}
     ],
-    {ok, ModuleName, Binary} = compile:forms(Forms),
+    {ModuleName, Binary} = beamtalk_test_module:compile(Forms),
     %% Create the pending-error table from this (long-lived) test process: if the
     %% on_load process creates it, the table dies with that process.
     ok = beamtalk_class_registry:record_pending_load_error(ProtoAtom, undefined),

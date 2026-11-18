@@ -1254,10 +1254,7 @@ class_remove_from_system_dynamic_class_test_() ->
                 {attribute, 1, module, ModAtom},
                 {attribute, 2, export, []}
             ],
-            {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
-            {module, ModAtom} = code:load_binary(
-                ModAtom, "bt1982_removable_mod.erl", Bin
-            ),
+            ok = beamtalk_test_module:load(ModAtom, Forms),
             ClassName = 'BT1982Removable',
             ClassInfo = #{
                 name => ClassName,
@@ -1294,10 +1291,7 @@ class_remove_from_system_dynamic_class_test_() ->
                 {attribute, 1, module, ModAtom},
                 {attribute, 2, export, []}
             ],
-            {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
-            {module, ModAtom} = code:load_binary(
-                ModAtom, "bt3105_ext_removable_mod.erl", Bin
-            ),
+            ok = beamtalk_test_module:load(ModAtom, Forms),
             ClassName = 'BT3105ExtRemovable',
             ClassInfo = #{
                 name => ClassName,
@@ -1527,10 +1521,7 @@ meta_fast_path_reflection_test_() ->
                 {attribute, 1, module, ModAtom},
                 {attribute, 2, export, []}
             ],
-            {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
-            {module, ModAtom} = code:load_binary(
-                ModAtom, "bt_stopactors_removable_mod.erl", Bin
-            ),
+            ok = beamtalk_test_module:load(ModAtom, Forms),
             ClassName = 'BTStopActorsClass',
             ClassInfo = #{
                 name => ClassName,
@@ -1595,10 +1586,7 @@ meta_fast_path_reflection_test_() ->
                 "-export([spawn/0]).",
                 "spawn() -> beamtalk_actor:safe_spawn(test_class_actor, #{class => 'Bt3243RemovableActor'})."
             ]),
-            {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
-            {module, ModAtom} = code:load_binary(
-                ModAtom, "bt_3243_removable_class_mod.erl", Bin
-            ),
+            ok = beamtalk_test_module:load(ModAtom, Forms),
             %% A private class name, stamped on the instance by the fixture's
             %% `class` option: `removeFromSystem` kills every process carrying
             %% the class marker, so a shared fixture name would hit other tests.
@@ -1745,35 +1733,32 @@ classRenameTo_dynamic_class_reregisters_test_() ->
 %% A classification that crashes must refuse the rename BEFORE any mutation,
 %% not be read as a "dynamic" class (which would let a stdlib class be renamed).
 classRenameTo_refuses_without_mutation_when_classification_fails_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT4792ClassifyFailTarget', #{}, #{}),
-                Mod = beamtalk_workspace_callback_tests:load_crashing_workspace(),
-                ok = beamtalk_workspace_callback:register(Mod),
-                try
-                    ?assertError(
-                        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
-                        beamtalk_class_refactor:classRenameTo(
-                            ClassObj, 'BT4792ClassifyFailRenamed'
-                        )
-                    ),
-                    ?assertEqual(
-                        Pid, beamtalk_class_registry:whereis_class('BT4792ClassifyFailTarget')
-                    ),
-                    ?assertEqual(
-                        undefined,
-                        beamtalk_class_registry:whereis_class('BT4792ClassifyFailRenamed')
+    {foreach, fun setup_workspace/0, fun teardown_workspace/1, [
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT4792ClassifyFailTarget', #{}, #{}),
+            Mod = beamtalk_workspace_callback_tests:load_crashing_workspace(),
+            ok = beamtalk_workspace_callback:register(Mod),
+            try
+                ?assertError(
+                    #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+                    beamtalk_class_refactor:classRenameTo(
+                        ClassObj, 'BT4792ClassifyFailRenamed'
                     )
-                    %% Extra teardown beside the class stop: kept as try/after (not with_class).
-                after
-                    beamtalk_workspace_callback_tests:unload_crashing_workspace(Mod),
-                    beamtalk_test_proc:stop(Pid)
-                end
-            end)
-        ]
-    end}.
+                ),
+                ?assertEqual(
+                    Pid, beamtalk_class_registry:whereis_class('BT4792ClassifyFailTarget')
+                ),
+                ?assertEqual(
+                    undefined,
+                    beamtalk_class_registry:whereis_class('BT4792ClassifyFailRenamed')
+                )
+                %% Extra teardown beside the class stop: kept as try/after (not with_class).
+            after
+                beamtalk_workspace_callback_tests:unload_crashing_workspace(Mod),
+                beamtalk_test_proc:stop(Pid)
+            end
+        end)
+    ]}.
 
 %% Collision refusal (ADR 0114 § Decision): renaming to an already-loaded
 %% class name raises a structured `class_already_exists` error, matching the
@@ -2579,64 +2564,61 @@ is_kind_of_named_verdicts_test_() ->
 %% lookup); a receiver of any other class still has its own class checked.
 is_kind_of_named_probe_pid_test_() ->
     Names = ['BT4754Grand', 'BT4754Bottom'],
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup, fun setup/0, fun(_) -> teardown(Names) end, fun(_) ->
-        [
-            ?_test(begin
-                {_, GrandPid} = register_class('BT4754Grand', #{}, #{}),
-                {_, BottomPid} = register_class_with_super(
-                    'BT4754Bottom', 'BT4754Grand', #{}, #{}
-                ),
-                Grand = #{'$beamtalk_class' => 'BT4754Grand'},
-                Bottom = #{'$beamtalk_class' => 'BT4754Bottom'},
-                %% Same class as the literal: answered from the probe's pid.
-                ?assertEqual(
-                    true,
-                    beamtalk_behaviour_intrinsics:isKindOfNamed(Grand, 'BT4754Grand', GrandPid)
-                ),
-                %% Subclass instance: its own class process is still checked.
-                ?assertEqual(
-                    true,
-                    beamtalk_behaviour_intrinsics:isKindOfNamed(Bottom, 'BT4754Grand', GrandPid)
-                ),
-                ?assertEqual(
-                    false,
-                    beamtalk_behaviour_intrinsics:isKindOfNamed(Grand, 'BT4754Bottom', BottomPid)
-                ),
-                %% /2 is /3 with the registry's own answer.
-                ?assertEqual(
-                    true, beamtalk_behaviour_intrinsics:isKindOfNamed(Bottom, 'BT4754Grand')
-                ),
-                %% No pid for the literal's class: undecided, so the send raises.
-                ?assertEqual(
-                    undecided,
-                    beamtalk_behaviour_intrinsics:isKindOfNamed(Grand, 'BT4754Grand', undefined)
-                ),
-                %% A dead receiver class is undecided even with a live probe pid.
-                stop_without_terminate(BottomPid),
-                ?assertEqual(
-                    undecided,
-                    beamtalk_behaviour_intrinsics:isKindOfNamed(Bottom, 'BT4754Grand', GrandPid)
-                ),
-                %% A dead local actor is undecided; a live one is answered.
-                {Pid, Ref} = spawn_monitor(fun() -> ok end),
-                receive
-                    {'DOWN', Ref, process, Pid, _} -> ok
-                after 5000 -> error(timeout)
-                end,
-                Dead = #beamtalk_object{class = 'BT4754Grand', class_mod = undefined, pid = Pid},
-                Live = #beamtalk_object{class = 'BT4754Grand', class_mod = undefined, pid = self()},
-                ?assertEqual(
-                    undecided,
-                    beamtalk_behaviour_intrinsics:isKindOfNamed(Dead, 'BT4754Grand', GrandPid)
-                ),
-                ?assertEqual(
-                    true,
-                    beamtalk_behaviour_intrinsics:isKindOfNamed(Live, 'BT4754Grand', GrandPid)
-                )
-            end)
-        ]
-    end}.
+    {foreach, fun setup/0, fun(_) -> teardown(Names) end, [
+        ?_test(begin
+            {_, GrandPid} = register_class('BT4754Grand', #{}, #{}),
+            {_, BottomPid} = register_class_with_super(
+                'BT4754Bottom', 'BT4754Grand', #{}, #{}
+            ),
+            Grand = #{'$beamtalk_class' => 'BT4754Grand'},
+            Bottom = #{'$beamtalk_class' => 'BT4754Bottom'},
+            %% Same class as the literal: answered from the probe's pid.
+            ?assertEqual(
+                true,
+                beamtalk_behaviour_intrinsics:isKindOfNamed(Grand, 'BT4754Grand', GrandPid)
+            ),
+            %% Subclass instance: its own class process is still checked.
+            ?assertEqual(
+                true,
+                beamtalk_behaviour_intrinsics:isKindOfNamed(Bottom, 'BT4754Grand', GrandPid)
+            ),
+            ?assertEqual(
+                false,
+                beamtalk_behaviour_intrinsics:isKindOfNamed(Grand, 'BT4754Bottom', BottomPid)
+            ),
+            %% /2 is /3 with the registry's own answer.
+            ?assertEqual(
+                true, beamtalk_behaviour_intrinsics:isKindOfNamed(Bottom, 'BT4754Grand')
+            ),
+            %% No pid for the literal's class: undecided, so the send raises.
+            ?assertEqual(
+                undecided,
+                beamtalk_behaviour_intrinsics:isKindOfNamed(Grand, 'BT4754Grand', undefined)
+            ),
+            %% A dead receiver class is undecided even with a live probe pid.
+            stop_without_terminate(BottomPid),
+            ?assertEqual(
+                undecided,
+                beamtalk_behaviour_intrinsics:isKindOfNamed(Bottom, 'BT4754Grand', GrandPid)
+            ),
+            %% A dead local actor is undecided; a live one is answered.
+            {Pid, Ref} = spawn_monitor(fun() -> ok end),
+            receive
+                {'DOWN', Ref, process, Pid, _} -> ok
+            after 5000 -> error(timeout)
+            end,
+            Dead = #beamtalk_object{class = 'BT4754Grand', class_mod = undefined, pid = Pid},
+            Live = #beamtalk_object{class = 'BT4754Grand', class_mod = undefined, pid = self()},
+            ?assertEqual(
+                undecided,
+                beamtalk_behaviour_intrinsics:isKindOfNamed(Dead, 'BT4754Grand', GrandPid)
+            ),
+            ?assertEqual(
+                true,
+                beamtalk_behaviour_intrinsics:isKindOfNamed(Live, 'BT4754Grand', GrandPid)
+            )
+        end)
+    ]}.
 
 override_flag_key_matches_shared_fixture_test() ->
     Cases = beamtalk_test_corpus:load_json_fixture([
@@ -2665,49 +2647,46 @@ override_flag_key_matches_shared_fixture_test() ->
 
 value_is_kind_of_class_test_() ->
     Classes = ['BT4319Base', 'BT4319Mid', 'BT4319Leaf', 'BT4319Other'],
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup, fun setup/0, fun(_) -> teardown(Classes) end, fun(_) ->
-        [
-            ?_test(begin
-                register_class('BT4319Base', #{}, #{}),
-                register_class_with_super('BT4319Mid', 'BT4319Base', #{}, #{}),
-                register_class_with_super('BT4319Leaf', 'BT4319Mid', #{}, #{}),
-                register_class('BT4319Other', #{}, #{}),
-                Leaf = #{'$beamtalk_class' => 'BT4319Leaf'},
-                %% An instance matches its own class and every ancestor.
-                ?assert(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Leaf')),
-                ?assert(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Mid')),
-                ?assert(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Base')),
-                ?assert(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'Object')),
-                %% Not an unrelated class, and not a subclass of the instance's class.
-                ?assertNot(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Other')),
-                Base = #{'$beamtalk_class' => 'BT4319Base'},
-                ?assertNot(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Base, 'BT4319Mid')),
-                %% An unregistered class name answers false.
-                ?assertNot(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Nope')),
-                %% Primitives and other representations never match a user class.
-                lists:foreach(
-                    fun(V) ->
-                        ?assertNot(
-                            beamtalk_behaviour_intrinsics:valueIsKindOfClass(V, 'BT4319Base')
-                        )
-                    end,
-                    [
-                        1,
-                        2.5,
-                        nil,
-                        true,
-                        sym,
-                        <<"b">>,
-                        {beamtalk_string, <<"s">>},
-                        [1],
-                        #{a => 1},
-                        {beamtalk_future, make_ref()}
-                    ]
-                )
-            end)
-        ]
-    end}.
+    {foreach, fun setup/0, fun(_) -> teardown(Classes) end, [
+        ?_test(begin
+            register_class('BT4319Base', #{}, #{}),
+            register_class_with_super('BT4319Mid', 'BT4319Base', #{}, #{}),
+            register_class_with_super('BT4319Leaf', 'BT4319Mid', #{}, #{}),
+            register_class('BT4319Other', #{}, #{}),
+            Leaf = #{'$beamtalk_class' => 'BT4319Leaf'},
+            %% An instance matches its own class and every ancestor.
+            ?assert(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Leaf')),
+            ?assert(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Mid')),
+            ?assert(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Base')),
+            ?assert(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'Object')),
+            %% Not an unrelated class, and not a subclass of the instance's class.
+            ?assertNot(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Other')),
+            Base = #{'$beamtalk_class' => 'BT4319Base'},
+            ?assertNot(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Base, 'BT4319Mid')),
+            %% An unregistered class name answers false.
+            ?assertNot(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Nope')),
+            %% Primitives and other representations never match a user class.
+            lists:foreach(
+                fun(V) ->
+                    ?assertNot(
+                        beamtalk_behaviour_intrinsics:valueIsKindOfClass(V, 'BT4319Base')
+                    )
+                end,
+                [
+                    1,
+                    2.5,
+                    nil,
+                    true,
+                    sym,
+                    <<"b">>,
+                    {beamtalk_string, <<"s">>},
+                    [1],
+                    #{a => 1},
+                    {beamtalk_future, make_ref()}
+                ]
+            )
+        end)
+    ]}.
 
 %%% Module-level fixture (BT-4962): loading a compiled `bt@stdlib@*` module starts
 %%% class processes; with no runtime app to own them they would outlive this suite.
