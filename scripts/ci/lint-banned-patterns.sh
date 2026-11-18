@@ -39,14 +39,14 @@ PATTERNS=(
 )
 
 # Emit `file:line:text` for every scannable line of the given files (NUL list
-# on stdin). $1 = rust|erl|rust-any (rust-any keeps test code in scope).
+# on stdin). $1 = rust|erl|rust-any (rust-any keeps inline test modules in scope; test files are still skipped).
 scan_files() {
   xargs -0 awk -v kind="$1" '
     FNR == 1 { intest = 0; pend = 0 }
     {
       t = $0; sub(/^[ \t]+/, "", t)
       if (kind != "erl" && kind != "rust-any") {
-        if (pend) { if (t ~ /^(pub(\([a-z]+\))? )?mod [A-Za-z0-9_]+ *\{/) intest = 1; pend = 0 }
+        if (pend && t !~ /^#\[/) { if (t ~ /^(pub(\([a-z]+\))? )?mod [A-Za-z0-9_]+ *\{/) intest = 1; pend = 0 }
         if (t == "#[cfg(test)]") pend = 1
         if (intest) next
       }
@@ -87,7 +87,7 @@ self_test() {
   [[ -n "$(sleep_hits scripts/ci/fixtures/banned-patterns/sleep-bare.erl)" ]] || { echo "❌ bare sleep not flagged"; fail=1; }
   # Test-region and comment filtering for Rust scopes.
   local out
-  out="$(printf '%s\0' scripts/ci/fixtures/banned-patterns/send-literal-in-test-mod.rs | match_lines rust "'beamtalk_message_dispatch':'send'\\(")"
+  out="$(printf '%s\0' scripts/ci/fixtures/banned-patterns/send-literal-in-test-mod.rs scripts/ci/fixtures/banned-patterns/send-literal-in-test-mod-attrs.rs | match_lines rust "'beamtalk_message_dispatch':'send'\\(")"
   [[ -z "$out" ]] || { echo "❌ test-module / comment lines were not skipped:"; echo "$out"; fail=1; }
   [[ $fail -eq 0 ]] && echo "✅ banned-patterns self-test: ${#PATTERNS[@]} patterns + sleep rule detected"
   return $fail
@@ -126,6 +126,7 @@ for spec in "${PATTERNS[@]}"; do
   IFS='|' read -r id kind specs re repl <<<"$spec"
   # shellcheck disable=SC2086
   fk="${kind%-any}"
+  # shellcheck disable=SC2086
   hits="$(files_for "$fk" $specs | match_lines "$kind" "$re")"
   while IFS= read -r hit; do
     [[ -n "$hit" ]] && report "$id" "$hit" "$repl"
