@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Package-qualified superclass (ADR 0070) — canonical formatter fixture.
+//
+// Demonstrates: `package@Superclass subclass: Name` keeps its `package@`
+// qualifier through formatting (BT-5024).
+
+json@Parser subclass: LenientParser
+
+  parse => 1

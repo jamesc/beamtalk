@@ -398,6 +398,11 @@ fn identity_fixture_standalone_methods() {
 }
 
 #[test]
+fn identity_fixture_package_qualified_superclass() {
+    assert_identity(include_str!("../fixtures/package_qualified_superclass.bt"));
+}
+
+#[test]
 fn identity_fixture_keyword_blocks() {
     assert_identity(include_str!("../fixtures/keyword_blocks.bt"));
 }

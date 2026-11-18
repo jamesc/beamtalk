@@ -226,10 +226,18 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
     };
 
     // Emit superclass type args: `Collection(E)` or `Collection(Integer)`
+    // A package-qualified superclass (ADR 0070) keeps its `package@` prefix, so
+    // `beamtalk fmt` does not change which class is inherited.
+    let superclass_name_doc = match &class.superclass_package {
+        Some(package) if class.superclass.is_some() => {
+            docvec![leaf::ident(&package.name), "@", leaf::ident(&superclass)]
+        }
+        _ => leaf::ident(&superclass),
+    };
     let superclass_with_type_args = if class.superclass_type_args.is_empty() {
-        leaf::ident(&superclass)
+        superclass_name_doc
     } else {
-        let mut parts = vec![leaf::ident(&superclass), Document::Str("(")];
+        let mut parts = vec![superclass_name_doc, Document::Str("(")];
         for (i, ta) in class.superclass_type_args.iter().enumerate() {
             if i > 0 {
                 parts.push(Document::Str(", "));
