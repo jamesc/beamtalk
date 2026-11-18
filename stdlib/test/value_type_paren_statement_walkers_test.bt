@@ -1,0 +1,66 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5031: the value-type body walker unwraps a parenthesised statement in every
+// position, last included (BT-3830, BT-4092). Pins the four shapes `(x := x + 1)`,
+// `(self.count := self.count + 1)`, `(c ifTrue: [self.count := 1])` and
+// `(xs do: [:e | self.count := self.count + e])`, non-last and last. The test class is
+// itself the value type (as in value_type_field_assignment_value_position_test.bt);
+// the actor and class-method cells are in paren_statement_walkers_test.bt.
+
+TestCase subclass: ValueTypeParenStatementWalkersTest
+  field: count = 0
+
+  getCount => self.count
+
+  localNonLast =>
+    x := 1
+    (x := x + 1)
+    x
+
+  localLast =>
+    x := 1
+    (x := x + 1)
+
+  fieldNonLast =>
+    (self.count := self.count + 1)
+    self.count
+
+  // A trailing field assignment answers the updated receiver (BT-4092).
+  fieldLast => (self.count := self.count + 1)
+
+  condNonLast =>
+    c := true
+    (c ifTrue: [self.count := 1])
+    self.count
+
+  condLast =>
+    c := true
+    (c ifTrue: [self.count := 1])
+    self
+
+  doNonLast =>
+    xs := #(1, 2, 3)
+    (xs do: [:e | self.count := self.count + e])
+    self.count
+
+  doLast =>
+    xs := #(1, 2, 3)
+    (xs do: [:e | self.count := self.count + e])
+    self
+
+  testLocalNonLast => self assert: self localNonLast equals: 2
+
+  testLocalLast => self assert: self localLast equals: 2
+
+  testFieldNonLast => self assert: self fieldNonLast equals: 1
+
+  testFieldLast => self assert: self fieldLast getCount equals: 1
+
+  testCondNonLast => self assert: self condNonLast equals: 1
+
+  testCondLast => self assert: self condLast getCount equals: 1
+
+  testDoNonLast => self assert: self doNonLast equals: 6
+
+  testDoLast => self assert: self doLast getCount equals: 6

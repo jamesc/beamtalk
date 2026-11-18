@@ -1530,6 +1530,14 @@ impl CoreErlangGenerator {
     }
 
     /// The address that identifies a send by its receiver node (BT-4279).
+    ///
+    /// BT-5031: an address cannot be reused while it is compared. The key is
+    /// pushed by `open_sync_window` from a receiver borrowed out of the AST being
+    /// lowered, and that borrow outlives the window; `offer_fast_path` compares
+    /// the offering send's receiver against the innermost window's key and a
+    /// pending offer is cleared whenever a window opens. Two live
+    /// nodes never share an address, and a temporary `Expression` built while
+    /// the window is open is a different live object, so it cannot match.
     fn expr_address(receiver: &Expression) -> usize {
         std::ptr::from_ref(receiver) as usize
     }

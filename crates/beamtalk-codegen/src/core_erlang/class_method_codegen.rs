@@ -510,6 +510,14 @@ impl CoreErlangGenerator {
                     return Ok(stmts);
                 }
 
+                // BT-5031: no unwrap here, unlike the actor and value-type
+                // walkers, because nothing in a class-method body is classified by a
+                // paren-sensitive predicate: class variables are written in place
+                // (ADR 0130), so a parenthesised `(self.count := ...)` loses nothing,
+                // and the only classification is the local-threading producer check
+                // below, which unwraps (`lower_root_statement_with_producer_in_place`).
+                // `paren_statement_walkers_test.bt` pins the four shapes here.
+                //
                 // ADR 0131 Phase 2: a local-threading producer in this
                 // statement rebinds its locals at the method root.
                 if let Some(result_var) =

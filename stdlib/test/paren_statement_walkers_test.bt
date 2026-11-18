@@ -1,0 +1,69 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5031: the actor, value-type, arm and class-method statement walkers differ in
+// how they look through parentheses, so each shape is pinned in every walker and in
+// both positions: `(s)` keeps the state update of `s` (BT-3830, BT-3838, BT-4092).
+// Fixtures: fixtures/paren_stmt_actor.bt, fixtures/paren_stmt_class_methods.bt; the value-type
+// cells are in value_type_paren_statement_walkers_test.bt.
+
+TestCase subclass: ParenStatementWalkersTest
+  field: actor = nil
+
+  setUp =>
+    self.actor := ParenStmtActor spawn
+    ParenStmtClassMethods reset
+    self
+
+  tearDown =>
+    self.actor stop
+    ParenStmtClassMethods reset
+
+  // --- actor ---
+  testActorLocalNonLast => self assert: self.actor localNonLast equals: 2
+
+  testActorLocalLast => self assert: self.actor localLast equals: 2
+
+  testActorFieldNonLast => self assert: self.actor fieldNonLast equals: 1
+
+  testActorFieldLast =>
+    self.actor fieldLast
+    self assert: self.actor getCount equals: 1
+
+  testActorCondNonLast => self assert: self.actor condNonLast equals: 1
+
+  testActorCondLast =>
+    self.actor condLast
+    self assert: self.actor getCount equals: 1
+
+  testActorDoNonLast => self assert: self.actor doNonLast equals: 6
+
+  testActorDoLast =>
+    self.actor doLast
+    self assert: self.actor getCount equals: 6
+
+  // --- class method ---
+  testClassLocalNonLast =>
+    self assert: ParenStmtClassMethods localNonLast equals: 2
+
+  testClassLocalLast => self assert: ParenStmtClassMethods localLast equals: 2
+
+  testClassFieldNonLast =>
+    self assert: ParenStmtClassMethods fieldNonLast equals: 1
+
+  testClassFieldLast =>
+    ParenStmtClassMethods fieldLast
+    self assert: ParenStmtClassMethods getCount equals: 1
+
+  testClassCondNonLast =>
+    self assert: ParenStmtClassMethods condNonLast equals: 1
+
+  testClassCondLast =>
+    ParenStmtClassMethods condLast
+    self assert: ParenStmtClassMethods getCount equals: 1
+
+  testClassDoNonLast => self assert: ParenStmtClassMethods doNonLast equals: 6
+
+  testClassDoLast =>
+    ParenStmtClassMethods doLast
+    self assert: ParenStmtClassMethods getCount equals: 6
