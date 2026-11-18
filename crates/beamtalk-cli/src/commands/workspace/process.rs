@@ -35,9 +35,6 @@ use crate::commands::protocol::ProtocolClient;
 use beamtalk_repl_protocol::RequestBuilder;
 use miette::{Result, miette};
 
-/// Default idle timeout in seconds (4 hours)
-const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 3600 * 4;
-
 /// Delay between port file read attempts in milliseconds.
 const PORT_DISCOVERY_DELAY_MS: u64 = 500;
 
@@ -107,12 +104,9 @@ fn prepare_workspace_paths(
     config: &super::WorkspaceConfig<'_>,
 ) -> Result<(String, PathBuf)> {
     // Determine idle timeout (explicit arg > environment variable > default)
-    let idle_timeout = config.max_idle_seconds.unwrap_or_else(|| {
-        std::env::var("BEAMTALK_WORKSPACE_TIMEOUT")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(DEFAULT_IDLE_TIMEOUT_SECONDS)
-    });
+    let idle_timeout = config
+        .max_idle_seconds
+        .unwrap_or_else(beamtalk_workspace::idle_timeout_seconds_from_env);
 
     // Build the eval command to start workspace supervisor and keep running
     let project_path = get_workspace_metadata(workspace_id)?.project_path;
@@ -916,7 +910,8 @@ mod tests {
         let (eval_cmd, _project_path) = prepare_workspace_paths(&fixture.id, &config).unwrap();
         assert!(
             eval_cmd.contains(&format!(
-                "max_idle_seconds => {DEFAULT_IDLE_TIMEOUT_SECONDS}"
+                "max_idle_seconds => {}",
+                beamtalk_workspace::DEFAULT_IDLE_TIMEOUT_SECONDS
             )),
             "no explicit timeout or env var must fall back to the default: {eval_cmd}"
         );
