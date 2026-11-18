@@ -9,8 +9,12 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use crate::core_erlang::generator::CoreErlangGenerator;
-use crate::core_erlang::threaded_ir::{self, VersionCounter, VersionPrefix};
+use crate::core_erlang::threaded_ir::{
+    self, BindOp, FrameId, ThreadedStmt, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
+};
 use crate::core_erlang::util;
+use beamtalk_cerl_doc::{form, leaf};
+use beamtalk_core::source_analysis::Span;
 
 /// Renders a `VersionPrefix::State` counter value, honoring loop context —
 /// the single shared implementation behind `current_state_var`/
@@ -115,6 +119,49 @@ impl CoreErlangGenerator {
     /// Gets the current state version.
     pub(in crate::core_erlang) fn state_version(&self) -> usize {
         self.state_threading.version()
+    }
+
+    /// The "step state, then bind" idiom: mints the next `State{N}` version
+    /// and pushes `State{N} <- op` (reading `source`) onto `out`, answering
+    /// the new version `N`. Every site that advances the state by one bind
+    /// goes through here so the step and the bind cannot be separated.
+    pub(in crate::core_erlang) fn push_state_bind(
+        &mut self,
+        out: &mut Vec<ThreadedStmt>,
+        frame: FrameId,
+        source: VersionedVar,
+        op: BindOp,
+        span: Span,
+    ) -> usize {
+        let _ = self.next_state_var();
+        let target_version = self.state_version();
+        out.push(ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+            source,
+            op,
+            span,
+        });
+        target_version
+    }
+
+    /// The "tuple two-hop" tail: after `let T = <expr> in …` bound a
+    /// `{Value, NewState}` tuple, steps the state to `element(2, T)`
+    /// (reading the pre-call `source_version`).
+    pub(in crate::core_erlang) fn bind_tuple_state(
+        &mut self,
+        out: &mut Vec<ThreadedStmt>,
+        frame: FrameId,
+        source_version: usize,
+        tuple_var: &str,
+        span: Span,
+    ) -> usize {
+        self.push_state_bind(
+            out,
+            frame,
+            VersionedVar::new(VersionPrefix::State, source_version, frame),
+            BindOp::Direct(ValueRef::Doc(form::element(2, leaf::var(tuple_var)))),
+            span,
+        )
     }
 
     /// Sets the state version.

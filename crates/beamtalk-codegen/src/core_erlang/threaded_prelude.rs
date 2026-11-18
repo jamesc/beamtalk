@@ -14,6 +14,7 @@ use super::threaded_ir::{
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{
     BinarySegment, CascadeMessage, Expression, MessageSelector, StringSegment,
@@ -736,25 +737,19 @@ impl CoreErlangGenerator {
             docvec!["let ", leaf::var(reply_var.clone()), " = ", call, " in "],
             span,
         ));
-        let _ = self.next_state_var();
-        let target_version = self.state_version();
-        prelude.push(ThreadedStmt::Bind {
-            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-            op: BindOp::Direct(ValueRef::Doc(docvec![
-                "call 'erlang':'element'(3, ",
-                leaf::var(reply_var.clone()),
-                ")",
-            ])),
+        self.push_state_bind(
+            &mut prelude,
+            frame,
+            VersionedVar::new(VersionPrefix::State, source_version, frame),
+            BindOp::Direct(ValueRef::Doc(docvec![form::element(
+                3,
+                leaf::var(reply_var.clone())
+            ),])),
             span,
-        });
+        );
         Ok(ThreadedValue {
             prelude,
-            value: ValueRef::Doc(docvec![
-                "call 'erlang':'element'(2, ",
-                leaf::var(reply_var),
-                ")",
-            ]),
+            value: ValueRef::Doc(docvec![form::element(2, leaf::var(reply_var)),]),
         })
     }
 

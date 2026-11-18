@@ -232,13 +232,10 @@ pub(in crate::core_erlang) fn extract_family_slots(
         .map(|(i, prefix)| {
             let FamilyVersionStep { source, target } = step(prefix);
             let slot = base_arity + i + 1;
-            let value = ValueRef::Doc(docvec![
-                "call 'erlang':'element'(",
-                leaf::int_lit(i64::try_from(slot).unwrap_or(i64::MAX)),
-                ", ",
-                leaf::var(tuple_var.to_string()),
-                ")",
-            ]);
+            let value = ValueRef::Doc(docvec![form::element(
+                slot,
+                leaf::var(tuple_var.to_string())
+            ),]);
             ThreadedStmt::Bind {
                 target,
                 source,

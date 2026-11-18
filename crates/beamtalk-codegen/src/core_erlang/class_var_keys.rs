@@ -25,6 +25,7 @@
 //! - read-only marker: `{'$bt_class_vars_ro', ClassTag}`, planted under the
 //!   class key by the runtime-owned out-of-process regions.
 
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::{Document, docvec, leaf};
 
 /// First element of the class key tuple.
@@ -59,9 +60,9 @@ pub(super) fn key_doc(class_self_var: &str) -> Document<'static> {
     docvec![
         "{",
         leaf::atom(KEY_TAG),
-        ", call 'erlang':'element'(2, ",
-        leaf::var(class_self_var),
-        ")}"
+        ", ",
+        form::element(2, leaf::var(class_self_var)),
+        "}"
     ]
 }
 

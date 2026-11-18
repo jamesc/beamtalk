@@ -35,6 +35,7 @@ use super::erlang_types::ErlangVar;
 use super::synced_call::ActorStateSource;
 use super::threaded_ir::{CellBoundary, StateReadSite};
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::Block;
 use beamtalk_core::source_analysis::Span;
@@ -368,21 +369,13 @@ impl CoreErlangGenerator {
         boundary: &CellBoundary,
     ) -> Document<'static> {
         match boundary {
-            CellBoundary::PreState(state) => {
-                docvec![
-                    "do ",
-                    super::threaded_ir::cell_put_call(leaf::var(state.name().to_string())),
-                    " "
-                ]
-            }
-            CellBoundary::Snapshot(snapshot) => docvec![
-                "do ",
-                actor_state_call(
-                    actor_state_helper::RESTORE,
-                    [leaf::var("Self"), leaf::var(snapshot.name().to_string())]
-                ),
-                " "
-            ],
+            CellBoundary::PreState(state) => form::do_prefix(super::threaded_ir::cell_put_call(
+                leaf::var(state.name().to_string()),
+            )),
+            CellBoundary::Snapshot(snapshot) => form::do_prefix(actor_state_call(
+                actor_state_helper::RESTORE,
+                [leaf::var("Self"), leaf::var(snapshot.name().to_string())],
+            )),
         }
     }
 

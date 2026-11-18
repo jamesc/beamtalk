@@ -264,12 +264,11 @@ impl CoreErlangGenerator {
                 ],
                 span,
             ));
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
+            self.push_state_bind(
+                stmts,
+                frame,
+                VersionedVar::new(VersionPrefix::State, source_version, frame),
+                BindOp::Direct(ValueRef::Doc(docvec![
                     "call 'maps':'put'(",
                     leaf::var(name_var),
                     ", ",
@@ -279,7 +278,7 @@ impl CoreErlangGenerator {
                     ")",
                 ])),
                 span,
-            });
+            );
             self.finish_precompiled_scope(scope)?;
             if is_last {
                 self.deliver_last_var(tail, val_var, span, stmts)?;
@@ -322,12 +321,11 @@ impl CoreErlangGenerator {
                 ],
                 span,
             ));
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
+            self.push_state_bind(
+                stmts,
+                frame,
+                VersionedVar::new(VersionPrefix::State, source_version, frame),
+                BindOp::Direct(ValueRef::Doc(docvec![
                     "call 'maps':'remove'(",
                     leaf::var(name_var),
                     ", ",
@@ -335,7 +333,7 @@ impl CoreErlangGenerator {
                     ")",
                 ])),
                 span,
-            });
+            );
             if is_last {
                 self.deliver_last_var(tail, "Self".to_string(), span, stmts)?;
             }

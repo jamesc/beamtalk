@@ -30,6 +30,7 @@ use super::class_var_keys::{self, KeyScope};
 use super::erlang_types::ErlangVar;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression, Identifier};
 use beamtalk_core::semantic_analysis::block_facts::class_var_accesses;
@@ -145,15 +146,11 @@ impl CoreErlangGenerator {
     /// `do call 'beamtalk_class_vars':'restore'(Snap) ` — the catch boundary's
     /// exit half (ADR 0130 §4), the first statement of a catch's non-NLR arm.
     pub(super) fn class_var_restore_doc(snapshot_var: &ErlangVar) -> Document<'static> {
-        docvec![
-            "do ",
-            beamtalk_class_vars_call(
-                class_var_fn::RESTORE,
-                None,
-                vec![leaf::var(snapshot_var.name())]
-            ),
-            " "
-        ]
+        form::do_prefix(beamtalk_class_vars_call(
+            class_var_fn::RESTORE,
+            None,
+            vec![leaf::var(snapshot_var.name())],
+        ))
     }
 
     /// `let CVCapture = call 'beamtalk_class_vars':'capture'(ClassSelf, Outer) in `

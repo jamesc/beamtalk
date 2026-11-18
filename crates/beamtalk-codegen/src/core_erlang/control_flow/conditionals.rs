@@ -66,6 +66,7 @@ use super::analysis::ThreadedFamilies;
 use super::family_slots::{self, FamilyVersionStep};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
 use beamtalk_core::source_analysis::Span;
@@ -955,11 +956,7 @@ impl CoreErlangGenerator {
         producer: bool,
     ) -> Result<ThreadedValue> {
         let carrier = self.fresh_temp_var("CF");
-        let value = ValueRef::Doc(docvec![
-            "call 'erlang':'element'(1, ",
-            leaf::var(carrier.clone()),
-            ")",
-        ]);
+        let value = ValueRef::Doc(docvec![form::element(1, leaf::var(carrier.clone())),]);
         // The method root and a registered frame (a `BranchArm`, a loop or fold
         // body) lower the construct's `LocalRebind`s.
         let rebinds_locals = self.lowers_as_conditional_producer(frame, producer);

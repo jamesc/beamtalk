@@ -17,6 +17,7 @@ use super::StateAccFallbackReason;
 use super::conditionals::ArmFrame;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
 use beamtalk_core::source_analysis::Span;
@@ -665,24 +666,13 @@ impl CoreErlangGenerator {
                     expr_doc,
                     " in let ",
                     leaf::var(result_var.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(tuple_var.clone()),
-                    ") in ",
+                    " = ",
+                    form::element(1, leaf::var(tuple_var.clone())),
+                    " in ",
                 ],
                 span,
             ));
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
-                    "call 'erlang':'element'(2, ",
-                    leaf::var(tuple_var),
-                    ")",
-                ])),
-                span,
-            });
+            self.bind_tuple_state(stmts, frame, source_version, &tuple_var, span);
             *last_result = Some(ValueRef::Var(result_var));
         } else {
             let tuple_var = self.fresh_temp_var("T2Tuple");
@@ -697,24 +687,13 @@ impl CoreErlangGenerator {
                     expr_doc,
                     " in let ",
                     leaf::var(discard_var),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(tuple_var.clone()),
-                    ")\n in ",
+                    " = ",
+                    form::element(1, leaf::var(tuple_var.clone())),
+                    "\n in ",
                 ],
                 span,
             ));
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
-                    "call 'erlang':'element'(2, ",
-                    leaf::var(tuple_var),
-                    ")",
-                ])),
-                span,
-            });
+            self.bind_tuple_state(stmts, frame, source_version, &tuple_var, span);
             // rebind captured local-var mutations from
             // NewState so a later read in this branch sees the
             // mutated value.
@@ -762,24 +741,13 @@ impl CoreErlangGenerator {
                     expr_doc,
                     " in let ",
                     leaf::var(result_var.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(tuple_var.clone()),
-                    ") in ",
+                    " = ",
+                    form::element(1, leaf::var(tuple_var.clone())),
+                    " in ",
                 ],
                 span,
             ));
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
-                    "call 'erlang':'element'(2, ",
-                    leaf::var(tuple_var),
-                    ")",
-                ])),
-                span,
-            });
+            self.bind_tuple_state(stmts, frame, source_version, &tuple_var, span);
             *last_result = Some(ValueRef::Var(result_var));
         } else {
             let tuple_var = self.fresh_temp_var("Tuple");
@@ -795,18 +763,7 @@ impl CoreErlangGenerator {
                 ],
                 span,
             ));
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
-                    "call 'erlang':'element'(2, ",
-                    leaf::var(tuple_var),
-                    ")",
-                ])),
-                span,
-            });
+            self.bind_tuple_state(stmts, frame, source_version, &tuple_var, span);
             // BT-4460 / BT-4462: a construct reaching here threads
             // no local (every arm registers a nested construct
             // writing an arm-local as a producer, lowered above);
@@ -871,24 +828,13 @@ impl CoreErlangGenerator {
                     value_str,
                     " in let ",
                     leaf::var(actual_val.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(tuple_var.clone()),
-                    ") in ",
+                    " = ",
+                    form::element(1, leaf::var(tuple_var.clone())),
+                    " in ",
                 ],
                 span,
             ));
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
-                    "call 'erlang':'element'(2, ",
-                    leaf::var(tuple_var),
-                    ")",
-                ])),
-                span,
-            });
+            self.bind_tuple_state(stmts, frame, source_version, &tuple_var, span);
             stmts.extend(self.construct_locals_in_place(value, span));
             // BT-4439: each name is written to the arm's slot.
             let _ = self.lower_destructure_bind_from_var(
@@ -987,9 +933,9 @@ impl CoreErlangGenerator {
                     val_code,
                     " in let ",
                     leaf::var(val_var.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(tuple_var.clone()),
-                    ") in ",
+                    " = ",
+                    form::element(1, leaf::var(tuple_var.clone())),
+                    " in ",
                 ],
                 span,
             ));
@@ -998,19 +944,17 @@ impl CoreErlangGenerator {
             stmts.push(ThreadedStmt::Bind {
                 target: gensym_state.clone(),
                 source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
-                    "call 'erlang':'element'(2, ",
-                    leaf::var(tuple_var),
-                    ")",
-                ])),
+                op: BindOp::Direct(ValueRef::Doc(docvec![form::element(
+                    2,
+                    leaf::var(tuple_var)
+                ),])),
                 span,
             });
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: gensym_state,
-                op: BindOp::Direct(ValueRef::Doc(docvec![
+            self.push_state_bind(
+                stmts,
+                frame,
+                gensym_state,
+                BindOp::Direct(ValueRef::Doc(docvec![
                     "call 'maps':'put'(",
                     leaf::var(name_var),
                     ", ",
@@ -1020,7 +964,7 @@ impl CoreErlangGenerator {
                     ")",
                 ])),
                 span,
-            });
+            );
             stmts.extend(self.construct_locals_in_place(&arguments[1], span));
             if is_last {
                 *last_result = Some(ValueRef::Var(val_var));
@@ -1070,9 +1014,9 @@ impl CoreErlangGenerator {
                     rhs_doc,
                     " in let ",
                     leaf::var(val_var.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(tuple_var.clone()),
-                    ") in ",
+                    " = ",
+                    form::element(1, leaf::var(tuple_var.clone())),
+                    " in ",
                 ],
                 span,
             ));
@@ -1080,24 +1024,22 @@ impl CoreErlangGenerator {
             stmts.push(ThreadedStmt::Bind {
                 target: gensym_state.clone(),
                 source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
-                    "call 'erlang':'element'(2, ",
-                    leaf::var(tuple_var),
-                    ")",
-                ])),
+                op: BindOp::Direct(ValueRef::Doc(docvec![form::element(
+                    2,
+                    leaf::var(tuple_var)
+                ),])),
                 span,
             });
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: gensym_state,
-                op: BindOp::Put {
+            self.push_state_bind(
+                stmts,
+                frame,
+                gensym_state,
+                BindOp::Put {
                     field: field.name.to_string(),
                     value: ValueRef::Var(val_var.clone()),
                 },
                 span,
-            });
+            );
             stmts.extend(self.construct_locals_in_place(value, span));
             if is_last {
                 *last_result = Some(ValueRef::Var(val_var));

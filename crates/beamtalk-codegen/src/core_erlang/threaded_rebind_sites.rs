@@ -11,6 +11,7 @@ use super::threaded_ir::{
 };
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::source_analysis::Span;
@@ -794,15 +795,7 @@ impl CoreErlangGenerator {
         self.loop_mode.discarded_fold_block = None;
         let doc = doc?;
         let carrier = self.fresh_temp_var("ThreadedResult");
-        let element = |k: i64, carrier: &str| {
-            docvec![
-                "call 'erlang':'element'(",
-                leaf::int_lit(k),
-                ", ",
-                leaf::var(carrier.to_string()),
-                ")",
-            ]
-        };
+        let element = |k: usize, carrier: &str| form::element(k, leaf::var(carrier.to_string()));
         let mut family_binds = Vec::new();
         // In an actor instance frame the carrier's element 2 is the `State`
         // family's next version (ADR 0131 §2). A direct-params or tuple-acc

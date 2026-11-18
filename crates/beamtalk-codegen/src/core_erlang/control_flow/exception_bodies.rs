@@ -9,8 +9,7 @@ use super::super::ensure_nlr_relay::EnsureCatchTriple;
 use super::super::intrinsics::STATEFUL_BLOCK_DISPATCH_HINT;
 use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{
-    BindOp, EnsureCleanup, FrameId, RebindFrame, RebindFrameKind, ThreadedStmt, TryRegion,
-    ValueRef, VersionPrefix, VersionedVar,
+    EnsureCleanup, FrameId, RebindFrame, RebindFrameKind, ThreadedStmt, TryRegion,
 };
 use super::super::{CoreErlangGenerator, Result};
 use super::LocalWrite;
@@ -175,17 +174,18 @@ impl CoreErlangGenerator {
         // check that the cell may be ahead of it now; for any other
         // exception it does nothing.
         let cleanup_apply = || docvec!["apply ", leaf::var(cleanup_param.to_string()), " ()"];
-        let other = docvec![
-            "do ",
+        let other = form::seq(
             self.annotate_current_send_call(cleanup_apply()),
-            " do ",
-            actor_state_call(
-                actor_state_helper::NOTE_UNWOUND,
-                [leaf::var(error_var.clone())],
+            form::seq(
+                actor_state_call(
+                    actor_state_helper::NOTE_UNWOUND,
+                    [leaf::var(error_var.clone())],
+                ),
+                Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),
+                Layout::Flat,
             ),
-            " ",
-            Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),
-        ];
+            Layout::Flat,
+        );
         self.ensure_catch(
             EnsureCatchTriple {
                 type_var,
@@ -668,17 +668,7 @@ impl CoreErlangGenerator {
                             ],
                             span,
                         ));
-                        let _ = self.next_state_var();
-                        let target_version = self.state_version();
-                        stmts.push(ThreadedStmt::Bind {
-                            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                            op: BindOp::Direct(ValueRef::Doc(docvec![form::element(
-                                2,
-                                leaf::var(tuple_var)
-                            )])),
-                            span,
-                        });
+                        self.bind_tuple_state(&mut stmts, frame, source_version, &tuple_var, span);
                         result_var = rv;
                     } else {
                         // E6/E7 — plain expression, no direct field

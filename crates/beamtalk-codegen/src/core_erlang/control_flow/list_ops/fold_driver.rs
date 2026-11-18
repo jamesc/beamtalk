@@ -25,6 +25,7 @@ use super::super::family_slots::FoldFamilySlots;
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
 
@@ -93,11 +94,11 @@ fn bind_detect_found_or_raise_doc(
     docvec![
         "let ",
         leaf::var(found_result.to_owned()),
-        " = case call 'erlang':'element'(2, ",
-        leaf::var(fold_result.to_owned()),
-        ") of <'true'> when 'true' -> call 'erlang':'element'(1, ",
-        leaf::var(fold_result.to_owned()),
-        ") <'false'> when 'true' -> let ",
+        " = case ",
+        form::element(2, leaf::var(fold_result.to_owned())),
+        " of <'true'> when 'true' -> ",
+        form::element(1, leaf::var(fold_result.to_owned())),
+        " <'false'> when 'true' -> let ",
         leaf::var(class_var.to_owned()),
         " = call 'beamtalk_primitive':'class_of'(",
         leaf::var(recv_var.to_owned()),
@@ -392,15 +393,8 @@ impl FoldOp<'_> {
         vars: &[String],
         str_check_var: &str,
     ) -> Epilogue<'_> {
-        let element = |n: i64, v: &str| {
-            docvec![
-                " = call 'erlang':'element'(",
-                leaf::int_lit(n),
-                ", ",
-                leaf::var(v.to_string()),
-                ") in "
-            ]
-        };
+        let element =
+            |n: usize, v: &str| docvec![" = ", form::element(n, leaf::var(v.to_string())), " in "];
         let var = |i: usize| leaf::var(vars[i].clone());
         let reversed = |out: usize, from: usize| {
             docvec![
@@ -735,21 +729,19 @@ impl CoreErlangGenerator {
         let slot_bindings = Document::Vec(
             slot_names
                 .iter()
-                .zip(1_i64..)
+                .zip(1_usize..)
                 .map(|(name, index)| {
                     docvec![
                         "let ",
                         leaf::var(name.clone()),
-                        " = call 'erlang':'element'(",
-                        leaf::int_lit(index),
-                        ", ",
-                        leaf::var(acc_state_var.clone()),
-                        ") in ",
+                        " = ",
+                        form::element(index, leaf::var(acc_state_var.clone())),
+                        " in ",
                     ]
                 })
                 .collect(),
         );
-        let state_index = i64::try_from(slot_count + 1).unwrap_or(i64::MAX);
+        let state_index = slot_count + 1;
         // Save the receiver temp for the String-aware result check.
         let str_check_var = list_var.clone();
         let safe_list = super::list_recv_to_safe_list_doc(
@@ -836,11 +828,9 @@ impl CoreErlangGenerator {
                 .as_ref()
                 .map_or(Document::Nil, |s| s.lambda_prologue(&acc_state_var)),
             slot_bindings,
-            "let StateAcc = call 'erlang':'element'(",
-            leaf::int_lit(state_index),
-            ", ",
-            leaf::var(acc_state_var.clone()),
-            ") in ",
+            "let StateAcc = ",
+            form::element(state_index, leaf::var(acc_state_var.clone())),
+            " in ",
         ]);
         let body_doc =
             self.lower_map_fold_body(body, &plan, &body_kind, params, &acc_state_var, slot_count)?;
@@ -871,11 +861,9 @@ impl CoreErlangGenerator {
             epilogue.bindings,
             "let ",
             leaf::var(state_out.clone()),
-            " = call 'erlang':'element'(",
-            leaf::int_lit(state_index),
-            ", ",
-            leaf::var(fold_result),
-            ") in ",
+            " = ",
+            form::element(state_index, leaf::var(fold_result)),
+            " in ",
             extract_doc,
             tail,
         ]);
@@ -1005,13 +993,13 @@ impl CoreErlangGenerator {
                 Some((key, val)) => docvec![
                     "let ",
                     leaf::var(key.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(lambda_param.clone()),
-                    ") in let ",
+                    " = ",
+                    form::element(1, leaf::var(lambda_param.clone())),
+                    " in let ",
                     leaf::var(val.clone()),
-                    " = call 'erlang':'element'(2, ",
-                    leaf::var(lambda_param.clone()),
-                    ") in ",
+                    " = ",
+                    form::element(2, leaf::var(lambda_param.clone())),
+                    " in ",
                 ],
                 None => Document::Nil,
             };

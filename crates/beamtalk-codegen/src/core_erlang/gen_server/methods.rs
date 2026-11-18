@@ -673,17 +673,16 @@ impl CoreErlangGenerator {
         });
         // BT-4369: every field write records itself for the loop checkout.
         self.note_field_write(field_name, span);
-        let _ = self.next_state_var();
-        let target_version = self.state_version();
-        stmts.push(ThreadedStmt::Bind {
-            target: VersionedVar::new(VersionPrefix::State, target_version, FrameId::ROOT),
-            source: cf_state,
-            op: BindOp::Put {
+        self.push_state_bind(
+            stmts,
+            FrameId::ROOT,
+            cf_state,
+            BindOp::Put {
                 field: field_name.to_string(),
                 value: ValueRef::Var(val_var.to_string()),
             },
             span,
-        });
+        );
     }
 
     /// Lowers a method body to one straight-line `Vec<ThreadedStmt>` (ADR
@@ -1116,25 +1115,20 @@ impl CoreErlangGenerator {
                 ));
                 // BT-4369: every field write records itself.
                 self.note_field_write(&field.name, span);
-                let _ = self.next_state_var();
-                let target_version = self.state_version();
-                stmts.push(ThreadedStmt::Bind {
-                    target: threaded_ir::VersionedVar::new(
-                        threaded_ir::VersionPrefix::State,
-                        target_version,
-                        threaded_ir::FrameId::ROOT,
-                    ),
-                    source: threaded_ir::VersionedVar::new(
+                self.push_state_bind(
+                    stmts,
+                    threaded_ir::FrameId::ROOT,
+                    threaded_ir::VersionedVar::new(
                         threaded_ir::VersionPrefix::State,
                         source_version,
                         threaded_ir::FrameId::ROOT,
                     ),
-                    op: threaded_ir::BindOp::Put {
+                    threaded_ir::BindOp::Put {
                         field: field.name.to_string(),
                         value: threaded_ir::ValueRef::Var(val_var.clone()),
                     },
                     span,
-                });
+                );
             } else {
                 // Evaluate the RHS (returns {Value, State} tuple)
                 let tuple_var = self.fresh_temp_var("CfTuple");
@@ -1244,20 +1238,15 @@ impl CoreErlangGenerator {
                 ],
                 span,
             ));
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: threaded_ir::VersionedVar::new(
-                    threaded_ir::VersionPrefix::State,
-                    target_version,
-                    threaded_ir::FrameId::ROOT,
-                ),
-                source: threaded_ir::VersionedVar::new(
+            self.push_state_bind(
+                stmts,
+                threaded_ir::FrameId::ROOT,
+                threaded_ir::VersionedVar::new(
                     threaded_ir::VersionPrefix::State,
                     source_version,
                     threaded_ir::FrameId::ROOT,
                 ),
-                op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(form::call(
+                threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(form::call(
                     "maps",
                     "put",
                     [
@@ -1267,7 +1256,7 @@ impl CoreErlangGenerator {
                     ],
                 ))),
                 span,
-            });
+            );
             let field_state = self.current_state_var();
             let mut doc_parts: Vec<Document<'static>> = Vec::new();
             if let Some(threaded_vars) = self
@@ -1335,24 +1324,13 @@ impl CoreErlangGenerator {
                 ],
                 span,
             ));
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: threaded_ir::VersionedVar::new(
-                    threaded_ir::VersionPrefix::State,
-                    target_version,
-                    threaded_ir::FrameId::ROOT,
-                ),
-                source: threaded_ir::VersionedVar::new(
-                    threaded_ir::VersionPrefix::State,
-                    source_version,
-                    threaded_ir::FrameId::ROOT,
-                ),
-                op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
-                    form::element(2, leaf::var(tuple_var))
-                ])),
+            self.bind_tuple_state(
+                stmts,
+                threaded_ir::FrameId::ROOT,
+                source_version,
+                &tuple_var,
                 span,
-            });
+            );
             let new_state = self.current_state_var();
             // Extract threaded locals
             let mut doc_parts: Vec<Document<'static>> = Vec::new();
@@ -1421,24 +1399,13 @@ impl CoreErlangGenerator {
                 ],
                 span,
             ));
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: threaded_ir::VersionedVar::new(
-                    threaded_ir::VersionPrefix::State,
-                    target_version,
-                    threaded_ir::FrameId::ROOT,
-                ),
-                source: threaded_ir::VersionedVar::new(
-                    threaded_ir::VersionPrefix::State,
-                    source_version,
-                    threaded_ir::FrameId::ROOT,
-                ),
-                op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
-                    form::element(2, leaf::var(tuple_var))
-                ])),
+            self.bind_tuple_state(
+                stmts,
+                threaded_ir::FrameId::ROOT,
+                source_version,
+                &tuple_var,
                 span,
-            });
+            );
         }
         if is_last {
             let reply = self.local_assign_reply_doc(expr)?;
@@ -1759,24 +1726,13 @@ impl CoreErlangGenerator {
                 ],
                 span,
             ));
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: threaded_ir::VersionedVar::new(
-                    threaded_ir::VersionPrefix::State,
-                    target_version,
-                    threaded_ir::FrameId::ROOT,
-                ),
-                source: threaded_ir::VersionedVar::new(
-                    threaded_ir::VersionPrefix::State,
-                    source_version,
-                    threaded_ir::FrameId::ROOT,
-                ),
-                op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
-                    form::element(2, leaf::var(tuple_var))
-                ])),
+            self.bind_tuple_state(
+                stmts,
+                threaded_ir::FrameId::ROOT,
+                source_version,
+                &tuple_var,
                 span,
-            });
+            );
             let new_state = self.current_state_var();
 
             // Extract captured local mutations from NewState
@@ -1870,24 +1826,13 @@ impl CoreErlangGenerator {
                     docvec![form::let_prefix(leaf::var(tuple_var.clone()), expr_str)],
                     span,
                 ));
-                let _ = self.next_state_var();
-                let target_version = self.state_version();
-                stmts.push(ThreadedStmt::Bind {
-                    target: threaded_ir::VersionedVar::new(
-                        threaded_ir::VersionPrefix::State,
-                        target_version,
-                        threaded_ir::FrameId::ROOT,
-                    ),
-                    source: threaded_ir::VersionedVar::new(
-                        threaded_ir::VersionPrefix::State,
-                        source_version,
-                        threaded_ir::FrameId::ROOT,
-                    ),
-                    op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
-                        form::element(2, leaf::var(tuple_var))
-                    ])),
+                self.bind_tuple_state(
+                    stmts,
+                    threaded_ir::FrameId::ROOT,
+                    source_version,
+                    &tuple_var,
                     span,
-                });
+                );
             }
             let new_state = self.current_state_var();
 
