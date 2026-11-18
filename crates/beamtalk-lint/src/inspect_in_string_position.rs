@@ -97,10 +97,10 @@ fn check_node(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
         }
         Expression::StringInterpolation { segments, .. } => {
             for seg in segments {
-                if let StringSegment::Interpolation(e) = seg {
-                    if let Some(span) = inspect_send_span(e) {
-                        flag(span, diagnostics);
-                    }
+                if let StringSegment::Interpolation(e) = seg
+                    && let Some(span) = inspect_send_span(e)
+                {
+                    flag(span, diagnostics);
                 }
             }
         }

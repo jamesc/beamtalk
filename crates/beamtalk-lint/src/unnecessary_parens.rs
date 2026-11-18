@@ -26,7 +26,7 @@ use std::collections::HashSet;
 
 use crate::{LintContext, LintPass, LintTree};
 use beamtalk_core::ast::{
-    BinarySegment, Block, CommentAttachment, Expression, MessageSelector, Module, PipelineSends,
+    BinarySegment, CommentAttachment, Expression, MessageSelector, Module, PipelineSends,
 };
 use beamtalk_core::ast_walker::{for_each_child, for_each_expr_seq, walk_expression};
 use beamtalk_core::source_analysis::Diagnostic;

@@ -138,18 +138,17 @@ fn walk_for_timer_sends(
             arguments,
             is_cast,
             span,
-        } => {
-            if check_message_send(
-                receiver,
-                selector,
-                arguments,
-                *is_cast,
-                *span,
-                in_timer_block,
-                diagnostics,
-            ) {
-                return;
-            }
+        } if check_message_send(
+            receiver,
+            selector,
+            arguments,
+            *is_cast,
+            *span,
+            in_timer_block,
+            diagnostics,
+        ) =>
+        {
+            return;
         }
         Expression::Cascade {
             receiver,

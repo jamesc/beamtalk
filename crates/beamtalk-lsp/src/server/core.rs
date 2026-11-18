@@ -70,16 +70,6 @@ impl Backend {
         }
     }
 
-    /// Read the current nav-cache generation. Foundation
-    /// consumers store this with each cached entry and compare on read.
-    #[allow(dead_code, reason = "per-method children consume this API")]
-    pub(crate) fn nav_cache_generation(&self) -> u64 {
-        self.nav_cache
-            .lock()
-            .expect("nav_cache lock poisoned")
-            .generation()
-    }
-
     /// two-mode dispatch seam for navigation queries.
     ///
     /// When the `delegateToRuntime` flag is on **and** a runtime is
@@ -1385,8 +1375,7 @@ impl Backend {
         // cache-invalidation listener for class-loaded /
         // method-installed push events. The listener holds a clone of the
         // shared `Arc<Mutex<NavCache>>` so it can bump the generation
-        // counter as events arrive — `Backend::nav_cache_generation` reads
-        // through the same lock.
+        // counter as events arrive.
         let class_changed_handle = tokio::spawn(class_changed_listener(
             Arc::clone(&self.nav_cache),
             class_changed_rx,
