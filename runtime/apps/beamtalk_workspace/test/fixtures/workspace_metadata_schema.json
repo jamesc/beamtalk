@@ -1,0 +1,29 @@
+{
+  "comment": "BT-5014: schema of ~/.beamtalk/workspaces/<id>/metadata.json, shared by the Rust CLI (storage.rs), the Erlang writer (beamtalk_workspace_meta) and the desktop broker (discovery.rs). Each writer owns a set of keys and must preserve every key it does not own. Rust half: crates/beamtalk-cli/src/commands/workspace/storage.rs tests; broker half: crates/beamtalk-desktop-broker/src/discovery.rs tests; Erlang half: beamtalk_workspace_meta_tests.",
+  "rust_owned": ["workspace_id", "project_path", "created_at", "project_fingerprint"],
+  "erlang_owned": ["workspace_id", "project_path", "created_at", "last_active", "node_name", "repl_port", "loaded_modules", "class_sources", "settings"],
+  "sample": {
+    "workspace_id": "fixture_ws",
+    "project_path": "/bt_test/fixture_project",
+    "created_at": 1700000000,
+    "project_fingerprint": "fixture_pkg",
+    "last_active": 1700000100,
+    "node_name": "beamtalk_workspace_fixture_ws@localhost",
+    "repl_port": 49152,
+    "loaded_modules": [],
+    "class_sources": {},
+    "settings": {},
+    "unknown_future_key": {"kept": true}
+  },
+  "null_project_path": {
+    "workspace_id": "fixture_ws",
+    "project_path": null,
+    "created_at": 1700000000,
+    "last_active": 1700000100,
+    "node_name": "beamtalk_workspace_fixture_ws@localhost",
+    "repl_port": null,
+    "loaded_modules": [],
+    "class_sources": {},
+    "settings": {}
+  }
+}

@@ -1181,13 +1181,8 @@ persist_metadata_to_disk(State) ->
     _ = filelib:ensure_dir(filename:join(Dir, "dummy")),
 
     %% Build JSON metadata (PIDs as strings, atoms as strings)
-    Metadata = #{
+    Owned = #{
         <<"workspace_id">> => State#state.workspace_id,
-        <<"project_path">> =>
-            case State#state.project_path of
-                undefined -> null;
-                PP -> PP
-            end,
         <<"created_at">> => State#state.created_at,
         <<"last_active">> => State#state.last_activity,
         <<"node_name">> => atom_to_binary(State#state.node_name, utf8),
@@ -1231,6 +1226,16 @@ persist_metadata_to_disk(State) ->
         %% e.g. `autoflush` survives workspace restart.
         <<"settings">> => persist_settings(State#state.settings)
     },
+    %% BT-5014: the Rust CLI writes this file too (`project_fingerprint`, and
+    %% keys future writers add). Read-merge-write so every key this writer
+    %% does not own survives; `project_path` is only written when known, so an
+    %% unknown path never erases the one the CLI recorded.
+    Owned1 =
+        case State#state.project_path of
+            undefined -> Owned;
+            PP -> Owned#{<<"project_path">> => PP}
+        end,
+    Metadata = maps:merge(read_existing_metadata(Path), Owned1),
 
     %% Write to disk
     Json = beamtalk_json:prettify_term(Metadata),
@@ -1244,6 +1249,24 @@ persist_metadata_to_disk(State) ->
                 #{domain => [beamtalk, runtime]}
             ),
             {error, Reason}
+    end.
+
+-doc """
+Read the JSON object currently in `metadata.json` so `persist_metadata_to_disk/1`
+can preserve keys it does not own. Anything unreadable or non-object yields `#{}`.
+""".
+-spec read_existing_metadata(string()) -> map().
+read_existing_metadata(Path) ->
+    case file:read_file(Path) of
+        {ok, Bin} ->
+            try json:decode(Bin) of
+                Map when is_map(Map) -> Map;
+                _ -> #{}
+            catch
+                _:_ -> #{}
+            end;
+        {error, _} ->
+            #{}
     end.
 
 -doc """
