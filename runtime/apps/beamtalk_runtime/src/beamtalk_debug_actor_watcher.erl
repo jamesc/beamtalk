@@ -35,9 +35,11 @@ the row then lives until `disableDebug:` / `disableAllDebug`.
 """.
 -spec watch(pid()) -> ok.
 watch(Pid) ->
-    case whereis(?MODULE) of
-        undefined -> ok;
-        _ -> gen_server:call(?MODULE, {watch, Pid})
+    try
+        gen_server:call(?MODULE, {watch, Pid})
+    catch
+        %% Not running / restarting: init/1 re-monitors from the table.
+        exit:{noproc, _} -> ok
     end.
 
 -doc "Stop monitoring `Pid` (its debug state was removed explicitly).".
@@ -66,11 +68,13 @@ handle_call(_Request, _From, Monitors) ->
     {reply, {error, unknown_request}, Monitors}.
 
 handle_cast({unwatch, Pid}, Monitors) ->
-    case maps:take(Pid, Monitors) of
-        {MRef, Rest} ->
+    %% The table is the source of truth: a concurrent re-enable may have
+    %% re-inserted the row after the disable that sent this cast.
+    case {ets:member(beamtalk_debug_targets, Pid), maps:take(Pid, Monitors)} of
+        {false, {MRef, Rest}} ->
             demonitor(MRef, [flush]),
             {noreply, Rest};
-        error ->
+        _ ->
             {noreply, Monitors}
     end;
 handle_cast(_Msg, Monitors) ->

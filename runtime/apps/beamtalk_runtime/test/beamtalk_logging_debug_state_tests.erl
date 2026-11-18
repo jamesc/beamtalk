@@ -24,6 +24,8 @@ debug_state_test_() ->
         {"debug enabled by an exited process can still be disabled",
             fun disable_all_after_enabling_process_exits/0},
         {"a dead actor's filter and row are removed", fun dead_actor_is_pruned/0},
+        {"a stale unwatch keeps the monitor of a re-enabled actor",
+            fun stale_unwatch_keeps_monitor/0},
         {"the actor filter goes only with the last actor", fun filter_outlives_other_actors/0},
         {"N actors cost one filter and no per-pid atoms", fun n_actors_one_filter_no_atoms/0},
         {"registered filters are external funs", fun filters_are_external_funs/0}
@@ -64,6 +66,20 @@ dead_actor_is_pruned() ->
     beamtalk_test_wait:until(fun() -> ets:lookup(?TABLE, Pid) =:= [] end),
     beamtalk_test_wait:until(fun() -> not has_primary_filter(?ACTOR_FILTER) end),
     ?assertEqual([], beamtalk_logging_config:activeDebugTargets()).
+
+stale_unwatch_keeps_monitor() ->
+    beamtalk_logging_config:disableAllDebug(),
+    Pid = beamtalk_test_proc:spawn_idle(),
+    nil = beamtalk_logging_config:enableDebug(actor_ref(Pid)),
+    %% A concurrent disable deleted the row, a re-enable re-inserted it, and
+    %% only then did the disable's unwatch cast arrive.
+    ets:delete(?TABLE, Pid),
+    ets:insert(?TABLE, {Pid, actor_instance, 'Counter'}),
+    beamtalk_debug_actor_watcher:unwatch(Pid),
+    beamtalk_test_wait:sync(beamtalk_debug_actor_watcher),
+    beamtalk_test_proc:kill_and_wait(Pid),
+    beamtalk_test_wait:until(fun() -> ets:lookup(?TABLE, Pid) =:= [] end),
+    beamtalk_test_wait:until(fun() -> not has_primary_filter(?ACTOR_FILTER) end).
 
 filter_outlives_other_actors() ->
     beamtalk_logging_config:disableAllDebug(),
