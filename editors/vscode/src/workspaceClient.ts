@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import type * as WsModule from "ws";
+import { workspacesBaseDir } from "./beamtalkRoot";
 
 // ─── Public types ────────────────────────────────────────────────────────────
 
@@ -230,17 +230,20 @@ export class WorkspaceClient {
 
   /**
    * Create a WorkspaceClient by reading port and cookie from the workspace
-   * directory (`~/.beamtalk/workspaces/{id}/port` and `cookie`).
+   * directory (`~/.beamtalk/workspaces/{id}/port` and `cookie`; `BEAMTALK_HOME` overrides `~/.beamtalk`).
    *
    * @param workspaceId  Workspace ID (hash or user-assigned name).
-   * @param options.baseDir  Override base directory (default: `~/.beamtalk/workspaces`).
+   * @param options.baseDir  Override base directory (default: `$BEAMTALK_HOME/workspaces`, else `~/.beamtalk/workspaces`).
    * @param options.wsFactory  Override WebSocket factory (for testing).
    */
   static fromFiles(
     workspaceId: string,
     options?: { baseDir?: string; wsFactory?: WebSocketFactory }
   ): WorkspaceClient {
-    const base = options?.baseDir ?? path.join(os.homedir(), ".beamtalk", "workspaces");
+    const base = options?.baseDir ?? workspacesBaseDir();
+    if (base === undefined) {
+      throw new Error("Cannot locate the Beamtalk workspaces directory: no home directory");
+    }
     const wsDir = path.join(base, workspaceId);
 
     const portContent = fs.readFileSync(path.join(wsDir, "port"), "utf8");
