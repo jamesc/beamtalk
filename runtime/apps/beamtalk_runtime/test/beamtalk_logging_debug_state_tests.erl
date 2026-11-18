@@ -26,6 +26,7 @@ debug_state_test_() ->
         {"a dead actor's filter and row are removed", fun dead_actor_is_pruned/0},
         {"a stale unwatch keeps the monitor of a re-enabled actor",
             fun stale_unwatch_keeps_monitor/0},
+        {"disableAllDebug leaves the watcher no monitor", fun disable_all_demonitors/0},
         {"the actor filter goes only with the last actor", fun filter_outlives_other_actors/0},
         {"N actors cost one filter and no per-pid atoms", fun n_actors_one_filter_no_atoms/0},
         {"registered filters are external funs", fun filters_are_external_funs/0}
@@ -80,6 +81,16 @@ stale_unwatch_keeps_monitor() ->
     beamtalk_test_proc:kill_and_wait(Pid),
     beamtalk_test_wait:until(fun() -> ets:lookup(?TABLE, Pid) =:= [] end),
     beamtalk_test_wait:until(fun() -> not has_primary_filter(?ACTOR_FILTER) end).
+
+disable_all_demonitors() ->
+    beamtalk_logging_config:disableAllDebug(),
+    Pid = beamtalk_test_proc:spawn_idle(),
+    nil = beamtalk_logging_config:enableDebug(actor_ref(Pid)),
+    ?assert(maps:is_key(Pid, sys:get_state(beamtalk_debug_actor_watcher))),
+    nil = beamtalk_logging_config:disableAllDebug(),
+    %% unwatch is a cast; sys:get_state is a call, so it is handled after it.
+    ?assertNot(maps:is_key(Pid, sys:get_state(beamtalk_debug_actor_watcher))),
+    beamtalk_test_proc:stop(Pid).
 
 filter_outlives_other_actors() ->
     beamtalk_logging_config:disableAllDebug(),

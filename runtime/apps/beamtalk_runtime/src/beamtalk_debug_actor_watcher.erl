@@ -30,7 +30,7 @@ start_link() ->
 -doc """
 Monitor `Pid` so its debug state is dropped when it exits.
 
-A no-op when the watcher is not running (a caller without the runtime app);
+A no-op when the watcher is not running or is going down (a caller without the runtime app);
 the row then lives until `disableDebug:` / `disableAllDebug`.
 """.
 -spec watch(pid()) -> ok.
@@ -38,8 +38,9 @@ watch(Pid) ->
     try
         gen_server:call(?MODULE, {watch, Pid})
     catch
-        %% Not running / restarting: init/1 re-monitors from the table.
-        exit:{noproc, _} -> ok
+        %% Not running / dying / restarting: init/1 re-monitors from the table.
+        %% A timeout is not swallowed: the watcher is alive but stuck.
+        exit:{Reason, {gen_server, call, _}} when Reason =/= timeout -> ok
     end.
 
 -doc "Stop monitoring `Pid` (its debug state was removed explicitly).".

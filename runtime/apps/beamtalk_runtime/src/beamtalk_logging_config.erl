@@ -509,6 +509,9 @@ activeDebugTargets() ->
 disableAllDebug() ->
     ensure_table(),
     Targets = ets:tab2list(?DEBUG_TABLE),
+    %% Rows go first: the watcher keeps the monitor of any pid that still has a
+    %% row, so an `unwatch` must not be sent while its row is in the table.
+    ets:delete_all_objects(?DEBUG_TABLE),
     lists:foreach(
         fun
             ({Target, subsystem, FilterIds}) ->
@@ -537,7 +540,6 @@ disableAllDebug() ->
         end,
         Targets
     ),
-    ets:delete_all_objects(?DEBUG_TABLE),
     sync_actor_filter(),
     nil.
 
