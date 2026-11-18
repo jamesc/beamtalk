@@ -782,7 +782,12 @@ build-corpus: build-rust
 # recipe's transitive dependency, already run earlier in `ci`/`ci-changed`)
 # has already run — so this only needs to diff, not regenerate.
 [unix]
-check-generated-builtins: build
+check-generated-builtins: build verify-generated-builtins
+
+# The diff half of check-generated-builtins, without the `build` dependency, for
+# a CI job that has already run `just build` (BT-5032: ci.yml's test-integration).
+[unix]
+verify-generated-builtins:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! git diff --exit-code \
@@ -953,7 +958,19 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns test-lint-stamp test-refresh-edge test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-repo
+
+# The repo-wide lint-* recipes and script tests that need only the toolchain CI's
+# lint job has. `lint` runs this group and ci.yml's lint job runs it by name, so
+# the two cannot diverge (BT-5032). Add a new lint here, not to either list.
+lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns test-lint-stamp test-refresh-edge test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly test-workflow-paths
+
+# Test (BT-5032): every repo path literal in a workflow's `paths:` filter or the
+# ci.yml `changes` job's `matches` gate names something that exists, so a renamed
+# file or directory cannot silently turn a gate off.
+test-workflow-paths:
+    @python3 scripts/ci/check_workflow_paths.py
+    @cd scripts/ci && python3 -m unittest -q test_check_workflow_paths
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
@@ -2225,13 +2242,6 @@ fuzz-corpus-lint CORPUS_DIRS="stdlib/test tests/repl-protocol/cases":
 # ═══════════════════════════════════════════════════════════════════════════
 # Coverage
 # ═══════════════════════════════════════════════════════════════════════════
-
-# Regenerate cover_excl_mods and dialyzer exclude_mods in runtime/rebar.config
-# from the actual bt@stdlib@*.beam files produced by build-stdlib.
-# Run this after adding or removing Beamtalk stdlib classes.
-[unix]
-update-stdlib-excludes: build-stdlib
-    python3 scripts/gen-stdlib-excludes.py
 
 # Unix-only: depends on coverage-runtime (Unix-only)
 # Generate coverage reports for both Rust and Erlang runtime
