@@ -65,7 +65,11 @@ defmodule BtAttach.MixProject do
   defp releases do
     [
       bt_attach: [
-        include_executables_for: [:unix],
+        # Windows needs `bin\bt_attach.bat` (the desktop app bundles and spawns
+        # it, BT-2988). Only generated when building on Windows, so the
+        # Unix archives and Docker image are unchanged (BT-5006).
+        include_executables_for:
+          if(match?({:win32, _}, :os.type()), do: [:unix, :windows], else: [:unix]),
         applications: [bt_attach: :permanent]
       ]
     ]
@@ -129,6 +133,10 @@ defmodule BtAttach.MixProject do
   #
   # `mix setup` bootstraps the project: fetch deps, install the esbuild/tailwind
   # binaries, then build assets once. See the module docs for `Mix`.
+  defp npm_launcher do
+    if match?({:win32, _}, :os.type()), do: "cmd /c ", else: ""
+  end
+
   defp aliases do
     [
       setup: ["deps.get", "assets.setup", "assets.build"],
@@ -143,7 +151,10 @@ defmodule BtAttach.MixProject do
         # is provisioned via .tool-versions / mise (dev, CI) and the Dockerfile.
         # --omit=dev skips the test-only `playwright` devDep (its postinstall
         # downloads browsers); the e2e lane installs it separately.
-        "cmd npm ci --prefix assets --no-audit --no-fund --omit=dev"
+        #
+        # On Windows npm is `npm.cmd`, which `mix cmd` cannot spawn directly
+        # (`:eacces` from open_port) — go through `cmd /c` there (BT-5006).
+        "cmd #{npm_launcher()}npm ci --prefix assets --no-audit --no-fund --omit=dev"
       ],
       "assets.build": ["tailwind bt_attach", "esbuild bt_attach"],
       "assets.deploy": [

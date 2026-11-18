@@ -419,3 +419,20 @@ jobs:
     uses: ./.github/workflows/liveview-release.yml
     with:
       publish: ${{ github.event_name == 'release' }}
+
+  # ─── Desktop app (delegated to desktop-release.yml) ──────────────────────
+  # Ships the Tauri desktop attach client (ADR 0097, BT-5006) on its own lane:
+  # Linux/macOS/Windows installers uploaded to the GitHub Release on a full
+  # release. The Apple secrets are optional — without them the macOS legs
+  # build unsigned, un-notarized artifacts instead of failing.
+  desktop-app:
+    uses: ./.github/workflows/desktop-release.yml
+    with:
+      publish: ${{ github.event_name == 'release' }}
+    secrets:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
