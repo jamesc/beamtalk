@@ -12,7 +12,7 @@ die by monitor, wait for a class to register, or sync with a gen_server.
 Replaces the ~70 per-file `wait_until/1,2` / `wait_for_class/2` copies, each
 with different tries and sleeps. Budgets are expressed in **milliseconds**,
 not retries, so the worst case of a wait is explicit and a test's EUnit
-timeout can be checked against it directly (see `default_timeout/0`).
+timeout can be checked against it directly.
 
 Every waiter returns `ok` (`value/2`: the value it found) or raises
 `error({wait_timeout, Reason})`; none returns an atom like `timeout` for the
@@ -29,18 +29,13 @@ caller to forget to check.
     dead/2,
     class/1,
     class/2,
-    sync/1,
-    default_timeout/0
+    sync/1
 ]).
 
 -define(DEFAULT_TIMEOUT_MS, 6000).
 -define(DEFAULT_INTERVAL_MS, 5).
 
--doc "Default wait budget in milliseconds (6 s, the largest budget any per-file waiter used); stay below the EUnit test timeout.".
--spec default_timeout() -> pos_integer().
-default_timeout() -> ?DEFAULT_TIMEOUT_MS.
-
--doc "`until/2` with the default budget (`default_timeout/0`).".
+-doc "`until/2` with the default budget (6 s).".
 -spec until(fun(() -> boolean())) -> ok.
 until(Pred) ->
     until(Pred, ?DEFAULT_TIMEOUT_MS).

@@ -30,6 +30,7 @@ exercise) — covered by the BUnit suite `ActorGlobalScopeTest`
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Shared fixture (round-trip + reserved-name — no netsplit)
@@ -340,10 +341,9 @@ netsplit_heal_resolves_conflict(Peer, PeerNode) ->
     %% publishes, whose `reason` is the dedicated `#globalNameConflict`
     %% Symbol (`normalize_stop_reason/1`), distinct from a plain `#shutdown`.
     Event =
-        receive
-            {got, 'ActorStopped', #{pid := OriginPid} = Ev} -> Ev
-        after 5000 ->
-            ?assert(false)
+        begin
+            ?awaitMessage({got, 'ActorStopped', #{pid := OriginPid} = Ev}),
+            Ev
         end,
     ?assertEqual('globalNameConflict', maps:get(reason, Event)),
 

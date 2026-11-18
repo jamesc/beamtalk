@@ -28,6 +28,7 @@ Phase 2 coverage:
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %% OTP supervisor callback + worker/child start functions.
 -export([init/1, start_worker/1, start_actor_worker/2, start_named_worker/2, start_child_sup/1]).
@@ -69,10 +70,7 @@ start_child_sup(_ParentPid) ->
     {ok, SupPid} = supervisor:start_link(
         ?MODULE, {SupFlags, [worker_spec(w1, start_worker, [Me])]}
     ),
-    receive
-        {worker_ready, _} -> ok
-    after 1000 -> error(worker_not_ready)
-    end,
+    ?awaitMessage({worker_ready, _}, 1000),
     {ok, SupPid}.
 
 %% Worker that registers itself under `Name` before idling.
@@ -100,10 +98,7 @@ start_supervisor(ChildSpecs) ->
     {ok, Pid} = supervisor:start_link(?MODULE, {SupFlags, ChildSpecs}),
     lists:foreach(
         fun(_) ->
-            receive
-                {worker_ready, _} -> ok
-            after 1000 -> error(worker_not_ready)
-            end
+            ?awaitMessage({worker_ready, _}, 1000)
         end,
         ChildSpecs
     ),
@@ -395,10 +390,7 @@ restarting_child_represented_test() ->
 worker_root_does_not_crash_test() ->
     Self = self(),
     {ok, WorkerPid} = start_worker(Self),
-    receive
-        {worker_ready, _} -> ok
-    after 1000 -> error(worker_not_ready)
-    end,
+    ?awaitMessage({worker_ready, _}, 1000),
     try
         Nodes = beamtalk_process_navigation:snapshot_from_pids([WorkerPid], system),
         ?assertEqual(1, length(Nodes)),
@@ -491,10 +483,7 @@ from_accepts_supervisor_handle_test() ->
 from_non_supervisor_pid_is_single_node_test() ->
     Self = self(),
     {ok, WorkerPid} = start_worker(Self),
-    receive
-        {worker_ready, _} -> ok
-    after 1000 -> error(worker_not_ready)
-    end,
+    ?awaitMessage({worker_ready, _}, 1000),
     try
         {ok, Nodes} = beamtalk_process_navigation:from(WorkerPid),
         ?assertEqual(1, length(Nodes)),
@@ -792,10 +781,7 @@ child_handles_dynamic_supervisor_children_test() ->
     {ok, _C2} = supervisor:start_child(SupPid, []),
     %% Drain readiness signals from the two started children.
     [
-        receive
-            {worker_ready, _} -> ok
-        after 1000 -> error(worker_not_ready)
-        end
+        ?awaitMessage({worker_ready, _}, 1000)
      || _ <- [1, 2]
     ],
     try
@@ -843,10 +829,7 @@ child_handles_bad_pid_is_type_error_test() ->
 child_handles_worker_pid_is_empty_test() ->
     Self = self(),
     {ok, WorkerPid} = start_worker(Self),
-    receive
-        {worker_ready, _} -> ok
-    after 1000 -> error(worker_not_ready)
-    end,
+    ?awaitMessage({worker_ready, _}, 1000),
     try
         ?assertEqual({ok, []}, beamtalk_process_navigation:child_handles(pid_to_list(WorkerPid)))
     after

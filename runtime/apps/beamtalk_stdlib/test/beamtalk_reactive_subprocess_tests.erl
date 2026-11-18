@@ -130,11 +130,8 @@ collector_loop(Owner, Acc) ->
 get_events(CollectorPid) ->
     Ref = make_ref(),
     CollectorPid ! {get_events, Ref},
-    receive
-        {events, Ref, Events} -> Events
-    after 5000 ->
-        error(timeout_waiting_for_events)
-    end.
+    ?awaitMessage({events, Ref, Events}),
+    Events.
 
 wait_for_exit(CollectorPid) ->
     IsExit = fun

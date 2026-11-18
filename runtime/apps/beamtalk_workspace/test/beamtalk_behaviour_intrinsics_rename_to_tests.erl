@@ -60,6 +60,7 @@ sites, not one.
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Fixture sources
@@ -441,10 +442,9 @@ dynamic_class_rename_orders_identity_move_before_reference_rewrite(#{class_obj :
     1 = erlang:trace_pattern({beamtalk_repl_loader_rewrite, rewrite_sites, 2}, true, [global]),
     Worker ! go,
     Result =
-        receive
-            {bt3278_reorder_result, R} -> R
-        after 5000 ->
-            erlang:error(bt3278_reorder_worker_timeout)
+        begin
+            ?awaitMessage({bt3278_reorder_result, R}),
+            R
         end,
     _ = erlang:trace_pattern({beamtalk_repl_loader_rewrite, validate_sites, 2}, false, [global]),
     _ = erlang:trace_pattern({beamtalk_object_class, rename, 2}, false, [global]),
@@ -538,10 +538,9 @@ dynamic_class_rename_revert_orders_identity_move_before_reference_rewrite(#{clas
     1 = erlang:trace_pattern({beamtalk_repl_loader_rewrite, rewrite_sites, 2}, true, [local]),
     Worker ! go,
     Result =
-        receive
-            {bt3278_revert_reorder_result, R} -> R
-        after 5000 ->
-            erlang:error(bt3278_revert_reorder_worker_timeout)
+        begin
+            ?awaitMessage({bt3278_revert_reorder_result, R}),
+            R
         end,
     _ = erlang:trace_pattern({beamtalk_repl_loader_rewrite, validate_sites, 2}, false, [local]),
     _ = erlang:trace_pattern({beamtalk_object_class, rename, 2}, false, [global]),

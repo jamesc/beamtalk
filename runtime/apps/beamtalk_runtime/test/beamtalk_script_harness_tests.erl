@@ -13,6 +13,7 @@ cannot run under EUnit, so these tests set the flag directly.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 setup() ->
     beamtalk_script_harness:clear_stop_requested().
@@ -108,10 +109,7 @@ entry_completion_defers_to_requested_stop_test_() ->
                 beamtalk_script_harness:mark_stop_requested(3),
                 Parent ! requested
             end),
-            receive
-                requested -> ok
-            after 1000 -> ?assert(false)
-            end,
+            ?awaitMessage(requested, 1000),
             %% "Entry": completes normally and reaches its implicit halt.
             Entry = spawn(fun() -> beamtalk_script_harness:halt_unless_stopping(0) end),
             Ref = erlang:monitor(process, Entry),

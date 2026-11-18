@@ -424,10 +424,7 @@ concurrent_message_sends_test() ->
 
     %% Wait for all processes to complete
     [
-        receive
-            {done, Pid} -> ok
-        after 5000 -> ?assert(false)
-        end
+        ?awaitMessage({done, Pid})
      || Pid <- Pids
     ],
 
@@ -1027,11 +1024,7 @@ monitor_delivers_down_on_actor_death_test() ->
 
     %% Kill the actor and verify we get a DOWN message
     gen_server:stop(Counter, normal, 1000),
-    receive
-        {'DOWN', Ref, process, Counter, normal} -> ok
-    after 1000 ->
-        ?assert(false)
-    end.
+    ?awaitMessage({'DOWN', Ref, process, Counter, normal}, 1000).
 
 %%% pid tests
 
@@ -1059,11 +1052,7 @@ on_exit_sync_calls_block_on_death_test() ->
     Block = fun(Reason) -> Self ! {exit_reason, Reason} end,
     beamtalk_actor:sync_send(Counter, 'onExit:', [Block]),
     gen_server:stop(Counter, normal, 1000),
-    receive
-        {exit_reason, normal} -> ok
-    after 2000 ->
-        ?assert(false)
-    end.
+    ?awaitMessage({exit_reason, normal}, 2000).
 
 on_exit_async_calls_block_on_death_test() ->
     {ok, Counter} = test_counter:start_link(0),
@@ -1073,11 +1062,7 @@ on_exit_async_calls_block_on_death_test() ->
     beamtalk_actor:async_send(Counter, 'onExit:', [Block], Future),
     ?assertEqual(ok, beamtalk_future:await(Future)),
     gen_server:stop(Counter, normal, 1000),
-    receive
-        {exit_reason_async, normal} -> ok
-    after 2000 ->
-        ?assert(false)
-    end.
+    ?awaitMessage({exit_reason_async, normal}, 2000).
 
 async_message_to_dead_actor_rejects_future_test() ->
     {ok, Counter} = test_counter:start_link(0),
@@ -1331,9 +1316,9 @@ handle_cast_fire_and_forget_unknown_selector_crashes_actor_test() ->
     Ref = erlang:monitor(process, Counter),
     gen_server:cast(Counter, {cast, unknownMethod, []}),
     Reason =
-        receive
-            {'DOWN', Ref, process, Counter, R} -> R
-        after 2000 -> error(actor_did_not_crash)
+        begin
+            ?awaitMessage({'DOWN', Ref, process, Counter, R}, 2000),
+            R
         end,
     ?assertMatch(
         {
@@ -1473,10 +1458,7 @@ await_initialize_monitor_established_before_death_reports_real_reason_test() ->
     try
         {ok, {Pid, MonRef}} = gen_server:start_monitor(test_crashing_init_actor, #{}, []),
         Probe = erlang:monitor(process, Pid),
-        receive
-            {'DOWN', Probe, process, Pid, _} -> ok
-        after 5000 -> error(actor_did_not_stop)
-        end,
+        ?awaitMessage({'DOWN', Probe, process, Pid, _}),
         ?assertEqual(
             {error, {error, function_clause}},
             beamtalk_actor:await_initialize(Pid, MonRef)
@@ -1561,9 +1543,7 @@ spawn_named_for_caller_unlinks_before_continuations_can_kill_caller_test_() ->
                         {ok, Pid} = R,
                         {links, Links} = process_info(self(), links),
                         Ref = erlang:monitor(process, Pid),
-                        receive
-                            {'DOWN', Ref, process, Pid, _} -> ok
-                        end,
+                        ?awaitMessage({'DOWN', Ref, process, Pid, _}),
                         Stray =
                             receive
                                 {'EXIT', Pid, _} = M -> M
@@ -1573,9 +1553,7 @@ spawn_named_for_caller_unlinks_before_continuations_can_kill_caller_test_() ->
                     end),
                     receive
                         {Caller, Linked, Stray} ->
-                            receive
-                                {'DOWN', MRef, process, Caller, _} -> ok
-                            end,
+                            ?awaitMessage({'DOWN', MRef, process, Caller, _}),
                             {Linked, Stray};
                         {'DOWN', MRef, process, Caller, Reason} ->
                             {caller_died, Reason}
@@ -1637,10 +1615,8 @@ safe_spawn_monitored_live_actor_keeps_monitor_and_no_link_test() ->
     {links, CallerLinks} = process_info(self(), links),
     ?assertNot(lists:member(Pid, CallerLinks)),
     gen_server:stop(Pid),
-    receive
-        {'DOWN', MonRef, process, Pid, Reason} -> ?assertEqual(normal, Reason)
-    after 5000 -> error(no_down)
-    end.
+    ?awaitMessage({'DOWN', MonRef, process, Pid, Reason}),
+    ?assertEqual(normal, Reason).
 
 safe_spawn_monitored_ignores_supervisor_spawn_context_test() ->
     %% Unlike safe_spawn/2, a monitored start never links, even in a
@@ -1687,10 +1663,8 @@ safe_spawn_monitored_async_live_actor_is_monitored_not_linked_test() ->
     ?assertNot(lists:member(Pid, CallerLinks)),
     ?assertMatch(#{mode := ok}, gen_server:call(Pid, get_state)),
     gen_server:stop(Pid),
-    receive
-        {'DOWN', MonRef, process, Pid, Reason} -> ?assertEqual(normal, Reason)
-    after 5000 -> error(no_down)
-    end.
+    ?awaitMessage({'DOWN', MonRef, process, Pid, Reason}),
+    ?assertEqual(normal, Reason).
 
 safe_spawn_monitored_async_is_a_proc_lib_gen_server_test() ->
     %% `sys` and observer rely on `$ancestors` / `$initial_call`, which
@@ -1717,10 +1691,8 @@ safe_spawn_monitored_async_honours_init_actions_test() ->
     {ok, {TPid, TRef}} = beamtalk_actor:safe_spawn_monitored_async(
         test_async_init_actor, #{mode => timeout}
     ),
-    receive
-        {'DOWN', TRef, process, TPid, Reason} -> ?assertEqual(timed_out, Reason)
-    after 5000 -> error(no_down)
-    end.
+    ?awaitMessage({'DOWN', TRef, process, TPid, Reason}),
+    ?assertEqual(timed_out, Reason).
 
 %% BT-4806: the former safe_spawn_monitored_fast_abnormal_exit_reports_real_reason and
 %% safe_spawn_monitored_async_{init_stop_delivers_down_with_reason,init_ignore_exits_normal,
@@ -2171,9 +2143,9 @@ handle_cast_fire_and_forget_error_crashes_actor_test() ->
     Ref = erlang:monitor(process, Actor),
     gen_server:cast(Actor, {cast, throwError, []}),
     Reason =
-        receive
-            {'DOWN', Ref, process, Actor, R} -> R
-        after 2000 -> error(actor_did_not_crash)
+        begin
+            ?awaitMessage({'DOWN', Ref, process, Actor, R}, 2000),
+            R
         end,
     ?assertMatch(
         {#{'$beamtalk_class' := _, error := #beamtalk_error{selector = throwError}}, _Stack},
@@ -2366,11 +2338,7 @@ async_send_onExit_already_dead_actor_test() ->
     beamtalk_actor:async_send(Counter, 'onExit:', [Block], Future),
     %% The watcher should get a DOWN immediately and call the block
     ?assertEqual(ok, beamtalk_future:await(Future, 2000)),
-    receive
-        {exit_reason_already_dead, _Reason} -> ok
-    after 2000 ->
-        ?assert(false)
-    end.
+    ?awaitMessage({exit_reason_already_dead, _Reason}, 2000).
 
 %%% ============================================================================
 %%% sync_send onExit: fires block on death
@@ -2382,11 +2350,7 @@ sync_send_onExit_with_kill_reason_test() ->
     Block = fun(Reason) -> Self ! {kill_exit_reason, Reason} end,
     beamtalk_actor:sync_send(Counter, 'onExit:', [Block]),
     exit(Counter, kill),
-    receive
-        {kill_exit_reason, killed} -> ok
-    after 2000 ->
-        ?assert(false)
-    end.
+    ?awaitMessage({kill_exit_reason, killed}, 2000).
 
 %%% ============================================================================
 %%% ADR 0079: Named-registration intrinsics
@@ -2442,11 +2406,7 @@ is_beamtalk_actor_false_for_dead_process_test() ->
     Pid = spawn(fun() -> ok end),
     %% Wait for the process to actually die.
     MRef = erlang:monitor(process, Pid),
-    receive
-        {'DOWN', MRef, process, Pid, _} -> ok
-    after 1000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({'DOWN', MRef, process, Pid, _}, 1000),
     ?assertNot(beamtalk_actor_registry:is_beamtalk_actor(Pid)).
 
 is_beamtalk_actor_false_for_non_pid_test() ->
@@ -2549,11 +2509,7 @@ register_name_dead_pid_test() ->
     cleanup_name(Name),
     DeadPid = spawn(fun() -> ok end),
     MRef = erlang:monitor(process, DeadPid),
-    receive
-        {'DOWN', MRef, process, DeadPid, _} -> ok
-    after 1000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({'DOWN', MRef, process, DeadPid, _}, 1000),
     Result = beamtalk_actor_registry:register_name(Name, DeadPid),
     ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result),
     %% And no ghost registration was left behind.
@@ -3205,11 +3161,7 @@ sync_send_onExit_callback_block_raises_test() ->
     %% BT-4679: assert on the observable effect (the block ran) instead of sleeping and
     %% asserting `true`. The block then raises; this does not check how the watcher
     %% handles that error.
-    receive
-        onexit_block_ran -> ok
-    after 2000 ->
-        error(onexit_block_did_not_run)
-    end.
+    ?awaitMessage(onexit_block_ran, 2000).
 
 async_send_onExit_callback_block_raises_test() ->
     %% Same as above but through async_send/4
@@ -3226,11 +3178,7 @@ async_send_onExit_callback_block_raises_test() ->
     beamtalk_test_wait:dead(Counter),
     %% BT-4679: assert the block ran (was `?assert(true)`); the error it then raises is not
     %% observed here.
-    receive
-        onexit_block_ran -> ok
-    after 2000 ->
-        error(onexit_block_did_not_run)
-    end.
+    ?awaitMessage(onexit_block_ran, 2000).
 
 cast_send_to_non_actor_pid_ok_test() ->
     %% cast_send calls lookup_class — for non-actor pids it falls back to
@@ -3584,9 +3532,9 @@ local_temp_not_published_as_changed_slot_test_() ->
             NewState = OldState#{total => 5, '__local__gaps' => 2},
             ok = beamtalk_actor:notify_state_change(OldState, NewState),
             Slots =
-                receive
-                    {object_changed, Self, S} -> S
-                after 1000 -> ?assert(false)
+                begin
+                    ?awaitMessage({object_changed, Self, S}, 1000),
+                    S
                 end,
             ?assert(lists:member(total, Slots)),
             ?assertNot(lists:member('__local__gaps', Slots)),
@@ -3613,9 +3561,9 @@ unchanged_state_publishes_nothing_test_() ->
             end,
             %% A real change on the same watched actor still publishes.
             ok = beamtalk_actor:notify_state_change(State, State#{total => 4}),
-            receive
-                {object_changed, Self, Slots} -> ?assertEqual([total], Slots)
-            after 1000 -> ?assert(false)
+            begin
+                ?awaitMessage({object_changed, Self, Slots}, 1000),
+                ?assertEqual([total], Slots)
             end,
             beamtalk_object_watch:unsubscribe(Self, Self)
         end)
@@ -4035,9 +3983,7 @@ bt3967_unknown_intrinsic_raises_test() ->
 bt3967_external_stop_with_dead_actor_is_ok_test() ->
     Pid = spawn(fun() -> ok end),
     Ref = erlang:monitor(process, Pid),
-    receive
-        {'DOWN', Ref, process, Pid, _} -> ok
-    end,
+    ?awaitMessage({'DOWN', Ref, process, Pid, _}),
     ?assertEqual(ok, beamtalk_actor:sync_send(Pid, 'stopWith:', [{shutdown, gone}])).
 
 bt3967_stop_with_timeout_rejects_bad_timeout_test() ->
@@ -4426,21 +4372,13 @@ bt4090_reply_to_deferred_answers_tagged_test() ->
     Handle = #{'$beamtalk_class' => 'ReplyTo', from => {self(), Tag}},
     ok = beamtalk_actor:replyToDeferred(Handle, 42),
     ok = beamtalk_actor:replyErrorToDeferred(Handle, boom),
-    receive
-        {Tag, {ok, 42}} -> ok
-    after 1000 -> ?assert(false)
-    end,
-    receive
-        {Tag, {error, boom}} -> ok
-    after 1000 -> ?assert(false)
-    end.
+    ?awaitMessage({Tag, {ok, 42}}, 1000),
+    ?awaitMessage({Tag, {error, boom}}, 1000).
 
 bt4090_reply_to_dead_caller_is_silent_test() ->
     Dead = spawn(fun() -> ok end),
     Ref = monitor(process, Dead),
-    receive
-        {'DOWN', Ref, _, _, _} -> ok
-    end,
+    ?awaitMessage({'DOWN', Ref, _, _, _}),
     Handle = #{'$beamtalk_class' => 'ReplyTo', from => {Dead, make_ref()}},
     ?assertEqual(ok, beamtalk_actor:replyToDeferred(Handle, 1)),
     ?assertEqual(ok, beamtalk_actor:replyErrorToDeferred(Handle, boom)).

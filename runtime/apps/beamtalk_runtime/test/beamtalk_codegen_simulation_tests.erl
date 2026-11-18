@@ -351,11 +351,9 @@ async_await_on_pending_future_blocks_test() ->
 
     %% Wait for the awaiter to signal it's ready
     AwaiterPid =
-        receive
-            {ready, P} -> P
-        after 1000 ->
-            % Timeout - spawned process didn't start
-            ?assert(false)
+        begin
+            ?awaitMessage({ready, P}, 1000),
+            P
         end,
 
     %% Wait for the await to register with the future: the awaiter is blocked
@@ -368,12 +366,8 @@ async_await_on_pending_future_blocks_test() ->
     gen_server:cast(Actor, {increment, [], Future}),
 
     %% Verify the awaiter got the result
-    receive
-        {awaited, Value} -> ?assertEqual(6, Value)
-    after 3000 ->
-        % Timeout - test failed
-        ?assert(false)
-    end,
+    ?awaitMessage({awaited, Value}, 3000),
+    ?assertEqual(6, Value),
 
     gen_server:stop(Actor).
 
@@ -585,10 +579,9 @@ async_multiple_awaits_same_future_test() ->
 
     %% Wait for all waiters to signal they're ready
     AwaiterPids = [
-        receive
-            {ready, _, Pid} -> Pid
-        after 1000 ->
-            ?assert(false)
+        begin
+            ?awaitMessage({ready, _, Pid}, 1000),
+            Pid
         end
      || _ <- [1, 2, 3]
     ],
@@ -604,10 +597,9 @@ async_multiple_awaits_same_future_test() ->
 
     %% All waiters should get the result
     Results = lists:sort([
-        receive
-            {waiter, N, R} -> {N, R}
-        after 3000 ->
-            ?assert(false)
+        begin
+            ?awaitMessage({waiter, N, R}, 3000),
+            {N, R}
         end
      || _ <- [1, 2, 3]
     ]),
@@ -1599,50 +1591,47 @@ extension_method_on_compiled_actor_test() ->
     beamtalk_extensions:init(),
     %% Extension funs take (Args, Self, State) and return {Result, NewState}
     ExtFun = fun([], _Self, State) -> {42, State} end,
-    beamtalk_extensions:register('Counter', testExtension, ExtFun, test_owner),
-    Object = 'bt@counter':spawn(),
-    Pid = element(4, Object),
-    try
-        {ok, Result} = gen_server:call(Pid, {testExtension, []}),
-        ?assertEqual(42, Result)
-    after
-        gen_server:stop(Pid),
-        ets:delete(beamtalk_extensions, {'Counter', testExtension}),
-        beamtalk_class_derived_cache:invalidate()
-    end.
+    beamtalk_test_extensions:with_extension('Counter', testExtension, ExtFun, fun() ->
+        Object = 'bt@counter':spawn(),
+        Pid = element(4, Object),
+        try
+            {ok, Result} = gen_server:call(Pid, {testExtension, []}),
+            ?assertEqual(42, Result)
+        after
+            gen_server:stop(Pid)
+        end
+    end).
 
 %% Test: Extension method receives Args correctly
 extension_method_with_args_test() ->
     beamtalk_extensions:init(),
     ExtFun = fun([N], _Self, State) -> {N * 10, State} end,
-    beamtalk_extensions:register('Counter', 'scaleBy:', ExtFun, test_owner),
-    Object = 'bt@counter':spawn(),
-    Pid = element(4, Object),
-    try
-        {ok, Result} = gen_server:call(Pid, {'scaleBy:', [5]}),
-        ?assertEqual(50, Result)
-    after
-        gen_server:stop(Pid),
-        ets:delete(beamtalk_extensions, {'Counter', 'scaleBy:'}),
-        beamtalk_class_derived_cache:invalidate()
-    end.
+    beamtalk_test_extensions:with_extension('Counter', 'scaleBy:', ExtFun, fun() ->
+        Object = 'bt@counter':spawn(),
+        Pid = element(4, Object),
+        try
+            {ok, Result} = gen_server:call(Pid, {'scaleBy:', [5]}),
+            ?assertEqual(50, Result)
+        after
+            gen_server:stop(Pid)
+        end
+    end).
 
 %% Test: Extension doesn't interfere with regular methods
 extension_coexists_with_regular_methods_test() ->
     beamtalk_extensions:init(),
     ExtFun = fun([], _Self, State) -> {extended, State} end,
-    beamtalk_extensions:register('Counter', myExtension, ExtFun, test_owner),
-    Object = 'bt@counter':spawn(),
-    Pid = element(4, Object),
-    try
-        {ok, 0} = gen_server:call(Pid, {getValue, []}),
-        {ok, 1} = gen_server:call(Pid, {increment, []}),
-        {ok, extended} = gen_server:call(Pid, {myExtension, []})
-    after
-        gen_server:stop(Pid),
-        ets:delete(beamtalk_extensions, {'Counter', myExtension}),
-        beamtalk_class_derived_cache:invalidate()
-    end.
+    beamtalk_test_extensions:with_extension('Counter', myExtension, ExtFun, fun() ->
+        Object = 'bt@counter':spawn(),
+        Pid = element(4, Object),
+        try
+            {ok, 0} = gen_server:call(Pid, {getValue, []}),
+            {ok, 1} = gen_server:call(Pid, {increment, []}),
+            {ok, extended} = gen_server:call(Pid, {myExtension, []})
+        after
+            gen_server:stop(Pid)
+        end
+    end).
 
 %% Test: Unregistered extension falls through to DNU error
 %% See method_not_found_error_test's comment — the DNU fallback
@@ -1672,24 +1661,23 @@ extension_method_state_threading_test() ->
         NewState = maps:put('value', OldValue + 100, State),
         {OldValue + 100, NewState}
     end,
-    beamtalk_extensions:register('Counter', 'addHundred', ExtFun, test_owner),
-    Object = 'bt@counter':spawn(),
-    Pid = element(4, Object),
-    try
-        %% Initial value is 0
-        {ok, 0} = gen_server:call(Pid, {getValue, []}),
-        %% Extension mutates state: value becomes 100
-        {ok, 100} = gen_server:call(Pid, {'addHundred', []}),
-        %% State mutation persisted: getValue should return 100
-        {ok, 100} = gen_server:call(Pid, {getValue, []}),
-        %% Call extension again: value becomes 200
-        {ok, 200} = gen_server:call(Pid, {'addHundred', []}),
-        {ok, 200} = gen_server:call(Pid, {getValue, []})
-    after
-        gen_server:stop(Pid),
-        ets:delete(beamtalk_extensions, {'Counter', 'addHundred'}),
-        beamtalk_class_derived_cache:invalidate()
-    end.
+    beamtalk_test_extensions:with_extension('Counter', 'addHundred', ExtFun, fun() ->
+        Object = 'bt@counter':spawn(),
+        Pid = element(4, Object),
+        try
+            %% Initial value is 0
+            {ok, 0} = gen_server:call(Pid, {getValue, []}),
+            %% Extension mutates state: value becomes 100
+            {ok, 100} = gen_server:call(Pid, {'addHundred', []}),
+            %% State mutation persisted: getValue should return 100
+            {ok, 100} = gen_server:call(Pid, {getValue, []}),
+            %% Call extension again: value becomes 200
+            {ok, 200} = gen_server:call(Pid, {'addHundred', []}),
+            {ok, 200} = gen_server:call(Pid, {getValue, []})
+        after
+            gen_server:stop(Pid)
+        end
+    end).
 
 %% Test: Extension that raises answers a structured error and leaves the actor alive
 %%
@@ -1701,27 +1689,26 @@ extension_method_state_threading_test() ->
 extension_error_propagation_test() ->
     beamtalk_extensions:init(),
     CrashFun = fun([], _Self, _State) -> error(extension_crash) end,
-    beamtalk_extensions:register('Counter', crashMethod, CrashFun, test_owner),
-    Object = 'bt@counter':spawn(),
-    Pid = element(4, Object),
-    try
-        Result = gen_server:call(Pid, {crashMethod, []}),
-        ?assertMatch(
-            {error, #{
-                error := #beamtalk_error{
-                    kind = runtime_error,
-                    class = 'Counter',
-                    selector = crashMethod,
-                    details = #{reason := extension_crash}
-                }
-            }},
-            Result
-        ),
-        %% The actor survived and its state is untouched.
-        ?assert(is_process_alive(Pid)),
-        {ok, 0} = gen_server:call(Pid, {getValue, []})
-    after
-        gen_server:stop(Pid),
-        ets:delete(beamtalk_extensions, {'Counter', crashMethod}),
-        beamtalk_class_derived_cache:invalidate()
-    end.
+    beamtalk_test_extensions:with_extension('Counter', crashMethod, CrashFun, fun() ->
+        Object = 'bt@counter':spawn(),
+        Pid = element(4, Object),
+        try
+            Result = gen_server:call(Pid, {crashMethod, []}),
+            ?assertMatch(
+                {error, #{
+                    error := #beamtalk_error{
+                        kind = runtime_error,
+                        class = 'Counter',
+                        selector = crashMethod,
+                        details = #{reason := extension_crash}
+                    }
+                }},
+                Result
+            ),
+            %% The actor survived and its state is untouched.
+            ?assert(is_process_alive(Pid)),
+            {ok, 0} = gen_server:call(Pid, {getValue, []})
+        after
+            gen_server:stop(Pid)
+        end
+    end).

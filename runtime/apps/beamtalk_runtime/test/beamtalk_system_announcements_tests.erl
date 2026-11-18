@@ -25,6 +25,7 @@ codegen, which EUnit cannot drive directly).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Setup / teardown
@@ -73,11 +74,8 @@ subscribe_self(EventClass) ->
 %% Block until the system event for `EventClass` is delivered, returning the
 %% payload map; fail after a timeout.
 expect_event(EventClass) ->
-    receive
-        {got, EventClass, Event} -> Event
-    after 1000 ->
-        ?assert(false)
-    end.
+    ?awaitMessage({got, EventClass, Event}, 1000),
+    Event.
 
 %%====================================================================
 %% system_announce/2 delivers each well-known system event
@@ -287,10 +285,7 @@ class_removed_not_fired_on_callback_crash_test_() ->
             _SubRef = subscribe_self('ClassRemoved'),
             MRef = erlang:monitor(process, Pid),
             ?assertExit(_, gen_server:call(Pid, bt4622_no_such_call)),
-            receive
-                {'DOWN', MRef, process, Pid, _} -> ok
-            after 5000 -> ?assert(false)
-            end,
+            ?awaitMessage({'DOWN', MRef, process, Pid, _}),
             try
                 receive
                     {got, 'ClassRemoved', _} -> ?assert(false)
@@ -342,11 +337,7 @@ check_exact_and_super(EventClass, Fields) ->
         'Announcement', self(), fun(E) -> Collector ! {super, E} end, false
     ),
     ok = beamtalk_announcements:system_announce_running(EventClass, Fields),
-    receive
-        {exact, E1} -> ?assertEqual(EventClass, maps:get('$beamtalk_class', E1))
-    after 1000 -> ?assert(false)
-    end,
-    receive
-        {super, E2} -> ?assertEqual(EventClass, maps:get('$beamtalk_class', E2))
-    after 1000 -> ?assert(false)
-    end.
+    ?awaitMessage({exact, E1}, 1000),
+    ?assertEqual(EventClass, maps:get('$beamtalk_class', E1)),
+    ?awaitMessage({super, E2}, 1000),
+    ?assertEqual(EventClass, maps:get('$beamtalk_class', E2)).

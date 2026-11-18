@@ -15,6 +15,7 @@ would not see it.
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %% proc_lib entry point for the fake `native:` backing process.
 -export([init/1]).
@@ -22,14 +23,6 @@ would not see it.
 %%% ---------------------------------------------------------------------
 %%% Helpers
 %%% ---------------------------------------------------------------------
-
-stop(Pid) ->
-    unlink(Pid),
-    MonRef = erlang:monitor(process, Pid),
-    exit(Pid, kill),
-    receive
-        {'DOWN', MonRef, process, Pid, _} -> ok
-    end.
 
 %% A marker-carrying process, like a generated `init/1` leaves behind, that is
 %% registered anywhere.
@@ -76,15 +69,15 @@ all_instances_reads_the_scan_test() ->
         ?assertEqual([Other], beamtalk_runtime_api:all_instances('Bt4947Other')),
         ?assertEqual([], beamtalk_runtime_api:all_instances('Bt4947None'))
     after
-        stop(A),
-        stop(B),
-        stop(Other)
+        beamtalk_test_proc:kill_and_wait(A),
+        beamtalk_test_proc:kill_and_wait(B),
+        beamtalk_test_proc:kill_and_wait(Other)
     end.
 
 all_instances_drops_dead_actors_test() ->
     A = marked('Bt4947Dead'),
     ?assertEqual([A], beamtalk_runtime_api:all_instances('Bt4947Dead')),
-    stop(A),
+    beamtalk_test_proc:kill_and_wait(A),
     ?assertEqual([], beamtalk_runtime_api:all_instances('Bt4947Dead')).
 
 all_instances_includes_named_and_supervised_test() ->
@@ -96,13 +89,11 @@ all_instances_includes_named_and_supervised_test() ->
         ?assert(lists:member(Named, Pids)),
         ?assert(lists:member(Child, Pids))
     after
-        stop(Named),
+        beamtalk_test_proc:kill_and_wait(Named),
         unlink(Sup),
         MonRef = erlang:monitor(process, Sup),
         exit(Sup, shutdown),
-        receive
-            {'DOWN', MonRef, process, Sup, _} -> ok
-        end
+        ?awaitMessage({'DOWN', MonRef, process, Sup, _})
     end.
 
 %%% ---------------------------------------------------------------------
@@ -127,8 +118,8 @@ local_actors_scans_without_the_actor_list_test() ->
             Pids = [P || {beamtalk_object, _, _, P} <- Objs],
             ?assertEqual(length(Pids), length(lists:usort(Pids)))
         after
-            stop(A),
-            stop(B)
+            beamtalk_test_proc:kill_and_wait(A),
+            beamtalk_test_proc:kill_and_wait(B)
         end
     end).
 
@@ -136,13 +127,13 @@ local_actors_filters_dead_test() ->
     with_obj_class(fun() ->
         A = marked('Bt4947Obj'),
         B = marked('Bt4947Obj'),
-        stop(A),
+        beamtalk_test_proc:kill_and_wait(A),
         try
             Pids = [P || {beamtalk_object, _, _, P} <- beamtalk_node:local_actors()],
             ?assertNot(lists:member(A, Pids)),
             ?assert(lists:member(B, Pids))
         after
-            stop(B)
+            beamtalk_test_proc:kill_and_wait(B)
         end
     end).
 
@@ -156,7 +147,7 @@ local_actor_at_uses_info_test() ->
             ?assertEqual(Expected, beamtalk_node:local_actor_at(pid_to_list(A))),
             ?assertEqual(Expected, beamtalk_node:local_actor_at({beamtalk_string, PidBin}))
         after
-            stop(A)
+            beamtalk_test_proc:kill_and_wait(A)
         end,
         %% dead
         ?assertEqual(nil, beamtalk_node:local_actor_at(PidBin)),
@@ -269,11 +260,8 @@ remove_from_system_refuses_from_own_instance_test() ->
         end
     end),
     try
-        receive
-            {result, Instance, Result} ->
-                ?assertMatch({error, #{error := #beamtalk_error{kind = runtime_error}}}, Result)
-        after 5000 -> ?assert(false)
-        end,
+        ?awaitMessage({result, Instance, Result}),
+        ?assertMatch({error, #{error := #beamtalk_error{kind = runtime_error}}}, Result),
         ?assert(is_process_alive(Instance)),
         ?assertEqual(ClassPid, beamtalk_class_registry:whereis_class(Class))
     after

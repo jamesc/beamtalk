@@ -23,6 +23,7 @@ counterpart.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -define(PREFIX, <<"LoaderShape">>).
 
@@ -51,12 +52,10 @@ fixture_opts() ->
 %% `reload_check` subscription (`subscribe_self_to_reload_check/0` already
 %% covers both, see `beamtalk_repl_subscriptions:announcement_classes/1`).
 receive_shape_reload_findings_announcement() ->
-    receive
-        {beamtalk_announcement, _SubRef, 'ShapeReloadFindingsCompleted', _Handler, Event} ->
-            Event
-    after 2000 ->
-        error(timeout_waiting_for_shape_reload_findings_announcement)
-    end.
+    ?awaitMessage(
+        {beamtalk_announcement, _SubRef, 'ShapeReloadFindingsCompleted', _Handler, Event}, 2000
+    ),
+    Event.
 
 state0() -> beamtalk_repl_state:new(undefined, 0).
 
@@ -111,63 +110,61 @@ counter_source_gen2() ->
 
 removing_a_state_slot_flags_the_real_dependent_test_() ->
     {timeout, 30,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
-                    UniqueId = beamtalk_test_unique:id(),
-                    Path = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_counter_~s.bt", [UniqueId])
-                    ),
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
+                UniqueId = beamtalk_test_unique:id(),
+                Path = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_counter_~s.bt", [UniqueId])
+                ),
 
-                    %% Generation 1: count + name. First-ever install of this
-                    %% class this session — the shape store has nothing to
-                    %% diff against yet, so this must NOT publish anything.
-                    ok = file:write_file(Path, counter_source_gen1()),
-                    State0 = beamtalk_repl_state:new(undefined, 0),
-                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+                %% Generation 1: count + name. First-ever install of this
+                %% class this session — the shape store has nothing to
+                %% diff against yet, so this must NOT publish anything.
+                ok = file:write_file(Path, counter_source_gen1()),
+                State0 = beamtalk_repl_state:new(undefined, 0),
+                {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
 
-                    %% Register the dependent AFTER generation 1 installs (so
-                    %% its own source/xref registration is not itself part of
-                    %% what generation 1's install triggers) but BEFORE
-                    %% generation 2, since that is the reload trigger_shape/2
-                    %% must find it for.
-                    ok = beamtalk_xref:register_class(
-                        'LoaderShapeDashboard',
-                        beamtalk_test_recheck_fixtures:dashboard_name_accessor_xref(?PREFIX)
-                    ),
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"LoaderShapeDashboard">>,
-                        beamtalk_test_recheck_fixtures:dashboard_name_accessor_source(?PREFIX)
-                    ),
+                %% Register the dependent AFTER generation 1 installs (so
+                %% its own source/xref registration is not itself part of
+                %% what generation 1's install triggers) but BEFORE
+                %% generation 2, since that is the reload trigger_shape/2
+                %% must find it for.
+                ok = beamtalk_xref:register_class(
+                    'LoaderShapeDashboard',
+                    beamtalk_test_recheck_fixtures:dashboard_name_accessor_xref(?PREFIX)
+                ),
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"LoaderShapeDashboard">>,
+                    beamtalk_test_recheck_fixtures:dashboard_name_accessor_source(?PREFIX)
+                ),
 
-                    %% Generation 2: `name` removed. The shape store already
-                    %% holds generation 1 (captured post-install above), so
-                    %% this reload diffs a real shape_change and triggers the
-                    %% dependent re-check against the newly-installed ambient
-                    %% hierarchy (no name slot).
-                    ok = file:write_file(Path, counter_source_gen2()),
-                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+                %% Generation 2: `name` removed. The shape store already
+                %% holds generation 1 (captured post-install above), so
+                %% this reload diffs a real shape_change and triggers the
+                %% dependent re-check against the newly-installed ambient
+                %% hierarchy (no name slot).
+                ok = file:write_file(Path, counter_source_gen2()),
+                {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
 
-                    Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
-                    ?assertEqual(<<"LoaderShapeCounter">>, maps:get(changedClass, Event)),
-                    ?assertEqual(shape_change, maps:get(classification, Event)),
-                    ?assert(
-                        lists:member(<<"LoaderShapeDashboard">>, maps:get(checkedOwners, Event))
-                    ),
+                Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
+                ?assertEqual(<<"LoaderShapeCounter">>, maps:get(changedClass, Event)),
+                ?assertEqual(shape_change, maps:get(classification, Event)),
+                ?assert(
+                    lists:member(<<"LoaderShapeDashboard">>, maps:get(checkedOwners, Event))
+                ),
 
-                    StoredFindings = beamtalk_workspace_findings_store:for_owner(
-                        <<"LoaderShapeDashboard">>
-                    ),
-                    ?assertEqual(1, length(StoredFindings)),
-                    [Finding] = StoredFindings,
-                    ?assertEqual(shape_change, maps:get(classification, Finding)),
-                    ?assertEqual(<<"name">>, maps:get(selector, Finding)),
-                    ?assertEqual(<<"Dnu">>, maps:get(category, Finding))
-                end)
-            ]
-        end}}.
+                StoredFindings = beamtalk_workspace_findings_store:for_owner(
+                    <<"LoaderShapeDashboard">>
+                ),
+                ?assertEqual(1, length(StoredFindings)),
+                [Finding] = StoredFindings,
+                ?assertEqual(shape_change, maps:get(classification, Finding)),
+                ?assertEqual(<<"name">>, maps:get(selector, Finding)),
+                ?assertEqual(<<"Dnu">>, maps:get(category, Finding))
+            end)
+        ]}}.
 
 %%====================================================================
 %% End-to-end: a clean shape re-check still announces — an empty Findings
@@ -224,56 +221,54 @@ clean_dashboard_spawn_with_source() ->
 
 adding_an_unrelated_field_with_no_stale_dependents_still_announces_test_() ->
     {timeout, 30,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
-                    UniqueId = beamtalk_test_unique:id(),
-                    Path = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_clean_counter_~s.bt", [UniqueId])
-                    ),
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
+                UniqueId = beamtalk_test_unique:id(),
+                Path = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_clean_counter_~s.bt", [UniqueId])
+                ),
 
-                    %% Generation 1: first-ever install this session — no_op,
-                    %% nothing published (same reasoning as the sibling test).
-                    ok = file:write_file(Path, clean_counter_source_gen1()),
-                    State0 = beamtalk_repl_state:new(undefined, 0),
-                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+                %% Generation 1: first-ever install this session — no_op,
+                %% nothing published (same reasoning as the sibling test).
+                ok = file:write_file(Path, clean_counter_source_gen1()),
+                State0 = beamtalk_repl_state:new(undefined, 0),
+                {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
 
-                    ok = beamtalk_xref:register_class(
-                        'LoaderShapeCleanDashboard', clean_dashboard_spawn_with_xref()
-                    ),
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"LoaderShapeCleanDashboard">>, clean_dashboard_spawn_with_source()
-                    ),
+                ok = beamtalk_xref:register_class(
+                    'LoaderShapeCleanDashboard', clean_dashboard_spawn_with_xref()
+                ),
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"LoaderShapeCleanDashboard">>, clean_dashboard_spawn_with_source()
+                ),
 
-                    %% Generation 2: an unrelated `count` slot is added. The
-                    %% dependent is swept into trigger_shape/2's candidate
-                    %% set (spawnWith: is always included, added changes
-                    %% included) and re-checks clean — checked_owners is
-                    %% non-empty, findings is empty.
-                    ok = file:write_file(Path, clean_counter_source_gen2()),
-                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+                %% Generation 2: an unrelated `count` slot is added. The
+                %% dependent is swept into trigger_shape/2's candidate
+                %% set (spawnWith: is always included, added changes
+                %% included) and re-checks clean — checked_owners is
+                %% non-empty, findings is empty.
+                ok = file:write_file(Path, clean_counter_source_gen2()),
+                {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
 
-                    Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
-                    ?assertEqual(<<"LoaderShapeCleanCounter">>, maps:get(changedClass, Event)),
-                    ?assertEqual(shape_change, maps:get(classification, Event)),
-                    ?assert(
-                        lists:member(
-                            <<"LoaderShapeCleanDashboard">>, maps:get(checkedOwners, Event)
-                        )
-                    ),
-                    ?assertEqual([], maps:get(findings, Event)),
-
-                    ?assertEqual(
-                        [],
-                        beamtalk_workspace_findings_store:for_owner(
-                            <<"LoaderShapeCleanDashboard">>
-                        )
+                Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
+                ?assertEqual(<<"LoaderShapeCleanCounter">>, maps:get(changedClass, Event)),
+                ?assertEqual(shape_change, maps:get(classification, Event)),
+                ?assert(
+                    lists:member(
+                        <<"LoaderShapeCleanDashboard">>, maps:get(checkedOwners, Event)
                     )
-                end)
-            ]
-        end}}.
+                ),
+                ?assertEqual([], maps:get(findings, Event)),
+
+                ?assertEqual(
+                    [],
+                    beamtalk_workspace_findings_store:for_owner(
+                        <<"LoaderShapeCleanDashboard">>
+                    )
+                )
+            end)
+        ]}}.
 
 %%====================================================================
 %% End-to-end: a skipped (no live source) shape-change candidate gets its
@@ -325,96 +320,94 @@ skipped_dashboard_spawn_with_xref() ->
 
 skipped_candidate_shape_change_marks_existing_finding_stale_test_() ->
     {timeout, 30,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    UniqueId = beamtalk_test_unique:id(),
-                    Path = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_skipped_counter_~s.bt", [UniqueId])
-                    ),
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                UniqueId = beamtalk_test_unique:id(),
+                Path = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_skipped_counter_~s.bt", [UniqueId])
+                ),
 
-                    %% Generation 1: first-ever install this session — no_op,
-                    %% nothing to diff against yet.
-                    ok = file:write_file(Path, skipped_counter_source_gen1()),
-                    State0 = beamtalk_repl_state:new(undefined, 0),
-                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+                %% Generation 1: first-ever install this session — no_op,
+                %% nothing to diff against yet.
+                ok = file:write_file(Path, skipped_counter_source_gen1()),
+                State0 = beamtalk_repl_state:new(undefined, 0),
+                {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
 
-                    %% Register the dependent via xref only — no
-                    %% `set_class_source/2`, so it stays a `skipped` outcome
-                    %% once generation 2 triggers its re-check.
-                    ok = beamtalk_xref:register_class(
-                        'LoaderShapeSkippedDashboard', skipped_dashboard_spawn_with_xref()
-                    ),
+                %% Register the dependent via xref only — no
+                %% `set_class_source/2`, so it stays a `skipped` outcome
+                %% once generation 2 triggers its re-check.
+                ok = beamtalk_xref:register_class(
+                    'LoaderShapeSkippedDashboard', skipped_dashboard_spawn_with_xref()
+                ),
 
-                    %% Seed a stale finding as if an earlier reload (when the
-                    %% dependent's source WAS still recorded) had already
-                    %% flagged it.
-                    SeedFinding = #{
-                        owner => <<"LoaderShapeSkippedDashboard">>,
-                        changed_class => <<"LoaderShapeSkippedCounter">>,
-                        selector => <<"name">>,
-                        classification => shape_change,
-                        severity => <<"warning">>,
-                        category => <<"Dnu">>,
-                        message => <<"stale generation-A shape finding">>,
-                        note => undefined,
-                        sites => [#{method => build, line => 2}],
-                        start => 0,
-                        'end' => 5
-                    },
-                    _ = beamtalk_workspace_findings_store:put_owner_origin(
-                        <<"LoaderShapeSkippedDashboard">>,
-                        <<"LoaderShapeSkippedCounter">>,
-                        [SeedFinding]
-                    ),
+                %% Seed a stale finding as if an earlier reload (when the
+                %% dependent's source WAS still recorded) had already
+                %% flagged it.
+                SeedFinding = #{
+                    owner => <<"LoaderShapeSkippedDashboard">>,
+                    changed_class => <<"LoaderShapeSkippedCounter">>,
+                    selector => <<"name">>,
+                    classification => shape_change,
+                    severity => <<"warning">>,
+                    category => <<"Dnu">>,
+                    message => <<"stale generation-A shape finding">>,
+                    note => undefined,
+                    sites => [#{method => build, line => 2}],
+                    start => 0,
+                    'end' => 5
+                },
+                _ = beamtalk_workspace_findings_store:put_owner_origin(
+                    <<"LoaderShapeSkippedDashboard">>,
+                    <<"LoaderShapeSkippedCounter">>,
+                    [SeedFinding]
+                ),
 
-                    %% Generation 2: an unrelated `count` slot is added,
-                    %% triggering a shape_change re-check. The dependent's
-                    %% source is still unrecorded, so its outcome is
-                    %% `skipped`, not `ok` — it must never reach
-                    %% `checked_owners`.
-                    ok = file:write_file(Path, skipped_counter_source_gen2()),
-                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+                %% Generation 2: an unrelated `count` slot is added,
+                %% triggering a shape_change re-check. The dependent's
+                %% source is still unrecorded, so its outcome is
+                %% `skipped`, not `ok` — it must never reach
+                %% `checked_owners`.
+                ok = file:write_file(Path, skipped_counter_source_gen2()),
+                {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
 
-                    %% The shape re-check runs asynchronously on
-                    %% `beamtalk_workspace_shape_recheck_worker`'s single-cast
-                    %% queue (`maybe_trigger_shape_recheck_for_class/1`'s
-                    %% doc). Unlike the sibling tests above, this scenario's
-                    %% only candidate is `skipped`, so `CheckedOwners` stays
-                    %% empty and `publish_shape_recheck_outcome/3` never
-                    %% broadcasts a `'ReloadCheckCompleted'` announcement
-                    %% (gated on `CheckedOwners` being non-empty — see that
-                    %% function's doc) even though the unconditional
-                    %% `mark_unverified_findings_stale/2` call still ran. A
-                    %% `sys:get_state/1` round trip to the worker forces it to
-                    %% finish draining its mailbox in FIFO order — our
-                    %% `enqueue/1` cast above is already queued ahead of this
-                    %% synchronous system message — without depending on an
-                    %% announcement this scenario deliberately never sends.
-                    ok = drain_shape_recheck_worker(),
+                %% The shape re-check runs asynchronously on
+                %% `beamtalk_workspace_shape_recheck_worker`'s single-cast
+                %% queue (`maybe_trigger_shape_recheck_for_class/1`'s
+                %% doc). Unlike the sibling tests above, this scenario's
+                %% only candidate is `skipped`, so `CheckedOwners` stays
+                %% empty and `publish_shape_recheck_outcome/3` never
+                %% broadcasts a `'ReloadCheckCompleted'` announcement
+                %% (gated on `CheckedOwners` being non-empty — see that
+                %% function's doc) even though the unconditional
+                %% `mark_unverified_findings_stale/2` call still ran. A
+                %% `sys:get_state/1` round trip to the worker forces it to
+                %% finish draining its mailbox in FIFO order — our
+                %% `enqueue/1` cast above is already queued ahead of this
+                %% synchronous system message — without depending on an
+                %% announcement this scenario deliberately never sends.
+                ok = drain_shape_recheck_worker(),
 
-                    %% The seeded finding's message/severity/classification
-                    %% stay untouched (no diagnostics round-trip actually
-                    %% ran for this owner) but its `note` is overwritten to
-                    %% flag it as not re-checked this reload — exactly like
-                    %% the instance-selector path's skipped case.
-                    [DashboardFinding] = beamtalk_workspace_findings_store:get_origin(
-                        <<"LoaderShapeSkippedDashboard">>, <<"LoaderShapeSkippedCounter">>
-                    ),
-                    ?assertEqual(
-                        <<"stale generation-A shape finding">>,
-                        maps:get(message, DashboardFinding)
-                    ),
-                    Note = maps:get(note, DashboardFinding),
-                    ?assert(is_binary(Note)),
-                    ?assert(
-                        binary:match(Note, <<"not re-checked against the latest reload">>) =/=
-                            nomatch
-                    )
-                end)
-            ]
-        end}}.
+                %% The seeded finding's message/severity/classification
+                %% stay untouched (no diagnostics round-trip actually
+                %% ran for this owner) but its `note` is overwritten to
+                %% flag it as not re-checked this reload — exactly like
+                %% the instance-selector path's skipped case.
+                [DashboardFinding] = beamtalk_workspace_findings_store:get_origin(
+                    <<"LoaderShapeSkippedDashboard">>, <<"LoaderShapeSkippedCounter">>
+                ),
+                ?assertEqual(
+                    <<"stale generation-A shape finding">>,
+                    maps:get(message, DashboardFinding)
+                ),
+                Note = maps:get(note, DashboardFinding),
+                ?assert(is_binary(Note)),
+                ?assert(
+                    binary:match(Note, <<"not re-checked against the latest reload">>) =/=
+                        nomatch
+                )
+            end)
+        ]}}.
 
 %%====================================================================
 %% End-to-end: ADR 0123 §4 shape-reload findings (BT-3538)
@@ -435,154 +428,146 @@ find_finding(Kind, Findings) ->
 %% Row 1: field removed, shapeVersion unchanged -> Warning.
 row1_dropped_without_bump_test_() ->
     {timeout, 30,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
-                    UniqueId = beamtalk_test_unique:id(),
-                    Path = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_row1_~s.bt", [UniqueId])
-                    ),
-                    Gen1 =
-                        <<
-                            "Actor subclass: LoaderShapeRow1Counter\n"
-                            "  state: count :: Integer = 0\n"
-                            "  state: name :: String = \"\"\n"
-                        >>,
-                    Gen2 =
-                        <<
-                            "Actor subclass: LoaderShapeRow1Counter\n"
-                            "  state: count :: Integer = 0\n"
-                        >>,
-                    ok = file:write_file(Path, Gen1),
-                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
-                    ok = file:write_file(Path, Gen2),
-                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
+                UniqueId = beamtalk_test_unique:id(),
+                Path = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_row1_~s.bt", [UniqueId])
+                ),
+                Gen1 =
+                    <<
+                        "Actor subclass: LoaderShapeRow1Counter\n"
+                        "  state: count :: Integer = 0\n"
+                        "  state: name :: String = \"\"\n"
+                    >>,
+                Gen2 =
+                    <<
+                        "Actor subclass: LoaderShapeRow1Counter\n"
+                        "  state: count :: Integer = 0\n"
+                    >>,
+                ok = file:write_file(Path, Gen1),
+                {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                ok = file:write_file(Path, Gen2),
+                {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
 
-                    Event = receive_shape_reload_findings_announcement(),
-                    ?assertEqual(<<"LoaderShapeRow1Counter">>, maps:get(class, Event)),
-                    Finding = find_finding(dropped_without_bump, maps:get(findings, Event)),
-                    ?assertEqual(warning, maps:get(severity, Finding)),
-                    ?assertEqual([<<"name">>], maps:get(fields, Finding)),
-                    ?assertEqual(1, maps:get(from_version, Finding)),
-                    ?assertEqual(1, maps:get(to_version, Finding))
-                end)
-            ]
-        end}}.
+                Event = receive_shape_reload_findings_announcement(),
+                ?assertEqual(<<"LoaderShapeRow1Counter">>, maps:get(class, Event)),
+                Finding = find_finding(dropped_without_bump, maps:get(findings, Event)),
+                ?assertEqual(warning, maps:get(severity, Finding)),
+                ?assertEqual([<<"name">>], maps:get(fields, Finding)),
+                ?assertEqual(1, maps:get(from_version, Finding)),
+                ?assertEqual(1, maps:get(to_version, Finding))
+            end)
+        ]}}.
 
 %% Row 2: fields only added, version unchanged -> Hint.
 row2_added_only_test_() ->
     {timeout, 30,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
-                    UniqueId = beamtalk_test_unique:id(),
-                    Path = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_row2_~s.bt", [UniqueId])
-                    ),
-                    Gen1 =
-                        <<
-                            "Actor subclass: LoaderShapeRow2Counter\n"
-                            "  state: count :: Integer = 0\n"
-                        >>,
-                    Gen2 =
-                        <<
-                            "Actor subclass: LoaderShapeRow2Counter\n"
-                            "  state: count :: Integer = 0\n"
-                            "  state: name :: String = \"\"\n"
-                        >>,
-                    ok = file:write_file(Path, Gen1),
-                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
-                    ok = file:write_file(Path, Gen2),
-                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
+                UniqueId = beamtalk_test_unique:id(),
+                Path = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_row2_~s.bt", [UniqueId])
+                ),
+                Gen1 =
+                    <<
+                        "Actor subclass: LoaderShapeRow2Counter\n"
+                        "  state: count :: Integer = 0\n"
+                    >>,
+                Gen2 =
+                    <<
+                        "Actor subclass: LoaderShapeRow2Counter\n"
+                        "  state: count :: Integer = 0\n"
+                        "  state: name :: String = \"\"\n"
+                    >>,
+                ok = file:write_file(Path, Gen1),
+                {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                ok = file:write_file(Path, Gen2),
+                {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
 
-                    Event = receive_shape_reload_findings_announcement(),
-                    Finding = find_finding(added_only, maps:get(findings, Event)),
-                    ?assertEqual(hint, maps:get(severity, Finding)),
-                    ?assertEqual([<<"name">>], maps:get(fields, Finding)),
-                    ?assertEqual(1, maps:get(from_version, Finding)),
-                    ?assertEqual(1, maps:get(to_version, Finding))
-                end)
-            ]
-        end}}.
+                Event = receive_shape_reload_findings_announcement(),
+                Finding = find_finding(added_only, maps:get(findings, Event)),
+                ?assertEqual(hint, maps:get(severity, Finding)),
+                ?assertEqual([<<"name">>], maps:get(fields, Finding)),
+                ?assertEqual(1, maps:get(from_version, Finding)),
+                ?assertEqual(1, maps:get(to_version, Finding))
+            end)
+        ]}}.
 
 %% Row 3: version bumped N -> N+1, no migrateFromVN: -> Hint.
 row3_bumped_without_migration_test_() ->
     {timeout, 30,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
-                    UniqueId = beamtalk_test_unique:id(),
-                    Path = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_row3_~s.bt", [UniqueId])
-                    ),
-                    Gen1 =
-                        <<
-                            "Actor subclass: LoaderShapeRow3Counter\n"
-                            "  state: count :: Integer = 0\n"
-                        >>,
-                    Gen2 =
-                        <<
-                            "Actor subclass: LoaderShapeRow3Counter\n"
-                            "  shapeVersion: 2\n"
-                            "  state: count :: Integer = 0\n"
-                        >>,
-                    ok = file:write_file(Path, Gen1),
-                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
-                    ok = file:write_file(Path, Gen2),
-                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
+                UniqueId = beamtalk_test_unique:id(),
+                Path = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_row3_~s.bt", [UniqueId])
+                ),
+                Gen1 =
+                    <<
+                        "Actor subclass: LoaderShapeRow3Counter\n"
+                        "  state: count :: Integer = 0\n"
+                    >>,
+                Gen2 =
+                    <<
+                        "Actor subclass: LoaderShapeRow3Counter\n"
+                        "  shapeVersion: 2\n"
+                        "  state: count :: Integer = 0\n"
+                    >>,
+                ok = file:write_file(Path, Gen1),
+                {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                ok = file:write_file(Path, Gen2),
+                {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
 
-                    Event = receive_shape_reload_findings_announcement(),
-                    Finding = find_finding(bumped_without_migration, maps:get(findings, Event)),
-                    ?assertEqual(hint, maps:get(severity, Finding)),
-                    ?assertEqual(1, maps:get(from_version, Finding)),
-                    ?assertEqual(2, maps:get(to_version, Finding))
-                end)
-            ]
-        end}}.
+                Event = receive_shape_reload_findings_announcement(),
+                Finding = find_finding(bumped_without_migration, maps:get(findings, Event)),
+                ?assertEqual(hint, maps:get(severity, Finding)),
+                ?assertEqual(1, maps:get(from_version, Finding)),
+                ?assertEqual(2, maps:get(to_version, Finding))
+            end)
+        ]}}.
 
 %% Row 4: version decreased -> Warning.
 row4_version_decreased_test_() ->
     {timeout, 30,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
-                    UniqueId = beamtalk_test_unique:id(),
-                    Path = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_row4_~s.bt", [UniqueId])
-                    ),
-                    Gen1 =
-                        <<
-                            "Actor subclass: LoaderShapeRow4Counter\n"
-                            "  shapeVersion: 3\n"
-                            "  state: count :: Integer = 0\n"
-                        >>,
-                    Gen2 =
-                        <<
-                            "Actor subclass: LoaderShapeRow4Counter\n"
-                            "  shapeVersion: 2\n"
-                            "  state: count :: Integer = 0\n"
-                        >>,
-                    ok = file:write_file(Path, Gen1),
-                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
-                    ok = file:write_file(Path, Gen2),
-                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
+                UniqueId = beamtalk_test_unique:id(),
+                Path = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_row4_~s.bt", [UniqueId])
+                ),
+                Gen1 =
+                    <<
+                        "Actor subclass: LoaderShapeRow4Counter\n"
+                        "  shapeVersion: 3\n"
+                        "  state: count :: Integer = 0\n"
+                    >>,
+                Gen2 =
+                    <<
+                        "Actor subclass: LoaderShapeRow4Counter\n"
+                        "  shapeVersion: 2\n"
+                        "  state: count :: Integer = 0\n"
+                    >>,
+                ok = file:write_file(Path, Gen1),
+                {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                ok = file:write_file(Path, Gen2),
+                {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
 
-                    Event = receive_shape_reload_findings_announcement(),
-                    Finding = find_finding(version_decreased, maps:get(findings, Event)),
-                    ?assertEqual(warning, maps:get(severity, Finding)),
-                    ?assertEqual(3, maps:get(from_version, Finding)),
-                    ?assertEqual(2, maps:get(to_version, Finding))
-                end)
-            ]
-        end}}.
+                Event = receive_shape_reload_findings_announcement(),
+                Finding = find_finding(version_decreased, maps:get(findings, Event)),
+                ?assertEqual(warning, maps:get(severity, Finding)),
+                ?assertEqual(3, maps:get(from_version, Finding)),
+                ?assertEqual(2, maps:get(to_version, Finding))
+            end)
+        ]}}.
 
 %% Row 5: any instance left suspended by a failed migration -> Error.
 %% Spawns a real live instance under generation 1, then reloads to a
@@ -594,52 +579,50 @@ row4_version_decreased_test_() ->
 %% rows go through — see its doc).
 row5_instances_suspended_test_() ->
     {timeout, 30,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
-                    UniqueId = beamtalk_test_unique:id(),
-                    Path = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_row5_~s.bt", [UniqueId])
-                    ),
-                    Gen1 =
-                        <<
-                            "Actor subclass: LoaderShapeRow5Counter\n"
-                            "  state: count :: Integer = 0\n"
-                        >>,
-                    Gen2 =
-                        <<
-                            "Actor subclass: LoaderShapeRow5Counter\n"
-                            "  shapeVersion: 2\n"
-                            "  state: count :: Integer = 0\n"
-                            "\n"
-                            "  class migrateFromV1: old -> Dictionary =>\n"
-                            "    old bogusPrecheckSelector\n"
-                        >>,
-                    ok = file:write_file(Path, Gen1),
-                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
+                UniqueId = beamtalk_test_unique:id(),
+                Path = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_row5_~s.bt", [UniqueId])
+                ),
+                Gen1 =
+                    <<
+                        "Actor subclass: LoaderShapeRow5Counter\n"
+                        "  state: count :: Integer = 0\n"
+                    >>,
+                Gen2 =
+                    <<
+                        "Actor subclass: LoaderShapeRow5Counter\n"
+                        "  shapeVersion: 2\n"
+                        "  state: count :: Integer = 0\n"
+                        "\n"
+                        "  class migrateFromV1: old -> Dictionary =>\n"
+                        "    old bogusPrecheckSelector\n"
+                    >>,
+                ok = file:write_file(Path, Gen1),
+                {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
 
-                    {ok, _, _, _, _} = beamtalk_repl_eval:do_eval(
-                        "LoaderShapeRow5Counter spawn", state0()
-                    ),
-                    [Pid] = beamtalk_runtime_api:all_instances('LoaderShapeRow5Counter'),
+                {ok, _, _, _, _} = beamtalk_repl_eval:do_eval(
+                    "LoaderShapeRow5Counter spawn", state0()
+                ),
+                [Pid] = beamtalk_runtime_api:all_instances('LoaderShapeRow5Counter'),
 
-                    ok = file:write_file(Path, Gen2),
-                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+                ok = file:write_file(Path, Gen2),
+                {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
 
-                    Event = receive_shape_reload_findings_announcement(),
-                    ?assertEqual(<<"LoaderShapeRow5Counter">>, maps:get(class, Event)),
-                    Finding = find_finding(instances_suspended, maps:get(findings, Event)),
-                    ?assertEqual(error, maps:get(severity, Finding)),
-                    ?assertEqual(1, maps:get(suspended, Finding)),
-                    ?assertEqual([Pid], maps:get(pids, Finding)),
-                    ?assertEqual(
-                        suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
-                    )
-                end)
-            ]
-        end}}.
+                Event = receive_shape_reload_findings_announcement(),
+                ?assertEqual(<<"LoaderShapeRow5Counter">>, maps:get(class, Event)),
+                Finding = find_finding(instances_suspended, maps:get(findings, Event)),
+                ?assertEqual(error, maps:get(severity, Finding)),
+                ?assertEqual(1, maps:get(suspended, Finding)),
+                ?assertEqual([Pid], maps:get(pids, Finding)),
+                ?assertEqual(
+                    suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
+                )
+            end)
+        ]}}.
 
 %%====================================================================
 %% Pre-save advisory: precheck_class_shape/2 (ADR 0105 Phase 3, ADR 0123 §4,
@@ -648,55 +631,53 @@ row5_instances_suspended_test_() ->
 
 precheck_class_shape_flags_dropped_field_before_install_test_() ->
     {timeout, 30,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    UniqueId = beamtalk_test_unique:id(),
-                    Path = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_precheck_~s.bt", [UniqueId])
-                    ),
-                    Gen1 =
-                        <<
-                            "Actor subclass: LoaderShapePrecheckCounter\n"
-                            "  state: count :: Integer = 0\n"
-                            "  state: name :: String = \"\"\n"
-                        >>,
-                    ok = file:write_file(Path, Gen1),
-                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
-                    ok = wait_for_shape_capture(<<"LoaderShapePrecheckCounter">>),
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                UniqueId = beamtalk_test_unique:id(),
+                Path = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_precheck_~s.bt", [UniqueId])
+                ),
+                Gen1 =
+                    <<
+                        "Actor subclass: LoaderShapePrecheckCounter\n"
+                        "  state: count :: Integer = 0\n"
+                        "  state: name :: String = \"\"\n"
+                    >>,
+                ok = file:write_file(Path, Gen1),
+                {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                ok = wait_for_shape_capture(<<"LoaderShapePrecheckCounter">>),
 
-                    %% A pending edit that would drop `name` without bumping
-                    %% shapeVersion — never installed via handle_load/2 at
-                    %% all, unlike every other test in this module.
-                    PendingSource =
-                        <<
-                            "Actor subclass: LoaderShapePrecheckCounter\n"
-                            "  state: count :: Integer = 0\n"
-                        >>,
-                    {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
-                        <<"LoaderShapePrecheckCounter">>, PendingSource
-                    ),
-                    Finding = find_finding(dropped_without_bump, Findings),
-                    ?assertEqual(warning, maps:get(severity, Finding)),
-                    ?assertEqual([<<"name">>], maps:get(fields, Finding)),
+                %% A pending edit that would drop `name` without bumping
+                %% shapeVersion — never installed via handle_load/2 at
+                %% all, unlike every other test in this module.
+                PendingSource =
+                    <<
+                        "Actor subclass: LoaderShapePrecheckCounter\n"
+                        "  state: count :: Integer = 0\n"
+                    >>,
+                {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
+                    <<"LoaderShapePrecheckCounter">>, PendingSource
+                ),
+                Finding = find_finding(dropped_without_bump, Findings),
+                ?assertEqual(warning, maps:get(severity, Finding)),
+                ?assertEqual([<<"name">>], maps:get(fields, Finding)),
 
-                    %% Never installed: the store's own captured generation
-                    %% is untouched — a *real* reload of this same pending
-                    %% edit still finds the same "previous" baseline.
-                    Prev = beamtalk_workspace_shape_store:previous(
-                        <<"LoaderShapePrecheckCounter">>
-                    ),
-                    ?assertEqual(
-                        #{
-                            <<"count">> => {<<"Integer">>, <<"eager">>},
-                            <<"name">> => {<<"String">>, <<"eager">>}
-                        },
-                        maps:get(shape, Prev)
-                    )
-                end)
-            ]
-        end}}.
+                %% Never installed: the store's own captured generation
+                %% is untouched — a *real* reload of this same pending
+                %% edit still finds the same "previous" baseline.
+                Prev = beamtalk_workspace_shape_store:previous(
+                    <<"LoaderShapePrecheckCounter">>
+                ),
+                ?assertEqual(
+                    #{
+                        <<"count">> => {<<"Integer">>, <<"eager">>},
+                        <<"name">> => {<<"String">>, <<"eager">>}
+                    },
+                    maps:get(shape, Prev)
+                )
+            end)
+        ]}}.
 
 %% BT-3945: the product race behind the flaky precheck test above.
 %% `handle_load/2` only *casts* the install's shape capture to
@@ -711,88 +692,84 @@ precheck_class_shape_flags_dropped_field_before_install_test_() ->
 %% reports the dropped field.
 precheck_class_shape_waits_for_pending_capture_test_() ->
     {timeout, 30,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    UniqueId = beamtalk_test_unique:id(),
-                    Path = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_precheck_race_~s.bt", [UniqueId])
-                    ),
-                    Gen1 =
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                UniqueId = beamtalk_test_unique:id(),
+                Path = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_precheck_race_~s.bt", [UniqueId])
+                ),
+                Gen1 =
+                    <<
+                        "Actor subclass: LoaderShapePrecheckRaceCounter\n"
+                        "  state: count :: Integer = 0\n"
+                        "  state: name :: String = \"\"\n"
+                    >>,
+                ok = file:write_file(Path, Gen1),
+                Worker = whereis(beamtalk_workspace_shape_recheck_worker),
+                ok = sys:suspend(Worker),
+                try
+                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                    %% Let the worker run again shortly: the precheck
+                    %% below must block on the drain until then rather
+                    %% than report "no baseline".
+                    spawn(fun() ->
+                        %% sleep: simulates the worker resuming later; the
+                        %% precheck below must block on the drain until then
+                        timer:sleep(300),
+                        sys:resume(beamtalk_workspace_shape_recheck_worker)
+                    end),
+                    T0 = erlang:monotonic_time(millisecond),
+                    {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
+                        <<"LoaderShapePrecheckRaceCounter">>,
                         <<
                             "Actor subclass: LoaderShapePrecheckRaceCounter\n"
                             "  state: count :: Integer = 0\n"
-                            "  state: name :: String = \"\"\n"
-                        >>,
-                    ok = file:write_file(Path, Gen1),
-                    Worker = whereis(beamtalk_workspace_shape_recheck_worker),
-                    ok = sys:suspend(Worker),
+                        >>
+                    ),
+                    Elapsed = erlang:monotonic_time(millisecond) - T0,
+                    Finding = find_finding(dropped_without_bump, Findings),
+                    ?assertEqual(warning, maps:get(severity, Finding)),
+                    ?assertEqual([<<"name">>], maps:get(fields, Finding)),
+                    %% The 300 ms delayed resume proves the precheck
+                    %% waited for the capture instead of racing past it.
+                    ?assert(Elapsed >= 200)
+                after
                     try
-                        {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
-                        %% Let the worker run again shortly: the precheck
-                        %% below must block on the drain until then rather
-                        %% than report "no baseline".
-                        spawn(fun() ->
-                            %% sleep: simulates the worker resuming later; the
-                            %% precheck below must block on the drain until then
-                            timer:sleep(300),
-                            sys:resume(beamtalk_workspace_shape_recheck_worker)
-                        end),
-                        T0 = erlang:monotonic_time(millisecond),
-                        {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
-                            <<"LoaderShapePrecheckRaceCounter">>,
-                            <<
-                                "Actor subclass: LoaderShapePrecheckRaceCounter\n"
-                                "  state: count :: Integer = 0\n"
-                            >>
-                        ),
-                        Elapsed = erlang:monotonic_time(millisecond) - T0,
-                        Finding = find_finding(dropped_without_bump, Findings),
-                        ?assertEqual(warning, maps:get(severity, Finding)),
-                        ?assertEqual([<<"name">>], maps:get(fields, Finding)),
-                        %% The 300 ms delayed resume proves the precheck
-                        %% waited for the capture instead of racing past it.
-                        ?assert(Elapsed >= 200)
-                    after
-                        try
-                            sys:resume(beamtalk_workspace_shape_recheck_worker)
-                        catch
-                            _:_ -> ok
-                        end
+                        sys:resume(beamtalk_workspace_shape_recheck_worker)
+                    catch
+                        _:_ -> ok
                     end
-                end)
-            ]
-        end}}.
+                end
+            end)
+        ]}}.
 
 %% A pending edit with nothing shape-relevant changed (e.g. just a method
 %% body tweak — here, literally unchanged) reports no findings.
 precheck_class_shape_reports_nothing_for_a_clean_edit_test_() ->
     {timeout, 30,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    UniqueId = beamtalk_test_unique:id(),
-                    Path = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_precheck_clean_~s.bt", [UniqueId])
-                    ),
-                    Source =
-                        <<
-                            "Actor subclass: LoaderShapePrecheckCleanCounter\n"
-                            "  state: count :: Integer = 0\n"
-                        >>,
-                    ok = file:write_file(Path, Source),
-                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
-                    ok = wait_for_shape_capture(<<"LoaderShapePrecheckCleanCounter">>),
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                UniqueId = beamtalk_test_unique:id(),
+                Path = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_precheck_clean_~s.bt", [UniqueId])
+                ),
+                Source =
+                    <<
+                        "Actor subclass: LoaderShapePrecheckCleanCounter\n"
+                        "  state: count :: Integer = 0\n"
+                    >>,
+                ok = file:write_file(Path, Source),
+                {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                ok = wait_for_shape_capture(<<"LoaderShapePrecheckCleanCounter">>),
 
-                    {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
-                        <<"LoaderShapePrecheckCleanCounter">>, Source
-                    ),
-                    ?assertEqual([], Findings)
-                end)
-            ]
-        end}}.
+                {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
+                    <<"LoaderShapePrecheckCleanCounter">>, Source
+                ),
+                ?assertEqual([], Findings)
+            end)
+        ]}}.
 
 %% precheck_class_shape/2 must never leak an atom per call (atoms are never
 %% garbage collected, and an editor prechecks on every pending edit). It
@@ -802,56 +779,54 @@ precheck_class_shape_reports_nothing_for_a_clean_edit_test_() ->
 %% not leak either.
 precheck_class_shape_does_not_leak_atoms_test_() ->
     {timeout, 30,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    UniqueId = beamtalk_test_unique:id(),
-                    Path = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_precheck_leak_~s.bt", [UniqueId])
-                    ),
-                    Source =
-                        <<
-                            "Actor subclass: LoaderShapePrecheckLeakCounter\n"
-                            "  state: count :: Integer = 0\n"
-                            "  state: name :: String = \"\"\n"
-                        >>,
-                    ok = file:write_file(Path, Source),
-                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
-                    ok = wait_for_shape_capture(<<"LoaderShapePrecheckLeakCounter">>),
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                UniqueId = beamtalk_test_unique:id(),
+                Path = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_precheck_leak_~s.bt", [UniqueId])
+                ),
+                Source =
+                    <<
+                        "Actor subclass: LoaderShapePrecheckLeakCounter\n"
+                        "  state: count :: Integer = 0\n"
+                        "  state: name :: String = \"\"\n"
+                    >>,
+                ok = file:write_file(Path, Source),
+                {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                ok = wait_for_shape_capture(<<"LoaderShapePrecheckLeakCounter">>),
 
-                    PendingSource =
-                        <<
-                            "Actor subclass: LoaderShapePrecheckLeakCounter\n"
-                            "  state: count :: Integer = 0\n"
-                        >>,
-                    %% Warm up once before measuring, so any atom a first
-                    %% compile mints isn't counted against the repeated calls
-                    %% below.
-                    {ok, _} = beamtalk_repl_loader_methods:precheck_class_shape(
-                        <<"LoaderShapePrecheckLeakCounter">>, PendingSource
-                    ),
-                    AtomCountBefore = erlang:system_info(atom_count),
+                PendingSource =
+                    <<
+                        "Actor subclass: LoaderShapePrecheckLeakCounter\n"
+                        "  state: count :: Integer = 0\n"
+                    >>,
+                %% Warm up once before measuring, so any atom a first
+                %% compile mints isn't counted against the repeated calls
+                %% below.
+                {ok, _} = beamtalk_repl_loader_methods:precheck_class_shape(
+                    <<"LoaderShapePrecheckLeakCounter">>, PendingSource
+                ),
+                AtomCountBefore = erlang:system_info(atom_count),
 
-                    lists:foreach(
-                        fun(_) ->
-                            {ok, _} = beamtalk_repl_loader_methods:precheck_class_shape(
-                                <<"LoaderShapePrecheckLeakCounter">>, PendingSource
-                            ),
-                            %% A syntactically-broken pending edit must not
-                            %% leak an atom either.
-                            {ok, _} = beamtalk_repl_loader_methods:precheck_class_shape(
-                                <<"LoaderShapePrecheckLeakCounter">>, <<"not valid beamtalk (((">>
-                            )
-                        end,
-                        lists:seq(1, 5)
-                    ),
+                lists:foreach(
+                    fun(_) ->
+                        {ok, _} = beamtalk_repl_loader_methods:precheck_class_shape(
+                            <<"LoaderShapePrecheckLeakCounter">>, PendingSource
+                        ),
+                        %% A syntactically-broken pending edit must not
+                        %% leak an atom either.
+                        {ok, _} = beamtalk_repl_loader_methods:precheck_class_shape(
+                            <<"LoaderShapePrecheckLeakCounter">>, <<"not valid beamtalk (((">>
+                        )
+                    end,
+                    lists:seq(1, 5)
+                ),
 
-                    AtomCountAfter = erlang:system_info(atom_count),
-                    ?assertEqual(AtomCountBefore, AtomCountAfter)
-                end)
-            ]
-        end}}.
+                AtomCountAfter = erlang:system_info(atom_count),
+                ?assertEqual(AtomCountBefore, AtomCountAfter)
+            end)
+        ]}}.
 
 %% BT-4285: a precheck must never mutate the live class. It used to load the
 %% pending compile under a scratch module, whose generated `on_load`
@@ -861,68 +836,66 @@ precheck_class_shape_does_not_leak_atoms_test_() ->
 %% collision warning was recorded, and constructing an instance failed.
 precheck_class_shape_leaves_the_live_class_untouched_test_() ->
     {timeout, 30,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    UniqueId = beamtalk_test_unique:id(),
-                    Path = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_precheck_live_~s.bt", [UniqueId])
-                    ),
-                    Source =
-                        <<
-                            "Actor subclass: LoaderShapePrecheckLiveCounter\n"
-                            "  state: count :: Integer = 7\n"
-                            "  state: name :: String = \"\"\n"
-                            "\n"
-                            "  count -> Integer => self.count\n"
-                        >>,
-                    ok = file:write_file(Path, Source),
-                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
-                    ok = wait_for_shape_capture(<<"LoaderShapePrecheckLiveCounter">>),
-                    ClassName = 'LoaderShapePrecheckLiveCounter',
-                    ClassPid = beamtalk_class_registry:whereis_class(ClassName),
-                    ModuleBefore = beamtalk_runtime_api:module_name(ClassPid),
-                    _ = beamtalk_class_registry:drain_class_warnings_by_names([ClassName]),
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                UniqueId = beamtalk_test_unique:id(),
+                Path = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_precheck_live_~s.bt", [UniqueId])
+                ),
+                Source =
+                    <<
+                        "Actor subclass: LoaderShapePrecheckLiveCounter\n"
+                        "  state: count :: Integer = 7\n"
+                        "  state: name :: String = \"\"\n"
+                        "\n"
+                        "  count -> Integer => self.count\n"
+                    >>,
+                ok = file:write_file(Path, Source),
+                {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                ok = wait_for_shape_capture(<<"LoaderShapePrecheckLiveCounter">>),
+                ClassName = 'LoaderShapePrecheckLiveCounter',
+                ClassPid = beamtalk_class_registry:whereis_class(ClassName),
+                ModuleBefore = beamtalk_runtime_api:module_name(ClassPid),
+                _ = beamtalk_class_registry:drain_class_warnings_by_names([ClassName]),
 
-                    PendingSource =
-                        <<
-                            "Actor subclass: LoaderShapePrecheckLiveCounter\n"
-                            "  state: count :: Integer = 7\n"
-                            "\n"
-                            "  count -> Integer => self.count\n"
-                        >>,
-                    {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
-                        <<"LoaderShapePrecheckLiveCounter">>, PendingSource
-                    ),
-                    %% The precheck still sees the pending shape...
-                    _ = find_finding(dropped_without_bump, Findings),
+                PendingSource =
+                    <<
+                        "Actor subclass: LoaderShapePrecheckLiveCounter\n"
+                        "  state: count :: Integer = 7\n"
+                        "\n"
+                        "  count -> Integer => self.count\n"
+                    >>,
+                {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
+                    <<"LoaderShapePrecheckLiveCounter">>, PendingSource
+                ),
+                %% The precheck still sees the pending shape...
+                _ = find_finding(dropped_without_bump, Findings),
 
-                    %% ...but the live class is exactly as it was.
-                    ?assertEqual(ClassPid, beamtalk_class_registry:whereis_class(ClassName)),
-                    ?assertEqual(ModuleBefore, beamtalk_runtime_api:module_name(ClassPid)),
-                    ?assertEqual(
-                        [], beamtalk_class_registry:drain_class_warnings_by_names([ClassName])
-                    ),
-                    ?assertEqual(false, code:is_loaded(beamtalk_precheck_scratch)),
-                    Instance = beamtalk_class_dispatch:class_send(ClassPid, spawn, []),
-                    ?assertEqual(7, beamtalk_message_dispatch:send(Instance, count, [])),
+                %% ...but the live class is exactly as it was.
+                ?assertEqual(ClassPid, beamtalk_class_registry:whereis_class(ClassName)),
+                ?assertEqual(ModuleBefore, beamtalk_runtime_api:module_name(ClassPid)),
+                ?assertEqual(
+                    [], beamtalk_class_registry:drain_class_warnings_by_names([ClassName])
+                ),
+                ?assertEqual(false, code:is_loaded(beamtalk_precheck_scratch)),
+                Instance = beamtalk_class_dispatch:class_send(ClassPid, spawn, []),
+                ?assertEqual(7, beamtalk_message_dispatch:send(Instance, count, [])),
 
-                    %% The meta the precheck reads off the Core Erlang text
-                    %% agrees with what the installed module's own
-                    %% `__beamtalk_meta/0` returns for the shape keys.
-                    ShapeKeys = [field_types, field_kinds, shape_version, shape_migrations],
-                    {ok, #{core_erlang := Core}} = beamtalk_compiler:compile(
-                        Source, beamtalk_repl_compiler:build_class_indexes()
-                    ),
-                    {ok, ParsedMeta} = beamtalk_compiler:class_meta_from_core_erlang(Core),
-                    ?assertEqual(
-                        maps:with(ShapeKeys, ModuleBefore:'__beamtalk_meta'()),
-                        maps:with(ShapeKeys, ParsedMeta)
-                    )
-                end)
-            ]
-        end}}.
+                %% The meta the precheck reads off the Core Erlang text
+                %% agrees with what the installed module's own
+                %% `__beamtalk_meta/0` returns for the shape keys.
+                ShapeKeys = [field_types, field_kinds, shape_version, shape_migrations],
+                {ok, #{core_erlang := Core}} = beamtalk_compiler:compile(
+                    Source, beamtalk_repl_compiler:build_class_indexes()
+                ),
+                {ok, ParsedMeta} = beamtalk_compiler:class_meta_from_core_erlang(Core),
+                ?assertEqual(
+                    maps:with(ShapeKeys, ModuleBefore:'__beamtalk_meta'()),
+                    maps:with(ShapeKeys, ParsedMeta)
+                )
+            end)
+        ]}}.
 
 %% BT-4285: concurrent prechecks of different pending sources for the same
 %% class each see their OWN pending shape. The old scratch-module design
@@ -931,68 +904,66 @@ precheck_class_shape_leaves_the_live_class_untouched_test_() ->
 %% shared, not exclusive, and two prechecks could read each other's meta.
 concurrent_prechecks_each_see_their_own_pending_source_test_() ->
     {timeout, 60,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    UniqueId = beamtalk_test_unique:id(),
-                    Path = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_precheck_concurrent_~s.bt", [UniqueId])
-                    ),
-                    Source =
-                        <<
-                            "Actor subclass: LoaderShapePrecheckConcurrent\n"
-                            "  state: count :: Integer = 0\n"
-                            "  state: name :: String = \"\"\n"
-                        >>,
-                    ok = file:write_file(Path, Source),
-                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
-                    ok = wait_for_shape_capture(<<"LoaderShapePrecheckConcurrent">>),
-                    Dropping =
-                        <<
-                            "Actor subclass: LoaderShapePrecheckConcurrent\n"
-                            "  state: count :: Integer = 0\n"
-                        >>,
-                    Parent = self(),
-                    Jobs = lists:append(lists:duplicate(4, [Source, Dropping])),
-                    Refs = [
-                        begin
-                            Ref = make_ref(),
-                            spawn_link(fun() ->
-                                {ok, Fs} = beamtalk_repl_loader_methods:precheck_class_shape(
-                                    <<"LoaderShapePrecheckConcurrent">>, Pending
-                                ),
-                                Parent ! {Ref, Fs}
-                            end),
-                            {Ref, Pending}
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                UniqueId = beamtalk_test_unique:id(),
+                Path = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_precheck_concurrent_~s.bt", [UniqueId])
+                ),
+                Source =
+                    <<
+                        "Actor subclass: LoaderShapePrecheckConcurrent\n"
+                        "  state: count :: Integer = 0\n"
+                        "  state: name :: String = \"\"\n"
+                    >>,
+                ok = file:write_file(Path, Source),
+                {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                ok = wait_for_shape_capture(<<"LoaderShapePrecheckConcurrent">>),
+                Dropping =
+                    <<
+                        "Actor subclass: LoaderShapePrecheckConcurrent\n"
+                        "  state: count :: Integer = 0\n"
+                    >>,
+                Parent = self(),
+                Jobs = lists:append(lists:duplicate(4, [Source, Dropping])),
+                Refs = [
+                    begin
+                        Ref = make_ref(),
+                        spawn_link(fun() ->
+                            {ok, Fs} = beamtalk_repl_loader_methods:precheck_class_shape(
+                                <<"LoaderShapePrecheckConcurrent">>, Pending
+                            ),
+                            Parent ! {Ref, Fs}
+                        end),
+                        {Ref, Pending}
+                    end
+                 || Pending <- Jobs
+                ],
+                lists:foreach(
+                    fun({Ref, Pending}) ->
+                        Fs =
+                            begin
+                                ?awaitMessage({Ref, F}, 30000),
+                                F
+                            end,
+                        case Pending of
+                            Source ->
+                                ?assertEqual([], Fs);
+                            Dropping ->
+                                Finding = find_finding(dropped_without_bump, Fs),
+                                ?assertEqual([<<"name">>], maps:get(fields, Finding))
                         end
-                     || Pending <- Jobs
-                    ],
-                    lists:foreach(
-                        fun({Ref, Pending}) ->
-                            Fs =
-                                receive
-                                    {Ref, F} -> F
-                                after 30000 -> error(timeout_waiting_for_precheck)
-                                end,
-                            case Pending of
-                                Source ->
-                                    ?assertEqual([], Fs);
-                                Dropping ->
-                                    Finding = find_finding(dropped_without_bump, Fs),
-                                    ?assertEqual([<<"name">>], maps:get(fields, Finding))
-                            end
-                        end,
-                        Refs
-                    )
-                end)
-            ]
-        end}}.
+                    end,
+                    Refs
+                )
+            end)
+        ]}}.
 
 %% A class never captured this session (no baseline) has nothing to compare
 %% against — [], not an error.
 precheck_class_shape_with_no_baseline_reports_nothing_test_() ->
-    {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+    {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
         ?_test(begin
             {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
                 <<"NeverCapturedClassXyz">>,
@@ -1000,7 +971,7 @@ precheck_class_shape_with_no_baseline_reports_nothing_test_() ->
             ),
             ?assertEqual([], Findings)
         end)
-    end}.
+    ]}.
 
 %% BT-3560 regression: a subclass shadows an ancestor's same-named,
 %% same-typed field (`count`). A pending edit drops the subclass's own
@@ -1015,44 +986,42 @@ precheck_class_shape_with_no_baseline_reports_nothing_test_() ->
 %% dropped.
 precheck_class_shape_does_not_false_positive_on_shadowed_ancestor_field_test_() ->
     {timeout, 30,
-        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    UniqueId = beamtalk_test_unique:id(),
-                    SuperPath = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_ancestor_super_~s.bt", [UniqueId])
-                    ),
-                    SubPath = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_ancestor_sub_~s.bt", [UniqueId])
-                    ),
-                    SuperSource =
-                        <<
-                            "Actor subclass: LoaderShapeAncestorSuper\n"
-                            "  state: count :: Integer = 0\n"
-                        >>,
-                    %% The subclass shadows the ancestor's `count` field with
-                    %% its own — same name, same declared type.
-                    SubSource =
-                        <<
-                            "LoaderShapeAncestorSuper subclass: LoaderShapeAncestorSub\n"
-                            "  state: count :: Integer = 0\n"
-                        >>,
-                    ok = file:write_file(SuperPath, SuperSource),
-                    {ok, _, State1} = beamtalk_repl_loader:handle_load(SuperPath, state0()),
-                    ok = file:write_file(SubPath, SubSource),
-                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(SubPath, State1),
-                    ok = wait_for_shape_capture(<<"LoaderShapeAncestorSub">>),
+        {foreach, fun shape_loader_setup/0, fun shape_loader_teardown/1, [
+            ?_test(begin
+                UniqueId = beamtalk_test_unique:id(),
+                SuperPath = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_ancestor_super_~s.bt", [UniqueId])
+                ),
+                SubPath = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("loader_shape_ancestor_sub_~s.bt", [UniqueId])
+                ),
+                SuperSource =
+                    <<
+                        "Actor subclass: LoaderShapeAncestorSuper\n"
+                        "  state: count :: Integer = 0\n"
+                    >>,
+                %% The subclass shadows the ancestor's `count` field with
+                %% its own — same name, same declared type.
+                SubSource =
+                    <<
+                        "LoaderShapeAncestorSuper subclass: LoaderShapeAncestorSub\n"
+                        "  state: count :: Integer = 0\n"
+                    >>,
+                ok = file:write_file(SuperPath, SuperSource),
+                {ok, _, State1} = beamtalk_repl_loader:handle_load(SuperPath, state0()),
+                ok = file:write_file(SubPath, SubSource),
+                {ok, _, _State2} = beamtalk_repl_loader:handle_load(SubPath, State1),
+                ok = wait_for_shape_capture(<<"LoaderShapeAncestorSub">>),
 
-                    %% Pending edit: drop the subclass's own `count` override
-                    %% entirely — never installed via handle_load/2.
-                    PendingSource =
-                        <<"LoaderShapeAncestorSuper subclass: LoaderShapeAncestorSub\n">>,
-                    {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
-                        <<"LoaderShapeAncestorSub">>, PendingSource
-                    ),
-                    ?assertEqual([], Findings)
-                end)
-            ]
-        end}}.
+                %% Pending edit: drop the subclass's own `count` override
+                %% entirely — never installed via handle_load/2.
+                PendingSource =
+                    <<"LoaderShapeAncestorSuper subclass: LoaderShapeAncestorSub\n">>,
+                {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
+                    <<"LoaderShapeAncestorSub">>, PendingSource
+                ),
+                ?assertEqual([], Findings)
+            end)
+        ]}}.

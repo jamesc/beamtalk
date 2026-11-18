@@ -22,6 +22,7 @@ Used only by beamtalk_supervisor_tests.erl.
 %% BT-3994: a long-lived owner for the `supervise` start-lock table.
 -export([ensure_lock_table/0]).
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -define(TAB, beamtalk_supervisor_test_helper_tab).
 
@@ -135,10 +136,7 @@ ensure_lock_table() ->
                     stop -> ok
                 end
             end),
-            receive
-                {lock_table_ready, Owner} -> ok
-            after 5000 -> error(lock_table_not_created)
-            end;
+            ?awaitMessage({lock_table_ready, Owner});
         _ ->
             ok
     end.

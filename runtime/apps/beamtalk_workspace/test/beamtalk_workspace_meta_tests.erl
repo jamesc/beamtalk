@@ -10,6 +10,7 @@ Tests workspace metadata tracking and activity updates.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/file.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Tests
@@ -778,10 +779,7 @@ prune_async_case() ->
         Pid = beamtalk_workspace_meta:prune_stale_foreground_workspaces_async(Base, Week, Now),
         %% The worker exits only after pruning finishes: wait on it, no sleeps.
         Ref = erlang:monitor(process, Pid),
-        receive
-            {'DOWN', Ref, process, Pid, _} -> ok
-        after 30000 -> ?assert(false)
-        end,
+        ?awaitMessage({'DOWN', Ref, process, Pid, _}, 30000),
         ?assertNot(filelib:is_dir(Dir))
     after
         _ = file:del_dir_r("bt_test_3672_async")

@@ -855,11 +855,7 @@ class_of_object_by_name_test_() ->
             ok = beamtalk_class_monitor:unwatch('Bt4117Killed'),
             MRef = monitor(process, Pid),
             exit(Pid, kill),
-            receive
-                {'DOWN', MRef, process, Pid, _} -> ok
-            after 5000 ->
-                error(bt4117_kill_timeout)
-            end,
+            ?awaitMessage({'DOWN', MRef, process, Pid, _}),
             try
                 %% The cached object names a dead pid; it must not be
                 %% served. Nothing revives the class (unwatched, and
@@ -1741,10 +1737,7 @@ pid_label_dead_pid_test() ->
     Pid = spawn(fun() -> ok end),
     %% Deterministically wait for the process to exit rather than a raw sleep.
     Ref = monitor(process, Pid),
-    receive
-        {'DOWN', Ref, process, Pid, _Reason} -> ok
-    after 5000 -> error(setup_timeout)
-    end,
+    ?awaitMessage({'DOWN', Ref, process, Pid, _Reason}),
     Result = beamtalk_primitive:pid_label(Pid),
     ?assertMatch(<<"#Dead<", _/binary>>, Result),
     ?assertEqual($>, binary:last(Result)),

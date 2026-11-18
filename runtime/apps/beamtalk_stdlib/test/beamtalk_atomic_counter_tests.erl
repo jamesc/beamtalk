@@ -407,11 +407,7 @@ concurrent_increment_test() ->
         %% Wait for all workers to finish (5 s timeout guards against worker crashes)
         lists:foreach(
             fun(_) ->
-                receive
-                    done -> ok
-                after 5000 ->
-                    error(concurrent_test_timeout)
-                end
+                ?awaitMessage(done)
             end,
             Pids
         ),

@@ -16,6 +16,7 @@ Beamtalk-level cases are in `stdlib/test/supervisor_stop_within_test.bt` and
 -behaviour(gen_server).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -export([init/1, handle_call/3, handle_cast/2, terminate/2]).
 
@@ -93,7 +94,5 @@ timed_out_stop_keeps_shutting_down_test() ->
     Pid = start(500),
     Ref = erlang:monitor(process, Pid),
     ?assertEqual({exit, timeout}, outcome(Pid, normal, 10)),
-    receive
-        {'DOWN', Ref, process, Pid, Why} -> ?assertEqual(normal, Why)
-    after 5000 -> ?assert(false)
-    end.
+    ?awaitMessage({'DOWN', Ref, process, Pid, Why}),
+    ?assertEqual(normal, Why).

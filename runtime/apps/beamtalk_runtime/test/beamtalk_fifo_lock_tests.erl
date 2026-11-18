@@ -11,6 +11,7 @@ critical section releases it, and a bounded wait gives up with
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %% Every test runs with the table owned by a process that outlives it, as the
 %% runtime app arranges at start.
@@ -42,25 +43,18 @@ lost_table_is_an_error_test() ->
         end),
         Test ! {holder, R}
     end),
-    receive
-        {holding, Holder} -> ok
-    after 2000 -> error(holder_not_holding)
-    end,
+    ?awaitMessage({holding, Holder}, 2000),
     Waiter = spawn(fun() ->
         Test ! {waiter, beamtalk_fifo_lock:with_lock(Key, 5000, fun() -> ran end)}
     end),
     beamtalk_test_wait:until(fun() -> lists:member(Waiter, beamtalk_fifo_lock:queue(Key)) end),
     try
         ets:delete(beamtalk_fifo_locks),
-        receive
-            {waiter, R} -> ?assertEqual({error, lost}, R)
-        after 2000 -> error(waiter_did_not_answer)
-        end,
+        ?awaitMessage({waiter, R}, 2000),
+        ?assertEqual({error, lost}, R),
         Holder ! release,
-        receive
-            {holder, HR} -> ?assertEqual({ok, ok}, HR)
-        after 2000 -> error(holder_did_not_answer)
-        end
+        ?awaitMessage({holder, HR}, 2000),
+        ?assertEqual({ok, ok}, HR)
     after
         beamtalk_supervisor_test_helper:ensure_lock_table()
     end.
@@ -90,9 +84,9 @@ waiters_are_served_in_arrival_order_and_promptly() ->
     Released = now_ms(),
     Holder ! release,
     Order = [
-        receive
-            {acquired, W, At} -> {W, At}
-        after 2000 -> error({not_acquired, W})
+        begin
+            ?awaitMessage({acquired, W, At}, 2000),
+            {W, At}
         end
      || W <- Waiters
     ],
@@ -112,10 +106,8 @@ dead_holder_hands_the_lock_on() ->
     end),
     beamtalk_test_wait:until(fun() -> length(beamtalk_fifo_lock:queue(Key)) =:= 2 end),
     exit(Holder, kill),
-    receive
-        {result, R} -> ?assertEqual({ok, got_it}, R)
-    after 2000 -> error(not_handed_on)
-    end.
+    ?awaitMessage({result, R}, 2000),
+    ?assertEqual({ok, got_it}, R).
 
 %% A waiter killed while queued is skipped when it reaches the head.
 dead_head_waiter_is_skipped() ->
@@ -130,10 +122,8 @@ dead_head_waiter_is_skipped() ->
     beamtalk_test_wait:until(fun() -> length(beamtalk_fifo_lock:queue(Key)) =:= 3 end),
     exit(Doomed, kill),
     Holder ! release,
-    receive
-        {result, R} -> ?assertEqual({ok, got_it}, R)
-    after 2000 -> error(not_handed_on)
-    end.
+    ?awaitMessage({result, R}, 2000),
+    ?assertEqual({ok, got_it}, R).
 
 recursive_lock_raises() ->
     Key = key(),
@@ -179,15 +169,11 @@ timed_out_waiter_does_not_strand_the_next() ->
     spawn_link(fun() ->
         Test ! {long, beamtalk_fifo_lock:with_lock(Key, 5000, fun() -> long end)}
     end),
-    receive
-        {short, S} -> ?assertEqual({error, timeout}, S)
-    after 2000 -> error(short_did_not_time_out)
-    end,
+    ?awaitMessage({short, S}, 2000),
+    ?assertEqual({error, timeout}, S),
     Holder ! release,
-    receive
-        {long, L} -> ?assertEqual({ok, long}, L)
-    after 2000 -> error(long_not_served)
-    end.
+    ?awaitMessage({long, L}, 2000),
+    ?assertEqual({ok, long}, L).
 
 %%% Helpers
 
@@ -205,10 +191,8 @@ hold(Key) ->
             end
         end)
     end),
-    receive
-        {holding, Pid} -> Pid
-    after 2000 -> error(holder_not_holding)
-    end.
+    ?awaitMessage({holding, Pid}, 2000),
+    Pid.
 
 now_ms() ->
     erlang:monotonic_time(millisecond).

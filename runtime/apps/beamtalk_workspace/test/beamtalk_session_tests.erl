@@ -10,6 +10,7 @@ Tests the session-per-connection architecture.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% Test Fixture
 
@@ -141,12 +142,7 @@ session_cleanup(_SupPid) ->
     exit(SessionPid, kill),
 
     %% Wait for session to die
-    receive
-        {'DOWN', MRef, process, SessionPid, _Reason} ->
-            ok
-    after 1000 ->
-        error(session_did_not_die)
-    end,
+    ?awaitMessage({'DOWN', MRef, process, SessionPid, _Reason}, 1000),
 
     %% Session should be gone
     [?_assertNot(is_process_alive(SessionPid))].

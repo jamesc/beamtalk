@@ -12,6 +12,7 @@ introspection.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %% logger handler callback for log_unwraps_string_metadata_test/0.
 -export([log/2]).
@@ -1071,15 +1072,15 @@ log_unwraps_string_metadata_test() ->
                 {beamtalk_string, <<"attempt">>} => 2
             }
         ),
-        receive
-            {bt_4321_log_event, #{level := error, msg := {Format, Args}, meta := M}} ->
-                ?assertEqual(<<"failed">>, iolist_to_binary(io_lib:format(Format, Args))),
-                ?assertEqual(<<"timeout">>, maps:get(<<"reason">>, M)),
-                ?assertEqual([<<"a">>], maps:get(<<"tags">>, M)),
-                ?assertEqual(2, maps:get(<<"attempt">>, M)),
-                ?assertEqual('Svc', maps:get(beamtalk_class, M))
-        after 1000 ->
-            ?assert(false)
+        begin
+            ?awaitMessage(
+                {bt_4321_log_event, #{level := error, msg := {Format, Args}, meta := M}}, 1000
+            ),
+            ?assertEqual(<<"failed">>, iolist_to_binary(io_lib:format(Format, Args))),
+            ?assertEqual(<<"timeout">>, maps:get(<<"reason">>, M)),
+            ?assertEqual([<<"a">>], maps:get(<<"tags">>, M)),
+            ?assertEqual(2, maps:get(<<"attempt">>, M)),
+            ?assertEqual('Svc', maps:get(beamtalk_class, M))
         end
     end).
 
@@ -1111,13 +1112,11 @@ log_ignores_module_level_override_test() ->
             nil = beamtalk_logging_config:log(
                 info, {beamtalk_string, <<"still filed">>}, #{domain => ?BT_4321_DOMAIN}
             ),
-            receive
-                {bt_4321_log_event, #{msg := {Format, Args}}} ->
-                    ?assertEqual(
-                        <<"still filed">>, iolist_to_binary(io_lib:format(Format, Args))
-                    )
-            after 1000 ->
-                ?assert(false, "module-level override on beamtalk_logging_config dropped the send")
+            begin
+                ?awaitMessage({bt_4321_log_event, #{msg := {Format, Args}}}, 1000),
+                ?assertEqual(
+                    <<"still filed">>, iolist_to_binary(io_lib:format(Format, Args))
+                )
             end
         after
             ok = logger:unset_module_level(beamtalk_logging_config)
@@ -1131,10 +1130,8 @@ BT-4321: a non-text message (e.g. an Integer reaching a Logger body through
 log_non_string_message_formats_cleanly_test() ->
     with_capture_handler(bt_4321_non_string_test_handler, fun() ->
         nil = beamtalk_logging_config:log(info, 42, #{domain => ?BT_4321_DOMAIN}),
-        receive
-            {bt_4321_log_event, #{msg := {Format, Args}}} ->
-                ?assertEqual(<<"42">>, iolist_to_binary(io_lib:format(Format, Args)))
-        after 1000 ->
-            ?assert(false)
+        begin
+            ?awaitMessage({bt_4321_log_event, #{msg := {Format, Args}}}, 1000),
+            ?assertEqual(<<"42">>, iolist_to_binary(io_lib:format(Format, Args)))
         end
     end).

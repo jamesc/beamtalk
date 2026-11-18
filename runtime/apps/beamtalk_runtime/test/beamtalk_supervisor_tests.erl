@@ -164,11 +164,7 @@ start_anon_supervisor_with_worker(ChildId) ->
     },
     SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
     {ok, Pid} = supervisor:start_link(?MODULE, {SupFlags, [ChildSpec]}),
-    receive
-        {worker_ready, _} -> ok
-    after 1000 ->
-        error(worker_not_ready)
-    end,
+    ?awaitMessage({worker_ready, _}, 1000),
     Pid.
 
 -doc "OTP-compatible worker start function (returns {ok, Pid}).".
@@ -213,10 +209,7 @@ start_anon_supervisor_with_workers(ChildIds) ->
     %% Wait for all workers to report ready.
     lists:foreach(
         fun(_) ->
-            receive
-                {worker_ready, _} -> ok
-            after 1000 -> error(worker_not_ready)
-            end
+            ?awaitMessage({worker_ready, _}, 1000)
         end,
         ChildIds
     ),
@@ -244,10 +237,7 @@ start_anon_supervisor_with_specs(Specs) ->
     %% (each comes from a different worker process), so the pids are looked
     %% up by id.
     [
-        receive
-            {worker_ready, _} -> ok
-        after 1000 -> error(worker_not_ready)
-        end
+        ?awaitMessage({worker_ready, _}, 1000)
      || _ <- Specs
     ],
     Children = supervisor:which_children(Pid),
@@ -275,10 +265,8 @@ start_named_supervisor_with_worker(Name, ChildId) ->
     Pid.
 
 wait_for_worker() ->
-    receive
-        {worker_ready, WorkerPid} -> {ok, WorkerPid}
-    after 1000 -> error(worker_not_ready)
-    end.
+    ?awaitMessage({worker_ready, WorkerPid}, 1000),
+    {ok, WorkerPid}.
 
 make_supervisor_tuple(ClassName, Module, Pid) ->
     {beamtalk_supervisor, ClassName, Module, Pid}.
@@ -542,10 +530,7 @@ terminate_restart_delete_by_id_test() ->
         {ok, B2} = beamtalk_supervisor:restartChild(Self, a2),
         ?assert(is_pid(B2)),
         ?assertNotEqual(B, B2),
-        receive
-            {worker_ready, B2} -> ok
-        after 1000 -> error(worker_not_ready)
-        end,
+        ?awaitMessage({worker_ready, B2}, 1000),
         %% delete after terminate
         {ok, nil} = beamtalk_supervisor:terminateChildId(Self, a2),
         ?assertEqual({ok, nil}, beamtalk_supervisor:deleteChild(Self, a2)),
@@ -761,10 +746,7 @@ declaration_order_survives_one_for_all_restart_test() ->
             SupFlags = #{strategy => Strategy, intensity => 5, period => 5},
             {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, ChildSpecs}),
             [
-                receive
-                    {worker_ready, _} -> ok
-                after 1000 -> error(worker_not_ready)
-                end
+                ?awaitMessage({worker_ready, _}, 1000)
              || _ <- ChildSpecs
             ],
             {o2, W2, _, _} = lists:keyfind(o2, 1, supervisor:which_children(SupPid)),
@@ -778,10 +760,7 @@ declaration_order_survives_one_for_all_restart_test() ->
                         rest_for_one -> 2
                     end,
                 [
-                    receive
-                        {worker_ready, _} -> ok
-                    after 1000 -> error(worker_not_restarted)
-                    end
+                    ?awaitMessage({worker_ready, _}, 1000)
                  || _ <- lists:seq(1, NRestarted)
                 ],
                 {ok, Infos} = beamtalk_supervisor:childInfos(Sup),
@@ -929,15 +908,9 @@ count_children_dynamic_supervisor_with_children_test() ->
         Self = make_supervisor_tuple('TestDynCount2', test_dyn_cnt2, SupPid),
         Parent = self(),
         {ok, _Child1} = supervisor:start_child(SupPid, [Parent]),
-        receive
-            {worker_ready, _} -> ok
-        after 1000 -> error(timeout)
-        end,
+        ?awaitMessage({worker_ready, _}, 1000),
         {ok, _Child2} = supervisor:start_child(SupPid, [Parent]),
-        receive
-            {worker_ready, _} -> ok
-        after 1000 -> error(timeout)
-        end,
+        ?awaitMessage({worker_ready, _}, 1000),
         ?assertEqual({ok, 2}, beamtalk_supervisor:countChildren(Self))
     after
         gen_server:stop(SupPid)
@@ -969,11 +942,7 @@ terminate_child_by_pid_test() ->
         %% Start a dynamic child; start_worker/1 expects a parent pid to signal readiness.
         Parent = self(),
         {ok, ChildPid} = supervisor:start_child(SupPid, [Parent]),
-        receive
-            {worker_ready, _} -> ok
-        after 1000 ->
-            error(worker_not_ready)
-        end,
+        ?awaitMessage({worker_ready, _}, 1000),
         ?assert(is_process_alive(ChildPid)),
         %% terminateChild/2 DynamicSupervisor path: Arg is an actor tuple (not a class object).
         %% is_class_object returns false (no " class" suffix in element 2), so the pid branch runs.
@@ -1236,11 +1205,10 @@ static_init_reads_config_from_instance_with_start_args_test() ->
             Sup = bt3963_sup('BT3963Sup', Pid),
             %% `self` in a configuration method is the supervisor being
             %% started, and `self args` its start args.
-            receive
-                {configured, Self, ArgsInInit} ->
-                    ?assertEqual(Sup, Self),
-                    ?assertEqual({ok, #{port => 80}}, ArgsInInit)
-            after 2000 -> error(not_configured)
+            begin
+                ?awaitMessage({configured, Self, ArgsInInit}, 2000),
+                ?assertEqual(Sup, Self),
+                ?assertEqual({ok, #{port => 80}}, ArgsInInit)
             end,
             ?assertEqual({ok, #{port => 80}}, beamtalk_supervisor:args(Sup)),
             ?assertEqual(
@@ -1435,10 +1403,8 @@ fake_supervisor_class(Name, Module) ->
             end
         end)()
     end),
-    receive
-        {Ref, ClassObj} -> {ClassPid, ClassObj}
-    after 5000 -> error(fake_supervisor_class_timeout)
-    end.
+    ?awaitMessage({Ref, ClassObj}),
+    {ClassPid, ClassObj}.
 
 bt3963_dynamic_config(ChildClass, Overrides) ->
     maps:merge(
@@ -1839,11 +1805,7 @@ start_child_via_class_method_supervisor_restart_test() ->
             Ref = monitor(process, ChildPid1),
             %% Kill the child — the supervisor should restart it.
             exit(ChildPid1, kill),
-            receive
-                {'DOWN', Ref, process, ChildPid1, killed} -> ok
-            after 2000 ->
-                error(child_did_not_die)
-            end,
+            ?awaitMessage({'DOWN', Ref, process, ChildPid1, killed}, 2000),
 
             %% Wait for the supervisor to restart the child.
             ok = beamtalk_test_wait:until(fun() ->
@@ -1900,11 +1862,7 @@ start_child_via_class_method_real_self_spawn_supervisor_restart_test() ->
 
             Ref = monitor(process, ChildPid1),
             exit(ChildPid1, kill),
-            receive
-                {'DOWN', Ref, process, ChildPid1, killed} -> ok
-            after 2000 ->
-                error(child_did_not_die)
-            end,
+            ?awaitMessage({'DOWN', Ref, process, ChildPid1, killed}, 2000),
 
             ok = beamtalk_test_wait:until(fun() ->
                 [{_, P, _, _}] = supervisor:which_children(SupPid),
@@ -1961,11 +1919,7 @@ start_child_via_class_method_real_self_spawn_as_supervisor_restart_test() ->
 
             Ref = monitor(process, ChildPid1),
             exit(ChildPid1, kill),
-            receive
-                {'DOWN', Ref, process, ChildPid1, killed} -> ok
-            after 2000 ->
-                error(child_did_not_die)
-            end,
+            ?awaitMessage({'DOWN', Ref, process, ChildPid1, killed}, 2000),
 
             ok = beamtalk_test_wait:until(fun() ->
                 [{_, P, _, _}] = supervisor:which_children(SupPid),
@@ -2086,9 +2040,9 @@ supervise_starts_registered_unlinked_and_runs_initialize_once_test() ->
             ?assertEqual(Pid, whereis(?BT3963_MOD)),
             %% Unlinked from the caller (and so from any class process).
             ?assertNot(linked_to_self(Pid)),
-            receive
-                {initialized, Sup, Runner} -> ?assertEqual(Test, Runner)
-            after 2000 -> error(not_initialized)
+            begin
+                ?awaitMessage({initialized, Sup, Runner}, 2000),
+                ?assertEqual(Test, Runner)
             end,
             %% Idempotent: the running instance, and no second initialize.
             ?assertEqual({ok, Sup}, beamtalk_supervisor:supervise('BT3963Sup', ?BT3963_MOD)),
@@ -2139,31 +2093,28 @@ supervise_callers_racing_during_start_get_one_instance_test() ->
         end,
         Caller(first),
         SupPid =
-            receive
-                {in_start, P} -> P
-            after 5000 -> error(not_started)
+            begin
+                ?awaitMessage({in_start, P}),
+                P
             end,
         SecondCaller = Caller(second),
         %% Wait until the second caller is blocked waiting on the in-flight start.
         ok = beamtalk_test_wait:idle(SecondCaller),
         SupPid ! go,
         First =
-            receive
-                {first, F} -> F
-            after 10000 -> error(first_timeout)
+            begin
+                ?awaitMessage({first, F}, 10000),
+                F
             end,
         Second =
-            receive
-                {second, S} -> S
-            after 10000 -> error(second_timeout)
+            begin
+                ?awaitMessage({second, S}, 10000),
+                S
             end,
         try
             ?assertEqual({ok, bt3963_sup('BT3963Sup', SupPid)}, First),
             ?assertEqual(First, Second),
-            receive
-                initialized -> ok
-            after 2000 -> error(not_initialized)
-            end,
+            ?awaitMessage(initialized, 2000),
             receive
                 initialized -> error(initialized_twice)
             after 100 -> ok
@@ -2201,14 +2152,14 @@ start_honours_exit_signals_from_existing_links_test() ->
             end
         end),
         Helper =
-            receive
-                {helper, H} -> H
-            after 2000 -> error(no_helper)
+            begin
+                ?awaitMessage({helper, H}, 2000),
+                H
             end,
         SupPid =
-            receive
-                {in_start, P} -> P
-            after 5000 -> error(not_started)
+            begin
+                ?awaitMessage({in_start, P}),
+                P
             end,
         %% Kill the caller's link while the caller is inside the start.
         exit(Helper, boom),
@@ -2216,9 +2167,9 @@ start_honours_exit_signals_from_existing_links_test() ->
         ok = beamtalk_test_wait:dead(Helper),
         SupPid ! go,
         try
-            receive
-                {'DOWN', Ref, process, Caller, Reason} -> ?assertEqual(boom, Reason)
-            after 5000 -> error(caller_survived_linked_exit)
+            begin
+                ?awaitMessage({'DOWN', Ref, process, Caller, Reason}),
+                ?assertEqual(boom, Reason)
             end,
             receive
                 survived -> error(caller_survived_linked_exit)
@@ -2254,14 +2205,8 @@ spawn_starts_independent_unlinked_listed_instances_test() ->
             ?assertEqual({ok, nil}, beamtalk_supervisor:args(A)),
             ?assertEqual({ok, #{n => 2}}, beamtalk_supervisor:args(B)),
             %% initialize ran once per instance, in the caller.
-            receive
-                {initialized, A} -> ok
-            after 2000 -> error(a_not_initialized)
-            end,
-            receive
-                {initialized, B} -> ok
-            after 2000 -> error(b_not_initialized)
-            end,
+            ?awaitMessage({initialized, A}, 2000),
+            ?awaitMessage({initialized, B}, 2000),
             %% Both are listed as top-level instances (`pg`) ...
             ?assert(lists:member(PA, beamtalk_supervisor:instance_pids())),
             ?assert(lists:member(B, beamtalk_supervisor:instances())),
@@ -2378,9 +2323,9 @@ supervise_waiter_behind_hung_start_gets_bounded_error_test() ->
                 Test ! {first, beamtalk_supervisor:supervise('BT3963Sup', ?BT3963_MOD)}
             end),
             SupPid =
-                receive
-                    {in_start, P} -> P
-                after 5000 -> error(not_started)
+                begin
+                    ?awaitMessage({in_start, P}),
+                    P
                 end,
             try
                 T0 = erlang:monotonic_time(millisecond),
@@ -2396,10 +2341,9 @@ supervise_waiter_behind_hung_start_gets_bounded_error_test() ->
                 %% The hung start is still the only one in progress.
                 ?assertEqual(SupPid, whereis(?BT3963_MOD)),
                 SupPid ! go,
-                receive
-                    {first, First} ->
-                        ?assertEqual({ok, bt3963_sup('BT3963Sup', SupPid)}, First)
-                after 5000 -> error(first_caller_timeout)
+                begin
+                    ?awaitMessage({first, First}),
+                    ?assertEqual({ok, bt3963_sup('BT3963Sup', SupPid)}, First)
                 end,
                 %% No lock left held: the next caller answers immediately.
                 ?assertEqual(
@@ -2550,13 +2494,13 @@ start_supervisor_child_passes_args_and_name_test() ->
             ?BT3963_MOD, #{n => 2}, bt3962_trampoline_named
         ),
         try
-            receive
-                {child_args, A1} -> ?assertEqual({ok, #{n => 1}}, A1)
-            after 2000 -> error(no_args)
+            begin
+                ?awaitMessage({child_args, A1}, 2000),
+                ?assertEqual({ok, #{n => 1}}, A1)
             end,
-            receive
-                {child_args, A2} -> ?assertEqual({ok, #{n => 2}}, A2)
-            after 2000 -> error(no_args)
+            begin
+                ?awaitMessage({child_args, A2}, 2000),
+                ?assertEqual({ok, #{n => 2}}, A2)
             end,
             ?assertEqual(P2, whereis(bt3962_trampoline_named)),
             ?assertEqual(undefined, whereis(?BT3963_MOD)),
@@ -2849,14 +2793,10 @@ startChild_announces_child_added_test() ->
     try
         Self = {beamtalk_supervisor, 'BT2445DynSup', ?MODULE, SupPid},
         {ok, _Child} = beamtalk_supervisor:startChild(Self),
-        receive
-            {child_added, Event} ->
-                ?assertEqual('SupervisionChildAdded', maps:get('$beamtalk_class', Event)),
-                ?assertEqual('BT2445DynSup', maps:get(supervisor, Event)),
-                ?assertEqual('BT2445DynWorker', maps:get(childClass, Event))
-        after 1000 ->
-            ?assert(false)
-        end
+        ?awaitMessage({child_added, Event}, 1000),
+        ?assertEqual('SupervisionChildAdded', maps:get('$beamtalk_class', Event)),
+        ?assertEqual('BT2445DynSup', maps:get(supervisor, Event)),
+        ?assertEqual('BT2445DynWorker', maps:get(childClass, Event))
     after
         beamtalk_announcements:unsubscribe(SubRef),
         ChildClassPid ! stop,
@@ -2877,10 +2817,7 @@ startChild_arity2_success_test() ->
         Self = {beamtalk_supervisor, 'BT1980DynArgsSup', ?MODULE, SupPid},
         Result = beamtalk_supervisor:startChild(Self, self()),
         %% Drain the worker_ready message start_worker/1 sends us.
-        receive
-            {worker_ready, _} -> ok
-        after 1000 -> error(no_worker_ready)
-        end,
+        ?awaitMessage({worker_ready, _}, 1000),
         ?assertMatch({ok, {beamtalk_object, 'BT1980DynArgs', ?MODULE, _}}, Result)
     after
         ChildClassPid ! stop,
@@ -2907,12 +2844,11 @@ run_initialize_sends_instance_initialize_test() ->
         try
             Sup = bt3963_sup('BT3963Sup', Pid),
             ?assertEqual(ok, beamtalk_supervisor:run_initialize(Sup)),
-            receive
-                {initialized, Self, Count, Runner} ->
-                    ?assertEqual(Sup, Self),
-                    ?assertEqual(0, Count),
-                    ?assertEqual(Test, Runner)
-            after 2000 -> error(not_initialized)
+            begin
+                ?awaitMessage({initialized, Self, Count, Runner}, 2000),
+                ?assertEqual(Sup, Self),
+                ?assertEqual(0, Count),
+                ?assertEqual(Test, Runner)
             end
         after
             stop_linked(Pid)
@@ -2940,14 +2876,8 @@ run_initialize_raise_stops_supervisor_test() ->
             #beamtalk_error{kind = runtime_error},
             raised_beamtalk_error(fun() -> beamtalk_supervisor:run_initialize(Sup) end)
         ),
-        receive
-            {'DOWN', SupRef, process, SupPid, _} -> ok
-        after 2000 -> error(supervisor_leaked)
-        end,
-        receive
-            {'DOWN', WorkerRef, process, WorkerPid, _} -> ok
-        after 2000 -> error(child_orphaned)
-        end,
+        ?awaitMessage({'DOWN', SupRef, process, SupPid, _}, 2000),
+        ?awaitMessage({'DOWN', WorkerRef, process, WorkerPid, _}, 2000),
         ?assertEqual(undefined, whereis(SupName))
     end).
 
@@ -2989,10 +2919,7 @@ wrap_child_actor_returns_beamtalk_object_test() ->
     },
     SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
     {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, [ChildSpec]}),
-    receive
-        {worker_ready, _} -> ok
-    after 1000 -> error(worker_not_ready)
-    end,
+    ?awaitMessage({worker_ready, _}, 1000),
     FakeClassPid = spawn(fun() ->
         (fun Loop() ->
             receive
@@ -3032,10 +2959,7 @@ wrap_child_supervisor_returns_beamtalk_supervisor_test() ->
     },
     SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
     {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, [ChildSpec]}),
-    receive
-        {worker_ready, _} -> ok
-    after 1000 -> error(worker_not_ready)
-    end,
+    ?awaitMessage({worker_ready, _}, 1000),
     FakeClassPid = spawn(fun() ->
         (fun Loop() ->
             receive
@@ -3128,10 +3052,7 @@ terminateChild_child_alias_delegates_test() ->
     SupPid = start_dynamic_supervisor(),
     Parent = self(),
     {ok, ChildPid} = supervisor:start_child(SupPid, [Parent]),
-    receive
-        {worker_ready, _} -> ok
-    after 1000 -> error(no_worker)
-    end,
+    ?awaitMessage({worker_ready, _}, 1000),
     Self = make_supervisor_tuple('BT1980AliasChild', bt1980_alias_child_mod, SupPid),
     ChildArg = {beamtalk_object, 'SomeActor', some_mod, ChildPid},
     try
@@ -3205,10 +3126,7 @@ terminate_child_static_terminate_failed_test() ->
         }}
     ),
     {ok, Child} = supervisor:start_child(SupPid, [self()]),
-    receive
-        {worker_ready, _} -> ok
-    after 1000 -> error(worker_not_ready)
-    end,
+    ?awaitMessage({worker_ready, _}, 1000),
     Self = make_supervisor_tuple('BT1998StaticFail', bt1998_static_fail_mod, SupPid),
     try
         Result = beamtalk_supervisor:terminateChildId(Self, some_id),
@@ -3693,13 +3611,9 @@ startChild_max_children_restart_replays_original_args_test() ->
 kill_and_await_down(Pid) ->
     Mon = monitor(process, Pid),
     exit(Pid, kill),
-    receive
-        {'DOWN', Mon, process, Pid, _} ->
-            demonitor(Mon, [flush]),
-            ok
-    after 5000 ->
-        error(child_not_dead)
-    end.
+    ?awaitMessage({'DOWN', Mon, process, Pid, _}),
+    demonitor(Mon, [flush]),
+    ok.
 
 dynamic_init_installs_capacity_state_test() ->
     %% A pool started through the real dynamic_init/3 carries enforcement
@@ -4546,9 +4460,9 @@ concurrent_supervise(HookOutcome) ->
         Caller(first),
         %% Barrier: the first caller is now inside the initialize: hook.
         HookPid =
-            receive
-                {init_entered, P} -> P
-            after 5000 -> error(hook_not_entered)
+            begin
+                ?awaitMessage({init_entered, P}),
+                P
             end,
         Caller(second),
         %% The second caller must be parked behind the hook and must not have
@@ -4567,14 +4481,14 @@ concurrent_supervise(HookOutcome) ->
         SupRef = erlang:monitor(process, SupPid),
         HookPid ! {hook, HookOutcome},
         First =
-            receive
-                {first, F} -> F
-            after 5000 -> error(first_caller_timeout)
+            begin
+                ?awaitMessage({first, F}),
+                F
             end,
         Second =
-            receive
-                {second, S} -> S
-            after 5000 -> error(second_caller_timeout)
+            begin
+                ?awaitMessage({second, S}),
+                S
             end,
         case HookOutcome of
             fail ->
@@ -4582,10 +4496,7 @@ concurrent_supervise(HookOutcome) ->
                 %% `Result` (both callers), instead of raising.
                 {returned, FirstResult} = First,
                 ?assertBtResultObjError(supervisor_start_failed, FirstResult),
-                receive
-                    {'DOWN', SupRef, process, SupPid, _} -> ok
-                after 2000 -> error(supervisor_not_stopped)
-                end,
+                ?awaitMessage({'DOWN', SupRef, process, SupPid, _}, 2000),
                 {returned, SecondResult} = Second,
                 #{isOk := false, errReason := SecondReason} = SecondResult,
                 ?assertMatch(
@@ -4775,10 +4686,8 @@ bt4033_failing_initialize_on_restart_counts_against_intensity_test() ->
         [{bt4033_restart, ChildPid, worker, _}] = supervisor:which_children(SupPid),
         MonRef = erlang:monitor(process, SupPid),
         exit(ChildPid, kill),
-        receive
-            {'DOWN', MonRef, process, SupPid, Reason} -> ?assertEqual(shutdown, Reason)
-        after 5000 -> ?assert(false)
-        end,
+        ?awaitMessage({'DOWN', MonRef, process, SupPid, Reason}),
+        ?assertEqual(shutdown, Reason),
         %% The kill and each failed restart count against the intensity
         %% (2): the first start, then two restarts that fail their
         %% `initialize`; the third restart event exceeds the intensity, so

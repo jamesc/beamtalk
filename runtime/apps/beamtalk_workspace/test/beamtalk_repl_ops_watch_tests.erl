@@ -18,6 +18,7 @@ Covers:
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Helpers
@@ -113,11 +114,7 @@ pid_stats_dead_pid_returns_dead_stats_map_test() ->
     PidBin = list_to_binary(pid_to_list(Pid)),
     Ref = erlang:monitor(process, Pid),
     exit(Pid, kill),
-    receive
-        {'DOWN', Ref, process, Pid, _} -> ok
-    after 1000 ->
-        error(timeout_waiting_for_process_death)
-    end,
+    ?awaitMessage({'DOWN', Ref, process, Pid, _}, 1000),
     Stats = beamtalk_repl_ops_watch:pid_stats(Pid),
     ?assert(is_map(Stats)),
     ?assertEqual(false, maps:get(<<"alive">>, Stats)),

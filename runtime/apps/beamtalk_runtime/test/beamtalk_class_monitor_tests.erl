@@ -42,6 +42,7 @@ would rebuild from ETS metadata.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %% Polling uses `beamtalk_test_wait:until/1` (default budget, ~6s: 100 x 20ms
 %% proved too tight under full-suite parallel load, BT-4330); the loop still
@@ -133,10 +134,7 @@ stop_if_alive(_) ->
 kill_and_wait(Pid, Reason) ->
     MRef = erlang:monitor(process, Pid),
     exit(Pid, Reason),
-    receive
-        {'DOWN', MRef, process, Pid, _} -> ok
-    after ?KILL_WAIT_MS -> ?assert(false)
-    end.
+    ?awaitMessage({'DOWN', MRef, process, Pid, _}, ?KILL_WAIT_MS).
 
 timed(Fun) ->
     {timeout, ?TEST_TIMEOUT_S, Fun}.
@@ -157,10 +155,7 @@ fresh_idle_pid() ->
 
 %% Block until the mock reported a restart of `Name` (an event, not a poll).
 await_restart_called(Name) ->
-    receive
-        {restart_class_called, Name} -> ok
-    after ?KILL_WAIT_MS -> error({restart_class_not_called, Name})
-    end.
+    ?awaitMessage({restart_class_called, Name}, ?KILL_WAIT_MS).
 
 %% Count (and consume) the `restart_class/1` reports still in the mailbox. Call
 %% only after a sync with the monitor (`sys:get_state/1`, whose reply follows

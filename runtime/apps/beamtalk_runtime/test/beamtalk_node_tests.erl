@@ -461,11 +461,8 @@ subscribe_self(EventClass) ->
 %% Wait for the `EventClass` event about `PeerNode` specifically — other
 %% suites' peers may come and go on the shared system bus concurrently.
 expect_event(EventClass, PeerNode) ->
-    receive
-        {got, EventClass, #{node := #{name := PeerNode}} = Event} -> Event
-    after 10000 ->
-        ?assert(false)
-    end.
+    ?awaitMessage({got, EventClass, #{node := #{name := PeerNode}} = Event}, 10000),
+    Event.
 
 %%====================================================================
 %% Local introspection targets (moved from Workspace, BT-3633)

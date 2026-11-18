@@ -6,6 +6,7 @@
 -moduledoc "Unit tests for beamtalk_stream.".
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% ============================================================================
 %%% Finalizer Support Tests
@@ -33,10 +34,7 @@ take_calls_finalizer_test() ->
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     Result = beamtalk_stream:take(Stream, 2),
     ?assertEqual([1, 2], Result),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end.
+    ?awaitMessage(finalizer_called, 100).
 
 %% Test that take: calls finalizer even when stream exhausts naturally
 take_calls_finalizer_on_exhaust_test() ->
@@ -46,10 +44,7 @@ take_calls_finalizer_on_exhaust_test() ->
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     Result = beamtalk_stream:take(Stream, 5),
     ?assertEqual([1, 2], Result),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end.
+    ?awaitMessage(finalizer_called, 100).
 
 %% Test that detect: calls the finalizer
 detect_calls_finalizer_test() ->
@@ -59,10 +54,7 @@ detect_calls_finalizer_test() ->
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     Result = beamtalk_stream:detect(Stream, fun(X) -> X =:= 3 end),
     ?assertEqual(3, Result),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end.
+    ?awaitMessage(finalizer_called, 100).
 
 %% The finalizer must still run when detect: exhausts the stream and
 %% raises — the raise happens after the `try ... after`, not inside it. Without
@@ -77,10 +69,7 @@ detect_calls_finalizer_on_not_found_test() ->
         #{'$beamtalk_class' := 'RuntimeError'},
         beamtalk_stream:detect(Stream, fun(X) -> X > 10 end)
     ),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end.
+    ?awaitMessage(finalizer_called, 100).
 
 %% Test that anySatisfy: calls the finalizer
 any_satisfy_calls_finalizer_test() ->
@@ -90,10 +79,7 @@ any_satisfy_calls_finalizer_test() ->
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     Result = beamtalk_stream:any_satisfy(Stream, fun(X) -> X =:= 2 end),
     ?assertEqual(true, Result),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end.
+    ?awaitMessage(finalizer_called, 100).
 
 %% Test that allSatisfy: calls the finalizer
 all_satisfy_calls_finalizer_test() ->
@@ -103,10 +89,7 @@ all_satisfy_calls_finalizer_test() ->
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     Result = beamtalk_stream:all_satisfy(Stream, fun(X) -> X < 3 end),
     ?assertEqual(false, Result),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end.
+    ?awaitMessage(finalizer_called, 100).
 
 %% Test that lazy ops propagate the finalizer
 select_propagates_finalizer_test() ->
@@ -117,10 +100,7 @@ select_propagates_finalizer_test() ->
     Filtered = beamtalk_stream:'select'(Stream, fun(X) -> X rem 2 =:= 0 end),
     Result = beamtalk_stream:take(Filtered, 2),
     ?assertEqual([2, 4], Result),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end.
+    ?awaitMessage(finalizer_called, 100).
 
 collect_propagates_finalizer_test() ->
     Self = self(),
@@ -130,10 +110,7 @@ collect_propagates_finalizer_test() ->
     Mapped = beamtalk_stream:'collect'(Stream, fun(X) -> X * 10 end),
     Result = beamtalk_stream:take(Mapped, 2),
     ?assertEqual([10, 20], Result),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end.
+    ?awaitMessage(finalizer_called, 100).
 
 reject_propagates_finalizer_test() ->
     Self = self(),
@@ -143,10 +120,7 @@ reject_propagates_finalizer_test() ->
     Rejected = beamtalk_stream:'reject'(Stream, fun(X) -> X =:= 2 end),
     Result = beamtalk_stream:take(Rejected, 2),
     ?assertEqual([1, 3], Result),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end.
+    ?awaitMessage(finalizer_called, 100).
 
 drop_propagates_finalizer_test() ->
     Self = self(),
@@ -156,10 +130,7 @@ drop_propagates_finalizer_test() ->
     Dropped = beamtalk_stream:'drop'(Stream, 2),
     Result = beamtalk_stream:take(Dropped, 2),
     ?assertEqual([3, 4], Result),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end.
+    ?awaitMessage(finalizer_called, 100).
 
 %% Test that streams without finalizer work fine (no crash)
 take_without_finalizer_test() ->
@@ -175,10 +146,7 @@ do_calls_finalizer_test() ->
     Finalizer = fun() -> Self ! finalizer_called end,
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     beamtalk_stream:do(Stream, fun(_) -> ok end),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end.
+    ?awaitMessage(finalizer_called, 100).
 
 %% Test that inject:into: calls the finalizer
 inject_into_calls_finalizer_test() ->
@@ -188,10 +156,7 @@ inject_into_calls_finalizer_test() ->
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     Result = beamtalk_stream:inject_into(Stream, 0, fun(Acc, X) -> Acc + X end),
     ?assertEqual(6, Result),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end.
+    ?awaitMessage(finalizer_called, 100).
 
 %% Test that asList calls the finalizer
 as_list_calls_finalizer_test() ->
@@ -201,10 +166,7 @@ as_list_calls_finalizer_test() ->
     Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
     Result = beamtalk_stream:as_list(Stream),
     ?assertEqual([1, 2, 3], Result),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end.
+    ?awaitMessage(finalizer_called, 100).
 
 %% Test that finalizer is safe to call multiple times (double-close)
 double_finalizer_safe_test() ->
@@ -216,10 +178,7 @@ double_finalizer_safe_test() ->
     end,
     Stream = beamtalk_stream:make_stream(fun() -> done end, <<"test">>, Finalizer),
     beamtalk_stream:take(Stream, 0),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end,
+    ?awaitMessage(finalizer_called, 100),
     ?assertEqual(1, atomics:get(Counter, 1)).
 
 %% Test that finalizer is called even when block raises an exception
@@ -237,10 +196,7 @@ finalizer_called_on_exception_test() ->
             end
         end)
     ),
-    receive
-        finalizer_called -> ok
-    after 100 -> ?assert(false)
-    end.
+    ?awaitMessage(finalizer_called, 100).
 
 %%% ============================================================================
 %%% File Handle Finalizer Test

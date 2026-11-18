@@ -442,10 +442,7 @@ invalidation_test_() ->
                     end),
                     Self ! installed
                 end),
-                receive
-                    derived -> ok
-                after 5000 -> error(lock_not_taken)
-                end,
+                ?awaitMessage(derived),
                 %% The writer: publishes Base's class variables, then erases
                 %% the descendants' flags.
                 Writer = spawn(fun() ->
@@ -459,14 +456,8 @@ invalidation_test_() ->
                     after 300 -> ok
                     end,
                     Installer ! release,
-                    receive
-                        installed -> ok
-                    after 5000 -> error(install_stuck)
-                    end,
-                    receive
-                        written -> ok
-                    after 5000 -> error(write_stuck)
-                    end,
+                    ?awaitMessage(installed),
+                    ?awaitMessage(written),
                     ?assertEqual(false, beamtalk_class_shadow_flags:direct_flag_value(LeafTag)),
                     ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, Leaf))
                 after
@@ -504,23 +495,14 @@ invalidation_test_() ->
                 end),
                 Self ! {installed, self()}
             end),
-            receive
-                derived -> ok
-            after 5000 -> error(lock_not_taken)
-            end,
+            ?awaitMessage(derived),
             Writer = spawn(fun() ->
                 ok = beamtalk_class_metadata:delete(Base),
                 Self ! {deleted, self()}
             end),
             try
-                receive
-                    {deleted, Writer} -> ok
-                after 5000 -> error(delete_stuck)
-                end,
-                receive
-                    {installed, Installer} -> ok
-                after 5000 -> error(install_stuck)
-                end,
+                ?awaitMessage({deleted, Writer}),
+                ?awaitMessage({installed, Installer}),
                 ?assertEqual(false, beamtalk_class_shadow_flags:direct_flag_value(LeafTag)),
                 ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, Leaf))
             after

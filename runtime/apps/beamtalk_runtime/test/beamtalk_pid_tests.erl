@@ -22,6 +22,7 @@ Covers both exported functions directly:
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% ============================================================================
 %%% is_alive/1 — local pids
@@ -36,11 +37,7 @@ is_alive_live_local_pid_test() ->
 is_alive_dead_local_pid_test() ->
     Pid = spawn(fun() -> ok end),
     Ref = monitor(process, Pid),
-    receive
-        {'DOWN', Ref, process, Pid, _} -> ok
-    after 1000 ->
-        error(process_did_not_exit)
-    end,
+    ?awaitMessage({'DOWN', Ref, process, Pid, _}, 1000),
     ?assertNot(beamtalk_pid:is_alive(Pid)).
 
 %%% ============================================================================

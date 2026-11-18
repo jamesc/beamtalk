@@ -16,6 +16,7 @@ EUnit coverage.  All three are exercised only indirectly by
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% ============================================================================
 %%% format_result/1 — Integer
@@ -134,10 +135,7 @@ format_result_pid_inner_matches_pid_to_list_test() ->
 format_result_dead_pid_renders_as_dead_test() ->
     Pid = spawn(fun() -> ok end),
     Ref = monitor(process, Pid),
-    receive
-        {'DOWN', Ref, process, Pid, _Reason} -> ok
-    after 5000 -> error(setup_timeout)
-    end,
+    ?awaitMessage({'DOWN', Ref, process, Pid, _Reason}),
     Result = beamtalk_stdlib_test:format_result(Pid),
     ?assertMatch(<<"#Dead<", _/binary>>, Result),
     ?assertNotMatch(<<"#Actor<", _/binary>>, Result).
@@ -669,10 +667,8 @@ capture_output(Fun) ->
             group_leader(OldGL, self())
         end,
     Sink ! {get, self()},
-    receive
-        {captured, Output} -> {Outcome, Output}
-    after 5000 -> error(capture_timeout)
-    end.
+    ?awaitMessage({captured, Output}),
+    {Outcome, Output}.
 
 capture_sink(Acc) ->
     receive

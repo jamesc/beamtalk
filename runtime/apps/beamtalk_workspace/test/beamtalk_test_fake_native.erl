@@ -5,6 +5,7 @@
 -behaviour(gen_server).
 
 -moduledoc """
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 Fixture for the workspace actor-list tests (BT-4960): a fake `native:` backing
 gen_server (ADR 0056: no `'$beamtalk_actor'` marker, found by its
 `'$initial_call'` through the backing-module index) and a stand-in
@@ -39,9 +40,7 @@ with_system_native(Classes, Fun) ->
     after
         MRef = erlang:monitor(process, Sup),
         exit(Sup, shutdown),
-        receive
-            {'DOWN', MRef, process, Sup, _} -> ok
-        end
+        ?awaitMessage({'DOWN', MRef, process, Sup, _})
     end.
 
 with_index(Pid, Classes, Fun) ->

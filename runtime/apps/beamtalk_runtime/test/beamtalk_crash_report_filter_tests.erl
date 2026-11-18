@@ -17,6 +17,7 @@ OTP in the supported window.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -export([log/2]).
 
@@ -200,11 +201,10 @@ malformed_report() ->
         meta => #{report_cb => fun(R) -> {"~tp", [R]} end}
     },
     ?assertEqual(ignore, beamtalk_crash_report_filter:filter(Bad, [])),
-    receive
-        {captured, #{msg := {report, #{label := {beamtalk, crash_report_translation_failed}}}}} ->
-            ok
-    after 2000 -> ?assert(false)
-    end,
+    ?awaitMessage(
+        {captured, #{msg := {report, #{label := {beamtalk, crash_report_translation_failed}}}}},
+        2000
+    ),
     #{filters := Filters} = logger:get_primary_config(),
     ?assert(lists:keymember(beamtalk_crash_report_filter, 1, Filters)).
 

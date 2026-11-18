@@ -521,12 +521,10 @@ async_cast_methods_group() ->
             %% Test async methods query
             FuturePid = self(),
             gen_server:cast(ClassPid, {methods, [], FuturePid}),
-            receive
-                {resolve, Methods} ->
-                    ?assert(is_list(Methods)),
-                    ?assert(lists:member(increment, Methods))
-            after 1000 ->
-                ?assert(false)
+            begin
+                ?awaitMessage({resolve, Methods}, 1000),
+                ?assert(is_list(Methods)),
+                ?assert(lists:member(increment, Methods))
             end
         end),
         ?_test(begin
@@ -539,11 +537,9 @@ async_cast_methods_group() ->
 
             FuturePid = self(),
             gen_server:cast(ClassPid, {superclass, [], FuturePid}),
-            receive
-                {resolve, Super} ->
-                    ?assertEqual('Object', Super)
-            after 1000 ->
-                ?assert(false)
+            begin
+                ?awaitMessage({resolve, Super}, 1000),
+                ?assertEqual('Object', Super)
             end
         end),
         ?_test(begin
@@ -556,11 +552,9 @@ async_cast_methods_group() ->
 
             FuturePid = self(),
             gen_server:cast(ClassPid, {class_name, [], FuturePid}),
-            receive
-                {resolve, Name} ->
-                    ?assertEqual('AsyncNameTest', Name)
-            after 1000 ->
-                ?assert(false)
+            begin
+                ?awaitMessage({resolve, Name}, 1000),
+                ?assertEqual('AsyncNameTest', Name)
             end
         end),
         ?_test(begin
@@ -573,11 +567,9 @@ async_cast_methods_group() ->
 
             FuturePid = self(),
             gen_server:cast(ClassPid, {module_name, [], FuturePid}),
-            receive
-                {resolve, Mod} ->
-                    ?assertEqual(test_class, Mod)
-            after 1000 ->
-                ?assert(false)
+            begin
+                ?awaitMessage({resolve, Mod}, 1000),
+                ?assertEqual(test_class, Mod)
             end
         end),
         ?_test(begin
@@ -590,14 +582,10 @@ async_cast_methods_group() ->
 
             FuturePid = self(),
             gen_server:cast(ClassPid, {unknownSelector, [arg1], FuturePid}),
-            receive
-                {reject, #beamtalk_error{
-                    kind = does_not_understand, selector = unknownSelector
-                }} ->
-                    ok
-            after 1000 ->
-                ?assert(false)
-            end
+            ?awaitMessage(
+                {reject, #beamtalk_error{kind = does_not_understand, selector = unknownSelector}},
+                1000
+            )
         end),
         ?_test(begin
             ClassInfo = #{
@@ -1289,12 +1277,8 @@ class_method_self_call_class_name_in_error_test() ->
                 Parent ! {self_call_error, ErrorMap}
         end
     end),
-    receive
-        {self_call_error, ErrorMap} ->
-            ?assertBtErrorValue(instantiation_error, TestClassName, spawn, ErrorMap)
-    after 2000 ->
-        ?assert(false)
-    end.
+    ?awaitMessage({self_call_error, ErrorMap}, 2000),
+    ?assertBtErrorValue(instantiation_error, TestClassName, spawn, ErrorMap).
 
 %%====================================================================
 %% ADR 0057: apply_class_info/2 superclass correction tests
@@ -1615,10 +1599,7 @@ crash_recovery_restart_group() ->
             %% Kill the class process (simulates crash)
             MRef = monitor(process, Pid1),
             exit(Pid1, kill),
-            receive
-                {'DOWN', MRef, process, Pid1, _} -> ok
-            after 1000 -> ?assert(false)
-            end,
+            ?awaitMessage({'DOWN', MRef, process, Pid1, _}, 1000),
             ?assertNot(is_process_alive(Pid1)),
 
             %% whereis_class returns undefined for the dead process
@@ -1656,10 +1637,7 @@ crash_recovery_restart_group() ->
             %% Kill the class process
             MRef = monitor(process, Pid1),
             exit(Pid1, kill),
-            receive
-                {'DOWN', MRef, process, Pid1, _} -> ok
-            after 1000 -> ?assert(false)
-            end,
+            ?awaitMessage({'DOWN', MRef, process, Pid1, _}, 1000),
 
             %% class_send with the stale pid should auto-recover.
             %% The class has no user methods, so any method call will raise

@@ -26,6 +26,7 @@ Covers:
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Fixtures
@@ -230,8 +231,8 @@ reload_case_setup() ->
 reload_case_teardown(#{
     clog_pid := ClogPid, meta_pid := MetaPid, tmp_home := Tmp, old_home := OldHome
 }) ->
-    stop(MetaPid),
-    stop(ClogPid),
+    beamtalk_test_proc:shutdown(MetaPid),
+    beamtalk_test_proc:shutdown(ClogPid),
     beamtalk_test_fs:restore_home(OldHome),
     beamtalk_test_fs:rm_rf(Tmp),
     ok.
@@ -359,7 +360,7 @@ setup() ->
     }.
 
 cleanup(#{pid := Pid, tmp_home := TmpHome, old_home := OldHome}) ->
-    stop(Pid),
+    beamtalk_test_proc:shutdown(Pid),
     beamtalk_test_fs:restore_home(OldHome),
     beamtalk_test_fs:rm_rf(TmpHome),
     ok.
@@ -909,7 +910,7 @@ mark_flushed_failure_is_reported(#{proj_dir := ProjDir, pid := Pid}) ->
     %% complete_flush/5 helper with seqs that the (live) ChangeLog server
     %% cannot mark — pass a manually-crafted scenario by killing the
     %% ChangeLog gen_server before calling mark_flushed.
-    stop(Pid),
+    beamtalk_test_proc:shutdown(Pid),
     %% Without a live ChangeLog server, mark_flushed/1 errors via the
     %% gen_server:call mechanism. complete_flush/5 must wrap that into the
     %% summary as a flush_marker_failed conflict.
@@ -1003,7 +1004,7 @@ filter_shadowed_keeps_only_renamed_survivors() ->
         Kept = beamtalk_workspace_flush:filter_shadowed_by_survivor(Shadowed, Keys),
         ?assertEqual(1, length(Kept))
     after
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
@@ -1038,7 +1039,7 @@ filter_shadowed_drops_unrenamed_survivors() ->
         Kept = beamtalk_workspace_flush:filter_shadowed_by_survivor(Shadowed, EmptyKeys),
         ?assertEqual([], Kept)
     after
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
@@ -3291,7 +3292,7 @@ entry_tier_classifies_remove_class_as_tier2() ->
         [Entry] = beamtalk_workspace_changelog:flushable_pending(),
         ?assertEqual(tier2, beamtalk_workspace_flush:entry_tier(Entry))
     after
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
@@ -3319,7 +3320,7 @@ entry_tier_classifies_other_kinds_as_tier1() ->
         Tiers = [beamtalk_workspace_flush:entry_tier(E) || E <- Entries],
         ?assertEqual([tier1, tier1, tier1], Tiers)
     after
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
@@ -3342,7 +3343,7 @@ entry_tier_classifies_rename_class_as_tier2() ->
         [Entry] = beamtalk_workspace_changelog:flushable_pending(),
         ?assertEqual(tier2, beamtalk_workspace_flush:entry_tier(Entry))
     after
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
@@ -3367,7 +3368,7 @@ entry_tier_classifies_rename_method_as_tier2() ->
         [MethodEntry] = beamtalk_workspace_changelog:flushable_pending(),
         ?assertEqual(tier2, beamtalk_workspace_flush:entry_tier(MethodEntry))
     after
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
@@ -3394,7 +3395,7 @@ resolve_new_path_prefers_recorded_value() ->
             beamtalk_workspace_flush_rename:resolve_new_path(Entry)
         )
     after
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
@@ -3420,7 +3421,7 @@ resolve_new_path_derives_exact_style_from_old_path() ->
             <<"/proj/src/Accumulator.bt">>, beamtalk_workspace_flush_rename:resolve_new_path(Entry)
         )
     after
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
@@ -3444,7 +3445,7 @@ resolve_new_path_derives_snake_case_style_from_old_path() ->
             <<"/proj/src/accumulator.bt">>, beamtalk_workspace_flush_rename:resolve_new_path(Entry)
         )
     after
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
@@ -3473,7 +3474,7 @@ resolve_new_path_preserves_drive_letter_case() ->
             beamtalk_workspace_flush_rename:resolve_new_path(Entry)
         )
     after
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
@@ -3505,7 +3506,7 @@ resolve_new_path_preserves_backslash_separators() ->
             beamtalk_workspace_flush_rename:resolve_new_path(Entry)
         )
     after
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
@@ -3527,7 +3528,7 @@ resolve_new_path_derives_path_with_no_directory() ->
         [Entry] = beamtalk_workspace_changelog:flushable_pending(),
         ?assertEqual(<<"Accumulator.bt">>, beamtalk_workspace_flush_rename:resolve_new_path(Entry))
     after
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
@@ -3549,7 +3550,7 @@ resolve_new_path_derives_path_at_filesystem_root() ->
         [Entry] = beamtalk_workspace_changelog:flushable_pending(),
         ?assertEqual(<<"/Accumulator.bt">>, beamtalk_workspace_flush_rename:resolve_new_path(Entry))
     after
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
@@ -3600,7 +3601,7 @@ group_by_file_preserves_seq_order() ->
         Selectors = [beamtalk_workspace_changelog:entry_selector(E) || E <- F1Entries],
         ?assertEqual([<<"inc">>, <<"dec">>], Selectors)
     after
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
@@ -3797,20 +3798,6 @@ entry_flushed(Seq) ->
     ],
     beamtalk_workspace_changelog:entry_flushed(Entry).
 
-stop(Pid) ->
-    case is_process_alive(Pid) of
-        true ->
-            Ref = monitor(process, Pid),
-            unlink(Pid),
-            exit(Pid, shutdown),
-            receive
-                {'DOWN', Ref, process, Pid, _} -> ok
-            after 5000 -> ok
-            end;
-        false ->
-            ok
-    end.
-
 %%====================================================================
 %% FlushCompleted announcement (ADR 0093 §2)
 %%====================================================================
@@ -3834,18 +3821,15 @@ announce_flush_completed_emits_typed_event_test() ->
     ],
     try
         ok = beamtalk_workspace_flush:announce_flush_completed(Files, FileKinds),
-        receive
-            {flush_evt, Event} ->
-                ?assertMatch(
-                    #{
-                        '$beamtalk_class' := 'FlushCompleted',
-                        files := Files,
-                        fileKinds := FileKinds
-                    },
-                    Event
-                )
-        after 1000 -> ?assert(false)
-        end
+        ?awaitMessage({flush_evt, Event}, 1000),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'FlushCompleted',
+                files := Files,
+                fileKinds := FileKinds
+            },
+            Event
+        )
     after
         beamtalk_announcements:unsubscribe(SubRef)
     end.
@@ -3892,9 +3876,9 @@ flush_announces_file_kinds_for_mixed_entries(#{proj_dir := ProjDir}) ->
     try
         {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
         Event =
-            receive
-                {flush_evt, E} -> E
-            after 1000 -> ?assert(false)
+            begin
+                ?awaitMessage({flush_evt, E}, 1000),
+                E
             end,
         FileKinds = maps:get(fileKinds, Event),
         KindOf = fun(FilePath) ->
@@ -3955,9 +3939,9 @@ flush_announces_old_file_for_rename_class_move(#{proj_dir := ProjDir}) ->
     try
         {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
         Event =
-            receive
-                {flush_evt, E} -> E
-            after 1000 -> ?assert(false)
+            begin
+                ?awaitMessage({flush_evt, E}, 1000),
+                E
             end,
         FileKinds = maps:get(fileKinds, Event),
         EntryFor = fun(FilePath) ->
@@ -4033,9 +4017,9 @@ flush_announces_rename_method_kind_for_confirmed_sites(#{proj_dir := ProjDir}) -
     try
         {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
         Event =
-            receive
-                {flush_evt, E} -> E
-            after 1000 -> ?assert(false)
+            begin
+                ?awaitMessage({flush_evt, E}, 1000),
+                E
             end,
         FileKinds = maps:get(fileKinds, Event),
         KindsByFile = [{maps:get(file, M), maps:get(kind, M)} || M <- FileKinds],

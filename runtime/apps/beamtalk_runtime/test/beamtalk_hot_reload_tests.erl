@@ -11,6 +11,7 @@ Tests hot code reloading, actor migration, and module replacement.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %% gen_server callbacks for a minimal test actor used to exercise
 %% trigger_code_change/2,3 success paths via sys:change_code/4.
@@ -164,11 +165,7 @@ trigger_code_change_dead_pid_test() ->
     %% A dead PID should result in a failure (noproc)
     DeadPid = spawn(fun() -> ok end),
     Ref = erlang:monitor(process, DeadPid),
-    receive
-        {'DOWN', Ref, process, DeadPid, _} -> ok
-    after 1000 ->
-        error(timeout_waiting_for_dead_pid)
-    end,
+    ?awaitMessage({'DOWN', Ref, process, DeadPid, _}, 1000),
     {ok, 0, Failures} = beamtalk_hot_reload:trigger_code_change(test_module, [DeadPid]),
     ?assertEqual(1, length(Failures)),
     [{DeadPid, _Reason}] = Failures.
@@ -180,11 +177,7 @@ trigger_code_change_multiple_dead_pids_test() ->
     lists:foreach(
         fun(Pid) ->
             Ref = erlang:monitor(process, Pid),
-            receive
-                {'DOWN', Ref, process, Pid, _} -> ok
-            after 1000 ->
-                error(timeout_waiting_for_dead_pid)
-            end
+            ?awaitMessage({'DOWN', Ref, process, Pid, _}, 1000)
         end,
         Pids
     ),
@@ -206,11 +199,7 @@ trigger_code_change_3_empty_pids_test() ->
 trigger_code_change_3_dead_pid_test() ->
     DeadPid = spawn(fun() -> ok end),
     Ref = erlang:monitor(process, DeadPid),
-    receive
-        {'DOWN', Ref, process, DeadPid, _} -> ok
-    after 1000 ->
-        error(timeout_waiting_for_dead_pid)
-    end,
+    ?awaitMessage({'DOWN', Ref, process, DeadPid, _}, 1000),
     Extra = #{module => some_module},
     {ok, 0, Failures} = beamtalk_hot_reload:trigger_code_change(
         test_module, [DeadPid], Extra
@@ -427,14 +416,12 @@ test_field_migration_initialize_class_no_telemetry() ->
         end,
         %% The handler is live: a real start does reach it.
         ok = beamtalk_actor:lifecycle_started('HotReloadListenerCheck'),
-        receive
+        ?awaitMessage(
             {telemetry_event, [beamtalk, actor, lifecycle, start], _, #{
                 class := 'HotReloadListenerCheck'
-            }} ->
-                ok
-        after 1000 ->
-            ?assert(false)
-        end
+            }},
+            1000
+        )
     after
         telemetry:detach(HandlerId),
         ok = beamtalk_telemetry:disable_lifecycle_events()
@@ -673,10 +660,7 @@ trigger_code_change_mixed_success_and_failure_test() ->
     {ok, LivePid} = gen_server:start_link(?MODULE, #{}, []),
     DeadPid = spawn(fun() -> ok end),
     Ref = erlang:monitor(process, DeadPid),
-    receive
-        {'DOWN', Ref, process, DeadPid, _} -> ok
-    after 1000 -> error(timeout)
-    end,
+    ?awaitMessage({'DOWN', Ref, process, DeadPid, _}, 1000),
     try
         {ok, Upgraded, Failures} =
             beamtalk_hot_reload:trigger_code_change(?MODULE, [LivePid, DeadPid]),

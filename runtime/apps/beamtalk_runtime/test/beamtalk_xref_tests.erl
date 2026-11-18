@@ -12,6 +12,7 @@ isolation, and concurrent reader during a write.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Setup / teardown
@@ -969,11 +970,7 @@ recv_type_propagates_through_senders_of_test_() ->
 
                 lists:foreach(
                     fun(_) ->
-                        receive
-                            {writer_done, _} -> ok
-                        after 10000 ->
-                            ?assert(false)
-                        end
+                        ?awaitMessage({writer_done, _}, 10000)
                     end,
                     WriterPids
                 ),
@@ -981,12 +978,10 @@ recv_type_propagates_through_senders_of_test_() ->
                 %% Tell the reader the writers are done; it should also
                 %% finish soon after.
                 ReaderPid ! stop,
-                receive
-                    {reader_done, Count, Errors} ->
-                        ?assert(Count > 0),
-                        ?assertEqual([], Errors)
-                after 10000 ->
-                    ?assert(false)
+                begin
+                    ?awaitMessage({reader_done, Count, Errors}, 10000),
+                    ?assert(Count > 0),
+                    ?assertEqual([], Errors)
                 end,
 
                 %% Final consistency check: the table is non-empty and gen
@@ -2114,10 +2109,9 @@ memoization_call_count_test_() ->
                     ),
                     Worker ! go,
                     Sites =
-                        receive
-                            {bt3218_memo_result, R} -> R
-                        after 5000 ->
-                            erlang:error(bt3218_memo_worker_timeout)
+                        begin
+                            ?awaitMessage({bt3218_memo_result, R}),
+                            R
                         end,
                     _ = erlang:trace_pattern(
                         {beamtalk_protocol_registry, conforms_to, 2}, false, [global]

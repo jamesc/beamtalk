@@ -110,7 +110,7 @@ setup() ->
     #{pid => Pid, workspace_id => WorkspaceId, tmp_home => TmpHome, old_home => OldHome}.
 
 cleanup(#{pid := Pid, tmp_home := TmpHome, old_home := OldHome}) ->
-    stop(Pid),
+    beamtalk_test_proc:shutdown(Pid),
     beamtalk_test_fs:restore_home(OldHome),
     beamtalk_test_fs:rm_rf(TmpHome),
     ok.
@@ -1051,7 +1051,7 @@ restart_bumps_epoch_and_tags_prior() ->
         {ok, P1} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
         ?assertEqual(1, beamtalk_workspace_changelog:epoch()),
         {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
-        stop(P1),
+        beamtalk_test_proc:shutdown(P1),
 
         %% Restart: epoch must advance, the pre-existing entry must be prior-epoch
         %% and therefore excluded from the active view, but still present overall.
@@ -1063,7 +1063,7 @@ restart_bumps_epoch_and_tags_prior() ->
         {ok, Seq} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"dec">>)),
         ?assertEqual(1, Seq),
         ?assertEqual(1, length(beamtalk_workspace_changelog:active_entries())),
-        stop(P2)
+        beamtalk_test_proc:shutdown(P2)
     after
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
@@ -1084,7 +1084,7 @@ restart_tags_orphan_when_disk_advanced() ->
             prev_source => <<"^ self value">>
         },
         {ok, _} = beamtalk_workspace_changelog:append(Input),
-        stop(P1),
+        beamtalk_test_proc:shutdown(P1),
 
         %% Disk advances under us (someone edited the file).
         ok = file:write_file(SrcFile, <<"class Counter\n  inc => ^ 999\nend\n">>),
@@ -1093,7 +1093,7 @@ restart_tags_orphan_when_disk_advanced() ->
         [Entry] = beamtalk_workspace_changelog:entries(),
         ?assert(is_orphan_flag(Entry)),
         ?assertEqual([], beamtalk_workspace_changelog:active_entries()),
-        stop(P2)
+        beamtalk_test_proc:shutdown(P2)
     after
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
@@ -1113,13 +1113,13 @@ restart_keeps_prior_when_disk_matches() ->
             prev_source => <<"^ self value">>
         },
         {ok, _} = beamtalk_workspace_changelog:append(Input),
-        stop(P1),
+        beamtalk_test_proc:shutdown(P1),
 
         %% Disk unchanged → entry is prior-epoch but NOT orphan.
         {ok, P2} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
         [Entry] = beamtalk_workspace_changelog:entries(),
         ?assertNot(is_orphan_flag(Entry)),
-        stop(P2)
+        beamtalk_test_proc:shutdown(P2)
     after
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
@@ -1166,7 +1166,7 @@ rotation_archives_overflow() ->
         {ok, LogBin} = file:read_file(filename:join(Dir, "changes.jsonl")),
         Lines = binary:split(LogBin, <<"\n">>, [global, trim_all]),
         ?assertEqual(1000, length(Lines)),
-        stop(Pid)
+        beamtalk_test_proc:shutdown(Pid)
     after
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
@@ -1208,7 +1208,7 @@ rotation_keeps_state_when_archive_fails() ->
         %% it still contains everything it had before (plus the new line).
         ?assert(byte_size(LogAfter) >= byte_size(LogBefore)),
         ?assert(is_process_alive(Pid)),
-        stop(Pid)
+        beamtalk_test_proc:shutdown(Pid)
     after
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
@@ -1243,7 +1243,7 @@ archive_filenames_unique_within_same_second() ->
         %% Both rotations produced distinct archive files (no overwrite).
         ?assert(length(MetaArchives) >= 2),
         ?assertEqual(length(MetaArchives), length(lists:usort(MetaArchives))),
-        stop(Pid)
+        beamtalk_test_proc:shutdown(Pid)
     after
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
@@ -1276,7 +1276,7 @@ load_enforces_ring_bound_when_disk_exceeds_max() ->
         LogLines = binary:split(LogBin, <<"\n">>, [global, trim_all]),
         ?assertEqual(1000, Size),
         ?assertEqual(1000, length(LogLines)),
-        stop(Pid)
+        beamtalk_test_proc:shutdown(Pid)
     after
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
@@ -1476,7 +1476,7 @@ run_mode_read_source_body_no_workspace() ->
             {error, no_workspace}, beamtalk_workspace_changelog:read_source_body(Entry)
         )
     after
-        stop(Pid)
+        beamtalk_test_proc:shutdown(Pid)
     end.
 
 run_mode_is_memory_only() ->
@@ -1487,7 +1487,7 @@ run_mode_is_memory_only() ->
         ?assertEqual(1, beamtalk_workspace_changelog:size()),
         ?assertEqual(undefined, beamtalk_workspace_changelog_log:changes_dir(undefined))
     after
-        stop(Pid)
+        beamtalk_test_proc:shutdown(Pid)
     end.
 
 %% BT-3685: a durable workspace id with no resolvable home dir silently turned
@@ -1506,7 +1506,7 @@ no_home_warns_once_and_stays_memory_only() ->
                 ?assertEqual(undefined, beamtalk_workspace_changelog_log:changes_dir(WsId)),
                 ?assertEqual(1, beamtalk_workspace_changelog:size())
             after
-                stop(Pid)
+                beamtalk_test_proc:shutdown(Pid)
             end
         end),
         ?assertMatch([_], Events),
@@ -1528,7 +1528,7 @@ no_home_warns_once_and_stays_memory_only() ->
 run_mode_does_not_warn() ->
     Events = capture_warnings(fun() ->
         {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => undefined}),
-        stop(Pid)
+        beamtalk_test_proc:shutdown(Pid)
     end),
     ?assertEqual([], Events).
 
@@ -1618,20 +1618,6 @@ rename_method_input() ->
         author => <<"sess-1">>,
         author_kind => agent
     }.
-
-stop(Pid) ->
-    case is_process_alive(Pid) of
-        true ->
-            Ref = monitor(process, Pid),
-            unlink(Pid),
-            exit(Pid, shutdown),
-            receive
-                {'DOWN', Ref, process, Pid, _} -> ok
-            after 5000 -> ok
-            end;
-        false ->
-            ok
-    end.
 
 seq_file(Seq, Suffix) ->
     lists:flatten(io_lib:format("~6..0b~s", [Seq, Suffix])).

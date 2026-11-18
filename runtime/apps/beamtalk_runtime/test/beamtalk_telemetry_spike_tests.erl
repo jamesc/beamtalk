@@ -18,6 +18,7 @@ to the full actor observability architecture:
 7. telemetry/try-catch composition with sync_send/3 pattern
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Helpers
@@ -82,23 +83,19 @@ span_emits_stop_event_with_duration_test() ->
             ?assertEqual({ok, hello}, Result),
 
             %% Verify the stop event was received
-            receive
-                {telemetry_event, Measurements, RecvMeta} ->
-                    %% Duration must be present and non-negative.
-                    %% `>= 0`, not `> 0`: Windows' monotonic clock has 1ms
-                    %% resolution, so a sub-millisecond span measures 0 there
-                    %% (BT-3980).
-                    Duration = maps:get(duration, Measurements),
-                    ?assert(is_integer(Duration)),
-                    ?assert(Duration >= 0),
-                    %% Monotonic time should be present
-                    ?assert(maps:is_key(monotonic_time, Measurements)),
-                    %% Our metadata should be preserved
-                    ?assertEqual(echo, maps:get(selector, RecvMeta)),
-                    ?assertEqual(ok, maps:get(outcome, RecvMeta))
-            after 1000 ->
-                ?assert(false)
-            end
+            ?awaitMessage({telemetry_event, Measurements, RecvMeta}, 1000),
+            %% Duration must be present and non-negative.
+            %% `>= 0`, not `> 0`: Windows' monotonic clock has 1ms
+            %% resolution, so a sub-millisecond span measures 0 there
+            %% (BT-3980).
+            Duration = maps:get(duration, Measurements),
+            ?assert(is_integer(Duration)),
+            ?assert(Duration >= 0),
+            %% Monotonic time should be present
+            ?assert(maps:is_key(monotonic_time, Measurements)),
+            %% Our metadata should be preserved
+            ?assertEqual(echo, maps:get(selector, RecvMeta)),
+            ?assertEqual(ok, maps:get(outcome, RecvMeta))
         after
             gen_server:stop(Pid)
         end
@@ -143,18 +140,14 @@ span_exception_preserves_timeout_shape_test() ->
             ?assertMatch({got_exit, {timeout, _}}, CaughtExit),
 
             %% Verify the exception event was emitted
-            receive
-                {telemetry_event, Measurements, RecvMeta} ->
-                    %% Duration must be present
-                    ?assert(maps:is_key(duration, Measurements)),
-                    %% Exception metadata: kind, reason, stacktrace are merged into
-                    %% the StartMetadata by telemetry:span/3
-                    ?assertEqual(exit, maps:get(kind, RecvMeta)),
-                    ?assertMatch({timeout, _}, maps:get(reason, RecvMeta)),
-                    ?assert(is_list(maps:get(stacktrace, RecvMeta)))
-            after 1000 ->
-                ?assert(false)
-            end
+            ?awaitMessage({telemetry_event, Measurements, RecvMeta}, 1000),
+            %% Duration must be present
+            ?assert(maps:is_key(duration, Measurements)),
+            %% Exception metadata: kind, reason, stacktrace are merged into
+            %% the StartMetadata by telemetry:span/3
+            ?assertEqual(exit, maps:get(kind, RecvMeta)),
+            ?assertMatch({timeout, _}, maps:get(reason, RecvMeta)),
+            ?assert(is_list(maps:get(stacktrace, RecvMeta)))
         after
             gen_server:stop(Pid)
         end
@@ -320,18 +313,14 @@ telemetry_poller_emits_vm_stats_test() ->
         ]),
         try
             %% Wait for at least one event
-            receive
-                {vm_memory, Measurements, _Metadata} ->
-                    %% Should have total, processes, system etc.
-                    ?assert(maps:is_key(total, Measurements)),
-                    ?assert(maps:is_key(processes, Measurements)),
-                    ?assert(maps:is_key(system, Measurements)),
-                    Total = maps:get(total, Measurements),
-                    ?assert(is_integer(Total)),
-                    ?assert(Total > 0)
-            after 2000 ->
-                ?assert(false)
-            end
+            ?awaitMessage({vm_memory, Measurements, _Metadata}, 2000),
+            %% Should have total, processes, system etc.
+            ?assert(maps:is_key(total, Measurements)),
+            ?assert(maps:is_key(processes, Measurements)),
+            ?assert(maps:is_key(system, Measurements)),
+            Total = maps:get(total, Measurements),
+            ?assert(is_integer(Total)),
+            ?assert(Total > 0)
         after
             gen_server:stop(PollerPid)
         end
@@ -377,14 +366,10 @@ span_composes_with_outer_try_catch_test() ->
             ?assertEqual({caught_timeout, ok}, Result),
 
             %% Verify telemetry still emitted the exception event
-            receive
-                {telemetry_event, Measurements, RecvMeta} ->
-                    ?assert(maps:is_key(duration, Measurements)),
-                    ?assertEqual(exit, maps:get(kind, RecvMeta)),
-                    ?assertMatch({timeout, _}, maps:get(reason, RecvMeta))
-            after 1000 ->
-                ?assert(false)
-            end
+            ?awaitMessage({telemetry_event, Measurements, RecvMeta}, 1000),
+            ?assert(maps:is_key(duration, Measurements)),
+            ?assertEqual(exit, maps:get(kind, RecvMeta)),
+            ?assertMatch({timeout, _}, maps:get(reason, RecvMeta))
         after
             gen_server:stop(Pid)
         end

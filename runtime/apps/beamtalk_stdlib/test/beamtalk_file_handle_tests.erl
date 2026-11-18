@@ -347,10 +347,7 @@ handle_shared_across_processes_test() ->
             beamtalk_file_handle:close(Handle),
             Parent ! closed
         end),
-        receive
-            closed -> ok
-        after 5000 -> error(timeout)
-        end,
+        ?awaitMessage(closed),
         ?assertNot(beamtalk_file_handle:isOpen(Handle))
     end).
 

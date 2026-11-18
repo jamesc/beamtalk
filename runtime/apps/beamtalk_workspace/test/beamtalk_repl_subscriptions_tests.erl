@@ -19,6 +19,7 @@ representative stream; the consumer receives the native
 branch of the bus delivers.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %% The inert handler term the facade registers for push-stream subscribers; it
 %% rides along inert in the delivered announcement message.
@@ -48,11 +49,10 @@ subscribe_pid_registers_that_pid() ->
         ok = beamtalk_repl_subscriptions:subscribe(classes, SubPid),
 
         beamtalk_announcements:system_announce('ClassLoaded', #{className => 'FacadeClass'}),
-        receive
-            {got, {beamtalk_announcement, _Ref, 'ClassLoaded', ?PUSH_HANDLER, Event}} ->
-                ?assertEqual('FacadeClass', maps:get(className, Event))
-        after 1000 -> ?assert(false)
-        end
+        ?awaitMessage(
+            {got, {beamtalk_announcement, _Ref, 'ClassLoaded', ?PUSH_HANDLER, Event}}, 1000
+        ),
+        ?assertEqual('FacadeClass', maps:get(className, Event))
     after
         beamtalk_repl_subscriptions:unsubscribe(classes, SubPid),
         stop_collector(SubPid)
@@ -69,11 +69,10 @@ subscribe_classes_delivers_class_removed() ->
     try
         ok = beamtalk_repl_subscriptions:subscribe(classes, SubPid),
         beamtalk_announcements:system_announce('ClassRemoved', #{className => 'Gone'}),
-        receive
-            {got, {beamtalk_announcement, _Ref, 'ClassRemoved', ?PUSH_HANDLER, Event}} ->
-                ?assertEqual('Gone', maps:get(className, Event))
-        after 1000 -> ?assert(false)
-        end
+        ?awaitMessage(
+            {got, {beamtalk_announcement, _Ref, 'ClassRemoved', ?PUSH_HANDLER, Event}}, 1000
+        ),
+        ?assertEqual('Gone', maps:get(className, Event))
     after
         beamtalk_repl_subscriptions:unsubscribe(classes, SubPid),
         stop_collector(SubPid)
@@ -114,13 +113,12 @@ binding_changed_carries_explicit_session_id() ->
         %% The shell's clear / put / remove paths call this with an explicit session
         %% id (the shell process has no `beamtalk_session_id` in its dictionary).
         ok = beamtalk_repl_eval:announce_binding_changed(x, 42, <<"sess-xyz">>),
-        receive
-            {got, {beamtalk_announcement, _Ref, 'BindingChanged', ?PUSH_HANDLER, Event}} ->
-                ?assertEqual(<<"sess-xyz">>, maps:get(sessionId, Event)),
-                ?assertEqual(x, maps:get(name, Event)),
-                ?assertEqual(42, maps:get(value, Event))
-        after 1000 -> ?assert(false)
-        end
+        ?awaitMessage(
+            {got, {beamtalk_announcement, _Ref, 'BindingChanged', ?PUSH_HANDLER, Event}}, 1000
+        ),
+        ?assertEqual(<<"sess-xyz">>, maps:get(sessionId, Event)),
+        ?assertEqual(x, maps:get(name, Event)),
+        ?assertEqual(42, maps:get(value, Event))
     after
         beamtalk_repl_subscriptions:unsubscribe(bindings, SubPid),
         stop_collector(SubPid)
@@ -143,10 +141,9 @@ subscribe_twice_delivers_once() ->
         beamtalk_announcements:system_announce('BindingChanged', #{
             name => y, value => 1, sessionId => <<"s">>
         }),
-        receive
-            {got, {beamtalk_announcement, _Ref, 'BindingChanged', ?PUSH_HANDLER, _Event}} -> ok
-        after 1000 -> ?assert(false)
-        end,
+        ?awaitMessage(
+            {got, {beamtalk_announcement, _Ref, 'BindingChanged', ?PUSH_HANDLER, _Event}}, 1000
+        ),
         %% Exactly one delivery — no duplicate from the second subscribe.
         receive
             {got, {beamtalk_announcement, _R2, 'BindingChanged', ?PUSH_HANDLER, _E2}} ->

@@ -203,3 +203,59 @@ repl_assert_error_response_test() ->
         json:encode(#{<<"status">> => [<<"done">>, <<"error">>], <<"error">> => <<"x">>})
     ),
     ?assertMatch(#{<<"error">> := <<"x">>}, beamtalk_test_repl:assert_error_response(Json)).
+
+%%% BT-5038: ?awaitMessage / ?assertNoMessage / with_extension / unlinking kill
+
+await_message_binds_pattern_variables_test() ->
+    self() ! {worker_ready, 42, ignored},
+    ?awaitMessage({worker_ready, Id, _}),
+    ?assertEqual(42, Id),
+    self() ! {again, Id},
+    ?awaitMessage({again, Id}, 100).
+
+await_message_timeout_names_pattern_and_shows_mailbox_test() ->
+    self() ! {unrelated, mail},
+    try
+        ?awaitMessage({never_sent, _Pid}, 10),
+        ?assert(false)
+    catch
+        error:{await_message_timeout, Info} ->
+            ?assertEqual("{ never_sent , _Pid }", proplists:get_value(pattern, Info)),
+            ?assertEqual(10, proplists:get_value(timeout_ms, Info)),
+            ?assertEqual([{unrelated, mail}], proplists:get_value(mailbox, Info))
+    after
+        receive
+            {unrelated, mail} -> ok
+        after 0 -> ok
+        end
+    end.
+
+assert_no_message_test() ->
+    ?assertNoMessage({ghost, _}, 10),
+    self() ! {ghost, 1},
+    ?assertError({unexpected_message, _}, ?assertNoMessage({ghost, _}, 10)).
+
+with_extension_registers_and_always_removes_test() ->
+    Fun = fun(_Args, _Self, State) -> {ext_ok, State} end,
+    ?assertEqual(
+        in_body,
+        beamtalk_test_extensions:with_extension('Integer', bt5038Ext, Fun, fun() ->
+            ?assertMatch([_], ets:lookup(beamtalk_extensions, {'Integer', bt5038Ext})),
+            in_body
+        end)
+    ),
+    ?assertEqual([], ets:lookup(beamtalk_extensions, {'Integer', bt5038Ext})),
+    ?assertError(
+        boom,
+        beamtalk_test_extensions:with_extension('Integer', bt5038Ext, Fun, fun() -> error(boom) end)
+    ),
+    ?assertEqual([], ets:lookup(beamtalk_extensions, {'Integer', bt5038Ext})).
+
+kill_and_wait_survives_linked_victim_test() ->
+    Pid = spawn_link(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ?assertEqual(ok, beamtalk_test_proc:kill_and_wait(Pid)),
+    ?assertNot(is_process_alive(Pid)).

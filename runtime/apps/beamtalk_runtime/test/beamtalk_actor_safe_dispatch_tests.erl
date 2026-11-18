@@ -28,6 +28,7 @@ Uses `test_fixtures/self_identity_actor.bt`, real compiled `.bt` source.
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -define(MOD, 'bt@self_identity_actor').
 
@@ -78,10 +79,8 @@ safe_dispatch_self_identity_test_() ->
 run_in_foreign(Fun) ->
     Caller = self(),
     Foreign = spawn_link(fun() -> Caller ! {self(), Fun()} end),
-    receive
-        {Foreign, Result} -> {Foreign, Result}
-    after 5000 -> error(timeout)
-    end.
+    ?awaitMessage({Foreign, Result}),
+    {Foreign, Result}.
 
 %%% Module-level fixture (BT-4962): loading a compiled `bt@stdlib@*` module starts
 %%% class processes; with no runtime app to own them they would outlive this suite.
