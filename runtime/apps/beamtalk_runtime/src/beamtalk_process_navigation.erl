@@ -89,7 +89,6 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
     guarded_state/1,
     guarded_state/2,
     infra_deny_list/0,
-    is_infra/1,
     %% Node / tree accessors consumed by the SupervisionNode & SupervisionTree
     %% stdlib classes.
     enrich/1,
@@ -175,7 +174,7 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
 -export_type([scope/0, node_map/0]).
 
 -ifdef(TEST).
--export([supervisor_config/2]).
+-export([supervisor_config/2, is_infra/1]).
 -endif.
 
 %%% ============================================================================
@@ -647,6 +646,9 @@ Return `true` if `Pid` is runtime infrastructure — i.e. it is registered under
 a name in the infra deny-list (`infra_deny_list/0`). A pid with no registered
 name, or one registered under a name not in the deny-list, is not infra.
 """.
+%% The non-pid clause is only reachable from tests now that `is_infra/1` is
+%% exported under TEST; the one production caller always passes a pid.
+-dialyzer({nowarn_function, is_infra/1}).
 -spec is_infra(term()) -> boolean().
 is_infra(Pid) when is_pid(Pid) ->
     case registered_name(Pid) of

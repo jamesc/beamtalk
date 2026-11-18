@@ -306,6 +306,35 @@ assert_no_restart_on_exit(ClassName, ExitReason) ->
     end.
 
 %%====================================================================
+%% BT-5046: crash history is dropped when the class is removed
+%%====================================================================
+
+unwatch_prunes_crash_history_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(#{monitor := MonPid}) ->
+        [
+            {"unwatch/1 drops the class's crash history",
+                timed(fun() ->
+                    meck:new(beamtalk_class_registry, [passthrough]),
+                    expect_restart_reports_to(self(), fun() -> {error, injected_failure} end),
+                    try
+                        Dummy = beamtalk_test_proc:spawn_idle(),
+                        ok = beamtalk_class_monitor:watch('HistoryPruneClass', Dummy),
+                        kill_and_wait(Dummy, kill),
+                        ok = await_restart_called('HistoryPruneClass'),
+                        _ = sys:get_state(MonPid),
+                        {state, _, _, _, _, History1} = sys:get_state(MonPid),
+                        ?assert(maps:is_key('HistoryPruneClass', History1)),
+                        ok = beamtalk_class_monitor:unwatch('HistoryPruneClass'),
+                        {state, _, _, _, _, History2} = sys:get_state(MonPid),
+                        ?assertNot(maps:is_key('HistoryPruneClass', History2))
+                    after
+                        meck:unload(beamtalk_class_registry)
+                    end
+                end)}
+        ]
+    end}.
+
+%%====================================================================
 %% restart_class/1 itself failing — the monitor must log and carry on
 %%====================================================================
 

@@ -148,6 +148,18 @@ register_class_side_three_arity_refused_test_() ->
             ?assertEqual({ok, Fun, mylib}, beamtalk_extensions:lookup('Integer', 'double'))
         end,
         fun() ->
+            %% BT-5046: repeated conflicting re-registrations must not grow the
+            %% conflicts bag — one row per (Key, owner).
+            F = fun([], X) -> X end,
+            beamtalk_extensions:register('String', 'dedup', F, mylib),
+            beamtalk_extensions:register('String', 'dedup', F, otherlib),
+            Rows1 = ets:info(beamtalk_extension_conflicts, size),
+            beamtalk_extensions:register('String', 'dedup', F, mylib),
+            beamtalk_extensions:register('String', 'dedup', F, otherlib),
+            beamtalk_extensions:register('String', 'dedup', F, mylib),
+            ?assertEqual(Rows1, ets:info(beamtalk_extension_conflicts, size))
+        end,
+        fun() ->
             Fun1 = fun([], X) -> X * 2 end,
             Fun2 = fun([], X) -> X * 3 end,
 

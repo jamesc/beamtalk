@@ -41,11 +41,14 @@ source text) are handled via the `on_activate` callback in activation options.
     find_bt_modules_in_dir/1,
     sort_modules_by_dependency/2,
     topo_sort/1,
-    extract_source_path/1,
     extract_class_names/1,
     load_app_from_ebin/1,
     safe_module_exports/1
 ]).
+
+-ifdef(TEST).
+-export([extract_source_path/1]).
+-endif.
 
 %% Exported for callers that need validation (e.g. workspace_bootstrap backwards compat).
 -export([is_valid_module_name/1]).

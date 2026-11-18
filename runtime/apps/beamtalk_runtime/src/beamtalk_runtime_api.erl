@@ -125,8 +125,7 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
 %%% ===================================================================
 -export([
     trigger_code_change/2,
-    trigger_code_change/3,
-    hot_reload_code_change/3
+    trigger_code_change/3
 ]).
 
 %%% ===================================================================
@@ -448,11 +447,6 @@ trigger_code_change(Mod, Pids) ->
     {ok, non_neg_integer(), [{pid(), term()}]}.
 trigger_code_change(Mod, Pids, Extra) ->
     beamtalk_hot_reload:trigger_code_change(Mod, Pids, Extra).
-
--spec hot_reload_code_change(term(), term(), term()) ->
-    {ok, term()} | {error, term()}.
-hot_reload_code_change(OldVsn, State, Extra) ->
-    beamtalk_hot_reload:code_change(OldVsn, State, Extra).
 
 %%% ====================================================================
 %%% Future Delegators
