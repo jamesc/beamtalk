@@ -73,7 +73,8 @@ pub(in crate::core_erlang) enum VerifyError {
     /// structural property: an optimized `ThreadingMode` node cannot contain
     /// an unpack `Bind`. (In release today this failure degrades to a
     /// `core_lint` unbound-variable error; the gain is a correct,
-    /// centralized, source-attributed diagnosis.)
+    /// centralized, source-attributed diagnosis.) Production code builds it
+    /// only as `inject_synthetic_verifier_violation`'s synthetic finding.
     ThreadingModeUnpackMismatch { mode: ThreadingMode, at: Span },
 
     /// Invariant class 1: a [`ThreadedStmt::TupleAccUnpack`] node
@@ -151,9 +152,9 @@ pub(in crate::core_erlang) enum VerifyError {
     NestedStateAccFallbackUnderDirectParams { at: Span },
 
     /// ADR 0118 §Decision 5: a [`ThreadedValue`] whose prelude
-    /// carries a versioned `Bind` for `prefix` was [`ThreadedValue::close`]d
+    /// carries a versioned `Bind` for `prefix` was closed
     /// in a context that cannot thread that prefix
-    /// ([`CloseContext::Opaque`]) — the closed `Document` scopes the new
+    /// (`CloseContext::Opaque`) — the closed `Document` scopes the new
     /// version away, so the state effect the expression performed is lost
     /// to everything after it. This is the "silent drop" class of bug
     /// (a nested actor self-send whose `NewState` is discarded) made into
@@ -163,9 +164,8 @@ pub(in crate::core_erlang) enum VerifyError {
     /// closure body — to surface a user-facing diagnostic built from this
     /// error rather than from a second predicate.
     ///
-    /// ADR 0118 phase 1a: constructed by [`ThreadedValue::close`].
-    ///
-    /// No production caller yet — see [`CloseContext`].
+    /// Constructed by `opaque_escapes` (production since BT-3430) and the
+    /// test-only `ThreadedValue::close`.
     StateEffectEscapesExpression { prefix: VersionPrefix, at: Span },
 
     /// ADR 0130 §4: a compiled `on:do:`'s catch is a class-variable catch
@@ -2042,6 +2042,7 @@ impl VerifyWalk<'_> {
                             self.check_use(v, *span);
                         }
                     }
+                    #[cfg(test)]
                     BindOp::Unpack { .. } => {
                         if let Some(mode) = self.mode_stack.last()
                             && !matches!(mode, ThreadingMode::StateAcc(_))

@@ -7,7 +7,7 @@
 //! (`beamtalk_erlang_proxy:ffi_call_raised/8`, `/9` for a binary or map argument). Anything the FFI type table
 //! cannot prove keeps `beamtalk_erlang_proxy:direct_call/4`.
 
-use super::codegen_named;
+use super::{assert_has, assert_lacks, codegen_named};
 use beamtalk_core::semantic_analysis::type_checker::{
     FunctionSignature, NativeTypeRegistry, ParamType,
 };

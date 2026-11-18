@@ -10,14 +10,17 @@
 //! and [`super::emit`] — the top of the `threaded_ir` module split.
 
 use super::super::CoreErlangGenerator;
+#[cfg(test)]
 use super::emit::{RenderCtx, render, render_value};
+#[cfg(test)]
+use super::ir::CloseContext;
 use super::ir::{
-    AccParam, BindOp, CarrierSlot, CloseContext, FoldAccShape, FrameId, RebindFrame,
-    RebindLowering, RebindShape, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef,
-    VersionPrefix, VersionedVar,
+    AccParam, BindOp, CarrierSlot, FoldAccShape, FrameId, RebindFrame, RebindLowering, RebindShape,
+    ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::verify::{ScopeKind, VerifyError, verify_in_scope};
 use beamtalk_cerl_doc::Document;
+#[cfg(test)]
 use beamtalk_cerl_doc::docvec;
 use beamtalk_core::source_analysis::Span;
 
@@ -366,9 +369,9 @@ impl ThreadedValue {
     /// [`VerifyError::StateEffectEscapesExpression`] per versioned `Bind`
     /// and per [`ThreadedStmt::LocalRebind`] (ADR 0131 §4, reported under
     /// [`VersionPrefix::Local`]) in the prelude when `context` is
-    /// [`CloseContext::Opaque`]; reports
+    /// `CloseContext::Opaque`; reports
     /// nothing when the context threads the prelude's prefixes itself
-    /// ([`CloseContext::ThreadsState`]). Callers route the errors through
+    /// (`CloseContext::ThreadsState`). Callers route the errors through
     /// `report_threaded_ir_verify_errors` (debug/CI hard failure, release
     /// `internal:` diagnostic), never drop them.
     ///
@@ -381,7 +384,8 @@ impl ThreadedValue {
     /// spliced prelude goes through, so a closed and a spliced prelude can
     /// never differ in bytes for the statements they share.
     ///
-    /// ADR 0118 phase 1a: no production caller yet — see [`CloseContext`].
+    /// Test-only — see [`CloseContext`].
+    #[cfg(test)]
     pub(in crate::core_erlang) fn close(
         self,
         ctx: &mut RenderCtx<'_>,
@@ -407,7 +411,7 @@ impl ThreadedValue {
 /// every versioned [`ThreadedStmt::Bind`], and (when `include_locals`) every
 /// [`ThreadedStmt::LocalRebind`] (ADR 0131 §4, reported under
 /// [`VersionPrefix::Local`] — a dropped local write). Shared by
-/// [`ThreadedValue::close`] and by every non-`close` site that renders a
+/// `ThreadedValue::close` (test-only) and by every non-`close` site that renders a
 /// prelude it knows nothing can thread (BT-3802: the closed cascade), so the
 /// "what escapes" rule has one definition.
 pub(in crate::core_erlang) fn opaque_escapes(
@@ -482,8 +486,7 @@ pub(in crate::core_erlang) fn stepping_local_rebinds(
 // ADR 0131 Phase 2's local-threading producer (`lower_local_threading_construct`,
 // BT-3749) is the first production caller, at the method root; Phase 3 adds
 // the conditional/handler arms (`build_branch_arm`), and the REPL root the
-// explicit `build_method_body` — hence the `#[allow(dead_code)]`s left on
-// those two.
+// explicit `build_method_body`.
 
 /// One threaded local of a construct, as its producer reports it: where it
 /// sits in the construct tuple and the lowering-time name its new value
