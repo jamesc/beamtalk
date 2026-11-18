@@ -8,9 +8,9 @@
 //! **DDD Context:** Semantic Analysis
 
 use crate::ast::{
-    BinarySegment, Block, Expression, ExpressionStatement, MatchArm, MessageSelector,
-    WellKnownSelector,
+    Block, Expression, ExpressionStatement, MatchArm, MessageSelector, WellKnownSelector,
 };
+use crate::ast_walker::for_each_child;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
     RootMethodKind, WriteKind, block_literal_of_other_arity, conditional_arm_blocks,
@@ -577,37 +577,20 @@ impl<'d> Walker<'d> {
                     self.pop_frame();
                 }
             }
-            Expression::MapLiteral { pairs, .. } => {
-                for pair in pairs {
-                    self.operand(&pair.key, Position::LiteralElement);
-                    self.operand(&pair.value, Position::LiteralElement);
-                }
+            // Literal elements are operands of the literal.
+            Expression::MapLiteral { .. }
+            | Expression::ListLiteral { .. }
+            | Expression::ArrayLiteral { .. }
+            | Expression::TupleLiteral { .. }
+            | Expression::BinaryConstruction { .. } => {
+                for_each_child(expr, &mut |child| {
+                    self.operand(child, Position::LiteralElement);
+                });
             }
-            Expression::ListLiteral { elements, tail, .. } => {
-                for e in elements {
-                    self.operand(e, Position::LiteralElement);
-                }
-                if let Some(t) = tail {
-                    self.operand(t, Position::LiteralElement);
-                }
-            }
-            Expression::ArrayLiteral { elements, .. }
-            | Expression::TupleLiteral { elements, .. } => {
-                for e in elements {
-                    self.operand(e, Position::LiteralElement);
-                }
-            }
-            Expression::StringInterpolation { segments, .. } => {
-                for segment in segments {
-                    if let crate::ast::StringSegment::Interpolation(e) = segment {
-                        self.operand(e, Position::Interpolation);
-                    }
-                }
-            }
-            Expression::BinaryConstruction { segments, .. } => {
-                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                    self.operand(e, Position::LiteralElement);
-                }
+            Expression::StringInterpolation { .. } => {
+                for_each_child(expr, &mut |child| {
+                    self.operand(child, Position::Interpolation);
+                });
             }
             // A local bound to a writing block was reported where it was bound
             // (`note_block_binding`), so a later escape of the local is not.

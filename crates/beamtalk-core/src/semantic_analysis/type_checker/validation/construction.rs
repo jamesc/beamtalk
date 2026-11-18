@@ -5,10 +5,7 @@
 //!
 //! **DDD Context:** Semantic Analysis
 
-//! `TypeChecker::state_default_types` (BT-3481), keeping the direction
-//! one-way instead of calling back into `inference/`.
-
-use crate::ast::{Expression, Literal, SlotKind};
+use crate::ast::{ConstructorSelectors, Expression, Literal, SlotKind};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::string_utils::edit_distance;
@@ -438,9 +435,6 @@ impl TypeChecker {
         if selector != "new" && selector != "new:" {
             return;
         }
-        if class_name == "self" || class_name == "super" {
-            return;
-        }
         if !hierarchy.has_class(class_name) || !hierarchy.is_value_subclass(class_name) {
             return;
         }
@@ -560,10 +554,7 @@ impl TypeChecker {
         span: Span,
         hierarchy: &ClassHierarchy,
     ) {
-        if selector != "spawn" && selector != "spawnWith:" {
-            return;
-        }
-        if class_name == "self" || class_name == "super" {
+        if !ConstructorSelectors::ActorSpawn.contains(selector) {
             return;
         }
         if !hierarchy.is_actor_subclass(class_name) {

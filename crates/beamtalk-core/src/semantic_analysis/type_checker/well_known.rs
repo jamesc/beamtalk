@@ -52,6 +52,12 @@ pub(crate) enum WellKnownClass {
     ErlangModule,
     /// Top type / unknown — used as a fallback display name.
     Dynamic,
+    /// Root of the value-class hierarchy (`Value subclass:`).
+    Value,
+    /// Root of the actor hierarchy.
+    Actor,
+    /// Root of the static supervisor hierarchy.
+    Supervisor,
 }
 
 impl WellKnownClass {
@@ -71,7 +77,17 @@ impl WellKnownClass {
             Self::Result => "Result",
             Self::ErlangModule => "ErlangModule",
             Self::Dynamic => "Dynamic",
+            Self::Value => "Value",
+            Self::Actor => "Actor",
+            Self::Supervisor => "Supervisor",
         }
+    }
+
+    /// Whether `name` is this well-known class's name: the comparison form of
+    /// [`Self::as_str`], for sites that hold a bare class-name string.
+    #[must_use]
+    pub(crate) fn is(self, name: &str) -> bool {
+        self.as_str() == name
     }
 
     /// Attempts to match a string against well-known class names.
@@ -93,6 +109,9 @@ impl WellKnownClass {
             "Result" => Some(Self::Result),
             "ErlangModule" => Some(Self::ErlangModule),
             "Dynamic" => Some(Self::Dynamic),
+            "Value" => Some(Self::Value),
+            "Actor" => Some(Self::Actor),
+            "Supervisor" => Some(Self::Supervisor),
             _ => None,
         }
     }
@@ -138,6 +157,9 @@ mod tests {
             WellKnownClass::Result,
             WellKnownClass::ErlangModule,
             WellKnownClass::Dynamic,
+            WellKnownClass::Value,
+            WellKnownClass::Actor,
+            WellKnownClass::Supervisor,
         ];
         for v in variants {
             let s = v.as_str();

@@ -128,6 +128,76 @@ pub struct MethodInfo {
 }
 
 impl MethodInfo {
+    /// Method metadata for a method the class source defines.
+    ///
+    /// `class_side` selects the constant-value rule
+    /// ([`Self::recorded_constant`]). `origin` stays `None`: it is stamped
+    /// after `ClassHierarchy::build` by `trait_expansion::apply_origins`
+    /// (ADR 0127), and class-side provisions are post-v1 (ADR 0127 §9).
+    #[must_use]
+    pub fn from_definition(
+        class: &ClassDefinition,
+        m: &MethodDefinition,
+        class_side: bool,
+    ) -> Self {
+        Self {
+            selector: m.selector.name(),
+            arity: m.selector.arity(),
+            kind: m.kind,
+            defined_in: class.name.name.clone(),
+            is_sealed: class.is_method_sealed(m),
+            is_internal: m.is_internal,
+            spawns_block: false,
+            return_type: m.return_type.as_ref().map(DeclaredType::from),
+            param_types: m
+                .parameters
+                .iter()
+                .map(|p| p.type_annotation.as_ref().map(DeclaredType::from))
+                .collect(),
+            doc: m.doc_comment.clone().map(Into::into),
+            origin: None,
+            primitive: m.quoted_primitive_name().cloned(),
+            constant_value: Self::recorded_constant(m, class_side),
+            answers_receiver: m.answers_receiver(),
+        }
+    }
+
+    /// Marks the method sealed (cannot be overridden).
+    #[must_use]
+    pub fn sealed(mut self) -> Self {
+        self.is_sealed = true;
+        self
+    }
+
+    /// Method metadata for a compiler-synthesized or registry-derived method:
+    /// primary, unsealed, public, with no source body. `arity` is
+    /// `param_types.len()`.
+    #[must_use]
+    pub fn synthesized(
+        selector: impl Into<EcoString>,
+        defined_in: impl Into<EcoString>,
+        return_type: Option<DeclaredType>,
+        param_types: Vec<Option<DeclaredType>>,
+        doc: Option<EcoString>,
+    ) -> Self {
+        Self {
+            selector: selector.into(),
+            arity: param_types.len(),
+            kind: MethodKind::Primary,
+            defined_in: defined_in.into(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type,
+            param_types,
+            doc,
+            origin: None,
+            primitive: None,
+            constant_value: None,
+            answers_receiver: false,
+        }
+    }
+
     /// The [`MethodInfo::constant_value`] to record for `method`: its literal
     /// body ([`MethodDefinition::literal_constant_body`]) on the class side,
     /// `None` on the instance side.
@@ -595,56 +665,13 @@ impl ClassInfo {
         let instance_methods: Vec<MethodInfo> = class
             .methods
             .iter()
-            .map(|m| MethodInfo {
-                selector: m.selector.name(),
-                arity: m.selector.arity(),
-                kind: m.kind,
-                defined_in: class.name.name.clone(),
-                is_sealed: class.is_method_sealed(m),
-                is_internal: m.is_internal,
-                spawns_block: false,
-                return_type: m.return_type.as_ref().map(DeclaredType::from),
-                param_types: m
-                    .parameters
-                    .iter()
-                    .map(|p| p.type_annotation.as_ref().map(DeclaredType::from))
-                    .collect(),
-                doc: m.doc_comment.clone().map(Into::into),
-                // Stamped after `ClassHierarchy::build` by
-                // `trait_expansion::apply_origins` (ADR 0127) — see
-                // `MethodInfo::origin`'s doc for why it can't be set here.
-                origin: None,
-                primitive: m.quoted_primitive_name().cloned(),
-                constant_value: MethodInfo::recorded_constant(m, false),
-                answers_receiver: m.answers_receiver(),
-            })
+            .map(|m| MethodInfo::from_definition(class, m, false))
             .collect();
 
         let class_methods: Vec<MethodInfo> = class
             .class_methods
             .iter()
-            .map(|m| MethodInfo {
-                selector: m.selector.name(),
-                arity: m.selector.arity(),
-                kind: m.kind,
-                defined_in: class.name.name.clone(),
-                is_sealed: class.is_method_sealed(m),
-                is_internal: m.is_internal,
-                spawns_block: false,
-                return_type: m.return_type.as_ref().map(DeclaredType::from),
-                param_types: m
-                    .parameters
-                    .iter()
-                    .map(|p| p.type_annotation.as_ref().map(DeclaredType::from))
-                    .collect(),
-                doc: m.doc_comment.clone().map(Into::into),
-                // Class-side provisions are post-v1 (ADR 0127 §9); class
-                // methods are never flattened in v1, so this is always `None`.
-                origin: None,
-                primitive: m.quoted_primitive_name().cloned(),
-                constant_value: MethodInfo::recorded_constant(m, true),
-                answers_receiver: m.answers_receiver(),
-            })
+            .map(|m| MethodInfo::from_definition(class, m, true))
             .collect();
 
         let mut info = Self {

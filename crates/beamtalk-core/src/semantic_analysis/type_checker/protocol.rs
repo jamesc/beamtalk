@@ -76,7 +76,6 @@ impl TypeChecker {
     }
 
     /// The per-send body of [`Self::check_protocol_conformance_in_expr`].
-    #[allow(clippy::too_many_lines)] // protocol-composition handling
     fn check_protocol_conformance_for_send(
         &mut self,
         send: &crate::ast_walker::SendRef<'_>,
@@ -549,7 +548,6 @@ impl TypeChecker {
     }
 
     /// The per-send body of [`Self::check_variance_in_expr`].
-    #[allow(clippy::too_many_lines)] // class-type-param substitution adds length
     fn check_variance_for_send(
         &mut self,
         send: &crate::ast_walker::SendRef<'_>,

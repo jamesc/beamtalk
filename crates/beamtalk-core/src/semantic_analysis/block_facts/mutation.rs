@@ -13,11 +13,11 @@
 use super::{RootMethodKind, captured_local_mutations_from_analysis, literal_block_value_arm};
 use crate::ast::well_known::WellKnownSelector;
 use crate::ast::{
-    BinarySegment, Block, ClassDefinition, Expression, ExpressionStatement, MessageSelector,
-    MethodKind, ParameterDefinition,
+    Block, ClassDefinition, Expression, ExpressionStatement, MessageSelector, MethodKind,
+    ParameterDefinition,
 };
 use crate::ast_walker::{
-    SendSite, WalkEvent, cascade_sends, walk_expression_and_sends, walk_sends,
+    SendSite, WalkEvent, cascade_sends, for_each_child, walk_expression_and_sends, walk_sends,
 };
 use crate::source_analysis::Span;
 use std::collections::HashSet;
@@ -598,30 +598,6 @@ fn analyze_expression(
     ctx: &mut AnalysisContext,
 ) {
     match expr {
-        Expression::Literal(..)
-        | Expression::Error { .. }
-        | Expression::Super(_)
-        | Expression::ClassReference { .. }
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Spread { .. } => {
-            // No variable access (ClassReference resolves at compile time)
-            // Primitive is a pragma, no variable access
-        }
-
-        Expression::StringInterpolation { segments, .. } => {
-            for segment in segments {
-                if let crate::ast::StringSegment::Interpolation(expr) = segment {
-                    analyze_expression(expr, analysis, ctx);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                analyze_expression(expr, analysis, ctx);
-            }
-        }
-
         Expression::Identifier(id) => {
             // Read of a variable - track ALL reads, not just known locals
             // This is important for detecting outer scope variables that need threading
@@ -764,10 +740,6 @@ fn analyze_expression(
                 .extend(nested_analysis.self_send_selectors.iter().cloned());
         }
 
-        Expression::Return { value, .. } => {
-            analyze_expression(value, analysis, ctx);
-        }
-
         Expression::Cascade { receiver, .. } => {
             // The parser folds the FIRST message into `receiver` as a whole
             // `MessageSend`, which the `MessageSend` arm analyses (receiver,
@@ -792,47 +764,16 @@ fn analyze_expression(
             }
         }
 
-        Expression::Parenthesized { expression, .. } => {
-            analyze_expression(expression, analysis, ctx);
-        }
-
-        Expression::Match { value, arms, .. } => {
-            analyze_expression(value, analysis, ctx);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    analyze_expression(guard, analysis, ctx);
-                }
-                analyze_expression(&arm.body, analysis, ctx);
-            }
-        }
-
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                analyze_expression(&pair.key, analysis, ctx);
-                analyze_expression(&pair.value, analysis, ctx);
-            }
-        }
-
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                analyze_expression(elem, analysis, ctx);
-            }
-            if let Some(t) = tail {
-                analyze_expression(t, analysis, ctx);
-            }
-        }
-
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for elem in elements {
-                analyze_expression(elem, analysis, ctx);
-            }
-        }
-
         Expression::DestructureAssignment { pattern, value, .. } => {
             // Destructure assignment: walk into value, then bind all pattern variables
             analyze_expression(value, analysis, ctx);
             collect_pattern_bindings(pattern, analysis, ctx);
         }
+
+        // Every other variant only fans out to its child expressions. The
+        // leaves (a `ClassReference` resolves at compile time, a `Primitive`
+        // is a pragma) access no variable.
+        _ => for_each_child(expr, &mut |child| analyze_expression(child, analysis, ctx)),
     }
 }
 

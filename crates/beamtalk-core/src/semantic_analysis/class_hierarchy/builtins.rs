@@ -29,8 +29,6 @@
 use super::ClassInfo;
 #[cfg(test)]
 use super::MethodInfo;
-#[cfg(test)]
-use crate::ast::MethodKind;
 use crate::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -42,23 +40,7 @@ mod generated;
 /// Create a built-in method info (always primary, never sealed).
 #[cfg(test)]
 pub(super) fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> MethodInfo {
-    MethodInfo {
-        selector: selector.into(),
-        arity,
-        kind: MethodKind::Primary,
-        defined_in: defined_in.into(),
-        is_sealed: false,
-        is_internal: false,
-        spawns_block: false,
-        return_type: None,
-        param_types: vec![None; arity],
-        doc: None,
-
-        origin: None,
-        primitive: None,
-        constant_value: None,
-        answers_receiver: false,
-    }
+    MethodInfo::synthesized(selector, defined_in, None, vec![None; arity], None)
 }
 
 /// Runtime-only built-in classes: no `stdlib/src/*.bt` source, so absent from

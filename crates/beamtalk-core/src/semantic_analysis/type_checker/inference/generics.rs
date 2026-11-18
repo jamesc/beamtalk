@@ -11,6 +11,7 @@
 //! composing through the inheritance chain (ADR 0068 Phase 1b) where the
 //! method is inherited from a superclass.
 
+use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use std::collections::{HashMap, HashSet};
 
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
@@ -363,7 +364,7 @@ impl TypeChecker {
                         && !class_type_params.contains(name)
                 };
 
-                if declared_base == "Block" {
+                if WellKnownClass::Block.is(declared_base) {
                     // A `Block(P1, ..., Pn, R)` param: the last declared slot
                     // is the block's *result*, aligned with the argument
                     // block's last type arg (its arity may differ from the
@@ -440,7 +441,7 @@ impl TypeChecker {
     /// result, a non-`Block` member counting as unknown (BT-4240). Any other
     /// argument contributes nothing.
     fn split_block_arg(arg: &InferredType) -> (&[InferredType], Option<InferredType>) {
-        let is_block = |ty: &InferredType| matches!(ty, InferredType::Known { class_name, .. } if class_name.as_str() == "Block");
+        let is_block = |ty: &InferredType| matches!(ty, InferredType::Known { class_name, .. } if WellKnownClass::Block.is(class_name));
         match arg {
             InferredType::Known { type_args, .. } if is_block(arg) => {
                 match type_args.split_last() {

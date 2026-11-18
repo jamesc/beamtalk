@@ -11,7 +11,7 @@
 //! crate's `actor-state-abroad` lint, which both judge a block handed to an
 //! actor (BT-4186).
 
-use crate::ast::{Expression, ExpressionStatement};
+use crate::ast::{ConstructorSelectors, Expression, ExpressionStatement};
 use crate::ast_walker::walk_expression;
 use crate::semantic_analysis::ClassHierarchy;
 use std::collections::HashSet;
@@ -29,7 +29,7 @@ use std::collections::HashSet;
 /// package-qualified class reference is not resolved and never matches.
 #[must_use]
 pub fn is_actor_spawn(hierarchy: &ClassHierarchy, receiver: &Expression, selector: &str) -> bool {
-    matches!(selector, "spawn" | "spawnWith:")
+    ConstructorSelectors::ActorSpawn.contains(selector)
         && matches!(
             receiver,
             Expression::ClassReference { name, package, .. }

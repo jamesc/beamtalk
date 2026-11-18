@@ -8,6 +8,7 @@
 //! and aggregate inherited state/class-variable information.
 
 use crate::ast::{ClassDefinition, ClassKind, MethodKind, Module, SlotKind};
+use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use ecow::EcoString;
 use std::collections::{BTreeSet, HashSet};
 use std::ops::ControlFlow;
@@ -95,8 +96,8 @@ impl ClassHierarchy {
     #[must_use]
     pub fn threads_actor_state(&self, class_name: &str) -> bool {
         self.get_class(class_name).is_some_and(|c| !c.is_native)
-            && class_name != "Actor"
-            && self.is_subclass_of(class_name, "Actor")
+            && !WellKnownClass::Actor.is(class_name)
+            && self.is_subclass_of(class_name, WellKnownClass::Actor.as_str())
     }
 
     /// Returns the names of all classes whose immediate superclass is
@@ -963,7 +964,7 @@ impl ClassHierarchy {
         if info.surface_incomplete {
             return true;
         }
-        class_name != "Value"
+        !WellKnownClass::Value.is(class_name)
             && info
                 .class_methods
                 .iter()
@@ -1004,7 +1005,7 @@ impl ClassHierarchy {
     /// to an ancestor that has none.
     #[must_use]
     pub fn defines_user_class_new0(&self, class_name: &str) -> bool {
-        if matches!(class_name, "Value" | "Actor") {
+        if WellKnownClass::Value.is(class_name) || WellKnownClass::Actor.is(class_name) {
             return false;
         }
         self.classes.get(class_name).is_some_and(|info| {
@@ -1035,44 +1036,26 @@ impl ClassHierarchy {
         for (slot_name, slot_type) in slots {
             // Auto-getter
             if !existing_instance_selectors.contains(slot_name) {
-                instance_methods.push(MethodInfo {
-                    selector: slot_name.clone(),
-                    arity: 0,
-                    kind: MethodKind::Primary,
-                    defined_in: class_name.clone(),
-                    is_sealed: false,
-                    is_internal: false,
-                    spawns_block: false,
-                    return_type: slot_type.clone(),
-                    param_types: vec![],
-                    doc: Some(EcoString::from("*(compiler-generated)*")),
-                    origin: None,
-                    primitive: None,
-                    constant_value: None,
-                    answers_receiver: false,
-                });
+                instance_methods.push(MethodInfo::synthesized(
+                    slot_name.clone(),
+                    class_name.clone(),
+                    slot_type.clone(),
+                    vec![],
+                    Some(EcoString::from("*(compiler-generated)*")),
+                ));
             }
 
             // Auto with*: setter
             let with_sel =
                 EcoString::from(crate::synthetic_selectors::with_star_selector(slot_name));
             if !existing_instance_selectors.contains(&with_sel) {
-                instance_methods.push(MethodInfo {
-                    selector: with_sel,
-                    arity: 1,
-                    kind: MethodKind::Primary,
-                    defined_in: class_name.clone(),
-                    is_sealed: false,
-                    is_internal: false,
-                    spawns_block: false,
-                    return_type: Some(crate::synthetic_selectors::synthesized_copy_return_type()),
-                    param_types: vec![slot_type.clone()],
-                    doc: Some(EcoString::from("*(compiler-generated)*")),
-                    origin: None,
-                    primitive: None,
-                    constant_value: None,
-                    answers_receiver: false,
-                });
+                instance_methods.push(MethodInfo::synthesized(
+                    with_sel,
+                    class_name.clone(),
+                    Some(crate::synthetic_selectors::synthesized_copy_return_type()),
+                    vec![slot_type.clone()],
+                    Some(EcoString::from("*(compiler-generated)*")),
+                ));
             }
         }
 
@@ -1089,24 +1072,13 @@ impl ClassHierarchy {
             return KeywordDecision::Ambiguous;
         };
         let kw_sel = EcoString::from(kw_sel);
-        class_methods.push(MethodInfo {
-            selector: kw_sel.clone(),
-            arity: slots.len(),
-            kind: MethodKind::Primary,
-            defined_in: class_name.clone(),
-            is_sealed: false,
-            is_internal: false,
-            spawns_block: false,
-            return_type: Some(
-                crate::synthetic_selectors::synthesized_constructor_return_type(class_name),
-            ),
-            param_types: slots.iter().map(|(_, ty)| ty.clone()).collect(),
-            doc: Some(EcoString::from("*(compiler-generated)*")),
-            origin: None,
-            primitive: None,
-            constant_value: None,
-            answers_receiver: false,
-        });
+        class_methods.push(MethodInfo::synthesized(
+            kw_sel.clone(),
+            class_name.clone(),
+            Some(crate::synthetic_selectors::synthesized_constructor_return_type(class_name)),
+            slots.iter().map(|(_, ty)| ty.clone()).collect(),
+            Some(EcoString::from("*(compiler-generated)*")),
+        ));
         KeywordDecision::Known(Some(kw_sel))
     }
 
@@ -1390,11 +1362,11 @@ impl ClassHierarchy {
     /// authority also used by `codegen::core_erlang::value_type_codegen`, so the
     /// class hierarchy (and therefore the type checker) agrees byte-for-byte with
     /// the methods codegen emits — without duplicating the naming logic.
-    #[allow(clippy::too_many_lines)] // field-mapping function — length is proportional to slot count
-    /// Returns the synthesized keyword constructor selector, if one was added.
     ///
+    /// Returns the synthesized keyword constructor selector, if one was added.
     /// The return value is the constructor-emission record: callers
     /// building a fresh `ClassInfo` store it as the `auto_ctors` anchor.
+    #[allow(clippy::too_many_lines)] // field-mapping function — length is proportional to slot count
     pub(super) fn add_value_auto_methods(
         class: &ClassDefinition,
         instance_methods: &mut Vec<MethodInfo>,
@@ -1423,22 +1395,13 @@ impl ClassHierarchy {
                 let getter_doc = format!(
                     "Returns the `{slot_name}` field value. Default: `{default_str}`.\n\n*(compiler-generated)*"
                 );
-                instance_methods.push(MethodInfo {
-                    selector: slot.name.name.clone(),
-                    arity: 0,
-                    kind: MethodKind::Primary,
-                    defined_in: class_name.clone(),
-                    is_sealed: false,
-                    is_internal: false,
-                    spawns_block: false,
-                    return_type: crate::synthetic_selectors::synthesized_getter_return_type(slot),
-                    param_types: vec![],
-                    doc: Some(getter_doc.into()),
-                    origin: None,
-                    primitive: None,
-                    constant_value: None,
-                    answers_receiver: false,
-                });
+                instance_methods.push(MethodInfo::synthesized(
+                    slot.name.name.clone(),
+                    class_name.clone(),
+                    crate::synthetic_selectors::synthesized_getter_return_type(slot),
+                    vec![],
+                    Some(getter_doc.into()),
+                ));
             }
 
             // Auto with*: setter: keyword method returning a new instance
@@ -1448,24 +1411,15 @@ impl ClassHierarchy {
                 let setter_doc = format!(
                     "Returns a new `{class_name}` with `{slot_name}` set to the given value.\n\n*(compiler-generated)*"
                 );
-                instance_methods.push(MethodInfo {
-                    selector: with_sel,
-                    arity: 1,
-                    kind: MethodKind::Primary,
-                    defined_in: class_name.clone(),
-                    is_sealed: false,
-                    is_internal: false,
-                    spawns_block: false,
-                    return_type: Some(crate::synthetic_selectors::synthesized_copy_return_type()),
-                    param_types: vec![crate::synthetic_selectors::synthesized_copy_param_type(
+                instance_methods.push(MethodInfo::synthesized(
+                    with_sel,
+                    class_name.clone(),
+                    Some(crate::synthetic_selectors::synthesized_copy_return_type()),
+                    vec![crate::synthetic_selectors::synthesized_copy_param_type(
                         slot,
                     )],
-                    doc: Some(setter_doc.into()),
-                    origin: None,
-                    primitive: None,
-                    constant_value: None,
-                    answers_receiver: false,
-                });
+                    Some(setter_doc.into()),
+                ));
             }
         }
 
@@ -1475,7 +1429,6 @@ impl ClassHierarchy {
                 class.state.iter().map(|s| s.name.name.as_str()),
                 |sel| user_class_selectors.contains(sel),
             )?);
-        let arity = class.state.len();
         let args_desc: String = class
             .state
             .iter()
@@ -1490,28 +1443,17 @@ impl ClassHierarchy {
             .join(", ");
         let ctor_doc =
             format!("Creates a new `{class_name}`. Args: {args_desc}.\n\n*(compiler-generated)*");
-        class_methods.push(MethodInfo {
-            selector: kw_sel.clone(),
-            arity,
-            kind: MethodKind::Primary,
-            defined_in: class_name.clone(),
-            is_sealed: false,
-            is_internal: false,
-            spawns_block: false,
-            return_type: Some(
-                crate::synthetic_selectors::synthesized_constructor_return_type(&class_name),
-            ),
-            param_types: class
+        class_methods.push(MethodInfo::synthesized(
+            kw_sel.clone(),
+            class_name.clone(),
+            Some(crate::synthetic_selectors::synthesized_constructor_return_type(&class_name)),
+            class
                 .state
                 .iter()
                 .map(crate::synthetic_selectors::synthesized_constructor_param_type)
                 .collect(),
-            doc: Some(ctor_doc.into()),
-            origin: None,
-            primitive: None,
-            constant_value: None,
-            answers_receiver: false,
-        });
+            Some(ctor_doc.into()),
+        ));
         Some(kw_sel)
     }
 }
@@ -1534,7 +1476,7 @@ pub fn superclass_chain_includes_value<'a>(
         if !visited.insert(name) {
             break;
         }
-        if name == "Value" {
+        if WellKnownClass::Value.is(name) {
             return true;
         }
         current = superclass_of(name);

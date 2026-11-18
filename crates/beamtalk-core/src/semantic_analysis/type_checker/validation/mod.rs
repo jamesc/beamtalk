@@ -29,9 +29,6 @@
 //! reverse. `check_state_defaults` needs an inferred type for each state
 //! field's default-value expression but does not call `infer_expr` itself —
 //! it reads the result `inference/mod.rs::check_module` already cached in
-//! `TypeChecker::state_default_types` (BT-3481), keeping the direction
-//! one-way instead of calling back into `inference/`.
-
 mod arguments;
 mod compat;
 mod construction;

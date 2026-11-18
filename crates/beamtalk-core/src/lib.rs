@@ -32,10 +32,6 @@ pub mod ast_walker;
 // `pub`: the one place the `_build/` layout is spelled; reached by the CLI,
 // compiler port, LSP, MCP and `beamtalk-project` (BT-4884).
 pub mod build_layout;
-// Test-support census query for ADR 0130 Phase 0 (BT-3703); compiled only for
-// tests and the `test` feature, so it is not a shipped surface.
-#[cfg(any(test, feature = "test"))]
-pub mod class_var_census;
 pub mod compilation;
 // Shared leaf: curated Erlang export/arity table read by the `arity_mismatch`
 // lint and by `beamtalk-language-service` `Erlang <module>` completions (BT-4371).

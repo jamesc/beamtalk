@@ -9,7 +9,8 @@
 //! [`OuterWriteWalker`]; the scope-tracking walk behind [`outer_local_writes`].
 
 use super::{LocalThreadingConstruct, local_threading_construct};
-use crate::ast::{BinarySegment, Block, Expression};
+use crate::ast::{Block, Expression};
+use crate::ast_walker::for_each_child;
 use crate::source_analysis::Span;
 use std::collections::HashSet;
 
@@ -284,59 +285,8 @@ impl OuterWriteWalker<'_> {
                 arguments,
                 ..
             } => self.send(expr, receiver, arguments),
-            Expression::Cascade {
-                receiver, messages, ..
-            } => {
-                self.expr(receiver);
-                for msg in messages {
-                    for arg in &msg.arguments {
-                        self.expr(arg);
-                    }
-                }
-            }
-            Expression::FieldAccess { receiver, .. } => self.expr(receiver),
-            Expression::Return { value, .. } => self.expr(value),
-            Expression::Parenthesized { expression, .. } => self.expr(expression),
-            Expression::MapLiteral { pairs, .. } => {
-                for pair in pairs {
-                    self.expr(&pair.key);
-                    self.expr(&pair.value);
-                }
-            }
-            Expression::ListLiteral { elements, tail, .. } => {
-                for e in elements {
-                    self.expr(e);
-                }
-                if let Some(t) = tail {
-                    self.expr(t);
-                }
-            }
-            Expression::ArrayLiteral { elements, .. }
-            | Expression::TupleLiteral { elements, .. } => {
-                for e in elements {
-                    self.expr(e);
-                }
-            }
-            Expression::StringInterpolation { segments, .. } => {
-                for segment in segments {
-                    if let crate::ast::StringSegment::Interpolation(e) = segment {
-                        self.expr(e);
-                    }
-                }
-            }
-            Expression::BinaryConstruction { segments, .. } => {
-                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                    self.expr(e);
-                }
-            }
-            Expression::Literal(..)
-            | Expression::Identifier(_)
-            | Expression::ClassReference { .. }
-            | Expression::Super(_)
-            | Expression::Primitive { .. }
-            | Expression::ExpectDirective { .. }
-            | Expression::Spread { .. }
-            | Expression::Error { .. } => {}
+            // Every other variant only fans out to its child expressions.
+            _ => for_each_child(expr, &mut |child| self.expr(child)),
         }
     }
 }

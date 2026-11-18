@@ -11,6 +11,7 @@ use crate::ast::{Expression, WellKnownSelector};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::type_checker::narrowing::visitors::block_has_return;
 use crate::semantic_analysis::type_checker::type_resolver;
+use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{
     DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv,
 };
@@ -257,7 +258,7 @@ impl TypeChecker {
         else {
             return;
         };
-        if class_name != "Block" {
+        if !WellKnownClass::Block.is(class_name) {
             return;
         }
         for (i, param) in block.parameters.iter().enumerate() {

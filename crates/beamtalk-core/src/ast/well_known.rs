@@ -833,3 +833,53 @@ mod tests {
         assert_eq!(sel.well_known(), None);
     }
 }
+
+/// Which members of the constructor-selector family a call site accepts.
+///
+/// The family is `spawn`, `spawnWith:`, `new`, `new:` and `basicNew`. Sites
+/// differ on purpose in which of them count, so each membership is a named
+/// variant here rather than a hand-typed `matches!` at the site.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ConstructorSelectors {
+    /// `spawn`, `spawnWith:`, `new`, `new:`: the selectors that instantiate a
+    /// class (the abstract-instantiation check).
+    Instantiation,
+    /// [`Self::Instantiation`] plus `basicNew`: the selectors whose result on
+    /// a class or metatype receiver is an instance of that class (ADR 0083).
+    Constructing,
+    /// `spawn`, `spawnWith:`: actor instantiation only.
+    ActorSpawn,
+    /// `new`, `basicNew`: the argument-less instance constructors.
+    PlainNew,
+}
+
+impl ConstructorSelectors {
+    /// Whether `selector` is a member of this set.
+    #[must_use]
+    pub fn contains(self, selector: &str) -> bool {
+        match self {
+            Self::Instantiation => matches!(selector, "spawn" | "spawnWith:" | "new" | "new:"),
+            Self::Constructing => Self::Instantiation.contains(selector) || selector == "basicNew",
+            Self::ActorSpawn => matches!(selector, "spawn" | "spawnWith:"),
+            Self::PlainNew => matches!(selector, "new" | "basicNew"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod constructor_selectors_tests {
+    use super::ConstructorSelectors::{ActorSpawn, Constructing, Instantiation, PlainNew};
+
+    #[test]
+    fn memberships() {
+        for s in ["spawn", "spawnWith:", "new", "new:"] {
+            assert!(Instantiation.contains(s) && Constructing.contains(s), "{s}");
+        }
+        assert!(!Instantiation.contains("basicNew"));
+        assert!(Constructing.contains("basicNew"));
+        assert!(ActorSpawn.contains("spawn") && ActorSpawn.contains("spawnWith:"));
+        assert!(!ActorSpawn.contains("new"));
+        assert!(PlainNew.contains("new") && PlainNew.contains("basicNew"));
+        assert!(!PlainNew.contains("new:") && !Constructing.contains("supervise"));
+    }
+}

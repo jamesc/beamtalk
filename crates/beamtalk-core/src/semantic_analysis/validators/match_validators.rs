@@ -7,6 +7,7 @@
 //!
 //! Validates pattern match exhaustiveness for sealed types.
 
+use super::structural_validators::unresolved_class_diagnostic;
 use crate::ast::{Expression, ExpressionStatement, Identifier, MethodDefinition, Module, Pattern};
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
@@ -526,15 +527,7 @@ fn validate_type_pattern_class(
         // `check_unresolved_classes`: open-world assumption when
         // cross-file metadata isn't loaded.
         if has_cross_file_classes {
-            diagnostics.push(
-                Diagnostic::warning(format!("Unresolved class `{class_name}`"), class.span)
-                    .with_hint(
-                        "This class is not defined in the current compilation unit or \
-                         standard library. Suppress with @expect unresolved_class if it \
-                         exists at runtime.",
-                    )
-                    .with_category(DiagnosticCategory::UnresolvedClass),
-            );
+            diagnostics.push(unresolved_class_diagnostic(class_name, class.span));
         }
         return;
     }

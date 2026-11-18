@@ -10,9 +10,9 @@
 //! inline at every call site.
 
 use crate::ast::{
-    BinarySegment, Block, BlockId, CascadeMessage, Expression, ExpressionStatement,
-    MessageSelector, MethodKind, Module, StringSegment,
+    Block, BlockId, Expression, ExpressionStatement, MessageSelector, MethodKind, Module,
 };
+use crate::ast_walker::for_each_child;
 use crate::semantic_analysis::block_facts::{BlockMutationAnalysis, analyze_block};
 use crate::source_analysis::{MethodSide, Span};
 use std::collections::{HashMap, HashSet};
@@ -142,6 +142,7 @@ pub struct ClassFacts {
 }
 
 impl ClassFacts {
+    #[cfg(test)]
     /// Returns `true` if the class has an instance method with the given selector.
     pub fn has_instance_method(&self, selector: &str) -> bool {
         self.instance_methods_by_selector.contains_key(selector)
@@ -282,33 +283,6 @@ fn expr_has_block_nlr(expr: &Expression, inside_block: bool) -> bool {
     match expr {
         Expression::Return { value, .. } => inside_block || expr_has_block_nlr(value, inside_block),
         Expression::Block(block) => block_has_nlr(block),
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            expr_has_block_nlr(receiver, inside_block)
-                || arguments
-                    .iter()
-                    .any(|a| expr_has_block_nlr(a, inside_block))
-        }
-        Expression::Assignment { target, value, .. } => {
-            expr_has_block_nlr(target, inside_block) || expr_has_block_nlr(value, inside_block)
-        }
-        Expression::Parenthesized { expression, .. } => {
-            expr_has_block_nlr(expression, inside_block)
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            expr_has_block_nlr(receiver, inside_block)
-                || messages.iter().any(|m: &CascadeMessage| {
-                    m.arguments
-                        .iter()
-                        .any(|a| expr_has_block_nlr(a, inside_block))
-                })
-        }
-        Expression::FieldAccess { receiver, .. } => expr_has_block_nlr(receiver, inside_block),
         Expression::Match { value, arms, .. } => {
             expr_has_block_nlr(value, inside_block)
                 || arms.iter().any(|arm| {
@@ -321,36 +295,14 @@ fn expr_has_block_nlr(expr: &Expression, inside_block: bool) -> bool {
                         || expr_has_block_nlr(&arm.body, true)
                 })
         }
-        Expression::MapLiteral { pairs, .. } => pairs.iter().any(|pair| {
-            expr_has_block_nlr(&pair.key, inside_block)
-                || expr_has_block_nlr(&pair.value, inside_block)
-        }),
-        Expression::ListLiteral { elements, tail, .. } => {
-            elements.iter().any(|e| expr_has_block_nlr(e, inside_block))
-                || tail
-                    .as_ref()
-                    .is_some_and(|t| expr_has_block_nlr(t, inside_block))
+        // Every other variant only fans out to its child expressions.
+        _ => {
+            let mut found = false;
+            for_each_child(expr, &mut |child| {
+                found = found || expr_has_block_nlr(child, inside_block);
+            });
+            found
         }
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            elements.iter().any(|e| expr_has_block_nlr(e, inside_block))
-        }
-        Expression::StringInterpolation { segments, .. } => segments.iter().any(|s| match s {
-            StringSegment::Literal(_) => false,
-            StringSegment::Interpolation(e) => expr_has_block_nlr(e, inside_block),
-        }),
-        Expression::BinaryConstruction { segments, .. } => segments
-            .iter()
-            .flat_map(BinarySegment::sub_expressions)
-            .any(|e| expr_has_block_nlr(e, inside_block)),
-        Expression::DestructureAssignment { value, .. } => expr_has_block_nlr(value, inside_block),
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::ClassReference { .. }
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::Error { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Spread { .. } => false,
     }
 }
 
@@ -545,30 +497,12 @@ pub fn compute_state_effects_for_expr(expr: &Expression, in_class_method: bool) 
 /// `self.field := …` write is bucketed into (see [`StateEffects`]'s doc
 /// comment) — the same flag [`compute_semantic_facts`] already threads
 /// through its class-method-vs-instance-method loop.
-#[allow(clippy::too_many_lines)] // one match arm per Expression variant, mirrors collect_expression_facts
 fn compute_state_effects(
     expr: &Expression,
     in_class_method: bool,
     out: &mut HashMap<Span, StateEffects>,
 ) -> StateEffects {
     let effects = match expr {
-        Expression::Parenthesized { expression, .. } => {
-            compute_state_effects(expression, in_class_method, out)
-        }
-
-        Expression::Identifier(_)
-        | Expression::ClassReference { .. }
-        | Expression::Super(_)
-        | Expression::Primitive { .. }
-        | Expression::Literal(..)
-        | Expression::Error { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Spread { .. } => StateEffects::default(),
-
-        Expression::FieldAccess { receiver, .. } => {
-            compute_state_effects(receiver, in_class_method, out)
-        }
-
         Expression::Block(block) => compute_block_state_effects(block, in_class_method, out),
 
         Expression::MessageSend {
@@ -620,10 +554,6 @@ fn compute_state_effects(
             eff
         }
 
-        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
-            compute_state_effects(value, in_class_method, out)
-        }
-
         Expression::Cascade {
             receiver, messages, ..
         } => {
@@ -653,60 +583,14 @@ fn compute_state_effects(
             eff
         }
 
-        Expression::Match { value, arms, .. } => {
-            let mut eff = compute_state_effects(value, in_class_method, out);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    eff = eff.union(compute_state_effects(guard, in_class_method, out));
-                }
-                eff = eff.union(compute_state_effects(&arm.body, in_class_method, out));
-            }
-            eff
-        }
-
-        Expression::MapLiteral { pairs, .. } => {
+        // Every other variant (a leaf carries no effect) unions its children's.
+        _ => {
             let mut eff = StateEffects::default();
-            for pair in pairs {
-                eff = eff.union(compute_state_effects(&pair.key, in_class_method, out));
-                eff = eff.union(compute_state_effects(&pair.value, in_class_method, out));
-            }
+            for_each_child(expr, &mut |child| {
+                eff = eff.union(compute_state_effects(child, in_class_method, out));
+            });
             eff
         }
-
-        Expression::ListLiteral { elements, tail, .. } => {
-            let mut eff = StateEffects::default();
-            for elem in elements {
-                eff = eff.union(compute_state_effects(elem, in_class_method, out));
-            }
-            if let Some(t) = tail {
-                eff = eff.union(compute_state_effects(t, in_class_method, out));
-            }
-            eff
-        }
-
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            let mut eff = StateEffects::default();
-            for elem in elements {
-                eff = eff.union(compute_state_effects(elem, in_class_method, out));
-            }
-            eff
-        }
-
-        Expression::StringInterpolation { segments, .. } => {
-            let mut eff = StateEffects::default();
-            for seg in segments {
-                if let StringSegment::Interpolation(e) = seg {
-                    eff = eff.union(compute_state_effects(e, in_class_method, out));
-                }
-            }
-            eff
-        }
-        Expression::BinaryConstruction { segments, .. } => segments
-            .iter()
-            .flat_map(BinarySegment::sub_expressions)
-            .fold(StateEffects::default(), |eff, e| {
-                eff.union(compute_state_effects(e, in_class_method, out))
-            }),
     };
     out.insert(expr.span(), effects);
     effects
@@ -735,8 +619,8 @@ fn compute_block_state_effects(
 mod tests {
     use super::*;
     use crate::ast::{
-        Block, ClassDefinition, Expression, ExpressionStatement, Identifier, KeywordPart, Literal,
-        MethodDefinition, Module, StandaloneMethodDefinition,
+        Block, CascadeMessage, ClassDefinition, Expression, ExpressionStatement, Identifier,
+        KeywordPart, Literal, MethodDefinition, Module, StandaloneMethodDefinition,
     };
     use crate::source_analysis::Span;
 

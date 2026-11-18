@@ -38,18 +38,21 @@ impl LexError {
         Self { kind, span }
     }
 
+    #[cfg(test)]
     /// Creates an "unexpected character" error.
     #[must_use]
     pub fn unexpected_char(c: char, span: Span) -> Self {
         Self::new(LexErrorKind::UnexpectedCharacter(c), span)
     }
 
+    #[cfg(test)]
     /// Creates an "unterminated string" error.
     #[must_use]
     pub fn unterminated_string(span: Span) -> Self {
         Self::new(LexErrorKind::UnterminatedString, span)
     }
 
+    #[cfg(test)]
     /// Creates an "unterminated comment" error.
     #[must_use]
     pub fn unterminated_comment(span: Span) -> Self {

@@ -24,6 +24,7 @@
 
 use crate::ast::{Identifier, Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{
     InferredType, MethodReturnKey, NativeTypeRegistry, infer_method_return_types,
 };
@@ -50,7 +51,7 @@ use std::collections::HashMap;
 /// writeback altogether.
 fn writeback_annotation(ty: &InferredType, span: Span) -> Option<TypeAnnotation> {
     match ty {
-        InferredType::Known { class_name, .. } if class_name == "Block" => {
+        InferredType::Known { class_name, .. } if WellKnownClass::Block.is(class_name) => {
             Some(TypeAnnotation::simple(class_name.clone(), span))
         }
         InferredType::Known {

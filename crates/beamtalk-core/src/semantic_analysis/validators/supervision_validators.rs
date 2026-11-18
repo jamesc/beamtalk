@@ -12,6 +12,7 @@
 
 use crate::ast::{Expression, MethodDefinition, Module};
 use crate::semantic_analysis::ClassHierarchy;
+use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, MethodSide};
 
 /// Validate that `class supervisionPolicy` override returns a valid symbol.
@@ -159,7 +160,7 @@ pub(crate) fn check_class_side_supervisor_config(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let is_supervisor_class = |name: &str| {
-        name != "Supervisor"
+        !WellKnownClass::Supervisor.is(name)
             && name != "DynamicSupervisor"
             && (hierarchy.is_supervisor_subclass(name)
                 || hierarchy.is_dynamic_supervisor_subclass(name))

@@ -19,11 +19,12 @@
 //! - Opaque `native:` `new`/`new:` usage errors
 
 use crate::ast::{
-    ClassKind, DeclaredKeyword, Expression, Identifier, MessageSelector, MethodDefinition, Module,
-    migrate_from_v_version,
+    ClassKind, ConstructorSelectors, DeclaredKeyword, Expression, Identifier, MessageSelector,
+    MethodDefinition, Module, migrate_from_v_version,
 };
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
+use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, MethodSide, Span};
 use ecow::EcoString;
 
@@ -42,7 +43,7 @@ pub(crate) fn check_abstract_instantiation(
 
 /// Returns true if the selector name is an instantiation method (spawn, new, etc.)
 fn is_instantiation_selector(name: &str) -> bool {
-    matches!(name, "spawn" | "spawnWith:" | "new" | "new:")
+    ConstructorSelectors::Instantiation.contains(name)
 }
 
 /// Creates a diagnostic for attempting to instantiate an abstract class.
@@ -253,7 +254,7 @@ fn visit_actor_new(
     {
         let sel = selector.name();
         if (sel == "new" || sel == "new:")
-            && class_name != "Actor"
+            && !WellKnownClass::Actor.is(class_name)
             && hierarchy.is_actor_subclass(class_name)
         {
             diagnostics.push(actor_must_spawn_error(class_name, &sel, *span));
@@ -268,7 +269,7 @@ fn visit_actor_new(
         for msg in messages {
             let sel = msg.selector.name();
             if (sel == "new" || sel == "new:")
-                && class_name != "Actor"
+                && !WellKnownClass::Actor.is(class_name)
                 && hierarchy.is_actor_subclass(class_name)
             {
                 diagnostics.push(actor_must_spawn_error(class_name, &sel, msg.span));

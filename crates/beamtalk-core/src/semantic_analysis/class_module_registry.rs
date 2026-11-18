@@ -436,6 +436,7 @@ impl ClassModuleRegistry {
         self.class_to_module.insert((pkg, class_name), module);
     }
 
+    #[cfg(test)]
     /// Inserts a batch of [`RegistryEntry`] rows, e.g. restored from the
     /// incremental Pass-1 build cache.
     pub fn extend_from_entries(&mut self, entries: impl IntoIterator<Item = RegistryEntry>) {
