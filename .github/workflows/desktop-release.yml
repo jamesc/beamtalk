@@ -340,6 +340,13 @@ jobs:
           APPLE_PASSWORD: ${{ runner.os == 'macOS' && steps.apple_cert.outputs.configured == 'true' && secrets.APPLE_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ runner.os == 'macOS' && steps.apple_cert.outputs.configured == 'true' && secrets.APPLE_TEAM_ID || '' }}
         run: |
+          # The env block above can only set these to "" when unsigned, and
+          # Tauri treats a present-but-empty APPLE_SIGNING_IDENTITY as "sign
+          # with identity ''" (fails: "no identity found"). Unset the empty
+          # ones so an unsigned run really is unsigned (BT-5006).
+          for v in APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!v:-}" ] || unset "$v"
+          done
           start=$(date +%s)
           just dist-desktop-platform ${{ matrix.bundles }}
           end=$(date +%s)
