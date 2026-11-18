@@ -49,21 +49,65 @@ with the previous night. Nothing else in this directory changes.
 | Rows | 7a-7d (actor sync read, state update, cast, `self hasField:`) and 16a-16d (actor start-up: async start + `continueWith:` + stop, with args, plain `Actor` spawn + stop, 100 in flight) |
 | Rounds | 5 (`BENCH_ROUNDS` in the workflow); row 0 always runs |
 | Recorded | Beamtalk ns/op, reductions/op and words/op, net of the loop baseline, plus Elixir ns/op measured in the same node as a control |
-| Gate | Time only: Beamtalk ns/op **relative to the Elixir ns/op of the same row** (BT/EX), timed in the same node and rounds. A row fails when that ratio is more than **25%** above the baseline's (`THRESHOLD_PCT`), or when a baseline row is missing tonight. Reductions and words are shown, never gated: BT-4842 showed reductions staying flat while latency rose 5x. The ratio is used because shared runners vary by tens of percent night to night: two runs of identical code differed by 30% in raw ns, and the Elixir control moved with them |
-| Baseline | the `vs-elixir-nightly` artifact (`results.json`) of the latest earlier run on the same branch. It is uploaded only when the check passes, so a regressed night never becomes the baseline |
+| Gate | Time only: Beamtalk ns/op **relative to the Elixir ns/op of the same row** (BT/EX), timed in the same node and rounds. A row is *over the threshold* when that ratio is more than **45%** above the baseline's (`THRESHOLD_PCT`), or when a baseline row is missing tonight. Reductions and words are shown, never gated: BT-4842 showed reductions staying flat while latency rose 5x |
+| Confirmation | A row **fails the night only when it is over the threshold in two measurements on different runners** (BT-4853). When the first comparison finds a row over, job `vs-elixir-confirm` runs the same rows on a fresh runner in the same nightly and compares with the same baseline; the night fails only for rows over in both. A row over in the first measurement only is reported as "not confirmed" in the job summary and the night passes. A normal night does not start the second job. A retry inside one job would not count: runner speed is the noise, and the retry shares the runner |
+| Baseline | the `vs-elixir-nightly` artifact (`results.json`) of the latest earlier run on the same branch. It is uploaded only when the night passes, so a confirmed regression never becomes the baseline. A night that passes because a row was not confirmed stores that row at its **old baseline figures** (tonight's figures for the other rows), so a slow drift cannot ratchet the baseline up |
 | First run | no earlier artifact: the table shows the current figures, the check passes and the night becomes the baseline |
-| Output | a before/after table in the job summary on every run; the full report is the `vs-elixir-nightly-report` artifact |
+| Output | a before/after table in the job summary on every run (and a second table from the confirming job when it runs); the full report is the `vs-elixir-nightly-report` artifact (`vs-elixir-nightly-report-confirm` for the second measurement) |
 
-The 25% is a starting point; the fast rows are short, so tune
-`THRESHOLD_PCT` (or the rows) once a week of nightlies shows the spread.
 A row whose Elixir control is under 0.5 ns net is shown but not gated. The summary shows raw ns and the Elixir control beside the gated ratio.
+
+### Why 45%, and row 7c (BT-4853)
+
+Nine reports from `main` between 14 and 18 Nov (the `vs-elixir-nightly-report`
+artifacts, including the failed nightly of 18 Nov and its re-run). The table is
+the BT/EX ratio of each gated row: the largest rise between any earlier run
+and a later one (what a stale baseline can produce), and max/min over the
+runs. Rows 7a-7d never changed code (reductions are identical in every run), so
+their spread is runner noise alone. Rows 16a-16d dropped sharply from the
+17 Nov run on (reductions 180 -> 40 for 16a): that is a real speed-up, so
+their figures are taken for the six runs before it and for the three after it
+separately.
+
+| Row | Worst rise vs an earlier run | max/min | Runs |
+|---|--:|--:|---|
+| 7a | +38% | +42% | all 9 |
+| 7b | +39% | +39% | all 9 |
+| 7c | +23% | +53% | all 9 |
+| 7d | +17% | +17% | all 9 |
+| 16a | +28% / +11% | +28% / +40% | before / after the speed-up (6 / 3 runs) |
+| 16b | +21% / +14% | +21% / +36% | before / after |
+| 16c | +32% / -6% | +32% / +41% | before / after |
+| 16d | +15% / +30% | +15% / +44% | before / after |
+
+* The old 25% was inside the noise: five of the eight rows rose by more than
+  25% between two runs of unchanged code, and two runs failed on it with no
+  Beamtalk slowdown (a bench run on 15 Nov on 16a, the nightly of 18 Nov on 7a;
+  the 18 Nov re-run passed).
+  The Elixir control alone moves 25-40% between runners (7a: 1362 to 2303 ns).
+* **45%** is just above the worst single rise seen (+39%). A real slowdown
+  below 45% is not caught by one night; the confirmation rule is what keeps the
+  threshold from having to sit higher still, and the figures stay in the table
+  for review.
+* The confirmation rule does not remove baseline noise: both measurements are
+  compared with the same baseline, so a baseline that happened to be taken on a
+  fast control runner makes both look slow. The threshold is what covers that.
+* **Row 7c stays gated, at the same threshold.** Its Elixir control is small
+  (220-350 ns), but its ratio moved less than 7a's and 7b's (worst rise +23%
+  against +38% and +39%), so the data gives no reason for a different
+  threshold, report-only status or more rounds. Revisit if a night shows
+  otherwise.
 
 To try it on a branch: run the Nightly workflow with `workflow_dispatch`,
 `bench_only` set (skips the macOS, Windows and dist jobs). The first dispatch
 on a branch has no baseline; later ones compare with the last passing run of
 that branch. `baseline_branch` points a run at another branch's last night
-(for example `main`). The comparison and the gate are
-`scripts/ci/vs_elixir_nightly.py` (tests: `just test-vs-elixir-nightly`).
+(for example `main`). `threshold_pct` overrides the threshold for the run: a
+tight value such as `0` makes the first comparison find rows over, which
+starts `vs-elixir-confirm` and shows the "not confirmed" / confirmed report.
+The comparison and the gate are `scripts/ci/vs_elixir_nightly.py` (tests:
+`just test-vs-elixir-nightly`); the rows are run by the composite action
+`.github/actions/vs-elixir-bench`, shared by both jobs.
 
 ## Benchee for the concurrent rows (BT-4935 spike)
 
