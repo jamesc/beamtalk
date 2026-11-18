@@ -2,7 +2,16 @@
 
 ## Status
 
-Deferred (2026-03-15) — revisit post-0.1.0. Originally proposed 2026-03-02.
+Rejected (2026-11-18). The `class` modifier stays: this is Option D below (keep the modifier and the ADR 0047 lookahead). Deferred 2026-03-15; originally proposed 2026-03-02.
+
+Why it was rejected, reviewed at 0.5.0:
+
+- **The problem is narrow and already handled.** One declaration, `sealed class -> Metaclass`, is ambiguous, and the ADR 0047 lookahead resolves it. No second collision has appeared since.
+- **The migration grew about eightfold.** This ADR counted about 57 class-side method definitions. `stdlib/src` now has 443, and the sibling packages add more.
+- **No option improves what a reader sees.** Option A splits `new` from `initialize` across two declarations. Options B and C only rename the modifier.
+- **Modifier prefixes are established.** `class sealed` and `class internal` are written hundreds of times, and `internal` is a method modifier of its own, so replacing `class` would not leave the grammar free of method modifiers, which was the goal this ADR shared with ADR 0049.
+
+If a second method name collides with a modifier keyword, replace the one-off lookahead with a general parser rule. That is a parser change, not a syntax change, and does not need this ADR.
 
 ## Context
 
@@ -69,9 +78,9 @@ There are approximately 57 class-side method definitions across the stdlib follo
 
 ## Decision
 
-TBD — see Alternatives.
+**Option D: keep the `class` modifier and the ADR 0047 lookahead** (decided 2026-11-18; see Status). Options A, B and C are rejected.
 
-This ADR is drafted for discussion. The three options each represent a distinct position on the tradeoff between Smalltalk fidelity, syntactic minimalism, and migration simplicity. No option has been selected; the analysis and steelman sections are provided to structure the decision.
+The options below were drafted for discussion in 2026-03, when none had been selected. Each takes a distinct position on the tradeoff between Smalltalk fidelity, syntactic minimalism, and migration simplicity; the analysis and steelman sections are kept as the record.
 
 ## Prior Art
 
