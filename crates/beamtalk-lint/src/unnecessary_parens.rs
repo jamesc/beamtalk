@@ -26,9 +26,9 @@ use std::collections::HashSet;
 
 use crate::{LintContext, LintPass, LintTree};
 use beamtalk_core::ast::{
-    BinarySegment, Block, CommentAttachment, Expression, MessageSelector, Module, PipelineSends,
+    BinarySegment, CommentAttachment, Expression, MessageSelector, Module, PipelineSends,
 };
-use beamtalk_core::ast_walker::{for_each_expr_seq, walk_expression};
+use beamtalk_core::ast_walker::{for_each_child, for_each_expr_seq, walk_expression};
 use beamtalk_core::source_analysis::Diagnostic;
 use beamtalk_core::unparse::prints_as_pipeline;
 
@@ -239,21 +239,6 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
             }
         }
 
-        Expression::Block(Block { body, .. }) => {
-            for stmt in body {
-                check_expr(&stmt.expression, diagnostics);
-            }
-        }
-
-        Expression::Assignment { target, value, .. } => {
-            check_expr(target, diagnostics);
-            check_expr(value, diagnostics);
-        }
-
-        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
-            check_expr(value, diagnostics);
-        }
-
         Expression::Cascade {
             receiver, messages, ..
         } => {
@@ -262,20 +247,6 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
                 for arg in &msg.arguments {
                     check_expr(arg, diagnostics);
                 }
-            }
-        }
-
-        Expression::FieldAccess { receiver, .. } => {
-            check_expr(receiver, diagnostics);
-        }
-
-        Expression::Match { value, arms, .. } => {
-            check_expr(value, diagnostics);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    check_expr(guard, diagnostics);
-                }
-                check_expr(&arm.body, diagnostics);
             }
         }
 
@@ -288,21 +259,6 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
                 // recurse into the inner expression for further checks.
                 check_map_key(&pair.key, diagnostics);
                 check_expr(&pair.value, diagnostics);
-            }
-        }
-
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                check_expr(elem, diagnostics);
-            }
-            if let Some(t) = tail {
-                check_expr(t, diagnostics);
-            }
-        }
-
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for elem in elements {
-                check_expr(elem, diagnostics);
             }
         }
 
@@ -322,15 +278,10 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
             }
         }
 
-        // Leaf nodes — nothing to recurse into.
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::ClassReference { .. }
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Error { .. }
-        | Expression::Spread { .. } => {}
+        // Every other variant (blocks, assignments, returns, field accesses,
+        // matches, list/array/tuple literals, leaves) has no parenthesis
+        // context of its own: recurse into its children.
+        _ => for_each_child(expr, &mut |child| check_expr(child, diagnostics)),
     }
 }
 

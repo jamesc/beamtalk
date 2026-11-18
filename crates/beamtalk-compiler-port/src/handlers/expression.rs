@@ -6,6 +6,7 @@
 use beamtalk_etf::{map_get, term_to_string, term_to_string_list};
 use eetf::{Map, Term};
 
+use super::analysis_prelude::{AmbientContext, analyse_module};
 use crate::decode::{
     extract_class_hierarchy, extract_known_type_aliases, extract_optional_string_map,
     extract_protocol_registry,
@@ -83,31 +84,24 @@ pub(crate) fn parse_and_check_expression(
     // BT-4325). Only file-backed requests (`compile`, `compile_method`,
     // `diagnostics` with a path) take a project scope.
     let scope = crate::project_context::RequestScope::for_source(None, None);
-    let (mut all_diagnostics, analysis) =
-        beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
-            &module,
-            parse_diagnostics,
-            &known_var_refs,
-            pre_class_hierarchy,
-            pre_loaded_protocols,
+    let (all_diagnostics, analysis) = analyse_module(
+        &module,
+        parse_diagnostics,
+        AmbientContext {
+            known_vars: &known_var_refs,
+            class_hierarchy: pre_class_hierarchy,
+            protocols: pre_loaded_protocols,
             // No wire representation for a full cross-file protocol AST on
             // this entry point (ADR 0127 §10a, BT-3593) — a bare expression
             // or an inline class/protocol definition typed at the REPL
             // cannot itself carry a `uses:` referencing a protocol outside
             // its own module, so there is nothing to thread here yet.
-            Vec::new(),
-            scope.aliases(pre_loaded_aliases),
-            scope.diagnostics_table(),
-            scope.analysis_project(),
-        );
-
-    let options = beamtalk_core::CompilerOptions::default();
-    let primitive_diags =
-        beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
-            &module, &options,
-        );
-    all_diagnostics.extend(primitive_diags);
-
+            protocol_defs: Vec::new(),
+            aliases: scope.aliases(pre_loaded_aliases),
+            scope: &scope,
+            stdlib_mode: false,
+        },
+    );
     let error_diags = filter_error_diagnostics(&all_diagnostics);
     let warnings = collect_warnings(&all_diagnostics);
 

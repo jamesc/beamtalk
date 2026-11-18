@@ -29,7 +29,6 @@
 pub(crate) struct ReplCommandSpec {
     pub(crate) name: &'static str,
     pub(crate) aliases: &'static [&'static str],
-    #[allow(dead_code, reason = "documents the vocabulary; not yet rendered")]
     pub(crate) help: &'static str,
     pub(crate) takes_class_expr_arg: bool,
 }
@@ -236,6 +235,21 @@ pub(crate) fn class_expr_arg_prefixes() -> impl Iterator<Item = String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_command_and_alias_is_rendered_in_help() {
+        let help = crate::commands::repl::display::render_command_help();
+        for form in all_forms() {
+            assert!(
+                help.split(|c: char| c.is_whitespace() || c == ',')
+                    .any(|w| w == form),
+                "`{form}` missing from :help output:\n{help}"
+            );
+        }
+        for cmd in REPL_COMMAND_TABLE {
+            assert!(help.contains(cmd.help), "help text of {} missing", cmd.name);
+        }
+    }
 
     #[test]
     fn is_form_matches_name_and_aliases() {

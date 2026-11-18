@@ -782,8 +782,7 @@ pub(crate) fn repl_loop(
 
     // Register SIGINT handler for interrupt during eval.
     // Uses signal-hook to non-destructively register alongside rustyline's handler.
-    let interrupted = Arc::new(AtomicBool::new(false));
-    let _ = signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&interrupted));
+    let interrupted = crate::commands::util::sigint_flag();
 
     // Main REPL loop
     let mut line_buffer: Vec<String> = Vec::new();

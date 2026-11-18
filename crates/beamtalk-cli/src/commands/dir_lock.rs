@@ -29,27 +29,42 @@ pub(crate) fn lock_dir(dir: &Utf8Path, what: &str) -> Result<std::fs::File> {
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create {what} directory '{dir}'"))?;
 
-    let lock_path = dir.join(".lock");
+    lock_file(dir.join(".lock").as_std_path(), what)
+}
+
+/// Open (creating if needed) `lock_path` and take an exclusive advisory lock
+/// (`fs2`) on it, logging a "waiting" warning when another beamtalk process
+/// holds it. The parent directory must already exist.
+///
+/// Returns the locked file; the lock releases when it drops. `what` names the
+/// lock in messages (e.g. `"workspace"`).
+///
+/// # Errors
+///
+/// Returns an error if the lock file cannot be opened or locked.
+pub(crate) fn lock_file(lock_path: &std::path::Path, what: &str) -> Result<std::fs::File> {
     let lockfile = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(false)
-        .open(&lock_path)
+        .open(lock_path)
         .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to open {what} lock file '{lock_path}'"))?;
+        .wrap_err_with(|| format!("Failed to open {what} lock file '{}'", lock_path.display()))?;
 
     // A blocking `lock_exclusive()` gives no indication *why* the process
     // appears to hang if another beamtalk process is stuck holding the lock
-    // (e.g. a `git clone` against an unreachable host). Try non-blocking
-    // first so the common uncontended case pays no extra cost; only log
-    // when there's actually something to wait for.
+    // (e.g. a `git clone` against an unreachable host, or a workspace still
+    // starting up, which can take over two minutes). Try non-blocking first
+    // so the common uncontended case pays no extra cost; only log when
+    // there's actually something to wait for.
     if let Err(e) = lockfile.try_lock_exclusive() {
-        debug!(error = %e, "{what} lock contended, waiting: {lock_path}");
-        warn!("Waiting for {what} lock '{lock_path}' held by another beamtalk process...");
+        let shown = lock_path.display();
+        debug!(error = %e, "{what} lock contended, waiting: {shown}");
+        warn!("Waiting for {what} lock '{shown}' held by another beamtalk process...");
         lockfile
             .lock_exclusive()
             .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to acquire {what} lock '{lock_path}'"))?;
+            .wrap_err_with(|| format!("Failed to acquire {what} lock '{}'", lock_path.display()))?;
     }
 
     Ok(lockfile)

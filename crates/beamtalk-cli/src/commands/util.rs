@@ -558,6 +558,15 @@ pub fn find_files(path: &Utf8Path, extensions: &[&str]) -> Result<Vec<Utf8PathBu
         .walk(path)
 }
 
+/// Register a SIGINT handler that sets the returned flag, alongside any other
+/// handler already installed (e.g. rustyline's). Callers poll and reset the
+/// flag to interrupt a running evaluation.
+pub(crate) fn sigint_flag() -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+    let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let _ = signal_hook::flag::register(signal_hook::consts::SIGINT, std::sync::Arc::clone(&flag));
+    flag
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -25,7 +25,8 @@
 //! ```
 
 use crate::{LintContext, LintPass};
-use beamtalk_core::ast::{BinarySegment, Expression, MessageSelector, Module, StringSegment};
+use beamtalk_core::ast::{Expression, MessageSelector, Module, StringSegment};
+use beamtalk_core::ast_walker::walk_expression;
 use beamtalk_core::source_analysis::{Diagnostic, Span};
 
 /// Lint pass that warns on `inspect` sends used directly in string position
@@ -36,7 +37,7 @@ impl LintPass for InspectInStringPositionPass {
     fn check(&self, module: &Module, _ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
         for method in module.all_methods() {
             for stmt in &method.body {
-                walk(&stmt.expression, diagnostics);
+                walk_expression(&stmt.expression, &mut |e| check_node(e, diagnostics));
             }
         }
     }
@@ -74,137 +75,47 @@ fn flag(span: Span, diagnostics: &mut Vec<Diagnostic>) {
     );
 }
 
-/// Recursively walk an expression tree, flagging `inspect` sends in `++` operand
-/// and string-interpolation positions.
-#[allow(clippy::too_many_lines)]
-fn walk(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+/// Flag `inspect` sends in `++` operand and string-interpolation positions of
+/// `expr` itself (the caller visits every node via `walk_expression`).
+fn check_node(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    let is_concat =
+        |sel: &MessageSelector| matches!(sel, MessageSelector::Binary(op) if op.as_str() == "++");
     match expr {
+        // `a ++ b`: either operand being a bare `inspect` send is a string-
+        // position use.
         Expression::MessageSend {
             receiver,
             selector,
             arguments,
             ..
-        } => {
-            // `a ++ b`: either operand being a bare `inspect` send is a string-
-            // position use.
-            if matches!(selector, MessageSelector::Binary(op) if op.as_str() == "++") {
-                if let Some(span) = inspect_send_span(receiver) {
+        } if is_concat(selector) => {
+            for operand in std::iter::once(&**receiver).chain(arguments) {
+                if let Some(span) = inspect_send_span(operand) {
                     flag(span, diagnostics);
                 }
-                for arg in arguments {
+            }
+        }
+        Expression::StringInterpolation { segments, .. } => {
+            for seg in segments {
+                if let StringSegment::Interpolation(e) = seg
+                    && let Some(span) = inspect_send_span(e)
+                {
+                    flag(span, diagnostics);
+                }
+            }
+        }
+        // A `++` cascade message (`x foo; ++ y`) puts its argument in
+        // string-concat position, same as a binary `++` send.
+        Expression::Cascade { messages, .. } => {
+            for msg in messages.iter().filter(|m| is_concat(&m.selector)) {
+                for arg in &msg.arguments {
                     if let Some(span) = inspect_send_span(arg) {
                         flag(span, diagnostics);
                     }
                 }
             }
-            walk(receiver, diagnostics);
-            for arg in arguments {
-                walk(arg, diagnostics);
-            }
         }
-
-        Expression::StringInterpolation { segments, .. } => {
-            for seg in segments {
-                if let StringSegment::Interpolation(e) = seg {
-                    if let Some(span) = inspect_send_span(e) {
-                        flag(span, diagnostics);
-                    }
-                    walk(e, diagnostics);
-                }
-            }
-        }
-        // A binary construction segment is not a string position: only
-        // descend for nested `++`/interpolation uses.
-        Expression::BinaryConstruction { segments, .. } => {
-            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                walk(e, diagnostics);
-            }
-        }
-
-        Expression::Block(block) => {
-            for stmt in &block.body {
-                walk(&stmt.expression, diagnostics);
-            }
-        }
-
-        Expression::Assignment { target, value, .. } => {
-            walk(target, diagnostics);
-            walk(value, diagnostics);
-        }
-
-        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
-            walk(value, diagnostics);
-        }
-
-        Expression::FieldAccess { receiver, .. } => {
-            walk(receiver, diagnostics);
-        }
-
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            walk(receiver, diagnostics);
-            for msg in messages {
-                // A `++` cascade message (`x foo; ++ y`) puts its argument in
-                // string-concat position, same as a binary `++` send.
-                if matches!(&msg.selector, MessageSelector::Binary(op) if op.as_str() == "++") {
-                    for arg in &msg.arguments {
-                        if let Some(span) = inspect_send_span(arg) {
-                            flag(span, diagnostics);
-                        }
-                    }
-                }
-                for arg in &msg.arguments {
-                    walk(arg, diagnostics);
-                }
-            }
-        }
-
-        Expression::Parenthesized { expression, .. } => {
-            walk(expression, diagnostics);
-        }
-
-        Expression::Match { value, arms, .. } => {
-            walk(value, diagnostics);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    walk(guard, diagnostics);
-                }
-                walk(&arm.body, diagnostics);
-            }
-        }
-
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                walk(&pair.key, diagnostics);
-                walk(&pair.value, diagnostics);
-            }
-        }
-
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                walk(elem, diagnostics);
-            }
-            if let Some(t) = tail {
-                walk(t, diagnostics);
-            }
-        }
-
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for elem in elements {
-                walk(elem, diagnostics);
-            }
-        }
-
-        // Leaf nodes — nothing to recurse into.
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::ClassReference { .. }
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Error { .. }
-        | Expression::Spread { .. } => {}
+        _ => {}
     }
 }
 

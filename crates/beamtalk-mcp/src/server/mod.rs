@@ -129,18 +129,12 @@ impl Drop for ToolTimer {
 pub struct BeamtalkMcp {
     /// Shared REPL client used by all tool handlers.
     client: Arc<ReplClient>,
-    /// Router that dispatches incoming MCP tool calls to handler methods.
-    #[allow(dead_code)]
-    tool_router: ToolRouter<Self>,
 }
 
 impl BeamtalkMcp {
     /// Create a new MCP server backed by the provided REPL client.
     pub fn new(client: Arc<ReplClient>) -> Self {
-        Self {
-            client,
-            tool_router: Self::tool_router(),
-        }
+        Self { client }
     }
 
     /// The combined tool router: every tool family's router, unioned.

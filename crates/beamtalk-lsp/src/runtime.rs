@@ -303,12 +303,9 @@ struct RuntimeInner {
     /// writer task serialises to the socket and the reader task fulfills the
     /// oneshot when the reply arrives.
     sender: mpsc::Sender<EvalRequest>,
-    /// Listener task handle; stored so the task survives as long as the
-    /// `RuntimeClient` exists, and so `close()` can abort it explicitly.
-    #[allow(dead_code)] // accessed via `close()`
+    /// Listener task handle; aborted on drop (and by `close()` in tests).
     listener: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Writer task handle; same purpose as `listener`.
-    #[allow(dead_code)] // accessed via `close()`
     writer: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
@@ -614,10 +611,8 @@ impl RuntimeClient {
     }
 
     /// Close the underlying connection and abort the listener/writer tasks.
-    /// Safe to call multiple times. Not currently called by the LSP backend —
-    /// the runtime client lives as long as the LSP process and the OS closes
-    /// the TCP socket on exit — but exposed for tests and future use.
-    #[allow(dead_code)]
+    /// Safe to call multiple times. Used to tear down the losing client when
+    /// two attach calls race; otherwise `Drop` aborts the tasks.
     pub async fn close(&self) {
         if let Some(handle) = self.inner.writer.lock().await.take() {
             handle.abort();

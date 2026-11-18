@@ -205,10 +205,7 @@ async fn resolve_port_and_cookie(
 async fn start_workspace(
     workspace_id: Option<&str>,
 ) -> Result<(u16, String, Option<String>), Box<dyn std::error::Error>> {
-    let idle_timeout = std::env::var("BEAMTALK_WORKSPACE_TIMEOUT")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(14400); // 4 hours
+    let idle_timeout = beamtalk_workspace::idle_timeout_seconds_from_env();
 
     // Cap the wait for `beamtalk repl` to report its port. A stuck boot fails
     // with a clear error instead of hanging the MCP server indefinitely.

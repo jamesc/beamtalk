@@ -39,13 +39,6 @@ pub struct BeamEnvironment {
     ///
     /// Sourced from the lockfile's resolved hex packages (e.g. gun, cowboy).
     pub otp_apps: Vec<String>,
-
-    /// `ERL_LIBS` directory for rebar3 deps (only set when the directory exists).
-    ///
-    /// Used by erlc for native Erlang compilation — not needed at BEAM runtime.
-    /// Available for `ErlcInvocation` callers that need it.
-    #[allow(dead_code)] // Part of the public environment API; consumed by erlc invocations
-    pub erl_libs: Option<Utf8PathBuf>,
 }
 
 impl BeamEnvironment {
@@ -57,7 +50,6 @@ impl BeamEnvironment {
     /// 3. Native Erlang ebin (`_build/dev/native/ebin/`, if it exists)
     /// 4. Rebar3 hex dep ebins (`_build/dev/native/default/lib/*/ebin/`)
     /// 5. Hex dep names from the lockfile (for OTP app startup)
-    /// 6. `ERL_LIBS` for rebar3 compilation
     ///
     /// # Errors
     ///
@@ -91,18 +83,9 @@ impl BeamEnvironment {
         // 5. Hex dep names from lockfile → OTP apps to start
         let otp_apps = super::deps::lockfile::Lockfile::collect_hex_dep_names(project_root)?;
 
-        // 6. ERL_LIBS for rebar3 compilation (only if the lib dir exists)
-        let rebar_lib = layout.rebar_lib_dir();
-        let erl_libs = if rebar_lib.exists() {
-            Some(rebar_lib)
-        } else {
-            None
-        };
-
         Ok(Self {
             code_paths,
             otp_apps,
-            erl_libs,
         })
     }
 
@@ -140,7 +123,6 @@ mod tests {
         assert_eq!(env.code_paths.len(), 1);
         assert!(env.code_paths[0].ends_with("_build/dev/ebin"));
         assert!(env.otp_apps.is_empty());
-        assert!(env.erl_libs.is_none());
     }
 
     #[test]
@@ -192,8 +174,6 @@ mod tests {
         // Should include package ebin + rebar3 gun ebin
         assert_eq!(env.code_paths.len(), 2);
         assert!(env.code_paths[1].ends_with("gun/ebin"));
-        // ERL_LIBS should be set since rebar lib dir exists
-        assert!(env.erl_libs.is_some());
     }
 
     #[test]

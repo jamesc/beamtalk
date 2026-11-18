@@ -347,18 +347,6 @@ pub(crate) struct NavCache {
 }
 
 impl NavCache {
-    /// Read the current generation. Cache consumers stash this with each
-    /// cached entry and compare on read.
-    ///
-    /// Foundation issue exposes the API but does not consume it directly;
-    /// per-method children call this when they cache
-    /// runtime results. Allowed-dead so the foundation PR doesn't have
-    /// to ship a consumer.
-    #[allow(dead_code, reason = "per-method children consume this API")]
-    pub(crate) fn generation(&self) -> u64 {
-        self.generation
-    }
-
     /// Bump the generation — invalidates every cached entry.
     pub(crate) fn invalidate(&mut self) {
         self.generation = self.generation.saturating_add(1);

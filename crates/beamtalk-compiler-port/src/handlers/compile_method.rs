@@ -8,9 +8,11 @@
 use beamtalk_etf::{atom, binary_from_str as binary, map_get, term_to_bool, term_to_string};
 use eetf::{Map, Term};
 
+use super::analysis_prelude::{
+    AmbientContext, analyse_module, class_name_pairs, extract_class_indexes,
+};
 use crate::decode::{
-    extract_class_hierarchy, extract_known_type_aliases, extract_optional_string_map,
-    extract_protocol_registry, merge_method,
+    extract_class_hierarchy, extract_known_type_aliases, extract_protocol_registry, merge_method,
 };
 use crate::diagnostics::{
     filter_error_diagnostics, partition_diagnostics, warnings_from_diag_infos,
@@ -324,13 +326,13 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     // full `AnalysisResult` for the already-merged `merged_module` — no
     // further mutation happens before the codegen call below, so it's always
     // safe to thread through via `CodegenOptions::with_analysis`.
-    let (mut all_diagnostics, analysis) =
-        beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
-            &merged_module,
-            merged_parse_diags,
-            &[],
-            pre_class_hierarchy.clone(),
-            pre_loaded_protocols,
+    let (all_diagnostics, analysis) = analyse_module(
+        &merged_module,
+        merged_parse_diags,
+        AmbientContext {
+            known_vars: &[],
+            class_hierarchy: pre_class_hierarchy.clone(),
+            protocols: pre_loaded_protocols,
             // Single-method patching does not yet carry a cross-file
             // protocol's full AST in (ADR 0127 §10a, BT-3593 left this to a
             // follow-up: `P >> sel` live-patching, not the whole-file reload
@@ -338,24 +340,13 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
             // protocol defined in another file keeps resolving that `uses:`
             // against its already-flattened, previously-installed body only,
             // same as before this parameter existed.
-            Vec::new(),
-            pre_loaded_aliases.clone(),
-            scope.diagnostics_table(),
-            scope.analysis_project(),
-        );
-    let referenced_aliases = analysis.referenced_aliases.clone();
-    let options = beamtalk_core::CompilerOptions {
-        stdlib_mode,
-        allow_primitives: false,
-        suppress_warnings: false,
-        ..Default::default()
-    };
-    all_diagnostics.extend(
-        beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
-            &merged_module,
-            &options,
-        ),
+            protocol_defs: Vec::new(),
+            aliases: pre_loaded_aliases.clone(),
+            scope: &scope,
+            stdlib_mode,
+        },
     );
+    let referenced_aliases = analysis.referenced_aliases.clone();
     let error_diags = filter_error_diagnostics(&all_diagnostics);
     let (_, warnings) = partition_diagnostics(&all_diagnostics);
     if !error_diags.is_empty() {
@@ -371,20 +362,11 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     let module_name_override = map_get(request, "module_name").and_then(term_to_string);
     let module_name =
         derive_class_module_name(&class_name, module_name_override.as_deref(), stdlib_mode);
-    let class_module_index = match extract_optional_string_map(request, "class_module_index") {
-        Ok(map) => map,
+    let (class_module_index, class_superclass_index) = match extract_class_indexes(request) {
+        Ok(indexes) => indexes,
         Err(resp) => return resp,
     };
-    let class_superclass_index =
-        match extract_optional_string_map(request, "class_superclass_index") {
-            Ok(map) => map,
-            Err(resp) => return resp,
-        };
-    let classes: Vec<(String, String)> = merged_module
-        .classes
-        .iter()
-        .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
-        .collect();
+    let classes = class_name_pairs(&merged_module);
     let warning_msgs = warnings_from_diag_infos(&warnings);
 
     // Prepare the AST at the driver boundary using the same

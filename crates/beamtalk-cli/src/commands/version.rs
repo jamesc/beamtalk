@@ -205,16 +205,7 @@ pub(crate) fn set_version_in_manifest(manifest_path: &Utf8Path, new_version: &st
         new_content.push('\n');
     }
 
-    // Validate the new TOML parses correctly before writing.
-    let _: toml::Value = toml::from_str(&new_content)
-        .into_diagnostic()
-        .wrap_err("Generated beamtalk.toml is invalid TOML — this is a bug")?;
-
-    std::fs::write(manifest_path, new_content)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to write '{manifest_path}'"))?;
-
-    Ok(())
+    super::toml_utils::write_validated_manifest(manifest_path, &new_content)
 }
 
 /// Replace the quoted value on a `version = "..."` line, keeping the
