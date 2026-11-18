@@ -65,7 +65,11 @@ defmodule BtAttach.MixProject do
   defp releases do
     [
       bt_attach: [
-        include_executables_for: [:unix],
+        # Windows needs `bin\bt_attach.bat` (the desktop app bundles and spawns
+        # it, BT-2988). Only generated when building on Windows, so the
+        # Unix archives and Docker image are unchanged (BT-5006).
+        include_executables_for:
+          if(match?({:win32, _}, :os.type()), do: [:unix, :windows], else: [:unix]),
         applications: [bt_attach: :permanent]
       ]
     ]
