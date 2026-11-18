@@ -1621,6 +1621,8 @@ system_announce_safe(EventClass, Fields) when is_atom(EventClass), is_map(Fields
         undefined ->
             ok;
         _Pid ->
+            %% bt-catcher-audit: not-applicable-other-process - handlers run in spawned
+            %% per-subscriber processes (fire-and-forget), never in the caller
             try
                 %% Fully qualified so the call goes through the module boundary
                 %% (callers and spies see it exactly as a direct call).
