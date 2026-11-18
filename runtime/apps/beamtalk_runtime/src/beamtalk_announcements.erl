@@ -805,9 +805,30 @@ handler crash (an abnormal monitor `DOWN`) is logged and dropped — never re-ra
 -spec gather_replies(
     #{reference() => {reference(), pid(), pid()}}, announcement_class(), timeout()
 ) -> ok.
-gather_replies(Pending, _EventClass, _Timeout) when map_size(Pending) =:= 0 ->
-    ok;
 gather_replies(Pending, EventClass, Timeout) ->
+    %% `Timeout` bounds the *total* wait, not each message: the deadline is fixed
+    %% once here so acks/DOWNs arriving one by one cannot re-arm it (N x Timeout).
+    Deadline =
+        case Timeout of
+            infinity -> infinity;
+            _ -> erlang:monotonic_time(millisecond) + Timeout
+        end,
+    gather_replies(Pending, EventClass, Timeout, Deadline).
+
+-spec gather_replies(
+    #{reference() => {reference(), pid(), pid()}},
+    announcement_class(),
+    timeout(),
+    integer() | infinity
+) -> ok.
+gather_replies(Pending, _EventClass, _Timeout, _Deadline) when map_size(Pending) =:= 0 ->
+    ok;
+gather_replies(Pending, EventClass, Timeout, Deadline) ->
+    Remaining =
+        case Deadline of
+            infinity -> infinity;
+            _ -> max(0, Deadline - erlang:monotonic_time(millisecond))
+        end,
     receive
         {handler_ack, ReplyRef} ->
             %% Correlate the ack's ReplyRef back to its monitor ref. An ack from a
@@ -816,9 +837,9 @@ gather_replies(Pending, EventClass, Timeout) ->
             case find_by_reply_ref(ReplyRef, Pending) of
                 {ok, MonRef} ->
                     erlang:demonitor(MonRef, [flush]),
-                    gather_replies(maps:remove(MonRef, Pending), EventClass, Timeout);
+                    gather_replies(maps:remove(MonRef, Pending), EventClass, Timeout, Deadline);
                 error ->
-                    gather_replies(Pending, EventClass, Timeout)
+                    gather_replies(Pending, EventClass, Timeout, Deadline)
             end;
         {'DOWN', MonRef, process, _Pid, Reason} when is_map_key(MonRef, Pending) ->
             #{MonRef := {_ReplyRef, _HandlerPid, SubscriberPid}} = Pending,
@@ -829,8 +850,8 @@ gather_replies(Pending, EventClass, Timeout) ->
                 normal -> ok;
                 _ -> log_handler_crash(EventClass, SubscriberPid, Reason)
             end,
-            gather_replies(maps:remove(MonRef, Pending), EventClass, Timeout)
-    after Timeout ->
+            gather_replies(maps:remove(MonRef, Pending), EventClass, Timeout, Deadline)
+    after Remaining ->
         %% Per-handler timeout: eject every still-pending handler so a slow or
         %% wedged handler cannot block the caller forever. Kill the lingering
         %% handler process (it is monitored, not linked, so the kill cannot reach
@@ -878,7 +899,7 @@ find_by_reply_ref(ReplyRef, Pending) ->
         Pending
     ).
 
--doc "Log an isolated handler crash on the synchronous path (never re-raised).".
+-doc "Log an isolated handler crash, from either the synchronous or the async path (never re-raised).".
 -spec log_handler_crash(announcement_class(), pid(), term()) -> ok.
 log_handler_crash(EventClass, SubscriberPid, Reason) ->
     %% Caller-side process, not the bus — set `domain` explicitly (ADR 0093 §1).
@@ -1551,7 +1572,10 @@ dispatch_one_veneer(SubRef, EventClass, Event, SubscriberPid, Handler) ->
                 try
                     run_handler(Handler, Event)
                 catch
-                    _:_ -> ok
+                    %% Same visibility as the sync path (`gather_replies/4`):
+                    %% log the crash, never re-raise.
+                    Class:Reason:Stack ->
+                        log_handler_crash(EventClass, SubscriberPid, {Class, Reason, Stack})
                 end
             end),
             ok;

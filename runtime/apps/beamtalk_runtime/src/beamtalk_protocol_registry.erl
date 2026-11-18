@@ -402,12 +402,7 @@ follows the more careful convention instead of adding a second one.
 """.
 -spec notify_compiler_server_removed(atom()) -> ok.
 notify_compiler_server_removed(Name) ->
-    try
-        gen_server:cast(beamtalk_compiler_server, {remove_protocol, Name})
-    catch
-        _:_ -> ok
-    end,
-    ok.
+    gen_server:cast(beamtalk_compiler_server, {remove_protocol, Name}).
 
 %%% ============================================================================
 %%% Query API
