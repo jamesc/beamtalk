@@ -54,7 +54,7 @@ use beamtalk_package::manifest;
 /// shape-compatibility preflight against the named previous release and
 /// prints its report. Any **error** finding fails the command (non-zero
 /// exit) — see [`upgrade::run_upgrade_preflight`].
-#[allow(clippy::too_many_lines)] // one straight-line assembly pipeline; splitting hurts readability
+#[allow(clippy::too_many_lines)] // one straight-line assembly pipeline; manifest loading, upgrade preflight and the summary are split out
 pub fn build_release(
     project_root: &Utf8Path,
     output: Option<&str>,
@@ -64,26 +64,7 @@ pub fn build_release(
     no_include_erts: bool,
     upgrade_from: Option<&str>,
 ) -> Result<()> {
-    let Some(parsed) = manifest::find_manifest_full(project_root)? else {
-        miette::bail!(
-            "No 'beamtalk.toml' found in '{project_root}'.\n\
-             `beamtalk release` requires a package manifest — run `beamtalk new <name> --app` \
-             to create one."
-        );
-    };
-
-    if parsed.application.is_none() {
-        miette::bail!(
-            "`beamtalk release` requires a root supervisor.\n\n\
-             \x20 beamtalk.toml has no [application] section, so there is nothing for the\n\
-             \x20 release to supervise. A release is a long-running service.\n\n\
-             \x20 For a one-shot program, build an escript instead:\n\
-             \x20     beamtalk build --escript --entry \"Main main:\"\n\n\
-             \x20 To make this project a service, declare its root supervisor:\n\
-             \x20     [application]\n\
-             \x20     supervisor = \"AppSup\""
-        );
-    }
+    let parsed = load_release_manifest(project_root)?;
 
     // ADR 0125 §3.1: a release is an artifact whose validity the operator
     // cannot state if it was produced on an OTP major outside the declared
@@ -283,22 +264,102 @@ pub fn build_release(
     // own shapes.json/beamtalk-provenance.json now exist) — the preflight
     // compares the two releases' finished manifests, never a partial build.
     if let Some(prev) = upgrade_from {
-        let report = upgrade::run_upgrade_preflight(
-            &Utf8PathBuf::from(prev),
-            &release_dir,
-            &release_name,
-            &release_vsn,
-        )?;
-        print!("\n{}", report.text);
-        if report.has_error {
-            miette::bail!(
-                "Upgrade check found blocking shape errors — see the report above.\n\n\
-                 \x20 Add the missing migration hook(s), or bump shapeVersion: to acknowledge \
-                 \x20 the structural fallback, then re-run `beamtalk release --upgrade-from`."
-            );
-        }
+        check_upgrade_from(prev, &release_dir, &release_name, &release_vsn)?;
     }
 
+    println!(
+        "{}",
+        release_summary(&ReleaseSummary {
+            name: &release_name,
+            vsn: &release_vsn,
+            dir: &release_dir,
+            tarball: &tar_path,
+            tarball_bytes: tar_size,
+            include_erts,
+            erts_version: &erts_version,
+            otp_release,
+        })
+    );
+    info!(name = %release_name, vsn = %release_vsn, dir = %release_dir, "release built");
+    Ok(())
+}
+
+/// Load `beamtalk.toml` for a release build, rejecting a project that has no
+/// manifest or no `[application]` root supervisor.
+fn load_release_manifest(project_root: &Utf8Path) -> Result<manifest::ParsedManifest> {
+    let Some(parsed) = manifest::find_manifest_full(project_root)? else {
+        miette::bail!(
+            "No 'beamtalk.toml' found in '{project_root}'.\n\
+             `beamtalk release` requires a package manifest — run `beamtalk new <name> --app` \
+             to create one."
+        );
+    };
+
+    if parsed.application.is_none() {
+        miette::bail!(
+            "`beamtalk release` requires a root supervisor.\n\n\
+             \x20 beamtalk.toml has no [application] section, so there is nothing for the\n\
+             \x20 release to supervise. A release is a long-running service.\n\n\
+             \x20 For a one-shot program, build an escript instead:\n\
+             \x20     beamtalk build --escript --entry \"Main main:\"\n\n\
+             \x20 To make this project a service, declare its root supervisor:\n\
+             \x20     [application]\n\
+             \x20     supervisor = \"AppSup\""
+        );
+    }
+
+    Ok(parsed)
+}
+
+/// Run the `--upgrade-from` shape-compatibility preflight against the previous
+/// release at `prev`, print its report, and fail on any blocking finding.
+fn check_upgrade_from(
+    prev: &str,
+    release_dir: &Utf8Path,
+    release_name: &str,
+    release_vsn: &str,
+) -> Result<()> {
+    let report = upgrade::run_upgrade_preflight(
+        &Utf8PathBuf::from(prev),
+        release_dir,
+        release_name,
+        release_vsn,
+    )?;
+    print!("\n{}", report.text);
+    if report.has_error {
+        miette::bail!(
+            "Upgrade check found blocking shape errors — see the report above.\n\n\
+             \x20 Add the missing migration hook(s), or bump shapeVersion: to acknowledge \
+             \x20 the structural fallback, then re-run `beamtalk release --upgrade-from`."
+        );
+    }
+    Ok(())
+}
+
+/// What the final "Built release ..." message reports.
+struct ReleaseSummary<'a> {
+    name: &'a str,
+    vsn: &'a str,
+    dir: &'a Utf8Path,
+    tarball: &'a Utf8Path,
+    tarball_bytes: u64,
+    include_erts: bool,
+    erts_version: &'a str,
+    otp_release: &'a str,
+}
+
+/// Render the message printed after a successful release build.
+fn release_summary(s: &ReleaseSummary<'_>) -> String {
+    let ReleaseSummary {
+        name: release_name,
+        vsn: release_vsn,
+        dir: release_dir,
+        tarball: tar_path,
+        tarball_bytes,
+        include_erts,
+        erts_version,
+        otp_release,
+    } = *s;
     let platform = provenance::current_platform();
     let erts_note = if include_erts {
         format!("with ERTS {erts_version}, {platform}")
@@ -335,16 +396,14 @@ pub fn build_release(
     // is unsupported, §1.3), so `cfg!(windows)` here is the same "this build
     // machine" scope the rest of this function already assumes.
     let launcher_suffix = if cfg!(windows) { ".cmd" } else { "" };
-    println!(
+    format!(
         "Built release {release_name}-{release_vsn} ({erts_note}).\n\
          \x20 → {release_dir}\n\
          \x20 → {tar_path}  ({tar_size})\n\n\
          {trailer}\n\n\
          Run it: {release_dir}/bin/{release_name}{launcher_suffix} foreground",
-        tar_size = format_bytes(tar_size),
-    );
-    info!(name = %release_name, vsn = %release_vsn, dir = %release_dir, "release built");
-    Ok(())
+        tar_size = format_bytes(tarball_bytes),
+    )
 }
 
 /// Parse the OTP build major out of `otp_release` (the compound
