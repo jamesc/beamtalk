@@ -811,6 +811,7 @@ get_aliases_when_down() ->
 gen_server_edge_test_() ->
     {setup, fun start_compiler/0, fun stop_compiler/1, [
         {"unknown call returns error", fun unknown_call/0},
+        {"wrong-arity port_call is an unknown request", fun wrong_arity_port_call/0},
         {"cast is ignored gracefully", fun cast_ignored/0},
         {"unknown info is ignored gracefully", fun unknown_info/0}
     ]}.
@@ -818,6 +819,15 @@ gen_server_edge_test_() ->
 unknown_call() ->
     Result = gen_server:call(beamtalk_compiler_server, {bogus_request, 42}, 5000),
     ?assertEqual({error, unknown_request}, Result).
+
+wrong_arity_port_call() ->
+    %% BT-5046: not in the forward allowlist at this arity, so the server
+    %% replies instead of crashing in erlang:apply/3.
+    Result = gen_server:call(
+        beamtalk_compiler_server, {port_call, categorize_methods, [<<"src">>]}, 5000
+    ),
+    ?assertEqual({error, unknown_request}, Result),
+    ?assert(is_pid(whereis(beamtalk_compiler_server))).
 
 cast_ignored() ->
     %% cast should not crash the server
@@ -1136,3 +1146,33 @@ stop_compiler(_) ->
 
 valid_core_erlang() ->
     beamtalk_test_core_erlang:valid_source(test_server_mod).
+
+%%====================================================================
+%% BT-5046: the {port_call, F, Args} allowlist matches the real forwards
+%%====================================================================
+
+port_forwards_are_exported_by_port_module_test() ->
+    Exports = beamtalk_compiler_port:module_info(exports),
+    lists:foreach(
+        fun(FA) -> ?assert(lists:member(FA, Exports), FA) end,
+        beamtalk_compiler_server:port_forwards()
+    ).
+
+every_port_call_wrapper_is_in_the_allowlist_test() ->
+    Src = filename:join([filename:dirname(?FILE), "..", "src", "beamtalk_compiler_server.erl"]),
+    {ok, Bin} = file:read_file(Src),
+    {match, Matches} = re:run(
+        Bin, "\\{port_call, (\\w+), \\[([^\\]]*)\\]\\}", [global, {capture, [1, 2], binary}]
+    ),
+    Allowed = beamtalk_compiler_server:port_forwards(),
+    ?assert(length(Matches) >= 18),
+    lists:foreach(
+        fun([Fun, Args]) ->
+            Arity = length([A || A <- binary:split(Args, <<",">>, [global]), A =/= <<>>]) + 1,
+            ?assert(
+                lists:member({binary_to_atom(Fun), Arity}, Allowed),
+                {Fun, Arity}
+            )
+        end,
+        Matches
+    ).

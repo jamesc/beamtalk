@@ -11,6 +11,7 @@ Unit tests for beamtalk_actor_sup module
 Tests actor supervisor behavior and dynamic actor management.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Tests
@@ -214,11 +215,7 @@ temporary_child_not_restarted_on_crash_test() ->
         %% Monitor and kill the child
         Ref = erlang:monitor(process, ChildPid),
         exit(ChildPid, kill),
-        receive
-            {'DOWN', Ref, process, ChildPid, _} -> ok
-        after 1000 ->
-            ?assert(false)
-        end,
+        ?awaitMessage({'DOWN', Ref, process, ChildPid, _}, 1000),
         %% After crash, active count should be 0 (temporary child not restarted)
         Counts = supervisor:count_children(SupPid),
         ?assertEqual(0, proplists:get_value(active, Counts))

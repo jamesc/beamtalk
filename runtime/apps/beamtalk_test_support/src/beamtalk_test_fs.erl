@@ -22,7 +22,6 @@ hardcoded `/tmp`) and named with `beamtalk_test_unique:id/0`, so separate
     rm_rf/1,
     base_dir/0,
     restore_home/1,
-    with_changelog_workspace/1,
     changelog_workspace/0,
     release_changelog_workspace/1,
     start_changelog_workspace/0,
@@ -57,24 +56,6 @@ with_tmp_home(Fun) ->
     after
         restore_home(Old),
         rm_rf(Dir)
-    end.
-
--doc """
-Run `Fun` (arity 1) inside an isolated ChangeLog workspace and always tear it
-down: `Fun` receives `#{workspace_id := binary(), home := file:filename()}`.
-See `changelog_workspace/0`. `Fun` starts (and stops) the
-`beamtalk_workspace_changelog` itself, since tests need different start
-options.
-""".
--spec with_changelog_workspace(
-    fun((#{workspace_id := binary(), home := file:filename()}) -> T)
-) -> T when T :: term().
-with_changelog_workspace(Fun) ->
-    {WorkspaceId, Home, _OldHome} = Handle = changelog_workspace(),
-    try
-        Fun(#{workspace_id => WorkspaceId, home => Home})
-    after
-        release_changelog_workspace(Handle)
     end.
 
 -doc """

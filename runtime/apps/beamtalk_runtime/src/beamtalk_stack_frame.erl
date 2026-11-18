@@ -114,9 +114,12 @@ loaded class modules share it. Which frames are listed is not decided here.
     structured_frame/1,
     structured_frames/1,
     frame_source_path/1,
-    lookup_method_line/2,
-    relative_to/3
+    lookup_method_line/2
 ]).
+
+-ifdef(TEST).
+-export([relative_to/3]).
+-endif.
 
 -doc """
 Convert an Erlang stacktrace (list of tuples) to a list of StackFrame objects.

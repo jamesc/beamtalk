@@ -9,6 +9,7 @@ EUnit tests for class gen_servers under `beamtalk_class_sup` with
 eager crash recovery via `beamtalk_class_monitor`.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Setup/Teardown
@@ -248,10 +249,7 @@ callback_crash_restart_test_() ->
                     {ok, Module} = beamtalk_class_metadata:lookup_module(Name),
                     MRef = erlang:monitor(process, OldPid),
                     ?assertExit(_, gen_server:call(OldPid, bt4622_no_such_call)),
-                    receive
-                        {'DOWN', MRef, process, OldPid, _} -> ok
-                    after 5000 -> ?assert(false)
-                    end,
+                    ?awaitMessage({'DOWN', MRef, process, OldPid, _}),
                     ?assertEqual(
                         ok,
                         beamtalk_test_wait:until(fun() ->

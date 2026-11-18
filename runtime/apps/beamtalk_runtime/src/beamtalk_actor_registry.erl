@@ -504,32 +504,27 @@ to `[]`, the same as a non-Beamtalk process.
 pid_class_candidates_remote_safe(Pid) when node(Pid) =:= node() ->
     pid_class_candidates(Pid);
 pid_class_candidates_remote_safe(Pid) ->
-    try
-        erpc:call(
+    case
+        beamtalk_call_failure:erpc(
             node(Pid), ?BT_ACTOR_WIRE_MODULE, pid_class_candidates, [Pid], ?BT_REMOTE_CALL_TIMEOUT
         )
     of
-        Result -> Result
-    catch
+        {ok, Result} -> Result;
         %% A node that predates `pid_class_candidates/1` (rolling upgrade,
         %% ADR 0125): fall back to the single-class answer it does have.
-        error:{exception, undef, _} -> remote_single_class_candidates(Pid);
-        error:{erpc, _ErpcReason} -> [];
-        error:{exception, _Reason, _Stack} -> [];
-        exit:{exception, _Reason} -> []
+        {error, {other, undef}} -> remote_single_class_candidates(Pid);
+        {error, _} -> []
     end.
 
 -spec remote_single_class_candidates(pid()) -> [atom()].
 remote_single_class_candidates(Pid) ->
-    try
-        erpc:call(node(Pid), ?BT_ACTOR_WIRE_MODULE, pid_class_name, [Pid], ?BT_REMOTE_CALL_TIMEOUT)
+    case
+        beamtalk_call_failure:erpc(
+            node(Pid), ?BT_ACTOR_WIRE_MODULE, pid_class_name, [Pid], ?BT_REMOTE_CALL_TIMEOUT
+        )
     of
-        Class when is_atom(Class), Class =/= nil, Class =/= undefined -> [Class];
+        {ok, Class} when is_atom(Class), Class =/= nil, Class =/= undefined -> [Class];
         _ -> []
-    catch
-        error:{erpc, _ErpcReason} -> [];
-        error:{exception, _Reason, _Stack} -> [];
-        exit:{exception, _Reason} -> []
     end.
 
 -spec name_registered_error(atom()) -> {error, #beamtalk_error{}}.
@@ -710,8 +705,8 @@ a fact about the network, not the actor, so it says nothing about age and
 actor_started_at(Pid) when node(Pid) =:= node() ->
     started_at_from_dictionary(Pid);
 actor_started_at(Pid) ->
-    try
-        erpc:call(
+    case
+        beamtalk_call_failure:erpc(
             node(Pid),
             ?BT_ACTOR_WIRE_MODULE,
             started_at_from_dictionary,
@@ -719,11 +714,8 @@ actor_started_at(Pid) ->
             ?BT_REMOTE_CALL_TIMEOUT
         )
     of
-        Result -> Result
-    catch
-        error:{erpc, _ErpcReason} -> unreachable;
-        error:{exception, _Reason, _Stack} -> unreachable;
-        exit:{exception, _Reason} -> unreachable
+        {ok, Result} -> Result;
+        {error, _} -> unreachable
     end.
 
 -doc """

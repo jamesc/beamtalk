@@ -27,7 +27,6 @@ use std::path::PathBuf;
 /// - `name = { git = "...", tag/branch/rev = "..." }` — git dependency
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
-#[allow(dead_code)] // Constructed by serde deserialization
 pub struct TomlDependency {
     /// Local filesystem path to the dependency.
     pub path: Option<String>,

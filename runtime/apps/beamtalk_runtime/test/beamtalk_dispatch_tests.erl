@@ -306,24 +306,14 @@ test_extension_priority() ->
         {extension_called, State}
     end,
 
-    ok = beamtalk_extensions:register('Counter', testExtension, TestFun, test_owner),
-
-    State = #{
-        '$beamtalk_class' => 'Counter',
-        'value' => 0
-    },
-
-    Self = make_ref(),
-
-    %% Call the extension method
-    Result = beamtalk_dispatch:lookup(testExtension, [], Self, State, 'Counter'),
-
-    %% Clean up the extension to avoid leaking between tests
-    (try
-        ets:delete(beamtalk_extensions, {'Counter', testExtension}),
-        beamtalk_class_derived_cache:invalidate()
-    catch
-        _:_ -> ok
+    %% Registered only for the lookup, and removed even if it raises.
+    Result = beamtalk_test_extensions:with_extension('Counter', testExtension, TestFun, fun() ->
+        State = #{
+            '$beamtalk_class' => 'Counter',
+            'value' => 0
+        },
+        Self = make_ref(),
+        beamtalk_dispatch:lookup(testExtension, [], Self, State, 'Counter')
     end),
 
     %% Should invoke the extension
@@ -417,26 +407,17 @@ test_extension_error_propagation() ->
         error(extension_test_crash)
     end,
 
-    ok = beamtalk_extensions:register('Counter', crashExt, CrashFun, test_owner),
+    beamtalk_test_extensions:with_extension('Counter', crashExt, CrashFun, fun() ->
+        State = #{
+            '$beamtalk_class' => 'Counter',
+            'value' => 0
+        },
+        Self = make_ref(),
 
-    State = #{
-        '$beamtalk_class' => 'Counter',
-        'value' => 0
-    },
-    Self = make_ref(),
-
-    try
         Result = beamtalk_dispatch:lookup(crashExt, [], Self, State, 'Counter'),
         %% BT-4593: a raise from an invoked method answers the wrapped map.
         ?assertBtErrorTuple(_, _, _, Result)
-    after
-        (try
-            ets:delete(beamtalk_extensions, {'Counter', crashExt}),
-            beamtalk_class_derived_cache:invalidate()
-        catch
-            _:_ -> ok
-        end)
-    end.
+    end).
 
 %% A `^` non-local return in flight must
 %% pass through invoke_extension/6 untouched for a value-type (arity-2)
@@ -452,24 +433,15 @@ test_extension_nlr_passthrough() ->
     NlrFun = fun(_Args, _Self) ->
         throw({'$bt_nlr', bt3199_token, nlr_value, nlr_state})
     end,
-    ok = beamtalk_extensions:register('Integer', bt3199NlrExt, NlrFun, test_owner),
+    beamtalk_test_extensions:with_extension('Integer', bt3199NlrExt, NlrFun, fun() ->
+        State = #{'$beamtalk_class' => 'Integer'},
+        Self = 42,
 
-    State = #{'$beamtalk_class' => 'Integer'},
-    Self = 42,
-
-    try
         ?assertThrow(
             {'$bt_nlr', bt3199_token, nlr_value, nlr_state},
             beamtalk_dispatch:lookup(bt3199NlrExt, [], Self, State, 'Integer')
         )
-    after
-        (try
-            ets:delete(beamtalk_extensions, {'Integer', bt3199NlrExt}),
-            beamtalk_class_derived_cache:invalidate()
-        catch
-            _:_ -> ok
-        end)
-    end.
+    end).
 
 %% A connected `Program exit: N` (ADR 0099
 %% §3) must likewise pass through untouched rather than be reported as a
@@ -483,24 +455,15 @@ test_extension_script_exit_passthrough() ->
     ScriptExitFun = fun(_Args, _Self) ->
         throw({beamtalk_script_exit, 7})
     end,
-    ok = beamtalk_extensions:register('Integer', bt3199ScriptExitExt, ScriptExitFun, test_owner),
+    beamtalk_test_extensions:with_extension('Integer', bt3199ScriptExitExt, ScriptExitFun, fun() ->
+        State = #{'$beamtalk_class' => 'Integer'},
+        Self = 42,
 
-    State = #{'$beamtalk_class' => 'Integer'},
-    Self = 42,
-
-    try
         ?assertThrow(
             {beamtalk_script_exit, 7},
             beamtalk_dispatch:lookup(bt3199ScriptExitExt, [], Self, State, 'Integer')
         )
-    after
-        (try
-            ets:delete(beamtalk_extensions, {'Integer', bt3199ScriptExitExt}),
-            beamtalk_class_derived_cache:invalidate()
-        catch
-            _:_ -> ok
-        end)
-    end.
+    end).
 
 %% Test responds_to finds extension methods
 test_responds_to_extension_method() ->
@@ -508,18 +471,9 @@ test_responds_to_extension_method() ->
     ok = beamtalk_extensions:init(),
 
     TestFun = fun(_Args, _Self, State0) -> {ok, State0} end,
-    ok = beamtalk_extensions:register('Counter', extTestMethod, TestFun, test_owner),
-
-    try
+    beamtalk_test_extensions:with_extension('Counter', extTestMethod, TestFun, fun() ->
         ?assert(beamtalk_dispatch:responds_to(extTestMethod, 'Counter'))
-    after
-        (try
-            ets:delete(beamtalk_extensions, {'Counter', extTestMethod}),
-            beamtalk_class_derived_cache:invalidate()
-        catch
-            _:_ -> ok
-        end)
-    end.
+    end).
 
 %%% ============================================================================
 %%% Performance and Correctness Tests (ADR 0032 Phase 1)
@@ -634,30 +588,20 @@ test_super_finds_extension_on_superclass() ->
         {super_extension_called, State0}
     end,
 
-    ok = beamtalk_extensions:register('Actor', superExtTest, TestFun, test_owner),
+    beamtalk_test_extensions:with_extension('Actor', superExtTest, TestFun, fun() ->
+        State = #{
+            '$beamtalk_class' => 'Counter',
+            'value' => 0
+        },
 
-    State = #{
-        '$beamtalk_class' => 'Counter',
-        'value' => 0
-    },
+        Self = make_ref(),
 
-    Self = make_ref(),
-
-    %% Call super from Counter — should find the extension on Actor
-    try
+        %% Call super from Counter — should find the extension on Actor
         Result = beamtalk_dispatch:super(superExtTest, [], Self, State, 'Counter'),
 
         %% Should invoke the extension registered on Actor
         ?assertMatch({reply, super_extension_called, _}, Result)
-    after
-        %% Clean up extension (ignore any error if it's already gone)
-        (try
-            ets:delete(beamtalk_extensions, {'Actor', superExtTest}),
-            beamtalk_class_derived_cache:invalidate()
-        catch
-            _:_ -> ok
-        end)
-    end.
+    end).
 
 %%% ============================================================================
 %%% Extension method state threading tests
@@ -674,26 +618,17 @@ test_extension_state_threading() ->
         {OldVal + 100, maps:put('value', OldVal + 100, State)}
     end,
 
-    ok = beamtalk_extensions:register('Counter', addHundred, TestFun, test_owner),
+    beamtalk_test_extensions:with_extension('Counter', addHundred, TestFun, fun() ->
+        State = #{
+            '$beamtalk_class' => 'Counter',
+            'value' => 42
+        },
+        Self = make_ref(),
 
-    State = #{
-        '$beamtalk_class' => 'Counter',
-        'value' => 42
-    },
-    Self = make_ref(),
-
-    try
         Result = beamtalk_dispatch:lookup(addHundred, [], Self, State, 'Counter'),
         %% State should be threaded: value 42 + 100 = 142
         ?assertMatch({reply, 142, #{'value' := 142}}, Result)
-    after
-        (try
-            ets:delete(beamtalk_extensions, {'Counter', addHundred}),
-            beamtalk_class_derived_cache:invalidate()
-        catch
-            _:_ -> ok
-        end)
-    end.
+    end).
 
 %% Test: arity-2 (value-type) extension works via runtime dispatch path
 test_value_type_extension_via_runtime_dispatch() ->
@@ -705,25 +640,16 @@ test_value_type_extension_via_runtime_dispatch() ->
         {value_ext_called, Self}
     end,
 
-    ok = beamtalk_extensions:register('Integer', testValExt, TestFun, test_owner),
+    beamtalk_test_extensions:with_extension('Integer', testValExt, TestFun, fun() ->
+        State = #{
+            '$beamtalk_class' => 'Integer'
+        },
+        Self = 42,
 
-    State = #{
-        '$beamtalk_class' => 'Integer'
-    },
-    Self = 42,
-
-    try
         Result = beamtalk_dispatch:lookup(testValExt, [], Self, State, 'Integer'),
         %% Arity-2 path: original State is preserved
         ?assertMatch({reply, {value_ext_called, 42}, _}, Result)
-    after
-        (try
-            ets:delete(beamtalk_extensions, {'Integer', testValExt}),
-            beamtalk_class_derived_cache:invalidate()
-        catch
-            _:_ -> ok
-        end)
-    end.
+    end).
 
 %%% ============================================================================
 %%% Additional Coverage Tests
@@ -1094,27 +1020,18 @@ test_extension_bad_arity() ->
 
     %% Register an extension with arity 1 (neither 2 nor 3)
     BadFun = fun(_OnlyOneArg) -> bad end,
-    ok = beamtalk_extensions:register('Counter', badArityExt, BadFun, test_owner),
+    beamtalk_test_extensions:with_extension('Counter', badArityExt, BadFun, fun() ->
+        State = #{
+            '$beamtalk_class' => 'Counter',
+            'value' => 0
+        },
+        Self = make_ref(),
 
-    State = #{
-        '$beamtalk_class' => 'Counter',
-        'value' => 0
-    },
-    Self = make_ref(),
-
-    try
         %% Caught and wrapped like any other extension-body crash, rather
         %% than raising the raw {bad_extension_arity, 1} tuple.
         Result = beamtalk_dispatch:lookup(badArityExt, [], Self, State, 'Counter'),
         ?assertBtErrorTuple(_, _, badArityExt, Result)
-    after
-        (try
-            ets:delete(beamtalk_extensions, {'Counter', badArityExt}),
-            beamtalk_class_derived_cache:invalidate()
-        catch
-            _:_ -> ok
-        end)
-    end.
+    end).
 
 %% Test: is_actor_instance returns false for non-actor values.
 %% When Self is not a #beamtalk_object{}, displayString goes through normal dispatch.
@@ -1217,21 +1134,12 @@ test_extension_raises_reraised() ->
     ThrowingFun = fun(_Args, _Self, _State) ->
         error(extension_crash)
     end,
-    ok = beamtalk_extensions:register('Counter', throwingExt, ThrowingFun, test_owner),
-
-    State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
-    Self = make_ref(),
-    try
+    beamtalk_test_extensions:with_extension('Counter', throwingExt, ThrowingFun, fun() ->
+        State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
+        Self = make_ref(),
         Result = beamtalk_dispatch:lookup(throwingExt, [], Self, State, 'Counter'),
         ?assertBtErrorTuple(_, _, _, Result)
-    after
-        (try
-            ets:delete(beamtalk_extensions, {'Counter', throwingExt}),
-            beamtalk_class_derived_cache:invalidate()
-        catch
-            _:_ -> ok
-        end)
-    end.
+    end).
 
 %% invoke_method with module_name=undefined continues to superclass.
 %% Covers the 'undefined' branch in invoke_method which routes to
@@ -1354,21 +1262,12 @@ test_super_extension_invoke() ->
 
     TestFun = fun(_Args, _Self, State) -> {from_super_ext, State} end,
     %% Register on Actor (Counter's superclass).
-    ok = beamtalk_extensions:register('Actor', superExtMethod, TestFun, test_owner),
-
-    State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
-    Self = make_ref(),
-    try
+    beamtalk_test_extensions:with_extension('Actor', superExtMethod, TestFun, fun() ->
+        State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
+        Self = make_ref(),
         Result = beamtalk_dispatch:super(superExtMethod, [], Self, State, 'Counter'),
         ?assertMatch({reply, from_super_ext, _}, Result)
-    after
-        (try
-            ets:delete(beamtalk_extensions, {'Actor', superExtMethod}),
-            beamtalk_class_derived_cache:invalidate()
-        catch
-            _:_ -> ok
-        end)
-    end.
+    end).
 
 %% Test: super from a class with no superclass returns DNU (not crash)
 test_super_no_superclass() ->
@@ -1445,10 +1344,9 @@ test_class_chain_step_probe_cost_is_linear_in_depth() ->
 
         Worker ! go,
         Result =
-            receive
-                {bt3482_result, R} -> R
-            after 5000 ->
-                erlang:error(bt3482_worker_timeout)
+            begin
+                ?awaitMessage({bt3482_result, R}),
+                R
             end,
 
         _ = erlang:trace_pattern({beamtalk_object_class, has_method_local, 2}, false, [global]),
@@ -1671,10 +1569,9 @@ test_cached_lookup_skips_walk() ->
         1 = erlang:trace_pattern({beamtalk_object_class, has_method, 2}, true, [global]),
         Worker ! go,
         Warm =
-            receive
-                {defmethod_warm_result, R} -> R
-            after 5000 ->
-                erlang:error(defmethod_worker_timeout)
+            begin
+                ?awaitMessage({defmethod_warm_result, R}),
+                R
             end,
         _ = erlang:trace_pattern({beamtalk_object_class, has_method_local, 2}, false, [global]),
         _ = erlang:trace_pattern({beamtalk_object_class, has_method, 2}, false, [global]),

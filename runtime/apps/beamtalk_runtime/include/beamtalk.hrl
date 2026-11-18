@@ -65,15 +65,6 @@
     pid :: pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()}
 }).
 
-%% Helper macro to recognise the name-resolving identity shape (ADR 0079 /
-%% ADR 0126 §3): both the local `{registered, Name}` and the node-qualified
-%% `{registered, Name, Node}` forms.
--define(IS_REGISTERED_REF(X),
-    (is_tuple(X) andalso element(1, X) =:= registered andalso
-        ((tuple_size(X) =:= 2 andalso is_atom(element(2, X))) orelse
-            (tuple_size(X) =:= 3 andalso is_atom(element(2, X)) andalso is_atom(element(3, X)))))
-).
-
 %% @doc Structured error record for runtime errors.
 %%
 %% All Beamtalk errors use this consistent structure for better tooling

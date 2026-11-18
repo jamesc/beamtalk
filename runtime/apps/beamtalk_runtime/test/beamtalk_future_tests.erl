@@ -16,6 +16,7 @@ Tests all future behaviors:
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% Basic resolve/await tests
 
@@ -43,12 +44,8 @@ await_then_resolve_test() ->
     beamtalk_future:resolve(Future, hello),
 
     %% Check that the waiter got the result
-    receive
-        {result, Value} -> ?assertEqual(hello, Value)
-    after 1000 ->
-        % Timeout - test failed
-        ?assert(false)
-    end.
+    ?awaitMessage({result, Value}, 1000),
+    ?assertEqual(hello, Value).
 
 %%% Basic reject/await tests
 
@@ -80,12 +77,8 @@ await_then_reject_test() ->
     beamtalk_future:reject(Future, oops),
 
     %% Check that the waiter got the rejection
-    receive
-        {rejected, Reason} -> ?assertEqual(oops, Reason)
-    after 1000 ->
-        % Timeout - test failed
-        ?assert(false)
-    end.
+    ?awaitMessage({rejected, Reason}, 1000),
+    ?assertEqual(oops, Reason).
 
 %%% Multiple waiters tests
 
@@ -182,12 +175,8 @@ callback_after_resolve_test() ->
     end),
 
     %% Callback should execute immediately since future is already resolved
-    receive
-        {callback_called, Value} -> ?assertEqual(100, Value)
-    after 1000 ->
-        % Timeout - callback wasn't called
-        ?assert(false)
-    end.
+    ?awaitMessage({callback_called, Value}, 1000),
+    ?assertEqual(100, Value).
 
 callback_before_resolve_test() ->
     Future = beamtalk_future:new(),
@@ -201,12 +190,8 @@ callback_before_resolve_test() ->
     beamtalk_future:resolve(Future, 200),
 
     %% Callback should execute now
-    receive
-        {callback_called, Value} -> ?assertEqual(200, Value)
-    after 1000 ->
-        % Timeout - callback wasn't called
-        ?assert(false)
-    end.
+    ?awaitMessage({callback_called, Value}, 1000),
+    ?assertEqual(200, Value).
 
 callback_rejected_test() ->
     Future = beamtalk_future:new(),
@@ -220,12 +205,8 @@ callback_rejected_test() ->
     beamtalk_future:reject(Future, error_reason),
 
     %% Error callback should execute
-    receive
-        {error_callback_called, Reason} -> ?assertEqual(error_reason, Reason)
-    after 1000 ->
-        % Timeout - callback wasn't called
-        ?assert(false)
-    end.
+    ?awaitMessage({error_callback_called, Reason}, 1000),
+    ?assertEqual(error_reason, Reason).
 
 callback_wrong_state_test() ->
     Future = beamtalk_future:new(),
@@ -514,9 +495,9 @@ process_cleanup_when_future_abandoned_test() ->
 
     %% Receive the future reference
     FutureRef =
-        receive
-            {future, F} -> F
-        after 1000 -> error(timeout)
+        begin
+            ?awaitMessage({future, F}, 1000),
+            F
         end,
 
     %% Wait for the creator to exit
@@ -622,11 +603,8 @@ callback_exception_does_not_crash_future_test() ->
     beamtalk_future:resolve(Future, 42),
 
     %% Good callback should still fire
-    receive
-        {good_callback, Value} -> ?assertEqual(42, Value)
-    after 1000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({good_callback, Value}, 1000),
+    ?assertEqual(42, Value),
 
     %% Future process should still be alive
     ok = beamtalk_test_wait:idle(beamtalk_future:pid(Future)),
@@ -796,10 +774,8 @@ when_resolved_with_raw_pid_test() ->
         Parent ! {raw_cb, Value}
     end),
     beamtalk_future:resolve(Pid, raw_cb_value),
-    receive
-        {raw_cb, Value} -> ?assertEqual(raw_cb_value, Value)
-    after 1000 -> ?assert(false)
-    end.
+    ?awaitMessage({raw_cb, Value}, 1000),
+    ?assertEqual(raw_cb_value, Value).
 
 when_rejected_with_raw_pid_test() ->
     {beamtalk_future, Pid} = beamtalk_future:new(),
@@ -808,10 +784,8 @@ when_rejected_with_raw_pid_test() ->
         Parent ! {raw_rej_cb, Reason}
     end),
     beamtalk_future:reject(Pid, raw_rej_reason),
-    receive
-        {raw_rej_cb, Reason} -> ?assertEqual(raw_rej_reason, Reason)
-    after 1000 -> ?assert(false)
-    end.
+    ?awaitMessage({raw_rej_cb, Reason}, 1000),
+    ?assertEqual(raw_rej_reason, Reason).
 
 %%% ============================================================================
 %%% Await on non-future values (compatibility)
@@ -873,9 +847,9 @@ timeout_and_resolve_race_test() ->
     ),
     %% All results should be either resolved or timed out — no crashes
     Results = [
-        receive
-            {race_result, R} -> R
-        after 2000 -> error(test_timeout)
+        begin
+            ?awaitMessage({race_result, R}, 2000),
+            R
         end
      || _ <- lists:seq(1, NumIterations)
     ],
@@ -922,9 +896,9 @@ callback_ordering_all_fire_test() ->
 
     %% Collect all callback notifications (order may vary)
     Received = lists:sort([
-        receive
-            {cb_order, N} -> N
-        after 1000 -> error(timeout)
+        begin
+            ?awaitMessage({cb_order, N}, 1000),
+            N
         end
      || _ <- lists:seq(1, 3)
     ]),
@@ -986,17 +960,17 @@ multiple_callbacks_on_already_resolved_test() ->
     beamtalk_future:when_resolved(Future, fun(V) -> Parent ! {late_3, V} end),
 
     Results = lists:sort([
-        receive
-            {late_1, V} -> {late_1, V}
-        after 1000 -> error(timeout)
+        begin
+            ?awaitMessage({late_1, V}, 1000),
+            {late_1, V}
         end,
-        receive
-            {late_2, V} -> {late_2, V}
-        after 1000 -> error(timeout)
+        begin
+            ?awaitMessage({late_2, V}, 1000),
+            {late_2, V}
         end,
-        receive
-            {late_3, V} -> {late_3, V}
-        after 1000 -> error(timeout)
+        begin
+            ?awaitMessage({late_3, V}, 1000),
+            {late_3, V}
         end
     ]),
     ?assertEqual([{late_1, done}, {late_2, done}, {late_3, done}], Results).
@@ -1012,13 +986,13 @@ multiple_callbacks_on_already_rejected_test() ->
     beamtalk_future:when_rejected(Future, fun(R) -> Parent ! {late_err_2, R} end),
 
     Results = lists:sort([
-        receive
-            {late_err_1, R} -> {late_err_1, R}
-        after 1000 -> error(timeout)
+        begin
+            ?awaitMessage({late_err_1, R}, 1000),
+            {late_err_1, R}
         end,
-        receive
-            {late_err_2, R} -> {late_err_2, R}
-        after 1000 -> error(timeout)
+        begin
+            ?awaitMessage({late_err_2, R}, 1000),
+            {late_err_2, R}
         end
     ]),
     ?assertEqual([{late_err_1, oops}, {late_err_2, oops}], Results).

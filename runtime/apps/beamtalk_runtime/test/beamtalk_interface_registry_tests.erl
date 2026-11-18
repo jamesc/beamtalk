@@ -247,10 +247,7 @@ class_object_for_pid_test_() ->
                 %% such as SystemNavigation classesInPackage:.
                 DeadPid = spawn(fun() -> ok end),
                 MRef = erlang:monitor(process, DeadPid),
-                receive
-                    {'DOWN', MRef, process, DeadPid, _} -> ok
-                after 1000 -> error(dead_pid_setup_timeout)
-                end,
+                ?awaitMessage({'DOWN', MRef, process, DeadPid, _}, 1000),
                 ?assertEqual(
                     nil, beamtalk_interface:class_object_for_pid('Integer', DeadPid)
                 )

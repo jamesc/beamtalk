@@ -19,6 +19,7 @@ capture crash reports.
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, format_status/1]).
 -export(['__beamtalk_secrets'/0]).
@@ -185,10 +186,7 @@ crash_report_redacts_message_and_state_test() ->
     MRef = monitor(process, Pid),
     try
         gen_server:cast(Pid, {cast, 'login:', [<<"hunter2">>], #{}}),
-        receive
-            {'DOWN', MRef, process, Pid, _} -> ok
-        after 5000 -> error(no_crash)
-        end,
+        ?awaitMessage({'DOWN', MRef, process, Pid, _}),
         Report = await_terminate_report(Pid),
         #{last_message := LastMsg, state := State} = Report,
         ?assertEqual({'$gen_cast', {cast, 'login:', ?R, #{}}}, LastMsg),
@@ -247,10 +245,7 @@ compiled_actor_crash_report_redacts_test() ->
     try
         %% A fire-and-forget cast that raises crashes the actor (ADR 0134).
         gen_server:cast(Pid, {cast, 'explode:', [<<"hunter2">>], #{}}),
-        receive
-            {'DOWN', MRef, process, Pid, _} -> ok
-        after 5000 -> error(no_crash)
-        end,
+        ?awaitMessage({'DOWN', MRef, process, Pid, _}),
         #{last_message := LastMsg, state := State} = await_terminate_report(Pid),
         ?assertEqual({'$gen_cast', {cast, 'explode:', ?R, #{}}}, LastMsg),
         ?assertMatch(#{verifier := ?R, count := 7}, State)
@@ -332,10 +327,7 @@ compiled_actor_proc_lib_report_redacts_queued_send_test() ->
         gen_server:cast(Pid, {cast, 'explode:', [1], #{}}),
         Pid ! {'$gen_call', {self(), make_ref()}, {'unlock:', [?UNLOCK_ARG], #{}}},
         true = erlang:resume_process(Pid),
-        receive
-            {'DOWN', MRef, process, Pid, _} -> ok
-        after 5000 -> error(no_crash)
-        end,
+        ?awaitMessage({'DOWN', MRef, process, Pid, _}),
         Info = await_proc_lib_report(Pid),
         Messages = proplists:get_value(messages, Info),
         ?assertMatch([{'$gen_call', _, {'unlock:', ?R, _}}], Messages),
@@ -358,10 +350,7 @@ async_spawned_actor_proc_lib_report_redacts_queued_send_test() ->
         gen_server:cast(Pid, {cast, 'explode:', [1], #{}}),
         Pid ! {'$gen_call', {self(), make_ref()}, {'unlock:', [?UNLOCK_ARG], #{}}},
         true = erlang:resume_process(Pid),
-        receive
-            {'DOWN', MonRef, process, Pid, _} -> ok
-        after 5000 -> error(no_crash)
-        end,
+        ?awaitMessage({'DOWN', MonRef, process, Pid, _}),
         Info = await_proc_lib_report(Pid),
         Messages = proplists:get_value(messages, Info),
         ?assertMatch([{'$gen_call', _, {'unlock:', ?R, _}}], Messages),

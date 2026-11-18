@@ -10,6 +10,7 @@ Tests expression evaluation, file loading, and compilation.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Helpers
@@ -366,10 +367,7 @@ cleanup_module_running_process_retained_not_killed_test() ->
     ?assert(erlang:is_process_alive(Holder)),
     Ref = erlang:monitor(process, Holder),
     Holder ! stop,
-    receive
-        {'DOWN', Ref, process, Holder, normal} -> ok
-    after 1000 -> ?assert(false)
-    end.
+    ?awaitMessage({'DOWN', Ref, process, Holder, normal}, 1000).
 
 cleanup_module_fun_holder_keeps_working_test() ->
     %% A process holding only a fun of the module is not killed and its fun
@@ -385,10 +383,7 @@ cleanup_module_fun_holder_keeps_working_test() ->
     _ = beamtalk_repl_eval:cleanup_module(Mod),
     ?assert(erlang:is_process_alive(Holder)),
     Holder ! {call, self()},
-    receive
-        {result, {ok, _}} -> ok
-    after 1000 -> ?assert(false)
-    end,
+    ?awaitMessage({result, {ok, _}}, 1000),
     ?assertMatch({ok, _}, Fun()).
 
 cleanup_module_eval_module_never_hosts_actor_class_test() ->
@@ -1074,10 +1069,7 @@ handle_stdin_request_with_subscriber_test() ->
     end),
     Result = beamtalk_io_capture:handle_stdin_request(Subscriber, <<"Name: ">>),
     ?assertEqual(<<"Alice\n">>, Result),
-    receive
-        subscriber_done -> ok
-    after 1000 -> ?assert(false)
-    end.
+    ?awaitMessage(subscriber_done, 1000).
 
 handle_stdin_request_eof_test() ->
     %% Test stdin EOF handling
@@ -1091,10 +1083,7 @@ handle_stdin_request_eof_test() ->
     end),
     Result = beamtalk_io_capture:handle_stdin_request(Subscriber, <<"? ">>),
     ?assertEqual(eof, Result),
-    receive
-        subscriber_done -> ok
-    after 1000 -> ?assert(false)
-    end.
+    ?awaitMessage(subscriber_done, 1000).
 
 %% ===================================================================
 %% Prompt conversion tests
@@ -1125,20 +1114,12 @@ io_capture_stdin_with_subscriber_test() ->
     ReplyRef = make_ref(),
     CapturePid ! {io_request, self(), ReplyRef, {get_line, unicode, <<"Enter: ">>}},
     %% Receive the need_input request from the IO capture process
-    receive
-        {need_input, IoCapPid, Ref, <<"Enter: ">>} ->
-            %% Provide stdin input with matching ref
-            IoCapPid ! {stdin_input, Ref, <<"test input\n">>}
-    after 5000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({need_input, IoCapPid, Ref, <<"Enter: ">>}),
+    %% Provide stdin input with matching ref
+    IoCapPid ! {stdin_input, Ref, <<"test input\n">>},
     %% Receive the io_reply
-    receive
-        {io_reply, ReplyRef, Reply} ->
-            ?assertEqual(<<"test input\n">>, Reply)
-    after 5000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({io_reply, ReplyRef, Reply}),
+    ?assertEqual(<<"test input\n">>, Reply),
     _Output = beamtalk_io_capture:stop({CapturePid, OldGL}).
 
 io_capture_stdin_stale_ref_ignored_test() ->
@@ -1147,22 +1128,14 @@ io_capture_stdin_stale_ref_ignored_test() ->
     {CapturePid, OldGL} = beamtalk_io_capture:start(Self),
     ReplyRef = make_ref(),
     CapturePid ! {io_request, self(), ReplyRef, {get_line, unicode, <<"Enter: ">>}},
-    receive
-        {need_input, IoCapPid, Ref, <<"Enter: ">>} ->
-            %% Send a stale/wrong ref first — should be ignored
-            StaleRef = make_ref(),
-            IoCapPid ! {stdin_input, StaleRef, <<"stale data\n">>},
-            %% Then send the correct ref
-            IoCapPid ! {stdin_input, Ref, <<"correct data\n">>}
-    after 5000 ->
-        ?assert(false)
-    end,
-    receive
-        {io_reply, ReplyRef, Reply} ->
-            ?assertEqual(<<"correct data\n">>, Reply)
-    after 5000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({need_input, IoCapPid, Ref, <<"Enter: ">>}),
+    %% Send a stale/wrong ref first — should be ignored
+    StaleRef = make_ref(),
+    IoCapPid ! {stdin_input, StaleRef, <<"stale data\n">>},
+    %% Then send the correct ref
+    IoCapPid ! {stdin_input, Ref, <<"correct data\n">>},
+    ?awaitMessage({io_reply, ReplyRef, Reply}),
+    ?assertEqual(<<"correct data\n">>, Reply),
     _Output = beamtalk_io_capture:stop({CapturePid, OldGL}).
 
 io_capture_stdin_no_subscriber_test() ->
@@ -1170,12 +1143,8 @@ io_capture_stdin_no_subscriber_test() ->
     {CapturePid, OldGL} = beamtalk_io_capture:start(),
     ReplyRef = make_ref(),
     CapturePid ! {io_request, self(), ReplyRef, {get_line, unicode, <<"? ">>}},
-    receive
-        {io_reply, ReplyRef, Reply} ->
-            ?assertEqual({error, enotsup}, Reply)
-    after 5000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({io_reply, ReplyRef, Reply}),
+    ?assertEqual({error, enotsup}, Reply),
     _Output = beamtalk_io_capture:stop({CapturePid, OldGL}).
 
 %% ===================================================================
@@ -2453,19 +2422,16 @@ announce_binding_changed_carries_session_id_test() ->
     put(beamtalk_session_id, <<"sess-bt2530">>),
     try
         ok = beamtalk_repl_eval:announce_binding_changed(x, 42),
-        receive
-            {binding_evt, Event} ->
-                ?assertMatch(
-                    #{
-                        '$beamtalk_class' := 'BindingChanged',
-                        name := x,
-                        value := 42,
-                        sessionId := <<"sess-bt2530">>
-                    },
-                    Event
-                )
-        after 1000 -> ?assert(false)
-        end
+        ?awaitMessage({binding_evt, Event}, 1000),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'BindingChanged',
+                name := x,
+                value := 42,
+                sessionId := <<"sess-bt2530">>
+            },
+            Event
+        )
     after
         erase(beamtalk_session_id),
         beamtalk_announcements:unsubscribe(SubRef)
@@ -2482,11 +2448,8 @@ announce_binding_changed_session_id_nil_outside_worker_test() ->
     ),
     try
         ok = beamtalk_repl_eval:announce_binding_changed(y, hello),
-        receive
-            {binding_evt_nil, Event} ->
-                ?assertMatch(#{name := y, value := hello, sessionId := nil}, Event)
-        after 1000 -> ?assert(false)
-        end
+        ?awaitMessage({binding_evt_nil, Event}, 1000),
+        ?assertMatch(#{name := y, value := hello, sessionId := nil}, Event)
     after
         beamtalk_announcements:unsubscribe(SubRef)
     end.

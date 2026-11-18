@@ -22,6 +22,7 @@ was called with on an exception. The cell is erased in an `after`
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %% gen_server / supervisor callbacks (the throwaway server)
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3]).
@@ -77,11 +78,7 @@ method({slow_set_sync, Notify}, _From, _State) ->
     %% behind the callback and observes the committed state on return.
     ok = beamtalk_actor_state:put(self_obj(), x, 5),
     Notify ! slow_set_started,
-    receive
-        slow_set_release -> ok
-    after 10000 ->
-        erlang:error(slow_set_release_timeout)
-    end,
+    ?awaitMessage(slow_set_release, 10000),
     {reply, ok};
 method(closure_updates, _From, _State) ->
     Self = self_obj(),
@@ -144,25 +141,13 @@ sys_get_state_during_callback_test() ->
     %% to arrive mid-callback. System messages are handled between callbacks:
     %% `sys:get_state` waits for the callback and gets the committed value,
     %% never a half-written one. No sleeps, no timing assertions.
-    receive
-        slow_set_started -> ok
-    after 5000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage(slow_set_started),
     spawn_link(fun() -> Caller ! {sys_state, sys:get_state(Pid)} end),
     ok = wait_until_sys_queued(Pid),
     Pid ! slow_set_release,
-    receive
-        {sys_state, State} ->
-            ?assertEqual(#{x => 5}, State)
-    after 5000 ->
-        ?assert(false)
-    end,
-    receive
-        {done, ok} -> ok
-    after 5000 ->
-        ?assert(false)
-    end.
+    ?awaitMessage({sys_state, State}),
+    ?assertEqual(#{x => 5}, State),
+    ?awaitMessage({done, ok}).
 
 %% Spin until the `sys` request has queued in the server's mailbox while the
 %% callback is blocked. Uses `erlang:yield/0`, not `timer:sleep/1`: this waits

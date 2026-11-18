@@ -19,6 +19,7 @@ ClassBuilder with the meta literal.
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Fixtures
@@ -377,17 +378,11 @@ collect_abi_refusals_test_() ->
                         end
                     end)
                 end),
-                receive
-                    collecting -> ok
-                after 5000 -> error(timeout_waiting_for_collector)
-                end,
+                ?awaitMessage(collecting),
                 ?assertNotEqual(undefined, ets:whereis(beamtalk_abi_refusals)),
                 Ref = monitor(process, Pid),
                 exit(Pid, kill),
-                receive
-                    {'DOWN', Ref, process, Pid, killed} -> ok
-                after 5000 -> error(timeout_waiting_for_collector_owner_down)
-                end,
+                ?awaitMessage({'DOWN', Ref, process, Pid, killed}),
                 ?assertEqual(undefined, ets:whereis(beamtalk_abi_refusals)),
                 ?assertMatch({ok, []}, beamtalk_class_var_abi:collect_abi_refusals(fun() -> ok end))
             end},

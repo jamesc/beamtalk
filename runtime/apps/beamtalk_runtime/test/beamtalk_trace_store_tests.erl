@@ -13,6 +13,7 @@ telemetry handler callbacks, and telemetry_poller VM stats.
 -export([init/1]).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %% Tests that poll with `beamtalk_test_wait:until/1` (directly or via
 %% `take_store_direct/0`) run under this explicit EUnit timeout via `?_timed/1`:
@@ -647,10 +648,7 @@ crash_recovery_preserves_exact_counts_test_() ->
                 process_flag(trap_exit, true),
                 try
                     exit(StorePid, kill),
-                    receive
-                        {'EXIT', StorePid, killed} -> ok
-                    after 5000 -> ?assert(false)
-                    end,
+                    ?awaitMessage({'EXIT', StorePid, killed}),
                     {ok, _} = beamtalk_trace_store:start_link(),
                     assert_seeded_data_intact(TestPid)
                 after
@@ -1874,10 +1872,7 @@ churn_one_actor(Kill) ->
         true -> exit(Pid, kill);
         false -> gen_server:stop(Pid)
     end,
-    receive
-        {'DOWN', MRef, process, Pid, _} -> ok
-    after 5000 -> ?assert(false)
-    end.
+    ?awaitMessage({'DOWN', MRef, process, Pid, _}).
 
 actor_churn_stays_flat_test_() ->
     {foreach, fun churn_setup/0, fun cleanup/1, [
@@ -2110,10 +2105,7 @@ per_actor_stats_need_tracing_test_() ->
                         stop -> ok
                     end
                 end),
-                receive
-                    stop_emitted -> ok
-                after 5000 -> ?assert(false)
-                end,
+                ?awaitMessage(stop_emitted),
                 %% Still alive: its per-pid stats stay until it exits.
                 PidKey = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
                 #{PidKey := #{{beamtalk_string, <<"methods">>} := LiveMethods}} =
@@ -2553,10 +2545,7 @@ do_churn_window(Parent, Collector, Workers, PerWorker, Class, Selector, Dispatch
             true -> 1 = erlang:trace(self(), true, [call, {tracer, Collector}]);
             false -> ok
         end,
-        receive
-            go -> ok
-        after 60000 -> exit(churn_barrier_timeout)
-        end,
+        ?awaitMessage(go, 60000),
         Ps = [
             begin
                 P = idle_process(),
@@ -2573,10 +2562,7 @@ do_churn_window(Parent, Collector, Workers, PerWorker, Class, Selector, Dispatch
             %% Stay alive until the parent lifts the trace flags: tracing
             %% a dead pid raises.
             true ->
-                receive
-                    release -> ok
-                after 60000 -> exit(churn_release_timeout)
-                end;
+                ?awaitMessage(release, 60000);
             false ->
                 ok
         end
@@ -2592,9 +2578,9 @@ do_churn_window(Parent, Collector, Workers, PerWorker, Class, Selector, Dispatch
                 [1 = erlang:trace(W, false, [call]) || W <- Wins],
                 Collector ! {get, self()},
                 Taken =
-                    receive
-                        {takes, N} -> N
-                    after 5000 -> exit(churn_count_timeout)
+                    begin
+                        ?awaitMessage({takes, N}),
+                        N
                     end,
                 [W ! release || W <- Wins],
                 Taken;
@@ -2607,10 +2593,8 @@ do_churn_window(Parent, Collector, Workers, PerWorker, Class, Selector, Dispatch
 collect_churn_pids(0) ->
     [];
 collect_churn_pids(N) ->
-    receive
-        {churn_done, _W, Ps} -> Ps ++ collect_churn_pids(N - 1)
-    after 120000 -> exit(churn_collect_timeout)
-    end.
+    ?awaitMessage({churn_done, _W, Ps}, 120000),
+    Ps ++ collect_churn_pids(N - 1).
 
 -doc "Count call-traced `ets:take/2` calls on the free-slots table.".
 take_counter_loop(N) ->
@@ -2863,9 +2847,7 @@ sweep_remote_pid_test_() ->
             beamtalk_trace_store:enable(),
             Dead = spawn(fun() -> ok end),
             Mon = erlang:monitor(process, Dead),
-            receive
-                {'DOWN', Mon, process, Dead, _} -> ok
-            end,
+            ?awaitMessage({'DOWN', Mon, process, Dead, _}),
             beamtalk_trace_store:record_dispatch(Dead, ping, 10, ok, sync, 'Counter'),
             ?assertEqual(1, pid_row_count()),
             %% Simulate the clear/0 race: row present, keys entry gone.
@@ -2984,9 +2966,9 @@ chunked_sweep_stale_continuation_test_() ->
             try
                 Caller = self(),
                 spawn(fun() -> Caller ! {bottlenecks, beamtalk_trace_store:bottlenecks(10)} end),
-                receive
-                    {bottlenecks, Result} -> ?assertEqual(10, length(Result))
-                after 10000 -> ?assert(false)
+                begin
+                    ?awaitMessage({bottlenecks, Result}, 10000),
+                    ?assertEqual(10, length(Result))
                 end
             after
                 sys:resume(Store),

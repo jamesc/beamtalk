@@ -24,6 +24,7 @@ Groups:
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -define(GONE_MODULES, [
     beamtalk_object_instances, beamtalk_repl_actors, beamtalk_test_actor_registry
@@ -92,7 +93,7 @@ no_registration(Start) ->
     %% A synchronous round trip: `init/1` (and everything after it that could
     %% register) has run.
     pong = sync(Pid),
-    stop(Pid),
+    beamtalk_test_proc:kill_and_wait(Pid),
     ?assertEqual(TablesBefore, lists:sort(ets:all())),
     ?assertEqual([], [N || N <- ?GONE_NAMES, whereis(N) =/= undefined]).
 
@@ -107,12 +108,9 @@ announces_spawned() ->
     try
         {ok, Pid} = beamtalk_actor:safe_spawn(test_counter, 0),
         try
-            receive
-                {got, #{pid := Pid}} -> ok
-            after 2000 -> ?assert(false)
-            end
+            ?awaitMessage({got, #{pid := Pid}}, 2000)
         after
-            stop(Pid)
+            beamtalk_test_proc:kill_and_wait(Pid)
         end
     after
         beamtalk_announcements:unsubscribe(SubRef)
@@ -166,7 +164,7 @@ old_compiler_registration_is_absorbed_test_() ->
             try
                 ?assertEqual(0, beamtalk_actor:sync_send(Pid, getValue, []))
             after
-                stop(Pid)
+                beamtalk_test_proc:kill_and_wait(Pid)
             end
         after
             code:purge(Mod),
@@ -197,12 +195,3 @@ old_compiler_core(Mod) ->
         "    end\n"
         "end\n"
     ]).
-
-stop(Pid) ->
-    unlink(Pid),
-    MonRef = erlang:monitor(process, Pid),
-    exit(Pid, kill),
-    receive
-        {'DOWN', MonRef, process, Pid, _} -> ok
-    after 5000 -> error({stop_timeout, Pid})
-    end.

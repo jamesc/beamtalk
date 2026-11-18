@@ -17,6 +17,7 @@ the same JSON the WebSocket transport returns via `handle_op/4`.
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Helpers
@@ -57,9 +58,7 @@ dispatch_interrupt_dead_session_returns_status_term_test() ->
     %% Dead SessionPid → noproc caught → {status, ok} term.
     Pid = spawn(fun() -> ok end),
     MRef = monitor(process, Pid),
-    receive
-        {'DOWN', MRef, process, Pid, _} -> ok
-    end,
+    ?awaitMessage({'DOWN', MRef, process, Pid, _}),
     Msg = beamtalk_test_repl:make_msg(<<"interrupt">>, <<"id-1">>, undefined),
     ?assertEqual({status, ok}, beamtalk_repl_ops:dispatch(<<"interrupt">>, #{}, Msg, Pid)).
 

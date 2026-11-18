@@ -15,7 +15,6 @@ on:
       - 'crates/beamtalk-cli/src/commands/registry/**'
       - 'crates/beamtalk-cli/src/commands/deps/registry.rs'
       - 'crates/beamtalk-cli/src/main.rs'
-      - 'crates/beamtalk-core/src/codegen/core_erlang/doc_chunks.rs'
       - 'scripts/install.sh'
       - '.github/workflows/docs.yml'
   schedule:

@@ -15,6 +15,7 @@ is already started by other tests. We handle `already_started`
 gracefully to avoid test pollution issues.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Test Fixtures
@@ -33,11 +34,7 @@ stop_runtime({started, Pid}) ->
     unlink(Pid),
     Ref = monitor(process, Pid),
     exit(Pid, shutdown),
-    receive
-        {'DOWN', Ref, process, Pid, _} -> ok
-    after 1000 ->
-        error(supervisor_cleanup_timeout)
-    end;
+    ?awaitMessage({'DOWN', Ref, process, Pid, _}, 1000);
 stop_runtime({already_running, _Pid}) ->
     %% Don't stop - it was already running before our test
     ok.

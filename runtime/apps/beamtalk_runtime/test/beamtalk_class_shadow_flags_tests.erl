@@ -13,6 +13,7 @@ register and unregister on the same class concurrently).
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 -include("beamtalk_class_vars_keys.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 setup_runtime() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
@@ -158,14 +159,8 @@ shadow_flag_test_() ->
                 ok = beamtalk_test_wait:idle(Raiser),
                 _ = {Sender, Raiser}
             end),
-            receive
-                {sender, _} -> ok
-            after 5000 -> ?assert(false)
-            end,
-            receive
-                raised -> ok
-            after 5000 -> ?assert(false)
-            end,
+            ?awaitMessage({sender, _}),
+            ?awaitMessage(raised),
             try
                 ?assert(beamtalk_class_shadow_flags:is_set(extension, Tag)),
                 ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
@@ -287,14 +282,8 @@ shadow_flag_test_() ->
                     put(bt3669_workers, {U, R})
                 end),
                 {U, R} = erase(bt3669_workers),
-                receive
-                    {u_done, U} -> ok
-                after 5000 -> error(u_timeout)
-                end,
-                receive
-                    {r_done, R} -> ok
-                after 5000 -> error(r_timeout)
-                end,
+                ?awaitMessage({u_done, U}),
+                ?awaitMessage({r_done, R}),
                 try
                     %% The row exists, so the flag must be up and the guard must decline.
                     ?assertMatch({ok, _, bt3669}, beamtalk_extensions:lookup(Tag, bt3669_ser_b)),
@@ -325,10 +314,7 @@ shadow_flag_test_() ->
             ],
             lists:foreach(
                 fun(W) ->
-                    receive
-                        {done, W} -> ok
-                    after 30000 -> error(timeout)
-                    end
+                    ?awaitMessage({done, W}, 30000)
                 end,
                 Workers
             ),
@@ -550,10 +536,7 @@ class_ref_test_() ->
                     %% Wait until the installer is blocked behind the held lock.
                     ok = beamtalk_test_wait:idle(Installer)
                 end),
-                receive
-                    installed -> ok
-                after 5000 -> ?assert(false)
-                end,
+                ?awaitMessage(installed),
                 ok = beamtalk_class_shadow_flags:invalidate(Name),
                 ?assertEqual(false, class_ref_installed(Name))
             end)
@@ -793,14 +776,8 @@ race_install_against(Name, Tag, Writer) ->
         end),
         ok = beamtalk_test_wait:idle(WriterPid)
     end),
-    receive
-        {installed, _} -> ok
-    after 5000 -> ?assert(false)
-    end,
-    receive
-        written -> ok
-    after 5000 -> ?assert(false)
-    end,
+    ?awaitMessage({installed, _}),
+    ?awaitMessage(written),
     ?assert(key_gone(Name)),
     ?assertNot(target(Name, static_key(Name, class_testSelf), testSelf)),
     ?assert(key_gone(Name)).
@@ -998,9 +975,9 @@ static_call_target_test_() ->
                     ok = beamtalk_test_wait:idle(Installers)
                 end),
                 [
-                    receive
-                        {installed, Got} -> ?assertEqual(Ref, Got)
-                    after 5000 -> ?assert(false)
+                    begin
+                        ?awaitMessage({installed, Got}),
+                        ?assertEqual(Ref, Got)
                     end
                  || _ <- [1, 2]
                 ],
@@ -1312,10 +1289,7 @@ static_call_target_test_() ->
             ok = beamtalk_class_monitor:unwatch(Name),
             MRef = erlang:monitor(process, Pid),
             exit(Pid, kill),
-            receive
-                {'DOWN', MRef, process, Pid, _} -> ok
-            after 5000 -> ?assert(false)
-            end,
+            ?awaitMessage({'DOWN', MRef, process, Pid, _}),
             ?assertEqual(OldRef, key_value(static_key(Name, class_testSelf))),
             {ok, NewPid} = beamtalk_class_registry:restart_class(Name),
             %% (Rebuilt from the helper module's meta, the restarted class has
@@ -1449,9 +1423,9 @@ static_call_target_test_() ->
                     %% sleep: lets the concurrent sender keep sending across the reload window
                     timer:sleep(20),
                     Sender ! stop,
-                    receive
-                        {sender_errors, Errors} -> ?assertEqual([], Errors)
-                    after 5000 -> ?assert(false)
+                    begin
+                        ?awaitMessage({sender_errors, Errors}),
+                        ?assertEqual([], Errors)
                     end,
                     ?assertNot(key_value(Dropped)),
                     ?assertEqual(fallback, static_send(Dropped, Name, dropped)),
@@ -1491,10 +1465,7 @@ bounded_lock_wait_test_() ->
                         end
                     end)
                 end),
-                receive
-                    holding -> ok
-                after 5000 -> error(holder_not_holding)
-                end,
+                ?awaitMessage(holding),
                 %% The send path gives up after the bound and takes the fallback.
                 ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
                 %% An eraser must not give up: it is still waiting after the bound.
@@ -1507,10 +1478,7 @@ bounded_lock_wait_test_() ->
                 after 400 -> ok
                 end,
                 Holder ! release,
-                receive
-                    erased -> ok
-                after 5000 -> error({eraser_never_finished, Eraser})
-                end,
+                ?awaitMessage(erased),
                 %% The lock is free again: the install now succeeds.
                 ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name))
             end},
@@ -1525,10 +1493,7 @@ bounded_lock_wait_test_() ->
                         end
                     end)
                 end),
-                receive
-                    holding -> ok
-                after 5000 -> error(holder_not_holding)
-                end,
+                ?awaitMessage(holding),
                 spawn_link(fun() ->
                     ok = beamtalk_extensions:unregister('Object', bt4004_absent, true),
                     Parent ! unregistered
@@ -1538,10 +1503,7 @@ bounded_lock_wait_test_() ->
                 after 400 -> ok
                 end,
                 Holder ! release,
-                receive
-                    unregistered -> ok
-                after 5000 -> error(unregister_never_finished)
-                end
+                ?awaitMessage(unregistered)
             end},
             {"with_shadow_lock times out behind a hung holder", fun() ->
                 %% A real class-object tag, so the lock is taken at all.
@@ -1569,10 +1531,7 @@ held_then_raise(Tag, Attempt) ->
             end
         end)
     end),
-    receive
-        holding -> ok
-    after 5000 -> error(holder_not_holding)
-    end,
+    ?awaitMessage(holding),
     try Attempt() of
         Other -> {unexpected, Other}
     catch

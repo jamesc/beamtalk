@@ -19,12 +19,6 @@ mod layout;
 mod renderer;
 mod site;
 
-// Re-export for potential LSP reuse.
-#[allow(unused_imports)]
-pub use extractor::ClassInfo;
-#[allow(unused_imports)]
-pub use extractor::MethodInfo;
-
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::HashMap;
@@ -32,7 +26,9 @@ use std::fs;
 use tracing::{debug, info, instrument};
 
 use assets::{write_css, write_search_js};
-use extractor::{collect_inherited_methods, find_source_files, parse_class_info};
+#[cfg(test)]
+use extractor::MethodInfo;
+use extractor::{ClassInfo, collect_inherited_methods, find_source_files, parse_class_info};
 use layout::build_sidebar_html;
 use renderer::{write_class_page, write_index_page};
 use site::{

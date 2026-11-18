@@ -430,11 +430,7 @@ test_kill_actor_spawned_via_class_survives_class() ->
 
     MonRef = erlang:monitor(process, ActorPid),
     exit(ActorPid, kill),
-    receive
-        {'DOWN', MonRef, process, ActorPid, _Reason} -> ok
-    after 5000 ->
-        error(actor_kill_timeout)
-    end,
+    ?awaitMessage({'DOWN', MonRef, process, ActorPid, _Reason}),
 
     %% The class process must not merely be alive — it must still be a
     %% functioning gen_server (not a zombie mid-crash), so this call must
@@ -671,10 +667,8 @@ test_class_self_spawn_monitored_success() ->
     ?assertMatch(#beamtalk_object{class = 'Counter'}, Obj),
     Pid = Obj#beamtalk_object.pid,
     gen_server:stop(Pid),
-    receive
-        {'DOWN', MonRef, process, Pid, Reason} -> ?assertEqual(normal, Reason)
-    after 5000 -> error(no_down)
-    end.
+    ?awaitMessage({'DOWN', MonRef, process, Pid, Reason}),
+    ?assertEqual(normal, Reason).
 
 test_class_self_spawn_monitored_abstract() ->
     ?assertBtError(
@@ -1258,10 +1252,7 @@ test_generic_new_ancestor_gone() ->
         %% reason (a racing call) or, post-deregister, with noproc.
         MRef = erlang:monitor(process, ParentPid),
         exit(ParentPid, kill),
-        receive
-            {'DOWN', MRef, process, ParentPid, _} -> ok
-        after 5000 -> error(parent_not_killed)
-        end,
+        ?awaitMessage({'DOWN', MRef, process, ParentPid, _}),
         {ok, Instance} = beamtalk_object_class:new(ChildPid, []),
         ?assertEqual('BT2277Child', maps:get('$beamtalk_class', Instance)),
         ?assertEqual(20, maps:get(c, Instance)),

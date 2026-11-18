@@ -23,6 +23,7 @@ stand-in. They pin:
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -define(START, [beamtalk, actor, lifecycle, start]).
 -define(STOP, [beamtalk, actor, lifecycle, stop]).
@@ -113,10 +114,7 @@ on_crash_reason_is_raw() ->
         catch
             exit:_ -> ok
         end,
-        receive
-            {'DOWN', MRef, process, Pid, _} -> ok
-        after 2000 -> error(no_down)
-        end,
+        ?awaitMessage({'DOWN', MRef, process, Pid, _}, 2000),
         ?assertEqual(
             {?STOP, #{}, #{pid => Pid, class => ?CLASS, reason => Reason}}, expect_event(?STOP)
         )
@@ -287,10 +285,8 @@ next_event(Timeout) ->
     end.
 
 expect_event(Event) ->
-    receive
-        {event, Event, Measurements, Metadata} -> {Event, Measurements, Metadata}
-    after 2000 -> error({no_event, Event})
-    end.
+    ?awaitMessage({event, Event, Measurements, Metadata}, 2000),
+    {Event, Measurements, Metadata}.
 
 flush() ->
     receive
@@ -319,11 +315,10 @@ announced_in_mode(Mode) ->
     end.
 
 announcement(Pid) ->
-    receive
-        {got, #{'$beamtalk_class' := Class, pid := Pid, actorClass := ActorClass} = Event} ->
-            {Class, ActorClass, maps:get(reason, Event, undefined)}
-    after 2000 -> error({no_announcement, Pid})
-    end.
+    ?awaitMessage(
+        {got, #{'$beamtalk_class' := Class, pid := Pid, actorClass := ActorClass} = Event}, 2000
+    ),
+    {Class, ActorClass, maps:get(reason, Event, undefined)}.
 
 %% The trace store's view of one actor's start and stop: the `{Class, start}`
 %% and `{Class, stop}` aggregate call counts and the lifecycle trace events

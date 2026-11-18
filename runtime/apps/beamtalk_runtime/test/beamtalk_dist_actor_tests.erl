@@ -180,20 +180,12 @@ known_class_send_reports_class_for_remote_pid(PeerNode) ->
     try
         ?assertEqual(unknown, beamtalk_actor:lookup_class(RemotePid)),
         ?assertEqual(7, beamtalk_actor:sync_send_known(RemotePid, 'Counter', getValue, [])),
-        receive
-            {dispatch_stop, #{pid := RemotePid} = Meta} ->
-                ?assertEqual('Counter', maps:get(class, Meta))
-        after 2000 ->
-            ?assert(false)
-        end,
+        ?awaitMessage({dispatch_stop, #{pid := RemotePid} = Meta}, 2000),
+        ?assertEqual('Counter', maps:get(class, Meta)),
         %% Without the class, the send reports `unknown`.
         ?assertEqual(7, beamtalk_actor:sync_send(RemotePid, getValue, [])),
-        receive
-            {dispatch_stop, #{pid := RemotePid} = Meta2} ->
-                ?assertEqual(unknown, maps:get(class, Meta2))
-        after 2000 ->
-            ?assert(false)
-        end
+        ?awaitMessage({dispatch_stop, #{pid := RemotePid} = Meta2}, 2000),
+        ?assertEqual(unknown, maps:get(class, Meta2))
     after
         ok = beamtalk_telemetry:disable_dispatch_events(),
         telemetry:detach(HandlerId),
@@ -256,10 +248,7 @@ peer_survives_dropped_connection_test_() ->
                 %% distribution-based control channel this halted the peer,
                 %% so every later call in the fixture raised node_down.
                 true = erlang:disconnect_node(PeerNode),
-                receive
-                    {nodedown, PeerNode} -> ok
-                after 5000 -> erlang:error({no_nodedown, PeerNode})
-                end,
+                ?awaitMessage({nodedown, PeerNode}),
                 ?assertNot(lists:member(PeerNode, nodes())),
                 %% The next call auto-connects, and the peer is still there
                 %% to answer it.

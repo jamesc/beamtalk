@@ -260,7 +260,12 @@ register(Class, Selector, Fun, Owner, Source) when
                 ),
 
                 %% Record conflict for tooling - record BOTH owners
+                %% BT-5046: one row per (Key, owner), so repeated conflicting
+                %% re-registrations refresh the timestamp instead of growing
+                %% the bag.
                 Timestamp = erlang:system_time(millisecond),
+                _ = ets:match_delete(?CONFLICTS_TABLE, {Key, OldOwner, '_'}),
+                _ = ets:match_delete(?CONFLICTS_TABLE, {Key, Owner, '_'}),
                 ets:insert(?CONFLICTS_TABLE, {Key, OldOwner, Timestamp}),
                 ets:insert(?CONFLICTS_TABLE, {Key, Owner, Timestamp + 1}),
 

@@ -167,10 +167,7 @@ user_process_not_captured() ->
         after 500 -> ok
         end
     end),
-    receive
-        registered -> ok
-    after 1000 -> erlang:error(impostor_not_registered)
-    end,
+    ?awaitMessage(registered, 1000),
     beamtalk_transcript_facade:show(<<"secret">>),
     ?assertMatch({notice, _, <<"secret">>}, next_event()),
     ?assertBtError(no_workspace, beamtalk_transcript_facade:recent()),

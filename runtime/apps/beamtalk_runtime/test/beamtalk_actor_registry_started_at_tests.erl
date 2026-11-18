@@ -13,6 +13,7 @@ backing process): the side that has one is kept, in either argument order.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %% A process that carries `StartedAt` (or no key at all when `undefined`).
 start_proc(StartedAt) ->
@@ -26,18 +27,8 @@ start_proc(StartedAt) ->
     end),
     %% Bounded: an unbounded receive turns a process that never started into
     %% an anonymous eunit timeout. Name what did not start instead.
-    receive
-        {ready, Pid} -> Pid
-    after 10000 ->
-        erlang:error(
-            {test_proc_did_not_start, #{
-                pid => Pid,
-                alive => is_process_alive(Pid),
-                process_info => erlang:process_info(Pid, [status, current_stacktrace]),
-                run_queue => erlang:statistics(run_queue)
-            }}
-        )
-    end.
+    ?awaitMessage({ready, Pid}, 10000),
+    Pid.
 
 stop_proc(Pid) ->
     Pid ! stop.

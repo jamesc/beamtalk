@@ -106,7 +106,7 @@ pub(crate) struct ClassIndexResult {
 /// Computes module names for all source files, builds the class-to-module and
 /// class-to-superclass indexes, merges dependency class indexes, and validates
 /// stdlib reservation violations.
-#[allow(clippy::too_many_lines)] // linear merge pipeline (source + N deps) — split adds indirection, not clarity
+#[allow(clippy::too_many_lines)] // linear merge pipeline (source + N deps); the surface-hash step is split out
 pub(crate) fn build_class_index(
     env: &BuildEnvironment,
     dep_ctx: &DependencyContext,
@@ -310,51 +310,18 @@ pub(crate) fn build_class_index(
             env.source_root.as_deref(),
             pkg,
         );
-        // BT-4336: hashed after flattening, over the cross-file context Pass 2
-        // hands `analyse_full` (pre-loaded classes, protocols, aliases and
-        // standalone extensions; the project-known Erlang modules are folded
-        // in by `execute_build_passes`), so any cross-file signature change
-        // re-checks every file instead of replaying stale diagnostics.
-        analysis_surface_hash = crate::commands::util::analysis_surface_hash(
-            &all_class_infos,
-            &all_protocol_infos,
-            &all_alias_infos,
-            &extension_index,
+        (analysis_surface_hash, surface_keys) = analysis_surface(
+            &SurfaceInputs {
+                class_infos: &all_class_infos,
+                protocol_infos: &all_protocol_infos,
+                alias_infos: &all_alias_infos,
+                extension_index: &extension_index,
+                class_superclass_index: &class_superclass_index,
+                class_module_index: &class_module_index,
+            },
+            options,
+            dependency_extensions_complete,
         );
-        // The dependency guard's final value changes every file's
-        // diagnostics, and can flip without the extension index changing (a
-        // dependency file gains a parse error; diagnostics cached before
-        // dependency extensions were loaded at all), so for a package with
-        // dependencies it is part of the surface too. Folded as the value
-        // analysis will actually use (`beam_compiler` computes it the same
-        // way), so the two cannot drift apart.
-        let mut globals = String::new();
-        if options.dependency_extensions_unknown {
-            let guard = beamtalk_project::dependency_extensions::dependency_extensions_unknown(
-                options.dependency_extensions_unknown,
-                true,
-                dependency_extensions_complete,
-            );
-            analysis_surface_hash = beamtalk_package::content_hash::sha256_hex(
-                format!("{analysis_surface_hash}\ndependency-extensions-unknown:{guard}")
-                    .as_bytes(),
-            );
-            globals = format!("dependency-extensions-unknown:{guard}");
-        }
-        if !analysis_surface_hash.is_empty() {
-            surface_keys = super::surface_key::SurfaceKeys::build(
-                &all_class_infos,
-                &all_protocol_infos,
-                &all_alias_infos,
-                &extension_index,
-                &class_superclass_index,
-                &class_module_index,
-            )
-            .map(|mut keys| {
-                keys.globals = globals;
-                keys
-            });
-        }
     }
 
     // Taken after trait flattening, which rewrites only project classes'
@@ -380,6 +347,73 @@ pub(crate) fn build_class_index(
         analysis_surface_hash,
         surface_keys,
     })
+}
+
+/// The cross-file context Pass 2 hands `analyse_full`, for hashing.
+struct SurfaceInputs<'a> {
+    class_infos: &'a [beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    protocol_infos: &'a [beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo],
+    alias_infos: &'a [beamtalk_core::semantic_analysis::AliasInfo],
+    extension_index: &'a beamtalk_core::compilation::extension_index::ExtensionIndex,
+    class_superclass_index: &'a HashMap<String, String>,
+    class_module_index: &'a HashMap<String, String>,
+}
+
+/// The analysis-surface hash and per-name surface keys for a package build,
+/// computed after trait flattening. See the comments below for what is folded
+/// in and why.
+fn analysis_surface(
+    inputs: &SurfaceInputs<'_>,
+    options: &beamtalk_core::CompilerOptions,
+    dependency_extensions_complete: bool,
+) -> (String, Option<super::surface_key::SurfaceKeys>) {
+    // BT-4336: hashed after flattening, over the cross-file context Pass 2
+    // hands `analyse_full` (pre-loaded classes, protocols, aliases and
+    // standalone extensions; the project-known Erlang modules are folded
+    // in by `execute_build_passes`), so any cross-file signature change
+    // re-checks every file instead of replaying stale diagnostics.
+    let mut analysis_surface_hash = crate::commands::util::analysis_surface_hash(
+        inputs.class_infos,
+        inputs.protocol_infos,
+        inputs.alias_infos,
+        inputs.extension_index,
+    );
+    // The dependency guard's final value changes every file's
+    // diagnostics, and can flip without the extension index changing (a
+    // dependency file gains a parse error; diagnostics cached before
+    // dependency extensions were loaded at all), so for a package with
+    // dependencies it is part of the surface too. Folded as the value
+    // analysis will actually use (`beam_compiler` computes it the same
+    // way), so the two cannot drift apart.
+    let mut globals = String::new();
+    if options.dependency_extensions_unknown {
+        let guard = beamtalk_project::dependency_extensions::dependency_extensions_unknown(
+            options.dependency_extensions_unknown,
+            true,
+            dependency_extensions_complete,
+        );
+        analysis_surface_hash = beamtalk_package::content_hash::sha256_hex(
+            format!("{analysis_surface_hash}\ndependency-extensions-unknown:{guard}").as_bytes(),
+        );
+        globals = format!("dependency-extensions-unknown:{guard}");
+    }
+    let surface_keys = if analysis_surface_hash.is_empty() {
+        None
+    } else {
+        super::surface_key::SurfaceKeys::build(
+            inputs.class_infos,
+            inputs.protocol_infos,
+            inputs.alias_infos,
+            inputs.extension_index,
+            inputs.class_superclass_index,
+            inputs.class_module_index,
+        )
+        .map(|mut keys| {
+            keys.globals = globals;
+            keys
+        })
+    };
+    (analysis_surface_hash, surface_keys)
 }
 
 /// Replaces, in `all_class_infos`, the `ClassInfo` of every class declared in a

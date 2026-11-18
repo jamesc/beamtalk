@@ -196,6 +196,7 @@ fn otp_app_start_fragment(otp_app_name: Option<&str>) -> String {
 /// or cover export).
 pub fn startup_prelude(port: u16, bind_addr: Option<Ipv4Addr>, log_level: &str) -> String {
     let bind_addr_erl = format_bind_addr_erl(bind_addr);
+    let idle_seconds = beamtalk_workspace::DEFAULT_IDLE_TIMEOUT_SECONDS;
     format!(
         "logger:remove_handler(default), \
          application:set_env(beamtalk_runtime, repl_port, {port}), \
@@ -210,7 +211,7 @@ pub fn startup_prelude(port: u16, bind_addr: Option<Ipv4Addr>, log_level: &str) 
              tcp_port => {port}, \
              bind_addr => {bind_addr_erl}, \
              auto_cleanup => false, \
-             max_idle_seconds => 14400}})"
+             max_idle_seconds => {idle_seconds}}})"
     )
 }
 

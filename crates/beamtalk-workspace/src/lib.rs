@@ -57,6 +57,25 @@ macro_rules! cargo_workspace_root {
     };
 }
 
+/// Default workspace idle timeout in seconds (4 hours).
+pub const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 3600 * 4;
+
+/// Environment variable that overrides [`DEFAULT_IDLE_TIMEOUT_SECONDS`].
+pub const IDLE_TIMEOUT_ENV_VAR: &str = "BEAMTALK_WORKSPACE_TIMEOUT";
+
+/// The workspace idle timeout in seconds: `BEAMTALK_WORKSPACE_TIMEOUT` when it
+/// parses as a `u64`, else [`DEFAULT_IDLE_TIMEOUT_SECONDS`].
+///
+/// The one reader of the variable, shared by the CLI and the MCP server so the
+/// default and the parse rule cannot drift apart.
+#[must_use]
+pub fn idle_timeout_seconds_from_env() -> u64 {
+    std::env::var(IDLE_TIMEOUT_ENV_VAR)
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_IDLE_TIMEOUT_SECONDS)
+}
+
 /// Lowercase-hex-encode a byte slice.
 ///
 /// The shared leaf under every hash-to-hex-string need in these tools —

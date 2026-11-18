@@ -10,12 +10,14 @@ Runtime half of the structured-error assertion macros in
 `include/beamtalk_test_assert.hrl` (BT-4900).
 
 The macros that check message / hint text cannot be written as a pure
-pattern match, so they call `contains/2` here.
+pattern match, so they call `contains/2` here. `?awaitMessage` and
+`?assertNoMessage` (BT-5038) call `await_timeout/3` / `no_message/2` to raise
+a failure that names the pattern and shows the mailbox.
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
--export([contains/2, raised_error/1]).
+-export([contains/2, raised_error/1, await_timeout/3, no_message/2]).
 
 -doc """
 True when `Needle` occurs in `Text`.
@@ -48,3 +50,31 @@ raised_error(Fun) ->
     catch
         error:#{error := #beamtalk_error{} = Err} -> Err
     end.
+
+-doc """
+Raise the failure of a timed-out `?awaitMessage(Pattern, TimeoutMs)`: names the
+source text of `Pattern` and shows the calling process's mailbox, so a test that
+never received its message says what it got instead.
+""".
+-spec await_timeout(string(), timeout(), pos_integer()) -> no_return().
+await_timeout(PatternText, TimeoutMs, Line) ->
+    erlang:error(
+        {await_message_timeout, [
+            {pattern, PatternText},
+            {timeout_ms, TimeoutMs},
+            {line, Line},
+            {mailbox, mailbox()}
+        ]}
+    ).
+
+-doc """
+Raise the failure of an `?assertNoMessage(Pattern, Ms)` that received a match.
+""".
+-spec no_message(string(), pos_integer()) -> no_return().
+no_message(PatternText, Line) ->
+    erlang:error({unexpected_message, [{pattern, PatternText}, {line, Line}]}).
+
+-spec mailbox() -> [term()].
+mailbox() ->
+    {messages, Messages} = process_info(self(), messages),
+    Messages.

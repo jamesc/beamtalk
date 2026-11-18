@@ -26,6 +26,7 @@ live remote node and are not covered here.
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk_supervisor_capacity.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% -----------------------------------------------------------------------
 %%% init_child_capacity/1 — reinit branches
@@ -48,9 +49,7 @@ init_child_capacity_dead_monitor_reuses_table_test() ->
     Tid = ets:new(beamtalk_sup_child_capacity, [public, set, {write_concurrency, true}]),
     true = ets:insert(Tid, {count, 7}),
     {DeadMon, MRef} = spawn_monitor(fun() -> ok end),
-    receive
-        {'DOWN', MRef, process, DeadMon, _} -> ok
-    end,
+    ?awaitMessage({'DOWN', MRef, process, DeadMon, _}),
     put(?MAX_CHILDREN_STATE_KEY, {Tid, DeadMon}),
     {NewTid, NewMonPid} = beamtalk_supervisor_capacity:init_child_capacity(10),
     ?assertEqual(Tid, NewTid),

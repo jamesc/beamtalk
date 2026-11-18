@@ -643,11 +643,8 @@ run_in_worker(Fun) ->
     Parent = self(),
     Ref = make_ref(),
     spawn(fun() -> Parent ! {Ref, Fun()} end),
-    receive
-        {Ref, Result} -> Result
-    after 5000 ->
-        erlang:error(worker_timeout)
-    end.
+    ?awaitMessage({Ref, Result}),
+    Result.
 
 %% Register/unregister this process as the workspace-meta sentinel, but only if
 %% no real meta process is already registered (so we don't clobber it).

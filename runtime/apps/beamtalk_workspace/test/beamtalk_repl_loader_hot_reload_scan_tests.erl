@@ -18,6 +18,7 @@ Hot reload finds live instances by the process scan (ADR 0150, BT-4947):
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 fixture_opts() ->
     #{
@@ -84,10 +85,8 @@ trace_scans(Classes, Fun) ->
     end,
     Ref = make_ref(),
     Tracer ! {done, self(), Ref},
-    receive
-        {Ref, Calls} -> reload_calls(Classes, Calls)
-    after 5000 -> error(tracer_timeout)
-    end.
+    ?awaitMessage({Ref, Calls}),
+    reload_calls(Classes, Calls).
 
 tracer_loop(Acc) ->
     receive
@@ -129,9 +128,7 @@ drop_fake_natives() ->
         fun(P) ->
             MRef = erlang:monitor(process, P),
             exit(P, kill),
-            receive
-                {'DOWN', MRef, process, P, _} -> ok
-            end
+            ?awaitMessage({'DOWN', MRef, process, P, _})
         end,
         Fakes
     ).

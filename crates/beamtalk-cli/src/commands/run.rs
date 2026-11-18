@@ -399,9 +399,6 @@ fn run_connected(
     workspace_name: Option<&str>,
     raw_mfa: bool,
 ) -> Result<()> {
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
-
     use crate::commands::repl::process::connect_with_retries;
 
     let is_keyword = validate_class_and_selector(class_name, selector)?;
@@ -453,8 +450,7 @@ fn run_connected(
     eprintln!("Running {class_name}>>{selector} (connected)...\n");
 
     // Ctrl-C interrupts the dispatched job (parity with the REPL eval path).
-    let interrupted = Arc::new(AtomicBool::new(false));
-    let _ = signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&interrupted));
+    let interrupted = super::util::sigint_flag();
 
     let response = client.dispatch_entry(class_name, selector, program_args, &interrupted)?;
 

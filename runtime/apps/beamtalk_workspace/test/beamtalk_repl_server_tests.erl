@@ -13,6 +13,7 @@ beamtalk_repl_json_tests.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Tests
@@ -656,10 +657,7 @@ tcp_inspect_dead_actor_test(Port) ->
     Pid = spawn(fun() -> ok end),
     %% Wait until the process is confirmed dead
     MRef = erlang:monitor(process, Pid),
-    receive
-        {'DOWN', MRef, process, Pid, _} -> ok
-    after 1000 -> error(timeout)
-    end,
+    ?awaitMessage({'DOWN', MRef, process, Pid, _}, 1000),
     PidStr = list_to_binary(pid_to_list(Pid)),
     Msg = iolist_to_binary(
         json:encode(#{<<"op">> => <<"inspect">>, <<"id">> => <<"t19">>, <<"actor">> => PidStr})
@@ -1509,11 +1507,7 @@ session_table_unknown_session_returns_default_test() ->
 session_table_dead_pid_returns_default_test() ->
     beamtalk_session_table:new(),
     SessionId = <<"test-session-bt1045-dead">>,
-    MonRef = erlang:monitor(process, spawn(fun() -> ok end)),
-    DeadPid =
-        receive
-            {'DOWN', MonRef, process, Pid, _} -> Pid
-        end,
+    DeadPid = beamtalk_test_proc:dead_pid(),
     beamtalk_session_table:insert(SessionId, DeadPid),
     Default = self(),
     Result = beamtalk_session_table:resolve_pid(SessionId, Default),
@@ -1534,11 +1528,7 @@ get_session_bindings_from_live_shell_returns_map_test() ->
 
 %% Dead shell PID → returns empty map without crashing
 get_session_bindings_dead_pid_returns_empty_test() ->
-    MonRef = erlang:monitor(process, spawn(fun() -> ok end)),
-    DeadPid =
-        receive
-            {'DOWN', MonRef, process, Pid, _} -> Pid
-        end,
+    DeadPid = beamtalk_test_proc:dead_pid(),
     Result = beamtalk_repl_ops_dev:get_session_bindings(DeadPid),
     ?assertEqual(#{}, Result).
 

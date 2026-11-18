@@ -13,7 +13,7 @@
 //! * A REPL op exists in the runtime that is not listed in the parity doc.
 //! * The parity doc lists a non–`surface-specific` binding for a REPL op
 //!   on a surface where the corresponding code artifact is missing.
-//! * An MCP tool is implemented in `crates/beamtalk-mcp/src/server.rs` but
+//! * An MCP tool is implemented in `crates/beamtalk-mcp/src/server/tools/` but
 //!   is not referenced anywhere in the parity doc.
 //! * A REPL meta-command is dispatched in
 //!   `crates/beamtalk-cli/src/commands/repl/handlers.rs` but is not referenced

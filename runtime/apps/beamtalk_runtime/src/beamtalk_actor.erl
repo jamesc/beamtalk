@@ -1409,6 +1409,89 @@ pid raises as there.
 async_send_known(Ref, Class, Selector, Args, FuturePid) ->
     async_send_impl(Ref, Selector, Args, FuturePid, Class).
 
+%% Lifecycle selectors answered locally with a plain value or error, shared by
+%% async_send_impl/5 and sync_send_pid/4. Each selector is matched with its
+%% exact arity so a wrong-arity send falls through to normal dispatch.
+-define(IS_LOCAL_LIFECYCLE(S, A),
+    ((A =:= [] andalso
+        (S =:= isAlive orelse S =:= kill orelse S =:= delegate orelse S =:= pid orelse
+            S =:= monitor)) orelse
+        (S =:= 'onExit:' andalso length(A) =:= 1))
+).
+
+-spec local_lifecycle(pid(), atom(), list()) -> {value, term()} | {error, #beamtalk_error{}}.
+local_lifecycle(ActorPid, isAlive, []) ->
+    {value, beamtalk_pid:is_alive(ActorPid)};
+local_lifecycle(ActorPid, kill, []) ->
+    %% Telemetry, monitor-before-kill, and DOWN-wait are in kill_and_wait/1.
+    %% If no DOWN is observed within 5 s we cannot claim success.
+    case kill_and_wait(ActorPid) of
+        ok -> {value, ok};
+        {error, _} = Err -> Err
+    end;
+local_lifecycle(_ActorPid, delegate, []) ->
+    %% Non-native Actors do not have a backing Erlang module.
+    {error, delegate_error(unknown)};
+local_lifecycle(ActorPid, pid, []) ->
+    {value, ActorPid};
+local_lifecycle(ActorPid, monitor, []) ->
+    {value, erlang:monitor(process, ActorPid)};
+local_lifecycle(ActorPid, 'onExit:', [Block]) ->
+    case start_exit_watcher(ActorPid, Block) of
+        ok ->
+            {value, ok};
+        timeout ->
+            {error,
+                beamtalk_error:new(
+                    timeout,
+                    unknown,
+                    'onExit:',
+                    <<"onExit: watcher did not start within 5000ms">>
+                )}
+    end.
+
+%% Spawn a watcher that monitors ActorPid and runs Block(Reason) on exit.
+%% Waits (max 5 s) for the watcher's monitor to be installed before returning,
+%% correlated by a unique token so stale/parallel watchers cannot confuse it.
+-spec start_exit_watcher(pid(), fun((term()) -> term())) -> ok | timeout.
+start_exit_watcher(ActorPid, Block) ->
+    Caller = self(),
+    Token = make_ref(),
+    WatcherPid = spawn(fun() ->
+        logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+        Ref = erlang:monitor(process, ActorPid),
+        Caller ! {onExit_ready, Token},
+        receive
+            {'DOWN', Ref, process, ActorPid, Reason} ->
+                %% bt-catcher-audit: not-applicable-other-process - onExit block runs in the
+                %% spawned watcher, no home entry
+                try
+                    Block(Reason)
+                catch
+                    Class:Err:Stack ->
+                        ?LOG_WARNING("Error in onExit: callback", #{
+                            domain => [beamtalk, runtime],
+                            actor_pid => ActorPid,
+                            exit_reason => Reason,
+                            error_class => Class,
+                            error => Err,
+                            stacktrace => Stack
+                        })
+                end
+        end
+    end),
+    receive
+        {onExit_ready, Token} -> ok
+    after 5000 ->
+        %% Kill the watcher to prevent ghost callbacks and flush stale token.
+        exit(WatcherPid, kill),
+        receive
+            {onExit_ready, Token} -> ok
+        after 0 -> ok
+        end,
+        timeout
+    end.
+
 -spec async_send_impl(
     pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()},
     atom(),
@@ -1430,10 +1513,14 @@ async_send_impl(Ref, Selector, Args, FuturePid, ClassHint) when ?IS_PROXY_REF(Re
             beamtalk_future:reject(FuturePid, Error),
             ok
     end;
-async_send_impl(ActorPid, isAlive, [], FuturePid, _ClassHint) ->
-    %% isAlive is handled locally - no message to the actor
-    Result = beamtalk_pid:is_alive(ActorPid),
-    beamtalk_future:resolve(FuturePid, Result),
+async_send_impl(ActorPid, Selector, Args, FuturePid, _ClassHint) when
+    ?IS_LOCAL_LIFECYCLE(Selector, Args)
+->
+    %% Local lifecycle selectors share one table with sync_send_pid/4.
+    case local_lifecycle(ActorPid, Selector, Args) of
+        {value, Value} -> beamtalk_future:resolve(FuturePid, Value);
+        {error, Error} -> beamtalk_future:reject(FuturePid, Error)
+    end,
     ok;
 async_send_impl(ActorPid, isRemote, [], FuturePid, _ClassHint) ->
     %% isRemote must compare against the *caller's* node, so it cannot run
@@ -1480,83 +1567,6 @@ async_send_impl(
     _ClassHint
 ) ->
     async_request_continuation(ActorPid, Selector, ContSelector, {args, ContArgs}, FuturePid);
-async_send_impl(ActorPid, kill, [], FuturePid, _ClassHint) ->
-    %% kill is handled locally - forcefully kills the actor process.
-    %% Telemetry, monitor-before-kill, and DOWN-wait are in kill_and_wait/1.
-    case kill_and_wait(ActorPid) of
-        ok ->
-            beamtalk_future:resolve(FuturePid, ok);
-        {error, Error} ->
-            %% We did not observe a DOWN within 5 s; cannot guarantee the actor
-            %% is gone, so reject the future rather than silently claiming success.
-            beamtalk_future:reject(FuturePid, Error)
-    end,
-    ok;
-async_send_impl(_ActorPid, delegate, [], FuturePid, _ClassHint) ->
-    %% Non-native Actors do not have a backing Erlang module.
-    beamtalk_future:reject(FuturePid, delegate_error(unknown)),
-    ok;
-async_send_impl(ActorPid, pid, [], FuturePid, _ClassHint) ->
-    %% pid returns the raw Erlang PID backing the actor
-    beamtalk_future:resolve(FuturePid, ActorPid),
-    ok;
-async_send_impl(ActorPid, monitor, [], FuturePid, _ClassHint) ->
-    %% monitor is handled locally - creates an Erlang monitor
-    Ref = erlang:monitor(process, ActorPid),
-    beamtalk_future:resolve(FuturePid, Ref),
-    ok;
-async_send_impl(ActorPid, 'onExit:', [Block], FuturePid, _ClassHint) ->
-    %% onExit: monitors the actor and calls block with reason on exit.
-    %% Synchronize with the watcher to ensure the monitor is set up before resolving.
-    %% Use a unique ref token to correlate the ready message (prevents stale/parallel confusion).
-    Caller = self(),
-    Token = make_ref(),
-    WatcherPid = spawn(fun() ->
-        Ref = erlang:monitor(process, ActorPid),
-        Caller ! {onExit_ready, Token},
-        receive
-            {'DOWN', Ref, process, ActorPid, Reason} ->
-                %% bt-catcher-audit: not-applicable-other-process - onExit block runs in the
-                %% spawned watcher, no home entry
-                try
-                    Block(Reason)
-                catch
-                    Class:Err:Stack ->
-                        ?LOG_WARNING("Error in onExit: callback", #{
-                            actor_pid => ActorPid,
-                            exit_reason => Reason,
-                            error_class => Class,
-                            error => Err,
-                            stacktrace => Stack
-                        })
-                end
-        end
-    end),
-    case
-        receive
-            {onExit_ready, Token} -> ok
-        after 5000 ->
-            %% Kill the watcher to prevent ghost callbacks and flush stale token.
-            exit(WatcherPid, kill),
-            receive
-                {onExit_ready, Token} -> ok
-            after 0 -> ok
-            end,
-            timeout
-        end
-    of
-        ok ->
-            beamtalk_future:resolve(FuturePid, ok);
-        timeout ->
-            Error = beamtalk_error:new(
-                timeout,
-                unknown,
-                'onExit:',
-                <<"onExit: watcher did not start within 5000ms">>
-            ),
-            beamtalk_future:reject(FuturePid, Error)
-    end,
-    ok;
 async_send_impl(ActorPid, Selector, _Args, FuturePid, ClassHint) when
     node(ActorPid) =/= node()
 ->
@@ -1767,8 +1777,11 @@ every other message through the Layer 1 self-send check. `ClassHint` is the
 caller's class, or `undefined` to look it up (see `resolve_class/2`).
 """.
 -spec sync_send_pid(pid(), atom(), list(), atom() | undefined) -> term().
-sync_send_pid(ActorPid, isAlive, [], _Class) ->
-    beamtalk_pid:is_alive(ActorPid);
+sync_send_pid(ActorPid, Selector, Args, _Class) when ?IS_LOCAL_LIFECYCLE(Selector, Args) ->
+    case local_lifecycle(ActorPid, Selector, Args) of
+        {value, Value} -> Value;
+        {error, Error} -> beamtalk_exception_handler:reraise(Error)
+    end;
 sync_send_pid(ActorPid, isRemote, [], _Class) ->
     is_remote(ActorPid, fun() -> sync_send(ActorPid, node, []) end);
 sync_send_pid(ActorPid, stop, [], _Class) ->
@@ -1791,65 +1804,6 @@ sync_send_pid(ActorPid, 'continueWith:' = Selector, [ContSelector], _Class) ->
     request_continuation(ActorPid, Selector, ContSelector, none);
 sync_send_pid(ActorPid, 'continueWith:withArguments:' = Selector, [ContSelector, ContArgs], _Class) ->
     request_continuation(ActorPid, Selector, ContSelector, {args, ContArgs});
-sync_send_pid(ActorPid, kill, [], _Class) ->
-    %% kill is handled locally - forcefully kills the actor process.
-    %% Telemetry, monitor-before-kill, and DOWN-wait are in kill_and_wait/1.
-    case kill_and_wait(ActorPid) of
-        ok -> ok;
-        {error, Error} -> beamtalk_exception_handler:reraise(Error)
-    end;
-sync_send_pid(_ActorPid, delegate, [], _Class) ->
-    %% Non-native Actors do not have a backing Erlang module.
-    %% Native Actors will override this at the codegen level.
-    beamtalk_exception_handler:reraise(delegate_error(unknown));
-sync_send_pid(ActorPid, pid, [], _Class) ->
-    %% pid returns the raw Erlang PID backing the actor
-    ActorPid;
-sync_send_pid(ActorPid, monitor, [], _Class) ->
-    erlang:monitor(process, ActorPid);
-sync_send_pid(ActorPid, 'onExit:', [Block], _Class) ->
-    %% onExit: monitors the actor and calls block with reason on exit.
-    %% Synchronize with the watcher to ensure the monitor is set up before returning.
-    %% Use a unique ref token to correlate the ready message.
-    Caller = self(),
-    Token = make_ref(),
-    WatcherPid = spawn(fun() ->
-        Ref = erlang:monitor(process, ActorPid),
-        Caller ! {onExit_ready, Token},
-        receive
-            {'DOWN', Ref, process, ActorPid, Reason} ->
-                %% bt-catcher-audit: not-applicable-other-process - onExit block runs in the
-                %% spawned watcher, no home entry
-                try
-                    Block(Reason)
-                catch
-                    Class:Err:Stack ->
-                        ?LOG_WARNING("Error in onExit: callback", #{
-                            actor_pid => ActorPid,
-                            exit_reason => Reason,
-                            error_class => Class,
-                            error => Err,
-                            stacktrace => Stack
-                        })
-                end
-        end
-    end),
-    case
-        receive
-            {onExit_ready, Token} -> ok
-        after 5000 ->
-            %% Kill the watcher to prevent ghost callbacks and flush stale token.
-            exit(WatcherPid, kill),
-            receive
-                {onExit_ready, Token} -> ok
-            after 0 -> ok
-            end,
-            timeout
-        end
-    of
-        ok -> ok;
-        timeout -> raise_timeout('onExit:')
-    end;
 sync_send_pid(ActorPid, Selector, Args, ClassHint) ->
     %% Layer 1: Fast-path for self-sends.
     %% If ActorPid is our own process AND the installed cell holds our own
@@ -2326,20 +2280,14 @@ be registered there — the node just cannot be asked).
 resolve_remote_registered(Name, Node) when Node =:= node() ->
     erlang:whereis(Name);
 resolve_remote_registered(Name, Node) ->
-    try erpc:call(Node, erlang, whereis, [Name], ?BT_REMOTE_CALL_TIMEOUT) of
-        Pid when is_pid(Pid) -> Pid;
-        undefined -> undefined
-    catch
-        %% Every erpc-level failure (an unusual reason, or the remote
-        %% erlang:whereis/1 itself somehow raising) collapses to the same
-        %% node_down sentinel this function already returns for the common
-        %% noconnection/timeout cases: this is a best-effort existence
-        %% check, not a Result-returning API, so there is no richer outcome
-        %% to report — "could not determine" and "node unreachable" are the
-        %% same actionable fact to every call site here.
-        error:{erpc, _ErpcReason} -> node_down;
-        error:{exception, _Reason, _Stack} -> node_down;
-        exit:{exception, _Reason} -> node_down
+    %% Every erpc-level failure (an unusual reason, or the remote
+    %% erlang:whereis/1 itself somehow raising) collapses to the same
+    %% node_down sentinel: this is a best-effort existence check, so "could
+    %% not determine" and "node unreachable" are the same actionable fact.
+    case beamtalk_call_failure:erpc(Node, erlang, whereis, [Name], ?BT_REMOTE_CALL_TIMEOUT) of
+        {ok, Pid} when is_pid(Pid) -> Pid;
+        {ok, undefined} -> undefined;
+        {error, _} -> node_down
     end.
 
 -doc """

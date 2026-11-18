@@ -20,6 +20,7 @@ Covers the acceptance criteria:
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Setup / teardown
@@ -42,11 +43,8 @@ stop_dummy(Pid) ->
     beamtalk_test_wait:dead(Pid).
 
 expect_change(Pid) ->
-    receive
-        {object_changed, Pid, Slots} -> Slots
-    after 1000 ->
-        ?assert(false)
-    end.
+    ?awaitMessage({object_changed, Pid, Slots}, 1000),
+    Slots.
 
 refute_change(Pid) ->
     receive
@@ -143,10 +141,7 @@ subscriber_death_cleans_up_test_() ->
                     die -> ok
                 end
             end),
-            receive
-                subscribed -> ok
-            after 1000 -> ?assert(false)
-            end,
+            ?awaitMessage(subscribed, 1000),
             ok = sync(ok),
             ?assert(beamtalk_object_watch:is_watched(Actor)),
             Sub ! die,
@@ -183,17 +178,14 @@ multiple_subscribers_each_notified_test_() ->
                 after 1000 -> Test ! sub2_timeout
                 end
             end),
-            receive
-                ready -> ok
-            after 1000 -> ?assert(false)
-            end,
+            ?awaitMessage(ready, 1000),
             ok = beamtalk_object_watch:subscribe(Actor, self()),
             ok = sync(ok),
             ok = beamtalk_object_watch:publish_change(Actor, 'Counter', [x]),
             ?assertEqual([x], expect_change(Actor)),
-            receive
-                {sub2_got, Actor, Slots} -> ?assertEqual([x], Slots)
-            after 1000 -> ?assert(false)
+            begin
+                ?awaitMessage({sub2_got, Actor, Slots}, 1000),
+                ?assertEqual([x], Slots)
             end,
             stop_dummy(Actor)
         end)

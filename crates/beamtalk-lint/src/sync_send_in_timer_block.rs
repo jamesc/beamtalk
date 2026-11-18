@@ -20,8 +20,8 @@
 //! ```
 
 use crate::{LintContext, LintPass, async_cast_hint};
-use beamtalk_core::ast::{BinarySegment, Block, Expression, Identifier, MessageSelector, Module};
-use beamtalk_core::ast_walker::cascade_sends;
+use beamtalk_core::ast::{Expression, Identifier, MessageSelector, Module};
+use beamtalk_core::ast_walker::{cascade_sends, for_each_child};
 use beamtalk_core::source_analysis::{Diagnostic, Span};
 
 /// Lint pass that warns on synchronous `self` sends inside `Timer every:do:`
@@ -124,12 +124,13 @@ fn check_message_send(
 /// Recursively walks an expression tree. When `in_timer_block` is true, we are
 /// inside a `Timer every:do:` or `Timer after:do:` block and should flag sync
 /// self-sends.
-#[allow(clippy::too_many_lines)]
 fn walk_for_timer_sends(
     expr: &Expression,
     in_timer_block: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // Children that need their own `in_timer_block` state are handled here and
+    // then skipped by the generic descent below.
     match expr {
         Expression::MessageSend {
             receiver,
@@ -137,43 +138,18 @@ fn walk_for_timer_sends(
             arguments,
             is_cast,
             span,
-        } => {
-            if check_message_send(
-                receiver,
-                selector,
-                arguments,
-                *is_cast,
-                *span,
-                in_timer_block,
-                diagnostics,
-            ) {
-                return;
-            }
-            walk_for_timer_sends(receiver, in_timer_block, diagnostics);
-            for arg in arguments {
-                walk_for_timer_sends(arg, in_timer_block, diagnostics);
-            }
+        } if check_message_send(
+            receiver,
+            selector,
+            arguments,
+            *is_cast,
+            *span,
+            in_timer_block,
+            diagnostics,
+        ) =>
+        {
+            return;
         }
-
-        Expression::Block(Block { body, .. }) => {
-            for stmt in body {
-                walk_for_timer_sends(&stmt.expression, in_timer_block, diagnostics);
-            }
-        }
-
-        Expression::Assignment { target, value, .. } => {
-            walk_for_timer_sends(target, in_timer_block, diagnostics);
-            walk_for_timer_sends(value, in_timer_block, diagnostics);
-        }
-
-        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
-            walk_for_timer_sends(value, in_timer_block, diagnostics);
-        }
-
-        Expression::FieldAccess { receiver, .. } => {
-            walk_for_timer_sends(receiver, in_timer_block, diagnostics);
-        }
-
         Expression::Cascade {
             receiver,
             messages,
@@ -210,67 +186,13 @@ fn walk_for_timer_sends(
                     walk_for_timer_sends(arg, in_timer_block, diagnostics);
                 }
             }
+            return;
         }
-
-        Expression::Parenthesized { expression, .. } => {
-            walk_for_timer_sends(expression, in_timer_block, diagnostics);
-        }
-
-        Expression::Match { value, arms, .. } => {
-            walk_for_timer_sends(value, in_timer_block, diagnostics);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    walk_for_timer_sends(guard, in_timer_block, diagnostics);
-                }
-                walk_for_timer_sends(&arm.body, in_timer_block, diagnostics);
-            }
-        }
-
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                walk_for_timer_sends(&pair.key, in_timer_block, diagnostics);
-                walk_for_timer_sends(&pair.value, in_timer_block, diagnostics);
-            }
-        }
-
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                walk_for_timer_sends(elem, in_timer_block, diagnostics);
-            }
-            if let Some(t) = tail {
-                walk_for_timer_sends(t, in_timer_block, diagnostics);
-            }
-        }
-
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for elem in elements {
-                walk_for_timer_sends(elem, in_timer_block, diagnostics);
-            }
-        }
-
-        Expression::StringInterpolation { segments, .. } => {
-            for seg in segments {
-                if let beamtalk_core::ast::StringSegment::Interpolation(e) = seg {
-                    walk_for_timer_sends(e, in_timer_block, diagnostics);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                walk_for_timer_sends(e, in_timer_block, diagnostics);
-            }
-        }
-
-        // Leaf nodes — nothing to recurse into.
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::ClassReference { .. }
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Error { .. }
-        | Expression::Spread { .. } => {}
+        _ => {}
     }
+    for_each_child(expr, &mut |child| {
+        walk_for_timer_sends(child, in_timer_block, diagnostics);
+    });
 }
 
 #[cfg(test)]

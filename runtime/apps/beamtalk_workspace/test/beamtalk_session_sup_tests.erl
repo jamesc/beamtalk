@@ -9,6 +9,7 @@ Unit tests for beamtalk_session_sup module
 Tests session supervisor behavior.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Tests
@@ -185,7 +186,4 @@ stop_sup(Sup) when is_pid(Sup) ->
     Ref = monitor(process, Sup),
     unlink(Sup),
     exit(Sup, shutdown),
-    receive
-        {'DOWN', Ref, process, Sup, _} -> ok
-    after 5000 -> error(timeout_stopping_session_sup)
-    end.
+    ?awaitMessage({'DOWN', Ref, process, Sup, _}).

@@ -12,6 +12,7 @@ immediately, and the snapshot-plus-feed protocol loses and duplicates nothing.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %% proc_lib entry point for the fake unmarked `native:` backing process.
 -export([init/1]).
@@ -23,14 +24,6 @@ init(_) ->
 native_loop() ->
     receive
         stop -> ok
-    end.
-
-stop(Pid) ->
-    unlink(Pid),
-    MonRef = erlang:monitor(process, Pid),
-    exit(Pid, kill),
-    receive
-        {'DOWN', MonRef, process, Pid, _} -> ok
     end.
 
 %% A marker-carrying process, like a generated `init/1` leaves behind.
@@ -65,7 +58,7 @@ sync_spawn_visible_to_next_list_test() ->
             [M || #{pid := P} = M <- beamtalk_workspace_actors:list(), P =:= Pid]
         )
     after
-        stop(Pid)
+        beamtalk_test_proc:kill_and_wait(Pid)
     end.
 
 list_metadata_shape_test() ->
@@ -79,7 +72,7 @@ list_metadata_shape_test() ->
         ?assert(is_integer(At)),
         ?assert(abs(At - erlang:system_time(second)) < 5)
     after
-        stop(Pid)
+        beamtalk_test_proc:kill_and_wait(Pid)
     end.
 
 list_missing_start_time_is_null_test() ->
@@ -100,12 +93,12 @@ list_missing_start_time_is_null_test() ->
             [M || #{pid := P} = M <- beamtalk_workspace_actors:list(), P =:= Pid]
         )
     after
-        stop(Pid)
+        beamtalk_test_proc:kill_and_wait(Pid)
     end.
 
 list_drops_dead_actor_test() ->
     Pid = marked('Gone'),
-    stop(Pid),
+    beamtalk_test_proc:kill_and_wait(Pid),
     ?assertNot(lists:member(Pid, pids(beamtalk_workspace_actors:list()))).
 
 %% BT-4960 (owner decision, 16 Nov 2026): the workspace lists include `native:`
@@ -154,7 +147,7 @@ system_actor_is_flagged_test() ->
             )
         end)
     after
-        stop(User)
+        beamtalk_test_proc:kill_and_wait(User)
     end.
 
 %% The workspace list and `Node current actors` report the same set, with the
@@ -177,7 +170,7 @@ workspace_list_and_node_actors_agree_test() ->
             ?assert(lists:keymember('Bt4960AgreeA', 2, Node))
         end)
     after
-        stop(User)
+        beamtalk_test_proc:kill_and_wait(User)
     end.
 
 lookup_known_and_unknown_test() ->
@@ -188,7 +181,7 @@ lookup_known_and_unknown_test() ->
             {error, not_found}, beamtalk_workspace_actors:lookup(beamtalk_test_proc:spawn_idle())
         )
     after
-        stop(Pid)
+        beamtalk_test_proc:kill_and_wait(Pid)
     end.
 
 lookup_remote_pid_is_not_found_test() ->
@@ -208,8 +201,8 @@ count_for_module_test() ->
         ?assert(beamtalk_workspace_actors:count_for_module(Mod) >= 2),
         ?assertEqual(0, beamtalk_workspace_actors:count_for_module(no_such_module_bt4950))
     after
-        stop(A),
-        stop(B)
+        beamtalk_test_proc:kill_and_wait(A),
+        beamtalk_test_proc:kill_and_wait(B)
     end.
 
 module_of(Pid) ->
@@ -289,10 +282,8 @@ native_actor_snapshot_plus_feed() ->
     end.
 
 receive_event(Class, Pid) ->
-    receive
-        {got, #{'$beamtalk_class' := Class, pid := Pid} = Event} -> Event
-    after 2000 -> error({no_announcement, Class, Pid})
-    end.
+    ?awaitMessage({got, #{'$beamtalk_class' := Class, pid := Pid} = Event}, 2000),
+    Event.
 
 %% No actor spawned between subscribe and scan is lost or duplicated: every
 %% pid that exists after the race appears exactly once in snapshot + emitted
@@ -320,7 +311,7 @@ subscribe_scan_race_loses_and_duplicates_nothing_test() ->
     Seen = lists:sort(pids(Snapshot) ++ Emitted),
     Expected = lists:sort(Spawned),
     unlink(Spawner),
-    [stop(P) || P <- Spawned],
+    [beamtalk_test_proc:kill_and_wait(P) || P <- Spawned],
     ?assertEqual(Expected, Seen),
     ?assertEqual(length(Seen), length(lists:usort(Seen))).
 
@@ -334,10 +325,8 @@ spawner_loop(Parent, Class, N) ->
 collect_spawns(0, Acc) ->
     Acc;
 collect_spawns(N, Acc) ->
-    receive
-        {spawned, Pid} -> collect_spawns(N - 1, [Pid | Acc])
-    after 5000 -> error({missing_spawns, N})
-    end.
+    ?awaitMessage({spawned, Pid}),
+    collect_spawns(N - 1, [Pid | Acc]).
 
 wait_queue(N) ->
     Self = self(),

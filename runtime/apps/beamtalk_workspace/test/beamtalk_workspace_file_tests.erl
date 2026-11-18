@@ -301,7 +301,7 @@ changelog_start_sweeps_stale_temps_test() ->
         ok = set_age(StaleLog, 7200),
         ok = set_age(StaleSource, 7200),
         {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
-        stop(Pid),
+        beamtalk_test_proc:shutdown(Pid),
         ?assertNot(filelib:is_regular(StaleLog)),
         ?assertNot(filelib:is_regular(StaleSource)),
         ?assert(filelib:is_regular(Fresh))
@@ -329,18 +329,9 @@ with_changelog(Fun) ->
         try
             Fun(WorkspaceId, Home)
         after
-            stop(Pid)
+            beamtalk_test_proc:shutdown(Pid)
         end
     end).
-
-stop(Pid) ->
-    Ref = monitor(process, Pid),
-    unlink(Pid),
-    exit(Pid, shutdown),
-    receive
-        {'DOWN', Ref, process, Pid, _} -> ok
-    after 5000 -> ok
-    end.
 
 %% Backdate `File`'s modification time by `Seconds`.
 set_age(File, Seconds) ->

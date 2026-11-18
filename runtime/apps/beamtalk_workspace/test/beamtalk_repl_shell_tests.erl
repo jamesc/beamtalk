@@ -10,6 +10,7 @@ Tests session lifecycle, eval, bindings, and gen_server callbacks.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Test Setup
@@ -606,21 +607,13 @@ script_exit_replies_and_terminates_session() ->
     WorkerState = worker_state_with_bindings(#{}),
     Pid ! {eval_result, FakeWorkerPid, {script_exit, 5, <<>>, [], WorkerState}},
     %% The shell surfaces the exit status to the caller...
-    receive
-        {eval_script_exit, Code, Output, Warnings} ->
-            ?assertEqual(5, Code),
-            ?assertEqual(<<>>, Output),
-            ?assertEqual([], Warnings)
-    after 2000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({eval_script_exit, Code, Output, Warnings}, 2000),
+    ?assertEqual(5, Code),
+    ?assertEqual(<<>>, Output),
+    ?assertEqual([], Warnings),
     %% ...and then ends the session with a normal stop.
-    receive
-        {'DOWN', MonRef, process, Pid, Reason} ->
-            ?assertEqual(normal, Reason)
-    after 2000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({'DOWN', MonRef, process, Pid, Reason}, 2000),
+    ?assertEqual(normal, Reason),
     ?assertNot(is_process_alive(Pid)),
     %% Tidy up the stand-in worker (harmless if already gone).
     exit(FakeWorkerPid, kill).

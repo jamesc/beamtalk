@@ -6,6 +6,7 @@
 %% Unified class metadata table tests.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -define(TABLE, beamtalk_class_metadata).
 %% Sibling table holding runtime class-method funs.
@@ -988,9 +989,7 @@ insert_drops_only_dead_owner_funs_of_that_class_test() ->
             ok = beamtalk_class_metadata:put_class_method_fun('Bt4831', old2, Info)
         end),
         Ref = monitor(process, Dead),
-        receive
-            {'DOWN', Ref, process, Dead, _} -> ok
-        end,
+        ?awaitMessage({'DOWN', Ref, process, Dead, _}),
         ok = beamtalk_class_metadata:put_class_method_fun('Other', keep, Info),
         ok = beamtalk_class_metadata:insert('Bt4831', mod, [], 'Object', false),
         ok = beamtalk_class_metadata:put_class_method_fun('Bt4831', fresh, Info),

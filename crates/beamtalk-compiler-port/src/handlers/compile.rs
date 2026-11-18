@@ -6,6 +6,9 @@
 use beamtalk_etf::{map_get, term_to_bool, term_to_string};
 use eetf::{Map, Term};
 
+use super::analysis_prelude::{
+    AmbientContext, analyse_module, class_name_pairs, extract_class_indexes,
+};
 use crate::decode::{
     extract_class_hierarchy, extract_known_type_aliases, extract_optional_string_map,
     extract_protocol_registry,
@@ -105,44 +108,30 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         &mut module,
     ));
 
-    // Run semantic analysis, also capturing `referenced_aliases` —
-    // shipped back in the response so the Erlang side can populate
-    // `beamtalk_alias_xref`'s alias-name → dependent-class index at class
-    // install time (see `diagnostics_ok_response`/this handler's response
-    // builder for where the field is attached).
-    // `compute_diagnostics_and_analysis` additionally returns the
-    // full `AnalysisResult`, threaded into codegen below via
-    // `CodegenOptions::with_analysis` so it doesn't re-derive the class
-    // hierarchy, semantic facts, and inferred method return types from
-    // scratch.
-    let (mut all_diagnostics, analysis) =
-        beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
-            &module,
-            parse_diagnostics,
-            &[],
-            pre_class_hierarchy.clone(),
-            pre_loaded_protocols,
-            pre_loaded_protocol_defs,
-            pre_loaded_aliases.clone(),
-            scope.diagnostics_table(),
-            scope.analysis_project(),
-        );
+    // Semantic analysis (also capturing `referenced_aliases`, shipped back in
+    // the response so the Erlang side can populate `beamtalk_alias_xref`'s
+    // alias-name -> dependent-class index at class install time) plus
+    // `@primitive` validation. The full `AnalysisResult` is threaded into
+    // codegen below via `CodegenOptions::with_analysis` so it doesn't re-derive
+    // the class hierarchy, semantic facts and inferred return types.
+    let (mut all_diagnostics, analysis) = analyse_module(
+        &module,
+        parse_diagnostics,
+        AmbientContext {
+            known_vars: &[],
+            class_hierarchy: pre_class_hierarchy.clone(),
+            protocols: pre_loaded_protocols,
+            protocol_defs: pre_loaded_protocol_defs,
+            aliases: pre_loaded_aliases.clone(),
+            scope: &scope,
+            stdlib_mode,
+        },
+    );
     let referenced_aliases = analysis.referenced_aliases.clone();
 
-    // Run @primitive validation
-    let options = beamtalk_core::CompilerOptions {
-        stdlib_mode,
-        allow_primitives: false,
-        suppress_warnings: false,
-        ..Default::default()
-    };
-    let primitive_diags =
-        beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
-            &module, &options,
-        );
-    all_diagnostics.extend(primitive_diags);
-
     // Warn when user code shadows a stdlib class name (not for stdlib itself).
+    // Whole-file compiles only: see the `analysis_prelude` module doc for why
+    // `compile_method` does not repeat it.
     if !stdlib_mode {
         let mut stdlib_shadow_diags = Vec::new();
         beamtalk_core::semantic_analysis::check_stdlib_name_shadowing(
@@ -201,15 +190,10 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         }
     };
 
-    let class_module_index = match extract_optional_string_map(request, "class_module_index") {
-        Ok(map) => map,
+    let (class_module_index, class_superclass_index) = match extract_class_indexes(request) {
+        Ok(indexes) => indexes,
         Err(resp) => return resp,
     };
-    let class_superclass_index =
-        match extract_optional_string_map(request, "class_superclass_index") {
-            Ok(map) => map,
-            Err(resp) => return resp,
-        };
 
     // Protocol-only files need the same early-return path as
     // handle_compile_expression. generate_module assumes at least
@@ -237,11 +221,7 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     }
 
     // Extract class info
-    let classes: Vec<(String, String)> = module
-        .classes
-        .iter()
-        .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
-        .collect();
+    let classes = class_name_pairs(&module);
 
     // Extract optional source file path to embed as beamtalk_source attribute.
     let source_path = map_get(request, "source_path").and_then(term_to_string);

@@ -17,6 +17,8 @@ verification that BEAM can invoke the Rust compiler via a port.
 
 -export([
     reply_atoms/0,
+    unexpected_port_response/2,
+    unexpected_diag_response/2,
     open/0, open/1,
     compile_expression/4, compile_expression/5,
     compile_expression_trace/4, compile_expression_trace/5,
@@ -170,9 +172,24 @@ unexpected_diag_response(Fmt, Other) ->
     {error, [#{message => <<"Unexpected compiler response">>}]}.
 
 log_unexpected({Fmt, Args}, Other) ->
-    ?LOG_ERROR(Fmt, Args, #{domain => [beamtalk, runtime], response => Other});
+    ?LOG_ERROR(Fmt, Args, #{domain => [beamtalk, runtime], response => summarize_response(Other)});
 log_unexpected(Fmt, Other) ->
-    ?LOG_ERROR(Fmt, #{domain => [beamtalk, runtime], response => Other}).
+    ?LOG_ERROR(Fmt, #{domain => [beamtalk, runtime], response => summarize_response(Other)}).
+
+%% A bounded description of an unexpected port response (BT-5046): the decoded
+%% response can be a large map (a whole compile result), so log its shape — keys
+%% and size — never its contents.
+-spec summarize_response(term()) -> map().
+summarize_response(Resp) when is_map(Resp) ->
+    #{type => map, size => map_size(Resp), keys => lists:sort(maps:keys(Resp))};
+summarize_response(Resp) when is_list(Resp) ->
+    #{type => list, length => length(Resp)};
+summarize_response(Resp) when is_binary(Resp) ->
+    #{type => binary, size => byte_size(Resp)};
+summarize_response(Resp) when is_tuple(Resp) ->
+    #{type => tuple, size => tuple_size(Resp)};
+summarize_response(Resp) ->
+    #{type => term, value => Resp}.
 
 -doc """
 Open a port to the compiler binary.
@@ -906,6 +923,8 @@ normalize_categories(Categories) ->
         {ok, [normalize_category(C) || C <- Categories]}
     catch
         error:{malformed_categorize_methods_response, Malformed} ->
+            %% The malformed term is a single small category/method map, and its
+            %% contents (e.g. an unrecognised `side`) are what debugging needs.
             ?LOG_ERROR("Malformed categorize-methods category/method", #{
                 domain => [beamtalk, runtime], malformed => Malformed
             }),
@@ -1042,10 +1061,7 @@ handle_scan_source_dependencies_response(#{status := error, reason := Reason} = 
     Message = maps:get(message, Resp, atom_to_binary(Reason, utf8)),
     {error, Reason, Message};
 handle_scan_source_dependencies_response(Other) ->
-    ?LOG_ERROR("Unexpected scan-source-dependencies response", #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, port_error, <<"Unexpected compiler response">>}.
+    unexpected_port_response("Unexpected scan-source-dependencies response", Other).
 
 -doc """
 Build the class→module-name index for a single `src/**/*.bt` file.

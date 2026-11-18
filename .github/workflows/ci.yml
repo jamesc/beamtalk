@@ -9,7 +9,12 @@ name: CI
 # test-learn step (BT-3927), so a learning-guide-only change must still run
 # CI. docs/beamtalk-language-features.md is put back too: its code blocks also
 # feed the corpus (BT-4554). build-corpus's docs_corpus_sources_trigger_full_ci
-# test enforces both.
+# test enforces both. docs/repl-protocol.md (its generated op-table block is
+# checked by beamtalk-repl-protocol's op_table_doc test) and
+# docs/development/surface-parity.md (read by `just check-surface-drift`) are
+# put back for the same reason (BT-5032): both checks live only in this
+# workflow, so a docs-only edit to either must still run it.
+# `just test-workflow-paths` checks every path literal here exists.
 on:
   push:
     branches: [main]
@@ -19,6 +24,8 @@ on:
       - '!docs/**'
       - 'docs/learning/**'
       - 'docs/beamtalk-language-features.md'
+      - 'docs/repl-protocol.md'
+      - 'docs/development/surface-parity.md'
       - '!LICENSE'
       - '!SECURITY.md'
       - '!.github/skills/**'
@@ -35,6 +42,8 @@ on:
       - '!docs/**'
       - 'docs/learning/**'
       - 'docs/beamtalk-language-features.md'
+      - 'docs/repl-protocol.md'
+      - 'docs/development/surface-parity.md'
       - '!LICENSE'
       - '!SECURITY.md'
       - '!.github/skills/**'
@@ -125,7 +134,7 @@ jobs:
           flag() { if "$@"; then echo true; else echo false; fi; }
 
           core_diff_modes=$(flag matches \
-            crates/beamtalk-cli/src/commands/build_stdlib.rs \
+            'crates/beamtalk-cli/src/commands/build_stdlib/*' \
             crates/beamtalk-cli/src/commands/test.rs \
             crates/beamtalk-cli/src/commands/test_stdlib.rs \
             crates/beamtalk-cli/src/commands/util.rs \
@@ -233,15 +242,16 @@ jobs:
         # The root Cargo.lock is committed; fail if Cargo.toml changed without it.
         run: cargo tree --locked --workspace --depth 0 > /dev/null
 
-      # The lint-* recipes carry their own history: lint-workaround-comments
-      # (BT-2347 ratchet, BT-2841), lint-binary-literal-encoding (BT-3026),
-      # test-grammar (BT-3261), lint-removed-facade-names (BT-3646, ADR 0129),
-      # lint-nlr-tuple-matches (BT-3758), lint-class-var-catchers (BT-3769,
-      # ADR 0130 §4), lint-coverage-skips (BT-4408), lint-duplicate-erlang-modules
-      # (BT-4671), lint-compiler-made-names (BT-4822, ADR 0139 decision 8), lint-banned-patterns (BT-5009),
-      # test-lint-stamp (BT-3926). See their Justfile comments.
+      # `lint-repo` is the Justfile's single list of the repo-wide lint-* and
+      # script-test recipes; `just lint` runs the same group, so this step can
+      # no longer drift from it (BT-5032: the hand-copied list had dropped
+      # test-check-stdlib-class-beams, test-core-diff-normalise and
+      # test-vs-elixir-nightly). The recipes carry their own history; see
+      # their Justfile comments. Not in the group, deliberately: dialyzer
+      # (test-dialyzer job), JS/Elixir formatting beyond fmt-check
+      # (the liveview workflow runs lint-elixir).
       - name: Clippy, format and repo lints
-        run: just clippy fmt-check lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns test-grammar test-github-extension test-lint-stamp test-refresh-edge
+        run: just clippy fmt-check lint-repo test-grammar test-github-extension
 
       - name: Surface parity drift check (BT-2082)
         # Verifies REPL ops × CLI × MCP × LSP coverage matches
@@ -831,6 +841,14 @@ jobs:
       - name: Build
         id: build
         run: just build
+
+      # BT-5032: `just build` regenerates the checked-in build-stdlib outputs
+      # in place, so a stale one would pass every other step; this diffs them
+      # against HEAD. Runs on PRs and main alike (generated_builtins.rs,
+      # the .hrl headers and beamtalk_stdlib.app.src).
+      - name: Check generated build-stdlib artifacts are committed
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: just verify-generated-builtins
 
       - name: Test workspace integration
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}

@@ -5,6 +5,24 @@
 
 use std::fmt::Write as _;
 
+use camino::Utf8Path;
+use miette::{Context, IntoDiagnostic, Result};
+
+/// Check that `content` parses as TOML, then write it to `manifest_path`.
+///
+/// Used for programmatic `beamtalk.toml` edits: a generated manifest that does
+/// not parse is a bug in the edit, so it is rejected before it can clobber the
+/// user's file.
+pub(crate) fn write_validated_manifest(manifest_path: &Utf8Path, content: &str) -> Result<()> {
+    let _: toml::Value = toml::from_str(content)
+        .into_diagnostic()
+        .wrap_err("Generated beamtalk.toml is invalid TOML — this is a bug")?;
+
+    std::fs::write(manifest_path, content)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to write '{manifest_path}'"))
+}
+
 /// Escape a value for embedding in a TOML basic string.
 ///
 /// TOML basic strings prohibit unescaped control characters (U+0000–U+001F,

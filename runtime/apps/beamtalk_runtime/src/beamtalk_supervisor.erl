@@ -1344,7 +1344,11 @@ sup_dictionary_value(Pid, Key) when Pid =:= self() ->
 sup_dictionary_value(Pid, Key) when node(Pid) =:= node() ->
     dictionary_info(erlang:process_info(Pid, {dictionary, Key}));
 sup_dictionary_value(Pid, Key) ->
-    try erpc:call(node(Pid), erlang, process_info, [Pid, {dictionary, Key}], 5000) of
+    try
+        erpc:call(
+            node(Pid), erlang, process_info, [Pid, {dictionary, Key}], ?BT_REMOTE_CALL_TIMEOUT
+        )
+    of
         Info -> dictionary_info(Info)
     catch
         Class:Reason ->

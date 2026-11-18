@@ -8,6 +8,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -define(C, 'ClassVarsTestClass').
 -define(KEY, beamtalk_class_vars:key_for_tag('ClassVarsTestClass class')).
@@ -64,18 +65,13 @@ start_fake_class(Map) ->
             stop -> ok
         end
     end),
-    receive
-        {ready, Pid} -> Pid
-    after 2000 -> error(fake_class_timeout)
-    end.
+    ?awaitMessage({ready, Pid}, 2000),
+    Pid.
 
 stop_fake_class(Pid) ->
     Ref = erlang:monitor(process, Pid),
     Pid ! stop,
-    receive
-        {'DOWN', Ref, process, Pid, _} -> ok
-    after 2000 -> error(stop_timeout)
-    end,
+    ?awaitMessage({'DOWN', Ref, process, Pid, _}, 2000),
     beamtalk_class_registry:forget_class_state_snapshot(Pid).
 
 %%% key / install / uninstall / assert_absent

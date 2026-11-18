@@ -8,6 +8,7 @@
 //! shaping specific to that family, error-response builders, ...) that
 //! aren't shared widely enough to live in [`crate::respond`].
 
+mod analysis_prelude;
 mod categorize;
 mod class_span;
 mod compile;

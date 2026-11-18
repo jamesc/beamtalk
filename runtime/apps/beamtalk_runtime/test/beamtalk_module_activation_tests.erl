@@ -13,6 +13,7 @@ and load-project.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% ============================================================================
 %%% topo_sort/1 tests — tuple format
@@ -222,11 +223,7 @@ activate_module_on_activate_callback_invoked_test() ->
     ok = beamtalk_module_activation:activate_module(
         lists, #{on_activate => Callback}
     ),
-    receive
-        {activated, lists, _Path} -> ok
-    after 1000 ->
-        error(on_activate_callback_not_invoked)
-    end.
+    ?awaitMessage({activated, lists, _Path}, 1000).
 
 activate_module_register_class_crash_test() ->
     %% Compile a dynamic module whose register_class/0 crashes.
