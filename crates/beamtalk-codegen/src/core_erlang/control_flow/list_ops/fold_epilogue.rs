@@ -18,8 +18,8 @@ use super::super::super::CoreErlangGenerator;
 use super::super::super::threaded_ir::{FoldCarry, ThreadedStmt};
 use super::super::ThreadingPlan;
 use super::BodyKind;
-use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::{Document, leaf};
+use beamtalk_cerl_doc::form::{self, Layout};
+use beamtalk_cerl_doc::{Document, docvec, join, leaf};
 use beamtalk_core::source_analysis::Span;
 
 /// What every fold epilogue reads beyond its own `BodyKind` fields: the
@@ -96,7 +96,77 @@ impl BodyKind {
     }
 }
 
+/// `{head…, tail}` — an accumulator tuple whose last slot is the epilogue's
+/// trailing state doc (`tail`).
+fn acc_tuple(
+    head: impl IntoIterator<Item = Document<'static>>,
+    tail: &Document<'static>,
+) -> Document<'static> {
+    docvec![
+        "{",
+        join(head, &Document::Str(", ")),
+        ", ",
+        tail.clone(),
+        "}"
+    ]
+}
+
+/// `[item | list]` — cons `item_var` onto the accumulator list `list`.
+fn cons(item_var: &str, list: &'static str) -> Document<'static> {
+    docvec!["[", leaf::var(item_var.to_string()), " | ", list, "]"]
+}
+
+/// `<'value'> when 'true' -> body` — one boolean arm of a predicate `case`.
+fn bool_arm(value: bool, body: Document<'static>) -> Document<'static> {
+    form::clause(
+        [leaf::atom(if value { "true" } else { "false" })],
+        None,
+        body,
+        Layout::Flat,
+    )
+}
+
 impl CoreErlangGenerator {
+    /// The `(carry, tail_state_doc)` pair every fold epilogue ends in: the
+    /// repacked current variable bindings in tuple mode, or the `StateAcc`
+    /// map (the latest state var when the body mutated) in map mode. Each
+    /// epilogue computes it once and builds its `case` once around it.
+    fn epilogue_tail(&self, cx: EpilogueCx<'_>) -> (FoldCarry, Document<'static>) {
+        if cx.plan.use_tuple_acc {
+            (cx.plan.fold_carry(), cx.plan.current_vars_doc(self))
+        } else {
+            let final_state = if cx.has_mutations {
+                self.current_state_var()
+            } else {
+                "StateAcc".to_string()
+            };
+            (FoldCarry::StateMap, leaf::var(final_state))
+        }
+    }
+
+    /// `case scrutinee of <'a'> when 'true' -> … <'b'> when 'true' -> …
+    /// <V> when 'true' -> error({'case_clause', V}) end` — the
+    /// two-boolean-arm `case` every predicate epilogue is built from, arms
+    /// in the order given (the generated text depends on it).
+    fn bool_case(
+        &mut self,
+        scrutinee: Document<'static>,
+        arms: [(bool, Document<'static>); 2],
+    ) -> Document<'static> {
+        let [(first, first_body), (second, second_body)] = arms;
+        let var = self.fresh_temp_var("_PredBad");
+        let fallback = Self::case_clause_fallback_clause(var);
+        form::case_of(
+            scrutinee,
+            [
+                bool_arm(first, first_body),
+                bool_arm(second, second_body),
+                fallback,
+            ],
+            Layout::Flat,
+        )
+    }
+
     // FoldlFilter: append the predicate case expression after all statements.
     fn lower_foldl_epilogue_filter(
         &mut self,
@@ -105,154 +175,46 @@ impl CoreErlangGenerator {
         cx: EpilogueCx<'_>,
         stmts: &mut Vec<ThreadedStmt>,
     ) {
-        let EpilogueCx {
-            pv,
-            plan,
-            has_mutations,
-            span: epilogue_span,
-        } = cx;
         let condition_doc: Document<'static> = if negate {
-            docvec!["call 'erlang':'not'(", leaf::var(pv.to_string()), ")",]
+            form::call("erlang", "not", [leaf::var(cx.pv.to_string())])
         } else {
-            leaf::var(pv.to_string())
+            leaf::var(cx.pv.to_string())
         };
-        if plan.use_tuple_acc {
-            // Tuple mode — repack current var bindings into the result tuple.
-            let vars_doc = plan.current_vars_doc(self);
-            stmts.push(Self::fold_accumulator(
-                plan.fold_carry(),
-                docvec![
-                    "case ",
-                    condition_doc,
-                    " of <'true'> when 'true' -> {[",
-                    leaf::var(item_var.to_string()),
-                    " | AccList], ",
-                    vars_doc.clone(),
-                    "} <'false'> when 'true' -> {AccList, ",
-                    vars_doc,
-                    "}",
-                    self.case_clause_fallback("_PredBad"),
-                    " end",
-                ],
-                epilogue_span,
-            ));
-        } else {
-            let final_state = if has_mutations {
-                self.current_state_var()
-            } else {
-                "StateAcc".to_string()
-            };
-            stmts.push(Self::fold_accumulator(
-                FoldCarry::StateMap,
-                docvec![
-                    "case ",
-                    condition_doc,
-                    " of <'true'> when 'true' -> {[",
-                    leaf::var(item_var.to_string()),
-                    " | AccList], ",
-                    leaf::var(final_state.clone()),
-                    "} <'false'> when 'true' -> {AccList, ",
-                    leaf::var(final_state),
-                    "}",
-                    self.case_clause_fallback("_PredBad"),
-                    " end",
-                ],
-                epilogue_span,
-            ));
-        }
+        let (carry, tail) = self.epilogue_tail(cx);
+        let value = self.bool_case(
+            condition_doc,
+            [
+                (true, acc_tuple([cons(item_var, "AccList")], &tail)),
+                (false, acc_tuple([Document::Str("AccList")], &tail)),
+            ],
+        );
+        stmts.push(Self::fold_accumulator(carry, value, cx.span));
     }
 
     // FoldlBoolPredicate — update boolean accumulator based on predicate result.
     // Match only 'true'/'false' explicitly (consistent with FoldlFilter and lists:any/all).
+    // allSatisfy: pred=false → set BoolAcc to false; pred=true → keep.
+    // anySatisfy: pred=true → set BoolAcc to true; pred=false → keep.
     fn lower_foldl_epilogue_bool_predicate(
         &mut self,
         is_all: bool,
         cx: EpilogueCx<'_>,
         stmts: &mut Vec<ThreadedStmt>,
     ) {
-        let EpilogueCx {
-            pv,
-            plan,
-            has_mutations,
-            span: epilogue_span,
-        } = cx;
-        if plan.use_tuple_acc {
-            let vars_doc = plan.current_vars_doc(self);
-            if is_all {
-                // allSatisfy: pred=false → set BoolAcc to false; pred=true → keep
-                stmts.push(Self::fold_accumulator(
-                    plan.fold_carry(),
-                    docvec![
-                        "case ",
-                        leaf::var(pv.to_string()),
-                        " of <'false'> when 'true' -> {'false', ",
-                        vars_doc.clone(),
-                        "} <'true'> when 'true' -> {BoolAcc, ",
-                        vars_doc,
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end",
-                    ],
-                    epilogue_span,
-                ));
-            } else {
-                // anySatisfy: pred=true → set BoolAcc to true; pred=false → keep
-                stmts.push(Self::fold_accumulator(
-                    plan.fold_carry(),
-                    docvec![
-                        "case ",
-                        leaf::var(pv.to_string()),
-                        " of <'true'> when 'true' -> {'true', ",
-                        vars_doc.clone(),
-                        "} <'false'> when 'true' -> {BoolAcc, ",
-                        vars_doc,
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end",
-                    ],
-                    epilogue_span,
-                ));
-            }
-        } else {
-            let final_state = if has_mutations {
-                self.current_state_var()
-            } else {
-                "StateAcc".to_string()
-            };
-            if is_all {
-                stmts.push(Self::fold_accumulator(
-                    FoldCarry::StateMap,
-                    docvec![
-                        "case ",
-                        leaf::var(pv.to_string()),
-                        " of <'false'> when 'true' -> {'false', ",
-                        leaf::var(final_state.clone()),
-                        "} <'true'> when 'true' -> {BoolAcc, ",
-                        leaf::var(final_state),
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end",
-                    ],
-                    epilogue_span,
-                ));
-            } else {
-                stmts.push(Self::fold_accumulator(
-                    FoldCarry::StateMap,
-                    docvec![
-                        "case ",
-                        leaf::var(pv.to_string()),
-                        " of <'true'> when 'true' -> {'true', ",
-                        leaf::var(final_state.clone()),
-                        "} <'false'> when 'true' -> {BoolAcc, ",
-                        leaf::var(final_state),
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end",
-                    ],
-                    epilogue_span,
-                ));
-            }
-        }
+        let (carry, tail) = self.epilogue_tail(cx);
+        let decided = !is_all;
+        let arms = [
+            (
+                decided,
+                acc_tuple(
+                    [Document::Str(if decided { "'true'" } else { "'false'" })],
+                    &tail,
+                ),
+            ),
+            (!decided, acc_tuple([Document::Str("BoolAcc")], &tail)),
+        ];
+        let value = self.bool_case(leaf::var(cx.pv.to_string()), arms);
+        stmts.push(Self::fold_accumulator(carry, value, cx.span));
     }
 
     // FoldlDetect — update found-item accumulator on first match.
@@ -265,105 +227,51 @@ impl CoreErlangGenerator {
         cx: EpilogueCx<'_>,
         stmts: &mut Vec<ThreadedStmt>,
     ) {
-        let EpilogueCx {
-            pv,
-            plan,
-            has_mutations,
-            span: epilogue_span,
-        } = cx;
-        if plan.use_tuple_acc {
-            let vars_doc = plan.current_vars_doc(self);
-            stmts.push(Self::fold_accumulator(
-                plan.fold_carry(),
-                docvec![
-                    "case ",
-                    leaf::var(pv.to_string()),
-                    " of <'true'> when 'true' -> {",
-                    leaf::var(item_var.to_string()),
-                    ", 'true', ",
-                    vars_doc.clone(),
-                    "} <'false'> when 'true' -> {FoundItem, FoundFlag, ",
-                    vars_doc,
-                    "}",
-                    self.case_clause_fallback("_PredBad"),
-                    " end",
-                ],
-                epilogue_span,
-            ));
-        } else {
-            let final_state = if has_mutations {
-                self.current_state_var()
-            } else {
-                "StateAcc".to_string()
-            };
-            stmts.push(Self::fold_accumulator(
-                FoldCarry::StateMap,
-                docvec![
-                    "case ",
-                    leaf::var(pv.to_string()),
-                    " of <'true'> when 'true' -> {",
-                    leaf::var(item_var.to_string()),
-                    ", 'true', ",
-                    leaf::var(final_state.clone()),
-                    "} <'false'> when 'true' -> {FoundItem, FoundFlag, ",
-                    leaf::var(final_state),
-                    "}",
-                    self.case_clause_fallback("_PredBad"),
-                    " end",
-                ],
-                epilogue_span,
-            ));
-        }
+        let (carry, tail) = self.epilogue_tail(cx);
+        let value = self.bool_case(
+            leaf::var(cx.pv.to_string()),
+            [
+                (
+                    true,
+                    acc_tuple(
+                        [leaf::var(item_var.to_string()), Document::Str("'true'")],
+                        &tail,
+                    ),
+                ),
+                (
+                    false,
+                    acc_tuple(
+                        [Document::Str("FoundItem"), Document::Str("FoundFlag")],
+                        &tail,
+                    ),
+                ),
+            ],
+        );
+        stmts.push(Self::fold_accumulator(carry, value, cx.span));
     }
 
     // FoldlCount — increment count accumulator on predicate match.
     // Accumulator is {Count, StateVars...}.
     fn lower_foldl_epilogue_count(&mut self, cx: EpilogueCx<'_>, stmts: &mut Vec<ThreadedStmt>) {
-        let EpilogueCx {
-            pv,
-            plan,
-            has_mutations,
-            span: epilogue_span,
-        } = cx;
-        if plan.use_tuple_acc {
-            let vars_doc = plan.current_vars_doc(self);
-            stmts.push(Self::fold_accumulator(
-                plan.fold_carry(),
-                docvec![
-                    "case ",
-                    leaf::var(pv.to_string()),
-                    " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
-                    vars_doc.clone(),
-                    "} <'false'> when 'true' -> {CountAcc, ",
-                    vars_doc,
-                    "}",
-                    self.case_clause_fallback("_PredBad"),
-                    " end",
-                ],
-                epilogue_span,
-            ));
-        } else {
-            let final_state = if has_mutations {
-                self.current_state_var()
-            } else {
-                "StateAcc".to_string()
-            };
-            stmts.push(Self::fold_accumulator(
-                FoldCarry::StateMap,
-                docvec![
-                    "case ",
-                    leaf::var(pv.to_string()),
-                    " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
-                    leaf::var(final_state.clone()),
-                    "} <'false'> when 'true' -> {CountAcc, ",
-                    leaf::var(final_state),
-                    "}",
-                    self.case_clause_fallback("_PredBad"),
-                    " end",
-                ],
-                epilogue_span,
-            ));
-        }
+        let (carry, tail) = self.epilogue_tail(cx);
+        let value = self.bool_case(
+            leaf::var(cx.pv.to_string()),
+            [
+                (
+                    true,
+                    acc_tuple(
+                        [form::call(
+                            "erlang",
+                            "+",
+                            [Document::Str("CountAcc"), leaf::int_lit(1)],
+                        )],
+                        &tail,
+                    ),
+                ),
+                (false, acc_tuple([Document::Str("CountAcc")], &tail)),
+            ],
+        );
+        stmts.push(Self::fold_accumulator(carry, value, cx.span));
     }
 
     // FoldlTakeWhile — include item while predicate holds.
@@ -375,61 +283,26 @@ impl CoreErlangGenerator {
         cx: EpilogueCx<'_>,
         stmts: &mut Vec<ThreadedStmt>,
     ) {
-        let EpilogueCx {
-            pv,
-            plan,
-            has_mutations,
-            span: epilogue_span,
-        } = cx;
-        if plan.use_tuple_acc {
-            let vars_doc = plan.current_vars_doc(self);
-            stmts.push(Self::fold_accumulator(
-                plan.fold_carry(),
-                docvec![
-                    "case StillTaking of \
-                         <'false'> when 'true' -> {AccList, 'false', ",
-                    vars_doc.clone(),
-                    "} <'true'> when 'true' -> case ",
-                    leaf::var(pv.to_string()),
-                    " of <'true'> when 'true' -> {[",
-                    leaf::var(item_var.to_string()),
-                    " | AccList], 'true', ",
-                    vars_doc.clone(),
-                    "} <'false'> when 'true' -> {AccList, 'false', ",
-                    vars_doc,
-                    "}",
-                    self.case_clause_fallback("_PredBad"),
-                    " end end",
-                ],
-                epilogue_span,
-            ));
-        } else {
-            let final_state = if has_mutations {
-                self.current_state_var()
-            } else {
-                "StateAcc".to_string()
-            };
-            stmts.push(Self::fold_accumulator(
-                FoldCarry::StateMap,
-                docvec![
-                    "case StillTaking of \
-                         <'false'> when 'true' -> {AccList, 'false', ",
-                    leaf::var(final_state.clone()),
-                    "} <'true'> when 'true' -> case ",
-                    leaf::var(pv.to_string()),
-                    " of <'true'> when 'true' -> {[",
-                    leaf::var(item_var.to_string()),
-                    " | AccList], 'true', ",
-                    leaf::var(final_state.clone()),
-                    "} <'false'> when 'true' -> {AccList, 'false', ",
-                    leaf::var(final_state),
-                    "}",
-                    self.case_clause_fallback("_PredBad"),
-                    " end end",
-                ],
-                epilogue_span,
-            ));
-        }
+        let (carry, tail) = self.epilogue_tail(cx);
+        let stop = |t: &Document<'static>| {
+            acc_tuple([Document::Str("AccList"), Document::Str("'false'")], t)
+        };
+        let inner = self.bool_case(
+            leaf::var(cx.pv.to_string()),
+            [
+                (
+                    true,
+                    acc_tuple([cons(item_var, "AccList"), Document::Str("'true'")], &tail),
+                ),
+                (false, stop(&tail)),
+            ],
+        );
+        let value = form::case_of(
+            Document::Str("StillTaking"),
+            [bool_arm(false, stop(&tail)), bool_arm(true, inner)],
+            Layout::Flat,
+        );
+        stmts.push(Self::fold_accumulator(carry, value, cx.span));
     }
 
     // FoldlDropWhile — drop items while predicate holds.
@@ -441,65 +314,26 @@ impl CoreErlangGenerator {
         cx: EpilogueCx<'_>,
         stmts: &mut Vec<ThreadedStmt>,
     ) {
-        let EpilogueCx {
-            pv,
-            plan,
-            has_mutations,
-            span: epilogue_span,
-        } = cx;
-        if plan.use_tuple_acc {
-            let vars_doc = plan.current_vars_doc(self);
-            stmts.push(Self::fold_accumulator(
-                plan.fold_carry(),
-                docvec![
-                    "case StillDropping of \
-                         <'false'> when 'true' -> {[",
-                    leaf::var(item_var.to_string()),
-                    " | AccList], 'false', ",
-                    vars_doc.clone(),
-                    "} <'true'> when 'true' -> case ",
-                    leaf::var(pv.to_string()),
-                    " of <'true'> when 'true' -> {AccList, 'true', ",
-                    vars_doc.clone(),
-                    "} <'false'> when 'true' -> {[",
-                    leaf::var(item_var.to_string()),
-                    " | AccList], 'false', ",
-                    vars_doc,
-                    "}",
-                    self.case_clause_fallback("_PredBad"),
-                    " end end",
-                ],
-                epilogue_span,
-            ));
-        } else {
-            let final_state = if has_mutations {
-                self.current_state_var()
-            } else {
-                "StateAcc".to_string()
-            };
-            stmts.push(Self::fold_accumulator(
-                FoldCarry::StateMap,
-                docvec![
-                    "case StillDropping of \
-                         <'false'> when 'true' -> {[",
-                    leaf::var(item_var.to_string()),
-                    " | AccList], 'false', ",
-                    leaf::var(final_state.clone()),
-                    "} <'true'> when 'true' -> case ",
-                    leaf::var(pv.to_string()),
-                    " of <'true'> when 'true' -> {AccList, 'true', ",
-                    leaf::var(final_state.clone()),
-                    "} <'false'> when 'true' -> {[",
-                    leaf::var(item_var.to_string()),
-                    " | AccList], 'false', ",
-                    leaf::var(final_state),
-                    "}",
-                    self.case_clause_fallback("_PredBad"),
-                    " end end",
-                ],
-                epilogue_span,
-            ));
-        }
+        let (carry, tail) = self.epilogue_tail(cx);
+        let keep = |t: &Document<'static>| {
+            acc_tuple([cons(item_var, "AccList"), Document::Str("'false'")], t)
+        };
+        let inner = self.bool_case(
+            leaf::var(cx.pv.to_string()),
+            [
+                (
+                    true,
+                    acc_tuple([Document::Str("AccList"), Document::Str("'true'")], &tail),
+                ),
+                (false, keep(&tail)),
+            ],
+        );
+        let value = form::case_of(
+            Document::Str("StillDropping"),
+            [bool_arm(false, keep(&tail)), bool_arm(true, inner)],
+            Layout::Flat,
+        );
+        stmts.push(Self::fold_accumulator(carry, value, cx.span));
     }
 
     // FoldlPartition — route item to one of two lists based on predicate.
@@ -510,59 +344,27 @@ impl CoreErlangGenerator {
         cx: EpilogueCx<'_>,
         stmts: &mut Vec<ThreadedStmt>,
     ) {
-        let EpilogueCx {
-            pv,
-            plan,
-            has_mutations,
-            span: epilogue_span,
-        } = cx;
-        if plan.use_tuple_acc {
-            let vars_doc = plan.current_vars_doc(self);
-            stmts.push(Self::fold_accumulator(
-                plan.fold_carry(),
-                docvec![
-                    "case ",
-                    leaf::var(pv.to_string()),
-                    " of <'true'> when 'true' -> {[",
-                    leaf::var(item_var.to_string()),
-                    " | MatchList], NoMatchList, ",
-                    vars_doc.clone(),
-                    "} <'false'> when 'true' -> {MatchList, [",
-                    leaf::var(item_var.to_string()),
-                    " | NoMatchList], ",
-                    vars_doc,
-                    "}",
-                    self.case_clause_fallback("_PredBad"),
-                    " end",
-                ],
-                epilogue_span,
-            ));
-        } else {
-            let final_state = if has_mutations {
-                self.current_state_var()
-            } else {
-                "StateAcc".to_string()
-            };
-            stmts.push(Self::fold_accumulator(
-                FoldCarry::StateMap,
-                docvec![
-                    "case ",
-                    leaf::var(pv.to_string()),
-                    " of <'true'> when 'true' -> {[",
-                    leaf::var(item_var.to_string()),
-                    " | MatchList], NoMatchList, ",
-                    leaf::var(final_state.clone()),
-                    "} <'false'> when 'true' -> {MatchList, [",
-                    leaf::var(item_var.to_string()),
-                    " | NoMatchList], ",
-                    leaf::var(final_state),
-                    "}",
-                    self.case_clause_fallback("_PredBad"),
-                    " end",
-                ],
-                epilogue_span,
-            ));
-        }
+        let (carry, tail) = self.epilogue_tail(cx);
+        let value = self.bool_case(
+            leaf::var(cx.pv.to_string()),
+            [
+                (
+                    true,
+                    acc_tuple(
+                        [cons(item_var, "MatchList"), Document::Str("NoMatchList")],
+                        &tail,
+                    ),
+                ),
+                (
+                    false,
+                    acc_tuple(
+                        [Document::Str("MatchList"), cons(item_var, "NoMatchList")],
+                        &tail,
+                    ),
+                ),
+            ],
+        );
+        stmts.push(Self::fold_accumulator(carry, value, cx.span));
     }
 
     // FoldlGroupBy — group item by key.
@@ -574,83 +376,51 @@ impl CoreErlangGenerator {
         cx: EpilogueCx<'_>,
         stmts: &mut Vec<ThreadedStmt>,
     ) {
-        let EpilogueCx {
-            pv,
-            plan,
-            has_mutations,
-            span: epilogue_span,
-        } = cx;
         // Use maps:get/3 to get current list for key (default []), prepend item, put back.
-        let key_var = pv;
-        if plan.use_tuple_acc {
-            let vars_doc = plan.current_vars_doc(self);
-            let existing_var = self.fresh_temp_var("ExistingList");
-            let new_list_var = self.fresh_temp_var("NewList");
-            let new_map_var = self.fresh_temp_var("NewMap");
-            stmts.push(Self::fold_accumulator(
-                plan.fold_carry(),
-                docvec![
-                    "let ",
-                    leaf::var(existing_var.clone()),
-                    " = call 'maps':'get'(",
+        let key_var = cx.pv;
+        let (carry, tail) = self.epilogue_tail(cx);
+        let existing_var = self.fresh_temp_var("ExistingList");
+        let new_list_var = self.fresh_temp_var("NewList");
+        let new_map_var = self.fresh_temp_var("NewMap");
+        let value = form::let_in(
+            leaf::var(existing_var.clone()),
+            form::call(
+                "maps",
+                "get",
+                [
                     leaf::var(key_var),
-                    ", GroupMap, []) in let ",
-                    leaf::var(new_list_var.clone()),
-                    " = [",
+                    Document::Str("GroupMap"),
+                    Document::Str("[]"),
+                ],
+            ),
+            form::let_in(
+                leaf::var(new_list_var.clone()),
+                docvec![
+                    "[",
                     leaf::var(item_var.to_string()),
                     " | ",
                     leaf::var(existing_var),
-                    "] in let ",
-                    leaf::var(new_map_var.clone()),
-                    " = call 'maps':'put'(",
-                    leaf::var(key_var),
-                    ", ",
-                    leaf::var(new_list_var),
-                    ", GroupMap) in {",
-                    leaf::var(new_map_var),
-                    ", ",
-                    vars_doc,
-                    "}",
+                    "]"
                 ],
-                epilogue_span,
-            ));
-        } else {
-            let final_state = if has_mutations {
-                self.current_state_var()
-            } else {
-                "StateAcc".to_string()
-            };
-            let existing_var = self.fresh_temp_var("ExistingList");
-            let new_list_var = self.fresh_temp_var("NewList");
-            let new_map_var = self.fresh_temp_var("NewMap");
-            stmts.push(Self::fold_accumulator(
-                FoldCarry::StateMap,
-                docvec![
-                    "let ",
-                    leaf::var(existing_var.clone()),
-                    " = call 'maps':'get'(",
-                    leaf::var(key_var),
-                    ", GroupMap, []) in let ",
-                    leaf::var(new_list_var.clone()),
-                    " = [",
-                    leaf::var(item_var.to_string()),
-                    " | ",
-                    leaf::var(existing_var),
-                    "] in let ",
+                form::let_in(
                     leaf::var(new_map_var.clone()),
-                    " = call 'maps':'put'(",
-                    leaf::var(key_var),
-                    ", ",
-                    leaf::var(new_list_var),
-                    ", GroupMap) in {",
-                    leaf::var(new_map_var),
-                    ", ",
-                    leaf::var(final_state),
-                    "}",
-                ],
-                epilogue_span,
-            ));
-        }
+                    form::call(
+                        "maps",
+                        "put",
+                        [
+                            leaf::var(key_var),
+                            leaf::var(new_list_var),
+                            Document::Str("GroupMap"),
+                        ],
+                    ),
+                    acc_tuple([leaf::var(new_map_var)], &tail),
+                    Layout::Flat,
+                ),
+                Layout::Flat,
+            ),
+            Layout::Flat,
+        );
+        stmts.push(Self::fold_accumulator(carry, value, cx.span));
     }
 
     // FoldlSort — write the comparator's final state back to its
@@ -663,13 +433,7 @@ impl CoreErlangGenerator {
         cx: EpilogueCx<'_>,
         stmts: &mut Vec<ThreadedStmt>,
     ) {
-        let EpilogueCx {
-            pv,
-            has_mutations,
-            span: epilogue_span,
-            ..
-        } = cx;
-        let final_state = if has_mutations {
+        let final_state = if cx.has_mutations {
             self.current_state_var()
         } else {
             "StateAcc".to_string()
@@ -679,15 +443,17 @@ impl CoreErlangGenerator {
         // what the tag records as carried.
         stmts.push(Self::fold_accumulator(
             FoldCarry::StateMap,
-            docvec![
-                "let _ = call 'erlang':'put'(",
-                leaf::var(state_key_var.to_string()),
-                ", ",
-                leaf::var(final_state),
-                ") in ",
-                leaf::var(pv.to_string()),
-            ],
-            epilogue_span,
+            form::let_in(
+                leaf::var("_"),
+                form::call(
+                    "erlang",
+                    "put",
+                    [leaf::var(state_key_var.to_string()), leaf::var(final_state)],
+                ),
+                leaf::var(cx.pv.to_string()),
+                Layout::Flat,
+            ),
+            cx.span,
         ));
     }
 }

@@ -34,6 +34,7 @@ use super::control_flow::SoloBoolean;
 use super::control_flow::{PureArm, SoloAnswer};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, primitives};
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::{Block, Expression, MessageSelector, WellKnownSelector};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
@@ -160,6 +161,24 @@ fn validate_if_not_nil_block(expr: &Expression, selector: &str) -> Result<bool> 
         // Arity 1 or non-literal block — pass the receiver (Smalltalk convention)
         _ => Ok(true),
     }
+}
+
+/// `case recv of <'nil'> when 'true' -> nil_branch <_> when 'true' -> not_nil_branch end`
+/// — the nil test every nil-protocol intrinsic ends in. `recv` is the
+/// variable the receiver was bound to.
+fn nil_test_case(
+    recv: &str,
+    nil_branch: Document<'static>,
+    not_nil_branch: Document<'static>,
+) -> Document<'static> {
+    form::case_of(
+        leaf::var(recv.to_string()),
+        [
+            form::clause([leaf::atom("nil")], None, nil_branch, Layout::Flat),
+            form::clause([leaf::var("_")], None, not_nil_branch, Layout::Flat),
+        ],
+        Layout::Flat,
+    )
 }
 
 /// Generates a Core Erlang `apply` call that adapts to block arity.

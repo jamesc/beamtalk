@@ -15,6 +15,7 @@ use crate::core_erlang::{CodeGenContext, CoreErlangGenerator, Result};
 use super::{ClassSendArgs, SpawnTargetKind};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Expression, MessageSelector};
 
@@ -224,9 +225,9 @@ impl CoreErlangGenerator {
         let own_class_doc = self.close_threaded_value_doc(own_class);
         let literal_doc = self.generate_class_method_call(class_name, selector, bound)?;
         let call_doc = docvec![
-            "case call 'erlang':'element'(2, ",
-            leaf::var(CLASS_SELF_VAR),
-            ") of <",
+            "case ",
+            form::element(2, leaf::var(CLASS_SELF_VAR)),
+            " of <",
             leaf::atom(crate::core_erlang::util::metaclass_tag(class_name)),
             "> when 'true' -> ",
             own_class_doc,
@@ -357,11 +358,7 @@ impl CoreErlangGenerator {
             let class_tag = crate::core_erlang::util::metaclass_tag(&class_name);
             let (receiver_tag_doc, fallback_doc) = if receiver_is_self {
                 (
-                    docvec![
-                        "call 'erlang':'element'(2, ",
-                        leaf::var(CLASS_SELF_VAR),
-                        ")"
-                    ],
+                    docvec![form::element(2, leaf::var(CLASS_SELF_VAR))],
                     Self::class_self_send_call_doc(&selector_atom, args_doc.clone()),
                 )
             } else {
@@ -602,9 +599,9 @@ impl CoreErlangGenerator {
     /// them through a `let`.
     pub(in crate::core_erlang) fn class_self_name_doc() -> Document<'static> {
         docvec![
-            "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
-            leaf::var("ClassSelf"),
-            "))"
+            "call 'beamtalk_primitive':'class_name_from_tag'(",
+            form::element(2, leaf::var("ClassSelf")),
+            ")"
         ]
     }
 

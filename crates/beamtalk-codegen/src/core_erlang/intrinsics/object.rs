@@ -12,11 +12,11 @@
 use super::{
     ClassHierarchy, CodeGenContext, CoreErlangGenerator, Document, ErrorSignalReceiver, Expression,
     MessageSelector, PERFORM_WITH_ARGS_TIMEOUT, Result, WellKnownSelector, class_var_fn, docvec,
-    leaf, not_nil_apply, primitives, validate_if_not_nil_block,
+    leaf, nil_test_case, not_nil_apply, primitives, validate_if_not_nil_block,
 };
 use crate::core_erlang::dispatch_codegen::runtime_send_args;
 use crate::core_erlang::errors::{BeamtalkErrorChain, ErrorBinding};
-use beamtalk_cerl_doc::form;
+use beamtalk_cerl_doc::form::{self, Layout};
 
 /// The `beamtalk_behaviour_intrinsics` functions the `isKindOf:` lowerings
 /// call. A typed set, so the runtime export contract
@@ -594,10 +594,6 @@ impl CoreErlangGenerator {
     /// - `ifNil:` — Conditional execution if nil
     /// - `ifNotNil:` — Conditional execution if not nil
     /// - `ifNil:ifNotNil:` / `ifNotNil:ifNil:` — Two-way conditional
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Six nil-testing variants (isNil, notNil, ifNil:, ifNotNil:, ifNil:ifNotNil:, ifNotNil:ifNil:) in single match"
-    )]
     fn try_generate_nil_protocol(
         &mut self,
         receiver: &Expression,
@@ -611,271 +607,251 @@ impl CoreErlangGenerator {
         match selector.well_known() {
             Some(WellKnownSelector::IsNil) => {
                 debug_assert!(arguments.is_empty());
-                // Hoist open-scope receiver (e.g. class method self-send).
-                let mut seq = self.sequence_call(&[receiver], "Obj")?;
-                let recv_doc = seq.next();
-                let recv_var = self.fresh_temp_var("Obj");
-                let call_doc = docvec![
-                    "let ",
-                    leaf::var(recv_var.clone()),
-                    " = ",
-                    recv_doc,
-                    " in case ",
-                    leaf::var(recv_var),
-                    " of <'nil'> when 'true' -> 'true' <_> when 'true' -> 'false' end",
-                ];
-                Ok(Some(seq.close(self, call_doc, "IsNilRes")))
+                self.nil_test_expr(receiver, "Obj", &[], "IsNilRes", |_, _| {
+                    (leaf::atom("true"), leaf::atom("false"))
+                })
+                .map(Some)
             }
             Some(WellKnownSelector::NotNil) => {
                 debug_assert!(arguments.is_empty());
-                // Hoist open-scope receiver (e.g. class method self-send).
-                let mut seq = self.sequence_call(&[receiver], "Obj")?;
-                let recv_doc = seq.next();
-                let recv_var = self.fresh_temp_var("Obj");
-                let call_doc = docvec![
-                    "let ",
-                    leaf::var(recv_var.clone()),
-                    " = ",
-                    recv_doc,
-                    " in case ",
-                    leaf::var(recv_var),
-                    " of <'nil'> when 'true' -> 'false' <_> when 'true' -> 'true' end",
-                ];
-                Ok(Some(seq.close(self, call_doc, "NotNilRes")))
+                self.nil_test_expr(receiver, "Obj", &[], "NotNilRes", |_, _| {
+                    (leaf::atom("false"), leaf::atom("true"))
+                })
+                .map(Some)
             }
             Some(WellKnownSelector::IfNil) => {
                 debug_assert_eq!(arguments.len(), 1);
-                // ADR 0118 phase 4: same inline mutation-threading
-                // check as `ifNotNil:` below — a self-send or field mutation
-                // inside the `ifNil:` block must not be lost to a plain
-                // closure.
-                if self.nil_conditional_inlines()
-                    && let Expression::Block(block) = &arguments[0]
-                    && self.conditional_needs_mutation_threading(receiver, &[block])
-                {
-                    let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
-                        receiver,
-                        Some(block),
-                        None,
-                        self.conditional_scratch(self.current_frame()),
-                        false,
-                    )?;
-                    return Ok(Some(tuple_doc));
+                if let Some(doc) = self.try_inline_nil_conditional(
+                    receiver,
+                    arguments,
+                    Some(0),
+                    None,
+                    WellKnownSelector::IfNil.as_str(),
+                )? {
+                    return Ok(Some(doc));
                 }
-                // Hoist open-scope receiver/block (e.g. class method self-sends).
-                let mut seq = self.sequence_call(&[receiver, &arguments[0]], "IfNil")?;
-                let recv_doc = seq.next();
-                let block_doc = seq.next();
-                let recv_var = self.fresh_temp_var("Obj");
-                let block_var = self.fresh_temp_var("NilBlk");
-                let call_doc = docvec![
-                    "let ",
-                    leaf::var(recv_var.clone()),
-                    " = ",
-                    recv_doc,
-                    " in let ",
-                    leaf::var(block_var.clone()),
-                    " = ",
-                    block_doc,
-                    " in case ",
-                    leaf::var(recv_var.clone()),
-                    " of <'nil'> when 'true' -> ",
-                    // BT-4366: nested in the nil-test `case`, so the apply carries the
-                    // send's line itself.
-                    self.annotate_current_send_call(docvec!["apply ", leaf::var(block_var), " ()"]),
-                    " <_> when 'true' -> ",
-                    leaf::var(recv_var),
-                    " end",
-                ];
-                Ok(Some(seq.close(self, call_doc, "IfNilRes")))
+                self.nil_test_expr(
+                    receiver,
+                    "IfNil",
+                    &[(&arguments[0], "NilBlk")],
+                    "IfNilRes",
+                    |this, vars| {
+                        let [recv_var, nil_var] = vars else {
+                            unreachable!("ifNil: binds the receiver and one block");
+                        };
+                        // BT-4366: nested in the nil-test `case`, so the apply carries the
+                        // send's line itself.
+                        let nil_branch = this.annotate_current_send_call(docvec![
+                            "apply ",
+                            leaf::var(nil_var.clone()),
+                            " ()"
+                        ]);
+                        (nil_branch, leaf::var(recv_var.clone()))
+                    },
+                )
+                .map(Some)
             }
             Some(WellKnownSelector::IfNotNil) => {
                 debug_assert_eq!(arguments.len(), 1);
                 let selector_name = WellKnownSelector::IfNotNil.as_str();
-                // When in actor context or loop body, check if the block
-                // contains field mutations. If so, generate inline state-threaded code
-                // instead of a closure to ensure mutations persist correctly.
-                if self.nil_conditional_inlines()
-                    && let Expression::Block(block) = &arguments[0]
-                {
-                    // inline when a nested list op mutates an outer local (see IfTrue).
-                    // also inline for a self-send receiver (see IfTrue above).
-                    let needs_threading =
-                        self.conditional_needs_mutation_threading(receiver, &[block]);
-                    if needs_threading {
-                        // Validate arity before generating mutation-threaded code.
-                        // This ensures a block with >1 params still raises
-                        // BlockArityMismatch rather than producing invalid Core Erlang.
-                        validate_if_not_nil_block(&arguments[0], selector_name)?;
-                        let doc = self.generate_nil_conditional_with_mutations_tuple(
-                            receiver,
-                            None,
-                            Some(block),
-                            self.conditional_scratch(self.current_frame()),
-                            false,
-                        )?;
-                        return Ok(Some(doc));
-                    }
+                // When in actor context or loop body, a block with field
+                // mutations is inlined state-threaded instead of a closure so
+                // the mutations persist.
+                if let Some(doc) = self.try_inline_nil_conditional(
+                    receiver,
+                    arguments,
+                    None,
+                    Some(0),
+                    selector_name,
+                )? {
+                    return Ok(Some(doc));
                 }
                 // If the block has 0 parameters, don't pass the receiver (avoids badarity)
-                // Hoist open-scope receiver/block (e.g. class method self-sends).
                 let block_takes_arg = validate_if_not_nil_block(&arguments[0], selector_name)?;
-                let mut seq = self.sequence_call(&[receiver, &arguments[0]], "IfNotNil")?;
-                let recv_doc = seq.next();
-                let block_doc = seq.next();
-                let recv_var = self.fresh_temp_var("Obj");
-                let block_var = self.fresh_temp_var("NotNilBlk");
-                let apply = self.annotate_current_send_call(not_nil_apply(
-                    &block_var,
-                    &recv_var,
-                    block_takes_arg,
-                ));
-                let call_doc = docvec![
-                    "let ",
-                    leaf::var(recv_var.clone()),
-                    " = ",
-                    recv_doc,
-                    " in let ",
-                    leaf::var(block_var),
-                    " = ",
-                    block_doc,
-                    " in case ",
-                    leaf::var(recv_var),
-                    " of <'nil'> when 'true' -> 'nil' <_> when 'true' -> ",
-                    apply,
-                    " end",
-                ];
-                Ok(Some(seq.close(self, call_doc, "IfNotNilRes")))
+                self.nil_test_expr(
+                    receiver,
+                    "IfNotNil",
+                    &[(&arguments[0], "NotNilBlk")],
+                    "IfNotNilRes",
+                    |this, vars| {
+                        let [recv_var, not_nil_var] = vars else {
+                            unreachable!("ifNotNil: binds the receiver and one block");
+                        };
+                        let apply = this.annotate_current_send_call(not_nil_apply(
+                            not_nil_var,
+                            recv_var,
+                            block_takes_arg,
+                        ));
+                        (leaf::atom("nil"), apply)
+                    },
+                )
+                .map(Some)
             }
             Some(WellKnownSelector::IfNilIfNotNil) => {
-                debug_assert_eq!(arguments.len(), 2);
-                let selector_name = WellKnownSelector::IfNilIfNotNil.as_str();
-                // ADR 0118 phase 4: inline mutation-threading
-                // check, same as the single-block `ifNil:`/`ifNotNil:`
-                // arms above.
-                if self.nil_conditional_inlines()
-                    && let (Expression::Block(nil_block), Expression::Block(not_nil_block)) =
-                        (&arguments[0], &arguments[1])
-                    && self
-                        .conditional_needs_mutation_threading(receiver, &[nil_block, not_nil_block])
-                {
-                    validate_if_not_nil_block(&arguments[1], selector_name)?;
-                    let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
-                        receiver,
-                        Some(nil_block),
-                        Some(not_nil_block),
-                        self.conditional_scratch(self.current_frame()),
-                        false,
-                    )?;
-                    return Ok(Some(tuple_doc));
-                }
-                // If the notNil block has 0 parameters, don't pass the receiver
-                // Hoist open-scope sub-expressions (e.g. class method self-sends).
-                let block_takes_arg = validate_if_not_nil_block(&arguments[1], selector_name)?;
-                let mut seq =
-                    self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "IfNilNotNil")?;
-                let recv_doc = seq.next();
-                let nil_doc = seq.next();
-                let not_nil_doc = seq.next();
-                let recv_var = self.fresh_temp_var("Obj");
-                let nil_var = self.fresh_temp_var("NilBlk");
-                let not_nil_var = self.fresh_temp_var("NotNilBlk");
-                let apply = self.annotate_current_send_call(not_nil_apply(
-                    &not_nil_var,
-                    &recv_var,
-                    block_takes_arg,
-                ));
-                let call_doc = docvec![
-                    "let ",
-                    leaf::var(recv_var.clone()),
-                    " = ",
-                    recv_doc,
-                    " in let ",
-                    leaf::var(nil_var.clone()),
-                    " = ",
-                    nil_doc,
-                    " in let ",
-                    leaf::var(not_nil_var),
-                    " = ",
-                    not_nil_doc,
-                    " in case ",
-                    leaf::var(recv_var),
-                    " of <'nil'> when 'true' -> ",
-                    // BT-4366: nested in the nil-test `case`, so the apply carries the
-                    // send's line itself.
-                    self.annotate_current_send_call(docvec!["apply ", leaf::var(nil_var), " ()"]),
-                    " <_> when 'true' -> ",
-                    apply,
-                    " end",
-                ];
-                Ok(Some(seq.close(self, call_doc, "IfNilNotNilRes")))
+                self.nil_two_way(receiver, arguments, WellKnownSelector::IfNilIfNotNil, true)
             }
             Some(WellKnownSelector::IfNotNilIfNil) => {
-                debug_assert_eq!(arguments.len(), 2);
-                let selector_name = WellKnownSelector::IfNotNilIfNil.as_str();
-                // ADR 0118 phase 4: inline mutation-threading
-                // check, same as the single-block `ifNil:`/`ifNotNil:`
-                // arms above.
-                if self.nil_conditional_inlines()
-                    && let (Expression::Block(not_nil_block), Expression::Block(nil_block)) =
-                        (&arguments[0], &arguments[1])
-                    && self
-                        .conditional_needs_mutation_threading(receiver, &[not_nil_block, nil_block])
-                {
-                    validate_if_not_nil_block(&arguments[0], selector_name)?;
-                    let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
-                        receiver,
-                        Some(nil_block),
-                        Some(not_nil_block),
-                        self.conditional_scratch(self.current_frame()),
-                        false,
-                    )?;
-                    return Ok(Some(tuple_doc));
-                }
-                // If the notNil block has 0 parameters, don't pass the receiver
-                // Hoist open-scope sub-expressions (e.g. class method self-sends).
-                let block_takes_arg = validate_if_not_nil_block(&arguments[0], selector_name)?;
-                let mut seq =
-                    self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "IfNotNilNil")?;
-                let recv_doc = seq.next();
-                let not_nil_doc = seq.next();
-                let nil_doc = seq.next();
-                let recv_var = self.fresh_temp_var("Obj");
-                let not_nil_var = self.fresh_temp_var("NotNilBlk");
-                let nil_var = self.fresh_temp_var("NilBlk");
-                let apply = self.annotate_current_send_call(not_nil_apply(
-                    &not_nil_var,
-                    &recv_var,
-                    block_takes_arg,
-                ));
-                let call_doc = docvec![
-                    "let ",
-                    leaf::var(recv_var.clone()),
-                    " = ",
-                    recv_doc,
-                    " in let ",
-                    leaf::var(not_nil_var.clone()),
-                    " = ",
-                    not_nil_doc,
-                    " in let ",
-                    leaf::var(nil_var.clone()),
-                    " = ",
-                    nil_doc,
-                    " in case ",
-                    leaf::var(recv_var),
-                    " of <'nil'> when 'true' -> ",
-                    // BT-4366: nested in the nil-test `case`, so the apply carries the
-                    // send's line itself.
-                    self.annotate_current_send_call(docvec!["apply ", leaf::var(nil_var), " ()"]),
-                    " <_> when 'true' -> ",
-                    apply,
-                    " end",
-                ];
-                Ok(Some(seq.close(self, call_doc, "IfNotNilNilRes")))
+                self.nil_two_way(receiver, arguments, WellKnownSelector::IfNotNilIfNil, false)
             }
             // Not a nil-protocol intrinsic — let the caller continue.
             _ => Ok(None),
         }
+    }
+
+    /// `ifNil:ifNotNil:` (`nil_first`) and `ifNotNil:ifNil:`: the inline
+    /// form when a block needs the state threaded, else the closure form
+    /// with the two blocks bound in selector order.
+    fn nil_two_way(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+        selector: WellKnownSelector,
+        nil_first: bool,
+    ) -> Result<Option<Document<'static>>> {
+        debug_assert_eq!(arguments.len(), 2);
+        let selector_name = selector.as_str();
+        let (nil_idx, not_nil_idx) = if nil_first { (0, 1) } else { (1, 0) };
+        if let Some(doc) = self.try_inline_nil_conditional(
+            receiver,
+            arguments,
+            Some(nil_idx),
+            Some(not_nil_idx),
+            selector_name,
+        )? {
+            return Ok(Some(doc));
+        }
+        // If the notNil block has 0 parameters, don't pass the receiver
+        let block_takes_arg = validate_if_not_nil_block(&arguments[not_nil_idx], selector_name)?;
+        let (seq_prefix, result_prefix, blocks) = if nil_first {
+            (
+                "IfNilNotNil",
+                "IfNilNotNilRes",
+                [(&arguments[0], "NilBlk"), (&arguments[1], "NotNilBlk")],
+            )
+        } else {
+            (
+                "IfNotNilNil",
+                "IfNotNilNilRes",
+                [(&arguments[0], "NotNilBlk"), (&arguments[1], "NilBlk")],
+            )
+        };
+        self.nil_test_expr(
+            receiver,
+            seq_prefix,
+            &blocks,
+            result_prefix,
+            |this, vars| {
+                let [recv_var, first_var, second_var] = vars else {
+                    unreachable!("the two-block nil conditionals bind the receiver and two blocks");
+                };
+                let (nil_var, not_nil_var) = if nil_first {
+                    (first_var, second_var)
+                } else {
+                    (second_var, first_var)
+                };
+                this.two_way_nil_branches(recv_var, nil_var, not_nil_var, block_takes_arg)
+            },
+        )
+        .map(Some)
+    }
+
+    /// The inline mutation-threading check shared by the four nil
+    /// conditionals (ADR 0118 phase 4): when every argument is a literal
+    /// block and a self-send or field mutation inside one (or the receiver)
+    /// needs the state threaded, lowers the whole send inline instead of
+    /// through closures, which would lose the mutation. `nil_idx` /
+    /// `not_nil_idx` say which argument is the `ifNil:` / `ifNotNil:` block;
+    /// the `ifNotNil:` block's arity is validated first so a block with more
+    /// than one parameter still raises `BlockArityMismatch` rather than
+    /// producing invalid Core Erlang.
+    fn try_inline_nil_conditional(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+        nil_idx: Option<usize>,
+        not_nil_idx: Option<usize>,
+        selector_name: &str,
+    ) -> Result<Option<Document<'static>>> {
+        if !self.nil_conditional_inlines() {
+            return Ok(None);
+        }
+        let mut blocks = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            let Expression::Block(block) = argument else {
+                return Ok(None);
+            };
+            blocks.push(block);
+        }
+        if !self.conditional_needs_mutation_threading(receiver, &blocks) {
+            return Ok(None);
+        }
+        if let Some(idx) = not_nil_idx {
+            validate_if_not_nil_block(&arguments[idx], selector_name)?;
+        }
+        let doc = self.generate_nil_conditional_with_mutations_tuple(
+            receiver,
+            nil_idx.map(|idx| blocks[idx]),
+            not_nil_idx.map(|idx| blocks[idx]),
+            self.conditional_scratch(self.current_frame()),
+            false,
+        )?;
+        Ok(Some(doc))
+    }
+
+    /// `let Obj = recv in <let Blk = arg in …> case Obj of <'nil'> -> … <_> -> … end`
+    /// — the closure form of a nil test. Hoists open-scope sub-expressions
+    /// (e.g. class method self-sends) through `sequence_call`, binds the
+    /// receiver and each `(argument, temp prefix)` block, and lets `branches`
+    /// build the `(nil, not-nil)` arms from the receiver/block variable names
+    /// (in binding order) once they exist.
+    fn nil_test_expr(
+        &mut self,
+        receiver: &Expression,
+        seq_prefix: &str,
+        blocks: &[(&Expression, &str)],
+        result_prefix: &str,
+        branches: impl FnOnce(&mut Self, &[String]) -> (Document<'static>, Document<'static>),
+    ) -> Result<Document<'static>> {
+        let operands: Vec<&Expression> = std::iter::once(receiver)
+            .chain(blocks.iter().map(|(arg, _)| *arg))
+            .collect();
+        let mut seq = self.sequence_call(&operands, seq_prefix)?;
+        let mut docs = Vec::with_capacity(operands.len());
+        for _ in &operands {
+            docs.push(seq.next());
+        }
+        let mut vars = vec![self.fresh_temp_var("Obj")];
+        for (_, prefix) in blocks {
+            vars.push(self.fresh_temp_var(prefix));
+        }
+        let (nil_branch, not_nil_branch) = branches(self, &vars);
+        let case = nil_test_case(&vars[0], nil_branch, not_nil_branch);
+        let call_doc = vars.iter().zip(docs).rev().fold(case, |body, (var, doc)| {
+            form::let_in(leaf::var(var.clone()), doc, body, Layout::Flat)
+        });
+        Ok(seq.close(self, call_doc, result_prefix))
+    }
+
+    /// The `(nil, not-nil)` arms of the two-block nil conditionals: the nil
+    /// arm applies the `ifNil:` block, the not-nil arm the `ifNotNil:` block
+    /// (passing the receiver only when it takes a parameter).
+    fn two_way_nil_branches(
+        &mut self,
+        recv_var: &str,
+        nil_var: &str,
+        not_nil_var: &str,
+        block_takes_arg: bool,
+    ) -> (Document<'static>, Document<'static>) {
+        let apply =
+            self.annotate_current_send_call(not_nil_apply(not_nil_var, recv_var, block_takes_arg));
+        // BT-4366: nested in the nil-test `case`, so the apply carries the
+        // send's line itself.
+        let nil_branch = self.annotate_current_send_call(docvec![
+            "apply ",
+            leaf::var(nil_var.to_string()),
+            " ()"
+        ]);
+        (nil_branch, apply)
     }
 
     /// Generates code for error signaling methods.
@@ -1360,9 +1336,9 @@ impl CoreErlangGenerator {
             leaf::var(receiver_var.clone()),
             ") of <'true'> when 'true' -> case call 'erlang':'=='(call 'erlang':'tuple_size'(",
             leaf::var(receiver_var.clone()),
-            "), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, ",
-            leaf::var(receiver_var.clone()),
-            "), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
+            "), 4) of <'true'> when 'true' -> call 'erlang':'=='(",
+            form::element(1, leaf::var(receiver_var.clone())),
+            ", 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
             "<'true'> when 'true' -> ",
             dispatch_call,
             // Non-actor: delegate map receivers to beamtalk_primitive:send
@@ -1519,9 +1495,9 @@ impl CoreErlangGenerator {
             leaf::var(receiver_var.clone()),
             ") of <'true'> when 'true' -> case call 'erlang':'=='(call 'erlang':'tuple_size'(",
             leaf::var(receiver_var.clone()),
-            "), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, ",
-            leaf::var(receiver_var.clone()),
-            "), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
+            "), 4) of <'true'> when 'true' -> call 'erlang':'=='(",
+            form::element(1, leaf::var(receiver_var.clone())),
+            ", 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
             "<'true'> when 'true' -> ",
             dispatch_call,
             " <_> when 'true' -> let ",

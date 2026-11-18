@@ -10,6 +10,7 @@ use super::threaded_ir::{
 };
 use super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{Block, Expression};
 use beamtalk_core::source_analysis::Span;
@@ -71,15 +72,7 @@ impl CoreErlangGenerator {
         let source_version = self.state_version();
         let doc = self.exception_producer_tuple_doc(expr)?;
         let carrier = self.fresh_temp_var("ThreadedResult");
-        let element = |k: i64, carrier: &str| {
-            docvec![
-                "call 'erlang':'element'(",
-                leaf::int_lit(k),
-                ", ",
-                leaf::var(carrier.to_string()),
-                ")",
-            ]
-        };
+        let element = |k: usize, carrier: &str| form::element(k, leaf::var(carrier.to_string()));
         let mut family_binds = Vec::new();
         if actor && enclosing.kind.extends_state_chain() {
             let _ = self.next_state_var();
@@ -246,15 +239,7 @@ impl CoreErlangGenerator {
                 .unwrap_or_default(),
         );
         let carrier = self.fresh_temp_var("ThreadedResult");
-        let element = |k: i64, carrier: &str| {
-            docvec![
-                "call 'erlang':'element'(",
-                leaf::int_lit(k),
-                ", ",
-                leaf::var(carrier.to_string()),
-                ")",
-            ]
-        };
+        let element = |k: usize, carrier: &str| form::element(k, leaf::var(carrier.to_string()));
         let _ = self.next_state_var();
         let adopt = ThreadedStmt::Bind {
             target: VersionedVar::new(VersionPrefix::State, self.state_version(), frame),

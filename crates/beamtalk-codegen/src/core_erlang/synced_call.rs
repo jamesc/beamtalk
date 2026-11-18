@@ -56,6 +56,7 @@ use super::{CodeGenContext, CoreErlangGenerator};
 use crate::core_erlang::docvec;
 use crate::core_erlang::leaf;
 use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::form;
 use beamtalk_core::ast::{Expression, MessageSelector};
 use beamtalk_core::source_analysis::Span;
 use beamtalk_core::state_threading_selectors::{SendUserCode, send_user_code};
@@ -1722,9 +1723,8 @@ impl CoreErlangGenerator {
                 leaf::var(tuple_var.clone()),
                 " = ",
                 call,
-                " in call 'erlang':'element'(1, ",
-                leaf::var(tuple_var),
-                ")",
+                " in ",
+                form::element(1, leaf::var(tuple_var)),
             ];
             self.tier2_merge_rebinds(expr)
         } else {

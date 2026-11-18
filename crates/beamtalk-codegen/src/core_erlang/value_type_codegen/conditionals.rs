@@ -21,6 +21,7 @@ use super::super::threaded_ir::{
 use super::super::threaded_rebind::{RebindLayout, RebindNaming};
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::{Block, Expression, MessageSelector};
 
@@ -191,9 +192,8 @@ impl CoreErlangGenerator {
                         leaf::var(tuple_var.clone()),
                         " = ",
                         val_doc,
-                        " in call 'erlang':'element'(1, ",
-                        leaf::var(tuple_var),
-                        ")",
+                        " in ",
+                        form::element(1, leaf::var(tuple_var)),
                     ]);
                 } else {
                     parts.push(self.expression_doc(value_expr)?);
@@ -585,13 +585,8 @@ impl CoreErlangGenerator {
                 span,
             )?);
         }
-        let value = capture_value.then(|| {
-            ValueRef::Doc(docvec![
-                "call 'erlang':'element'(1, ",
-                leaf::var(result_var),
-                ")"
-            ])
-        });
+        let value =
+            capture_value.then(|| ValueRef::Doc(docvec![form::element(1, leaf::var(result_var))]));
         Ok(Some(VtConditionalLowered { prelude, value }))
     }
 
@@ -956,9 +951,9 @@ impl CoreErlangGenerator {
             docs.push(docvec![
                 "let ",
                 leaf::var(state_var.clone()),
-                " = call 'erlang':'element'(2, ",
-                leaf::var(tuple_var.clone()),
-                ") in ",
+                " = ",
+                form::element(2, leaf::var(tuple_var.clone())),
+                " in ",
             ]);
             docs.extend(self.rebind_threaded_locals(
                 &threaded_vars,

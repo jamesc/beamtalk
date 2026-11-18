@@ -35,6 +35,7 @@ use super::family_slots::append_family_slots;
 use super::loop_scope::{DirectParamsKind, DirectParamsLoopScope};
 use super::{LocalWrite, ThreadingPlan};
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::{Block, Expression};
 use beamtalk_core::semantic_analysis::extract_pattern_bindings;
@@ -524,11 +525,10 @@ impl CoreErlangGenerator {
                     condition_stmts.push(ThreadedStmt::Bind {
                         target: target.clone(),
                         source: seed,
-                        op: BindOp::Direct(ValueRef::Doc(docvec![
-                            "call 'erlang':'element'(3, ",
-                            leaf::var(pair.clone()),
-                            ")"
-                        ])),
+                        op: BindOp::Direct(ValueRef::Doc(docvec![form::element(
+                            3,
+                            leaf::var(pair.clone())
+                        )])),
                         span: condition.span(),
                     });
                     target
@@ -866,11 +866,11 @@ impl CoreErlangGenerator {
                     leaf::var(pair_var.clone()),
                     " = ",
                     pair,
-                    " in {call 'erlang':'element'(1, ",
-                    leaf::var(pair_var.clone()),
-                    "), call 'erlang':'element'(2, ",
-                    leaf::var(pair_var),
-                    "), ",
+                    " in {",
+                    form::element(1, leaf::var(pair_var.clone())),
+                    ", ",
+                    form::element(2, leaf::var(pair_var)),
+                    ", ",
                     leaf::var(self_var),
                     "}"
                 ],

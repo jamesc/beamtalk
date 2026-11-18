@@ -71,6 +71,7 @@ use super::threaded_ir::{
 };
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::source_analysis::Span;
@@ -368,20 +369,19 @@ impl CoreErlangGenerator {
                 expr_doc,
                 " in let ",
                 leaf::var(result_var.clone()),
-                " = call 'erlang':'element'(1, ",
-                leaf::var(tuple_var.clone()),
-                ") in ",
+                " = ",
+                form::element(1, leaf::var(tuple_var.clone())),
+                " in ",
             ],
             span,
         ));
         stmts.push(ThreadedStmt::Bind {
             target: VersionedVar::new(VersionPrefix::State, target_version, FrameId::ROOT),
             source: VersionedVar::new(VersionPrefix::State, source_version, FrameId::ROOT),
-            op: BindOp::Direct(ValueRef::Doc(docvec![
-                "call 'erlang':'element'(2, ",
-                leaf::var(tuple_var),
-                ")",
-            ])),
+            op: BindOp::Direct(ValueRef::Doc(docvec![form::element(
+                2,
+                leaf::var(tuple_var)
+            ),])),
             span,
         });
         stmts.push(ThreadedStmt::Statement(

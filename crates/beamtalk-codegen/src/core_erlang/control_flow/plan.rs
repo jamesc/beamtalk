@@ -18,6 +18,7 @@ use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
 use super::analysis::ThreadedFamilies;
 use super::family_slots::FoldFamilySlots;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::source_analysis::Span;
@@ -1606,11 +1607,9 @@ impl ThreadingPlan {
             docs.push(docvec![
                 "let ",
                 leaf::var(core_var),
-                " = call 'erlang':'element'(",
-                leaf::int_lit(i64::try_from(idx).unwrap_or(0)),
-                ", ",
-                leaf::var(final_acc_var.to_string()),
-                ") in ",
+                " = ",
+                form::element(idx, leaf::var(final_acc_var.to_string())),
+                " in ",
             ]);
         }
         Document::Vec(docs)

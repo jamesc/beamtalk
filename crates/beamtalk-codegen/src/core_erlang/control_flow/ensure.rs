@@ -82,16 +82,15 @@ impl CoreErlangGenerator {
                 rethrow: RethrowSlot::CellOverCarried,
             }
         });
-        let other = docvec![
-            "do ",
+        let other = form::seq(
             self.annotate_current_send_call(docvec![
                 "apply ",
                 leaf::var(cleanup_var.clone()),
                 " ()"
             ]),
-            " ",
             Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),
-        ];
+            Layout::Flat,
+        );
         let catch = self.ensure_catch(
             EnsureCatchTriple {
                 type_var,

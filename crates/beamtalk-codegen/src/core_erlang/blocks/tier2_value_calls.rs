@@ -12,6 +12,7 @@
 
 use crate::core_erlang::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{Expression, MessageSelector};
 
@@ -342,13 +343,13 @@ impl CoreErlangGenerator {
                 call_doc,
                 " in let ",
                 leaf::var(this_result.clone()),
-                " = call 'erlang':'element'(1, ",
-                leaf::var(tuple_var.clone()),
-                ") in let ",
+                " = ",
+                form::element(1, leaf::var(tuple_var.clone())),
+                " in let ",
                 leaf::var(this_state.clone()),
-                " = call 'erlang':'element'(2, ",
-                leaf::var(tuple_var),
-                ") in ",
+                " = ",
+                form::element(2, leaf::var(tuple_var)),
+                " in ",
             ]);
             result_var = Some(this_result);
             state_var = Some(this_state);

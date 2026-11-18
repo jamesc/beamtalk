@@ -44,6 +44,7 @@
 
 use super::super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{
     Block, BlockParameter, Expression, ExpressionStatement, Identifier, KeywordPart, Literal,
@@ -245,9 +246,9 @@ impl CoreErlangGenerator {
             leaf::var(tuple_var.clone()),
             " = ",
             fold_doc,
-            " in {'nil', call 'erlang':'element'(2, ",
-            leaf::var(tuple_var),
-            ")}",
+            " in {'nil', ",
+            form::element(2, leaf::var(tuple_var)),
+            "}",
         ]
     }
 

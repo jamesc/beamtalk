@@ -265,6 +265,13 @@ pub fn seq<'a>(first: Document<'a>, second: Document<'a>, layout: Layout) -> Doc
     docvec!["do ", first, sep, second]
 }
 
+/// `do first ` — [`seq`] with the second part left to the caller: ends with
+/// the space after `first`, like [`let_prefix`] for a `let`.
+#[must_use]
+pub fn do_prefix(first: Document<'_>) -> Document<'_> {
+    docvec!["do ", first, " "]
+}
+
 /// One `<patterns> when guard -> body` clause of a [`case_of`].
 ///
 /// `guard` of `None` is the always-true guard `'true'`. `Flat` renders
@@ -510,6 +517,15 @@ mod tests {
         assert_eq!(
             mk(Layout::Block).to_pretty_string(),
             "letrec 'loop'/1 = fun (N) ->\n    call 'm':'f'(N) in\napply 'loop'/1 (X)"
+        );
+    }
+
+    #[test]
+    fn do_prefix_is_seq_without_the_second_part() {
+        assert_eq!(do_prefix(v("A")).to_pretty_string(), "do A ");
+        assert_eq!(
+            docvec![do_prefix(v("A")), v("B")].to_pretty_string(),
+            seq(v("A"), v("B"), Layout::Flat).to_pretty_string()
         );
     }
 

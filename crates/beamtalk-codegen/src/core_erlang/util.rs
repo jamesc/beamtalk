@@ -383,13 +383,25 @@ impl CoreErlangGenerator {
     /// the caller already owns (a node that renders without a generator, such as
     /// the `on:do:` catch boundary, carries its own).
     pub(super) fn case_clause_fallback_doc(var: String) -> beamtalk_cerl_doc::Document<'static> {
-        docvec![
-            " <",
-            beamtalk_cerl_doc::leaf::var(var.clone()),
-            "> when 'true' -> call 'erlang':'error'({'case_clause', ",
-            beamtalk_cerl_doc::leaf::var(var),
-            "})",
-        ]
+        docvec![" ", Self::case_clause_fallback_clause(var)]
+    }
+
+    /// The fallback as a [`beamtalk_cerl_doc::form::clause`] — no leading
+    /// space — for sites that build their `case` with `form::case_of`. The one
+    /// owner of the fallback's text; [`Self::case_clause_fallback_doc`] adds
+    /// the separator for the sites that append it to a hand-written `case`.
+    pub(super) fn case_clause_fallback_clause(var: String) -> beamtalk_cerl_doc::Document<'static> {
+        use beamtalk_cerl_doc::{form, leaf};
+        form::clause(
+            [leaf::var(var.clone())],
+            None,
+            form::call(
+                "erlang",
+                "error",
+                [form::tuple([leaf::atom("case_clause"), leaf::var(var)])],
+            ),
+            form::Layout::Flat,
+        )
     }
 
     /// Returns the class name for the currently compiled class.

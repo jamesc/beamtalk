@@ -12,6 +12,7 @@ use super::super::threaded_ir::{
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use super::conditionals::{Closure, FieldWriteSite, SoloBoolean};
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Expression, MessageSelector};
 use beamtalk_core::source_analysis::Span;
@@ -199,11 +200,7 @@ impl CoreErlangGenerator {
                     self.repl_adoption_prelude(&carrier, tuple_doc, &cached, adopt, frame, span)?;
                 return Ok(Some(ThreadedValue {
                     prelude,
-                    value: ValueRef::Doc(docvec![
-                        "call 'erlang':'element'(1, ",
-                        leaf::var(carrier),
-                        ")",
-                    ]),
+                    value: ValueRef::Doc(docvec![form::element(1, leaf::var(carrier)),]),
                 }));
             }
             let frame = self.current_frame();
@@ -557,9 +554,9 @@ impl CoreErlangGenerator {
                     value_code,
                     " in let ",
                     leaf::var(val_var.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(t2_tuple.clone()),
-                    ") in ",
+                    " = ",
+                    form::element(1, leaf::var(t2_tuple.clone())),
+                    " in ",
                 ],
                 span,
             ));
@@ -567,11 +564,10 @@ impl CoreErlangGenerator {
             stmts.push(ThreadedStmt::Bind {
                 target: gensym_state.clone(),
                 source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
-                    "call 'erlang':'element'(2, ",
-                    leaf::var(t2_tuple),
-                    ")",
-                ])),
+                op: BindOp::Direct(ValueRef::Doc(docvec![form::element(
+                    2,
+                    leaf::var(t2_tuple)
+                ),])),
                 span,
             });
             self.push_local_slot_put_from(
@@ -630,9 +626,9 @@ impl CoreErlangGenerator {
                     value_code,
                     " in let ",
                     leaf::var(val_var.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(cf_tuple.clone()),
-                    ") in ",
+                    " = ",
+                    form::element(1, leaf::var(cf_tuple.clone())),
+                    " in ",
                 ],
                 span,
             ));
@@ -640,11 +636,10 @@ impl CoreErlangGenerator {
             stmts.push(ThreadedStmt::Bind {
                 target: gensym_state.clone(),
                 source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
-                    "call 'erlang':'element'(2, ",
-                    leaf::var(cf_tuple),
-                    ")",
-                ])),
+                op: BindOp::Direct(ValueRef::Doc(docvec![form::element(
+                    2,
+                    leaf::var(cf_tuple)
+                ),])),
                 span,
             });
             self.push_local_slot_put_from(

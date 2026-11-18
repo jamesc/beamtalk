@@ -19,6 +19,7 @@ use super::super::threaded_ir::{
 use super::super::threaded_rebind::{RebindLayout, RebindNaming};
 use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary, Result};
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::{Document, concat, join, leaf};
 use beamtalk_core::ast::{
     Block, ClassDefinition, Expression, MessageSelector, MethodDefinition, WellKnownSelector,
@@ -426,11 +427,7 @@ impl CoreErlangGenerator {
         span: beamtalk_core::source_analysis::Span,
     ) -> Option<Document<'static>> {
         let prefix = families.as_slice().first()?;
-        let value_doc = docvec![
-            "call 'erlang':'element'(3, ",
-            leaf::var(tuple_var.to_string()),
-            ")"
-        ];
+        let value_doc = docvec![form::element(3, leaf::var(tuple_var.to_string()))];
         Some(match prefix {
             VersionPrefix::SelfVt => self.rebind_value_self_from_doc(value_doc, span),
             other => unreachable!(
@@ -471,9 +468,9 @@ impl CoreErlangGenerator {
             expr_doc,
             " in\n    let ",
             leaf::var(result_var.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(tuple_var.clone()),
-            ") in\n",
+            " = ",
+            form::element(1, leaf::var(tuple_var.clone())),
+            " in\n",
         ]);
         if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
             body_parts.push(docvec!["    ", rebind_doc, "\n"]);
@@ -1392,9 +1389,9 @@ impl CoreErlangGenerator {
             parts.push(docvec![
                 "    let ",
                 leaf::var(state_var.clone()),
-                " = call 'erlang':'element'(2, ",
-                leaf::var(tuple_var.clone()),
-                ") in\n",
+                " = ",
+                form::element(2, leaf::var(tuple_var.clone())),
+                " in\n",
             ]);
 
             // Extract each threaded local from the state map

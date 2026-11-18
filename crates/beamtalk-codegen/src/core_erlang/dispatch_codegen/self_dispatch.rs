@@ -286,11 +286,10 @@ impl CoreErlangGenerator {
     /// the single spelling shared by [`Self::generate_self_dispatch`]'s
     /// value and [`Self::try_handle_self_dispatch`]'s planner substitution.
     pub(in crate::core_erlang) fn self_dispatch_result_value(dispatch_var: &str) -> ValueRef {
-        ValueRef::Doc(docvec![
-            "call 'erlang':'element'(1, ",
-            leaf::var(dispatch_var.to_string()),
-            ")",
-        ])
+        ValueRef::Doc(docvec![form::element(
+            1,
+            leaf::var(dispatch_var.to_string())
+        ),])
     }
 
     /// The `Statement` + `Bind` pair behind [`Self::generate_self_dispatch`],
@@ -326,11 +325,10 @@ impl CoreErlangGenerator {
             ThreadedStmt::Bind {
                 target: VersionedVar::new(VersionPrefix::State, target_version, frame),
                 source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
-                    "call 'erlang':'element'(2, ",
-                    leaf::var(dispatch_var.clone()),
-                    ")",
-                ])),
+                op: BindOp::Direct(ValueRef::Doc(docvec![form::element(
+                    2,
+                    leaf::var(dispatch_var.clone())
+                ),])),
                 span,
             },
         ];

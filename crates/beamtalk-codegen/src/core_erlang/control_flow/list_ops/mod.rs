@@ -36,6 +36,7 @@ mod tests;
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
 
@@ -464,7 +465,7 @@ impl CoreErlangGenerator {
         // `-> Nil` (and the runtime primitive answers `nil`), so the inlined
         // `do:` sequences the call and answers `'nil'`.
         let list_call = if operation == "foreach" {
-            docvec!["do ", list_call, " ", leaf::atom("nil")]
+            form::seq(list_call, leaf::atom("nil"), Layout::Flat)
         } else {
             list_call
         };

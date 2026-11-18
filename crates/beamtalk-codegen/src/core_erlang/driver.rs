@@ -17,8 +17,11 @@ use crate::core_erlang::guard_returns;
 use crate::core_erlang::{
     CodeGenError, CodegenOptions, DirectCallClassInfo, DirectCallTable, GeneratedModule, Result,
 };
+use beamtalk_cerl_doc::Document;
 use beamtalk_core::ast::{Module, normalize};
+use beamtalk_core::source_analysis::Span;
 use ecow::EcoString;
+use std::borrow::Cow;
 
 /// Generates Core Erlang code from a Beamtalk module.
 ///
@@ -86,160 +89,21 @@ pub fn generate_module_surfacing_verifier(
 /// - Code generation encounters an internal error
 /// - Formatting fails
 /// - A class defines the same method twice (BT-4811)
-#[allow(
-    clippy::too_many_lines,
-    reason = "one linear driver: option plumbing, analysis hand-off, hierarchy set-up, then generation"
-)]
 pub fn generate_module_with_warnings(
     module: &Module,
     options: CodegenOptions,
 ) -> Result<GeneratedModule> {
-    // BT-4059: codegen compiles the canonical tree, with redundant
-    // send-operand parentheses stripped (`ast::normalize`), so `(e) foo`
-    // compiles exactly like `e foo`. This is the one place codegen's tree is
-    // peeled (lowering leaves the driver's module as written): on a clone,
-    // before semantic facts and the hierarchy are derived from it, and only
-    // when there is something to strip. The removed wrappers are recorded on
-    // the generator, so reflected method source keeps them as written.
-    // BT-4721: a file is one compilation unit for its class. Front-end drivers
-    // fold same-file extensions before analysis; this keeps ad-hoc callers
-    // (unit tests, tools that parse and generate directly) on the same single
-    // fold rather than a second representation.
-    let folded_storage;
-    let module: &Module =
-        if module.method_definitions.iter().any(|md| {
-            beamtalk_core::compilation::is_same_file_extension(module, &md.class_name.name)
-        }) {
-            let mut owned = module.clone();
-            // Fold diagnostics are the front end's to report; codegen only needs the tree.
-            let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut owned);
-            folded_storage = owned;
-            &folded_storage
-        } else {
-            module
-        };
-    check_no_duplicate_methods(module)?;
-    let peeled_storage;
-    let mut peeled_parens = normalize::PeeledParens::default();
-    let module: &Module = if normalize::needs_normalising(module) {
-        let mut owned = module.clone();
-        peeled_parens = normalize::peel_operand_parens_recording(&mut owned);
-        peeled_storage = owned;
-        &peeled_storage
-    } else {
-        module
-    };
-    let mut generator = if let Some(bindings) = options.bindings {
-        CoreErlangGenerator::with_bindings(&options.module_name, bindings)
-    } else {
-        CoreErlangGenerator::new(&options.module_name)
-    };
-    generator.peeled_parens = peeled_parens;
-    generator.current_pipeline_sends = module.pipeline_sends.clone();
-    generator.current_literal_comments = module.literal_comments.clone();
-    generator.source_text = options.source_text;
-    generator.set_stdlib_mode(options.stdlib_mode);
-    generator.protocol_sources = options.protocol_sources;
-    generator.local_protocol_names = module
-        .protocols
-        .iter()
-        .map(|p| p.name.name.clone())
-        .collect();
-    generator.set_class_module_index(options.class_module_index);
-    // BT-4200: the unit's own class lives in the unit's own module, whatever
-    // the (possibly stale) index says.
-    if let Some(class) = module.classes.first() {
-        generator.register_own_class_module(&class.name.name);
-    }
-    generator.source_path = options.source_path;
-    generator
-        .native_type_registry
-        .clone_from(&options.native_type_registry);
-    // ADR 0098 Phase 3: bake the producing-toolchain identity into `__beamtalk_meta`.
-    generator.beamtalk_version = options.beamtalk_version.map(EcoString::from);
-    generator.otp_release = options.otp_release.map(EcoString::from);
-    // Override codegen diagnostics flag if explicitly set in options.
-    if let Some(enabled) = options.codegen_diagnostics {
-        generator.codegen_diagnostics_enabled = enabled;
-    }
-
-    // Consume the driver's already-computed analysis when supplied
-    // (`CodegenOptions::with_analysis`) instead of re-deriving semantic facts,
-    // the class hierarchy, and inferred method return types from scratch —
-    // eliminating a second full type-checking pass per compiled module. `None`
-    // preserves the previous self-sufficient behaviour for callers that don't
-    // run analysis separately (unit tests, ad-hoc codegen).
-    // Self-sufficient path only: the `uses:`-flattened clone of `module` (so
-    // return-type inference below sees flattened provisions) and its origins.
-    let mut self_flattened: Option<Module> = None;
-    let self_flattened_origins;
-    let mut protocol_registry = None;
-    let (mut hierarchy, analysis_handed_off, mut driver_method_return_types) =
-        if let Some(analysis) = options.analysis {
-            protocol_registry = Some(analysis.protocol_registry);
-            generator.set_stdlib_protocol_uses(analysis.stdlib_protocol_uses);
-            generator.semantic_facts = analysis.semantic_facts;
-            // Carry the driver's already-computed `TypeMap` through
-            // for `recv_type` projection. May be superseded below if this
-            // generation's own cross-file enrichment invalidates the
-            // hand-off and forces a fuller re-inference pass.
-            generator.type_map = analysis.type_map;
-            (
-                analysis.class_hierarchy,
-                true,
-                Some(analysis.method_return_types),
-            )
-        } else {
-            // ADR 0127 §3 (BT-3590): flatten `uses:` before computing
-            // semantic facts or building the hierarchy here. Unlike the
-            // `Some(analysis)` branch above (whose `hierarchy` *and*
-            // `semantic_facts` both already reflect `analyse_full`'s own
-            // flattened clone — `compute_semantic_facts` runs there only
-            // after that clone's flattening reassigns `module`, per
-            // `analyse_full`'s Phase -1), self-sufficient codegen has no
-            // other driver flattening this module for it. Both
-            // `compute_semantic_facts` and `ClassHierarchy::build` walk
-            // `module.classes` directly — never `module.protocols` — so a
-            // flattened provision is invisible to *both* unless this
-            // module is flattened *before* either call: `SemanticFacts`
-            // (state-effect/block-NLR/dispatch-kind classification) would
-            // otherwise have no entry for the provision's own body,
-            // silently degrading codegen for any flattened provision with
-            // a block, loop, or self-send needing state-threading — not
-            // just make `hierarchy` blind to it, which is the narrower
-            // failure a hierarchy-only fix would have left in place.
-            // Diagnostics are *not* discarded here, unlike
-            // `lower_module_for_codegen`'s own `expand_module` call: this
-            // branch only runs when `analyse_full` never ran, so there is no
-            // other pipeline to surface an unknown-protocol / provision-
-            // conflict error (BT-3626). They are returned as warnings.
-            let (flattened, origins, diags) = flatten_uses_self_sufficient(module, &mut generator);
-            generator.codegen_warnings.extend(diags);
-            self_flattened_origins = origins;
-            let flattened_module: &Module = match flattened {
-                Some(owned) => self_flattened.insert(owned),
-                None => module,
-            };
-
-            // Compute semantic facts before codegen begins.
-            generator.semantic_facts =
-                beamtalk_core::semantic_analysis::compute_semantic_facts(flattened_module);
-
-            // Build hierarchy once for the entire generation (ADR 0006)
-            let (hierarchy_result, _) =
-                beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(
-                    flattened_module,
-                );
-            let mut hierarchy = hierarchy_result
-                .map_err(|e| CodeGenError::Internal(format!("hierarchy: {e:?}")))?;
-            // Stamp `MethodInfo::origin` for flattened provisions, exactly as
-            // `analyse_full` does for the driver-handoff path (BT-3626).
-            beamtalk_core::semantic_analysis::trait_expansion::apply_origins(
-                &mut hierarchy,
-                &self_flattened_origins,
-            );
-            (hierarchy, false, None)
-        };
+    let mut options = options;
+    let (canonical, peeled_parens) = canonical_module(module)?;
+    let module: &Module = &canonical;
+    let mut generator = configured_generator(module, &mut options, peeled_parens);
+    let AnalysisBasis {
+        mut hierarchy,
+        analysis_handed_off,
+        mut driver_method_return_types,
+        protocol_registry,
+        mut self_flattened,
+    } = derive_analysis_basis(module, options.analysis.take(), &mut generator)?;
 
     // BT-4151: before the pre-loaded entries are folded into `hierarchy`
     // (which keeps one entry per name), record which class names more than
@@ -299,73 +163,16 @@ pub fn generate_module_with_warnings(
     // cross-file enrichment (above) added stub classes the driver's
     // `lower_module_for_codegen` call never saw, making its writeback
     // possibly incomplete for this generation's fuller view of the hierarchy.
-    let mut module_owned;
-    let module: &Module = if analysis_handed_off && !added_beam_meta && !added_superclasses {
-        // `module` is used exactly as the driver prepared it (no
-        // clone/re-infer below), so the driver's own `method_return_types`
-        // map is precisely "which methods did inference write a return type
-        // into" for *this* `module` — record it for `extract_method_source`
-        // to strip before baking image-resident `__source__` text. `.take()`
-        // rather than `.clone()`: `driver_method_return_types` is only read
-        // again in the `else` arm below, which this branch never executes.
-        generator.method_return_types_written_back =
-            driver_method_return_types.take().unwrap_or_default();
-        module
-    } else {
-        // Either way `module_owned` is already flattened: on the
-        // self-sufficient path it starts from the flattened clone, so
-        // `infer_types_and_returns` below sees flattened provisions
-        // (BT-3626); a stale hand-off's module was flattened by the driver's
-        // `lower_analysed_module_for_codegen`. So only the writebacks run
-        // below — flattening it again here, without the analysis's carried
-        // protocols and package, would re-resolve its still-present `uses:`
-        // lines differently (a package's own `Comparable` falling back to the
-        // stdlib's) and splice in provisions analysis never saw (BT-3915).
-        module_owned = self_flattened.take().unwrap_or_else(|| module.clone());
-        // A driver that handed off `AnalysisResult` already wrote its
-        // (narrower-hierarchy) inference into `module_owned` before we got
-        // here — but `added_beam_meta`/`added_superclasses` just proved that
-        // hand-off stale. Undo exactly those driver-written entries before
-        // re-inferring: both `infer_method_return_types` (via
-        // `resolve_self_delegate_return_type`, which trusts an
-        // already-populated `return_type` as a declared annotation) and
-        // `apply_return_type_writeback_from_map` only fill in a `None`
-        // `return_type`, so without this the "fuller hierarchy" recompute
-        // below would silently be a no-op for every method the driver's
-        // pass already answered. `written_by` only ever contains
-        // inference-derived keys, so this can never clear a genuine user
-        // annotation (see `clear_return_type_writeback_for_keys`'s doc).
-        if let Some(written_by) = &driver_method_return_types {
-            beamtalk_core::semantic_analysis::clear_return_type_writeback_for_keys(
-                &mut module_owned,
-                written_by,
-            );
-        }
-        // ADR 0115 Phase 2 spike §1d: `infer_types_and_returns`
-        // returns both `TypeMap` and `method_return_types` from the same
-        // single `TypeChecker` pass `infer_method_return_types` already ran
-        // — zero extra inference. Refreshes `generator.type_map` for this
-        // (possibly fuller, re-inferred) hierarchy, superseding whatever the
-        // `Some(analysis)` branch above set from the driver's now-stale
-        // hand-off.
-        let (type_map, method_return_types) =
-            beamtalk_core::semantic_analysis::type_checker::infer_types_and_returns(
-                &module_owned,
-                &hierarchy,
-                options.native_type_registry.as_deref(),
-            );
-        generator.type_map = type_map;
-        beamtalk_core::semantic_analysis::apply_codegen_writebacks(
-            &mut module_owned,
-            &hierarchy,
-            &method_return_types,
-        );
-        // Record which methods *this* (re-)inference wrote a
-        // return type into, for `extract_method_source` to strip before
-        // emitting image-resident `__source__` text — see the field's doc.
-        generator.method_return_types_written_back = method_return_types;
-        &module_owned
-    };
+    let lowered = lower_for_generation(
+        module,
+        &mut generator,
+        &hierarchy,
+        analysis_handed_off && !added_beam_meta && !added_superclasses,
+        driver_method_return_types.take(),
+        self_flattened.take(),
+        options.native_type_registry.as_deref(),
+    );
+    let module: &Module = &lowered;
 
     // Build the alias registry once, merging this module's own
     // `type_aliases` with any pre-loaded aliases from other modules in the
@@ -431,6 +238,303 @@ pub fn generate_module_with_warnings(
         generator.generate_value_type_module(module)?
     };
 
+    finish_generation(
+        generator,
+        &doc,
+        module.span,
+        options.inject_verifier_violation,
+    )
+}
+
+/// Canonicalises the module codegen compiles (borrowing it when nothing
+/// needs changing) and answers the operand parentheses it peeled.
+///
+/// BT-4059: codegen compiles the canonical tree, with redundant
+/// send-operand parentheses stripped (`ast::normalize`), so `(e) foo`
+/// compiles exactly like `e foo`. This is the one place codegen's tree is
+/// peeled (lowering leaves the driver's module as written): on a clone,
+/// before semantic facts and the hierarchy are derived from it, and only
+/// when there is something to strip. The removed wrappers are recorded on
+/// the generator, so reflected method source keeps them as written.
+/// BT-4721: a file is one compilation unit for its class. Front-end drivers
+/// fold same-file extensions before analysis; this keeps ad-hoc callers
+/// (unit tests, tools that parse and generate directly) on the same single
+/// fold rather than a second representation.
+fn canonical_module(module: &Module) -> Result<(Cow<'_, Module>, normalize::PeeledParens)> {
+    let mut canonical: Cow<'_, Module> = Cow::Borrowed(module);
+    if module
+        .method_definitions
+        .iter()
+        .any(|md| beamtalk_core::compilation::is_same_file_extension(module, &md.class_name.name))
+    {
+        let mut owned = module.clone();
+        // Fold diagnostics are the front end's to report; codegen only needs the tree.
+        let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut owned);
+        canonical = Cow::Owned(owned);
+    }
+    check_no_duplicate_methods(&canonical)?;
+    let mut peeled_parens = normalize::PeeledParens::default();
+    if normalize::needs_normalising(&canonical) {
+        let mut owned = canonical.into_owned();
+        peeled_parens = normalize::peel_operand_parens_recording(&mut owned);
+        canonical = Cow::Owned(owned);
+    }
+    Ok((canonical, peeled_parens))
+}
+
+/// A generator carrying every option [`generate_module_with_warnings`]
+/// plumbs through, so the rest of the driver reads only the generator.
+/// Takes the owned option fields (`bindings`, `source_text`, …) out of
+/// `options`; the ones later phases still read are left in place.
+fn configured_generator(
+    module: &Module,
+    options: &mut CodegenOptions,
+    peeled_parens: normalize::PeeledParens,
+) -> CoreErlangGenerator {
+    let mut generator = if let Some(bindings) = options.bindings.take() {
+        CoreErlangGenerator::with_bindings(&options.module_name, bindings)
+    } else {
+        CoreErlangGenerator::new(&options.module_name)
+    };
+    generator.peeled_parens = peeled_parens;
+    generator.current_pipeline_sends = module.pipeline_sends.clone();
+    generator.current_literal_comments = module.literal_comments.clone();
+    generator.source_text = options.source_text.take();
+    generator.set_stdlib_mode(options.stdlib_mode);
+    generator.protocol_sources = std::mem::take(&mut options.protocol_sources);
+    generator.local_protocol_names = module
+        .protocols
+        .iter()
+        .map(|p| p.name.name.clone())
+        .collect();
+    generator.set_class_module_index(std::mem::take(&mut options.class_module_index));
+    // BT-4200: the unit's own class lives in the unit's own module, whatever
+    // the (possibly stale) index says.
+    if let Some(class) = module.classes.first() {
+        generator.register_own_class_module(&class.name.name);
+    }
+    generator.source_path = options.source_path.take();
+    generator
+        .native_type_registry
+        .clone_from(&options.native_type_registry);
+    // ADR 0098 Phase 3: bake the producing-toolchain identity into `__beamtalk_meta`.
+    generator.beamtalk_version = options.beamtalk_version.take().map(EcoString::from);
+    generator.otp_release = options.otp_release.take().map(EcoString::from);
+    // Override codegen diagnostics flag if explicitly set in options.
+    if let Some(enabled) = options.codegen_diagnostics {
+        generator.codegen_diagnostics_enabled = enabled;
+    }
+    generator
+}
+
+/// What the analysis phase hands the rest of generation.
+struct AnalysisBasis {
+    hierarchy: beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
+    /// Whether the driver's `AnalysisResult` was consumed (rather than
+    /// re-derived here).
+    analysis_handed_off: bool,
+    /// The driver's inferred method return types (hand-off path only).
+    driver_method_return_types: Option<
+        std::collections::HashMap<
+            beamtalk_core::semantic_analysis::MethodReturnKey,
+            beamtalk_core::semantic_analysis::InferredType,
+        >,
+    >,
+    protocol_registry:
+        Option<beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry>,
+    /// The `uses:`-flattened clone of the module (self-sufficient path only).
+    self_flattened: Option<Module>,
+}
+
+/// The analysis phase: consume the driver's analysis, or derive the semantic
+/// facts and class hierarchy here (self-sufficient codegen).
+fn derive_analysis_basis(
+    module: &Module,
+    analysis: Option<beamtalk_core::semantic_analysis::AnalysisResult>,
+    generator: &mut CoreErlangGenerator,
+) -> Result<AnalysisBasis> {
+    // Consume the driver's already-computed analysis when supplied
+    // (`CodegenOptions::with_analysis`) instead of re-deriving semantic facts,
+    // the class hierarchy, and inferred method return types from scratch —
+    // eliminating a second full type-checking pass per compiled module. `None`
+    // preserves the previous self-sufficient behaviour for callers that don't
+    // run analysis separately (unit tests, ad-hoc codegen).
+    // Self-sufficient path only: the `uses:`-flattened clone of `module` (so
+    // return-type inference below sees flattened provisions) and its origins.
+    let mut self_flattened: Option<Module> = None;
+    let self_flattened_origins;
+    let mut protocol_registry = None;
+    let (hierarchy, analysis_handed_off, driver_method_return_types) =
+        if let Some(analysis) = analysis {
+            protocol_registry = Some(analysis.protocol_registry);
+            generator.set_stdlib_protocol_uses(analysis.stdlib_protocol_uses);
+            generator.semantic_facts = analysis.semantic_facts;
+            // Carry the driver's already-computed `TypeMap` through
+            // for `recv_type` projection. May be superseded below if this
+            // generation's own cross-file enrichment invalidates the
+            // hand-off and forces a fuller re-inference pass.
+            generator.type_map = analysis.type_map;
+            (
+                analysis.class_hierarchy,
+                true,
+                Some(analysis.method_return_types),
+            )
+        } else {
+            // ADR 0127 §3 (BT-3590): flatten `uses:` before computing
+            // semantic facts or building the hierarchy here. Unlike the
+            // `Some(analysis)` branch above (whose `hierarchy` *and*
+            // `semantic_facts` both already reflect `analyse_full`'s own
+            // flattened clone — `compute_semantic_facts` runs there only
+            // after that clone's flattening reassigns `module`, per
+            // `analyse_full`'s Phase -1), self-sufficient codegen has no
+            // other driver flattening this module for it. Both
+            // `compute_semantic_facts` and `ClassHierarchy::build` walk
+            // `module.classes` directly — never `module.protocols` — so a
+            // flattened provision is invisible to *both* unless this
+            // module is flattened *before* either call: `SemanticFacts`
+            // (state-effect/block-NLR/dispatch-kind classification) would
+            // otherwise have no entry for the provision's own body,
+            // silently degrading codegen for any flattened provision with
+            // a block, loop, or self-send needing state-threading — not
+            // just make `hierarchy` blind to it, which is the narrower
+            // failure a hierarchy-only fix would have left in place.
+            // Diagnostics are *not* discarded here, unlike
+            // `lower_module_for_codegen`'s own `expand_module` call: this
+            // branch only runs when `analyse_full` never ran, so there is no
+            // other pipeline to surface an unknown-protocol / provision-
+            // conflict error (BT-3626). They are returned as warnings.
+            let (flattened, origins, diags) = flatten_uses_self_sufficient(module, generator);
+            generator.codegen_warnings.extend(diags);
+            self_flattened_origins = origins;
+            let flattened_module: &Module = match flattened {
+                Some(owned) => self_flattened.insert(owned),
+                None => module,
+            };
+
+            // Compute semantic facts before codegen begins.
+            generator.semantic_facts =
+                beamtalk_core::semantic_analysis::compute_semantic_facts(flattened_module);
+
+            // Build hierarchy once for the entire generation (ADR 0006)
+            let (hierarchy_result, _) =
+                beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(
+                    flattened_module,
+                );
+            let mut hierarchy = hierarchy_result
+                .map_err(|e| CodeGenError::Internal(format!("hierarchy: {e:?}")))?;
+            // Stamp `MethodInfo::origin` for flattened provisions, exactly as
+            // `analyse_full` does for the driver-handoff path (BT-3626).
+            beamtalk_core::semantic_analysis::trait_expansion::apply_origins(
+                &mut hierarchy,
+                &self_flattened_origins,
+            );
+            (hierarchy, false, None)
+        };
+    Ok(AnalysisBasis {
+        hierarchy,
+        analysis_handed_off,
+        driver_method_return_types,
+        protocol_registry,
+        self_flattened,
+    })
+}
+
+/// The module generation reads: as the driver prepared it when its hand-off
+/// is still `trusted_hand_off`, otherwise a clone re-inferred against the
+/// (fuller) `hierarchy` with the codegen writebacks applied.
+fn lower_for_generation<'m>(
+    module: &'m Module,
+    generator: &mut CoreErlangGenerator,
+    hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
+    trusted_hand_off: bool,
+    mut driver_method_return_types: Option<
+        std::collections::HashMap<
+            beamtalk_core::semantic_analysis::MethodReturnKey,
+            beamtalk_core::semantic_analysis::InferredType,
+        >,
+    >,
+    mut self_flattened: Option<Module>,
+    native_type_registry: Option<
+        &beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+    >,
+) -> Cow<'m, Module> {
+    if trusted_hand_off {
+        // `module` is used exactly as the driver prepared it (no
+        // clone/re-infer below), so the driver's own `method_return_types`
+        // map is precisely "which methods did inference write a return type
+        // into" for *this* `module` — record it for `extract_method_source`
+        // to strip before baking image-resident `__source__` text. `.take()`
+        // rather than `.clone()`: `driver_method_return_types` is only read
+        // again in the `else` arm below, which this branch never executes.
+        generator.method_return_types_written_back =
+            driver_method_return_types.take().unwrap_or_default();
+        Cow::Borrowed(module)
+    } else {
+        // Either way `module_owned` is already flattened: on the
+        // self-sufficient path it starts from the flattened clone, so
+        // `infer_types_and_returns` below sees flattened provisions
+        // (BT-3626); a stale hand-off's module was flattened by the driver's
+        // `lower_analysed_module_for_codegen`. So only the writebacks run
+        // below — flattening it again here, without the analysis's carried
+        // protocols and package, would re-resolve its still-present `uses:`
+        // lines differently (a package's own `Comparable` falling back to the
+        // stdlib's) and splice in provisions analysis never saw (BT-3915).
+        let mut module_owned = self_flattened.take().unwrap_or_else(|| module.clone());
+        // A driver that handed off `AnalysisResult` already wrote its
+        // (narrower-hierarchy) inference into `module_owned` before we got
+        // here — but `added_beam_meta`/`added_superclasses` just proved that
+        // hand-off stale. Undo exactly those driver-written entries before
+        // re-inferring: both `infer_method_return_types` (via
+        // `resolve_self_delegate_return_type`, which trusts an
+        // already-populated `return_type` as a declared annotation) and
+        // `apply_return_type_writeback_from_map` only fill in a `None`
+        // `return_type`, so without this the "fuller hierarchy" recompute
+        // below would silently be a no-op for every method the driver's
+        // pass already answered. `written_by` only ever contains
+        // inference-derived keys, so this can never clear a genuine user
+        // annotation (see `clear_return_type_writeback_for_keys`'s doc).
+        if let Some(written_by) = &driver_method_return_types {
+            beamtalk_core::semantic_analysis::clear_return_type_writeback_for_keys(
+                &mut module_owned,
+                written_by,
+            );
+        }
+        // ADR 0115 Phase 2 spike §1d: `infer_types_and_returns`
+        // returns both `TypeMap` and `method_return_types` from the same
+        // single `TypeChecker` pass `infer_method_return_types` already ran
+        // — zero extra inference. Refreshes `generator.type_map` for this
+        // (possibly fuller, re-inferred) hierarchy, superseding whatever the
+        // `Some(analysis)` branch above set from the driver's now-stale
+        // hand-off.
+        let (type_map, method_return_types) =
+            beamtalk_core::semantic_analysis::type_checker::infer_types_and_returns(
+                &module_owned,
+                hierarchy,
+                native_type_registry,
+            );
+        generator.type_map = type_map;
+        beamtalk_core::semantic_analysis::apply_codegen_writebacks(
+            &mut module_owned,
+            hierarchy,
+            &method_return_types,
+        );
+        // Record which methods *this* (re-)inference wrote a
+        // return type into, for `extract_method_source` to strip before
+        // emitting image-resident `__source__` text — see the field's doc.
+        generator.method_return_types_written_back = method_return_types;
+        Cow::Owned(module_owned)
+    }
+}
+
+/// The checks and bookkeeping after the module document is generated: the
+/// guard-rewrite invariants, synced-call finish, the optional verifier hook
+/// and (debug builds) the operand-order check.
+fn finish_generation(
+    mut generator: CoreErlangGenerator,
+    doc: &Document<'_>,
+    module_span: Span,
+    inject_verifier_violation: bool,
+) -> Result<GeneratedModule> {
     // BT-4415: a rewritten guard whose receiver no conditional decided
     // through `guard_condition_doc` would send a non-Boolean receiver
     // `ifTrue:ifFalse:` in place of the guard's own selector. A wrong
@@ -453,8 +557,8 @@ pub fn generate_module_with_warnings(
         )));
     }
 
-    generator.finish_synced_calls(module.span);
-    generator.inject_synthetic_verifier_violation(options.inject_verifier_violation, module.span);
+    generator.finish_synced_calls(module_span);
+    generator.inject_synthetic_verifier_violation(inject_verifier_violation, module_span);
     let code = doc.to_pretty_string();
     // BT-4591: left-to-right operand evaluation is a checked invariant on the
     // finished text — no list cell or map literal may hold two operands that
@@ -466,7 +570,7 @@ pub fn generate_module_with_warnings(
         generator.report_threaded_ir_verify_errors(
             &racing,
             "list cell or map literal with operands evaluated out of source order",
-            module.span,
+            module_span,
         );
     }
     Ok(GeneratedModule {
