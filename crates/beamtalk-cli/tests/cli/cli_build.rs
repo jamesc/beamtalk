@@ -867,3 +867,290 @@ fn dependency_qualifiers_are_checked_against_the_dependencys_own_packages() {
         .assert()
         .success();
 }
+
+/// Collects every `.beam` under `<project>/_build`, keyed by path relative to
+/// the project, with its bytes.
+fn collect_beams(project: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    fn walk(
+        root: &std::path::Path,
+        dir: &std::path::Path,
+        out: &mut std::collections::BTreeMap<String, Vec<u8>>,
+    ) {
+        for entry in std::fs::read_dir(dir).expect("read_dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else if path.extension().is_some_and(|e| e == "beam") {
+                let rel = path
+                    .strip_prefix(root)
+                    .expect("under root")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                out.insert(rel, std::fs::read(&path).expect("read beam"));
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    walk(project, &project.join("_build"), &mut out);
+    out
+}
+
+/// BT-4940: the same project built in two different directories gives
+/// byte-identical `.beam` files, and no `.beam` carries the absolute path of
+/// the directory it was built in (reproducible, no build-machine leak).
+#[test]
+fn build_is_reproducible_across_directories_and_embeds_no_absolute_path() {
+    let a = cli_common::fixture_project();
+    let b = cli_common::fixture_project();
+    for project in [&a, &b] {
+        cli_common::beamtalk()
+            .current_dir(project.path())
+            .arg("build")
+            .assert()
+            .success();
+    }
+    let beams_a = collect_beams(a.path());
+    let beams_b = collect_beams(b.path());
+    assert!(!beams_a.is_empty(), "expected .beam output from the build");
+    assert_eq!(
+        beams_a.keys().collect::<Vec<_>>(),
+        beams_b.keys().collect::<Vec<_>>(),
+        "both builds must produce the same set of .beam files"
+    );
+    for (name, bytes_a) in &beams_a {
+        assert!(
+            beams_b.get(name) == Some(bytes_a),
+            "{name} differs between the two build directories"
+        );
+    }
+    // Compressed chunks hide literals, so check the raw bytes of the
+    // directory name as well as what `beam_lib` reports for attributes.
+    let needle_a = a.path().to_string_lossy().into_owned();
+    for (name, bytes) in &beams_a {
+        assert!(
+            !bytes
+                .windows(needle_a.len())
+                .any(|w| w == needle_a.as_bytes()),
+            "{name} embeds the absolute build path {needle_a}"
+        );
+    }
+}
+
+/// BT-4940: a path dependency embeds a path relative to *its own* package
+/// root (`src/DepThingBt4940.bt`), not relative to the consuming project and not
+/// absolute. Dependency beams are found by name under `_build`.
+#[test]
+fn dependency_beam_embeds_path_relative_to_its_own_package_root() {
+    let root = tempfile::tempdir().unwrap();
+    let dep_dir = root.path().join("dep_pkg");
+    std::fs::create_dir_all(dep_dir.join("src")).unwrap();
+    std::fs::write(
+        dep_dir.join("beamtalk.toml"),
+        "[package]\nname = \"dep_pkg\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dep_dir.join("src/DepThingBt4940.bt"),
+        "Value subclass: DepThingBt4940\n  answer => 1\n",
+    )
+    .unwrap();
+    let app_dir = root.path().join("app");
+    std::fs::create_dir_all(app_dir.join("src")).unwrap();
+    std::fs::write(
+        app_dir.join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\ndep_pkg = { path = \"../dep_pkg\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app_dir.join("src/AppThingBt4940.bt"),
+        "Value subclass: AppThingBt4940\n  answer => 2\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(&app_dir)
+        .arg("build")
+        .assert()
+        .success();
+
+    let beams = collect_beams(&app_dir);
+    let (dep_name, dep_bytes) = beams
+        .iter()
+        .find(|(name, _)| name.contains("dep_thing_bt4940"))
+        .expect("dependency beam under _build");
+    let contains =
+        |hay: &[u8], needle: &str| hay.windows(needle.len()).any(|w| w == needle.as_bytes());
+    assert!(
+        contains(dep_bytes, "src/DepThingBt4940.bt"),
+        "{dep_name} should embed its package-relative path"
+    );
+    assert!(
+        !contains(dep_bytes, "dep_pkg/src/DepThingBt4940.bt"),
+        "{dep_name} must not be relative to the consuming project or absolute"
+    );
+    // The runtime finds the dependency's sources through a marker beside its
+    // beams (not inside them): it names the dependency's package root.
+    let marker = app_dir.join("_build/deps/dep_pkg/ebin/.beamtalk-source-root");
+    let recorded = std::fs::read_to_string(&marker).expect("source-root marker");
+    // BT-4957: line 1 is relative to the ebin dir (survives a moved tree),
+    // line 2 absolute.
+    let mut lines = recorded.lines();
+    let (rel, abs) = (lines.next().unwrap(), lines.next().unwrap());
+    let want = std::fs::canonicalize(&dep_dir).unwrap();
+    let ebin = marker.parent().unwrap();
+    assert!(
+        std::path::Path::new(rel).is_relative(),
+        "line 1 must be relative: {rel}"
+    );
+    assert_eq!(
+        std::fs::canonicalize(ebin.join(rel)).unwrap(),
+        want,
+        "relative line must name the dependency's package root"
+    );
+    assert_eq!(
+        std::fs::canonicalize(abs).unwrap(),
+        want,
+        "absolute line must name the dependency's package root"
+    );
+    let root_str = root.path().to_string_lossy().into_owned();
+    for (name, bytes) in &beams {
+        assert!(!contains(bytes, &root_str), "{name} embeds {root_str}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BT-4961: a subclass of a `native:` actor must declare its own `native:`
+// ---------------------------------------------------------------------------
+
+/// Writes package `name` with one `src/<class>.bt` file per `(class, source)`.
+fn write_native_package(
+    root: &std::path::Path,
+    name: &str,
+    deps: &str,
+    files: &[(&str, &str)],
+) -> std::path::PathBuf {
+    let dir = root.join(name);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("beamtalk.toml"),
+        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n\n[dependencies]\n{deps}"),
+    )
+    .unwrap();
+    for (class, source) in files {
+        std::fs::write(dir.join(format!("src/{class}.bt")), source).unwrap();
+    }
+    dir
+}
+
+const BT4961_PARENT: &str =
+    "Actor subclass: Bt4961Counter native: bt4961_backing\n  get -> Integer => self delegate\n";
+
+#[test]
+fn build_rejects_subclass_of_native_actor_without_native_same_package() {
+    let root = tempfile::tempdir().unwrap();
+    let app = write_native_package(
+        root.path(),
+        "app",
+        "",
+        &[
+            ("Bt4961Counter", BT4961_PARENT),
+            (
+                "Bt4961Sub",
+                "Bt4961Counter subclass: Bt4961Sub\n  extra => 1\n",
+            ),
+        ],
+    );
+    cli_common::beamtalk()
+        .current_dir(&app)
+        .arg("build")
+        .assert()
+        .failure()
+        .stderr(contains("subclasses the").and(contains("Bt4961Counter")));
+}
+
+#[test]
+fn build_rejects_subclass_of_native_actor_from_a_dependency() {
+    let root = tempfile::tempdir().unwrap();
+    write_native_package(root.path(), "dep", "", &[("Bt4961Counter", BT4961_PARENT)]);
+    let app = write_native_package(
+        root.path(),
+        "app",
+        "dep = { path = \"../dep\" }\n",
+        &[(
+            "Bt4961Sub",
+            "Bt4961Counter subclass: Bt4961Sub\n  extra => 1\n",
+        )],
+    );
+    cli_common::beamtalk()
+        .current_dir(&app)
+        .arg("build")
+        .assert()
+        .failure()
+        .stderr(contains("subclasses the").and(contains("Bt4961Counter")));
+}
+
+#[test]
+fn build_accepts_subclass_of_dependency_native_actor_that_redeclares_native() {
+    let root = tempfile::tempdir().unwrap();
+    write_native_package(root.path(), "dep", "", &[("Bt4961Counter", BT4961_PARENT)]);
+    let app = write_native_package(
+        root.path(),
+        "app",
+        "dep = { path = \"../dep\" }\n",
+        &[(
+            "Bt4961Sub",
+            "Bt4961Counter subclass: Bt4961Sub native: bt4961_other\n  more -> Integer => self delegate\n",
+        )],
+    );
+    cli_common::beamtalk()
+        .current_dir(&app)
+        .arg("build")
+        .assert()
+        .success();
+}
+
+// ---------------------------------------------------------------------------
+// BT-4964: the same rule for `Value` / `Object` native classes
+// ---------------------------------------------------------------------------
+
+const BT4964_PARENT: &str =
+    "Value subclass: Bt4964Box native: bt4964_backing\n  size -> Integer => self delegate\n";
+
+#[test]
+fn build_rejects_value_subclass_of_native_class_from_a_dependency() {
+    let root = tempfile::tempdir().unwrap();
+    write_native_package(root.path(), "dep", "", &[("Bt4964Box", BT4964_PARENT)]);
+    let app = write_native_package(
+        root.path(),
+        "app",
+        "dep = { path = \"../dep\" }\n",
+        &[("Bt4964Sub", "Bt4964Box subclass: Bt4964Sub\n  extra => 1\n")],
+    );
+    cli_common::beamtalk()
+        .current_dir(&app)
+        .arg("build")
+        .assert()
+        .failure()
+        .stderr(contains("subclasses the `native:` class").and(contains("Bt4964Box")));
+}
+
+#[test]
+fn build_accepts_value_subclass_of_dependency_native_class_that_redeclares_native() {
+    let root = tempfile::tempdir().unwrap();
+    write_native_package(root.path(), "dep", "", &[("Bt4964Box", BT4964_PARENT)]);
+    let app = write_native_package(
+        root.path(),
+        "app",
+        "dep = { path = \"../dep\" }\n",
+        &[(
+            "Bt4964Sub",
+            "Bt4964Box subclass: Bt4964Sub native: bt4964_other\n  more -> Integer => self delegate\n",
+        )],
+    );
+    cli_common::beamtalk()
+        .current_dir(&app)
+        .arg("build")
+        .assert()
+        .success();
+}

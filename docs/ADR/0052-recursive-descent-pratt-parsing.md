@@ -1,7 +1,7 @@
 # ADR 0052: Recursive Descent Parser with Pratt Parsing for Binary Operators
 
 ## Status
-Accepted | Implemented (2026-03-05)
+Implemented (2026-03-05)
 
 ## Context
 

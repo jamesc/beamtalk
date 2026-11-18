@@ -786,6 +786,35 @@ actor_spawned_pushes_frame_test() ->
     %% ActorSpawned event has no such field — the connect snapshot still does).
     ?assertNot(maps:is_key(<<"spawned_at">>, Data)).
 
+%% ADR 0150: the connect snapshot is one actor scan; the feed it returns drops
+%% the `ActorSpawned` announcement for an actor that is already in the snapshot
+%% (spawned between subscribe and scan), and only that one.
+actor_snapshot_lists_live_actor_and_dedupes_its_announcement_test() ->
+    {ok, ActorPid} = beamtalk_actor:safe_spawn_linked(test_counter, 0),
+    try
+        {Frames, Feed} = beamtalk_ws_handler:actor_snapshot_frames(),
+        PidBin = list_to_binary(pid_to_list(ActorPid)),
+        Mine = [
+            D
+         || {text, J} <- Frames,
+            #{<<"data">> := #{<<"pid">> := P} = D} <- [json:decode(J)],
+            P =:= PidBin
+        ],
+        ?assertMatch([#{<<"class">> := <<"Counter">>, <<"spawned_at">> := _}], Mine),
+        State = (authed_state())#ws_state{actor_feed = Feed},
+        Event = #{'$beamtalk_class' => 'ActorSpawned', actorClass => 'Counter', pid => ActorPid},
+        %% Announced between subscribe and scan: already shown, so not pushed again
+        {[], State1} = beamtalk_ws_handler:websocket_info(ann('ActorSpawned', Event), State),
+        %% An actor the snapshot did not hold is pushed
+        Idle = beamtalk_test_proc:spawn_idle(),
+        Other = #{'$beamtalk_class' => 'ActorSpawned', actorClass => 'Counter', pid => Idle},
+        {OtherFrames, _} = beamtalk_ws_handler:websocket_info(ann('ActorSpawned', Other), State1),
+        ?assertMatch([{text, _}], OtherFrames)
+    after
+        unlink(ActorPid),
+        exit(ActorPid, kill)
+    end.
+
 actor_stopped_pushes_frame_test() ->
     Event = #{
         '$beamtalk_class' => 'ActorStopped',
@@ -1090,8 +1119,8 @@ terminate_with_session_unsubscribes_test() ->
 %%% success paths. They need a live `beamtalk_session_sup` (which spawns a real
 %%% `beamtalk_repl_shell`) plus the session ETS table. The pub/sub subscribe
 %%% calls are casts that are safe when their servers are down, and
-%%% `actor_snapshot_frames/0` falls back to [] without a registry, so this
-%%% fixture stays lightweight.
+%%% `actor_snapshot_frames/0` is a process scan, so this fixture stays
+%%% lightweight.
 
 session_setup() ->
     beamtalk_session_table:new(),

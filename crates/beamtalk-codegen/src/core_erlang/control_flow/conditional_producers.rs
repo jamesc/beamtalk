@@ -4,6 +4,8 @@
 //! Solo-boolean, nil, `ifTrue:ifFalse:` and `match:` conditional producers and
 //! the pure boolean arms (split from `conditionals.rs`).
 
+use super::super::dispatch_codegen::send_arg_list_doc;
+use super::super::error::CodeGenError;
 use super::super::patterns::MatchThreading;
 use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{ThreadedStmt, ThreadedValue};
@@ -13,7 +15,9 @@ use super::conditionals::{
 };
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
+use beamtalk_core::ast::normalize::IF_FALSE_IF_TRUE;
 use beamtalk_core::ast::{Block, Expression, MatchArm};
 use beamtalk_core::semantic_analysis::block_facts::match_arm_block;
 use beamtalk_core::source_analysis::Span;
@@ -674,6 +678,48 @@ impl CoreErlangGenerator {
         blocks: &[&Block],
         bracketed: bool,
     ) -> Result<Document<'static>> {
+        // BT-4991: an `ifFalse:ifTrue:` written with two literal blocks is
+        // lowered as `ifTrue:ifFalse:` (`ast::normalize`), but a non-Boolean
+        // receiver may implement `ifFalse:ifTrue:` itself: send it as
+        // written, the arms in the order they were written.
+        let swapped: Vec<&Block>;
+        let (selector_atom, blocks) = match blocks {
+            [true_block, false_block]
+                if selector_atom == IF_TRUE_IF_FALSE
+                    && true_block.if_false_if_true_arm
+                    && false_block.if_false_if_true_arm =>
+            {
+                swapped = vec![*false_block, *true_block];
+                (IF_FALSE_IF_TRUE, swapped.as_slice())
+            }
+            _ => (selector_atom, blocks),
+        };
+        // BT-4998: a recorded tail `ifTrue: [^a] ifFalse: [^b]` was rewritten
+        // to the plain values `a` / `b`. A non-Boolean receiver is sent the
+        // selector as written by `beamtalk_guard_return:two_branch/3`, which
+        // owns the frame its blocks return through, so the method has none.
+        if let Some(first) = blocks.iter().map(|b| b.span).min_by_key(|s| s.start())
+            && self.take_two_branch(first)
+        {
+            let values = blocks
+                .iter()
+                .map(|block| match block.body.as_slice() {
+                    [stmt] => self.generate_expression(&stmt.expression),
+                    _ => Err(CodeGenError::Internal(
+                        "BT-4998: a recorded two-branch arm is one value".into(),
+                    )),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            return Ok(form::call(
+                "beamtalk_guard_return",
+                crate::core_erlang::guard_returns::TWO_BRANCH_HELPER,
+                [
+                    leaf::var(cond_var.to_string()),
+                    leaf::atom(selector_atom),
+                    send_arg_list_doc(values),
+                ],
+            ));
+        }
         let at = blocks.first().map(|b| b.span).unwrap_or_default();
         // The send's `^`-holding arms that go as closures are checked
         // whichever path lowered the conditional (the mutation path never

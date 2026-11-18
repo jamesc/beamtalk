@@ -19,6 +19,7 @@ module on demand. Replaces the per-file `start_class/N`, `stop_class/1`,
     with_class/2,
     ensure_fixture_loaded/2,
     ensure_counter_loaded/0,
+    reload_fixture/2,
     stop_graceful/1,
     snapshot_instances/1,
     stop_instances_since/1
@@ -129,6 +130,22 @@ register_fixture(ClassName, Module) ->
             beamtalk_test_wait:class(ClassName)
     end.
 
+-doc """
+Register `ClassName` from `Module` freshly: stop a registered class of that name
+(deliberately, so the class monitor does not revive it) and register the fixture
+again. `ensure_fixture_loaded/2` treats any class backed by `Module` as the
+fixture, which holds for a class revived by the class monitor from compiled
+metadata but not for its published reflection data (instance variables ...); a
+test that asserts on that data starts from a fresh registration (BT-4934).
+""".
+-spec reload_fixture(atom(), atom()) -> ok.
+reload_fixture(ClassName, Module) ->
+    ok = stop_graceful(ClassName),
+    ok = beamtalk_test_wait:until(fun() ->
+        beamtalk_class_registry:whereis_class(ClassName) =:= undefined
+    end),
+    ensure_fixture_loaded(ClassName, Module).
+
 -doc "Ensure the compiled `Counter` fixture (`bt@counter`) is loaded and registered.".
 -spec ensure_counter_loaded() -> ok.
 ensure_counter_loaded() ->
@@ -154,8 +171,9 @@ stop_graceful(Name) ->
 Remember which actor instances are alive now, under `Key`. Pair with
 `stop_instances_since/1` in a suite whose tests spawn actors through the REPL
 evaluator or a compiled class and cannot stop each one: an actor left running
-stays in the instance registry and shows up in every later module's
-`bottlenecks`/`actor_health` scans (BT-4934).
+shows up in every later module's `bottlenecks`/`actor_health` scans (BT-4934).
+Instances are found by the process scan (ADR 0150), so supervised, named and
+`native:` actors are covered as well.
 """.
 -spec snapshot_instances(term()) -> ok.
 snapshot_instances(Key) ->
@@ -175,8 +193,18 @@ stop_instances_since(Key) ->
             lists:foreach(fun beamtalk_test_proc:stop/1, live_instances() -- Before)
     end.
 
+%% The runtime's own actors (`TranscriptStream`, ...) are not instances a test
+%% started: stopping one would only make its supervisor restart it. Same rule
+%% as the workspace `actors` op (`system`), when the workspace app is loaded.
 live_instances() ->
-    case ets:info(beamtalk_instance_class) of
-        undefined -> [];
-        _ -> [Pid || {Pid, _Class} <- ets:tab2list(beamtalk_instance_class), is_process_alive(Pid)]
+    [
+        Pid
+     || {Pid, _Class, _StartedAt} <- beamtalk_actor_scan:scan_actors_by_pid(),
+        not is_system_actor(Pid)
+    ].
+
+is_system_actor(Pid) ->
+    case code:ensure_loaded(beamtalk_workspace_actors) of
+        {module, Mod} -> Mod:is_system(Pid);
+        _ -> false
     end.

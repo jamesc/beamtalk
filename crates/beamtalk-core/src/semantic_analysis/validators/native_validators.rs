@@ -136,12 +136,12 @@ pub(crate) fn check_native_delegate_return_type(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Instance methods, inline and standalone (Tonel-style
-    // `MyActor >> selector => self delegate`). Only native classes (a backing
-    // module) are checked: on non-native classes `self delegate` is a regular
-    // message send to Actor.delegate (which raises at runtime), so no special
-    // warning is needed.
-    for (class_name, side, method) in module.methods_with_owner() {
+    // Instance methods, inline or folded same-file extensions (a cross-file
+    // standalone method is rejected by `check_cross_file_native_delegate`
+    // instead, BT-4930). Only native classes (a backing module) are checked:
+    // on non-native classes `self delegate` is a regular message send to
+    // Actor.delegate (which raises at runtime), so no special warning is needed.
+    for (class_name, side, method) in module.inline_methods_with_owner() {
         if side == MethodSide::Instance
             && hierarchy.is_native(class_name)
             && method.is_self_delegate()
@@ -173,12 +173,149 @@ pub(crate) fn check_native_delegate_reserved_word(
         hierarchy.is_native(class_name) && !hierarchy.is_actor_subclass(class_name)
     };
 
-    // Inline and standalone (Tonel-style `MyClass >> sel => self delegate`)
-    // methods, instance- and class-side.
-    for (class_name, _side, method) in module.methods_with_owner() {
+    // Inline methods and same-file extensions (folded into the class body),
+    // instance- and class-side. A cross-file `Foo >> sel => self delegate` is
+    // not a native delegate (BT-4930) and gets its own error instead.
+    for (class_name, _side, method) in module.inline_methods_with_owner() {
         if is_native_object(class_name) && method.is_self_delegate() {
             check_selector_reserved_word(&method.selector, method.span, diagnostics);
         }
+    }
+}
+
+/// BT-4930: error on a cross-file `Foo >> sel => self delegate` where `Foo` is
+/// a `native:` class.
+///
+/// Codegen lowers `self delegate` through the backing module only for methods
+/// folded into the class body (inline methods and same-file extensions). A
+/// cross-file extension compiles to a foreign extension fun where `self
+/// delegate` is a plain send that resolves to the `Object>>delegate` sentinel
+/// and raises at run time, so the definition can never work. The native
+/// delegate checks (return type, reserved word) do not run for this form.
+pub(crate) fn check_cross_file_native_delegate(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for def in &module.method_definitions {
+        let class_name = def.class_name.name.as_str();
+        if hierarchy.is_native(class_name) && def.method.is_self_delegate() {
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "`self delegate` method `{}` on native class `{class_name}` is defined \
+                         outside the class's own file and will not reach the backing module",
+                        def.method.selector.name()
+                    ),
+                    def.method.head_span(),
+                )
+                .with_hint(format!(
+                    "`self delegate` only reaches the backing module when the method is in the \
+                     same file as `{class_name}`. Define the method in the file that declares \
+                     `{class_name}`."
+                )),
+            );
+        }
+    }
+}
+
+/// BT-4961 / BT-4964: error on a non-abstract class that has a `native:`
+/// ancestor but declares no `native:` of its own.
+///
+/// Actor (BT-4961): a `native:` actor compiles to a facade module with no `init/1`. A subclass
+/// without `native:` compiles to a full `gen_server` whose `init/1` calls its
+/// superclass's `init/1`, so spawning it died on an undefined function.
+/// `native:` is not inherited (see `docs/beamtalk-native-erlang.md` §
+/// Inheritance), so the subclass has to name its own backing module.
+///
+/// Value / Object (BT-4964): the inherited `class new` is a `self delegate` that
+/// builds the backing module's term, tagged with the parent class, so `MyQ new`
+/// answers a plain `Queue` and `MyQ`'s own methods are unreachable.
+///
+/// One rule, two messages. Exempt: the built-in classes identified by term
+/// shape ([`ClassHierarchy::is_term_shape_builtin_class`]), while compiling the
+/// stdlib. Not reported: a class that redeclares `native:`, a subclass that
+/// already has the seal error (that is the one diagnostic), and
+/// an abstract class (never instantiated; its concrete descendants are
+/// checked). The ancestor
+/// may come from this module or from a dependency, as long as the dependency
+/// was built with the `native` metadata flag (BT-4930).
+pub(crate) fn check_native_subclass_declares_native(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    stdlib_mode: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        let name = class.name.name.as_str();
+        if class.backing_module.is_some() || class.is_abstract {
+            continue;
+        }
+        // The one exemption: a built-in class identified by term shape (today
+        // `String` under `Binary`), and only while compiling the stdlib itself,
+        // so a user class that reuses the name is still checked.
+        if stdlib_mode && ClassHierarchy::is_term_shape_builtin_class(name) {
+            continue;
+        }
+        // A subclass of a sealed class that already has the seal error (same
+        // span, emitted when the hierarchy was built) gets no second error: the
+        // "declare your own `native:`" hint would suggest a form the seal
+        // forbids (BT-4964 review). If no seal error was emitted (a sealed
+        // parent from a dependency), this check still reports.
+        if let Some(superclass) = class.superclass.as_ref()
+            && diagnostics.iter().any(|d| {
+                d.severity == crate::source_analysis::Severity::Error
+                    && d.span == superclass.span
+                    && d.category == Some(DiagnosticCategory::Inheritance)
+            })
+        {
+            continue;
+        }
+        let is_actor = hierarchy.is_actor_subclass(name);
+        let Some(parent) = class.superclass.as_ref().map(|s| s.name.as_str()) else {
+            continue;
+        };
+        let Some(native_ancestor) = hierarchy
+            .ancestors(name)
+            .find(|info| info.is_native)
+            .map(|info| info.name.clone())
+        else {
+            continue;
+        };
+        let via = if native_ancestor.as_str() == parent {
+            String::new()
+        } else {
+            format!(" (through `{parent}`)")
+        };
+        let diagnostic = if is_actor {
+            Diagnostic::error(
+                format!(
+                    "Actor `{name}` subclasses the `native:` actor `{native_ancestor}`{via} and \
+                     must declare its own `native:` backing module"
+                ),
+                class.name.span,
+            )
+            .with_hint(format!(
+                "`native:` is not inherited, so `{name}` has no `init/1` and `{name} spawn` would \
+                 fail. Write `{parent} subclass: {name} native: your_backing_module`, or derive \
+                 from `Actor` instead."
+            ))
+        } else {
+            Diagnostic::error(
+                format!(
+                    "Class `{name}` subclasses the `native:` class `{native_ancestor}`{via} and \
+                     must declare its own `native:` backing module"
+                ),
+                class.name.span,
+            )
+            .with_hint(format!(
+                "`native:` is not inherited, so `{name} new` would answer a plain \
+                 `{native_ancestor}` and `{name}`'s own methods would be unreachable. Hold a \
+                 `{native_ancestor}` in a field of a plain class instead, or write \
+                 `{parent} subclass: {name} native: your_backing_module`."
+            ))
+        };
+        diagnostics.push(diagnostic);
     }
 }
 
@@ -387,36 +524,35 @@ mod tests {
         );
     }
 
-    /// Standalone (Tonel-style) self delegate without return type on native class → warning.
+    /// BT-4930: a standalone `self delegate` on a native class gets the new
+    /// error, not the return-type warning. The validators are called on the
+    /// unfolded parse on purpose: in a real compile a same-file extension is
+    /// folded into the class first, so only a cross-file one reaches them (and
+    /// a same-file instance-side extension on a native actor is rejected by
+    /// the fold instead).
     #[test]
-    fn native_standalone_delegate_missing_return_type_warning() {
+    fn native_standalone_delegate_gets_cross_file_error_not_return_type_warning() {
         let src = "Actor subclass: MyActor native: my_mod\n  get -> Integer => self delegate\nMyActor >> getValue => self delegate";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
-        assert_eq!(
-            diagnostics.len(),
-            1,
-            "Expected 1 warning for standalone method missing return type, got: {diagnostics:?}"
-        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        check_cross_file_native_delegate(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].severity, Severity::Error);
         assert!(diagnostics[0].message.contains("getValue"));
     }
 
-    /// Standalone self delegate with return type on native class → no warning.
+    /// A standalone non-delegate method on a native class gets no cross-file error.
     #[test]
-    fn native_standalone_delegate_with_return_type_ok() {
-        let src = "Actor subclass: MyActor native: my_mod\n  get -> Integer => self delegate\nMyActor >> getValue -> Integer => self delegate";
-        let module = parse_ok(src);
-        let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+    fn native_standalone_non_delegate_has_no_cross_file_error() {
+        let src = "Object subclass: MyObj native: my_mod\n  get -> Integer => self delegate\nMyObj >> other -> Integer => 1";
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
-        check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
-        assert!(
-            diagnostics.is_empty(),
-            "Expected no warning when standalone method has return type, got: {diagnostics:?}"
-        );
+        check_cross_file_native_delegate(&module, &hierarchy, &mut diagnostics);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     // ── native: Object validation (ADR 0101) ──────────────────────────────────

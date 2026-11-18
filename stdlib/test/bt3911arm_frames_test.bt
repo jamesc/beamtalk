@@ -113,6 +113,7 @@ TestCase subclass: Bt3911ArmFramesTest
   // state, and the loop body around it gets its own back.
   testActorClassBuilderFunInLoopBody =>
     self assert: Bt3911ArmFramesActor spawn builderInLoopBody equals: 2
+    @expect unresolved_class "Bt3911BuiltInLoop is defined at runtime by the fixture's ClassBuilder fun, not in a source file"
     self assert: Bt3911BuiltInLoop answer equals: 41
 
   testClassBuilderFunKeepsTheEnclosingNonLocalReturn =>

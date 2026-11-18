@@ -7,7 +7,7 @@
 //! [`Severity::Lint`] diagnostics. It also runs semantic analysis to collect
 //! DNU hint diagnostics so that `@expect type` annotations are correctly
 //! applied. It exits non-zero if any unsuppressed lint diagnostics
-//! are found.
+//! or error-severity diagnostics are found (BT-4942).
 //!
 //! Native `.erl` files in `native/` and `native/test/` are also checked for
 //! missing `-moduledoc`/`-doc` attributes and hardcoded `'bt@...'` module
@@ -37,7 +37,8 @@ use tracing::warn;
 
 /// Run lint passes on the given path (file or directory).
 ///
-/// Prints each lint diagnostic and returns an error if any are found.
+/// Prints each lint diagnostic and returns an error if any lint or
+/// error-severity diagnostic is found (BT-4942).
 /// With `warnings_as_errors`, live-recheck diagnostics (non-error
 /// `Dnu`/`Type` findings, plus any `Error`) also fail the command, so the
 /// buccaneer-style sources the REPL `load-project` rejects fail CI here too
@@ -86,11 +87,17 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
     // Pass 2: analyse each file with cross-file class context.
     let mut gate = LintGate::default();
     let mut all_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
+    let exempt_dirs = load_lint_exemptions(&source_path);
     let provision_diags = lint_pipeline::analyse_package(
         sources,
         dependencies,
         native_type_registry.as_ref(),
         |file| {
+            // Exempt files stay in the Pass 1 context above; only their own
+            // diagnostics are dropped.
+            if is_lint_exempt(&exempt_dirs, file.path) {
+                return;
+            }
             for diag in &file.diagnostics {
                 print_diagnostic(format, file.path.as_str(), file.source, diag);
                 gate.count(diag);
@@ -101,6 +108,9 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
 
     // Each flattened-provision diagnostic once, in its protocol's file.
     for routed in provision_diags {
+        if is_lint_exempt(&exempt_dirs, Utf8Path::new(&routed.path)) {
+            continue;
+        }
         print_diagnostic(format, &routed.path, &routed.source, &routed.diagnostic);
         gate.count(&routed.diagnostic);
         all_diags.push(routed.diagnostic);
@@ -144,7 +154,7 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
 
     // BT-4334: the REPL-parity gate. Reported separately so the default
     // lint-severity message above stays unchanged for existing callers.
-    if gate.fails(warnings_as_errors) {
+    if warnings_as_errors && gate.live_recheck > 0 {
         let count = gate.live_recheck;
         let plural = if count == 1 { "" } else { "s" };
         miette::bail!(
@@ -152,7 +162,40 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
         );
     }
 
+    // BT-4942: an error-severity diagnostic fails the run on its own. Without
+    // `--warnings-as-errors` the gates above ignore `Error`, so e.g. an
+    // unknown package qualifier printed and still exited 0.
+    if gate.error > 0 {
+        let count = gate.error;
+        let plural = if count == 1 { "" } else { "s" };
+        miette::bail!("{count} error diagnostic{plural} found in {total_files_checked} file(s)");
+    }
+
     Ok(())
+}
+
+/// Name of the optional exemption file read from the linted directory.
+const LINT_EXEMPT_FILE: &str = ".beamtalk-lint-exempt";
+
+/// Read `<dir>/.beamtalk-lint-exempt`: one directory path per line, relative
+/// to `dir`; blank lines and `#` comments are ignored. Files under a listed
+/// directory still feed cross-file context, but their own diagnostics are
+/// neither printed nor counted. Meant for deliberately non-idiomatic inputs
+/// (e.g. codegen-shape fixtures); every entry must carry a comment saying why.
+fn load_lint_exemptions(dir: &Utf8Path) -> Vec<Utf8PathBuf> {
+    let Ok(text) = std::fs::read_to_string(dir.join(LINT_EXEMPT_FILE)) else {
+        return Vec::new();
+    };
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| dir.join(l.trim_end_matches('/')))
+        .collect()
+}
+
+/// Whether `file` lies under one of the exempt directories.
+fn is_lint_exempt(exempt_dirs: &[Utf8PathBuf], file: &Utf8Path) -> bool {
+    exempt_dirs.iter().any(|d| file.starts_with(d))
 }
 
 /// Print one `.bt` diagnostic: miette-rendered for text, one JSON line for

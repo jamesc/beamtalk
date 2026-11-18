@@ -4,6 +4,8 @@
 Implemented (2026-09-19) — via Epic BT-3533 (Phases 0–5,
 BT-3531…BT-3540).
 
+> **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** Hot-reload migration enumerates a class's actors with one process scan (`beamtalk_runtime_api:all_instances/1`, by marker) instead of `beamtalk_object_instances:all/1`, so supervised and named actors are included. A migration that fails leaves a supervised actor suspended, and a supervisor shutdown waits out its timeout.
+
 ## Context
 
 ### Problem statement
@@ -496,7 +498,7 @@ validator enforces.
   is the recorded workspace-side refinement if the window bites.
 - **Subclass instances are migrated on a superclass reload.**
   `hot_reload_class/2` is driven from the reloaded module's own class
-  list, and `beamtalk_object_instances:all/1` is keyed by exact class name,
+  list, and the instance lookup (`beamtalk_object_instances:all/1` when this was written, a scan keyed by exact class name now) matches the exact class name,
   so today reloading `Cart` touches `Cart` instances only — live
   `SpecialCart` instances, which carry `Cart`'s fields, are never
   reconciled. The loader walks `beamtalk_class_registry:direct_subclasses/1`

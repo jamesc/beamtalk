@@ -407,3 +407,85 @@ fn flattened_class_info_keeps_a_class_body_method_over_the_provision() {
     assert_eq!(tags.len(), 1);
     assert_eq!(tags[0].origin, None);
 }
+
+// BT-4929: the package-qualifier check walks what the author wrote. A
+// provision's body is spliced into every using class by the flattener, but the
+// qualifier in it was written once, in the protocol — so it is reported once,
+// in the protocol's file, however many classes use the protocol.
+
+const QUALIFIED_TRAIT: &str = "Protocol define: Greets
+  name -> String
+
+  greet -> Object => nosuchpkg@Widget new
+";
+
+fn unknown_package_errors(diagnostics: &[Diagnostic]) -> Vec<&Diagnostic> {
+    diagnostics
+        .iter()
+        .filter(|d| d.message.contains("Unknown package 'nosuchpkg'"))
+        .collect()
+}
+
+fn known(packages: &[&str]) -> std::collections::HashSet<String> {
+    packages.iter().map(|p| (*p).to_string()).collect()
+}
+
+#[test]
+fn unknown_qualifier_in_provision_is_reported_once_with_a_user_in_the_same_file() {
+    let module = parse_ok(&format!(
+        "{QUALIFIED_TRAIT}\nObject subclass: W\n  uses: Greets\n  name -> String => \"w\"\n"
+    ));
+    let diagnostics = analyse_full(
+        &module,
+        AnalysisContext::default().with_known_packages(known(&["json"])),
+    )
+    .diagnostics;
+    let errors = unknown_package_errors(&diagnostics);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+}
+
+#[test]
+fn unknown_qualifier_in_provision_is_reported_once_across_two_users_in_the_same_file() {
+    let module = parse_ok(&format!(
+        "{QUALIFIED_TRAIT}\n\
+         Object subclass: A\n  uses: Greets\n  name -> String => \"a\"\n\n\
+         Object subclass: B\n  uses: Greets\n  name -> String => \"b\"\n"
+    ));
+    let diagnostics = analyse_full(
+        &module,
+        AnalysisContext::default().with_known_packages(known(&["json"])),
+    )
+    .diagnostics;
+    let errors = unknown_package_errors(&diagnostics);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+}
+
+/// The protocol lives in another file: the user's file must not report the
+/// protocol's qualifier (its span is an offset into the other file).
+#[test]
+fn unknown_qualifier_in_a_carried_provision_is_not_reported_against_the_user() {
+    let defs = protocol_defs(QUALIFIED_TRAIT);
+    let module = parse_ok("Object subclass: W\n  uses: Greets\n  name -> String => \"w\"\n");
+    let diagnostics = analyse_full(
+        &module,
+        AnalysisContext::default()
+            .with_pre_loaded_protocol_defs(defs)
+            .with_known_packages(known(&["json"])),
+    )
+    .diagnostics;
+    let errors = unknown_package_errors(&diagnostics);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// And the protocol's own file still reports it.
+#[test]
+fn unknown_qualifier_in_a_provision_is_reported_in_the_protocols_own_file() {
+    let module = parse_ok(QUALIFIED_TRAIT);
+    let diagnostics = analyse_full(
+        &module,
+        AnalysisContext::default().with_known_packages(known(&["json"])),
+    )
+    .diagnostics;
+    let errors = unknown_package_errors(&diagnostics);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+}

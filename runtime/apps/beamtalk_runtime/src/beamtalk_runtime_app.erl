@@ -23,6 +23,10 @@ start(_StartType, _StartArgs) ->
     %% logger framework (OTP 21+) and are captured by the workspace file handler.
     application:set_env(sasl, sasl_error_logger, false),
 
+    %% Actor spawn options from the app env (BT-4997): none unless
+    %% `actor_min_heap_size` is set.
+    ok = beamtalk_actor:refresh_spawn_options(),
+
     %% Initialize extension registry ETS tables
     beamtalk_extensions:init(),
 
@@ -73,10 +77,6 @@ start(_StartType, _StartArgs) ->
     %% ADR 0068 Phase 2c: Initialize protocol registry ETS table.
     beamtalk_protocol_registry:init(),
 
-    %% Actor spawn callback: the registry is runtime-owned (BT-3633), so the
-    %% callback is too. Workspace-only bookkeeping hangs off `actor_spawned_hook`.
-    application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_repl_actors),
-
     %% ADR 0129 §5: plain-format handler for `Transcript` output outside an
     %% interactive workspace. Installed before any user code can run.
     ok = beamtalk_logging_config:install_transcript_handler(),
@@ -89,7 +89,7 @@ start(_StartType, _StartArgs) ->
     ok = beamtalk_crash_report_filter:install(),
 
     %% Start the runtime supervisor tree (which starts beamtalk_bootstrap, beamtalk_stdlib,
-    %% and beamtalk_object_instances; pg is conditionally started inside beamtalk_bootstrap:init/1)
+    %% and the other runtime workers; pg is conditionally started inside beamtalk_bootstrap:init/1)
     case beamtalk_runtime_sup:start_link() of
         {ok, _} = Ok ->
             beamtalk_class_registry:ensure_pending_errors_table(),

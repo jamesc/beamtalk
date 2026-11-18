@@ -29,11 +29,15 @@ idempotent (a normal stdlib load skips a module whose on_load already ran).
 
 -export([
     boot_real_stdlib/1,
+    reload_stdlib_modules/0,
     wait_for_class/2,
     registry/0,
     runtime/0,
     start_app/1,
     compiler/0,
+    extensions/0,
+    app_owned_table/1,
+    no_compiler/0,
     telemetry/0,
     load_runtime_modules/0,
     workspace/1,
@@ -78,6 +82,61 @@ boot_real_stdlib(CanaryClass) ->
     end,
     ok.
 
+-doc """
+Make sure the `beamtalk_extensions` ETS tables exist and outlive the caller.
+`beamtalk_extensions:init/0` makes the calling process the table owner, and an
+eunit setup process exits when its fixture ends, taking the tables with it; the
+next module then fails with `badarg` on `ets:lookup/2` (BT-4962). The runtime
+app creates them from its own long-lived process; this does the same from a
+parked process when the app did not (or the tables were dropped since).
+""".
+-spec extensions() -> ok.
+extensions() ->
+    case ets:info(beamtalk_extensions, owner) of
+        undefined ->
+            Self = self(),
+            Ref = make_ref(),
+            Owner = spawn(fun() ->
+                ok = beamtalk_extensions:init(),
+                Self ! {Ref, ready},
+                receive
+                    stop -> ok
+                end
+            end),
+            receive
+                {Ref, ready} -> ok
+            after 5000 ->
+                exit(Owner, kill),
+                error(extensions_tables_not_created)
+            end;
+        _ ->
+            ok
+    end.
+
+-doc """
+Make sure the boot table `Table` is owned and heir-protected the way
+`beamtalk_runtime_app:start/2` leaves it. A module that loads stdlib code before
+the runtime app is up creates such tables from a test or class process with no
+heir (`beamtalk_ets_heir:heir_option/0` is empty then), and starting the app later
+cannot add one (`maybe_set_heir/1` only works for the owner). When that happened
+(a table with no heir), restart the app with the table removed so the app creates
+it, and register the stdlib classes again. A no-op otherwise (BT-4962).
+""".
+-spec app_owned_table(atom()) -> ok.
+app_owned_table(Table) ->
+    case ets:info(Table, heir) of
+        none ->
+            _ = application:stop(beamtalk_runtime),
+            try
+                ets:delete(Table)
+            catch
+                error:badarg -> ok
+            end,
+            boot_real_stdlib('Integer');
+        _ ->
+            ok
+    end.
+
 -spec wait_for_class(atom(), non_neg_integer()) -> ok.
 wait_for_class(ClassName, Retries) ->
     beamtalk_test_wait:class(ClassName, Retries * 50).
@@ -109,6 +168,13 @@ class_registered_within(ClassName, TimeoutMs) ->
         error:{class_not_registered, ClassName} -> false
     end.
 
+-doc """
+Unload every loaded `bt@stdlib@*` module so the next `beamtalk_stdlib:init/0`
+runs their `on_load` hooks again (class registration and baked xref rows).
+`init/0` skips a module that is already loaded, so a suite that asserts a cold
+stdlib boot calls this first.
+""".
+-spec reload_stdlib_modules() -> ok.
 reload_stdlib_modules() ->
     lists:foreach(
         fun beamtalk_test_module:unload/1,
@@ -175,7 +241,9 @@ start_app(App) ->
 start_app(App, Retries) ->
     case application:ensure_all_started(App) of
         {ok, _} = Ok when App =:= beamtalk_runtime ->
+            ok = reclaim_class_owned_tables(),
             ok = ensure_bootstrap_classes(),
+            ok = ensure_boot_tables(),
             Ok;
         {ok, _} = Ok ->
             Ok;
@@ -188,32 +256,108 @@ start_app(App, Retries) ->
             error({app_start_failed, App, Reason})
     end.
 
-%% A suite that deliberately stops the bootstrap `Object` class leaves the
-%% runtime application "started" but without it, and a second
-%% `ensure_all_started` is then a no-op, so no later suite ever sees `Object`
-%% again (`class_not_registered 'Object'`). Restart the application once so its
-%% bootstrap child registers the stub classes again (BT-4934).
+%% Boot tables that a test process created before the runtime app was up are
+%% owned by that process and vanish with it (`badarg` on `ets:lookup/2` in a later
+%% module), while the app itself is "healthy" and never recreates them. The heir
+%% is alive now, so the idempotent `init/0` of the registries tests have been seen
+%% to lose recreates a missing table with the heir (BT-4962).
+ensure_boot_tables() ->
+    _ = beamtalk_extensions:init(),
+    _ = beamtalk_protocol_registry:init(),
+    ok.
+
+%% A suite can leave the runtime application "started" but unhealthy, and a
+%% second `ensure_all_started` is then a no-op, so no later suite ever sees it
+%% repaired: the bootstrap `Object` class stopped on purpose
+%% (`class_not_registered 'Object'`), or a supervised server (the announcement
+%% bus, ...) killed and replaced by a bare `start_link` instance that is not the
+%% supervisor's child, which a restarted dependent never sees. Restart the
+%% application once so its children and the bootstrap classes are registered
+%% again (BT-4934).
 ensure_bootstrap_classes() ->
-    case beamtalk_class_registry:whereis_class('Object') of
-        Pid when is_pid(Pid) ->
+    case runtime_healthy() of
+        true -> ok;
+        false -> restart_runtime()
+    end.
+
+restart_runtime() ->
+    ok = application:stop(beamtalk_runtime),
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    wait_for_class('Object', 100),
+    %% Stopping the app took every class process with it, but stdlib
+    %% modules stay loaded and `stdlib:init/0` skips loaded modules:
+    %% reload them so `Integer`, `Subprocess`, ... register again.
+    ok = reload_stdlib_modules(),
+    beamtalk_stdlib:init(),
+    wait_for_class('Integer', 100),
+    ok = repair_class_pid_index().
+
+%% A stdlib class loaded before the runtime app was up (an `on_load` in a test
+%% process) creates the boot tables from its class process, with no heir, and the
+%% app started later keeps using them. The first test that stops that class (e.g.
+%% `restart_class/2` on `Counter`) then destroys every class table with it. Stop
+%% those class processes and restart the app so it owns the tables, with the heir
+%% (BT-4962).
+reclaim_class_owned_tables() ->
+    Orphans = lists:usort([
+        Owner
+     || T <- ets:all(),
+        is_atom(T),
+        ets:info(T, heir) =:= none,
+        Owner <- [ets:info(T, owner)],
+        is_pid(Owner),
+        beamtalk_test_class_teardown:is_class_process(Owner)
+    ]),
+    case Orphans of
+        [] ->
             ok;
-        undefined ->
-            ok = application:stop(beamtalk_runtime),
-            {ok, _} = application:ensure_all_started(beamtalk_runtime),
-            wait_for_class('Object', 100),
-            %% Stopping the app took every class process with it, but stdlib
-            %% modules stay loaded and `stdlib:init/0` skips loaded modules:
-            %% reload them so `Integer`, `Subprocess`, ... register again.
-            ok = reload_stdlib_modules(),
-            beamtalk_stdlib:init(),
-            wait_for_class('Integer', 100),
-            ok = repair_class_pid_index()
+        _ ->
+            %% Every class process predates the app and is stale, not only the table
+            %% owners: a bare `Object` left running keeps its registered name, so the
+            %% restarted stdlib's `Object` never registers.
+            beamtalk_test_class_teardown:stop_pg_class_processes(),
+            restart_runtime()
+    end.
+
+%% `Object` is registered, the system announcer still holds its subscription on
+%% the announcement bus (a suite that wipes every subscription silences system
+%% events such as `NodeShapeSkew` for everyone after it), and every supervisor
+%% child that registers a name equal to its id is the process registered under
+%% that name.
+runtime_healthy() ->
+    is_pid(beamtalk_class_registry:whereis_class('Object')) andalso
+        system_announcer_subscribed() andalso
+        lists:all(
+            fun
+                ({Id, Pid, _Type, _Mods}) when is_atom(Id), is_pid(Pid) ->
+                    case whereis(Id) of
+                        undefined -> true;
+                        Registered -> Registered =:= Pid
+                    end;
+                ({_Id, _Restarting, _Type, _Mods}) ->
+                    false
+            end,
+            supervisor:which_children(beamtalk_runtime_sup)
+        ).
+
+%% `beamtalk_announcements:subscription_count/0` is exported only under
+%% `-ifdef(TEST)`; this module lives in `src/` (compiled without TEST), so
+%% dialyzer cannot see it. The code that calls this runs with TEST defined.
+-dialyzer({no_missing_calls, system_announcer_subscribed/0}).
+system_announcer_subscribed() ->
+    try
+        beamtalk_announcements:subscription_count() > 0
+    catch
+        _:_ -> false
     end.
 
 -doc """
 Start the `beamtalk_runtime` application (and the bootstrap process, as
-`boot_real_stdlib/1` does) without loading stdlib. Returns a teardown handle
-that stops the application only if this call started it.
+`boot_real_stdlib/1` does) without loading stdlib on a normal start. Returns a
+teardown handle that stops the application only if this call started it.
+Started through `start_app/1`, so if an earlier suite left the app running
+without the bootstrap `Object` class it is restarted and the stdlib classes are
+reloaded (see `start_app/1`).
 """.
 -spec runtime() -> fun(() -> ok).
 runtime() ->
@@ -267,6 +411,18 @@ telemetry() ->
     ok.
 
 -doc """
+Establish "no compiler running": stop the compiler application and wait until
+its server is gone. For tests of the no-compiler / `noproc` error paths: many
+suites start the compiler and leave it up, so those tests must set the
+precondition themselves instead of relying on suite order (BT-4934).
+""".
+-spec no_compiler() -> ok.
+no_compiler() ->
+    _ = application:stop(beamtalk_compiler),
+    ok = beamtalk_test_wait:until(fun() -> whereis(beamtalk_compiler_server) =:= undefined end),
+    ok.
+
+-doc """
 Boot a fresh, isolated workspace for the integration suites that drive the
 real compiler: start `compiler`, `beamtalk_compiler` and `beamtalk_runtime`,
 replace any running `beamtalk_workspace_meta` with a fresh one in **run
@@ -298,7 +454,10 @@ Idempotent; pair with `beamtalk_test_proc:stop_registered/1` in teardown.
 }) -> ok.
 workspace(#{workspace_id := WorkspaceId} = Opts) ->
     ok = compiler(),
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    %% start_app/1, not a bare ensure_all_started: an earlier suite may have left a
+    %% supervised server (beamtalk_xref via ensure_xref/0, ...) running bare, which
+    %% makes the supervisor's own start fail with already_started (BT-4962).
+    {ok, _} = start_app(beamtalk_runtime),
     ok = beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     {ok, _} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WorkspaceId,

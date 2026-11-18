@@ -303,49 +303,45 @@ fn test_generate_actor_spawn_monitored_non_repl() {
 }
 
 #[test]
-fn test_generate_actor_spawn_monitored_repl_registers_pair_actor() {
-    // BT-4104: in the REPL the registry gets the pid of the pair's actor
-    // (element 4 of element 1), and the whole pair is answered.
-    let mut generator = CoreErlangGenerator::new("test");
-    generator.bind_var("__bindings__", "Bindings");
-    let doc = generator
-        .generate_actor_spawn_qualified(
-            "Counter",
-            None,
+fn test_generate_actor_spawn_repl_is_the_plain_module_call() {
+    // ADR 0150 (BT-4951): the REPL spawn no longer looks up a registry in the
+    // bindings and registers the pid. It is the same call as outside the REPL,
+    // for every spawn variant.
+    for (selector, variant, function) in [
+        ("spawn", SpawnVariant::Plain, "'spawn'"),
+        (
             "spawnMonitored",
-            None,
             SpawnVariant::Monitored,
-        )
-        .unwrap();
-    let output = doc.to_pretty_string();
-    assert!(
-        output.matches(":'spawn_monitored'()").count() == 2,
-        "both REPL arms should call spawn_monitored/0. Got: {output}"
-    );
-    assert!(
-        output.contains(
-            "let SpawnPid = call 'erlang':'element'(4, call 'erlang':'element'(1, SpawnResult)) in"
+            "'spawn_monitored'",
         ),
-        "REPL registration must take the pid from the pair's actor. Got: {output}"
-    );
-    assert!(
-        output.contains("register_spawned"),
-        "REPL variant must register the actor. Got: {output}"
-    );
-}
-
-#[test]
-fn test_generate_actor_spawn_repl_registers_plain_result() {
-    let mut generator = CoreErlangGenerator::new("test");
-    generator.bind_var("__bindings__", "Bindings");
-    let doc = generator
-        .generate_actor_spawn_qualified("Counter", None, "spawn", None, SpawnVariant::Plain)
-        .unwrap();
-    let output = doc.to_pretty_string();
-    assert!(
-        output.contains("let SpawnPid = call 'erlang':'element'(4, SpawnResult) in"),
-        "plain REPL spawn takes the pid from the actor itself. Got: {output}"
-    );
+        (
+            "spawnMonitoredAsync",
+            SpawnVariant::MonitoredAsync,
+            "'spawn_monitored_async'",
+        ),
+    ] {
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.bind_var("__bindings__", "Bindings");
+        let repl = generator
+            .generate_actor_spawn_qualified("Counter", None, selector, None, variant)
+            .unwrap()
+            .to_pretty_string();
+        let plain = CoreErlangGenerator::new("test")
+            .generate_actor_spawn_qualified("Counter", None, selector, None, variant)
+            .unwrap()
+            .to_pretty_string();
+        assert_eq!(
+            repl, plain,
+            "REPL {selector} must equal the non-REPL call. Got: {repl}"
+        );
+        assert!(repl.contains(function), "missing {function}: {repl}");
+        for gone in ["register_spawned", "__repl_actor_registry__", "SpawnPid"] {
+            assert!(
+                !repl.contains(gone),
+                "REPL {selector} must not emit {gone}: {repl}"
+            );
+        }
+    }
 }
 
 #[test]

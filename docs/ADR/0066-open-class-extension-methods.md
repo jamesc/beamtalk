@@ -419,14 +419,14 @@ Make extensions visible to the gradual type checker via the metadata from Phase 
 
 | Phase | Issue | Title | Size | Status |
 |-------|-------|-------|------|--------|
-| 1b | [BT-1512](https://linear.app/beamtalk/issue/BT-1512) | Fix extension state threading — ETS dispatch discards mutations | S | Backlog |
-| 2 | [BT-1473](https://linear.app/beamtalk/issue/BT-1473) | Document `>>` syntax in language features docs | M | In Review |
-| 2 | [BT-1514](https://linear.app/beamtalk/issue/BT-1514) | Test sealed class extensions via ETS dispatch path | S | Backlog |
-| 3 | [BT-1515](https://linear.app/beamtalk/issue/BT-1515) | Extension collector — scan declarations across project | M | Backlog |
-| 3 | [BT-1516](https://linear.app/beamtalk/issue/BT-1516) | Compile-time conflict detection for duplicate extensions | S | Backlog |
-| 3 | [BT-1517](https://linear.app/beamtalk/issue/BT-1517) | Emit extension method type metadata for the type checker | M | Backlog |
-| 4 | [BT-1518](https://linear.app/beamtalk/issue/BT-1518) | Type checker reads extension metadata — typed method surface | M | Backlog |
-| 4 | [BT-1519](https://linear.app/beamtalk/issue/BT-1519) | Extension type annotation syntax — return types on `>>` | M | Backlog |
+| 1b | [BT-1512](https://linear.app/beamtalk/issue/BT-1512) | Fix extension state threading — ETS dispatch discards mutations | S | Done |
+| 2 | [BT-1473](https://linear.app/beamtalk/issue/BT-1473) | Document `>>` syntax in language features docs | M | Done |
+| 2 | [BT-1514](https://linear.app/beamtalk/issue/BT-1514) | Test sealed class extensions via ETS dispatch path | S | Done |
+| 3 | [BT-1515](https://linear.app/beamtalk/issue/BT-1515) | Extension collector — scan declarations across project | M | Done |
+| 3 | [BT-1516](https://linear.app/beamtalk/issue/BT-1516) | Compile-time conflict detection for duplicate extensions | S | Done |
+| 3 | [BT-1517](https://linear.app/beamtalk/issue/BT-1517) | Emit extension method type metadata for the type checker | M | Done |
+| 4 | [BT-1518](https://linear.app/beamtalk/issue/BT-1518) | Type checker reads extension metadata — typed method surface | M | Done |
+| 4 | [BT-1519](https://linear.app/beamtalk/issue/BT-1519) | Extension type annotation syntax — return types on `>>` | M | Done |
 
 ## References
 - Related issues: BT-1473, [BT-1512](https://linear.app/beamtalk/issue/BT-1512) (extension state threading bug)

@@ -60,29 +60,21 @@ impl CoreErlangGenerator {
     /// a method a subclass inherits without overriding, the inherited method's
     /// code lives in the superclass module, so a literal `class_name()` atom
     /// would yield the superclass instead of the actor's actual runtime class —
-    /// unlike `sync_send_remote/3`, which resolves the runtime class via the
-    /// same `lookup_class/1` ETS reverse-lookup on `beamtalk_instance_registry`.
-    /// Emitting the same runtime lookup here keeps the self-send breadcrumb's
-    /// `class` value in parity with the cross-actor path for inherited methods.
-    /// `selector_atom` is still known at compile time and stays a literal atom.
+    /// unlike `sync_send_remote/3`, which resolves the runtime class through the
+    /// same `lookup_class/1`. Emitting the same runtime lookup here keeps the
+    /// self-send breadcrumb's `class` value in parity with the cross-actor path
+    /// for inherited methods. `selector_atom` is still known at compile time and
+    /// stays a literal atom.
     ///
-    /// Known caveat: `lookup_class/1` reads `beamtalk_instance_registry`,
-    /// which the *spawner* populates only after `beamtalk_actor:safe_spawn/2`'s
-    /// `await_initialize/3` confirms `initialize` has returned (see
-    /// `gen_server/spawn.rs`'s `instance_registration_doc`). A self-send that
-    /// raises *during* `initialize` — or in a continuation `initialize`
-    /// requested, which since BT-3992 runs concurrently with the spawner's
-    /// registration — can therefore run before this actor's own registry
-    /// entry exists, so `lookup_class(self())` falls back to `'unknown'` for
-    /// that narrow window — trading a guaranteed-
-    /// correct compile-time atom (for non-inherited classes only) for a
-    /// safe-but-less-specific fallback, in exchange for a correct answer in
-    /// every other case (including all inherited-method self-sends, the
-    /// actual bug this fixes). `lookup_class/1` never crashes either way.
+    /// `lookup_class/1` reads the `'$beamtalk_actor'` marker (ADR 0150) with
+    /// one `process_info/2` on `self()`. The actor's generated `init/1` writes
+    /// that marker first, so a self-send, including one that raises during
+    /// `initialize`, always finds it; the lookup never crashes and answers
+    /// `'unknown'` only for a process that carries no marker.
     ///
     /// Core Erlang map literals (`~{...}~`) cannot contain `call` expressions
-    /// (see `lifecycle_telemetry_let` in `gen_server/callbacks.rs` for the
-    /// same constraint), so the lookup is hoisted into a `let` binding inside
+    /// (the lifecycle calls in `gen_server/callbacks.rs` avoid building a map
+    /// for the same reason), so the lookup is hoisted into a `let` binding inside
     /// the clause body before the map is constructed. This only runs on the
     /// error path — no overhead on the success path.
     ///

@@ -29,39 +29,22 @@ Tests the Phase 2 dispatch/3 interface for Beamtalk primitives:
 %%====================================================================
 
 setup() ->
-    beamtalk_test_boot:registry(),
+    %% The real stdlib supplies Object, Integer, Actor, ...; only `Counter` is this
+    %% suite's own fixture. Faking those classes and stopping every class process
+    %% afterwards (the old teardown) left the next module without a stdlib or with
+    %% half-published class facts (BT-4962).
+    ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
     register_test_classes().
 
 teardown(_) ->
     OldTrap = process_flag(trap_exit, true),
-    cleanup_test_classes(),
-    process_flag(trap_exit, OldTrap).
+    %% A graceful stop runs the class's terminate path, which drops its metadata
+    %% rows; the class monitor does not revive a deliberately stopped class.
+    beamtalk_test_class:stop_graceful('Counter'),
+    process_flag(trap_exit, OldTrap),
+    ok.
 
 register_test_classes() ->
-    ensure_class_started('Object', #{
-        name => 'Object',
-        module => beamtalk_object,
-        superclass => none,
-        instance_methods => #{},
-        instance_variables => []
-    }),
-    ensure_class_started('Integer', #{
-        name => 'Integer',
-        module => 'bt@stdlib@integer',
-        superclass => 'Object',
-        instance_methods => #{
-            '+' => #{arity => 1},
-            '-' => #{arity => 1}
-        },
-        instance_variables => []
-    }),
-    ensure_class_started('Actor', #{
-        name => 'Actor',
-        module => 'bt@stdlib@actor',
-        superclass => 'Object',
-        instance_methods => #{},
-        instance_variables => []
-    }),
     %% Fresh, not `ensure_class_started/2`: a `Counter` class another suite in
     %% the same EUnit VM left running can have lost its metadata rows, which
     %% hides it from `allClasses`. This suite's `Counter` is its own fixture.
@@ -95,27 +78,6 @@ ensure_class_started(ClassName, ClassInfo) ->
         {ok, _Pid} -> ok;
         {error, {already_started, _Pid}} -> ok
     end.
-
-cleanup_test_classes() ->
-    %% BT-3815: unwatch before killing so beamtalk_class_monitor cannot
-    %% resurrect these classes mid-teardown.
-    beamtalk_test_class_teardown:stop_pg_class_processes(),
-    lists:foreach(
-        fun(Name) ->
-            try
-                unregister(Name)
-            catch
-                _:_ -> ok
-            end
-        end,
-        [
-            beamtalk_class_Object,
-            beamtalk_class_Integer,
-            beamtalk_class_Counter,
-            beamtalk_class_Actor
-        ]
-    ),
-    ok.
 
 %%====================================================================
 %% allClasses Tests

@@ -425,6 +425,7 @@ mod closure_self_send_state_guard_corpus;
 mod constant_class_methods;
 mod control_flow;
 mod cross_file_abstract;
+mod cross_file_self_delegate;
 mod dispatch;
 mod duplicate_methods;
 mod dynamic_site_report;

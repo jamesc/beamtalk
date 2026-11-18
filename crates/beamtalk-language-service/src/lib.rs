@@ -180,11 +180,26 @@ pub struct SimpleLanguageService {
     project_index: ProjectIndex,
     /// Native type registry for Erlang FFI typed completions (ADR 0075).
     native_types: Option<std::sync::Arc<NativeTypeRegistry>>,
+    /// Per-file FFI registry that replaces `native_types` for diagnostics of
+    /// that file (BT-4967): a file under the monorepo's `stdlib/` tree has no
+    /// `beamtalk.toml`, so no root contributes a registry for it. The LSP
+    /// fills this from the registry `build`/`test`/`lint` share
+    /// (`ffi_type_registry::lint_type_registry`); this crate does not decide
+    /// which files qualify.
+    file_native_types: HashMap<Utf8PathBuf, std::sync::Arc<NativeTypeRegistry>>,
     /// Project-known Erlang modules for the `unresolved_ffi` check (BT-4022):
     /// hex-dep/native ebin modules plus own `native/*.erl`, unioned across
     /// workspace roots by the LSP server at startup (mirrors `native_types`).
     /// Default (unset) disables the check — no unresolved-module diagnostics.
     known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules,
+    /// Per-workspace-root package names a `pkg@Class` qualifier may name
+    /// (ADR 0070 Phase 2, BT-4928): each root's manifest `[dependencies]`,
+    /// the package itself and `stdlib`, built by
+    /// [`beamtalk_core::semantic_analysis::known_qualifier_packages`]. A file
+    /// is checked against the set of the most specific root containing it; a
+    /// file under no registered root (no manifest, unreadable manifest) is
+    /// never checked.
+    root_qualifier_packages: Vec<(Utf8PathBuf, std::collections::HashSet<String>)>,
     /// Whether workspace preload has completed with full coverage.
     ///
     /// When `true`, diagnostics are computed with
@@ -269,7 +284,9 @@ impl SimpleLanguageService {
             files: HashMap::new(),
             project_index: ProjectIndex::new(),
             native_types: None,
+            file_native_types: HashMap::new(),
             known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules::default(),
+            root_qualifier_packages: Vec::new(),
             project_complete: false,
             dependency_extensions_unknown: false,
             diagnostics_overrides:
@@ -288,7 +305,9 @@ impl SimpleLanguageService {
             files: HashMap::new(),
             project_index,
             native_types: None,
+            file_native_types: HashMap::new(),
             known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules::default(),
+            root_qualifier_packages: Vec::new(),
             project_complete: false,
             dependency_extensions_unknown: false,
             diagnostics_overrides:
@@ -381,6 +400,24 @@ impl SimpleLanguageService {
         self.native_types = Some(std::sync::Arc::new(registry));
     }
 
+    /// Sets (`Some`) or clears (`None`) the FFI registry used for `file`'s
+    /// diagnostics in place of the session-wide one (BT-4967).
+    pub fn set_file_native_types(
+        &mut self,
+        file: &Utf8PathBuf,
+        registry: Option<NativeTypeRegistry>,
+    ) {
+        match registry {
+            Some(registry) => {
+                self.file_native_types
+                    .insert(file.clone(), std::sync::Arc::new(registry));
+            }
+            None => {
+                self.file_native_types.remove(file);
+            }
+        }
+    }
+
     /// Returns a reference to the native type registry, if set.
     #[must_use]
     pub fn native_types(&self) -> Option<&NativeTypeRegistry> {
@@ -406,6 +443,45 @@ impl SimpleLanguageService {
     #[must_use]
     pub fn known_erlang_modules(&self) -> &beamtalk_core::ffi_type_specs::KnownErlangModules {
         &self.known_erlang_modules
+    }
+
+    /// Sets the `pkg@Class` qualifier package set for each workspace root
+    /// (ADR 0070 Phase 2, BT-4928).
+    ///
+    /// Replaces the whole map — pass every root whose manifest yielded a set
+    /// (see [`beamtalk_core::semantic_analysis::known_qualifier_packages`]);
+    /// a root with a missing or unreadable manifest is omitted, so its files
+    /// are not checked rather than falsely flagged.
+    ///
+    /// Loaded once at startup (and when a new root is first opened), like
+    /// [`set_known_erlang_modules`](Self::set_known_erlang_modules): a later
+    /// edit to a manifest's `[dependencies]` needs an LSP restart, until
+    /// then a newly declared package still shows "Unknown package".
+    pub fn set_root_qualifier_packages(
+        &mut self,
+        root_packages: Vec<(Utf8PathBuf, std::collections::HashSet<String>)>,
+    ) {
+        self.root_qualifier_packages = root_packages;
+    }
+
+    /// The qualifier package set of the most specific registered root
+    /// containing `file`, or `None` when no root does. A file in a fetched
+    /// dependency checkout (`_build/deps/<name>/…`) is checked only against
+    /// its own checkout's set - never inherited from the consumer root (the
+    /// CLI's `dependency_compile_options` rule) - so a checkout that is not
+    /// registered (stale, renamed, non-UTF-8) is skipped.
+    fn known_qualifier_packages_for(
+        &self,
+        file: &camino::Utf8Path,
+    ) -> Option<std::collections::HashSet<String>> {
+        let (root, packages) =
+            project_index::most_specific_root(&self.root_qualifier_packages, file)?;
+        if project_index::is_dependency_checkout_file(file)
+            && !project_index::is_dependency_checkout_file(root)
+        {
+            return None;
+        }
+        Some(packages.clone())
     }
 
     /// Returns a reference to the project index.
@@ -1083,6 +1159,7 @@ impl LanguageService for SimpleLanguageService {
         let had_internal_aliases = !self.project_index.internal_aliases_of(file).is_empty();
         self.project_index.remove_file(file);
         self.files.remove(file);
+        self.file_native_types.remove(file);
         // Siblings were expanded against this file's aliases (BT-4778).
         if had_internal_aliases && crate::project_index::is_dependency_file(file) {
             self.reindex_dependency_siblings(file, false);
@@ -1135,6 +1212,10 @@ impl LanguageService for SimpleLanguageService {
                 // `ProjectIndex::alias_package_for_file`'s doc.
                 options.current_package =
                     Some(self.project_index.alias_package_for_file(file).to_string());
+                // ADR 0070 Phase 2 (BT-4928): the file's root's manifest
+                // package set, so an undeclared `pkg@Class` qualifier shows
+                // the squiggle `beamtalk build` would. `None` skips the check.
+                options.known_packages = self.known_qualifier_packages_for(file);
                 // Cross-file extensions from the ProjectIndex are
                 // passed so a same-project `ClassName >> selector` defined in
                 // another file resolves instead of producing a false Dnu hint.
@@ -1175,7 +1256,11 @@ impl LanguageService for SimpleLanguageService {
                     pre_loaded_protocol_defs,
                     pre_loaded_aliases,
                     cross_file_extensions,
-                    native_type_registry: self.native_types.clone(),
+                    native_type_registry: self
+                        .file_native_types
+                        .get(file)
+                        .cloned()
+                        .or_else(|| self.native_types.clone()),
                     // Apply the same `beamtalk.toml` `[diagnostics]`
                     // severity-override table `beamtalk build` uses, so the
                     // LSP never disagrees with the CLI about a diagnostic's

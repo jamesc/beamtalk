@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4995 fixture, see bt4995plain.bt and stdlib/test/actor_intrinsic_dispatch_test.bt.
+
+Bt4995Plain subclass: Bt4995Recorder
+
+  // The class's own `terminate:` override: records the reason and the state
+  // it ran against.
+  terminate: reason =>
+    self note: #terminateReason value: reason
+    self note: #terminateN value: self.n

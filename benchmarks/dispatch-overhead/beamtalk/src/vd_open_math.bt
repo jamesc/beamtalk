@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Class-side method on an open stateless class.
+Object subclass: VdOpenMath
+  class double: x :: Integer -> Integer => x * 2

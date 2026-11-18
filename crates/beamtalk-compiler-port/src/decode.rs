@@ -399,6 +399,7 @@ pub(crate) fn parse_class_info_from_meta_term(
     let is_sealed = map_get(m, "is_sealed")
         .and_then(term_to_bool)
         .unwrap_or(false);
+    let is_native = map_get(m, "native").and_then(term_to_bool).unwrap_or(false);
     let is_abstract = map_get(m, "is_abstract")
         .and_then(term_to_bool)
         .unwrap_or(false);
@@ -487,7 +488,9 @@ pub(crate) fn parse_class_info_from_meta_term(
         is_internal,
         package,
         is_value,
-        is_native: false, // BEAM cache doesn't carry native flag; re-derived at parse time
+        // BT-4930: the flag only (not the backing module name). Absent in
+        // `.beam` files built before it was added, which decode as non-native.
+        is_native,
         // the wire doesn't carry the constructor anchor either;
         // binary-only cross-package classes conservatively miss out on
         // direct constructor calls (safe `class_send` fallback).
@@ -513,9 +516,8 @@ pub(crate) fn parse_class_info_from_meta_term(
         // scan (`beamtalk_core::semantic_analysis::has_dynamic_field_writer`)
         // is not part of `__beamtalk_meta`'s wire format — cross-package
         // construction-site confidence is already the documented gap ADR
-        // 0100 WS3 (cross-package metadata) leaves open, same as
-        // `is_native` above. `false` here only ever costs confidence
-        // (Warning where a Hint would be more honest), never correctness —
+        // 0100 WS3 (cross-package metadata) leaves open. `false` here only
+        // ever costs confidence (Warning where a Hint would be more honest), never correctness —
         // see `ClassInfo::has_dynamic_field_writer`'s doc.
         has_dynamic_field_writer: false,
         methods,

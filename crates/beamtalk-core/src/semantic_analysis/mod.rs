@@ -620,7 +620,7 @@ impl<'a> AnalysisContext<'a> {
 /// implicitly.
 ///
 /// The one rule every compile path shares (`build`, `check`, `lint`, `test`,
-/// the compiler port behind the REPL; the LSP is a known gap, BT-4928).
+/// the compiler port behind the REPL, the LSP).
 /// Callers with no package (single files, an unreadable manifest) pass no
 /// set at all, which skips the check.
 #[must_use]
@@ -844,6 +844,13 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // provisions are normalised too, and before anything below reads the
     // module — `(e) foo` must analyse exactly like `e foo`. Cloned only when
     // there is something to expand or peel.
+    // The module as written, before the owned clone below replaces `module`
+    // with its flattened form. Checks about what the author *wrote* (the
+    // package qualifiers, Phase 7) read this: the flattened form also holds
+    // every `uses:`d provision spliced into each using class, so a qualifier
+    // written once in a protocol would be seen once per user, and a protocol
+    // carried in from another file would be reported against this one.
+    let written_module = module;
     let has_uses = module.classes.iter().any(|c| !c.uses.is_empty());
     // BT-4721: a file is one compilation unit for its class. The compile
     // pipelines fold same-file extensions before analysis, so this is a no-op
@@ -1358,6 +1365,19 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+    // BT-4930: cross-file `self delegate` on a native class never reaches the backing module
+    validators::check_cross_file_native_delegate(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
+    // BT-4961/BT-4964: a concrete class under a native class must declare its own `native:`
+    validators::check_native_subclass_declares_native(
+        module,
+        &result.class_hierarchy,
+        stdlib_mode,
+        &mut result.diagnostics,
+    );
     // Reserved-word backing-function check for native Objects (ADR 0101)
     validators::check_native_delegate_reserved_word(
         module,
@@ -1493,7 +1513,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
 
     // Phase 7: Package qualifier validation (ADR 0070 Phase 2)
     if let Some(packages) = known_packages {
-        validators::check_package_qualifiers(module, &packages, &mut result.diagnostics);
+        validators::check_package_qualifiers(written_module, &packages, &mut result.diagnostics);
     }
 
     // Phase 8: Visibility enforcement (ADR 0071)

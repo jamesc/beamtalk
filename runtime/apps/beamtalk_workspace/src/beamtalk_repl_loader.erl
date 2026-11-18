@@ -418,7 +418,7 @@ Log a pending `'class-def'` ChangeLog entry for each class in `Classes` that
 Called from `load_class_module/3` after a successful inline class-body
 install — the cockpit `:def` tab's "Compile" action against an *existing*
 class routes through here
-(`beamtalk_repl_eval:handle_class_definition/7` → `load_class_module/3`), and
+(`beamtalk_repl_eval:handle_class_definition/6` → `load_class_module/3`), and
 previously installed the new class body with no ChangeLog entry at all: the
 CHANGES dock stayed at "No pending changes" and `Workspace flush` silently
 discarded the edit.

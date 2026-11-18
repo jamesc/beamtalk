@@ -898,7 +898,8 @@ xref_setup() ->
 
 xref_teardown(Acc) ->
     beamtalk_test_repl:clear_xref(),
-    teardown(Acc).
+    teardown(Acc),
+    ok = beamtalk_test_repl:release_xref().
 
 %% True when the compiler AST FFI walker that backs runtime xref send-parsing
 %% is loaded and reachable. A bare EUnit node may lack the compiler port, in
@@ -964,3 +965,7 @@ classbuilder_methods_appear_in_xref_test_() ->
             gen_server:stop(Pid, normal, 5000)
         end)
     ]}.
+
+%%% Module-level fixture (BT-4962): loading a compiled `bt@stdlib@*` module starts
+%%% class processes; with no runtime app to own them they would outlive this suite.
+eunit_wrapper_(Tests) -> beamtalk_test_class_teardown:leak_free(Tests).

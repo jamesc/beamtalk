@@ -743,6 +743,10 @@ impl CoreErlangGenerator {
     /// the subclass's marker — the leaf class name is what downstream lookups
     /// need.
     ///
+    /// BT-4937: the same branch also writes `'$beamtalk_actor_started_at'`
+    /// (`erlang:system_time(microsecond)`), the age `resolve_global_conflict/3`
+    /// compares. It is the writer for compiled actors.
+    ///
     /// BT-3596: when `traps_exit` is true (this class or an ancestor
     /// overrides `terminate:`, see `class_or_ancestor_overrides_terminate`),
     /// also sets `trap_exit` on this actor's own `gen_server` process — in the
@@ -767,6 +771,20 @@ impl CoreErlangGenerator {
                 leaf::atom(class_name.to_owned()),
             ],
         );
+        // BT-4937 / ADR 0126 §4: the start-time marker
+        // `beamtalk_actor_registry:resolve_global_conflict/3` reads (via
+        // `actor_started_at/1`, possibly from another node) to keep the older
+        // registrant. Written once per spawned process, in the same
+        // `__skip_initialize__`-guarded branch as the class marker.
+        let put_started_at = form::call(
+            "erlang",
+            "put",
+            [
+                leaf::atom("$beamtalk_actor_started_at"),
+                form::call("erlang", "system_time", [leaf::atom("microsecond")]),
+            ],
+        );
+        let put_markers = bind(leaf::var("_ClassMarker"), put_marker, put_started_at);
         let false_arm_body = if traps_exit {
             bind(
                 leaf::var("_TrapExit"),
@@ -775,10 +793,10 @@ impl CoreErlangGenerator {
                     "process_flag",
                     [leaf::atom("trap_exit"), leaf::atom("true")],
                 ),
-                put_marker,
+                put_markers,
             )
         } else {
-            put_marker
+            put_markers
         };
         bind(
             leaf::var("_Marker"),
@@ -790,44 +808,29 @@ impl CoreErlangGenerator {
         )
     }
 
-    /// Generate the lifecycle start telemetry call for init/1.
+    /// Generate the lifecycle call for `init/1` (`start`) and `terminate/2` (`stop`).
     ///
-    /// Emits `[beamtalk, actor, lifecycle, start]` via `beamtalk_actor:maybe_execute_telemetry/3`.
-    /// Uses a `let` binding for `self()` since Core Erlang map literals cannot contain calls.
-    /// Takes the clean Beamtalk class name (e.g., `EventStore`), not the
-    /// compiled module name, so lifecycle traces match dispatch trace format.
-    fn lifecycle_telemetry_let(
-        event: &'static str,
+    /// Emits `call 'beamtalk_actor':'lifecycle_started'(Class)` or
+    /// `'lifecycle_stopped'(Class, Reason)` (BT-4997). The runtime function
+    /// announces `ActorSpawned` / `ActorStopped`, records the trace-store
+    /// aggregate, and builds and emits the `[beamtalk, actor, lifecycle, _]`
+    /// telemetry event only while lifecycle events are enabled, so the generated
+    /// code builds no event metadata itself. Takes the clean Beamtalk class name
+    /// (e.g., `EventStore`), not the compiled module name, so lifecycle traces
+    /// match dispatch trace format.
+    fn lifecycle_call_let(
+        function: &'static str,
         telemetry_var: &'static str,
         class_name: &str,
-        extra_metadata: Document<'static>,
+        extra_args: Vec<Document<'static>>,
         body: Document<'static>,
     ) -> Document<'static> {
+        let mut args = vec![leaf::atom(class_name.to_owned())];
+        args.extend(extra_args);
         bind(
-            leaf::var("_TelPid"),
-            form::call("erlang", "self", []),
-            bind(
-                leaf::var(telemetry_var),
-                form::call(
-                    "beamtalk_actor",
-                    "maybe_execute_telemetry",
-                    [
-                        docvec![
-                            "['beamtalk', 'actor', 'lifecycle', ",
-                            leaf::atom(event),
-                            "]"
-                        ],
-                        Document::Str("~{}~"),
-                        docvec![
-                            "~{'pid' => _TelPid, 'class' => ",
-                            leaf::atom(class_name.to_owned()),
-                            extra_metadata,
-                            "}~"
-                        ],
-                    ],
-                ),
-                body,
-            ),
+            leaf::var(telemetry_var),
+            form::call("beamtalk_actor", function, args),
+            body,
         )
     }
 
@@ -857,11 +860,11 @@ impl CoreErlangGenerator {
                 ),
                 arm(
                     [leaf::atom("false")],
-                    Self::lifecycle_telemetry_let(
-                        "start",
+                    Self::lifecycle_call_let(
+                        "lifecycle_started",
                         "_TelStart",
                         class_name,
-                        Document::Nil,
+                        Vec::new(),
                         // BT-3992: strip the starter's initialize-ack
                         // target and ack at once — no `initialize` step
                         // follows, so startup ends here.
@@ -923,11 +926,11 @@ impl CoreErlangGenerator {
                             [leaf::atom("__skip_initialize__"), leaf::var("FinalState")],
                         ),
                         // Emit lifecycle start telemetry before returning
-                        Self::lifecycle_telemetry_let(
-                            "start",
+                        Self::lifecycle_call_let(
+                            "lifecycle_started",
                             "_TelStart",
                             class_name,
-                            Document::Nil,
+                            Vec::new(),
                             // BT-3992: strip the starter's initialize-ack
                             // target and keep it for handle_continue's
                             // `initialize` step, which acks once it succeeds.
@@ -1855,12 +1858,9 @@ impl CoreErlangGenerator {
     /// implementations"). A decoded envelope re-dispatches, by a recursive
     /// self-call, through the `{'cast', ...}` clause below exactly as if it
     /// had arrived locally; a decode/version failure has already been
-    /// logged and dropped by the shared helper. The 7-tuple `async`-kind
-    /// wire shape is deliberately not matched here: no compiled `.bt`
-    /// construct reaches the async-with-future protocol at all (see
-    /// `decode_wire_cast/1`'s own doc), so an async-tagged wire cast falls
-    /// through to the ordinary catch-all below exactly like an
-    /// un-wire-tagged one already does today.
+    /// logged and dropped by the shared helper. There is no `async`-kind
+    /// wire shape: remote async sends are unsupported and raise at the
+    /// sender (ADR 0126 Amendment BT-4989).
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_handle_cast(
         &mut self,
@@ -2662,11 +2662,11 @@ impl CoreErlangGenerator {
                 "terminate",
                 [leaf::var("Reason"), leaf::var("State")],
                 // Emit lifecycle stop telemetry from compiled terminate
-                Self::lifecycle_telemetry_let(
-                    "stop",
+                Self::lifecycle_call_let(
+                    "lifecycle_stopped",
                     "_TelStop",
                     &class_name,
-                    Document::Str(", 'reason' => Reason"),
+                    vec![leaf::var("Reason")],
                     docvec![
                         "%% Call terminate: method if defined — exceptions must not prevent shutdown",
                         line(),

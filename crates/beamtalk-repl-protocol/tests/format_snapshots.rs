@@ -285,7 +285,8 @@ fn make_actor(class: &str, pid: &str) -> ActorInfo {
         pid: pid.to_string(),
         class: class.to_string(),
         module: "m".to_string(),
-        spawned_at: 0,
+        spawned_at: Some(0),
+        system: false,
     }
 }
 
@@ -310,6 +311,28 @@ fn snapshot_actor_list_multi_plain() {
     Logger (<0.124.0>)
     "
     );
+}
+
+#[test]
+fn snapshot_actor_list_system_and_user_plain() {
+    let mut sys = make_actor("TranscriptStream", "<0.9.0>");
+    sys.system = true;
+    let actors = [sys, make_actor("Counter", "<0.123.0>")];
+    insta::assert_snapshot!(
+        format::format_actor_list(&actors, OutputMode::Plain),
+        @r"
+    TranscriptStream (<0.9.0>) [system]
+    Counter (<0.123.0>)
+    "
+    );
+}
+
+#[test]
+fn snapshot_actor_summary_system_ansi() {
+    let mut a = make_actor("TranscriptStream", "<0.9.0>");
+    a.system = true;
+    let out = format::format_actor_summary(&a, OutputMode::Ansi);
+    insta::assert_snapshot!(strip_ansi(&out), @"TranscriptStream (<0.9.0>) [system]");
 }
 
 #[test]

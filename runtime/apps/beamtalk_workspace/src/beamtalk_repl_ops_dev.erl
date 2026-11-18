@@ -483,7 +483,6 @@ handle_list_classes(Params, SessionPid) ->
                     %% or the session is gone, so list-classes still answers in
                     %% editor / non-session contexts (actor_count = 0).
                     Tracker = list_classes_session_tracker(SessionPid),
-                    RegistryPid = whereis(beamtalk_actor_registry),
                     ClassInfos = lists:filtermap(
                         fun(Pid) ->
                             try
@@ -509,7 +508,7 @@ handle_list_classes(Params, SessionPid) ->
                                     true ->
                                         SourceFile = list_classes_source_file(ModName),
                                         ActorCount = beamtalk_repl_modules:get_actor_count(
-                                            ModName, RegistryPid, Tracker
+                                            ModName, Tracker
                                         ),
                                         {true, #{
                                             <<"name">> => atom_to_binary(Name, utf8),
@@ -1235,7 +1234,7 @@ Fetch a session module-tracker for list-classes if a session is
 available, falling back to an empty tracker otherwise.
 
 Editor / non-session callers don't have a SessionPid; in that case we
-return an empty tracker so `get_actor_count/3` reports 0 without crashing.
+return an empty tracker so `get_actor_count/2` reports 0 without crashing.
 """.
 -spec list_classes_session_tracker(pid() | undefined) ->
     beamtalk_repl_modules:module_tracker().

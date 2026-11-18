@@ -27,71 +27,61 @@ Tests all actor behaviors:
 %% test_wirecheck_actor.erl's method funs — must be exported.
 -export([bt3582_invoke_block_fun4/4, bt3582_invoke_block_fun2/2]).
 
+%%% Fixture (BT-4981)
+
+%% Module-level EUnit wrapper: every test in this module runs inside one fixture,
+%% so none of them depends on the stdlib an earlier module happened to leave
+%% registered (seeds 29, 37 and 59 of BT-4962 each killed this module that way).
+eunit_wrapper_(Tests) ->
+    {setup, fun fixture_setup/0, fun fixture_teardown/1, Tests}.
+
+%% The real stdlib supplies Object, Actor, ... (`Counter` etc. are the tests' own
+%% `test_actor_host` doubles). Returns the actors that already existed, so the
+%% teardown stops only the ones this module left behind.
+fixture_setup() ->
+    ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
+    [Pid || {Pid, _Class, _StartedAt} <- beamtalk_actor_scan:scan_actors()].
+
+fixture_teardown(ActorsBefore) ->
+    Leaked = [
+        Pid
+     || {Pid, _Class, _StartedAt} <- beamtalk_actor_scan:scan_actors(),
+        not lists:member(Pid, ActorsBefore)
+    ],
+    lists:foreach(fun beamtalk_test_proc:stop/1, Leaked),
+    ok.
+
 %%% Tests
 
 %%% Initialization tests
+%%
+%% These drive a compiled actor's generated `init/1` (the `bt@counter` fixture),
+%% the callback every real actor runs. `init/1` writes the actor marker into its
+%% process: run it in a fresh process, or every later scan lists the shared test
+%% process as an actor (ADR 0150).
 
-init_with_valid_state_test() ->
-    State = #{
-        '$beamtalk_class' => 'TestActor',
-        '__methods__' => #{test => fun(_Args, S) -> {reply, ok, S} end},
-        data => 123
-    },
-    ?assertEqual({ok, State}, beamtalk_actor:init(State)).
-
-init_without_class_test() ->
-    State = #{
-        '__methods__' => #{test => fun(_Args, S) -> {reply, ok, S} end}
-    },
-    ?assertEqual({stop, {missing_key, '$beamtalk_class'}}, beamtalk_actor:init(State)).
-
-init_with_non_atom_class_test() ->
-    State = #{
-        '$beamtalk_class' => "StringNotAtom",
-        '__methods__' => #{test => fun(_Args, S) -> {reply, ok, S} end}
-    },
-    ?assertEqual({stop, {invalid_value, '$beamtalk_class'}}, beamtalk_actor:init(State)).
-
-init_without_methods_test() ->
-    State = #{
-        '$beamtalk_class' => 'TestActor'
-    },
-    ?assertEqual({stop, {missing_key, '__methods__'}}, beamtalk_actor:init(State)).
-
-init_with_non_map_test() ->
-    ?assertEqual({stop, {invalid_state, not_a_map}}, beamtalk_actor:init("not a map")),
-    ?assertEqual({stop, {invalid_state, not_a_map}}, beamtalk_actor:init([1, 2, 3])),
-    ?assertEqual({stop, {invalid_state, not_a_map}}, beamtalk_actor:init(123)).
-
-init_actor_started_log_omits_unassigned_late_slot_state_keys_test() ->
-    %% BT-3548 (ADR 0124 B2): compiled codegen now leaves a defaultless
-    %% `late` slot's key out of the state map entirely (never emits
-    %% `<name> => 'nil'`). The "Actor started" log's `state_keys` is derived
-    %% purely from `maps:keys(State)`, so it naturally reflects that absence
-    %% with no change needed in `beamtalk_actor:init/1` itself — this pins
-    %% that derivation against a State map shaped the way codegen now
-    %% produces for a `late state: proc` slot with no `spawnWith:`-supplied
-    %% value: no `proc` key at all, alongside an ordinary eager `count` key.
-    %% The test sys.config caps the primary logger level at `error` (to
-    %% keep CI output clean), which would filter out `?LOG_INFO`'s "Actor
-    %% started" before it ever reaches a handler — bump it for this test's
-    %% duration, matching the same pattern beamtalk_hot_reload_tests.erl /
-    %% beamtalk_shape_migration_tests.erl use for their own info-level log
-    %% assertions.
-    beamtalk_test_log:with_capture(all, fun() ->
-        State = #{
-            '$beamtalk_class' => 'LateSlotActor',
-            '__methods__' => #{},
-            '__class_mod__' => 'bt@late_slot_actor',
-            count => 0
-        },
-        ?assertEqual({ok, State}, beamtalk_actor:init(State)),
-        Found = collect_log_meta("Actor started", state_keys, 500),
-        ?assertMatch({ok, _}, Found),
-        {ok, Keys} = Found,
-        ?assertNot(lists:member(proc, Keys)),
-        ?assert(lists:member(count, Keys))
+compiled_init(InitArgs) ->
+    ok = beamtalk_test_class:ensure_fixture_loaded('Counter', 'bt@counter'),
+    beamtalk_test_proc:in_fresh_process(fun() ->
+        Result = 'bt@counter':init(InitArgs),
+        {Result, erlang:get('$beamtalk_actor')}
     end).
+
+init_applies_defaults_and_writes_marker_test() ->
+    {{ok, State}, Marker} = compiled_init(#{}),
+    ?assertEqual(0, maps:get(value, State)),
+    ?assertEqual('bt@counter', maps:get('__class_mod__', State)),
+    ?assertEqual('Counter', Marker).
+
+init_args_override_defaults_test() ->
+    {{ok, State}, _Marker} = compiled_init(#{value => 7}),
+    ?assertEqual(7, maps:get(value, State)).
+
+init_skip_initialize_leaves_no_marker_test() ->
+    {Result, Marker} = compiled_init(#{'__skip_initialize__' => true}),
+    ?assertMatch({ok, #{value := 0}}, Result),
+    ?assertNot(maps:is_key('__skip_initialize__', element(2, Result))),
+    ?assertEqual(undefined, Marker).
 
 %%% Sync message dispatch tests
 
@@ -192,57 +182,6 @@ malformed_cast_message_test() ->
 
 %%% doesNotUnderstand tests
 
-dnu_forward_to_target_test() ->
-    {ok, Counter} = test_counter:start_link(10),
-    {ok, Proxy} = test_proxy:start_link(Counter),
-
-    %% Call getValue on proxy - should forward to counter
-    Result = gen_server:call(Proxy, {getValue, []}),
-    ?assertEqual(10, Result),
-
-    gen_server:stop(Proxy),
-    gen_server:stop(Counter).
-
-dnu_no_target_test() ->
-    {ok, Proxy} = test_proxy:start_link(nil),
-
-    %% Call unknown method with no target
-    Result = gen_server:call(Proxy, {someMethod, []}),
-    ?assertMatch({error, no_target}, Result),
-
-    gen_server:stop(Proxy).
-
-dnu_change_target_test() ->
-    {ok, Counter1} = test_counter:start_link(10),
-    {ok, Counter2} = test_counter:start_link(20),
-    {ok, Proxy} = test_proxy:start_link(Counter1),
-
-    %% First call should return 10
-    Result1 = gen_server:call(Proxy, {getValue, []}),
-    ?assertEqual(10, Result1),
-
-    %% Change target
-    ok = gen_server:call(Proxy, {setTarget, [Counter2]}),
-
-    %% Second call should return 20
-    Result2 = gen_server:call(Proxy, {getValue, []}),
-    ?assertEqual(20, Result2),
-
-    gen_server:stop(Proxy),
-    gen_server:stop(Counter1),
-    gen_server:stop(Counter2).
-
-dnu_handler_throws_test() ->
-    {ok, Actor} = test_throwing_dnu_actor:start_link(),
-
-    %% Call unknown method - DNU handler will throw
-    Result = gen_server:call(Actor, {unknownMethod, [arg1]}),
-    ?assertMatch(
-        {error, #beamtalk_error{kind = runtime_error, selector = 'doesNotUnderstand:args:'}}, Result
-    ),
-
-    gen_server:stop(Actor).
-
 %%% Multiple actors communicating
 
 multiple_actors_test() ->
@@ -276,7 +215,7 @@ code_change_preserves_state_test() ->
 
     %% Simulate code change
     State = sys:get_state(Counter),
-    {ok, NewState} = beamtalk_actor:code_change(old_version, State, extra),
+    {ok, NewState} = test_actor_host:code_change(old_version, State, extra),
 
     %% State should be unchanged
     ?assertEqual(State, NewState),
@@ -381,34 +320,6 @@ method_throws_exception_async_test() ->
 
     gen_server:stop(Actor).
 
-invalid_method_not_function_sync_test() ->
-    {ok, Actor} = test_invalid_method_actor:start_link(),
-
-    %% Try to call a method that's not a function
-    Result = gen_server:call(Actor, {notAFunction, []}),
-    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = notAFunction}}, Result),
-
-    %% Verify actor still works with valid methods
-    ValidResult = gen_server:call(Actor, {validMethod, []}),
-    ?assertEqual(ok, ValidResult),
-
-    gen_server:stop(Actor).
-
-invalid_method_not_function_async_test() ->
-    {ok, Actor} = test_invalid_method_actor:start_link(),
-
-    %% Send async message to method that's not a function
-    Future = beamtalk_future:new(),
-    gen_server:cast(Actor, {notAFunction, [], Future}),
-
-    %% Future should be rejected
-    ?assertThrow(
-        {future_rejected, #beamtalk_error{kind = type_error, selector = notAFunction}},
-        beamtalk_future:await(Future, 1000)
-    ),
-
-    gen_server:stop(Actor).
-
 %%% Backward-compat error path tests
 %% Verify that the {error, {ErlType, ErrorValue}} 2-tuple path (older
 %% compiled actors without stacktrace) preserves the exception class.
@@ -439,30 +350,22 @@ compat_self_dispatch_preserves_class_test_() ->
     %% BT-4679: the former compat_self_dispatch_{exit,throw,error}_preserves_class tests.
     %% The self_dispatch path (unwrap_dispatch_result) with backward-compat 2-tuple
     %% errors. selfSend*Error triggers a self-send inside the actor, which goes through
-    %% self_dispatch -> safe_dispatch/3 -> unwrap_dispatch_result. The self-send error
-    %% bubbles up through dispatch/4's try/catch as an error exception, which
-    %% wrap_method_error catches and wraps.
+    %% self_dispatch -> safe_dispatch/3 -> unwrap_dispatch_result; the exception it
+    %% raises must keep the original exception class when the host wraps it.
     [
-        {Label, fun() -> compat_self_dispatch_case(Message, Class) end}
-     || {Label, Message, Class} <- [
-            {"exit error keeps ExitError", selfSendExitError, 'ExitError'},
-            {"throw error keeps ThrowError", selfSendThrowError, 'ThrowError'},
-            {"plain error keeps RuntimeError", selfSendPlainError, 'RuntimeError'}
+        {Label, fun() -> compat_self_dispatch_case(Message, Kind) end}
+     || {Label, Message, Kind} <- [
+            {"exit error keeps erlang_exit kind", selfSendExitError, erlang_exit},
+            {"throw error keeps erlang_throw kind", selfSendThrowError, erlang_throw},
+            {"plain error keeps runtime_error kind", selfSendPlainError, runtime_error}
         ]
     ].
 
-compat_self_dispatch_case(Message, Class) ->
+compat_self_dispatch_case(Message, Kind) ->
     {ok, Actor} = test_compat_error_actor:start_link(),
     try
         Result = gen_server:call(Actor, {Message, []}),
-        ?assertMatch({error, _}, Result),
-        {error, Inner} = Result,
-        %% The inner error is a #beamtalk_error{} from wrap_method_error, with the
-        %% original_reason containing the wrapped exception of the original class.
-        ?assertMatch(#beamtalk_error{kind = runtime_error}, Inner),
-        Details = Inner#beamtalk_error.details,
-        OriginalReason = maps:get(original_reason, Details),
-        ?assertEqual(Class, maps:get('$beamtalk_class', OriginalReason))
+        ?assertMatch({error, #beamtalk_error{kind = Kind}}, Result)
     after
         gen_server:stop(Actor)
     end.
@@ -903,18 +806,6 @@ dispatch4_async_with_self_test() ->
 %%% Object reflection API tests
 %%% Reflection methods now delegate to hierarchy walk, which requires bootstrap
 
-respondsTo_existing_method_test() ->
-    %% Test respondsTo: with an existing method
-    application:ensure_all_started(beamtalk_runtime),
-    {ok, Counter} = test_counter:start_link(0),
-
-    %% Check for existing methods (use keyword selector with colon)
-    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [increment]})),
-    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [getValue]})),
-    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', ['setValue:']})),
-
-    gen_server:stop(Counter).
-
 respondsTo_nonexistent_method_test() ->
     %% Test respondsTo: with a nonexistent method
     application:ensure_all_started(beamtalk_runtime),
@@ -997,143 +888,7 @@ fieldAt_put_test() ->
 
     gen_server:stop(Counter).
 
-reflection_combined_test() ->
-    %% Combined test: use reflection to discover and access instance variables
-    application:ensure_all_started(beamtalk_runtime),
-    {ok, Counter} = test_counter:start_link(123),
-
-    %% Discover instance variables
-    VarNames = gen_server:call(Counter, {fieldNames, []}),
-    ?assertEqual([value], VarNames),
-
-    %% Read each discovered variable
-    [VarName] = VarNames,
-    Value = gen_server:call(Counter, {'fieldAt:', [VarName]}),
-    ?assertEqual(123, Value),
-
-    %% Check that we respond to the method we're about to call
-    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [increment]})),
-
-    %% Call the method
-    gen_server:call(Counter, {increment, []}),
-
-    %% Read the updated value via reflection
-    NewValue = gen_server:call(Counter, {'fieldAt:', [value]}),
-    ?assertEqual(124, NewValue),
-
-    gen_server:stop(Counter).
-
 %%% perform: dynamic message send tests
-
-perform_unary_message_test() ->
-    %% Test perform: with no arguments (unary message)
-    {ok, Counter} = test_counter:start_link(10),
-
-    %% obj perform: #increment  => obj increment
-    %% increment returns noreply, so the result is nil
-    nil = gen_server:call(Counter, {'perform:', [increment]}),
-    ?assertEqual(11, gen_server:call(Counter, {getValue, []})),
-
-    %% Another increment via perform:
-    nil = gen_server:call(Counter, {'perform:', [increment]}),
-    ?assertEqual(12, gen_server:call(Counter, {getValue, []})),
-
-    gen_server:stop(Counter).
-
-perform_keyword_message_test() ->
-    %% Test perform:withArguments: with keyword message
-    {ok, Counter} = test_counter:start_link(5),
-
-    %% obj perform: #'setValue:' withArgs: [100]  => obj setValue: 100
-    ok = gen_server:call(Counter, {'perform:withArguments:', ['setValue:', [100]]}),
-    ?assertEqual(100, gen_server:call(Counter, {getValue, []})),
-
-    gen_server:stop(Counter).
-
-perform_with_result_test() ->
-    %% Test perform: on a method that returns a value
-    {ok, Counter} = test_counter:start_link(42),
-
-    %% obj perform: #getValue  => obj getValue (returns value)
-    Result = gen_server:call(Counter, {'perform:', [getValue]}),
-    ?assertEqual(42, Result),
-
-    gen_server:stop(Counter).
-
-perform_withArgs_multiple_arguments_test() ->
-    %% Test perform:withArguments: with multiple arguments
-    {ok, Actor} = test_multi_arg_actor:start_link(),
-
-    %% obj perform: #'compute:plus:' withArgs: [10, 20]  => obj compute: 10 plus: 20
-    Result = gen_server:call(Actor, {'perform:withArguments:', ['compute:plus:', [10, 20]]}),
-    ?assertEqual(30, Result),
-
-    gen_server:stop(Actor).
-
-perform_unknown_selector_test() ->
-    %% Test perform: with unknown selector (should trigger doesNotUnderstand)
-    {ok, Counter} = test_counter:start_link(0),
-
-    %% obj perform: #unknownMethod  => doesNotUnderstand
-    Result = gen_server:call(Counter, {'perform:', [unknownMethod]}),
-    ?assertMatch(
-        {error, #beamtalk_error{kind = does_not_understand, selector = unknownMethod}}, Result
-    ),
-
-    gen_server:stop(Counter).
-
-perform_invalid_selector_type_test() ->
-    %% Test perform: with non-atom selector (should return type_error)
-    {ok, Counter} = test_counter:start_link(0),
-
-    %% obj perform: "notAnAtom"  => type error
-    Result = gen_server:call(Counter, {'perform:', ["notAnAtom"]}),
-    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = 'perform:'}}, Result),
-
-    gen_server:stop(Counter).
-
-perform_withArgs_invalid_args_type_test() ->
-    %% Test perform:withArguments: with non-list args (should error)
-    {ok, Counter} = test_counter:start_link(0),
-
-    %% obj perform: #increment withArgs: 42  => type error (42 is not a list)
-    Result = gen_server:call(Counter, {'perform:withArguments:', [increment, 42]}),
-    ?assertMatch(
-        {error, #beamtalk_error{kind = type_error, selector = 'perform:withArguments:'}}, Result
-    ),
-
-    gen_server:stop(Counter).
-
-perform_async_with_future_test() ->
-    %% Test perform: with async message (cast with future)
-    {ok, Counter} = test_counter:start_link(0),
-
-    %% Send async perform: message
-    Future = beamtalk_future:new(),
-    gen_server:cast(Counter, {'perform:', [increment], Future}),
-
-    %% Wait for future to resolve
-    ?assertEqual(nil, beamtalk_future:await(Future)),
-
-    %% Verify state was updated
-    ?assertEqual(1, gen_server:call(Counter, {getValue, []})),
-
-    gen_server:stop(Counter).
-
-perform_recursive_dispatch_test() ->
-    %% Test that perform: correctly dispatches through the same dispatch/4 logic
-    application:ensure_all_started(beamtalk_runtime),
-    {ok, Counter} = test_counter:start_link(50),
-
-    %% Use perform: to call respondsTo: (a built-in reflection method)
-    Result1 = gen_server:call(Counter, {'perform:withArguments:', ['respondsTo:', [increment]]}),
-    ?assertEqual(true, Result1),
-
-    %% Use perform: to call fieldAt: (another built-in)
-    Result2 = gen_server:call(Counter, {'perform:withArguments:', ['fieldAt:', [value]]}),
-    ?assertEqual(50, Result2),
-
-    gen_server:stop(Counter).
 
 %%% Object method delegation tests
 %%% Actors inherit Object base methods via hierarchy walk
@@ -1165,19 +920,6 @@ object_delegation_zero_state_test_() ->
                 {"class returns the class atom", fun() ->
                     Result = gen_server:call(Counter, {class, []}),
                     ?assertEqual('Counter', Result)
-                end},
-                {"respondsTo: reports inherited Object methods and actor built-ins", fun() ->
-                    %% Inherited methods from Object should be reported
-                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', ['printString']})),
-                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [inspect]})),
-                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [isNil]})),
-                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [hash]})),
-                    %% Actor-specific built-in should also be reported
-                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [isAlive]})),
-                    %% pid, monitor, onExit: should be reported
-                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [pid]})),
-                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [monitor]})),
-                    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', ['onExit:']}))
                 end}
             ]
         end}.
@@ -1253,14 +995,6 @@ isAlive_sync_returns_false_after_actor_stops_test() ->
     beamtalk_test_wait:dead(Counter),
 
     ?assertEqual(false, beamtalk_actor:sync_send(Counter, isAlive, [])).
-
-isAlive_via_dispatch_returns_true_test() ->
-    %% When called via gen_server:call (dispatch path), always true
-    {ok, Counter} = test_counter:start_link(0),
-
-    ?assertEqual(true, gen_server:call(Counter, {isAlive, []})),
-
-    gen_server:stop(Counter).
 
 monitor_returns_reference_test() ->
     {ok, Counter} = test_counter:start_link(0),
@@ -1367,177 +1101,6 @@ sync_message_to_dead_actor_returns_error_test() ->
 
     ?assertBtError(actor_dead, _, getValue, beamtalk_actor:sync_send(Counter, getValue, [])).
 
-%%% ===========================================================================
-%%% register_spawned callback tests
-%%% ===========================================================================
-
-%%% ===========================================================================
-%%% register_spawned/4 Callback Integration Tests (from main)
-%%% ===========================================================================
-
-register_spawned_invokes_callback_when_env_set_test() ->
-    %% Register test process so test_spawn_callback can find us
-    register(spawn_callback_test, self()),
-    application:set_env(beamtalk_runtime, actor_spawn_callback, test_spawn_callback),
-
-    RegistryPid = self(),
-    ActorPid = spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end),
-    try
-        ok = beamtalk_actor:register_spawned(RegistryPid, ActorPid, 'Counter', test_counter),
-
-        %% Verify callback was invoked with correct args
-        receive
-            {callback_invoked, RegPid, APid, Class, Mod} ->
-                ?assertEqual(RegistryPid, RegPid),
-                ?assertEqual(ActorPid, APid),
-                ?assertEqual('Counter', Class),
-                ?assertEqual(test_counter, Mod)
-        after 1000 ->
-            error("Callback was not invoked")
-        end
-    after
-        exit(ActorPid, kill),
-        application:unset_env(beamtalk_runtime, actor_spawn_callback),
-        try
-            unregister(spawn_callback_test)
-        catch
-            _:_ -> ok
-        end
-    end.
-
-register_spawned_without_callback_returns_ok_test_() ->
-    %% BT-4806: the former register_spawned_{returns_ok_when_no_callback_configured,
-    %% noop_when_env_unset}_test pair. With no actor_spawn_callback configured,
-    %% register_spawned/4 is a no-op that answers ok.
-    %% {Label, RegistryIsActor, Class, Module}: the first test passed the same fake pid as
-    %% registry and actor, the second the test process as the registry.
-    [
-        {Label, fun() ->
-            application:unset_env(beamtalk_runtime, actor_spawn_callback),
-            ActorPid = spawn(fun() ->
-                receive
-                    stop -> ok
-                end
-            end),
-            Registry =
-                case RegistryIsActor of
-                    true -> ActorPid;
-                    false -> self()
-                end,
-            try
-                ?assertEqual(ok, beamtalk_actor:register_spawned(Registry, ActorPid, Class, Mod))
-            after
-                exit(ActorPid, kill)
-            end
-        end}
-     || {Label, RegistryIsActor, Class, Mod} <- [
-            {"no callback configured", true, 'Test', test_mod},
-            {"callback env unset", false, 'Counter', test_counter}
-        ]
-    ].
-
-register_spawned_callback_failure_test_() ->
-    %% BT-4679: the former register_spawned_returns_error_on_{undef_callback,
-    %% beamtalk_error,generic_error} tests. register_spawned surfaces callback
-    %% failures as {error, _} for a callback module that does not export
-    %% on_actor_spawned/4 (beamtalk_actor_tests itself), raises a #beamtalk_error{}, or
-    %% throws a generic error. {Label, CallbackModule, ResultMatcher}.
-    [
-        {Label, fun() -> register_spawned_callback_failure_case(CallbackMod, Matches) end}
-     || {Label, CallbackMod, Matches} <- [
-            {"callback without on_actor_spawned/4", beamtalk_actor_tests, fun
-                ({error, {callback_undef, beamtalk_actor_tests}}) -> true;
-                (_) -> false
-            end},
-            {"callback raising #beamtalk_error{}", test_spawn_callback_bt_error, fun
-                ({error, {beamtalk_error, _}}) -> true;
-                (_) -> false
-            end},
-            {"callback raising a generic error", test_spawn_callback_generic_error, fun
-                ({error, _}) -> true;
-                (_) -> false
-            end},
-            %% BT-4806: the former register_spawned_{returns_error_when_callback_undef,
-            %% returns_error_when_callback_crashes,surfaces_callback_error_result} tests.
-            {"callback module that does not exist", nonexistent_callback_mod, fun
-                ({error, {callback_undef, nonexistent_callback_mod}}) -> true;
-                (_) -> false
-            end},
-            {"callback calling erlang:error/1", beamtalk_actor_tests_crash_callback, fun
-                ({error, {error, deliberate_crash}}) -> true;
-                (_) -> false
-            end},
-            %% An {error, _} result from on_actor_spawned is returned, not swallowed.
-            {"callback answering {error, _}", beamtalk_actor_tests_error_callback, fun
-                ({error, {registry_failed, registry_not_running}}) -> true;
-                (_) -> false
-            end}
-        ]
-    ].
-
-register_spawned_callback_failure_case(CallbackMod, Matches) ->
-    ok = ensure_crash_callback_module(),
-    ok = ensure_error_callback_module(),
-    application:set_env(beamtalk_runtime, actor_spawn_callback, CallbackMod),
-    ActorPid = spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end),
-    try
-        Result = beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter),
-        case Matches(Result) of
-            true -> ok;
-            false -> error({unexpected_register_spawned_result, CallbackMod, Result})
-        end
-    after
-        exit(ActorPid, kill),
-        application:unset_env(beamtalk_runtime, actor_spawn_callback)
-    end.
-
-%%% ===========================================================================
-%%% Test helpers for the register_spawned callback tests above
-%%% ===========================================================================
-
--doc "Create a callback module that crashes".
-ensure_crash_callback_module() ->
-    Forms = [
-        {attribute, 1, module, beamtalk_actor_tests_crash_callback},
-        {attribute, 2, export, [{on_actor_spawned, 4}]},
-        {function, 3, on_actor_spawned, 4, [
-            {clause, 3, [{var, 3, '_'}, {var, 3, '_'}, {var, 3, '_'}, {var, 3, '_'}], [], [
-                {call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, error}}, [
-                    {atom, 3, deliberate_crash}
-                ]}
-            ]}
-        ]}
-    ],
-    {ok, _, Bin} = compile:forms(Forms),
-    {module, _} = code:load_binary(beamtalk_actor_tests_crash_callback, "test", Bin),
-    ok.
-
--doc "Create a callback module that returns an error tuple".
-ensure_error_callback_module() ->
-    Forms = [
-        {attribute, 1, module, beamtalk_actor_tests_error_callback},
-        {attribute, 2, export, [{on_actor_spawned, 4}]},
-        {function, 3, on_actor_spawned, 4, [
-            {clause, 3, [{var, 3, '_'}, {var, 3, '_'}, {var, 3, '_'}, {var, 3, '_'}], [], [
-                {tuple, 3, [
-                    {atom, 3, error},
-                    {tuple, 3, [{atom, 3, registry_failed}, {atom, 3, registry_not_running}]}
-                ]}
-            ]}
-        ]}
-    ],
-    {ok, _, Bin} = compile:forms(Forms),
-    {module, _} = code:load_binary(beamtalk_actor_tests_error_callback, "test", Bin),
-    ok.
-
 %%% ============================================================================
 %%% Actor Lifecycle Tests (async_send/sync_send wrappers)
 %%% ============================================================================
@@ -1618,9 +1181,9 @@ terminate_returns_ok_test() ->
         '$beamtalk_class' => 'TestActor',
         '__methods__' => #{}
     },
-    ?assertEqual(ok, beamtalk_actor:terminate(normal, State)),
-    ?assertEqual(ok, beamtalk_actor:terminate(shutdown, State)),
-    ?assertEqual(ok, beamtalk_actor:terminate({error, reason}, State)).
+    ?assertEqual(ok, test_actor_host:terminate(normal, State)),
+    ?assertEqual(ok, test_actor_host:terminate(shutdown, State)),
+    ?assertEqual(ok, test_actor_host:terminate({error, reason}, State)).
 
 %%% ============================================================================
 %%% make_self/1 Tests
@@ -2371,62 +1934,6 @@ safe_spawn_restores_trap_exit_test() ->
     end.
 
 %%% ============================================================================
-%%% Stacktrace preservation tests
-%%% ============================================================================
-
-spawn_callback_crash_log_includes_stacktrace_test() ->
-    %% Capture log events to verify the stacktrace is logged
-    beamtalk_test_log:with_capture(error, fun() ->
-        try
-            application:set_env(
-                beamtalk_runtime, actor_spawn_callback, beamtalk_actor_tests_crash_callback
-            ),
-            ok = ensure_crash_callback_module(),
-
-            FakePid = spawn(fun() ->
-                receive
-                    _ -> ok
-                end
-            end),
-            _Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
-            exit(FakePid, kill),
-
-            %% Collect log events and find the specific callback failure with stacktrace
-            Found = collect_log_with_stacktrace("Actor spawn callback failed", 500),
-            ?assertMatch({ok, _}, Found),
-            {ok, ST} = Found,
-            ?assert(is_list(ST)),
-            ?assert(length(ST) > 0)
-        after
-            application:unset_env(beamtalk_runtime, actor_spawn_callback)
-        end
-    end).
-
--doc """
-Collect log events until we find one matching the expected message with stacktrace
-""".
-collect_log_with_stacktrace(ExpectedMsg, Timeout) ->
-    collect_log_meta(ExpectedMsg, stacktrace, Timeout).
-
--doc """
-Collect log events until we find one matching `ExpectedMsg` whose metadata
-carries `MetaKey`, returning `{ok, Value}` for that key. Shared by every
-log-capture test in this module (AGENTS.md's no-duplicate-implementations
-rule) — `collect_log_with_stacktrace/2` is this with `MetaKey = stacktrace`.
-""".
-collect_log_meta(ExpectedMsg, MetaKey, Timeout) ->
-    Matches = fun
-        (#{msg := {string, Msg}, meta := Meta}) ->
-            Msg =:= ExpectedMsg andalso maps:is_key(MetaKey, Meta);
-        (_) ->
-            false
-    end,
-    case beamtalk_test_log:await(Matches, Timeout) of
-        {ok, #{meta := Meta}} -> {ok, maps:get(MetaKey, Meta)};
-        timeout -> not_found
-    end.
-
-%%% ============================================================================
 %%% Trace context propagation and restoration tests
 %%% ============================================================================
 
@@ -2652,45 +2159,6 @@ start_link_supervised_test() ->
     gen_server:stop(Pid).
 
 %%% ============================================================================
-%%% dispatch/4 delegate returns signal error
-%%% ============================================================================
-
-dispatch_delegate_returns_signal_error_test() ->
-    State = #{
-        '$beamtalk_class' => 'TestActor',
-        '__methods__' => #{}
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(delegate, [], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = signal}, _}, Result).
-
-%%% ============================================================================
-%%% dispatch/4 perform:withArguments:timeout: tests
-%%% ============================================================================
-
-dispatch_perform_with_timeout_valid_test() ->
-    {ok, Counter} = test_counter:start_link(99),
-    %% perform:withArguments:timeout: re-dispatches through dispatch/4
-    Result = gen_server:call(Counter, {'perform:withArguments:timeout:', [getValue, [], 5000]}),
-    ?assertEqual(99, Result),
-    gen_server:stop(Counter).
-
-dispatch_perform_with_timeout_invalid_args_test() ->
-    {ok, Counter} = test_counter:start_link(0),
-    %% Non-atom selector
-    Result1 = gen_server:call(Counter, {'perform:withArguments:timeout:', ["badSel", [], 5000]}),
-    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result1),
-    %% Negative timeout
-    Result2 = gen_server:call(Counter, {'perform:withArguments:timeout:', [getValue, [], -1]}),
-    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result2),
-    %% Non-list args
-    Result3 = gen_server:call(
-        Counter, {'perform:withArguments:timeout:', [getValue, notAList, 5000]}
-    ),
-    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result3),
-    gen_server:stop(Counter).
-
-%%% ============================================================================
 %%% handle_cast fire-and-forget error path
 %%% ============================================================================
 
@@ -2779,8 +2247,7 @@ safe_spawn_restores_trap_exit_on_error_test() ->
 make_self_with_class_mod_test() ->
     State = #{
         '$beamtalk_class' => 'MyClass',
-        '__class_mod__' => my_class_mod,
-        '__methods__' => #{}
+        '__class_mod__' => my_class_mod
     },
     Self = beamtalk_actor:make_self(State),
     ?assertEqual('MyClass', Self#beamtalk_object.class),
@@ -2788,81 +2255,11 @@ make_self_with_class_mod_test() ->
 
 make_self_without_class_mod_test() ->
     State = #{
-        '$beamtalk_class' => 'MyClass',
-        '__methods__' => #{}
+        '$beamtalk_class' => 'MyClass'
     },
     Self = beamtalk_actor:make_self(State),
     ?assertEqual('MyClass', Self#beamtalk_object.class),
     ?assertEqual(undefined, Self#beamtalk_object.class_mod).
-
-%%% ============================================================================
-%%% format_method_error_message coverage (via dispatch)
-%%% ============================================================================
-
-method_badarg_error_test() ->
-    %% Trigger a badarg error in a method to cover format_method_error_message badarg path
-    {ok, Actor} = test_badarg_actor:start_link(),
-    Result = gen_server:call(Actor, {triggerBadarg, []}),
-    %% the runtime-only method path now classifies the kind (badarg ->
-    %% argument_error) the same as the compiled path, keeping its MFA message.
-    ?assertMatch(
-        {error, #beamtalk_error{kind = argument_error, selector = triggerBadarg}}, Result
-    ),
-    %% Message should contain "Bad argument"
-    {error, Err} = Result,
-    ?assertNotEqual(
-        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Bad argument">>)
-    ),
-    gen_server:stop(Actor).
-
-method_badarith_error_test() ->
-    %% Trigger a badarith error to cover format_method_error_message badarith path
-    {ok, Actor} = test_badarg_actor:start_link(),
-    Result = gen_server:call(Actor, {triggerBadarith, []}),
-    %% badarith -> type_error, matching the compiled path.
-    ?assertMatch(
-        {error, #beamtalk_error{kind = type_error, selector = triggerBadarith}}, Result
-    ),
-    {error, Err} = Result,
-    ?assertNotEqual(
-        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Arithmetic error">>)
-    ),
-    gen_server:stop(Actor).
-
-method_undef_error_test() ->
-    %% Trigger an undef error to cover format_method_error_message undef path
-    {ok, Actor} = test_badarg_actor:start_link(),
-    Result = gen_server:call(Actor, {triggerUndef, []}),
-    ?assertMatch({error, #beamtalk_error{kind = runtime_error, selector = triggerUndef}}, Result),
-    {error, Err} = Result,
-    ?assertNotEqual(
-        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Undefined function">>)
-    ),
-    gen_server:stop(Actor).
-
-method_function_clause_error_test() ->
-    %% Trigger a function_clause error to cover that path
-    {ok, Actor} = test_badarg_actor:start_link(),
-    Result = gen_server:call(Actor, {triggerFunctionClause, []}),
-    %% function_clause is an internal bug -> internal_error.
-    ?assertMatch(
-        {error, #beamtalk_error{kind = internal_error, selector = triggerFunctionClause}}, Result
-    ),
-    {error, Err} = Result,
-    ?assertNotEqual(
-        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"No matching clause">>)
-    ),
-    gen_server:stop(Actor).
-
-%%% ============================================================================
-%%% respondsTo: for delegate selector
-%%% ============================================================================
-
-respondsTo_delegate_test() ->
-    application:ensure_all_started(beamtalk_runtime),
-    {ok, Counter} = test_counter:start_link(0),
-    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [delegate]})),
-    gen_server:stop(Counter).
 
 %%% ============================================================================
 %%% Concurrent async error + future watcher tests
@@ -2904,10 +2301,10 @@ terminate_with_different_reasons_test() ->
         '$beamtalk_class' => 'TestActor',
         '__methods__' => #{}
     },
-    ?assertEqual(ok, beamtalk_actor:terminate(normal, State)),
-    ?assertEqual(ok, beamtalk_actor:terminate(shutdown, State)),
-    ?assertEqual(ok, beamtalk_actor:terminate({shutdown, timeout}, State)),
-    ?assertEqual(ok, beamtalk_actor:terminate(killed, State)).
+    ?assertEqual(ok, test_actor_host:terminate(normal, State)),
+    ?assertEqual(ok, test_actor_host:terminate(shutdown, State)),
+    ?assertEqual(ok, test_actor_host:terminate({shutdown, timeout}, State)),
+    ?assertEqual(ok, test_actor_host:terminate(killed, State)).
 
 %%% ============================================================================
 %%% code_change/3 delegates to hot_reload
@@ -2919,7 +2316,7 @@ code_change_preserves_state_unit_test() ->
         '__methods__' => #{},
         value => 42
     },
-    {ok, NewState} = beamtalk_actor:code_change("1.0.0", State, []),
+    {ok, NewState} = test_actor_host:code_change("1.0.0", State, []),
     ?assertEqual(State, NewState).
 
 %%% ============================================================================
@@ -3567,22 +2964,32 @@ ensure_counter_class_pid() ->
 %%% Additional actor system coverage
 %%% ============================================================================
 
-%%% maybe_execute_telemetry/3 conditional paths
+%%% lifecycle_started/1 and lifecycle_stopped/2 (BT-4997)
 
-maybe_execute_telemetry_returns_ok_test() ->
-    %% Exercises the public maybe_execute_telemetry/3 surface. In the unit
-    %% test environment telemetry is loaded, so the telemetry:execute/3
-    %% path runs; the function must still return ok to the caller.
-    Result = beamtalk_actor:maybe_execute_telemetry(
-        [beamtalk, actor, unit_test, event],
-        #{count => 1},
-        #{test => true}
+maybe_execute_telemetry_shim_test() ->
+    %% A pre-BT-4997 .beam still calls maybe_execute_telemetry/3; it must keep
+    %% working, and other events are emitted as given.
+    ?assertEqual(
+        ok,
+        beamtalk_actor:maybe_execute_telemetry(
+            [beamtalk, actor, lifecycle, start], #{}, #{pid => self(), class => 'ShimClass'}
+        )
     ),
-    ?assertEqual(ok, Result).
-
-maybe_execute_telemetry_with_empty_metadata_test() ->
-    %% Minimal call: empty measurements and metadata should still return ok
+    ?assertEqual(
+        ok,
+        beamtalk_actor:maybe_execute_telemetry(
+            [beamtalk, actor, lifecycle, stop],
+            #{},
+            #{pid => self(), class => 'ShimClass', reason => normal}
+        )
+    ),
     ?assertEqual(ok, beamtalk_actor:maybe_execute_telemetry([a, b], #{}, #{})).
+
+lifecycle_started_stopped_return_ok_test() ->
+    %% Both work in any process and with the events off (the default): they
+    %% announce, record the aggregate, and emit nothing.
+    ?assertEqual(ok, beamtalk_actor:lifecycle_started('LifecycleUnitClass')),
+    ?assertEqual(ok, beamtalk_actor:lifecycle_stopped('LifecycleUnitClass', normal)).
 
 %%% sync_send_remote error paths (exit reasons)
 
@@ -3663,88 +3070,6 @@ bt4525_unwrap_dispatch_result_error_still_stores_test() ->
         beamtalk_actor_state:uninstall(undefined)
     end.
 
-dispatch_user_method_type_error_for_non_function_value_test() ->
-    %% The `{ok, _NotAFunction}` branch in dispatch_user_method returns a
-    %% type_error. Exercises dispatch error surface + formatting path.
-    State = #{
-        '$beamtalk_class' => 'BadActor',
-        '__methods__' => #{badMethod => not_a_function}
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(badMethod, [], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = badMethod}, _}, Result).
-
-%%% dispatch_via_hierarchy DNU fallback branches
-
-dispatch_unknown_selector_unregistered_class_falls_back_to_object_test() ->
-    %% An unknown selector on a class that isn't in the registry should flow
-    %% through dispatch_via_hierarchy -> catch exit:{noproc, _} ->
-    %% object_fallback, and ultimately produce a does_not_understand error.
-    State = #{
-        '$beamtalk_class' => 'UnregisteredClass_BT1979',
-        '__methods__' => #{}
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(nonsense_selector_xyz, [], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = does_not_understand}, _}, Result).
-
-dispatch_inherited_object_method_via_fallback_test() ->
-    %% A selector that Object implements (e.g. 'yourself') should succeed via
-    %% object_fallback even when the class is not registered.
-    State = #{
-        '$beamtalk_class' => 'UnregisteredClass_BT1979',
-        '__methods__' => #{}
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(yourself, [], Self, State),
-    %% yourself returns Self and does not error
-    ?assertMatch({reply, _, _}, Result).
-
-%%% call_dnu_handler: 2-ary and 3-ary handler variants with errors
-
-call_dnu_handler_2ary_crash_wrapped_test() ->
-    %% Install a DNU handler with arity 2 that crashes — covers the
-    %% call_dnu_handler/5 (arity = 2) error wrapping branch.
-    Methods = #{
-        'doesNotUnderstand:args:' => fun(_Args, _State) -> error(boom) end
-    },
-    State = #{
-        '$beamtalk_class' => 'DnuCrashActor',
-        '__methods__' => Methods
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(missingSelector, [1, 2], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = runtime_error}, _}, Result).
-
-call_dnu_handler_3ary_crash_wrapped_test() ->
-    %% 3-ary DNU handler that crashes — covers call_dnu_handler/5 (arity = 3)
-    Methods = #{
-        'doesNotUnderstand:args:' => fun(_Args, _Self, _State) -> error(kapow) end
-    },
-    State = #{
-        '$beamtalk_class' => 'DnuCrashActor3',
-        '__methods__' => Methods
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(missingSelector2, [1], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = runtime_error}, _}, Result).
-
-call_dnu_handler_3ary_preserves_beamtalk_error_test() ->
-    %% 3-ary DNU that raises a structured beamtalk_error should be preserved
-    %% verbatim (covers the error:#beamtalk_error{} branch).
-    BtErr = beamtalk_error:new(signal, 'DnuPreserve', 'badSelector:'),
-    Methods = #{
-        'doesNotUnderstand:args:' =>
-            fun(_Args, _Self, _State) -> error(BtErr) end
-    },
-    State = #{
-        '$beamtalk_class' => 'DnuPreserve',
-        '__methods__' => Methods
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch('badSelector:', [1], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = signal, class = 'DnuPreserve'}, _}, Result).
-
 %%% safe_spawn error paths
 
 safe_spawn_with_ignore_returns_error_test() ->
@@ -3770,7 +3095,7 @@ code_change_with_hot_reload_extra_test() ->
         '__methods__' => #{},
         value => 99
     },
-    {ok, NewState} = beamtalk_actor:code_change("0.1.0", State, #{extra => data}),
+    {ok, NewState} = test_actor_host:code_change("0.1.0", State, #{extra => data}),
     ?assertEqual(State, NewState).
 
 %%% sync_send with a pre-existing call stack exercises the non-empty branch
@@ -3811,7 +3136,7 @@ terminate_with_state_without_class_test() ->
     %% terminate/2 should still succeed (return ok) even if the state is
     %% missing the class key — defaulted to 'unknown' by class_of/2.
     StateNoClass = #{'__methods__' => #{}},
-    ?assertEqual(ok, beamtalk_actor:terminate(normal, StateNoClass)).
+    ?assertEqual(ok, test_actor_host:terminate(normal, StateNoClass)).
 
 %%% sync_send/4 exit paths
 
@@ -3906,41 +3231,6 @@ async_send_onExit_callback_block_raises_test() ->
     after 2000 ->
         error(onexit_block_did_not_run)
     end.
-
-dispatch_initialize_selector_runs_method_test() ->
-    %% Exercise the `initialize -> ?LOG_DEBUG` branch in dispatch_user_method
-    Init = fun(_Args, State) -> {reply, ok, State} end,
-    State = #{
-        '$beamtalk_class' => 'InitDirect',
-        '__methods__' => #{initialize => Init}
-    },
-    Self = beamtalk_actor:make_self(State),
-    ?assertMatch({reply, ok, _}, beamtalk_actor:dispatch(initialize, [], Self, State)).
-
-dispatch_4ary_method_preserves_beamtalk_error_test() ->
-    %% 4-ary user method raising a structured #beamtalk_error{} should flow
-    %% through unchanged (covers the error:#beamtalk_error{} branch at line 1717).
-    BtErr = beamtalk_error:new(signal, 'BtSignal', someSelector),
-    Method = fun(_Selector, _Args, _Self, _State) -> error(BtErr) end,
-    State = #{
-        '$beamtalk_class' => 'BtSignal',
-        '__methods__' => #{someSelector => Method}
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(someSelector, [], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = signal}, _}, Result).
-
-dispatch_4ary_method_wraps_generic_error_test() ->
-    %% 4-ary user method raising a generic error is wrapped via wrap_method_error
-    %% (covers the Class:Reason:Stacktrace branch at line 1719).
-    Method = fun(_Selector, _Args, _Self, _State) -> error(boom) end,
-    State = #{
-        '$beamtalk_class' => 'BtGeneric',
-        '__methods__' => #{explode => Method}
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(explode, [], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = runtime_error, selector = explode}, _}, Result).
 
 cast_send_to_non_actor_pid_ok_test() ->
     %% cast_send calls lookup_class — for non-actor pids it falls back to
@@ -4518,7 +3808,7 @@ bt3582_nlr_relayed_across_actor_send_arity4_test() ->
         getValue => fun(_Args, S) -> {reply, maps:get(value, S), S} end,
         'invokeBlock:' => fun ?MODULE:bt3582_invoke_block_fun4/4
     }),
-    {ok, ActorPid} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, ActorPid} = gen_server:start_link(test_actor_host, State, []),
     Token = make_ref(),
     NlrValue = bt3582_nlr_marker,
     NlrBlock = fun() -> throw({'$bt_nlr', Token, NlrValue, defining_method_state}) end,
@@ -4544,7 +3834,7 @@ bt3582_nlr_relayed_across_actor_send_arity2_test() ->
         getValue => fun(_Args, S) -> {reply, maps:get(value, S), S} end,
         'invokeBlock:' => fun ?MODULE:bt3582_invoke_block_fun2/2
     }),
-    {ok, ActorPid} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, ActorPid} = gen_server:start_link(test_actor_host, State, []),
     Token = make_ref(),
     NlrValue = bt3582_nlr_marker,
     NlrBlock = fun() -> throw({'$bt_nlr', Token, NlrValue, defining_method_state}) end,
@@ -4904,7 +4194,7 @@ bt3958_raising_runtime_continuation_step_raises_test() ->
         _,
         _,
         throwError,
-        beamtalk_actor:handle_continue(
+        test_actor_host:handle_continue(
             {'$bt_continue', [{throwError, []}, {normalMethod, []}]}, State
         )
     ).
@@ -5035,7 +4325,7 @@ bt3968_intrinsic_dispatch_routes_continue_with_test() ->
     ).
 
 bt3968_runtime_handle_continue_ignores_unknown_term_test() ->
-    ?assertEqual({noreply, #{}}, beamtalk_actor:handle_continue(something_else, #{})).
+    ?assertEqual({noreply, #{}}, test_actor_host:handle_continue(something_else, #{})).
 
 bt3968_perform_of_continue_with_from_another_process_raises_test() ->
     {ok, Counter} = test_counter:start_link(0),

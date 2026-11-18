@@ -33,7 +33,7 @@ setup() ->
     ok.
 
 teardown(_) ->
-    ok.
+    ok = beamtalk_test_repl:release_xref().
 
 %% True when beamtalk_compiler_server is reachable — some standalone EUnit
 %% runs of just this app may not have started the beamtalk_compiler
@@ -87,17 +87,21 @@ class_removed_purges_xref_test_() ->
         [
             ?_test(begin
                 ClassName = 'BT3105LifecycleXref',
+                %% A selector no other suite uses: `implementors_of/1` is a node-wide
+                %% index, so a common one (`foo`) also lists classes other suites
+                %% left behind (BT-4934).
+                Selector = 'bt3105LifecycleXrefProbe',
                 Entry = beamtalk_xref:build_method_entry(
-                    false, 'foo', <<"foo => 1">>, indexed, class_body
+                    false, Selector, <<"bt3105LifecycleXrefProbe => 1">>, indexed, class_body
                 ),
                 ok = beamtalk_xref:register_class(ClassName, [Entry]),
                 ?assertEqual(
-                    [{ClassName, false}], beamtalk_xref:implementors_of('foo')
+                    [{ClassName, false}], beamtalk_xref:implementors_of(Selector)
                 ),
 
                 ok = beamtalk_class_lifecycle:class_removed(ClassName, bt3105_lifecycle_mod),
 
-                ?assertEqual([], beamtalk_xref:implementors_of('foo'))
+                ?assertEqual([], beamtalk_xref:implementors_of(Selector))
             end)
         ]
     end}.
@@ -254,7 +258,10 @@ class_removed_purges_all_five_registries_together_test_() ->
 
                     ok = beamtalk_class_lifecycle:class_removed(ClassName, Module),
 
-                    ?assertEqual([], beamtalk_xref:implementors_of('bar')),
+                    %% Only this class's rows: other modules' classes may implement #bar.
+                    ?assertNot(
+                        lists:keymember(ClassName, 1, beamtalk_xref:implementors_of('bar'))
+                    ),
                     ?assertNot(beamtalk_extensions:has(ClassName, 'ext1')),
                     ?assertNot(beamtalk_extensions:has(ClassTag, 'ext2')),
                     ?assertNot(beamtalk_protocol_registry:is_protocol(ClassName)),

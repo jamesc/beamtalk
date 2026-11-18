@@ -269,7 +269,7 @@ For v0.2 (import system), the leading candidate is Option B (package-scoped impo
 **Issues:**
 - [BT-737](https://linear.app/beamtalk/issue/BT-737) — Add class redefinition collision warning and document flat namespace
 - [BT-738](https://linear.app/beamtalk/issue/BT-738) — Prevent stdlib class shadowing with structured error (blocked by BT-737)
-**Status:** Planned
+**Status:** Done
 
 ## Migration Path
 

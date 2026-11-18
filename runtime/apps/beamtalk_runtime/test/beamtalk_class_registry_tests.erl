@@ -1041,6 +1041,10 @@ user_classes_test_() ->
 pid_table_survives_owner_death_test_() ->
     {setup,
         fun() ->
+            %% The `foreign` branch below asserts the app-created table's heir; make
+            %% that so even if an earlier module created the table before the app.
+            ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
+            ok = beamtalk_test_boot:app_owned_table(beamtalk_class_pids),
             %% Delete the table if it exists so we can recreate it
             %% from a spawned (transient) process to test heir behavior.
             case ets:info(beamtalk_class_pids) of

@@ -10,6 +10,8 @@ load-bearing runtime assumptions (with API corrections) and found one
 the time. That gap was fixed as BT-3582 (done), and Phases 1–7 were then
 implemented against the corrected ADR as BT-3598–BT-3605 under Epic BT-3577.
 
+> **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** `local_actors/0` and `local_actor_at/1` are scans of actor markers, not reads of the deleted actor list. The class of a bare local pid is its marker (`lookup_class/1`), and a missing marker gives `unknown`; there is no registry row to be missing. `actor_started_at/1` returns a value for compiled actors, because every generated `init/1` writes `'$beamtalk_actor_started_at'`, so the `global` tie-break of §4 no longer falls back to a random exit name.
+
 ## Implementation Tracking
 
 **Epic:** BT-3577
@@ -64,8 +66,8 @@ silently resolves against *that* node's registry.
 
 **Sends are not remote-safe.** Every send path in `beamtalk_actor.erl` guards
 with `is_process_alive(ActorPid)` (lines 599, 712, 749, 793, 899, 1003), which
-raises `badarg` for a remote pid. `lookup_class/1` reads the local
-`beamtalk_instance_registry` ETS table (line 1339) and returns `unknown` for a
+raises `badarg` for a remote pid. `lookup_class/1` read the local
+`beamtalk_instance_registry` ETS table (line 1339; since replaced by the actor marker, ADR 0150) and returned `unknown` for a
 remote pid. The exit mapping (lines 952-965) has no `nodedown`/`noconnection`
 case: a partition falls into the catch-all and is reported as `actor_dead`,
 which is false — the actor may be alive on the far side. BT-2530 already fixed
@@ -350,6 +352,62 @@ choice) and **stops** the other with `gen_server:stop(Loser,
 `ActorStopped` announcement carries `reason: #globalNameConflict` and its
 `terminate` runs. User-supplied resolvers are future work.
 
+**The start time (BT-4937).** The age is the `'$beamtalk_actor_started_at'`
+process-dictionary key (`erlang:system_time(microsecond)`), read with
+`actor_started_at/1`, over `erpc` when the candidate is on the other node. It
+is written by the **generated** `init/1` of the leaf class, once, in the same
+`__skip_initialize__`-guarded branch as the `'$beamtalk_actor'` marker (so a
+parent's `init/1`, called as a state-building helper, never overwrites it). It
+is written for every compiled actor, whatever its scope, because scope is a
+spawn-time choice made after `init/1` has run. Every start path goes through
+that `init/1`: plain `spawn`, `spawnMonitored`, `spawnMonitoredAsync`,
+supervised children and named children (local and global).
+
+`native:` actors (ADR 0056) have no generated `init/1`: their process is the
+backing module's own, and a key can only be written from inside the process.
+They can be registered `#global`, so the runtime writes the key for them
+(BT-4956), on the path it owns: `beamtalk_actor:register_native_started/2`, the
+one place a started native actor is registered under a global name (plain
+`spawnAsGlobal`, named supervised children and `spawn_named_*` all reach it
+through `safe_start_native`). Just before `global:register_name/3` it runs a
+`sys:replace_state/3` whose fun, executing inside the backing `gen_server`,
+puts `'$beamtalk_actor_started_at'` (and leaves the state unchanged). So the key
+exists before the name can conflict, and no backing-module author writes any
+code. The write is skipped if the backing module already wrote the key, and only
+`global` pays for it: anonymous and `local` native starts, which the resolver
+never reads, do not. The cost is one system-message round trip, about 4 us
+against about 210 us for a whole global native start (single scheduler, measured
+in the PR). A backing process that does not answer the system message within a
+second stays untimed until it drains its queue; until then it behaves as before
+BT-4956. It is written at registration, not at `init/1`, so it is a few
+microseconds later than the process's true start; that is far below the
+resolution at which two registrants of one name are ordered.
+
+OTP's `random_exit_name/3`, the fallback, is not random: it keeps the pid on
+the node with the lower name, and on the same node its second argument. Before
+BT-4937 it decided every compiled-actor conflict, so the "older registrant"
+rule above did not hold.
+
+**One side has no start time.** This happens in a rolling upgrade (ADR 0125),
+when a node still on a runtime older than BT-4937 or BT-4956 started one of the
+candidates (that node can still answer the read, it just finds no key). A peer too old to answer the read at all is a different
+case, covered below. The side that has a start time is kept
+and the other is stopped. The alternative, falling back to `random_exit_name/3`
+whenever either time is missing, would decide by node name for the whole
+upgrade window; keeping the side with a time is the only choice that is
+decided by a fact about the actors. A side that is older but untimed can lose
+to a younger timed one, which is accepted: it is bounded by the upgrade window,
+and the loser is stopped gracefully, not killed. If neither side has a time,
+`random_exit_name/3` decides, as before.
+
+"Has no start time" means the read succeeded and found no key. A read that
+*failed* (an `erpc` timeout, `noconnection`, or a peer too old to export the
+read function) is reported as `unreachable`, not `undefined`, and always takes
+the `random_exit_name/3` fallback: it is a fact about the network, not about the
+actor, and it is most likely during the very partition heal this resolver runs
+in. Treating it as "no start time" would make the local candidate win every
+time the remote read failed, even when the remote actor is the older one.
+
 **Mesh side effects.** `global` keeps a fully connected mesh, and OTP 25+
 enables `prevent_overlapping_partitions` by default: on partial connectivity
 `global` actively disconnects nodes to restore a consistent view. Users of
@@ -365,19 +423,19 @@ not a lookup feature, and belong with a future "cluster announcements" ADR.
 
 When the target of a send is on another node, the sender encodes the payload
 through a single new module, `beamtalk_wire`, and sends a **tagged wire
-message** instead of the local form. All three send kinds, and both result
-paths, are covered:
+message** instead of the local form. Sync and cast sends are covered; a remote
+async send is **not supported** (see the Amendment (BT-4989) section):
 
 | Send kind | Local message (unchanged) | Remote message |
 |-----------|---------------------------|----------------|
 | sync (`.`) | `{Selector, Args, PropCtx}` via `gen_server:call` | `{'$beamtalk_wire', 1, call, Selector, WireArgs, PropCtx}` |
-| async (Future) | `{Selector, Args, FuturePid, PropCtx}` via `gen_server:cast` | `{'$beamtalk_wire', 1, async, Selector, WireArgs, FuturePid, PropCtx}` |
+| async (Future) | `{Selector, Args, FuturePid, PropCtx}` via `gen_server:cast` | none: `beamtalk_actor:async_send/4,5` raises `unsupported_operation` for a remote target (BT-4989) |
 | cast (`!`) | `{cast, Selector, Args, PropCtx}` via `gen_server:cast` | `{'$beamtalk_wire', 1, cast, Selector, WireArgs, PropCtx}` |
 
 | Result path | Encoded when |
 |-------------|--------------|
 | sync reply (`{ok, R}` / `{error, E}`) | callee side, `node(FromPid) =/= node()` |
-| future resolution (`beamtalk_future:resolve/2`) | callee side, `node(FuturePid) =/= node()` |
+| future resolution (`beamtalk_future:resolve/2`) | callee side, `node(FuturePid) =/= node()` (only a future the callee was handed some other way; see the Amendment (BT-4989) section) |
 
 "Remote" is decided by `node(Pid) =/= node()` at send time (for
 `{registered, N, Node}` / `{global, N}` refs, by the resolved node). This is
@@ -1250,8 +1308,9 @@ there, `dispatch_user_method/4` needs the same `?IS_NLR` relay
 `beamtalk_class_dispatch.erl` already has — filed as BT-3582, a
 prerequisite tracked against this ADR's epic (BT-3577).
 
-**(d) Async futures resolve across nodes — holds, with two usage notes
-(§5.1).** An async send from A to an actor on B resolves A's future with
+**(d) Async futures resolve across nodes — held for the spike's fixture,
+later withdrawn (BT-4989; see the Amendment (BT-4989) section). The finding
+below describes what the hand-written fixture did, not a supported path.** An async send from A to an actor on B resolves A's future with
 the correct value via `beamtalk_future:resolve/2`, and rejects it on error.
 Two things a Phase 3 implementer should not assume: `beamtalk_future:
 await/2` signals rejection as a **`throw`** of `{future_rejected, Reason}`,
@@ -1304,13 +1363,43 @@ receiver, `Node current` included, so one selector has one return type (ADR
 cross the wire per §5.1. Failures are `Error` values tagged `node_down`,
 `timeout`, `insecure_distribution` or `remote_code_mismatch` (§7), never raised.
 
-- `aNode actors` lists every live actor (the runtime-owned
-  `beamtalk_actor_registry`). `Actor allRegisteredOn:` (§3) still lists only
+- `aNode actors` lists every live actor (a scan of actor markers; ADR 0150. It was the runtime-owned
+  `beamtalk_actor_registry` process). `Actor allRegisteredOn:` (§3) still lists only
   name-registered actors, and the two doc comments say so.
 - `aNode shapeSkew` is the per-node form of the §8 tally. `Workspace nodes` and
   `connectedWithSkew` are removed; the `nodes` surface operation (§10) maps
   `shapeSkew` over `Node connected`.
 - `Node` stays a stateless `Value` with no class state.
+
+## Amendment (BT-4989): remote async sends are not supported
+
+Phase 0.5 scenario (d) showed a remote async send resolving its future. That
+only worked against `test_actor_host`, a test-only receiver. No compiled actor
+ever decoded the 7-element `async` envelope: the generated `handle_cast/2`
+matches only the 6-element `cast` envelope, so a remote `async_send/4` to a
+compiled actor fell through the callback's catch-all and its future never
+resolved. No generated code or stdlib code calls `async_send/4` or
+`async_send_known/5`, so nothing in the language reached the path.
+
+**Decision (owner, 17 Nov 2026): remove the remote async path rather than
+implement the receiver.** The `'$beamtalk_wire', 1, async, ...` envelope no
+longer exists. `beamtalk_actor:async_send/4` and `async_send_known/5` to a
+pid on another node raise `unsupported_operation` (selector = the sent
+selector) immediately, for any selector not answered locally (`isAlive`,
+`stop`, `kill`, `monitor`, `onExit:`, …, which behave as before). The future
+is rejected first, and nothing is sent and no future watcher starts, so a
+caller can never be left waiting. Local async sends are
+unchanged. Sync sends (`.`) and casts (`!`) are the cross-node send kinds.
+
+Removed with it: the remote branch of `async_send_impl/5`, the `async` clauses
+of `decode_wire_cast/1`, the `async` clause of `beamtalk_actor_redaction`'s
+request redaction, `test_actor_host`'s `async` routing clause, and Phase 0.5
+scenario (d). A new `beamtalk_dist_wire_tests` case sends a remote
+`async_send` to a compiled actor on a second node and asserts the error.
+
+If remote async sends are wanted later, that is a new decision: the receiver
+must be generated code (`handle_cast/2` decoding the envelope and resolving the
+future), which changes the Core Erlang of every actor.
 
 ## Migration Path
 

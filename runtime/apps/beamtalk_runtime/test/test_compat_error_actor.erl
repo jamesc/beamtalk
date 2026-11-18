@@ -39,7 +39,7 @@ start_link() ->
     beamtalk_actor:start_link(?MODULE, []).
 
 init(_Args) ->
-    beamtalk_actor:init(#{
+    test_actor_host:init(#{
         '$beamtalk_class' => 'CompatErrorActor',
         '__class_mod__' => ?MODULE,
         '__methods__' => #{
@@ -61,15 +61,15 @@ init(_Args) ->
         }
     }).
 
-handle_cast(Msg, State) -> beamtalk_actor:handle_cast(Msg, State).
+handle_cast(Msg, State) -> test_actor_host:handle_cast(Msg, State).
 
 %% Custom handle_call that simulates backward-compat error replies.
-%% Instead of delegating to beamtalk_actor:handle_call (which would use
-%% dispatch/4 with its own try/catch), we produce the old-style
+%% Instead of delegating to test_actor_host:handle_call (which wraps method
+%% exceptions itself), we produce the old-style
 %% {error, {ErlType, ErrorValue}} reply directly.
 %%
-%% Note: selfSend* methods delegate to beamtalk_actor:handle_call so they
-%% go through dispatch/4 → the method fun calls sync_send(self(), ...) →
+%% Note: selfSend* methods delegate to test_actor_host:handle_call so they
+%% run the method fun, which calls sync_send(self(), ...) →
 %% self_dispatch → safe_dispatch/3 → unwrap_dispatch_result.
 handle_call({triggerExitError, _Args}, _From, State) ->
     {reply, {error, {exit, simulated_exit}}, State};
@@ -84,11 +84,11 @@ handle_call({triggerThrowError, _Args, _PropCtx}, _From, State) ->
 handle_call({triggerPlainError, _Args, _PropCtx}, _From, State) ->
     {reply, {error, {error, simulated_error}}, State};
 handle_call(Msg, From, State) ->
-    beamtalk_actor:handle_call(Msg, From, State).
+    test_actor_host:handle_call(Msg, From, State).
 
-handle_info(Msg, State) -> beamtalk_actor:handle_info(Msg, State).
-code_change(OldVsn, State, Extra) -> beamtalk_actor:code_change(OldVsn, State, Extra).
-terminate(Reason, State) -> beamtalk_actor:terminate(Reason, State).
+handle_info(Msg, State) -> test_actor_host:handle_info(Msg, State).
+code_change(OldVsn, State, Extra) -> test_actor_host:code_change(OldVsn, State, Extra).
+terminate(Reason, State) -> test_actor_host:terminate(Reason, State).
 
 -doc """
 Backward-compat safe_dispatch/3 that returns 2-tuple errors.
@@ -104,9 +104,4 @@ safe_dispatch(triggerThrowError, _Args, State) ->
 safe_dispatch(triggerPlainError, _Args, State) ->
     {error, {error, simulated_error}, State};
 safe_dispatch(normalMethod, _Args, State) ->
-    {reply, ok, State};
-safe_dispatch(Selector, Args, State) ->
-    %% For selfSend* methods, fall through to normal dispatch so they execute
-    %% as regular methods (which then self-send to trigger safe_dispatch above).
-    Self = beamtalk_actor:make_self(State),
-    beamtalk_actor:dispatch(Selector, Args, Self, State).
+    {reply, ok, State}.

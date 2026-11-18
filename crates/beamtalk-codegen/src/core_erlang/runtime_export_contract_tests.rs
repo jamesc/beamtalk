@@ -509,6 +509,12 @@ fn dynamic_calls() -> Vec<EmittedCall> {
             "GuardSense::helper",
         ));
     }
+    out.push(call(
+        "beamtalk_guard_return",
+        super::guard_returns::TWO_BRANCH_HELPER,
+        Some(3),
+        "TWO_BRANCH_HELPER",
+    ));
     for k in ALL_SUPERVISOR_KINDS {
         out.push(call(
             "beamtalk_supervisor",

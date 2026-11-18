@@ -1,7 +1,7 @@
 # ADR 0044: Comments as First-Class AST Nodes
 
 ## Status
-Accepted | Implemented 2026-02-28
+Implemented 2026-02-28
 
 ## Context
 
@@ -641,7 +641,7 @@ compiled to runtime objects.
 
 **Epic:** BT-972
 **Issues:** BT-973, BT-974, BT-975, BT-976, BT-977, BT-978
-**Status:** Planned
+**Status:** Done
 
 | Issue | Title | Phase |
 |-------|-------|-------|

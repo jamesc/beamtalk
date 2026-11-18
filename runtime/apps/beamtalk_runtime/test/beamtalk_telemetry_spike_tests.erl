@@ -12,7 +12,7 @@ to the full actor observability architecture:
 1. telemetry:span/3 emits stop events with correct duration
 2. telemetry:span/3 exception events preserve exit:{timeout, _} shape
 3. telemetry handlers can increment counters:add/3 from the calling process
-4. beamtalk_object_instances reverse lookup (Pid -> Class) works with measured overhead
+4. (removed by BT-4953: the Pid -> Class registry lookup; the class is read from the process marker)
 5. Microbenchmark: telemetry:span/3 + counters:add/3 overhead
 6. telemetry_poller emits periodic VM stats as telemetry events
 7. telemetry/try-catch composition with sync_send/3 pattern
@@ -214,71 +214,6 @@ handler_increments_counters_test() ->
     after
         telemetry:detach(HandlerId)
     end.
-
-%%====================================================================
-%% Test 4: beamtalk_object_instances reverse lookup (Pid -> Class)
-%%====================================================================
-
-pid_to_class_reverse_lookup_test() ->
-    %% Ensure the instance registry is running
-    case whereis(beamtalk_object_instances) of
-        undefined ->
-            {ok, _} = beamtalk_object_instances:start_link();
-        _ ->
-            ok
-    end,
-
-    %% Spawn a process to act as an actor
-    Self = self(),
-    ActorPid = spawn(fun() ->
-        Self ! ready,
-        receive
-            stop -> ok
-        end
-    end),
-    receive
-        ready -> ok
-    end,
-
-    %% Register it as a 'Counter' instance
-    ok = beamtalk_object_instances:register('Counter', ActorPid),
-    try
-        %% Reverse lookup: find class by Pid on the pid-keyed index (BT-4113;
-        %% it used to be a full-table ets:match on the class-keyed bag)
-        ?assertEqual('Counter', beamtalk_object_instances:class_of(ActorPid)),
-
-        %% Measure overhead of reverse lookup (should be < 1us typically)
-        {Time, _Result} = timer:tc(fun() ->
-            lists:foreach(
-                fun(_) ->
-                    beamtalk_object_instances:class_of(ActorPid)
-                end,
-                lists:seq(1, 1000)
-            )
-        end),
-        AvgUs = Time / 1000,
-        %% Log the overhead for review — use ~w for portable float formatting
-        io:format(user, "Pid->Class reverse lookup overhead: ~w us/call~n", [AvgUs]),
-        %% Should be well under 10us per call (ETS single-key lookup)
-        ?assert(AvgUs < 10.0)
-    after
-        beamtalk_object_instances:unregister('Counter', ActorPid),
-        ActorPid ! stop
-    end.
-
-%% Test that unknown Pid returns empty (no crash)
-pid_to_class_unknown_pid_test() ->
-    case whereis(beamtalk_object_instances) of
-        undefined ->
-            {ok, _} = beamtalk_object_instances:start_link();
-        _ ->
-            ok
-    end,
-
-    %% Lookup a pid that was never registered
-    FakePid = spawn(fun() -> ok end),
-    beamtalk_test_wait:dead(FakePid),
-    ?assertEqual(undefined, beamtalk_object_instances:class_of(FakePid)).
 
 %%====================================================================
 %% Test 5: Microbenchmark — telemetry:span/3 + counters:add/3 overhead

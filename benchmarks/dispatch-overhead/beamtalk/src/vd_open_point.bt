@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// The same shape, open: a subclass could override any method.
+Value subclass: VdOpenPoint
+  field: x :: Integer = 0
+  field: y :: Integer = 0
+
+  viaHelper -> Integer => self helper
+  helper -> Integer => self.x

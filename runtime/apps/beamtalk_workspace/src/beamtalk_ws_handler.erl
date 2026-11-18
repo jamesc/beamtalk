@@ -25,6 +25,10 @@ accepting any protocol operations.
     terminate/3
 ]).
 
+-ifdef(TEST).
+-export([actor_snapshot_frames/0]).
+-endif.
+
 -doc "HTTP upgrade to WebSocket.".
 init(Req, _Opts) ->
     Peer = cowboy_req:peer(Req),
@@ -192,40 +196,36 @@ websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true
     {[{text, Push}], State};
 %% Actor / class / flush system announcements (SystemAnnouncer bus),
 %% re-encoded to the existing JSON push frames. The legacy bespoke channels
-%% (`beamtalk_repl_actors` lifecycle, `beamtalk_class_events`,
+%% (the actor-list lifecycle channel, `beamtalk_class_events`,
 %% `beamtalk_flush_events`) were retired; consumers now discriminate on the
 %% announced class atom.
 %%
 %% ADR 0017 Phase 2: actor lifecycle. The live `spawned` frame carries
 %% `{class, pid}` only — `spawned_at` is no longer on the live event (it is still
-%% present on the connect snapshot, read from the registry). `stopped` carries the
+%% present on the connect snapshot, read from the actor scan). `stopped` carries the
 %% normalized reason symbol (`#normal`/`#shutdown`/`#crashed`).
 websocket_info(
     {beamtalk_announcement, _SubRef, 'ActorSpawned', _Handler, Event},
-    State = #ws_state{authenticated = true}
+    State = #ws_state{authenticated = true, actor_feed = Feed}
 ) ->
-    Push = iolist_to_binary(
-        json:encode(#{
-            <<"type">> => <<"push">>,
-            <<"channel">> => <<"actors">>,
-            <<"event">> => <<"spawned">>,
-            <<"data">> => encode_actor_spawned_event(Event)
-        })
-    ),
-    {[{text, Push}], State};
+    case beamtalk_workspace_actors:feed_event(Event, Feed) of
+        {drop, Feed1} ->
+            {[], State#ws_state{actor_feed = Feed1}};
+        {emit, Feed1} ->
+            Frame = actor_push_frame(<<"spawned">>, encode_actor_spawned_event(Event)),
+            {[{text, Frame}], State#ws_state{actor_feed = Feed1}}
+    end;
 websocket_info(
     {beamtalk_announcement, _SubRef, 'ActorStopped', _Handler, Event},
-    State = #ws_state{authenticated = true}
+    State = #ws_state{authenticated = true, actor_feed = Feed}
 ) ->
-    Push = iolist_to_binary(
-        json:encode(#{
-            <<"type">> => <<"push">>,
-            <<"channel">> => <<"actors">>,
-            <<"event">> => <<"stopped">>,
-            <<"data">> => encode_actor_stopped_event(Event)
-        })
-    ),
-    {[{text, Push}], State};
+    case beamtalk_workspace_actors:feed_event(Event, Feed) of
+        {drop, Feed1} ->
+            {[], State#ws_state{actor_feed = Feed1}};
+        {emit, Feed1} ->
+            Frame = actor_push_frame(<<"stopped">>, encode_actor_stopped_event(Event)),
+            {[{text, Frame}], State#ws_state{actor_feed = Feed1}}
+    end;
 %% Class-loaded push — broadcast when any session loads or reloads a class.
 websocket_info(
     {beamtalk_announcement, _SubRef, 'ClassLoaded', _Handler, Event},
@@ -743,7 +743,7 @@ start_or_resume_session(ResumeId, Meta, State) when is_binary(ResumeId) ->
                     %% ADR 0082 Phase 3: the flush stream lets LSP
                     %% clients emit `workspace/applyEdit` per touched file.
                     beamtalk_repl_subscriptions:subscribe_all(),
-                    InitialActors = actor_snapshot_frames(),
+                    {InitialActors, ActorFeed} = actor_snapshot_frames(),
                     AuthOk = iolist_to_binary(json:encode(#{<<"type">> => <<"auth_ok">>})),
                     SessionMsg = iolist_to_binary(
                         json:encode(#{
@@ -755,7 +755,8 @@ start_or_resume_session(ResumeId, Meta, State) when is_binary(ResumeId) ->
                         authenticated = true,
                         session_id = ResumeId,
                         session_pid = Pid,
-                        session_mon = MonRef
+                        session_mon = MonRef,
+                        actor_feed = ActorFeed
                     }};
                 false ->
                     %% Session process died — clean up and create new
@@ -799,7 +800,7 @@ create_session(SessionId, Meta, State) ->
             %% the flush stream lets LSP clients emit
             %% `workspace/applyEdit` on flush.
             beamtalk_repl_subscriptions:subscribe_all(),
-            InitialActors = actor_snapshot_frames(),
+            {InitialActors, ActorFeed} = actor_snapshot_frames(),
             AuthOk = iolist_to_binary(json:encode(#{<<"type">> => <<"auth_ok">>})),
             SessionMsg = iolist_to_binary(
                 json:encode(#{
@@ -811,7 +812,8 @@ create_session(SessionId, Meta, State) ->
                 authenticated = true,
                 session_id = SessionId,
                 session_pid = SessionPid,
-                session_mon = MonRef
+                session_mon = MonRef,
+                actor_feed = ActorFeed
             }};
         {error, Reason} ->
             ?LOG_ERROR("Session creation failed after auth", #{
@@ -1029,39 +1031,42 @@ handle_shutdown(Msg, State) ->
 %%% Internal — Actor lifecycle encoding
 
 -doc """
-Build WebSocket text frames for all currently live actors.
-Used to send an initial snapshot on connect/resume so the browser
-sees actors that were already running before it subscribed.
+Build WebSocket text frames for all currently live actors, plus the feed that
+filters later announcements against them. One actor scan (ADR 0150). Used to
+send an initial snapshot on connect/resume so the browser sees actors that were
+already running before it subscribed. Callers subscribe first, then call this:
+an actor that starts in between is in the snapshot and announced, and the
+feed drops that second sighting.
 """.
 actor_snapshot_frames() ->
-    case whereis(beamtalk_actor_registry) of
-        RegPid when is_pid(RegPid) ->
-            try beamtalk_repl_actors:list_actors(RegPid) of
-                Actors ->
-                    [
-                        {text,
-                            iolist_to_binary(
-                                json:encode(#{
-                                    <<"type">> => <<"push">>,
-                                    <<"channel">> => <<"actors">>,
-                                    <<"event">> => <<"spawned">>,
-                                    <<"data">> => encode_actor_metadata(M)
-                                })
-                            )}
-                     || M <- Actors
-                    ]
-            catch
-                Class:Reason ->
-                    ?LOG_WARNING("Failed to snapshot actors", #{
-                        class => Class,
-                        reason => Reason,
-                        domain => [beamtalk, runtime]
-                    }),
-                    []
-            end;
-        _ ->
-            []
+    try beamtalk_workspace_actors:list() of
+        Actors ->
+            Frames = [
+                {text, actor_push_frame(<<"spawned">>, encode_actor_metadata(M))}
+             || M <- Actors
+            ],
+            {Frames, beamtalk_workspace_actors:feed_new(Actors)}
+    catch
+        Class:Reason ->
+            ?LOG_WARNING("Failed to snapshot actors", #{
+                class => Class,
+                reason => Reason,
+                domain => [beamtalk, runtime]
+            }),
+            {[], beamtalk_workspace_actors:feed_new([])}
     end.
+
+-doc "One `actors` channel push frame (`spawned` / `stopped`) as JSON text.".
+-spec actor_push_frame(binary(), map()) -> binary().
+actor_push_frame(Event, Data) ->
+    iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"push">>,
+            <<"channel">> => <<"actors">>,
+            <<"event">> => Event,
+            <<"data">> => Data
+        })
+    ).
 
 -doc "Encode actor metadata for push message JSON.".
 encode_actor_metadata(#{pid := Pid, class := Class} = Meta) ->
@@ -1070,9 +1075,15 @@ encode_actor_metadata(#{pid := Pid, class := Class} = Meta) ->
         <<"pid">> => list_to_binary(pid_to_list(Pid))
     },
     % elp:fixme W0032 maps:find with complex branch logic
-    case maps:find(spawned_at, Meta) of
-        {ok, T} -> Base#{<<"spawned_at">> => T};
-        error -> Base
+    WithTime =
+        case maps:find(spawned_at, Meta) of
+            {ok, T} -> Base#{<<"spawned_at">> => T};
+            error -> Base
+        end,
+    %% BT-4960: present only for a runtime-started actor, like the `actors` op.
+    case Meta of
+        #{system := true} -> WithTime#{<<"system">> => true};
+        _ -> WithTime
     end.
 
 -doc """
@@ -1182,7 +1193,7 @@ normalise_file_kind_entry(Other) ->
 Encode an `ActorSpawned` announcement payload for the `actors`/`spawned`
 push frame. The typed event carries `actorClass` (a Symbol) and `pid`; the live
 frame is `{class, pid}` — `spawned_at` is no longer present on the live event
-(the connect snapshot still carries it, read from the registry).
+(the connect snapshot still carries it, read from the actor scan).
 """.
 -spec encode_actor_spawned_event(map()) -> map().
 encode_actor_spawned_event(Event) ->

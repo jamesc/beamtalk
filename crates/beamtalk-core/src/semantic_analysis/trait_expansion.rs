@@ -1048,7 +1048,7 @@ fn expand_class(
 /// [`expand_module`]'s doc), so failing to find it here means precisely that
 /// — not a typo — and the diagnostic can name that directly instead of
 /// guessing between the two.
-fn missing_protocol_diagnostic(use_: &ProtocolUse) -> Diagnostic {
+pub(crate) fn missing_protocol_diagnostic(use_: &ProtocolUse) -> Diagnostic {
     if let Some(package) = &use_.package {
         Diagnostic::error(
             format!(

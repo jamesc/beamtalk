@@ -1,0 +1,135 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4995 fixtures: actors that exercise the three Actor intrinsic dispatches
+// of an actor start/stop (`self continueWith:`, `self stopWith:` and the
+// default `terminate:`) so that stdlib/test/actor_intrinsic_dispatch_test.bt
+// can pin, on today's code, where `State` is committed around them. Each
+// method records what it observed in the shared Ets table named by
+// `tableName`, so the observation survives a crash or stop of the actor.
+
+Actor subclass: Bt4995Plain
+  state: n = 0
+  state: tableName = nil
+  state: stashed = nil
+
+  note: key value: value =>
+    self.tableName isNil ifFalse: [
+      (Ets named: self.tableName) at: key put: value
+    ]
+
+  n => self.n
+
+  noop => nil
+
+  // The request is deferred: the writes after it are in `n` when the step runs.
+  partialThenContinue =>
+    self.n := 1
+    self continueWith: #stepAfterPartial
+    self.n := 2
+    #queued
+
+  stepAfterPartial =>
+    self note: #stepSaw value: self.n
+    self.n := self.n + 10
+
+  // A block that writes a field, run before and after the request, reads and
+  // writes the live state (the cell) around the intrinsic.
+  blockAcrossContinue =>
+    bump := [self.n := self.n + 100]
+    self.n := 1
+    self continueWith: #noop
+    bump value
+    self.n
+
+  blockWritesThenContinue =>
+    set := [self.n := 7]
+    set value
+    self continueWith: #noop
+    self.n
+
+  blockWritesBetweenRequests =>
+    set := [self.n := self.n + 1]
+    self continueWith: #noop
+    set value
+    self continueWith: #noop
+    set value
+    self.n
+
+  // A continuation that raises after writing: the actor crashes (cast
+  // semantics) and the write is not visible.
+  raisingContinuation =>
+    self.n := 1
+    self continueWith: #failingStep
+    #queued
+
+  failingStep =>
+    self.n := 99
+    self note: #failingStepRan value: true
+    self error: "boom in continuation"
+
+  // The continuation chain: each step sees the previous step's write.
+  chain =>
+    self.n := 1
+    self continueWith: #chainOne
+    #queued
+
+  chainOne =>
+    self note: #chainOneSaw value: self.n
+    self.n := self.n + 10
+    self continueWith: #chainTwo
+
+  chainTwo =>
+    self note: #chainTwoSaw value: self.n
+    self.n := self.n + 100
+
+  continueWithArgs =>
+    self.n := 3
+    self continueWith: #stepWithArg: withArguments: #(4)
+    self.n := self.n + 1
+    #queued
+
+  stepWithArg: k =>
+    self note: #argStepSaw value: self.n
+    self.n := self.n * k
+
+  // A pending stop wins over a pending continuation.
+  stopBeatsContinue =>
+    self.n := 1
+    self continueWith: #neverRuns
+    self stopWith: #wins
+    #queued
+
+  neverRuns => self note: #neverRan value: true
+
+  // stopWith: after partial state changes; `terminate:` records `n`.
+  stopAfterPartial =>
+    self.n := 1
+    self stopWith: #partial
+    self.n := 2
+    #stillRunning
+
+  stopAfterBlockWrite =>
+    set := [self.n := 5]
+    self.n := 1
+    self stopWith: #viaBlock
+    set value
+    #stillRunning
+
+  stopThenRaise =>
+    self.n := 1
+    self stopWith: #requested
+    self.n := 2
+    self error: "boom after stop request"
+
+  stopTwice =>
+    self.n := 1
+    self stopWith: #first
+    self.n := 2
+    self stopWith: #second
+    #stillRunning
+
+  stopNormal =>
+    self.n := 41
+    self stop
+    #stillRunning

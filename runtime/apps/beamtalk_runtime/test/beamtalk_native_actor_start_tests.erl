@@ -59,6 +59,56 @@ global_named_start_test() ->
     ?assertEqual({ok, 5}, get_value(Pid)),
     stop(Pid).
 
+%% BT-4956: a `native:` actor registered `#global` has a start time, written by
+%% the runtime's registration path (the backing module has no `init/1` of ours),
+%% so a name conflict keeps the older one instead of falling back to
+%% `random_exit_name/3`.
+global_native_actor_records_start_time_test() ->
+    Before = erlang:system_time(microsecond),
+    {ok, Pid} = beamtalk_actor_registry:'spawnAsGlobal'(
+        bt4956_eunit_start_time, ?FACADE, #{initial => 1}
+    ),
+    After = erlang:system_time(microsecond),
+    StartedAt = beamtalk_actor_registry:started_at_from_dictionary(Pid),
+    ?assert(is_integer(StartedAt)),
+    ?assert(StartedAt >= Before andalso StartedAt =< After),
+    stop(Pid).
+
+local_and_anonymous_native_actors_record_no_start_time_test() ->
+    {ok, Anon} = beamtalk_actor:safe_spawn_linked(?FACADE, #{initial => 1}),
+    ?assertEqual(undefined, beamtalk_actor_registry:started_at_from_dictionary(Anon)),
+    {ok, Local} = beamtalk_actor_registry:'spawnAs'(bt4956_eunit_local, ?FACADE, #{}),
+    ?assertEqual(undefined, beamtalk_actor_registry:started_at_from_dictionary(Local)),
+    stop(Anon),
+    stop(Local).
+
+global_native_conflict_keeps_the_older_test() ->
+    {ok, Older} = beamtalk_actor_registry:'spawnAsGlobal'(bt4956_eunit_older, ?FACADE, #{}),
+    %% sleep: waits for a clock tick between the starts (class 3)
+    timer:sleep(5),
+    {ok, Younger1} = beamtalk_actor_registry:'spawnAsGlobal'(bt4956_eunit_younger1, ?FACADE, #{}),
+    timer:sleep(5),
+    {ok, Younger2} = beamtalk_actor_registry:'spawnAsGlobal'(bt4956_eunit_younger2, ?FACADE, #{}),
+    %% The resolver stops the loser with `{shutdown, global_name_conflict}`,
+    %% which would take a linked test process down with it.
+    [unlink(P) || P <- [Older, Younger1, Younger2]],
+    Mon1 = erlang:monitor(process, Younger1),
+    Mon2 = erlang:monitor(process, Younger2),
+    %% On one node `random_exit_name/3` keeps its second argument, so only a
+    %% start-time rule keeps the older whichever order the pids arrive in.
+    ?assertEqual(Older, beamtalk_actor_registry:resolve_global_conflict(name, Older, Younger1)),
+    ?assertEqual(Older, beamtalk_actor_registry:resolve_global_conflict(name, Younger2, Older)),
+    receive
+        {'DOWN', Mon1, process, Younger1, {shutdown, global_name_conflict}} -> ok
+    after 5000 -> ?assert(false)
+    end,
+    receive
+        {'DOWN', Mon2, process, Younger2, {shutdown, global_name_conflict}} -> ok
+    after 5000 -> ?assert(false)
+    end,
+    ?assert(is_process_alive(Older)),
+    stop(Older).
+
 taken_name_is_refused_before_start_test() ->
     Name = bt4577_eunit_taken,
     Holder = spawn(fun() ->

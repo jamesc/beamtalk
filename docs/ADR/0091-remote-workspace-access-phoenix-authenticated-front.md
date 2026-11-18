@@ -716,7 +716,7 @@ the Owner (execute) role still has full RCE; only Observer is non-executing.
 
 **Epic:** BT-2416 — Remote Workspace Access — Phoenix Authenticated Front (ADR 0091)
 **Implements:** ADR 0017 Phase 3 / LiveView IDE Wave 5 (BT-2411 umbrella)
-**Status:** Planned
+**Status:** Done
 
 | Phase | Issue | Title | Size | Blocked by |
 |-------|-------|-------|------|------------|

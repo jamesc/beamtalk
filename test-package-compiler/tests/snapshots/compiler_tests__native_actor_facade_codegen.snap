@@ -24,10 +24,7 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
             in
             case StartResult of
                 <{'ok', Pid}> when 'true' ->
-                    let _InstReg = try call 'beamtalk_object_instances':'register'('NativeWorker', Pid)
-                        of _RegOk -> _RegOk
-                        catch <_RegT, _RegE, _RegS> -> 'ok'
-                    in
+                    let _NativeAnnounced = call 'beamtalk_actor':'native_started'(Pid) in
                     {'beamtalk_object', 'NativeWorker', 'native_actor_facade', Pid}
                 <{'error', Reason}> when 'true' ->
                     let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'NativeWorker') in
@@ -117,15 +114,15 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
 
 'dispatch_doWork'/1 = fun (Self) ->
     let Pid = call 'erlang':'element'(4, Self) in
-    call 'beamtalk_actor':'sync_send'(Pid, 'doWork', [])
+    call 'beamtalk_actor':'sync_send_known'(Pid, 'NativeWorker', 'doWork', [])
 
 'dispatch_compute:'/2 = fun (Value@, Self) ->
     let Pid = call 'erlang':'element'(4, Self) in
-    call 'beamtalk_actor':'sync_send'(Pid, 'compute:', [Value@])
+    call 'beamtalk_actor':'sync_send_known'(Pid, 'NativeWorker', 'compute:', [Value@])
 
 'dispatch_ping:'/2 = fun (Msg@, Self) ->
     let Pid = call 'erlang':'element'(4, Self) in
-    call 'beamtalk_actor':'sync_send'(Pid, 'ping:', [Msg@])
+    call 'beamtalk_actor':'sync_send_known'(Pid, 'NativeWorker', 'ping:', [Msg@])
 
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'NativeWorker',

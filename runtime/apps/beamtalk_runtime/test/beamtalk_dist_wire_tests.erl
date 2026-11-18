@@ -16,15 +16,17 @@ prelude, and the reply/future-resolution encode path — rather than
 BT-3600) or the raw block/NLR/future mechanics the Phase 0.5 spike already
 proved (`beamtalk_dist_wirecheck_tests.erl`, BT-3579/BT-3582).
 
-Two of the ADR's required scenarios — NLR relay over a sync call, and async
-future resolution/rejection across nodes — are **not** duplicated here:
+One of the ADR's required scenarios — NLR relay over a sync call — is **not**
+duplicated here (async future resolution across nodes is withdrawn: remote
+async sends are unsupported and raise, asserted by
+`remote_async_send_raises_instead_of_hanging` below, BT-4989):
 every remote send this issue's sender-side changes make now goes through
 the `'\$beamtalk_wire'` tag automatically (decided purely by
 `node(ActorPid) =/= node()`, ADR 0126 §5.1), so
-`beamtalk_dist_wirecheck_tests.erl`'s existing (c) and (d) scenarios already
-exercise the real wire path once this issue lands — re-running that
-unmodified suite is the regression check for both, not a second copy of the
-same assertions here.
+`beamtalk_dist_wirecheck_tests.erl`'s existing (c) scenario already
+exercises the real wire path once this issue lands — re-running that
+unmodified suite is the regression check, not a second copy of the same
+assertions here.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -33,6 +35,7 @@ same assertions here.
 
 -export([
     ensure_fixture_loaded/2,
+    spawn_unlinked_box_actor/0,
     install_meta_stub/2,
     restore_meta_stub/1
 ]).
@@ -87,20 +90,15 @@ wire_test_() ->
                 {"an older envelope migrates forward through a migrateFromVN: chain", fun() ->
                     migrate_forward_through_wire(PeerNode)
                 end},
-                {"remote_code_mismatch: a block whose module is missing on the callee (undef)",
-                    fun() -> remote_code_mismatch_undef(PeerNode) end},
-                {"remote_code_mismatch: a block whose module is a different version (badfun)",
-                    fun() -> remote_code_mismatch_badfun(PeerNode) end},
-                {
-                    "async future rejection double-wrap: a method that calls "
-                    "beamtalk_error:raise/1 on itself rejects with the wrapped map buried in "
-                    "details.original_reason, not the bare record",
-                    fun() -> async_future_rejection_double_wrap(PeerNode) end
-                },
                 {
                     "a wire-tagged cast of an unrecognised kind is dropped, not "
                     "tail-recursed into forever (BT-3613 livelock guard)",
                     fun() -> unrecognised_kind_cast_does_not_livelock(PeerNode) end
+                },
+                {
+                    "a remote async_send to a compiled actor raises at once and never "
+                    "leaves a future pending (BT-4989)",
+                    fun() -> remote_async_send_raises_instead_of_hanging(PeerNode) end
                 },
                 {
                     "a wire-tagged call of an unrecognised kind falls through to "
@@ -301,90 +299,6 @@ migrate_forward_through_wire(PeerNode) ->
     end.
 
 %%====================================================================
-%% remote_code_mismatch (ADR 0126 §5.5, BT-3579 finding (b))
-%%====================================================================
-
-remote_code_mismatch_undef(PeerNode) ->
-    ModName = beamtalk_test_unique:atom("bt3601_undef"),
-    Binary = beamtalk_dist_wirecheck_tests:compile_block_module_variant(ModName, "v1"),
-    {module, ModName} = code:load_binary(ModName, atom_to_list(ModName) ++ ".erl", Binary),
-    Fun = ModName:make_block(),
-    {ok, RemotePid} = rpc:call(PeerNode, test_wire_actor, start, [0]),
-    try
-        ?assertBtErrorDetails(
-            remote_code_mismatch,
-            'Block',
-            _,
-            #{module := ModName},
-            beamtalk_actor:sync_send(RemotePid, 'invokeBlockWith:', [Fun])
-        )
-    after
-        beamtalk_test_module:unload(ModName),
-        rpc:call(PeerNode, gen_server, stop, [RemotePid])
-    end.
-
-remote_code_mismatch_badfun(PeerNode) ->
-    ModName = beamtalk_test_unique:atom("bt3601_badfun"),
-    BinaryV1 = beamtalk_dist_wirecheck_tests:compile_block_module_variant(ModName, "v1"),
-    BinaryV2 = beamtalk_dist_wirecheck_tests:compile_block_module_variant(ModName, "v2"),
-    {module, ModName} = code:load_binary(ModName, atom_to_list(ModName) ++ ".erl", BinaryV1),
-    Fun = ModName:make_block(),
-    {module, ModName} = rpc:call(
-        PeerNode, code, load_binary, [ModName, atom_to_list(ModName) ++ ".erl", BinaryV2]
-    ),
-    {ok, RemotePid} = rpc:call(PeerNode, test_wire_actor, start, [0]),
-    try
-        ?assertBtErrorDetails(
-            remote_code_mismatch,
-            'Block',
-            _,
-            #{module := ModName},
-            beamtalk_actor:sync_send(RemotePid, 'invokeBlockWith:', [Fun])
-        )
-    after
-        beamtalk_test_module:unload(ModName),
-        rpc:call(PeerNode, code, delete, [ModName]),
-        rpc:call(PeerNode, code, purge, [ModName]),
-        rpc:call(PeerNode, gen_server, stop, [RemotePid])
-    end.
-
-%%====================================================================
-%% Async future rejection — the "double-wrap" case (ADR 0126 Amendment (d))
-%%====================================================================
-
--doc """
-`beamtalk_future:await/2` signals rejection as a `throw` of
-`{future_rejected, Reason}` (not `error/1`) on every path — the plain case
-(a method that raises the bare `#beamtalk_error{}` directly, e.g.
-`test_wirecheck_actor:handle_boom/2`) is already exercised, over the real
-wire, by `beamtalk_dist_wirecheck_tests:async_future_rejects/1` (every
-remote send now goes through the `'\$beamtalk_wire'` tag automatically, per
-this module's moduledoc). This test covers the other path the Amendment
-calls out: `test_wire_actor:handle_boomWrapped/2` raises via
-`beamtalk_error:raise/1` on itself, which double-wraps — `Reason` here is a
-fresh `runtime_error` whose `details.original_reason` holds the
-already-wrapped Exception map, not the bare `#beamtalk_error{}` `boom`
-produces.
-""".
-async_future_rejection_double_wrap(PeerNode) ->
-    {ok, RemotePid} = rpc:call(PeerNode, test_wire_actor, start, [0]),
-    try
-        Future = beamtalk_future:new(),
-        ok = beamtalk_actor:async_send(RemotePid, boomWrapped, [], beamtalk_future:pid(Future)),
-        ?assertThrow(
-            {future_rejected, #beamtalk_error{
-                kind = runtime_error,
-                class = 'WireActor',
-                selector = boomWrapped,
-                details = #{original_reason := #{'$beamtalk_class' := 'RuntimeError', error := _}}
-            }},
-            beamtalk_future:await(Future, 5000)
-        )
-    after
-        rpc:call(PeerNode, gen_server, stop, [RemotePid])
-    end.
-
-%%====================================================================
 %% Livelock guard (BT-3613): a wire-tagged message of a `kind` the
 %% receiving direction doesn't expect must fall through to the ordinary
 %% local catch-all, not re-enter the same wire clause with an unchanged
@@ -440,3 +354,48 @@ unrecognised_kind_call_does_not_livelock(PeerNode) ->
     after
         rpc:call(PeerNode, gen_server, stop, [RemotePid])
     end.
+
+%%====================================================================
+%% Remote async_send is unsupported and fails loudly (BT-4989, ADR 0126 §5.1)
+%%====================================================================
+
+-doc """
+Runs ON the peer: load the compiled `BoxActor` fixture, spawn an instance and
+unlink it from the `erpc` worker so it outlives the call (the same
+spawn-then-unlink sequence `beamtalk_dist_wirecheck_tests:spawn_via_erpc/2`
+uses).
+""".
+-spec spawn_unlinked_box_actor() -> pid().
+spawn_unlinked_box_actor() ->
+    ok = ensure_fixture_loaded(box_actor, 'BoxActor'),
+    Pid = element(4, 'bt@box_actor':spawn()),
+    unlink(Pid),
+    Pid.
+
+%% No compiled actor decodes an async wire envelope, so a remote `async_send/4`
+%% used to cast one into the generated `handle_cast/2` catch-all and leave the
+%% future pending forever. It must now raise before anything is sent. The whole
+%% attempt is bounded by a timeout so a regression fails instead of hanging.
+remote_async_send_raises_instead_of_hanging(PeerNode) ->
+    RemotePid = erpc:call(PeerNode, ?MODULE, spawn_unlinked_box_actor, []),
+    try
+        Future = beamtalk_future:new(),
+        ?assertError(
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{kind = unsupported_operation, selector = volume}
+            },
+            beamtalk_actor:async_send(RemotePid, volume, [], beamtalk_future:pid(Future))
+        ),
+        %% The future is settled too, so nothing is left waiting on it.
+        ?assertThrow(
+            {future_rejected, #beamtalk_error{kind = unsupported_operation, selector = volume}},
+            beamtalk_future:await(Future, 1000)
+        )
+    after
+        rpc:call(PeerNode, gen_server, stop, [RemotePid])
+    end.
+
+%%% Module-level fixture (BT-4962): loading a compiled `bt@stdlib@*` module starts
+%%% class processes; with no runtime app to own them they would outlive this suite.
+eunit_wrapper_(Tests) -> beamtalk_test_class_teardown:leak_free(Tests).

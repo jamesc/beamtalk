@@ -10,6 +10,8 @@ Tests cover: direct insert, query, ring buffer eviction, counters aggregates,
 clear, composite key uniqueness, gen_server crash recovery (heir),
 telemetry handler callbacks, and telemetry_poller VM stats.
 """.
+-export([init/1]).
+
 -include_lib("eunit/include/eunit.hrl").
 
 %% Tests that poll with `beamtalk_test_wait:until/1` (directly or via
@@ -47,7 +49,11 @@ cleanup(_State) ->
     catch
         _:_ -> ok
     end,
-    ok.
+    %% A bare-started store (and the heir some tests stand up) must not outlive the
+    %% module: the next one's `ensure_all_started(beamtalk_runtime)` would fail with
+    %% `already_started` (BT-4962).
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_trace_store),
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_ets_heir).
 
 %%====================================================================
 %% Test: Direct insert and query
@@ -418,6 +424,28 @@ direct_insert_and_query_test_() ->
                 maps:get({beamtalk_string, <<"error">>}, Health)
             )
         end),
+        ?_test(begin
+            %% The class comes from the actor marker, with no registration.
+            Pid = idle_actor('Bt4947Health'),
+            try
+                Health = beamtalk_trace_store:actor_health(Pid),
+                ?assertEqual(
+                    {beamtalk_string, <<"Bt4947Health">>},
+                    maps:get({beamtalk_string, <<"class">>}, Health)
+                ),
+                ?assert(is_integer(maps:get({beamtalk_string, <<"queue_depth">>}, Health)))
+            after
+                Pid ! stop
+            end
+        end),
+        ?_test(begin
+            %% A live process that is not an actor is `unknown`, not an empty answer.
+            Health = beamtalk_trace_store:actor_health(self()),
+            ?assertEqual(
+                {beamtalk_string, <<"unknown">>}, maps:get({beamtalk_string, <<"class">>}, Health)
+            ),
+            ?assertNotEqual(dead, maps:get({beamtalk_string, <<"status">>}, Health))
+        end),
         %%====================================================================
         %% Test: System health
         %%====================================================================
@@ -435,23 +463,11 @@ direct_insert_and_query_test_() ->
         %% Test: Bottlenecks query
         %%====================================================================
         ?_test(begin
-            %% bottlenecks/1 scans the instance registry, so it needs no
-            %% dispatches and works whether or not tracing is enabled.
-            case whereis(beamtalk_object_instances) of
-                undefined -> {ok, _} = beamtalk_object_instances:start_link();
-                _ -> ok
-            end,
+            %% bottlenecks/1 scans the processes for the actor marker (ADR 0150),
+            %% so it needs no dispatches and no registration, and works whether
+            %% or not tracing is enabled.
             Self = self(),
-            Pid = spawn(fun() ->
-                Self ! ready,
-                receive
-                    stop -> ok
-                end
-            end),
-            receive
-                ready -> ok
-            end,
-            ok = beamtalk_object_instances:register('Counter', Pid),
+            Pid = idle_actor('Counter'),
             try
                 Result = beamtalk_trace_store:bottlenecks(10),
                 ?assert(is_list(Result)),
@@ -491,32 +507,29 @@ direct_insert_and_query_test_() ->
                 ),
                 Ghost ! stop
             after
-                beamtalk_object_instances:unregister('Counter', Pid),
                 Pid ! stop
             end
         end),
-        {"a pid registered under two classes reports once",
+        {"a pid backing two native classes reports once",
             ?_test(begin
-                case whereis(beamtalk_object_instances) of
-                    undefined ->
-                        {ok, _} = beamtalk_object_instances:start_link();
-                    _ ->
-                        ok
-                end,
-                Self = self(),
-                Pid = spawn(fun() ->
-                    Self ! ready,
-                    receive
-                        stop -> ok
-                    end
+                beamtalk_class_registry:ensure_backing_module_index_table(),
+                ClassA = 'Bt4947NativeA',
+                ClassB = 'Bt4947NativeB',
+                ClassPidA = idle_process(),
+                ClassPidB = idle_process(),
+                Pid = proc_lib:spawn(?MODULE, init, [x]),
+                ok = beamtalk_test_wait:until(fun() ->
+                    {dictionary, D} = erlang:process_info(Pid, dictionary),
+                    lists:keymember('$initial_call', 1, D)
                 end),
-                receive
-                    ready -> ok
-                end,
-                ok = beamtalk_object_instances:register('Counter', Pid),
-                ok = beamtalk_object_instances:register('Other', Pid),
+                register(beamtalk_class_registry:registry_name(ClassA), ClassPidA),
+                register(beamtalk_class_registry:registry_name(ClassB), ClassPidB),
+                ets:insert(beamtalk_backing_module_index, [
+                    {?MODULE, ClassA, ClassPidA}, {?MODULE, ClassB, ClassPidB}
+                ]),
                 try
-                    Result = beamtalk_trace_store:bottlenecks(1000),
+                    ?assertEqual(2, length(beamtalk_actor_scan:info(Pid))),
+                    Result = beamtalk_trace_store:bottlenecks(100000),
                     PidBin = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
                     Matches = [
                         R
@@ -524,8 +537,11 @@ direct_insert_and_query_test_() ->
                     ],
                     ?assertEqual(1, length(Matches))
                 after
-                    beamtalk_object_instances:unregister('Counter', Pid),
-                    beamtalk_object_instances:unregister('Other', Pid),
+                    ets:match_delete(beamtalk_backing_module_index, {?MODULE, '_', '_'}),
+                    unregister(beamtalk_class_registry:registry_name(ClassA)),
+                    unregister(beamtalk_class_registry:registry_name(ClassB)),
+                    ClassPidA ! stop,
+                    ClassPidB ! stop,
                     Pid ! stop
                 end
             end)},
@@ -1770,6 +1786,35 @@ min_max_duration_test_() ->
                 ?assertNotEqual(#{}, beamtalk_trace_store:get_stats()),
                 ?assertEqual([], beamtalk_trace_store:get_traces())
             end)},
+        {"lifecycle handler still counts the class aggregate when tracing is disabled (BT-4932)",
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:disable(),
+                TestPid = self(),
+                Metadata = #{pid => TestPid, class => 'LifecycleOff', reason => normal},
+                [
+                    beamtalk_trace_store:handle_lifecycle_event(
+                        [beamtalk, actor, lifecycle, Action], #{}, Metadata, #{}
+                    )
+                 || Action <- [start, stop, stop]
+                ],
+                %% No trace event and no per-actor row while tracing is off ...
+                ?assertEqual([], beamtalk_trace_store:get_traces()),
+                ?assertEqual(#{}, beamtalk_trace_store:get_stats(TestPid)),
+                %% ... but the always-on class aggregate counts each lifecycle
+                %% action once per event, with a zero duration.
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"start">>} := Start,
+                        {beamtalk_string, <<"stop">>} := Stop
+                    }
+                } = class_entry(<<"LifecycleOff">>),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, Start)),
+                ?assertEqual(2, maps:get({beamtalk_string, <<"calls">>}, Stop)),
+                ?assertEqual(2, maps:get({beamtalk_string, <<"ok">>}, Stop)),
+                ?assertEqual(0, maps:get({beamtalk_string, <<"errors">>}, Stop)),
+                ?assertEqual(0, maps:get({beamtalk_string, <<"total_duration_ns">>}, Stop))
+            end)},
         %%====================================================================
         %% Test: Unknown request handling
         %%====================================================================
@@ -1801,10 +1846,6 @@ tmp_export_path(Tag) ->
 churn_setup() ->
     setup(),
     {module, telemetry} = code:ensure_loaded(telemetry),
-    case whereis(beamtalk_object_instances) of
-        undefined -> {ok, _} = beamtalk_object_instances:start_link();
-        _ -> ok
-    end,
     beamtalk_trace_store:clear(),
     beamtalk_trace_store:disable(),
     ok.
@@ -1827,9 +1868,6 @@ or, when `Kill` is true, an untrapped `kill` (no `terminate/2`).
 """.
 churn_one_actor(Kill) ->
     {ok, Pid} = test_counter:start(0),
-    %% Register like a compiled actor spawn does, so dispatch telemetry
-    %% attributes to 'Counter' (the registry is unregistered on death).
-    ok = beamtalk_object_instances:register('Counter', Pid),
     ?assertEqual(0, beamtalk_actor:sync_send(Pid, getValue, [])),
     MRef = erlang:monitor(process, Pid),
     case Kill of
@@ -1883,7 +1921,6 @@ actor_churn_stays_flat_test_() ->
                 StorePid = whereis(beamtalk_trace_store),
                 ?assertEqual([], element(2, erlang:process_info(StorePid, monitors))),
                 {ok, Live} = test_counter:start(0),
-                ok = beamtalk_object_instances:register('Counter', Live),
                 ?assertEqual(0, beamtalk_actor:sync_send(Live, getValue, [])),
                 {monitored_by, MonitoredBy} = erlang:process_info(Live, monitored_by),
                 ?assertNot(lists:member(StorePid, MonitoredBy)),
@@ -2143,6 +2180,26 @@ idle_process() ->
             stop -> ok
         end
     end).
+
+-doc "Spawn a process carrying the actor marker for `Class` (registered nowhere) that waits for `stop`.".
+idle_actor(Class) ->
+    Parent = self(),
+    Pid = spawn(fun() ->
+        erlang:put('$beamtalk_actor', Class),
+        Parent ! {ready, self()},
+        receive
+            stop -> ok
+        end
+    end),
+    receive
+        {ready, Pid} -> Pid
+    end.
+
+%% proc_lib entry point for the fake `native:` backing process.
+init(_) ->
+    receive
+        stop -> ok
+    end.
 
 sweep_reclaims_dead_pid_rows_test_() ->
     {foreach, fun churn_setup/0, fun cleanup/1, [
@@ -2919,14 +2976,7 @@ chunked_sweep_stale_continuation_test_() ->
             ?assertEqual(Store, whereis(beamtalk_trace_store))
         end),
         ?_test(begin
-            case whereis(beamtalk_object_instances) of
-                undefined -> {ok, _} = beamtalk_object_instances:start_link();
-                _ -> ok
-            end,
-            Pids = [idle_process() || _ <- lists:seq(1, 2000)],
-            lists:foreach(
-                fun(P) -> ok = beamtalk_object_instances:register('Counter', P) end, Pids
-            ),
+            Pids = [idle_actor('Counter') || _ <- lists:seq(1, 2000)],
             Store = whereis(beamtalk_trace_store),
             %% With the trace store suspended, a gen_server call would block;
             %% bottlenecks/1 runs in the caller and answers regardless.

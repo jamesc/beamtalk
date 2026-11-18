@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Snapshot test for `ifFalse:ifTrue:` codegen (BT-4991).
+//
+// With two literal blocks `ifFalse:ifTrue:` lowers exactly as `ifTrue:ifFalse:`
+// with the blocks swapped: an inline `case` over the receiver, no closure and
+// no send on the Boolean arms. A `^` inside a block lowers exactly as it does
+// in the `ifTrue:ifFalse:` spelling (the `*Canonical:` methods are the
+// reference); making that a plain return is BT-4985, not this snapshot.
+
+Value subclass: IfFalseIfTrueProbe
+
+  // Both arms inline: `true -> 1`, `false -> 2`.
+  pick: flag => flag ifFalse: [2] ifTrue: [1]
+
+  // Same, with a typed receiver.
+  typed: flag :: Boolean -> Integer => flag ifFalse: [20] ifTrue: [10]
+
+  // `^` in the false arm, mid-method: same lowering as `earlyCanonical:`.
+  early: flag =>
+    flag ifFalse: [^"early"] ifTrue: ["value"]
+    "fell through"
+
+  // The same method spelled `ifTrue:ifFalse:`: its lowering is the reference
+  // `early:` must match, `^` handling included.
+  earlyCanonical: flag =>
+    flag ifTrue: ["value"] ifFalse: [^"early"]
+    "fell through"
+
+  // `^` in a tail-position conditional: same lowering as `tailCanonical:`.
+  tail: flag => flag ifFalse: [^"early"] ifTrue: ["value"]
+
+  tailCanonical: flag => flag ifTrue: ["value"] ifFalse: [^"early"]
+
+  // Non-literal blocks keep the ordinary send.
+  blocks: flag false: falseBlock true: trueBlock =>
+    flag ifFalse: falseBlock ifTrue: trueBlock

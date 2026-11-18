@@ -726,8 +726,8 @@ catch error:#{'$beamtalk_class' := _, error := #beamtalk_error{kind = Kind}} -> 
 
 | Issue | Title | Size | Status |
 |-------|-------|------|--------|
-| [BT-451](https://linear.app/beamtalk/issue/BT-451) | Signal-time wrapping: raise/1, runtime + codegen migration, REPL _error binding | L | Planned |
-| [BT-452](https://linear.app/beamtalk/issue/BT-452) | Error class hierarchy: RuntimeError, TypeError, InstantiationError + kind_to_class mapping | M | Planned (blocked by BT-451) |
+| [BT-451](https://linear.app/beamtalk/issue/BT-451) | Signal-time wrapping: raise/1, runtime + codegen migration, REPL _error binding | L | Done |
+| [BT-452](https://linear.app/beamtalk/issue/BT-452) | Error class hierarchy: RuntimeError, TypeError, InstantiationError + kind_to_class mapping | M | Done |
 
 **Supersedes:** BT-30 (Prototype object-wrapped exceptions), BT-237 (REPL error formatting)
 

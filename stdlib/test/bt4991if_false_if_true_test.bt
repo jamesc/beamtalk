@@ -1,0 +1,82 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4991: `ifFalse:ifTrue:` on Boolean. With two literal blocks the compiler
+// inlines it exactly like `ifTrue:ifFalse:` (no closure, `^` inside a block
+// is a plain return); with anything else it is an ordinary send answered by
+// `True>>ifFalse:ifTrue:` / `False>>ifFalse:ifTrue:`.
+//
+// Receivers route through parameters so the send sites keep literal blocks
+// while the receiver is a runtime value. The custom-`ifFalse:ifTrue:`
+// receiver lives in fixtures/bt4991custom_if_false_if_true.bt.
+
+TestCase subclass: Bt4991IfFalseIfTrueTest
+
+  typed: cond :: Boolean -> String => cond ifFalse: ["no"] ifTrue: ["yes"]
+
+  untyped: cond => cond ifFalse: ["no"] ifTrue: ["yes"]
+
+  blocks: cond false: falseBlock true: trueBlock =>
+    cond ifFalse: falseBlock ifTrue: trueBlock
+
+  // `^` in one block: a plain early return from the method.
+  earlyInFalseArm: cond =>
+    cond ifFalse: [^"early"] ifTrue: ["value"]
+    "fell through"
+
+  earlyInTrueArm: cond =>
+    cond ifFalse: ["value"] ifTrue: [^"early"]
+    "fell through"
+
+  testTypedTrue => self assert: (self typed: true) equals: "yes"
+
+  testTypedFalse => self assert: (self typed: false) equals: "no"
+
+  testUntypedTrue => self assert: (self untyped: true) equals: "yes"
+
+  testUntypedFalse => self assert: (self untyped: false) equals: "no"
+
+  swapped: cond => cond ifFalse: [1] ifTrue: [2]
+
+  canonical: cond => cond ifTrue: [2] ifFalse: [1]
+
+  bump: cond =>
+    count := 0
+    cond ifFalse: [count := count + 10] ifTrue: [count := count + 1]
+    count
+
+  testMatchesIfTrueIfFalse =>
+    self assert: (self swapped: true) equals: (self canonical: true)
+    self assert: (self swapped: false) equals: (self canonical: false)
+
+  testOnlyChosenBlockRuns =>
+    self assert: (self bump: true) equals: 1
+    self assert: (self bump: false) equals: 10
+
+  testNonLiteralBlocksOnTrue =>
+    self
+      assert: (self
+        blocks: true
+        false: ["no"]
+        true: ["yes"])
+      equals: "yes"
+
+  testNonLiteralBlocksOnFalse =>
+    self
+      assert: (self
+        blocks: false
+        false: ["no"]
+        true: ["yes"])
+      equals: "no"
+
+  testEarlyReturnInFalseArm =>
+    self assert: (self earlyInFalseArm: false) equals: "early"
+    self assert: (self earlyInFalseArm: true) equals: "fell through"
+
+  testEarlyReturnInTrueArm =>
+    self assert: (self earlyInTrueArm: true) equals: "early"
+    self assert: (self earlyInTrueArm: false) equals: "fell through"
+
+  testNonBooleanReceiverKeepsItsOwnImplementation =>
+    custom := Bt4991CustomIfFalseIfTrue new
+    self assert: (self untyped: custom) equals: #bt4991Custom

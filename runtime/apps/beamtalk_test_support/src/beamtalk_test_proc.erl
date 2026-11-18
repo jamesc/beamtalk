@@ -18,7 +18,9 @@ stop/kill. Every stop waits on a monitor `'DOWN'`, never a `timer:sleep`.
     shutdown/1,
     await_down/2,
     stop_registered/1,
-    restart/1
+    stop_if_bare/1,
+    restart/1,
+    in_fresh_process/1
 ]).
 
 -doc "Spawn an unlinked process that idles until it is killed or sent `stop`.".
@@ -104,6 +106,32 @@ stop_registered(Name) ->
     stop(whereis(Name)).
 
 -doc """
+Stop the process registered as `Name` only when a test started it bare: its
+`$ancestors` start with a pid (a bare `start_link/0` from a test or fixture
+process), not with a supervisor's registered name. A supervised child of the
+runtime is left alone. For a fixture's cleanup half of "start it if it is not
+running": a bare-started singleton outlives the test (a normal exit signal does not
+kill a process that is not trapping exits) and makes the next module's
+`ensure_all_started(beamtalk_runtime)` fail with `already_started` (BT-4962).
+""".
+-spec stop_if_bare(atom()) -> ok.
+stop_if_bare(Name) ->
+    case whereis(Name) of
+        undefined ->
+            ok;
+        Pid ->
+            case process_info(Pid, dictionary) of
+                {dictionary, Dict} ->
+                    case proplists:get_value('$ancestors', Dict) of
+                        [Starter | _] when is_pid(Starter) -> stop(Pid);
+                        _ -> ok
+                    end;
+                undefined ->
+                    ok
+            end
+    end.
+
+-doc """
 Stop the singleton registered as `Name` (if any), then start a fresh one with
 `Name:start_link/0` — the module is assumed to share its registered name, as
 every Beamtalk workspace singleton does. Returns what `start_link/0` returns.
@@ -131,4 +159,37 @@ await_down(MRef, Pid) ->
     after 5000 ->
         demonitor(MRef, [flush]),
         error({wait_timeout, {alive, [Pid]}})
+    end.
+
+-doc """
+Run `Fun()` in a short-lived process and return its result (a crash is
+re-raised in the caller). For a test that calls an actor's `init/1` inline:
+`init/1` writes the `'$beamtalk_actor'` marker into the calling process's
+dictionary, and a marker left on a shared test process makes that process an
+"actor" to every later scan (ADR 0150), listing it in actor lists.
+""".
+-spec in_fresh_process(fun(() -> T)) -> T when T :: term().
+in_fresh_process(Fun) ->
+    Parent = self(),
+    Ref = make_ref(),
+    {Pid, MonRef} = spawn_monitor(fun() ->
+        %% bt-catcher-audit: not-applicable-reraises - test helper; the failure is
+        %% sent to the caller, which re-raises it with the original stacktrace
+        Parent !
+            {Ref,
+                try
+                    {ok, Fun()}
+                catch
+                    Class:Reason:Stack -> {raised, Class, Reason, Stack}
+                end}
+    end),
+    receive
+        {Ref, {ok, Result}} ->
+            erlang:demonitor(MonRef, [flush]),
+            Result;
+        {Ref, {raised, Class, Reason, Stack}} ->
+            erlang:demonitor(MonRef, [flush]),
+            erlang:raise(Class, Reason, Stack);
+        {'DOWN', MonRef, process, Pid, Why} ->
+            erlang:error({in_fresh_process_died, Why})
     end.

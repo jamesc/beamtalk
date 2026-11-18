@@ -1395,7 +1395,7 @@ Safety checks (raises errors for):
   - Classes with direct subclasses (must remove children first)
 
 Cleanup sequence:
-  1. Stop all live actors of this class (via beamtalk_actor_registry)
+  1. Stop all live actors of this class (found by the process scan)
   2. Stop the class gen_server (terminate/2 removes ETS entry and pg group)
   3. Purge the BEAM module (code:soft_purge + code:delete)
   4. Purge derived registries — xref, extensions, protocol registry,
@@ -1470,9 +1470,17 @@ classRemoveFromSystemByName(ClassName) ->
                             %% on the class process during the removal
                             %% window, which the monitor would otherwise
                             %% classify as a crash and resurrect mid-removal.
+                            %% BT-4936: refuse while any supervisor holds a child
+                            %% of this class — before anything is unwatched,
+                            %% killed or removed.
+                            %% One scan serves the supervision check, the
+                            %% self-kill check and the stop below.
+                            ActorPids = class_actor_pids(ClassName),
+                            ok = refuse_if_supervised(ClassName, Module, ActorPids),
+                            ok = refuse_if_caller_is_instance(ClassName, ActorPids),
                             beamtalk_class_monitor:unwatch(ClassName),
                             %% Stop live actors of this class
-                            stop_class_actors(ClassName),
+                            stop_class_actors(ActorPids),
                             %% Stop the class gen_server
                             %% (terminate/2 in beamtalk_object_class removes ETS entry and pg group)
                             gen_server:stop(ClassPid),
@@ -2061,31 +2069,117 @@ is_stdlib_module_name(Module) ->
     beamtalk_module_name:is_stdlib_module(Module).
 
 -doc """
-Stop all live actors of a given class.
+BT-4936: raise a structured error (nothing killed, nothing removed) when a
+supervisor holds a child of the class: a static spec, a dynamic supervisor
+child, or a `withClassMethod:` factory child. A supervisor that cannot be
+queried (timeout, or removal running inside it) also refuses (fail closed).
 
-Queries the actor registry (if available) for all actors belonging
-to the class, then kills each one. The registry is accessed by its
-registered name to avoid a module-level dependency on beamtalk_workspace.
+Known, accepted window: the check runs once, up front. A dynamic child
+started by another process between this check and the module delete is not
+caught; closing it would need supervisors to refuse starts of a class under
+removal.
 """.
--spec stop_class_actors(atom()) -> ok.
-stop_class_actors(ClassName) ->
-    case erlang:whereis(beamtalk_actor_registry) of
-        undefined ->
+-spec refuse_if_supervised(atom(), module(), [pid()]) -> ok.
+refuse_if_supervised(ClassName, Module, ActorPids) ->
+    case beamtalk_supervisor:supervised_children_of(Module, ActorPids) of
+        [] ->
             ok;
-        RegistryPid ->
-            Actors = gen_server:call(RegistryPid, list_actors),
-            ClassActors = [
-                maps:get(pid, Meta)
-             || Meta <- Actors, maps:get(class, Meta, undefined) =:= ClassName
-            ],
-            lists:foreach(
-                fun(Pid) ->
-                    try
-                        gen_server:call(RegistryPid, {kill, Pid})
-                    catch
-                        _:_ -> ok
-                    end
-                end,
-                ClassActors
+        [#{supervisor := Sup, supervisor_pid := SupPid, id := Id} | _] = Found ->
+            SupStr = supervisor_label(Sup, SupPid),
+            Error0 = beamtalk_error:new(runtime_error, ClassName),
+            Error1 = beamtalk_error:with_message(
+                Error0,
+                iolist_to_binary(
+                    io_lib:format(
+                        "Cannot remove class '~ts'; supervisor ~ts holds a child of it (~ts)",
+                        [ClassName, SupStr, child_label(Id)]
+                    )
+                )
+            ),
+            Error2 = beamtalk_error:with_hint(
+                Error1,
+                <<"Remove the child from the supervisor first, then remove the class.">>
+            ),
+            beamtalk_error:raise(
+                beamtalk_error:with_details(Error2, #{
+                    supervisor => Sup, child_id => Id, supervised_children => length(Found)
+                })
             )
+    end.
+
+-doc """
+Raise a structured error (nothing killed, nothing removed) when the calling
+process is itself an instance of the class (`Foo removeFromSystem` run by a
+`Foo` actor). Stopping the class's actors would kill the caller part-way, after
+the class monitor was unwatched but before the class process, module and
+registries were cleaned up.
+""".
+-spec refuse_if_caller_is_instance(atom(), [pid()]) -> ok.
+refuse_if_caller_is_instance(ClassName, ActorPids) ->
+    case lists:member(self(), ActorPids) of
+        false ->
+            ok;
+        true ->
+            Error0 = beamtalk_error:new(runtime_error, ClassName),
+            Error1 = beamtalk_error:with_message(
+                Error0,
+                iolist_to_binary(
+                    io_lib:format(
+                        "Cannot remove class '~ts' from one of its own instances", [ClassName]
+                    )
+                )
+            ),
+            beamtalk_error:raise(
+                beamtalk_error:with_hint(
+                    Error1, <<"Call removeFromSystem from outside an instance of the class.">>
+                )
+            )
+    end.
+
+supervisor_label(nil, Pid) -> io_lib:format("~p", [Pid]);
+supervisor_label(Sup, _Pid) -> atom_to_list(Sup).
+
+child_label(unreachable) -> "a supervisor that could not be queried";
+child_label(undefined) -> "dynamic child";
+child_label(Id) -> io_lib:format("child id ~tp", [Id]).
+
+-spec class_actor_pids(atom()) -> [pid()].
+class_actor_pids(ClassName) ->
+    %% Marked actors only: this feeds `removeFromSystem`, which kills what it
+    %% finds. The `native:` fallback would also match other classes' processes
+    %% and processes Beamtalk never started.
+    beamtalk_runtime_api:marked_instances(ClassName).
+
+-doc """
+Stop the live actors of a class, given by `class_actor_pids/1`, and wait for
+each to die.
+
+The pids come from the process scan (ADR 0150): supervised and named children
+included, no actor list involved, marked actors only, so a `native:` backing
+module shared with another class or an OTP process is never killed. Unlike the
+list-based version, a REPL-spawned `native:` actor is no longer killed, and
+marked actors are killed whether or not an actor list is running.
+""".
+-spec stop_class_actors([pid()]) -> ok.
+stop_class_actors(ActorPids) ->
+    lists:foreach(fun kill_and_wait/1, ActorPids).
+
+-spec kill_and_wait(pid()) -> ok.
+kill_and_wait(Pid) ->
+    Ref = erlang:monitor(process, Pid),
+    exit(Pid, kill),
+    receive
+        {'DOWN', Ref, process, Pid, _Reason} -> ok
+    after 5000 ->
+        erlang:demonitor(Ref, [flush]),
+        Class =
+            case beamtalk_actor_scan:info(Pid) of
+                [{_, C, _} | _] -> C;
+                [] -> unknown
+            end,
+        ?LOG_WARNING(
+            "removeFromSystem: actor did not die within 5s of kill",
+            #{pid => Pid, class => Class, domain => [beamtalk, runtime]}
+        ),
+        ok
     end.

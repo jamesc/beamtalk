@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4991: test fixture — a non-Boolean class with its own
+// `ifFalse:ifTrue:`, so the conditional's fallback send for a non-Boolean
+// receiver is observable.
+
+Value subclass: Bt4991CustomIfFalseIfTrue
+
+  ifFalse: _falseBlock ifTrue: _trueBlock => #bt4991Custom

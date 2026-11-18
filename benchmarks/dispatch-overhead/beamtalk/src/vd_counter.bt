@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Actor: self sends inside a gen_server callback.
+Actor subclass: VdCounter
+  state: count :: Integer = 0
+
+  count -> Integer => self.count
+
+  viaSelf -> Integer => self count
+
+  // BT-4995: the Actor intrinsics an actor start runs (`self continueWith:`,
+  // `self stopWith:`, the default `terminate:`), sent from inside the actor
+  // `n` times. Each reaches the generated `dispatch/4` default arm.
+  noop -> Nil => nil
+
+  intrinsicContinue: n :: Integer -> Integer =>
+    n timesRepeat: [self continueWith: #noop]
+    n
+
+  intrinsicStop: n :: Integer -> Integer =>
+    n timesRepeat: [self stopWith: #normal]
+    n
+
+  intrinsicTerminate: n :: Integer -> Integer =>
+    n timesRepeat: [self terminate: #normal]
+    n

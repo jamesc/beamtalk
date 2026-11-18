@@ -304,7 +304,7 @@ impl LanguageService {
 
 #### Gap 5.1: doesNotUnderstand Dispatch (Low Priority)
 
-**Expected (from DDD model):**
+**Expected (from DDD model):** _(Historical snippet: the interpretive `handle_dnu` path it describes was deleted in BT-4871. Compiled actors dispatch through generated `dispatch/4`, and an unrecognised message raises `does_not_understand`.)_
 ```erlang
 handle_dnu(Selector, Args, Self, State) ->
     case maps:find('doesNotUnderstand:args:', maps:get('__methods__', State)) of

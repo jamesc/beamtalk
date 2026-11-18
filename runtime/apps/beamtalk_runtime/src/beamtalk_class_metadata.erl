@@ -180,9 +180,9 @@ a table deleted between an existence check and the op (teardown/shutdown).
 %% table so compile-time-only classes pay nothing on the dispatch hot path.
 -define(FUN_TABLE, beamtalk_class_method_funs).
 %% Reverse-edge index for match_subclasses/1 — an `ordered_set` of
-%% `{Superclass, ClassName, Owner}` rows, keyed on Superclass (BT-4808: `Owner`
-%% is the class process that wrote the edge). See moduledoc "Reverse subclass
-%% index".
+%% `{{Superclass, ClassName}, Owner}` rows, keyed on the `{Superclass,
+%% ClassName}` pair (BT-4840; BT-4808: `Owner` is the class process that wrote
+%% the edge). See moduledoc "Reverse subclass index".
 -define(SUBCLASS_INDEX, beamtalk_class_subclass_index).
 %% BT-3832: per-method records (info / source / signature / doc) behind
 %% `CompiledMethod` lookups, an `ordered_set` keyed `{ClassName, Side,
@@ -374,6 +374,15 @@ new() ->
     %% `ordered_set` keyed on the pair: insert/delete are O(log N) regardless of
     %% a superclass's subclass count, and a Superclass-prefix select reads just
     %% that superclass's edges.
+    %%
+    %% BT-4846: upgrades are restart-only (ADR 0125 §2.1). Before BT-4840 this
+    %% table was a `bag` of `{Superclass, ClassName, Owner}`, and `ensure_table`
+    %% keeps an existing table, so hot-loading this module onto a node that
+    %% still holds the old bag would write the new row shape into it. There is
+    %% deliberately no in-place rebuild: `new/0` is called concurrently by class
+    %% gen_servers and the table is public, so a delete-and-recreate cannot be
+    %% made atomic and would lose or crash on concurrent edge writes. Restart
+    %% the node to pick up the new table shape.
     ensure_table(?SUBCLASS_INDEX, [
         ordered_set,
         public,
@@ -2051,8 +2060,8 @@ insert_subclass_edge(Superclass, Name, Owner) ->
 delete_subclass_edge(Superclass, Name, Owner) ->
     try
         case {Superclass, Owner} of
-            {'_', _} -> ets:match_delete(?SUBCLASS_INDEX, {{Superclass, Name}, Owner});
-            {_, '_'} -> ets:delete(?SUBCLASS_INDEX, {Superclass, Name});
+            %% Fully-bound key, any owner: a direct key delete.
+            {Super, '_'} when Super =/= '_' -> ets:delete(?SUBCLASS_INDEX, {Super, Name});
             _ -> ets:match_delete(?SUBCLASS_INDEX, {{Superclass, Name}, Owner})
         end,
         ok

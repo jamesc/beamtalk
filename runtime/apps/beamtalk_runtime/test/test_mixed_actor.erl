@@ -30,7 +30,7 @@ start_link(InitialValue) ->
     beamtalk_actor:start_link(?MODULE, InitialValue).
 
 init(InitialValue) ->
-    beamtalk_actor:init(#{
+    test_actor_host:init(#{
         '$beamtalk_class' => 'MixedActor',
         '__class_mod__' => 'test_mixed_actor',
         '__methods__' => #{
@@ -41,11 +41,11 @@ init(InitialValue) ->
         value => InitialValue
     }).
 
-handle_cast(Msg, State) -> beamtalk_actor:handle_cast(Msg, State).
-handle_call(Msg, From, State) -> beamtalk_actor:handle_call(Msg, From, State).
-handle_info(Msg, State) -> beamtalk_actor:handle_info(Msg, State).
-code_change(OldVsn, State, Extra) -> beamtalk_actor:code_change(OldVsn, State, Extra).
-terminate(Reason, State) -> beamtalk_actor:terminate(Reason, State).
+handle_cast(Msg, State) -> test_actor_host:handle_cast(Msg, State).
+handle_call(Msg, From, State) -> test_actor_host:handle_call(Msg, From, State).
+handle_info(Msg, State) -> test_actor_host:handle_info(Msg, State).
+code_change(OldVsn, State, Extra) -> test_actor_host:code_change(OldVsn, State, Extra).
+terminate(Reason, State) -> test_actor_host:terminate(Reason, State).
 
 %% Old-style method (Fun/2)
 handle_getValueOldStyle([], State) ->

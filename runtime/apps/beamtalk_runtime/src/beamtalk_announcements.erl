@@ -171,7 +171,8 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 %% Exported for tests only (BT-4903): no production caller.
 -ifdef(TEST).
 -export([
-    subscription_count/0
+    subscription_count/0,
+    subscribed_classes/1
 ]).
 -endif.
 
@@ -570,10 +571,15 @@ matching_classes(EventClass, Classes) ->
     [C || C <- lists:usort(Classes), beamtalk_class_derived_cache:inherits_from(EventClass, C)].
 
 -doc """
-Classes with at least one subscription on `AnnouncerRef`. The by-class index is
-an `ordered_set` keyed `{AnnouncerRef, Class, SubRef}`, so this is a prefix range
-scan, not a table scan. Not cached: subscribe / unsubscribe / claim keep the
-index current, so nothing needs invalidating.
+Classes with at least one subscription on `AnnouncerRef`, each once, in class
+order. The by-class index is an `ordered_set` keyed `{AnnouncerRef, Class,
+SubRef}`, so one announcer's keys are contiguous and the walk below visits one
+key per subscribed class (`ets:next/2` from just past each class's last
+possible key), not one per subscription. It replaces an `ets:select/2` with a
+match spec: the same answer, minus the match-spec compile that `select/2` pays
+on every call, which dominated an announce with nobody listening (BT-4932).
+Not cached: subscribe / unsubscribe / claim keep the index current, so
+nothing needs invalidating.
 """.
 -spec subscribed_classes(announcer_ref()) -> [announcement_class()].
 subscribed_classes(AnnouncerRef) ->
@@ -581,8 +587,23 @@ subscribed_classes(AnnouncerRef) ->
         undefined ->
             [];
         _ ->
-            ets:select(?BY_CLASS_TABLE, [{{{AnnouncerRef, '$1', '_'}}, [], ['$1']}])
+            %% `{AnnouncerRef, 0, 0}` sorts before every key of this announcer
+            %% (a number sorts before the atom `Class`).
+            subscribed_classes_from(AnnouncerRef, ets:next(?BY_CLASS_TABLE, {AnnouncerRef, 0, 0}))
     end.
+
+-spec subscribed_classes_from(announcer_ref(), term()) -> [announcement_class()].
+subscribed_classes_from(AnnouncerRef, {AnnouncerRef, Class, _SubRef}) ->
+    %% `[]` sorts after every reference, so this key is past all of `Class`'s
+    %% subscriptions and `ets:next/2` lands on the next class (or announcer).
+    [
+        Class
+        | subscribed_classes_from(
+            AnnouncerRef, ets:next(?BY_CLASS_TABLE, {AnnouncerRef, Class, []})
+        )
+    ];
+subscribed_classes_from(_AnnouncerRef, _OtherAnnouncerOrEnd) ->
+    [].
 
 -spec walk_collect(
     announcer_ref(),

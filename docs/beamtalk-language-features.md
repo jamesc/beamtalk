@@ -3595,6 +3595,7 @@ These message sends are Tier 1 optimized — the compiler generates inlined tail
 
 | Construct | Example | Mutations Allowed |
 |-----------|---------|-------------------|
+| `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:` / `ifFalse:ifTrue:` | `flag ifFalse: [n := 0] ifTrue: [n := 1]` | ✅ |
 | `whileTrue:` / `whileFalse:` | `[count < 10] whileTrue: [count := count + 1]` | ✅ |
 | `whileTrue` / `whileFalse` (unary: the receiver block is condition and body, so it runs at least once) | `[self.count := self.count + 1. self.count < 10] whileTrue` | ✅ (below) |
 | `timesRepeat:` | `5 timesRepeat: [sum := sum + n]` | ✅ |
@@ -3605,6 +3606,8 @@ These message sends are Tier 1 optimized — the compiler generates inlined tail
 The unary `[...] whileTrue` / `[...] whileFalse` is the keyword loop with an empty body (`[...] whileTrue: []`), so its receiver follows the rule for a `whileTrue:` condition ([BT-4313](https://linear.app/beamtalk/issue/BT-4313)). A local written in a `whileTrue:`/`whileFalse:` condition threads in every method kind and at the REPL, the unary forms included, whatever the condition or body does ([BT-4602](https://linear.app/beamtalk/issue/BT-4602)): `count := 0. [count := count + 1. count < 10] whileTrue` leaves `count` at 10. The condition runs once more than the body. The one exception is a keyword loop whose body is not a block literal (`[count := count + 1. count < 10] whileTrue: aBlock`): the loop runs its condition as a closure, so a local written in it is a compile error ([BT-4062](https://linear.app/beamtalk/issue/BT-4062)); wrap the block value in a literal (`whileTrue: [aBlock value]`).
 
 A `repeat` sent to a block literal is the loop `[true] whileTrue: [...]` ([BT-4589](https://linear.app/beamtalk/issue/BT-4589)), so its receiver is a loop body: the locals and REPL bindings it writes are carried from one iteration to the next, and are visible after a `^` ends the loop. An error that ends it follows the protected-region rule like any other loop.
+
+`ifFalse:ifTrue:` is the two-branch conditional with the arms in the other order ([BT-4991](https://linear.app/beamtalk/issue/BT-4991)): `c ifFalse: [a] ifTrue: [b]` answers what `c ifTrue: [b] ifFalse: [a]` answers. With two literal block arguments that take no parameters, the compiler lowers it as that `ifTrue:ifFalse:`, so inlining, narrowing, local threading and `^` inside a block behave exactly as they do for `ifTrue:ifFalse:` (a `^` in one arm still uses the non-local-return throw/catch, as it does there). This holds for an untyped receiver too: the inline `case` sends the message only for a value that is not a Boolean. It does not apply to a `self`, `super` or class-reference receiver, or to the first message of a cascade; those, and any send with a block held in a variable, are ordinary sends, which `Boolean` answers. A receiver that is not a Boolean is sent `ifFalse:ifTrue:` as written, and the type checker resolves it under that selector, so a `Boolean | C` receiver loses the Boolean narrowing inside the arms.
 
 ### Local Variable Mutations
 
@@ -6676,6 +6679,15 @@ source). Unlike `removeSelector:` (above), it is a hard, unconditional
 refusal for stdlib classes and classes with subclasses — there is no
 in-memory-but-non-flushable escape hatch.
 
+It also refuses while any supervisor still holds a child of the class (a
+static child spec, a `DynamicSupervisor` child, or a child started through a
+`withClassMethod:` factory), including supervisors nested anywhere in a tree
+and a `transient` child that has exited normally but whose spec remains
+([BT-4936](https://linear.app/beamtalk/issue/BT-4936)). The error names the
+supervisor and the child, and nothing is stopped or removed. Remove the child
+from the supervisor first (`terminateChild:` then `deleteChild:`), then remove
+the class. Unsupervised actors of the class are stopped as before.
+
 ```beamtalk
 Counter removeFromSystem   // => nil (Counter class removed; refuses if Counter has subclasses)
 Integer removeFromSystem   // => Error: cannot remove stdlib class
@@ -7396,7 +7408,7 @@ Telemetry detach: #auditMisses
 - The handler runs **synchronously in the emitting process**, so keep it short (hand work to an actor if it is slow).
 - If a handler raises, `telemetry` logs the error and **detaches** it; the emitter is not affected.
 - A handler is not re-entered by an emit it causes itself (for example a handler on `#(#beamtalk, #actor, #dispatch, #stop)` that sends to an actor), so it cannot recurse without bound.
-- The runtime's actor-dispatch events (`#(#beamtalk, #actor, #dispatch, #start)`, `#stop`, `#exception`) are **opt-in** ([ADR 0069 amendment, BT-4113](ADR/0069-actor-observability-and-tracing.md#amendment-2026-10-28-dispatch-events-are-opt-in-bt-4113)): every actor send would pay for them otherwise. Attaching a handler to one of them through `Telemetry` turns them on, and detaching the last such handler turns them off again; `Tracing enable` also turns them on. Erlang or Elixir code that attaches with `telemetry:attach/4` must set the app env `{beamtalk_runtime, dispatch_telemetry, true}` or call `beamtalk_telemetry:enable_dispatch_events/0`. The `Tracing` aggregates do not depend on them, and the actor lifecycle events are always emitted.
+- The runtime's actor-dispatch events (`#(#beamtalk, #actor, #dispatch, #start)`, `#stop`, `#exception`) are **opt-in** ([ADR 0069 amendment, BT-4113](ADR/0069-actor-observability-and-tracing.md#amendment-2026-10-28-dispatch-events-are-opt-in-bt-4113)): every actor send would pay for them otherwise. Attaching a handler to one of them through `Telemetry` turns them on, and detaching the last such handler turns them off again; `Tracing enable` also turns them on. Erlang or Elixir code that attaches with `telemetry:attach/4` must set the app env `{beamtalk_runtime, dispatch_telemetry, true}` or call `beamtalk_telemetry:enable_dispatch_events/0`. The `Tracing` aggregates do not depend on them. The actor start and stop events (`#(#beamtalk, #actor, #lifecycle, #start)` and `#stop`) are opt-in in the same way ([ADR 0069 amendment, BT-4997](ADR/0069-actor-observability-and-tracing.md#amendment-2026-11-17-lifecycle-startstop-events-are-opt-in-bt-4997)): a `Telemetry` handler on one of them turns them on; Erlang or Elixir code sets the app env `{beamtalk_runtime, lifecycle_telemetry, true}` or calls `beamtalk_telemetry:enable_lifecycle_events/0`. `Tracing`, its aggregates and the `ActorSpawned` / `ActorStopped` announcements do not depend on them; the `#kill` event is always emitted.
 - Class variables follow [ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md): a handler running away from its home class reads the values captured when the block was created, and a write raises `class_state_unreachable`; at home, a raising handler's writes are discarded.
 - The handler block belongs to the code that created it: after redefining that class, attach the handler again.
 - The runtime's own handler ids (the ones `Tracing` relies on) are reserved: `attach:` and `detach:` refuse them with `#reserved_name`.

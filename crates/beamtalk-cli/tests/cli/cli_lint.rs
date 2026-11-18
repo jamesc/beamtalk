@@ -485,6 +485,40 @@ fn lint_types_ffi_calls_into_stdlibs_own_backing_modules_bt_3597() {
         .stderr(contains("untyped FFI").not());
 }
 
+/// BT-4965: a file under `stdlib/test` gets the same FFI registry `beamtalk
+/// test` gives it (the runtime's own specs), so an `@expect type` that the
+/// build needs is not reported as stale by lint. Before the fix lint only
+/// gave `stdlib/src` that registry, the FFI type error never fired under
+/// lint, and the marker looked stale (a contributor following the warning
+/// broke the `test-bunit` compile).
+///
+/// Path-shape only, like the BT-3597 twin above: a hermetic
+/// `<tmp>/stdlib/test` exercises the same gate as the real tree.
+#[test]
+fn lint_does_not_report_needed_expect_type_stale_under_stdlib_test_bt_4965() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let stdlib_test = temp.path().join("stdlib").join("test");
+    std::fs::create_dir_all(&stdlib_test).unwrap();
+    std::fs::write(
+        stdlib_test.join("ffi_expect_test.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: FfiExpectTest\n\
+         \n\
+         \x20\x20bad =>\n\
+         \x20\x20\x20\x20@expect type\n\
+         \x20\x20\x20\x20Erlang beamtalk_character is_digit: #notAnInteger\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .args(["lint", stdlib_test.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(contains("stale @expect").not());
+}
+
 #[test]
 fn lint_missing_path_exits_nonzero() {
     let project = cli_common::fixture_project();
@@ -949,4 +983,217 @@ fn actor_state_abroad_resolves_out_of_file_actor_ancestor_bt_4183() {
     );
     assert!(abroad[0].contains("Sub.bt"), "{}", abroad[0]);
     assert!(!output.status.success(), "lint must fail:\n{stdout}");
+}
+
+/// BT-4942: an error-severity diagnostic (here ADR 0070's unknown package
+/// qualifier) must fail plain `beamtalk lint`, not only
+/// `--warnings-as-errors`. The gate used to count `Severity::Lint` alone, so
+/// every `Error` diagnostic printed and still exited 0.
+#[test]
+fn lint_unknown_package_qualifier_exits_nonzero_bt_4942() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Qualified.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Qualified\n\
+         \x20\x20other => nosuchpkg@Widget\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .failure()
+        .stderr(contains("Unknown package 'nosuchpkg'"))
+        .stderr(contains("1 error diagnostic found in"))
+        .stderr(contains("REPL load-project parity").not());
+}
+
+/// BT-4942: a known qualifier (the package's own name) stays clean.
+#[test]
+fn lint_known_package_qualifier_exits_zero_bt_4942() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Qualified.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Qualified\n\
+         \x20\x20other => cli_subprocess_fixture@Greeter\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .success();
+}
+
+const HEADER: &str = "// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\n";
+
+/// BT-4929: `uses: nosuchpkg@Foo` is an unknown package, reported once — the
+/// flattener's own "no source available" error for the same line is replaced,
+/// not added to.
+#[test]
+fn lint_uses_unknown_package_qualifier_is_reported_once_bt_4929() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Widget.bt"),
+        format!(
+            "{HEADER}Object subclass: Widget\n  uses: nosuchpkg@Foo\n  name -> String => \"w\"\n"
+        ),
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .failure()
+        .stderr(contains(
+            "Unknown package 'nosuchpkg' in protocol reference 'nosuchpkg@Foo'",
+        ))
+        .stderr(contains("no source available").not())
+        .stderr(contains("1 error diagnostic found in"));
+}
+
+/// BT-4929: `uses: pkg@Proto` naming the package itself is a known qualifier;
+/// the package check adds nothing. (It resolves to the package's own protocol.)
+#[test]
+fn lint_uses_known_package_qualifier_is_accepted_bt_4929() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Foo.bt"),
+        format!(
+            "{HEADER}Protocol define: Foo\n  name -> String\n\n  shout -> String => self name\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("src/Widget.bt"),
+        format!(
+            "{HEADER}Object subclass: Widget\n  uses: cli_subprocess_fixture@Foo\n  name -> String => \"w\"\n"
+        ),
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .success()
+        .stderr(contains("Unknown package").not());
+}
+
+/// BT-4929: a protocol's provided-method body is walked too.
+#[test]
+fn lint_protocol_provided_method_unknown_package_qualifier_bt_4929() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Greets.bt"),
+        format!(
+            "{HEADER}Protocol define: Greets\n  name -> String\n\n  greet -> Object => nosuchpkg@Widget new\n"
+        ),
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .failure()
+        .stderr(contains(
+            "Unknown package 'nosuchpkg' in qualified reference 'nosuchpkg@Widget'",
+        ))
+        .stderr(contains("1 error diagnostic found in"));
+}
+
+#[test]
+fn lint_protocol_provided_method_known_package_qualifier_bt_4929() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Greets.bt"),
+        format!(
+            "{HEADER}Protocol define: Greets\n  name -> String\n\n  greet -> Object => cli_subprocess_fixture@Greeter new\n"
+        ),
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .success()
+        .stderr(contains("Unknown package").not());
+}
+
+/// BT-4929 (review): a qualifier written once in a protocol's provided method
+/// is one error however many classes `uses:` the protocol. A class and a
+/// protocol cannot share a file, so the users are in other files of the
+/// package: the error is reported in the protocol's file only, not again
+/// against each user's. (The same-file case is covered by the `analyse_full`
+/// tests in `flattened_provision_diagnostics.rs`.)
+#[test]
+fn lint_protocol_provided_method_qualifier_reported_once_with_users_in_other_files_bt_4929() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Greets.bt"),
+        format!(
+            "{HEADER}Protocol define: Greets\n  name -> String\n\n  greet -> Object => nosuchpkg@Widget new\n"
+        ),
+    )
+    .unwrap();
+    for user in ["A", "B"] {
+        std::fs::write(
+            project.path().join(format!("src/{user}.bt")),
+            format!("{HEADER}Object subclass: {user}\n  uses: Greets\n  name -> String => \"x\"\n"),
+        )
+        .unwrap();
+    }
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .failure()
+        .stderr(contains("Greets.bt"))
+        .stderr(contains("1 error diagnostic found in"));
+}
+
+/// BT-4955: a directory listed in `.beamtalk-lint-exempt` is not reported on
+/// (and does not fail the run), while an identical finding elsewhere still
+/// fails, and the exempt files still feed cross-file context.
+#[test]
+fn lint_exempt_file_silences_listed_directory_only() {
+    let project = cli_common::fixture_project();
+    let body = "Object subclass: Shaped\n  go =>\n    ^1\n";
+    std::fs::create_dir_all(project.path().join("fixtures")).expect("mkdir fixtures");
+    std::fs::write(project.path().join("fixtures/shaped.bt"), body).expect("write fixture");
+    std::fs::write(
+        project.path().join(".beamtalk-lint-exempt"),
+        "# test\nfixtures/\n",
+    )
+    .expect("write exempt file");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .success();
+
+    std::fs::write(
+        project.path().join("other.bt"),
+        body.replace("Shaped", "Other"),
+    )
+    .expect("write non-exempt file");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .failure()
+        .stderr(contains("redundant"));
 }

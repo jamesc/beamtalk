@@ -38,9 +38,12 @@ spawn() ->
 spawn(InitArgs) when is_map(InitArgs) ->
     beamtalk_actor:safe_spawn(?MODULE, InitArgs).
 
+%% `InitArgs` may carry `class => Name` to stamp a private class name on the
+%% instance, so a test that removes its class never matches another test's
+%% actors (`removeFromSystem` kills every process carrying the class marker).
 init(InitArgs) ->
-    beamtalk_actor:init(#{
-        '$beamtalk_class' => 'TestClassActor',
+    test_actor_host:init(#{
+        '$beamtalk_class' => maps:get(class, InitArgs, 'TestClassActor'),
         '__class_mod__' => ?MODULE,
         '__methods__' => #{
             getValue => fun handle_getValue/2
@@ -48,11 +51,11 @@ init(InitArgs) ->
         value => maps:get(value, InitArgs, 0)
     }).
 
-handle_cast(Msg, State) -> beamtalk_actor:handle_cast(Msg, State).
-handle_call(Msg, From, State) -> beamtalk_actor:handle_call(Msg, From, State).
-handle_info(Msg, State) -> beamtalk_actor:handle_info(Msg, State).
-code_change(OldVsn, State, Extra) -> beamtalk_actor:code_change(OldVsn, State, Extra).
-terminate(Reason, State) -> beamtalk_actor:terminate(Reason, State).
+handle_cast(Msg, State) -> test_actor_host:handle_cast(Msg, State).
+handle_call(Msg, From, State) -> test_actor_host:handle_call(Msg, From, State).
+handle_info(Msg, State) -> test_actor_host:handle_info(Msg, State).
+code_change(OldVsn, State, Extra) -> test_actor_host:code_change(OldVsn, State, Extra).
+terminate(Reason, State) -> test_actor_host:terminate(Reason, State).
 
 handle_getValue([], State) ->
     {reply, maps:get(value, State), State}.

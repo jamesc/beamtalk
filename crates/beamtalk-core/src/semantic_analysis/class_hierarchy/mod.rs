@@ -120,6 +120,13 @@ impl ClassHierarchy {
     pub fn is_builtin_class(name: &str) -> bool {
         builtins::is_builtin_class(name)
     }
+    /// Returns true if `name` is a built-in class identified by its Erlang
+    /// term shape rather than a tagged constructor (BT-4964; today `String`).
+    #[must_use]
+    pub fn is_term_shape_builtin_class(name: &str) -> bool {
+        builtins::is_term_shape_builtin_class(name)
+    }
+
     /// Returns true if the given class name has runtime shadowing protection.
     ///
     /// Only stdlib classes with the `bt@stdlib@` module prefix are protected

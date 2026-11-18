@@ -319,12 +319,17 @@ is_supervisor_returns_false_for_non_supervisor_class_test() ->
     %% A class that inherits from 'Actor' (not Supervisor) returns false.
     beamtalk_class_metadata:new(),
     beamtalk_class_metadata:insert('BT1960Worker', undefined, undefined, 'Actor', undefined),
-    beamtalk_class_metadata:insert('Actor', undefined, undefined, none, undefined),
+    %% Only claim the shared 'Actor' row when no real Actor is registered, and delete
+    %% only a row inserted here: overwriting then deleting the real stdlib Actor's row
+    %% broke the class chain for later modules (BT-4962).
+    InsertedActor = beamtalk_class_metadata:lookup_module('Actor') =:= not_found,
+    InsertedActor andalso
+        beamtalk_class_metadata:insert('Actor', undefined, undefined, none, undefined),
     try
         ?assertEqual(false, beamtalk_supervisor:is_supervisor('BT1960Worker'))
     after
         beamtalk_class_metadata:delete('BT1960Worker'),
-        beamtalk_class_metadata:delete('Actor')
+        InsertedActor andalso beamtalk_class_metadata:delete('Actor')
     end.
 
 %%====================================================================

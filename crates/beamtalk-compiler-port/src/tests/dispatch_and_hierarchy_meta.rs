@@ -654,3 +654,107 @@ fn constant_class_methods_survive_etf_meta() {
     }
     assert_eq!(info.methods[0].constant_value, None);
 }
+
+/// BT-4930: `__beamtalk_meta` carries `'native' => 'true'` for a `native:`
+/// class and decode reads it back; a `.beam` built before the flag existed (no
+/// `native` key) decodes as non-native without error.
+#[test]
+fn parse_class_hierarchy_reads_the_native_flag() {
+    use eetf::List;
+
+    let meta = |native: Option<&str>| {
+        let mut m = Map::from([
+            (atom("class"), atom("Host")),
+            (atom("superclass"), atom("Value")),
+            (atom("is_value"), atom("true")),
+            (atom("fields"), Term::from(List::from(vec![]))),
+            (atom("class_fields"), Term::from(List::from(vec![]))),
+        ]);
+        if let Some(v) = native {
+            m.map.insert(atom("native"), atom(v));
+        }
+        let term = Term::from(Map::from([(atom("Host"), Term::from(m))]));
+        parse_class_hierarchy_from_term(&term)
+    };
+
+    let flagged = meta(Some("true"));
+    assert_eq!(flagged.len(), 1);
+    assert!(flagged[0].is_native, "flag 'true' must decode as native");
+    let old = meta(None);
+    assert_eq!(old.len(), 1, "a .beam without the flag must still decode");
+    assert!(!old[0].is_native, "absent flag must decode as non-native");
+}
+
+/// BT-4930: the decoded native flag reaches `threads_actor_state`, the one rule
+/// behind the static `CompiledSelfSend`/`super`-send classification. A native
+/// actor from a compiled dependency used to look like a state-threading actor;
+/// it must now agree with the same class declared in source.
+#[test]
+fn decoded_native_actor_does_not_thread_actor_state() {
+    use beamtalk_core::semantic_analysis::ClassHierarchy;
+    use eetf::List;
+
+    let decode = |native: bool| {
+        let mut m = Map::from([
+            (atom("class"), atom("NatActor")),
+            (atom("superclass"), atom("Actor")),
+            (atom("fields"), Term::from(List::from(vec![]))),
+            (atom("class_fields"), Term::from(List::from(vec![]))),
+        ]);
+        if native {
+            m.map.insert(atom("native"), atom("true"));
+        }
+        let term = Term::from(Map::from([(atom("NatActor"), Term::from(m))]));
+        let mut h = ClassHierarchy::with_builtins();
+        for info in parse_class_hierarchy_from_term(&term) {
+            h.insert_class(info.name.clone(), info);
+        }
+        h
+    };
+    assert!(!decode(true).threads_actor_state("NatActor"));
+    assert!(decode(false).threads_actor_state("NatActor"));
+}
+
+/// BT-4961: a `native:` actor that arrives only as compiled metadata (no source)
+/// is enough for the validator: a source subclass without `native:` is an error,
+/// one that redeclares `native:` is not, and a `.beam` built before the flag
+/// existed gets no check.
+#[test]
+fn decoded_native_actor_parent_rejects_a_subclass_without_native() {
+    use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
+    use eetf::List;
+
+    let analyse = |native: bool, src: &str| {
+        let mut m = Map::from([
+            (atom("class"), atom("Counter")),
+            (atom("superclass"), atom("Actor")),
+            (atom("fields"), Term::from(List::from(vec![]))),
+            (atom("class_fields"), Term::from(List::from(vec![]))),
+        ]);
+        if native {
+            m.map.insert(atom("native"), atom("true"));
+        }
+        let term = Term::from(Map::from([(atom("Counter"), Term::from(m))]));
+        let infos = parse_class_hierarchy_from_term(&term);
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+        let ctx = AnalysisContext::default()
+            .with_current_package("app")
+            .with_pre_loaded_classes(infos);
+        analyse_full(&module, ctx)
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("must declare its own `native:`"))
+            .count()
+    };
+    let plain = "Counter subclass: Sub\n  extra => 1\n";
+    assert_eq!(analyse(true, plain), 1);
+    assert_eq!(
+        analyse(
+            true,
+            "Counter subclass: Sub native: other\n  more -> Integer => self delegate\n"
+        ),
+        0
+    );
+    assert_eq!(analyse(false, plain), 0);
+}

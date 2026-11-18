@@ -69,7 +69,7 @@ format_diagnostics_unexpected_type_test() ->
 %%====================================================================
 
 is_internal_key_double_underscore_test() ->
-    ?assert(beamtalk_repl_compiler:is_internal_key('__repl_actor_registry__')).
+    ?assert(beamtalk_repl_compiler:is_internal_key('__some_internal_key__')).
 
 is_internal_key_double_underscore_prefix_only_test() ->
     ?assert(beamtalk_repl_compiler:is_internal_key('__workspace_user_bindings__')).
@@ -108,10 +108,10 @@ known_vars_includes_user_bindings_test() ->
 %% Internal `__`-prefixed keys are excluded (they are not source identifiers).
 known_vars_excludes_internal_keys_test() ->
     KnownVars = beamtalk_repl_compiler:known_vars(#{
-        '__workspace_user_bindings__' => #{}, '__repl_actor_registry__' => self()
+        '__workspace_user_bindings__' => #{}, '__internal_other__' => self()
     }),
     ?assertNot(lists:member(<<"__workspace_user_bindings__">>, KnownVars)),
-    ?assertNot(lists:member(<<"__repl_actor_registry__">>, KnownVars)).
+    ?assertNot(lists:member(<<"__internal_other__">>, KnownVars)).
 
 %% The result is sorted and de-duplicated (a binding shadowing a singleton name
 %% must not appear twice).
@@ -249,26 +249,18 @@ compile_trailing_expressions_none_test() ->
     Result = beamtalk_repl_compiler:compile_trailing_expressions(ClassInfo, my_mod),
     ?assertEqual(none, Result).
 
-%% These tests exercise the error path with no compiler server running, but
-%% many other suites start the compiler app and leave it up, so the tests must
-%% establish that precondition themselves and assert it (BT-4934).
-require_no_compiler() ->
-    _ = application:stop(beamtalk_compiler),
-    ok = beamtalk_test_wait:until(fun() -> whereis(beamtalk_compiler_server) =:= undefined end),
-    ok.
-
 %%====================================================================
 %% compile_expression_via_port/3 — error paths (no compiler running)
 %%====================================================================
 
 compile_expression_via_port_noproc_test() ->
-    ok = require_no_compiler(),
+    ok = beamtalk_test_boot:no_compiler(),
     %% With no compiler server, hits exit:{noproc,_} → {error, _}
     Result = beamtalk_repl_compiler:compile_expression_via_port("1 + 1", test_mod, #{}),
     ?assertMatch({error, _}, Result).
 
 compile_expression_via_port_with_bindings_test() ->
-    ok = require_no_compiler(),
+    ok = beamtalk_test_boot:no_compiler(),
     %% Bindings are filtered; still hits noproc
     Result = beamtalk_repl_compiler:compile_expression_via_port(
         "x + 1", test_mod, #{x => 42, '__internal__' => true}
@@ -276,7 +268,7 @@ compile_expression_via_port_with_bindings_test() ->
     ?assertMatch({error, _}, Result).
 
 compile_expression_via_port_error_message_test() ->
-    ok = require_no_compiler(),
+    ok = beamtalk_test_boot:no_compiler(),
     {error, Msg} = beamtalk_repl_compiler:compile_expression_via_port("1", m, #{}),
     ?assertEqual(
         <<"Compiler not available. Ensure beamtalk_compiler application is started.">>, Msg
@@ -287,19 +279,19 @@ compile_expression_via_port_error_message_test() ->
 %%====================================================================
 
 compile_file_via_port_noproc_test() ->
-    ok = require_no_compiler(),
+    ok = beamtalk_test_boot:no_compiler(),
     Result = beamtalk_repl_compiler:compile_file_via_port("x := 1", "/test.bt", false, undefined),
     ?assertMatch({error, {compile_error, _}}, Result).
 
 compile_file_via_port_stdlib_mode_test() ->
-    ok = require_no_compiler(),
+    ok = beamtalk_test_boot:no_compiler(),
     Result = beamtalk_repl_compiler:compile_file_via_port(
         "Object subclass: Foo [\n]\n", "/stdlib/src/Foo.bt", true, undefined
     ),
     ?assertMatch({error, {compile_error, _}}, Result).
 
 compile_file_via_port_with_override_test() ->
-    ok = require_no_compiler(),
+    ok = beamtalk_test_boot:no_compiler(),
     Result = beamtalk_repl_compiler:compile_file_via_port(
         "Object subclass: Bar [\n]\n", "/src/Bar.bt", false, <<"bt@pkg@bar">>
     ),
@@ -310,7 +302,7 @@ compile_file_via_port_with_override_test() ->
 %%====================================================================
 
 compile_expression_noproc_test() ->
-    ok = require_no_compiler(),
+    ok = beamtalk_test_boot:no_compiler(),
     Result = beamtalk_repl_compiler:compile_expression("1 + 1", some_mod, #{}),
     ?assertMatch({error, _}, Result).
 
@@ -319,7 +311,7 @@ compile_expression_noproc_test() ->
 %%====================================================================
 
 compile_file_noproc_test() ->
-    ok = require_no_compiler(),
+    ok = beamtalk_test_boot:no_compiler(),
     Result = beamtalk_repl_compiler:compile_file(
         "Object subclass: X [\n]\n", "/x.bt", false, undefined
     ),
@@ -330,7 +322,7 @@ compile_file_noproc_test() ->
 %%====================================================================
 
 compile_for_codegen_noproc_test() ->
-    ok = require_no_compiler(),
+    ok = beamtalk_test_boot:no_compiler(),
     Result = beamtalk_repl_compiler:compile_for_codegen(<<"1 + 1">>, <<"test_mod">>, []),
     ?assertMatch({error, {compile_error, _}}, Result).
 

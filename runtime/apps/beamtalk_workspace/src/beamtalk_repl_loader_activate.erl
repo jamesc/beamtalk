@@ -170,28 +170,44 @@ trigger_hot_reload(ModuleName, Classes) ->
         [N || ClassMap <- Classes, N <- [resolve_class_name(ClassMap)], N =/= undefined],
         [{version, 2}]
     ),
-    lists:foreach(
-        fun(ClassMap) ->
-            case resolve_class_name(ClassMap) of
-                undefined ->
-                    ok;
-                ClassName ->
-                    hot_reload_class(ModuleName, ClassName),
-                    hot_reload_descendants(ClassName, ReloadedNames)
-            end
+    %% Plan order does not matter: each entry migrates its own instances, and
+    %% `usort` only drops duplicates (a class named by two `Classes` entries).
+    Plan = lists:usort(
+        lists:append([
+            [{ModuleName, ClassName} | descendant_targets(ClassName, ReloadedNames)]
+         || ClassMap <- Classes,
+            ClassName <- [resolve_class_name(ClassMap)],
+            ClassName =/= undefined
+        ])
+    ),
+    %% ADR 0150: one pass over the node's processes serves the whole reload —
+    %% marked actors only (the `native:` fallback would also match other
+    %% classes' and non-Beamtalk processes, which must not be migrated) —
+    %% the reloaded classes and every descendant, grouped by class — and is
+    %% taken here, after the new code is loaded, never cached from an earlier
+    %% reload (owner condition (a): readers re-scan, no stale list).
+    Instances =
+        case Plan of
+            [] -> #{};
+            _ -> beamtalk_actor_scan:scan_marked_classes([C || {_, C} <- Plan])
         end,
-        Classes
+    lists:foreach(
+        fun({Module, ClassName}) ->
+            Pids = [Pid || {Pid, _StartedAt} <- maps:get(ClassName, Instances, [])],
+            hot_reload_class(Module, ClassName, Pids)
+        end,
+        Plan
     ),
     ok.
 
 -doc """
-BT-3531: hot-reload every loaded descendant of ClassName, each against its
-own (unchanged) module — only the field set being reconciled changed,
-via the ancestor's field addition/removal, not the descendant's code.
+BT-3531: the hot-reload targets `{Module, Descendant}` for every loaded
+descendant of ClassName, each against its own (unchanged) module — only the
+field set being reconciled changed, via the ancestor's field addition/removal,
+not the descendant's code.
 
-Skips any descendant in `ReloadedNames` — it already has (or will get) its
-own direct `hot_reload_class/2` call from `trigger_hot_reload/2`'s own loop
-over `Classes`, so reaching it again here would double the
+Skips any descendant in `ReloadedNames` — it already has its own direct entry
+in `trigger_hot_reload/2`'s plan, so reaching it again here would double the
 suspend/change_code/resume cycle for the same instances.
 
 `whereis_class/1` and `module_name/1` are two independent calls with a gap
@@ -201,27 +217,24 @@ before `terminate/2` runs), `module_name/1` raises `exit({noproc, _})`.
 Since this runs before `activate_module/4`'s workspace bookkeeping steps
 and the new module code is already loaded by this point, an uncaught
 crash here would abort the whole reload half-applied — so a vanished
-descendant is skipped, same as `undefined` above, mirroring the
-`catch error:badarg -> []` guard `hot_reload_class/2` already applies to
-`all_instances/1` for the same class of transient race.
+descendant is skipped, same as `undefined` above.
 """.
--spec hot_reload_descendants(atom(), sets:set(atom())) -> ok.
-hot_reload_descendants(ClassName, ReloadedNames) ->
-    lists:foreach(
+-spec descendant_targets(atom(), sets:set(atom())) -> [{atom(), atom()}].
+descendant_targets(ClassName, ReloadedNames) ->
+    lists:filtermap(
         fun(Descendant) ->
             case sets:is_element(Descendant, ReloadedNames) of
                 true ->
-                    ok;
+                    false;
                 false ->
                     case beamtalk_runtime_api:whereis_class(Descendant) of
                         undefined ->
-                            ok;
+                            false;
                         ClassPid ->
                             try
-                                DescendantModule = beamtalk_runtime_api:module_name(ClassPid),
-                                hot_reload_class(DescendantModule, Descendant)
+                                {true, {beamtalk_runtime_api:module_name(ClassPid), Descendant}}
                             catch
-                                exit:{noproc, _} -> ok
+                                exit:{noproc, _} -> false
                             end
                     end
             end
@@ -229,10 +242,10 @@ hot_reload_descendants(ClassName, ReloadedNames) ->
         beamtalk_class_registry:all_subclasses(ClassName)
     ).
 
-%% Trigger hot reload for a single class's live instances, against
-%% ModuleName (that class's own BEAM module — the just-reloaded module for
-%% the reloaded class itself, or an unchanged descendant module when called
-%% from hot_reload_descendants/1).
+%% Trigger hot reload for a single class's live instances (`Pids`, from the
+%% reload's one scan), against ModuleName (that class's own BEAM module — the
+%% just-reloaded module for the reloaded class itself, or an unchanged
+%% descendant module).
 %%
 %% BT-3534: Extra carries `module => ModuleName` — the loader no longer
 %% computes a field list at all; the flattened field list (inherited
@@ -250,34 +263,24 @@ hot_reload_descendants(ClassName, ReloadedNames) ->
 %% not deferred through `beamtalk_workspace_shape_recheck_worker`'s async
 %% queue like the field/version findings (`maybe_trigger_shape_recheck_for_class/1`)
 %% are, since this applies uniformly to a directly-reloaded class *and* every
-%% descendant `hot_reload_descendants/2` reconciles (neither of which is
-%% primed/captured in the shape store for a descendant, which never has its
-%% own module recompiled) and needs no shape/version diff to report — it is
-%% purely "did any live instance of this class end up suspended", which
-%% `trigger_code_change/3`'s own return already answers.
--spec hot_reload_class(atom(), atom()) -> ok.
-hot_reload_class(ModuleName, ClassName) ->
-    Pids =
-        try
-            beamtalk_runtime_api:all_instances(ClassName)
-        catch
-            error:badarg -> []
-        end,
-    case Pids of
-        [] ->
-            ok;
-        _ ->
-            %% BT-3543: the stray-migration-outside-table check only depends
-            %% on ClassName, never on an instance — run it once here rather
-            %% than once per pid inside code_change/3 (skip_stray_warning
-            %% tells the per-instance path below not to repeat it).
-            beamtalk_shape_migration:check_stray_migrations(ClassName),
-            Extra = #{module => ModuleName, skip_stray_warning => true},
-            {ok, Upgraded, Failures} = beamtalk_runtime_api:trigger_code_change(
-                ModuleName, Pids, Extra
-            ),
-            publish_suspended_finding(ModuleName, ClassName, Upgraded, Failures)
-    end.
+%% descendant (neither of which is primed/captured in the shape store for a
+%% descendant, which never has its own module recompiled) and needs no
+%% shape/version diff to report — it is purely "did any live instance of this
+%% class end up suspended", which `trigger_code_change/3`'s own return answers.
+-spec hot_reload_class(atom(), atom(), [pid()]) -> ok.
+hot_reload_class(_ModuleName, _ClassName, []) ->
+    ok;
+hot_reload_class(ModuleName, ClassName, Pids) ->
+    %% BT-3543: the stray-migration-outside-table check only depends
+    %% on ClassName, never on an instance — run it once here rather
+    %% than once per pid inside code_change/3 (skip_stray_warning
+    %% tells the per-instance path below not to repeat it).
+    beamtalk_shape_migration:check_stray_migrations(ClassName),
+    Extra = #{module => ModuleName, skip_stray_warning => true},
+    {ok, Upgraded, Failures} = beamtalk_runtime_api:trigger_code_change(
+        ModuleName, Pids, Extra
+    ),
+    publish_suspended_finding(ModuleName, ClassName, Upgraded, Failures).
 
 %% Best-effort publish of the `instances_suspended` finding (ADR 0123 §4 row
 %% 5) for `ClassName` through the existing reload-findings channel. Reads
@@ -285,7 +288,7 @@ hot_reload_class(ModuleName, ClassName) ->
 %% (cheap, already-loaded local call) rather than the shape store, since
 %% this runs for descendants too, which the shape store never primes/captures
 %% (their own module is not recompiled by this reload — see
-%% `hot_reload_class/2`'s doc). Never raises: any internal failure is logged
+%% `hot_reload_class/3`'s doc). Never raises: any internal failure is logged
 %% and swallowed — this is advisory plumbing on the reload's own response
 %% path, never a gate on the reload having already succeeded.
 -spec publish_suspended_finding(atom(), atom(), non_neg_integer(), [{pid(), term()}]) -> ok.

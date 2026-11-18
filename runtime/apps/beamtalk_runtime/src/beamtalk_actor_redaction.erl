@@ -61,8 +61,8 @@ put on the wire:
   `{'$beamtalk_wire', V, call, Selector, WireArgs, PropCtx}` from another node;
 - fire-and-forget cast: `{cast, Selector, Args, PropCtx}` (or without
   `PropCtx`), and `{'$beamtalk_wire', V, cast, Selector, WireArgs, PropCtx}`;
-- async send: `{Selector, Args, FuturePid, PropCtx}`, and
-  `{'$beamtalk_wire', V, async, Selector, WireArgs, FuturePid, PropCtx}`;
+- async send: `{Selector, Args, FuturePid, PropCtx}` (local only: a remote
+  async send is not supported, ADR 0126 Amendment BT-4989);
 - continuation: `{continue, {'$bt_continue', [{Selector, Args}]}}`.
 
 A `perform:` send naming a secret selector, at any depth of nested
@@ -288,8 +288,6 @@ redact_msg(Msg, Selectors) ->
 -spec redact_request(term(), [atom()]) -> term().
 redact_request({?BT_WIRE_TAG, V, Kind, Sel, WireArgs, Ctx}, Ss) when is_atom(Sel) ->
     {?BT_WIRE_TAG, V, Kind, Sel, redact_args(Sel, WireArgs, Ss), Ctx};
-redact_request({?BT_WIRE_TAG, V, async, Sel, WireArgs, Fut, Ctx}, Ss) when is_atom(Sel) ->
-    {?BT_WIRE_TAG, V, async, Sel, redact_args(Sel, WireArgs, Ss), Fut, Ctx};
 redact_request({cast, Sel, Args, Ctx}, Ss) when is_atom(Sel), is_list(Args) ->
     {cast, Sel, redact_args(Sel, Args, Ss), Ctx};
 redact_request({cast, Sel, Args}, Ss) when is_atom(Sel), is_list(Args) ->

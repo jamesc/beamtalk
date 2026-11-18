@@ -216,6 +216,26 @@ impl Module {
             .chain(self.method_definitions.iter().map(|s| &s.method))
     }
 
+    /// Iterate the methods written in class bodies (instance, then class side)
+    /// with their owning class name and side. Excludes standalone definitions;
+    /// [`Self::methods_with_owner`] adds them.
+    pub fn inline_methods_with_owner(
+        &self,
+    ) -> impl Iterator<Item = (&str, crate::source_analysis::MethodSide, &MethodDefinition)> {
+        use crate::source_analysis::MethodSide;
+        self.classes.iter().flat_map(|c| {
+            let name = c.name.name.as_str();
+            c.methods
+                .iter()
+                .map(move |m| (name, MethodSide::Instance, m))
+                .chain(
+                    c.class_methods
+                        .iter()
+                        .map(move |m| (name, MethodSide::Class, m)),
+                )
+        })
+    }
+
     /// Iterate every method in this module with its owning class name and
     /// side: inline instance and class methods, then standalone Tonel-style
     /// definitions (`Foo >> bar`, `Foo class >> bar`).
@@ -227,17 +247,6 @@ impl Module {
         &self,
     ) -> impl Iterator<Item = (&str, crate::source_analysis::MethodSide, &MethodDefinition)> {
         use crate::source_analysis::MethodSide;
-        let inline = self.classes.iter().flat_map(|c| {
-            let name = c.name.name.as_str();
-            c.methods
-                .iter()
-                .map(move |m| (name, MethodSide::Instance, m))
-                .chain(
-                    c.class_methods
-                        .iter()
-                        .map(move |m| (name, MethodSide::Class, m)),
-                )
-        });
         let standalone = self.method_definitions.iter().map(|s| {
             let side = if s.is_class_method {
                 MethodSide::Class
@@ -246,7 +255,7 @@ impl Module {
             };
             (s.class_name.name.as_str(), side, &s.method)
         });
-        inline.chain(standalone)
+        self.inline_methods_with_owner().chain(standalone)
     }
 
     /// [`Self::methods_with_owner`] with mutable access to each method, in the

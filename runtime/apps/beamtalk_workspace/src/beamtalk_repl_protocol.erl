@@ -304,18 +304,27 @@ encode_loaded(Classes, Msg, _TermToJson, Warnings) ->
 -spec encode_actors([map()], protocol_msg(), fun((term()) -> term())) -> binary().
 encode_actors(Actors, Msg, _TermToJson) ->
     JsonActors = [
-        #{
-            <<"pid">> => list_to_binary(pid_to_list(Pid)),
-            <<"class">> => atom_to_binary(Class, utf8),
-            <<"module">> => atom_to_binary(Module, utf8),
-            <<"spawned_at">> => SpawnedAt
-        }
-     || #{pid := Pid, class := Class, module := Module, spawned_at := SpawnedAt} <- Actors
+        add_system_flag(
+            #{
+                <<"pid">> => list_to_binary(pid_to_list(Pid)),
+                <<"class">> => atom_to_binary(Class, utf8),
+                <<"module">> => atom_to_binary(Module, utf8),
+                <<"spawned_at">> => SpawnedAt
+            },
+            Actor
+        )
+     || #{pid := Pid, class := Class, module := Module, spawned_at := SpawnedAt} = Actor <- Actors
     ],
     Base = base_response(Msg),
     iolist_to_binary(
         json:encode(Base#{<<"actors">> => JsonActors, <<"status">> => [<<"done">>]})
     ).
+
+%% BT-4960: a runtime-started actor (`TranscriptStream`) carries `"system": true`.
+%% The key is absent for a user actor, so their output is unchanged.
+-spec add_system_flag(map(), map()) -> map().
+add_system_flag(Json, #{system := true}) -> Json#{<<"system">> => true};
+add_system_flag(Json, _Actor) -> Json.
 
 -doc "Encode a sessions list response.".
 -spec encode_sessions([map()], protocol_msg(), fun((term()) -> term())) -> binary().

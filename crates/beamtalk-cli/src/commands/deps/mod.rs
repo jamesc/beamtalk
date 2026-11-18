@@ -311,6 +311,13 @@ fn collect_fresh_deps(
         };
         let ebin_path = layout.dep_ebin_dir(&dep.name);
 
+        // BT-4958: a fresh dependency is not recompiled, so its source-root
+        // marker is not rewritten there. A copied workspace would keep naming
+        // the original tree; refresh it on every build.
+        if dep.is_path_dep && ebin_path.is_dir() {
+            path::write_source_root_marker(&ebin_path, &dep.root)?;
+        }
+
         // Rebuild class/protocol/alias indexes from source files (fast — no compilation)
         let (
             class_module_index,
@@ -2317,6 +2324,43 @@ mod tests {
             "the recorded snapshot must read back as fresh — otherwise every \
              build re-resolves"
         );
+    }
+
+    /// BT-4958: a copied workspace keeps a marker whose absolute line names the
+    /// original tree. A build that finds the dependency fresh must still
+    /// rewrite it, so both lines agree with where the dependency is now.
+    #[test]
+    fn test_fresh_path_dependency_build_rewrites_a_stale_source_root_marker() {
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let consumer = consumer_with_fresh_path_dependency(
+            &root,
+            &[("helper.bt", "Object subclass: Helper\n  greet => \"hi\"\n")],
+            "",
+            &[],
+        );
+        let layout = BuildLayout::new(&consumer);
+        let marker = layout
+            .dep_ebin_dir("producer")
+            .join(path::SOURCE_ROOT_MARKER);
+        fs::write(&marker, "../../../../producer\n/original/tree/producer").unwrap();
+        let parsed = manifest::parse_manifest_full(&consumer.join("beamtalk.toml")).unwrap();
+        record_dep_graph_snapshot(&consumer, &parsed);
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let resolved = ensure_deps_resolved(&consumer, &options).unwrap();
+        assert_eq!(resolved.len(), 1);
+
+        let producer =
+            beamtalk_core::paths::canonicalize(root.join("producer").as_std_path()).unwrap();
+        let written = fs::read_to_string(&marker).unwrap();
+        let lines: Vec<&str> = written.lines().collect();
+        assert_eq!(
+            lines.last().copied(),
+            Some(producer.to_str().unwrap()),
+            "absolute line must name the dependency's current root: {written:?}"
+        );
+        assert!(!written.contains("/original/tree"), "{written:?}");
     }
 
     /// BT-3684 fixture. `pkg_a` and `pkg_b` both declare a `Retryable` trait,

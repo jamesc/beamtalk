@@ -63,6 +63,12 @@ dispatch_test_() ->
                 fun test_inherited_target_compiled/0},
             {"BT-4280: inherited_target answers no actor verdict for an Object-owned selector",
                 fun test_inherited_target_object_owned_slow/0},
+            {"BT-4995: inherited_target answers compiled for the state-free Actor intrinsics only",
+                fun test_inherited_target_actor_intrinsics/0},
+            {"BT-4995: an extension on the class or its superclass flips an Actor intrinsic verdict",
+                fun test_inherited_target_actor_intrinsic_extension_flips/0},
+            {"BT-4995: an extension on Actor itself keeps the value verdict for its intrinsics",
+                fun test_inherited_target_actor_intrinsic_owner_extension/0},
             {"BT-4260: inherited_target answers value for an Object method sent to a String",
                 fun test_inherited_target_value_owner/0},
             {"BT-4260: an extension anywhere on a value chain flips the verdict",
@@ -2098,6 +2104,123 @@ test_inherited_target_compiled() ->
         {compiled, 'Counter', 'bt@counter'},
         beamtalk_dispatch:inherited_target('LoggingCounter', decrement)
     ).
+
+%% BT-4995: the three Actor methods an actor start dispatches are answered
+%% `compiled` (the arm calls `invoke_resolved/6`); every other Actor intrinsic
+%% keeps the `value` verdict, which an actor's arm treats as `slow`. The test
+%% reads `actor.bt` so the names in `state_free_actor_intrinsic/3` cannot drift
+%% from the source: each must be a sealed `@intrinsic` of `Actor`, or the
+%% `terminate:` method whose body is `nil`.
+test_inherited_target_actor_intrinsics() ->
+    ok = beamtalk_test_class:ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
+    beamtalk_class_derived_cache:invalidate(),
+    Direct = {compiled, 'Actor', 'bt@stdlib@actor'},
+    Value = {value, 'Actor', 'bt@stdlib@actor'},
+    lists:foreach(
+        fun(Selector) ->
+            ?assertEqual(Direct, beamtalk_dispatch:inherited_target('LoggingCounter', Selector))
+        end,
+        ['continueWith:', 'stopWith:', 'terminate:']
+    ),
+    lists:foreach(
+        fun(Selector) ->
+            ?assertEqual(Value, beamtalk_dispatch:inherited_target('LoggingCounter', Selector))
+        end,
+        [
+            'continueWith:withArguments:',
+            'stopWith:timeout:',
+            'onExit:',
+            monitor,
+            delegate,
+            stop,
+            pid
+        ]
+    ),
+    Root = filename:join(lists:duplicate(4, "..")),
+    ActorBt = filename:join([filename:dirname(?FILE), Root, "stdlib", "src", "actor.bt"]),
+    {ok, Src} = file:read_file(ActorBt),
+    ?assertMatch(
+        {match, _},
+        re:run(
+            Src,
+            <<"sealed continueWith: selector :: Symbol -> Symbol =>\\s+@intrinsic \"actorContinueWith\"">>
+        )
+    ),
+    ?assertMatch(
+        {match, _},
+        re:run(
+            Src, <<"sealed stopWith: reason :: Object -> Symbol => @intrinsic \"actorStopWith\"">>
+        )
+    ),
+    ?assertMatch(
+        {match, _},
+        re:run(Src, <<"\n  terminate: _reason :: Object -> Nil => nil\n">>)
+    ).
+
+%% BT-4995: an extension on the class itself or on its superclass flips an
+%% Actor-intrinsic verdict off `compiled`, as for any inherited actor method;
+%% removing it flips it back.
+test_inherited_target_actor_intrinsic_extension_flips() ->
+    ok = beamtalk_test_class:ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
+    ok = beamtalk_extensions:init(),
+    beamtalk_class_derived_cache:invalidate(),
+    Fun = fun(_Args, _Self, St) -> {ext4995, St} end,
+    Direct = {compiled, 'Actor', 'bt@stdlib@actor'},
+    lists:foreach(
+        fun(Selector) ->
+            lists:foreach(
+                fun(Class) ->
+                    try
+                        ?assertEqual(
+                            Direct, beamtalk_dispatch:inherited_target('LoggingCounter', Selector)
+                        ),
+                        ok = beamtalk_extensions:register(Class, Selector, Fun, bt4995_test),
+                        ?assertEqual(
+                            slow, beamtalk_dispatch:inherited_target('LoggingCounter', Selector)
+                        ),
+                        ok = beamtalk_extensions:unregister(Class, Selector),
+                        ?assertEqual(
+                            Direct, beamtalk_dispatch:inherited_target('LoggingCounter', Selector)
+                        )
+                    after
+                        try
+                            beamtalk_extensions:unregister(Class, Selector)
+                        catch
+                            _:_ -> ok
+                        end
+                    end
+                end,
+                ['LoggingCounter', 'Counter']
+            )
+        end,
+        ['continueWith:', 'stopWith:', 'terminate:']
+    ).
+
+%% BT-4995: an extension on `Actor` itself (the owner) keeps the `value` verdict,
+%% i.e. today's slow route, whatever depth the receiver's class is at.
+test_inherited_target_actor_intrinsic_owner_extension() ->
+    ok = beamtalk_test_class:ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
+    ok = beamtalk_extensions:init(),
+    beamtalk_class_derived_cache:invalidate(),
+    Fun = fun(_Args, _Self, St) -> {ext4995, St} end,
+    Direct = {compiled, 'Actor', 'bt@stdlib@actor'},
+    Value = {value, 'Actor', 'bt@stdlib@actor'},
+    try
+        ?assertEqual(Direct, beamtalk_dispatch:inherited_target('LoggingCounter', 'terminate:')),
+        ok = beamtalk_extensions:register('Actor', 'terminate:', Fun, bt4995_test),
+        ?assertEqual(Value, beamtalk_dispatch:inherited_target('LoggingCounter', 'terminate:')),
+        ok = beamtalk_extensions:unregister('Actor', 'terminate:'),
+        ?assertEqual(Direct, beamtalk_dispatch:inherited_target('LoggingCounter', 'terminate:'))
+    after
+        try
+            beamtalk_extensions:unregister('Actor', 'terminate:')
+        catch
+            _:_ -> ok
+        end
+    end.
 
 %% BT-4280: `printString` resolves to Object, an owner without the actor-State
 %% flag, so the verdict is not `compiled`. (BT-4260: it is Object's `value`

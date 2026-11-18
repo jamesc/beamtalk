@@ -38,7 +38,7 @@ streams_lists_all_six_streams_test() ->
 %%% subscribe/2 registers the given pid, not the caller
 %%% ===========================================================================
 
-subscribe_pid_registers_that_pid_test() ->
+subscribe_pid_registers_that_pid() ->
     ensure_bus(),
     Self = self(),
     SubPid = spawn_collector(Self),
@@ -62,7 +62,7 @@ subscribe_pid_registers_that_pid_test() ->
 %%% classes stream delivers ClassRemoved too (newly visible on the bus)
 %%% ===========================================================================
 
-subscribe_classes_delivers_class_removed_test() ->
+subscribe_classes_delivers_class_removed() ->
     ensure_bus(),
     Self = self(),
     SubPid = spawn_collector(Self),
@@ -83,7 +83,7 @@ subscribe_classes_delivers_class_removed_test() ->
 %%% unsubscribe/2 removes the given pid
 %%% ===========================================================================
 
-unsubscribe_pid_removes_that_pid_test() ->
+unsubscribe_pid_removes_that_pid() ->
     ensure_bus(),
     Self = self(),
     SubPid = spawn_collector(Self),
@@ -105,7 +105,7 @@ unsubscribe_pid_removes_that_pid_test() ->
 %%% refresh path uses announce_binding_changed/3 with an explicit session id)
 %%% ===========================================================================
 
-binding_changed_carries_explicit_session_id_test() ->
+binding_changed_carries_explicit_session_id() ->
     ensure_bus(),
     Self = self(),
     SubPid = spawn_collector(Self),
@@ -130,7 +130,7 @@ binding_changed_carries_explicit_session_id_test() ->
 %%% subscribe_bus is idempotent per pid+class (dedup re-mount)
 %%% ===========================================================================
 
-subscribe_twice_delivers_once_test() ->
+subscribe_twice_delivers_once() ->
     ensure_bus(),
     Self = self(),
     SubPid = spawn_collector(Self),
@@ -162,7 +162,7 @@ subscribe_twice_delivers_once_test() ->
 %%% subscribe_all/1 covers every bus-backed stream for the given pid
 %%% ===========================================================================
 
-subscribe_all_pid_covers_bus_streams_test() ->
+subscribe_all_pid_covers_bus_streams() ->
     ensure_bus(),
     Self = self(),
     SubPid = spawn_collector(Self),
@@ -183,6 +183,20 @@ subscribe_all_pid_covers_bus_streams_test() ->
         beamtalk_repl_subscriptions:unsubscribe_all(SubPid),
         stop_collector(SubPid)
     end.
+
+%% The bus tests run under one fixture so a bus started bare here is stopped again:
+%% left running it would make the next module's `ensure_all_started(beamtalk_runtime)`
+%% fail with `already_started` (BT-4962).
+bus_test_() ->
+    {setup, fun() -> ok end,
+        fun(_) -> ok = beamtalk_test_proc:stop_if_bare(beamtalk_announcements) end, [
+            fun subscribe_pid_registers_that_pid/0,
+            fun subscribe_classes_delivers_class_removed/0,
+            fun unsubscribe_pid_removes_that_pid/0,
+            fun binding_changed_carries_explicit_session_id/0,
+            fun subscribe_twice_delivers_once/0,
+            fun subscribe_all_pid_covers_bus_streams/0
+        ]}.
 
 %%% ===========================================================================
 %%% Internal helpers

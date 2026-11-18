@@ -840,8 +840,23 @@ attribute; `nil` when neither is known.
 -spec frame_source_path(map()) -> binary() | nil.
 frame_source_path(#{module := Module} = Frame) ->
     case frame_file(Module, maps:get(file, Frame, nil)) of
-        nil -> nil;
-        Path -> unicode:characters_to_binary(Path)
+        nil ->
+            nil;
+        Path ->
+            %% BT-4940: a frame's own `file` is the package-relative path the
+            %% compiler embedded; the snippet reader needs the file on disk.
+            %% A stdlib module embeds a bare file name with no package above
+            %% it, so resolving it could pick a same-named user file: leave it.
+            case beamtalk_module_name:is_stdlib_module(Module) of
+                true ->
+                    unicode:characters_to_binary(Path);
+                false ->
+                    %% BT-4957: an unreadable source root is no file at all.
+                    case beamtalk_source_path:resolve_strict(Module, Path) of
+                        {ok, Resolved} -> unicode:characters_to_binary(Resolved);
+                        unresolvable -> nil
+                    end
+            end
     end;
 frame_source_path(_) ->
     nil.
