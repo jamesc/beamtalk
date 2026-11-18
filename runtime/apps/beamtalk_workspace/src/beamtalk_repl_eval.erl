@@ -881,6 +881,11 @@ purge_eval_module(ModuleName) ->
 %% loaded and retire this process's cached module name so the next `evaluate:`
 %% loads a fresh module instead of replacing this one.
 %%
+%% Only the returned value is inspected: a block that escapes some other way
+%% (stored in an actor's state or an ETS table, say) is not detected and can
+%% still hit `badfun` once its module is purged. `evaluate:` is documented as
+%% values-only, so this is the supported boundary.
+%%
 %% The retained module is never released automatically: nothing can tell when
 %% the last holder of the block is gone (the same trade-off `cleanup_module/1`
 %% makes for REPL eval modules). It costs one module and one atom per

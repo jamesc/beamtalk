@@ -163,3 +163,51 @@ eval_with_self_captured_block_survives() ->
     {ok, Closure} = beamtalk_repl_eval:eval_with_self(Wrap, <<"self value: [:x | x + 1]">>),
     ?assertEqual({ok, 1}, beamtalk_repl_eval:eval_with_self(1, <<"self">>)),
     ?assertEqual(3, Closure(2)).
+
+%% The result holds no block, but a process spawned by the evaluated source is
+%% still running eval-module code. The cleanup must not kill it; the old code
+%% goes on the pending list and a later `evaluate:` releases it once the process
+%% has finished.
+eval_with_self_pending_old_code_released_test_() ->
+    {setup, fun compiler_setup/0, fun(_) -> ok end,
+        {spawn, ?_test(eval_with_self_pending_old_code_released())}}.
+
+eval_with_self_pending_old_code_released() ->
+    %% `self` is a fun: given a block it runs the block in a new process and
+    %% returns `started`; given anything else it parks until told to go.
+    Parent = self(),
+    Wrap = fun
+        (B) when is_function(B, 0) ->
+            Holder = spawn(fun() ->
+                Parent ! {holder, self()},
+                B(),
+                Parent ! finished
+            end),
+            Holder,
+            %% return only once the holder is parked inside eval-module code
+            receive
+                parked -> started
+            end;
+        (_) ->
+            Parent ! parked,
+            receive
+                go -> ok
+            end
+    end,
+    {ok, started} = beamtalk_repl_eval:eval_with_self(Wrap, <<"self value: [self value: 1. 5]">>),
+    Holder =
+        receive
+            {holder, H} -> H
+        after 2000 -> error(no_holder)
+        end,
+    Module = hd(get('$beamtalk_inspector_eval_pending')),
+    %% The holder still runs the (now old) code: it must be alive, and the
+    %% module is only released by a later call after it has finished.
+    ?assert(erlang:is_process_alive(Holder)),
+    ?assert(erlang:check_old_code(Module)),
+    ?assertEqual(undefined, get('$beamtalk_inspector_eval_module')),
+    Holder ! go,
+    ?awaitMessage(finished, 2000),
+    ?assertEqual({ok, 7}, beamtalk_repl_eval:eval_with_self(7, <<"self">>)),
+    ?assertEqual(false, erlang:check_old_code(Module)),
+    ?assertEqual([], get('$beamtalk_inspector_eval_pending')).
