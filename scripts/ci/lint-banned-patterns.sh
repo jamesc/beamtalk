@@ -8,10 +8,14 @@
 # `<pattern-id><TAB><path><TAB><reason>`); an allowlist entry that no longer
 # matches anything fails the check, so the list cannot rot.
 #
-# Patterns are plain extended regexes applied line by line. "rust-nontest"
-# scopes skip tests/ dirs, tests.rs, test_support.rs, `//` comment lines and
-# everything from an inline `#[cfg(test)] mod … {` on. Erlang scopes skip `%`
-# comment lines.
+# Patterns are plain extended regexes applied line by line, so they only catch
+# a call written on ONE line (a chain or `try` that rustfmt/erlfmt splits across
+# lines gets past `chain-any` and `try-stop`). The `rust` kind skips tests/ dirs,
+# tests.rs, test_support.rs, `//` comment lines and every inline
+# `#[cfg(test)] mod … {` block (it ends at the closing `}` in column 0, where
+# rustfmt puts a top-level module's brace). `rust-any` scans inline test modules
+# too but still skips test files. The `erl` kind scans only */test/*.erl and
+# skips `%` comment lines.
 #
 # Usage:
 #   scripts/ci/lint-banned-patterns.sh               # check the repo
@@ -48,6 +52,7 @@ scan_files() {
       if (kind != "erl" && kind != "rust-any") {
         if (pend && t !~ /^#\[/) { if (t ~ /^(pub(\([a-z]+\))? )?mod [A-Za-z0-9_]+ *\{/) intest = 1; pend = 0 }
         if (t == "#[cfg(test)]") pend = 1
+        if (intest && t == "}" && $0 ~ /^}/) { intest = 0; next }
         if (intest) next
       }
       if (kind == "erl") { if (t ~ /^%/) next } else if (t ~ /^\/\//) next
@@ -62,7 +67,7 @@ files_for() { # kind pathspecs...
   local specs=("$@")
   if [[ "$kind" == rust ]]; then
     git ls-files -z -- "${specs[@]}" | { grep -z -E "$ext" || true; } |
-      { grep -z -v -E '(/tests/|/tests\.rs$|/test_support\.rs$|^crates/beamtalk-core/src/build_layout\.rs$)' || true; }
+      { grep -z -v -E '(/tests/|/tests\.rs$|/test_support\.rs$)' || true; }
   else
     git ls-files -z -- "${specs[@]}" | { grep -z -E "$ext" || true; }
   fi
@@ -89,6 +94,8 @@ self_test() {
   local out
   out="$(printf '%s\0' scripts/ci/fixtures/banned-patterns/send-literal-in-test-mod.rs scripts/ci/fixtures/banned-patterns/send-literal-in-test-mod-attrs.rs | match_lines rust "'beamtalk_message_dispatch':'send'\\(")"
   [[ -z "$out" ]] || { echo "❌ test-module / comment lines were not skipped:"; echo "$out"; fail=1; }
+  out="$(printf '%s\0' scripts/ci/fixtures/banned-patterns/send-literal-after-test-mod.rs | match_lines rust "'beamtalk_message_dispatch':'send'\\(")"
+  [[ "$(grep -c . <<<"$out")" -eq 1 ]] || { echo "❌ production code after a mid-file test module must be scanned (want exactly 1 hit):"; echo "$out"; fail=1; }
   [[ $fail -eq 0 ]] && echo "✅ banned-patterns self-test: ${#PATTERNS[@]} patterns + sleep rule detected"
   return $fail
 }
@@ -124,7 +131,6 @@ report() { # id file:line:text replacement
 
 for spec in "${PATTERNS[@]}"; do
   IFS='|' read -r id kind specs re repl <<<"$spec"
-  # shellcheck disable=SC2086
   fk="${kind%-any}"
   # shellcheck disable=SC2086
   hits="$(files_for "$fk" $specs | match_lines "$kind" "$re")"
