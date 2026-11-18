@@ -33,7 +33,7 @@ sealed typed Object subclass: Pid
   /// Pid current              // => Pid
   /// Pid current isAlive      // => true
   /// ```
-  class sealed current -> Pid => (Erlang beamtalk_process_ops) current
+  class current -> Pid => (Erlang beamtalk_process_ops) current
 
   /// Convert the pid to a readable string representation.
   ///
@@ -109,7 +109,7 @@ sealed typed Object subclass: Pid
   /// self pid send: #accept                     // => nil
   /// handler pid send: {#ready, sock, config}   // => nil
   /// ```
-  sealed send: msg :: Object -> Nil =>
+  send: msg :: Object -> Nil =>
     (Erlang beamtalk_process_ops) send: self msg: msg
 
   // === Monitoring ===
@@ -129,7 +129,7 @@ sealed typed Object subclass: Pid
   /// ref class              // => Reference
   /// ref demonitor          // cancel the monitor
   /// ```
-  sealed monitor -> Reference => (Erlang beamtalk_process_ops) monitor: self
+  monitor -> Reference => (Erlang beamtalk_process_ops) monitor: self
 
   // === Process Control ===
 

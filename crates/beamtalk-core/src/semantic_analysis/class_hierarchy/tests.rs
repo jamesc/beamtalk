@@ -4520,3 +4520,71 @@ fn state_path_keyword_constructor_carries_slot_types() {
         vec![Some(DeclaredType::simple("Integer")), None]
     );
 }
+
+// --- BT-5008: every method of a sealed class is sealed ---
+#[test]
+fn methods_of_sealed_class_are_sealed_with_or_without_keyword() {
+    let src = "sealed Object subclass: Leaf\n  plain => 1\n  sealed marked => 2\n  class makePlain => 3\n  class sealed makeMarked => 4\n\nObject subclass: Open\n  plain => 1\n  sealed marked => 2\n  class makePlain => 3\n  class sealed makeMarked => 4\n";
+    let (module, diags) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
+    assert!(diags.is_empty(), "{diags:?}");
+    let (h, _) = ClassHierarchy::build(&module);
+    let h = h.unwrap();
+    let flag = |class: &str, sel: &str, class_side: bool| {
+        let class_info = h.get_class(class).unwrap();
+        let methods = if class_side {
+            &class_info.class_methods
+        } else {
+            &class_info.methods
+        };
+        methods
+            .iter()
+            .find(|m| m.selector.as_str() == sel)
+            .unwrap_or_else(|| panic!("{class}>>{sel} not found"))
+            .is_sealed
+    };
+    for (sel, class_side) in [
+        ("plain", false),
+        ("marked", false),
+        ("makePlain", true),
+        ("makeMarked", true),
+    ] {
+        assert!(flag("Leaf", sel, class_side), "Leaf {sel} must be sealed");
+    }
+    assert!(!flag("Open", "plain", false));
+    assert!(flag("Open", "marked", false));
+    assert!(!flag("Open", "makePlain", true));
+    assert!(flag("Open", "makeMarked", true));
+}
+
+#[test]
+fn abstract_sealed_class_methods_are_sealed_only_with_the_keyword() {
+    // `abstract sealed` classes (e.g. `Boolean`) have stdlib-internal
+    // subclasses, so only an explicit `sealed` marks a method (BT-5008).
+    let src = "abstract sealed Object subclass: Gate\n  plain => 1\n  sealed marked => 2\n";
+    let (module, diags) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
+    assert!(diags.is_empty(), "{diags:?}");
+    let (h, _) = ClassHierarchy::build(&module);
+    let h = h.unwrap();
+    let methods = &h.get_class("Gate").unwrap().methods;
+    let flag = |sel: &str| {
+        methods
+            .iter()
+            .find(|m| m.selector.as_str() == sel)
+            .unwrap()
+            .is_sealed
+    };
+    assert!(!flag("plain"));
+    assert!(flag("marked"));
+}
+
+#[test]
+fn subclassing_sealed_class_reports_one_error_not_one_per_overridden_method() {
+    // BT-5008: every method of a sealed class counts as sealed, but a subclass
+    // of it is one mistake, reported once at the superclass.
+    let src = "Integer subclass: MyInt\n  + other => 1\n  - other => 2\n  class make => 3\n";
+    let (module, diags) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
+    assert!(diags.is_empty(), "{diags:?}");
+    let (_, diags) = ClassHierarchy::build(&module);
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert!(diags[0].message.contains("Cannot subclass sealed class"));
+}

@@ -56,7 +56,7 @@ sealed typed Object subclass: ProcessDictionary
   /// ProcessDictionary at: #nothingHere   // => nil
   /// ```
   @expect type
-  class sealed at: key :: Object -> Object =>
+  class at: key :: Object -> Object =>
     @expect class_method_process_resource "reads the calling process's dictionary by design"
     value := Erlang erlang get: key
     value =:= #undefined ifTrue: [nil] ifFalse: [value]
@@ -69,7 +69,7 @@ sealed typed Object subclass: ProcessDictionary
   /// ProcessDictionary at: #nothingHere ifAbsent: [0]   // => 0
   /// ```
   @expect type
-  class sealed at: key :: Object ifAbsent: block :: Block(Object) -> Object =>
+  class at: key :: Object ifAbsent: block :: Block(Object) -> Object =>
     @expect class_method_process_resource "reads the calling process's dictionary by design"
     value := Erlang erlang get: key
     value =:= #undefined ifTrue: [block value] ifFalse: [value]
@@ -84,7 +84,7 @@ sealed typed Object subclass: ProcessDictionary
   /// ProcessDictionary at: #mark put: 2   // => 1
   /// ```
   @expect type
-  class sealed at: key :: Object put: value :: Object -> Object =>
+  class at: key :: Object put: value :: Object -> Object =>
     @expect class_method_process_resource "writes the calling process's dictionary by design"
     previous := Erlang erlang put: key value: value
     previous =:= #undefined ifTrue: [nil] ifFalse: [previous]
@@ -99,7 +99,7 @@ sealed typed Object subclass: ProcessDictionary
   /// ProcessDictionary erase: #mark       // => nil
   /// ```
   @expect type
-  class sealed erase: key :: Object -> Object =>
+  class erase: key :: Object -> Object =>
     @expect class_method_process_resource "erases from the calling process's dictionary by design"
     previous := Erlang erlang erase: key
     previous =:= #undefined ifTrue: [nil] ifFalse: [previous]
@@ -114,4 +114,4 @@ sealed typed Object subclass: ProcessDictionary
   /// ProcessDictionary keys includes: #mark   // => true
   /// ```
   @expect type
-  class sealed keys -> List(Object) => Erlang erlang get_keys
+  class keys -> List(Object) => Erlang erlang get_keys

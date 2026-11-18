@@ -22,7 +22,7 @@ sealed typed Object subclass: Beamtalk native: beamtalk_interface
   /// ```beamtalk
   /// Beamtalk releaseInfo
   /// ```
-  class sealed releaseInfo -> Dictionary => (Erlang beamtalk_release) info
+  class releaseInfo -> Dictionary => (Erlang beamtalk_release) info
 
   /// Return `className -> #{#version, #fields, #migrations}` for every
   /// registered project class (ADR 0125 §3.4) — the live-node twin of a
@@ -33,8 +33,7 @@ sealed typed Object subclass: Beamtalk native: beamtalk_interface
   /// ```beamtalk
   /// Beamtalk shapeManifest
   /// ```
-  class sealed shapeManifest -> Dictionary =>
-    (Erlang beamtalk_release) shapeManifest
+  class shapeManifest -> Dictionary => (Erlang beamtalk_release) shapeManifest
 
   // === Class registry ===
 
@@ -44,7 +43,7 @@ sealed typed Object subclass: Beamtalk native: beamtalk_interface
   /// ```beamtalk
   /// Beamtalk allClasses
   /// ```
-  class sealed allClasses -> List(Class) => self delegate
+  class allClasses -> List(Class) => self delegate
 
   /// Look up a class by name (symbol).
   ///
@@ -52,7 +51,7 @@ sealed typed Object subclass: Beamtalk native: beamtalk_interface
   /// ```beamtalk
   /// Beamtalk classNamed: #Integer
   /// ```
-  class sealed classNamed: className :: Symbol -> Class | Nil => self delegate
+  class classNamed: className :: Symbol -> Class | Nil => self delegate
 
   // === Help and documentation ===
 
@@ -64,7 +63,7 @@ sealed typed Object subclass: Beamtalk native: beamtalk_interface
   /// Beamtalk help: Counter
   /// Beamtalk help: #Counter
   /// ```
-  class sealed help: aClass :: Object -> String => self delegate
+  class help: aClass :: Object -> String => self delegate
 
   /// Show detailed documentation for a specific method on a class.
   ///
@@ -72,7 +71,7 @@ sealed typed Object subclass: Beamtalk native: beamtalk_interface
   /// ```beamtalk
   /// Beamtalk help: Counter selector: #increment
   /// ```
-  class sealed help: aClass :: Class selector: aSelector :: Symbol -> String =>
+  class help: aClass :: Class selector: aSelector :: Symbol -> String =>
     self delegate
 
   /// Show documentation for an Erlang module: type signatures and EEP-48 docs.
@@ -82,7 +81,7 @@ sealed typed Object subclass: Beamtalk native: beamtalk_interface
   /// Beamtalk erlangHelp: "lists"
   /// Beamtalk erlangHelp: "maps"
   /// ```
-  class sealed erlangHelp: moduleName :: String -> String => self delegate
+  class erlangHelp: moduleName :: String -> String => self delegate
 
   /// Show documentation for a specific function in an Erlang module.
   ///
@@ -91,7 +90,7 @@ sealed typed Object subclass: Beamtalk native: beamtalk_interface
   /// Beamtalk erlangHelp: "lists" selector: #reverse
   /// Beamtalk erlangHelp: "maps" selector: #get
   /// ```
-  class sealed erlangHelp: moduleName :: String selector: functionName :: Symbol -> String =>
+  class erlangHelp: moduleName :: String selector: functionName :: Symbol -> String =>
     self delegate
 
   /// Return the Beamtalk version string.
@@ -100,4 +99,4 @@ sealed typed Object subclass: Beamtalk native: beamtalk_interface
   /// ```beamtalk
   /// Beamtalk version
   /// ```
-  class sealed version -> String => self delegate
+  class version -> String => self delegate

@@ -49,7 +49,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// ```beamtalk
   /// DateTime now                                   // => DateTime(...)
   /// ```
-  class sealed now -> DateTime => self delegate
+  class now -> DateTime => self delegate
 
   /// Monotonic clock value in nanoseconds (for measuring intervals).
   /// Returns an Integer, not a DateTime.
@@ -60,7 +60,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// // ... do work ...
   /// elapsed := DateTime monotonicNow - start       // nanoseconds
   /// ```
-  class sealed monotonicNow -> Integer => self delegate
+  class monotonicNow -> Integer => self delegate
 
   /// Construct from year, month, day (time defaults to 00:00:00).
   ///
@@ -69,7 +69,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// DateTime year: 2026 month: 2 day: 18
   /// // => DateTime(2026-02-18T00:00:00Z)
   /// ```
-  class sealed year: y :: Integer month: m :: Integer day: d :: Integer -> DateTime =>
+  class year: y :: Integer month: m :: Integer day: d :: Integer -> DateTime =>
     self delegate
 
   /// Construct from year, month, day, hour, minute, second.
@@ -79,7 +79,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// DateTime year: 2026 month: 2 day: 18 hour: 10 minute: 30 second: 0
   /// // => DateTime(2026-02-18T10:30:00Z)
   /// ```
-  class sealed year: y :: Integer month: m :: Integer day: d :: Integer hour: h :: Integer minute: mi :: Integer second: s :: Integer -> DateTime =>
+  class year: y :: Integer month: m :: Integer day: d :: Integer hour: h :: Integer minute: mi :: Integer second: s :: Integer -> DateTime =>
     self delegate
 
   /// Construct from year, month, day, hour, minute, second, and a fixed
@@ -93,7 +93,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// DateTime year: 2026 month: 7 day: 25 hour: 14 minute: 30 second: 0 offsetMinutes: 120
   /// // => DateTime(2026-07-25T14:30:00+02:00)
   /// ```
-  class sealed year: y :: Integer month: m :: Integer day: d :: Integer hour: h :: Integer minute: mi :: Integer second: s :: Integer offsetMinutes: off :: Integer -> DateTime =>
+  class year: y :: Integer month: m :: Integer day: d :: Integer hour: h :: Integer minute: mi :: Integer second: s :: Integer offsetMinutes: off :: Integer -> DateTime =>
     self delegate
 
   /// Construct from Unix epoch timestamp (seconds). Result is UTC (offsetMinutes 0).
@@ -103,7 +103,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// DateTime fromTimestamp: 0
   /// // => DateTime(1970-01-01T00:00:00Z)
   /// ```
-  class sealed fromTimestamp: ts :: Integer -> DateTime => self delegate
+  class fromTimestamp: ts :: Integer -> DateTime => self delegate
 
   /// Parse a strict ISO 8601 string, including an optional UTC offset
   /// suffix (`Z`, or `+hh:mm`/`-hh:mm`). Raises `#type_error` if the string
@@ -116,7 +116,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// DateTime fromString: "2026-07-25T14:30:00+02:00"
   /// // => DateTime(2026-07-25T14:30:00+02:00)
   /// ```
-  class sealed fromString: str :: String -> DateTime => self delegate
+  class fromString: str :: String -> DateTime => self delegate
 
   /// Parse `str` using the pattern language documented at `format:` — the
   /// fallible, Result-based counterpart to `fromString:`.
@@ -132,7 +132,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// (DateTime parse: "not a date" format: "yyyy-MM-dd") isOk
   /// // => false
   /// ```
-  class sealed parse: str :: String format: pattern :: String -> Result(DateTime, Error) =>
+  class parse: str :: String format: pattern :: String -> Result(DateTime, Error) =>
     self delegate
 
   // ===== Instance Methods — Accessors =====

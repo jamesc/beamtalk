@@ -38,7 +38,7 @@ sealed typed Object subclass: Transcript native: beamtalk_transcript_facade
   /// Transcript show: "hello"
   /// Transcript show: 42
   /// ```
-  class sealed show: value :: Object -> Nil => self delegate
+  class show: value :: Object -> Nil => self delegate
 
   /// Write a newline. A no-op outside an interactive workspace.
   ///
@@ -46,7 +46,7 @@ sealed typed Object subclass: Transcript native: beamtalk_transcript_facade
   /// ```beamtalk
   /// Transcript cr
   /// ```
-  class sealed cr -> Nil => self delegate
+  class cr -> Nil => self delegate
 
   /// Write a value followed by a newline.
   ///
@@ -54,7 +54,7 @@ sealed typed Object subclass: Transcript native: beamtalk_transcript_facade
   /// ```beamtalk
   /// Transcript showCr: "hello"
   /// ```
-  class sealed showCr: value :: Object -> Nil => self delegate
+  class showCr: value :: Object -> Nil => self delegate
 
   /// Return the recent transcript lines. Raises `no_workspace` when there is
   /// no interactive workspace's transcript.
@@ -63,7 +63,7 @@ sealed typed Object subclass: Transcript native: beamtalk_transcript_facade
   /// ```beamtalk
   /// Transcript recent
   /// ```
-  class sealed recent -> List(String) => self delegate
+  class recent -> List(String) => self delegate
 
   /// Empty the transcript buffer. Raises `no_workspace` when there is no
   /// interactive workspace's transcript.
@@ -72,4 +72,4 @@ sealed typed Object subclass: Transcript native: beamtalk_transcript_facade
   /// ```beamtalk
   /// Transcript clear
   /// ```
-  class sealed clear -> Nil => self delegate
+  class clear -> Nil => self delegate

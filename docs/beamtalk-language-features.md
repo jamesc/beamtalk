@@ -472,6 +472,8 @@ Modifiers can be combined: `sealed typed Collection subclass: Array`.
 
 Most stdlib classes are `sealed` — this prevents user code from subclassing built-in types like `Integer`, `String`, `Array`, `Result`, and `Stream`. If you need custom behaviour, compose with these types rather than subclassing them.
 
+**Method-level `sealed`.** A `sealed` method cannot be overridden in a subclass. Write it only in a class that can be subclassed (an open or `abstract` class), where it protects one method of an otherwise extensible class: `sealed area => ...` or `class sealed make => ...`. In a `sealed` class that is not `abstract` it is redundant: the class cannot be subclassed, so none of its methods can be overridden. Every method of such a class counts as sealed whether or not it carries the keyword (class metadata, `beamtalk doc` and hover report it as sealed), and `beamtalk lint` reports the keyword as ``redundant `sealed` `` (suppress with `@expect lint`). An `abstract sealed` class (the stdlib's `Boolean`, which has the internal subclasses `True` and `False`) is exempt from both rules: only the methods that carry the keyword are sealed, and the lint stays quiet.
+
 **Performance:** Sealed actor classes benefit from a direct-call optimization — self-sends within the class emit direct function calls instead of dynamic dispatch, since the compiler knows no subclass can override the method. This is automatic and requires no user intervention.
 
 ### Self-Sends and Overrides (BT-3666)
@@ -1543,7 +1545,7 @@ sealed typed Value subclass: Regex native: beamtalk_regex
   /// ## Options
   /// - `#caseless` — case-insensitive matching.
   /// - `#multiline` — `^` and `$` match at line breaks.
-  class sealed from: pattern :: String options: opts :: List(RegexOption) -> Result(Regex, Error) =>
+  class from: pattern :: String options: opts :: List(RegexOption) -> Result(Regex, Error) =>
     self delegate
 ```
 
@@ -2458,15 +2460,15 @@ sealed Value subclass: Result(T, E)
   field: okValue :: T = nil
   field: errReason :: E = nil
 
-  sealed unwrap -> T =>
+  unwrap -> T =>
     self.isOk ifTrue: [
       self.okValue
     ] ifFalse: [(Erlang beamtalk_result) unwrapError: self.errReason]
 
-  sealed map: block :: Block(T, R) -> Result(R, E) =>
+  map: block :: Block(T, R) -> Result(R, E) =>
     self.isOk ifTrue: [Result ok: (block value: self.okValue)] ifFalse: [self]
 
-  sealed andThen: block :: Block(T, Result(R, E)) -> Result(R, E) =>
+  andThen: block :: Block(T, Result(R, E)) -> Result(R, E) =>
     self.isOk ifTrue: [block value: self.okValue] ifFalse: [self]
 ```
 

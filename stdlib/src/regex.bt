@@ -36,7 +36,7 @@ sealed typed Value subclass: Regex native: beamtalk_regex
   /// ```beamtalk
   /// (Regex from: "[0-9]+") unwrap              // => Regex([0-9]+)
   /// ```
-  class sealed from: pattern :: String -> Result(Regex, Error) => self delegate
+  class from: pattern :: String -> Result(Regex, Error) => self delegate
 
   /// Compile a regex pattern with PCRE options (class method).
   ///
@@ -58,7 +58,7 @@ sealed typed Value subclass: Regex native: beamtalk_regex
   /// ```beamtalk
   /// Regex from: "[a-z]+" options: #(#caseless)
   /// ```
-  class sealed from: pattern :: String options: opts :: List(RegexOption) -> Result(Regex, Error) =>
+  class from: pattern :: String options: opts :: List(RegexOption) -> Result(Regex, Error) =>
     self delegate
 
   // ===== Instance Methods — Accessors =====

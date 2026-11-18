@@ -32,7 +32,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File exists: "test.txt"   // => true or false
   /// ```
-  class sealed exists: path :: String -> Boolean => self delegate
+  class exists: path :: String -> Boolean => self delegate
 
   // === Reading and writing files ===
 
@@ -44,7 +44,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File readAll: "test.txt"  // => Result ok: "file contents..."
   /// ```
-  class sealed readAll: path :: String -> Result(String, Error) => self delegate
+  class readAll: path :: String -> Result(String, Error) => self delegate
 
   /// Write text to a file, creating or overwriting it (class method).
   ///
@@ -54,7 +54,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File writeAll: "output.txt" contents: "hello"
   /// ```
-  class sealed writeAll: path :: String contents: text :: String -> Result(Nil, Error) =>
+  class writeAll: path :: String contents: text :: String -> Result(Nil, Error) =>
     self delegate
 
   /// Read the entire contents of a file as raw binary (class method).
@@ -66,8 +66,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File readBinary: "image.png"  // => Result ok: <<...>>
   /// ```
-  class sealed readBinary: path :: String -> Result(Binary, Error) =>
-    self delegate
+  class readBinary: path :: String -> Result(Binary, Error) => self delegate
 
   /// Write binary data to a file, creating or overwriting it (class method).
   ///
@@ -77,7 +76,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File writeBinary: "output.bin" contents: data
   /// ```
-  class sealed writeBinary: path :: String contents: binary :: Binary -> Result(Nil, Error) =>
+  class writeBinary: path :: String contents: binary :: Binary -> Result(Nil, Error) =>
     self delegate
 
   /// Append binary data to a file, creating it if needed (class method).
@@ -88,7 +87,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File appendBinary: "log.bin" contents: data
   /// ```
-  class sealed appendBinary: path :: String contents: binary :: Binary -> Result(Nil, Error) =>
+  class appendBinary: path :: String contents: binary :: Binary -> Result(Nil, Error) =>
     self delegate
 
   // === Streaming and handles ===
@@ -108,8 +107,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// (File lines: "data.csv") unwrap take: 5
   /// (File lines: "log.txt") unwrap select: [:l | l includesSubstring: "ERROR"]
   /// ```
-  class sealed lines: path :: String -> Result(Stream(String), Error) =>
-    self delegate
+  class lines: path :: String -> Result(Stream(String), Error) => self delegate
 
   /// Block-scoped file handle with automatic cleanup (class method).
   ///
@@ -132,7 +130,7 @@ sealed typed Object subclass: File native: beamtalk_file
   ///   handle lines take: 10
   /// ]) unwrap
   /// ```
-  class sealed open: path :: String do: block :: Block(FileHandle, R) -> Result(R, Error) =>
+  class open: path :: String do: block :: Block(FileHandle, R) -> Result(R, Error) =>
     self delegate
 
   /// Open a file in the given mode and return a FileHandle (class method).
@@ -166,7 +164,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// handle sync.
   /// handle close.
   /// ```
-  class sealed open: path :: String mode: mode :: FileMode -> Result(FileHandle, Error) =>
+  class open: path :: String mode: mode :: FileMode -> Result(FileHandle, Error) =>
     self delegate
 
   /// Block-scoped handle in the given mode, closed however the block exits
@@ -190,7 +188,7 @@ sealed typed Object subclass: File native: beamtalk_file
   ///   handle sync
   /// ]) unwrap
   /// ```
-  class sealed open: path :: String mode: mode :: FileMode do: block :: Block(FileHandle, R) -> Result(R, Error) =>
+  class open: path :: String mode: mode :: FileMode do: block :: Block(FileHandle, R) -> Result(R, Error) =>
     self delegate
 
   // === Metadata ===
@@ -204,8 +202,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File lastModified: "test.txt"  // => Result ok: a DateTime(...)
   /// ```
-  class sealed lastModified: path :: String -> Result(DateTime, Error) =>
-    self delegate
+  class lastModified: path :: String -> Result(DateTime, Error) => self delegate
 
   /// Test if a path refers to a directory (class method).
   ///
@@ -213,7 +210,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File isDirectory: "target"   // => true or false
   /// ```
-  class sealed isDirectory: path :: String -> Boolean => self delegate
+  class isDirectory: path :: String -> Boolean => self delegate
 
   /// Test if a path refers to a regular file (class method).
   ///
@@ -221,7 +218,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File isFile: "test.txt"   // => true or false
   /// ```
-  class sealed isFile: path :: String -> Boolean => self delegate
+  class isFile: path :: String -> Boolean => self delegate
 
   // === Directory operations ===
 
@@ -233,7 +230,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File mkdir: "target/mydir"
   /// ```
-  class sealed mkdir: path :: String -> Result(Nil, Error) => self delegate
+  class mkdir: path :: String -> Result(Nil, Error) => self delegate
 
   /// Create a directory and all missing parent directories (class method).
   ///
@@ -243,7 +240,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File mkdirAll: "target/a/b/c"
   /// ```
-  class sealed mkdirAll: path :: String -> Result(Nil, Error) => self delegate
+  class mkdirAll: path :: String -> Result(Nil, Error) => self delegate
 
   /// List entries in a directory as a List of Strings (class method).
   ///
@@ -253,7 +250,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File listDirectory: "target"
   /// ```
-  class sealed listDirectory: path :: String -> Result(List(String), Error) =>
+  class listDirectory: path :: String -> Result(List(String), Error) =>
     self delegate
 
   // === Deleting and renaming ===
@@ -266,7 +263,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File delete: "target/old.txt"
   /// ```
-  class sealed delete: path :: String -> Result(Nil, Error) => self delegate
+  class delete: path :: String -> Result(Nil, Error) => self delegate
 
   /// Recursively delete a directory tree (class method).
   ///
@@ -276,7 +273,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File deleteAll: "target/old-workspace"
   /// ```
-  class sealed deleteAll: path :: String -> Result(Nil, Error) => self delegate
+  class deleteAll: path :: String -> Result(Nil, Error) => self delegate
 
   /// Rename or move a file or directory (class method).
   ///
@@ -286,7 +283,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File rename: "old.txt" to: "new.txt"
   /// ```
-  class sealed rename: from :: String to: to :: String -> Result(Nil, Error) =>
+  class rename: from :: String to: to :: String -> Result(Nil, Error) =>
     self delegate
 
   // === Paths and diagnostics ===
@@ -299,8 +296,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File absolutePath: "target/test.txt"
   /// ```
-  class sealed absolutePath: path :: String -> Result(String, Error) =>
-    self delegate
+  class absolutePath: path :: String -> Result(String, Error) => self delegate
 
   /// Return the current working directory (class method).
   ///
@@ -308,7 +304,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File cwd   // => "/home/user/projects/myapp"
   /// ```
-  class sealed cwd -> String => self delegate
+  class cwd -> String => self delegate
 
   /// Return the OS temporary directory path (class method).
   ///
@@ -316,7 +312,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// ```beamtalk
   /// File tempDirectory
   /// ```
-  class sealed tempDirectory -> String => self delegate
+  class tempDirectory -> String => self delegate
 
   /// List every outstanding `open:mode:` handle for diagnostics (class method).
   ///
@@ -332,4 +328,4 @@ sealed typed Object subclass: File native: beamtalk_file
   /// File openHandles   // => #(#("events.log" #append <a Pid>))
   /// h close.
   /// ```
-  class sealed openHandles -> Array => self delegate
+  class openHandles -> Array => self delegate

@@ -24,7 +24,7 @@ sealed typed Behaviour subclass: Class
   /// ```beamtalk
   /// Counter printString   // => "Counter"
   /// ```
-  sealed printString -> String => self name asString
+  printString -> String => self name asString
 
   /// Test whether this is a Class (not a Metaclass).
   ///
@@ -32,7 +32,7 @@ sealed typed Behaviour subclass: Class
   /// ```beamtalk
   /// Counter isClass   // => true
   /// ```
-  sealed isClass -> Boolean => true
+  isClass -> Boolean => true
 
   /// Return the metaclass for this class (ADR 0036).
   ///
@@ -40,7 +40,7 @@ sealed typed Behaviour subclass: Class
   /// ```beamtalk
   /// Counter class   // => Metaclass
   /// ```
-  sealed class -> Metaclass => @primitive "classClass"
+  class -> Metaclass => @primitive "classClass"
 
   // === Constructing Subclasses ===
 
@@ -53,5 +53,5 @@ sealed typed Behaviour subclass: Class
   /// ```beamtalk
   /// Object classBuilder name: #Foo; register
   /// ```
-  sealed classBuilder -> ClassBuilder =>
+  classBuilder -> ClassBuilder =>
     ClassBuilder spawnWith: #{#superclassRef => self}

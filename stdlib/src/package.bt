@@ -39,7 +39,7 @@ sealed typed Value subclass: Package native: beamtalk_package
   /// Package all includes: "stdlib"
   /// // => true
   /// ```
-  class sealed all -> List(String) => self delegate
+  class all -> List(String) => self delegate
 
   /// Return a Package for the given package name.
   ///
@@ -50,7 +50,7 @@ sealed typed Value subclass: Package native: beamtalk_package
   /// (Package named: "stdlib") name
   /// // => "stdlib"
   /// ```
-  class sealed named: name :: String -> Package => self delegate
+  class named: name :: String -> Package => self delegate
 
   /// Return a List of class names (Symbols) belonging to the given package.
   ///
@@ -61,7 +61,7 @@ sealed typed Value subclass: Package native: beamtalk_package
   /// Package classes: "stdlib"
   /// // => _
   /// ```
-  class sealed classes: name :: String -> List(Symbol) => self delegate
+  class classes: name :: String -> List(Symbol) => self delegate
 
   /// Return a List of dependency package names (Strings) for the given package.
   ///
@@ -72,7 +72,7 @@ sealed typed Value subclass: Package native: beamtalk_package
   /// Package dependencies: "stdlib"
   /// // => _
   /// ```
-  class sealed dependencies: name :: String -> List(String) => self delegate
+  class dependencies: name :: String -> List(String) => self delegate
 
   /// Return the package name (String) that owns the given class name (Symbol).
   ///
@@ -83,8 +83,7 @@ sealed typed Value subclass: Package native: beamtalk_package
   /// Package packageNameFor: #Object
   /// // => _
   /// ```
-  class sealed packageNameFor: className :: Symbol -> String | Nil =>
-    self delegate
+  class packageNameFor: className :: Symbol -> String | Nil => self delegate
 
   // ===== Instance Methods — Accessors =====
 

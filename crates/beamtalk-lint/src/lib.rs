@@ -34,6 +34,7 @@ mod dead_block_assignment;
 mod dead_returned_assignment;
 mod effect_free_statement;
 mod inspect_in_string_position;
+mod redundant_sealed;
 mod shadowed_block_param;
 mod sync_send_in_timer_block;
 mod trailing_caret;
@@ -129,6 +130,7 @@ fn all_passes() -> Vec<Box<dyn LintPass>> {
         Box::new(dead_returned_assignment::DeadReturnedAssignmentPass),
         Box::new(effect_free_statement::EffectFreeStatementPass),
         Box::new(inspect_in_string_position::InspectInStringPositionPass),
+        Box::new(redundant_sealed::RedundantSealedPass),
         Box::new(shadowed_block_param::ShadowedBlockParamPass),
         Box::new(sync_send_in_timer_block::SyncSendInTimerBlockPass),
         Box::new(trailing_caret::TrailingCaretPass),

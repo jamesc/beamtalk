@@ -51,7 +51,7 @@ sealed typed Object subclass: Tls
   /// (Tls clientOptions: "example.com" alpn: #("h2")) size
   /// // => 8
   /// ```
-  class sealed clientOptions: host :: String alpn: protos :: List(String) -> List(Object) =>
+  class clientOptions: host :: String alpn: protos :: List(String) -> List(Object) =>
     self
       clientOptions: host
       alpn: protos
@@ -70,7 +70,7 @@ sealed typed Object subclass: Tls
   /// (Tls clientOptions: "example.com" alpn: #("h2") verify: #verify_none) size
   /// // => 6
   /// ```
-  class sealed clientOptions: host :: String alpn: protos :: List(String) verify: mode :: TlsVerify -> List(Object) =>
+  class clientOptions: host :: String alpn: protos :: List(String) verify: mode :: TlsVerify -> List(Object) =>
     alpn := protos collect: [:proto | Binary fromIolist: proto]
     base :: List(Object) := #(#binary, {#packet, #raw}, {#active, false}, {#verify, mode})
     mode =:= #verify_peer
@@ -101,7 +101,7 @@ sealed typed Object subclass: Tls
   /// trust store is missing or unreadable. The raw OTP reason is kept
   /// for the trust-store failure (BT-4236); the `does_not_understand`
   /// record carries no reason term.
-  class internal sealed systemCacerts -> List(Object) =>
+  class internal systemCacerts -> List(Object) =>
     // Untyped stock-OTP FFI (no spec for cacerts_get/0): intentionally
     // Dynamic; the entry's presence is pinned by TlsTest.
     @expect type
@@ -115,7 +115,7 @@ sealed typed Object subclass: Tls
   /// The SNI value for a DNS-name `host`, nil for an IP literal (either
   /// family: SNI must not carry an IP). A charlist: OTP `ssl` rejects a
   /// Binary `server_name_indication`.
-  class internal sealed sniOf: host :: String -> List(Integer) | Nil =>
+  class internal sniOf: host :: String -> List(Integer) | Nil =>
     // Untyped stock-OTP FFI (no spec for parse_address/1): intentionally
     // Dynamic; only isOk is read, and both outcomes are pinned by TlsTest.
     @expect type

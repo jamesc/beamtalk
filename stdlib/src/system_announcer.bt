@@ -36,7 +36,7 @@ sealed Announcer subclass: SystemAnnouncer
   /// PROHIBITED on SystemAnnouncer — it is a singleton reached only through
   /// `current`. It would otherwise inherit `Announcer class >> new` (BT-4479)
   /// and mint a private-ref announcer that is not the system bus.
-  class sealed new -> Never =>
+  class new -> Never =>
     Exception
       signalKind: #instantiation_error
       class: #SystemAnnouncer

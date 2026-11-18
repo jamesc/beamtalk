@@ -54,7 +54,7 @@ sealed typed Object subclass: Parallel native: beamtalk_parallel
   /// ((Parallel all: #([1 / 0], [42])) at: 1) isError             // => true
   /// Parallel all: #()                                            // => #()
   /// ```
-  class sealed all: blocks :: List(Block) -> List(Result) => self delegate
+  class all: blocks :: List(Block) -> List(Result) => self delegate
 
   /// Like `all:`, but with an overall wall-clock deadline (Integer
   /// milliseconds or a `Duration`), measured from when `all:timeout:` is
@@ -70,7 +70,7 @@ sealed typed Object subclass: Parallel native: beamtalk_parallel
   /// (results at: 1) isError    // => true
   /// (results at: 2) value      // => 2
   /// ```
-  class sealed all: blocks :: List(Block) timeout: ms :: Integer | Duration -> List(Result) =>
+  class all: blocks :: List(Block) timeout: ms :: Integer | Duration -> List(Result) =>
     self delegate
 
   /// Run each zero-argument block in `blocks` in its own process; return the
@@ -91,4 +91,4 @@ sealed typed Object subclass: Parallel native: beamtalk_parallel
   /// (Parallel any: #([1], [2])) isOk           // => true
   /// (Parallel any: #([1 / 0], [2 / 0])) isError // => true
   /// ```
-  class sealed any: blocks :: List(Block) -> Result => self delegate
+  class any: blocks :: List(Block) -> Result => self delegate

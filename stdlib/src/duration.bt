@@ -41,7 +41,7 @@ sealed typed Value subclass: Duration native: beamtalk_duration
   /// ```beamtalk
   /// (Duration milliseconds: 1500) asMilliseconds   // => 1500
   /// ```
-  class sealed milliseconds: n :: Number -> Duration => self delegate
+  class milliseconds: n :: Number -> Duration => self delegate
 
   /// Construct from seconds (Integer, or Float rounded to the nearest ms).
   ///
@@ -50,7 +50,7 @@ sealed typed Value subclass: Duration native: beamtalk_duration
   /// (Duration seconds: 90) asMilliseconds          // => 90000
   /// (Duration seconds: 1.5) asMilliseconds         // => 1500
   /// ```
-  class sealed seconds: n :: Number -> Duration => self delegate
+  class seconds: n :: Number -> Duration => self delegate
 
   /// Construct from minutes (Integer, or Float rounded to the nearest ms).
   ///
@@ -58,7 +58,7 @@ sealed typed Value subclass: Duration native: beamtalk_duration
   /// ```beamtalk
   /// (Duration minutes: 2) asSeconds                // => 120
   /// ```
-  class sealed minutes: n :: Number -> Duration => self delegate
+  class minutes: n :: Number -> Duration => self delegate
 
   /// Construct from hours (Integer, or Float rounded to the nearest ms).
   ///
@@ -66,7 +66,7 @@ sealed typed Value subclass: Duration native: beamtalk_duration
   /// ```beamtalk
   /// (Duration hours: 2) asMinutes                  // => 120
   /// ```
-  class sealed hours: n :: Number -> Duration => self delegate
+  class hours: n :: Number -> Duration => self delegate
 
   /// Construct from days (Integer, or Float rounded to the nearest ms).
   ///
@@ -74,7 +74,7 @@ sealed typed Value subclass: Duration native: beamtalk_duration
   /// ```beamtalk
   /// (Duration days: 1) asHours                     // => 24
   /// ```
-  class sealed days: n :: Number -> Duration => self delegate
+  class days: n :: Number -> Duration => self delegate
 
   /// Parse an ISO 8601 duration string (e.g. "PT1H30M", "P1DT2H", "PT0.250S").
   ///
@@ -88,7 +88,7 @@ sealed typed Value subclass: Duration native: beamtalk_duration
   /// (Duration fromString: "PT1H30M") asMinutes     // => 90
   /// (Duration fromString: "PT0.250S") asMilliseconds  // => 250
   /// ```
-  class sealed fromString: str :: String -> Duration => self delegate
+  class fromString: str :: String -> Duration => self delegate
 
   // ===== Instance Methods — Conversions =====
 

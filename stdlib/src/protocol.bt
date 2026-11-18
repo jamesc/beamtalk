@@ -29,7 +29,7 @@ sealed typed Object subclass: Protocol
   /// ```beamtalk
   /// Protocol requiredMethods: #Printable   // => [#asString, #printString]
   /// ```
-  class sealed requiredMethods: protocolName :: Symbol -> List(Symbol) =>
+  class requiredMethods: protocolName :: Symbol -> List(Symbol) =>
     @primitive "protocolRequiredMethods"
 
   /// Return the list of classes conforming to a protocol.
@@ -42,7 +42,7 @@ sealed typed Object subclass: Protocol
   /// ```beamtalk
   /// Protocol conformingClasses: #Printable   // => [Integer, String, ...]
   /// ```
-  class sealed conformingClasses: protocolName :: Symbol -> List(Behaviour) =>
+  class conformingClasses: protocolName :: Symbol -> List(Behaviour) =>
     @primitive "protocolConformingClasses"
 
   /// Test whether a name is a registered protocol.
@@ -52,8 +52,7 @@ sealed typed Object subclass: Protocol
   /// Protocol isProtocol: #Printable   // => true
   /// Protocol isProtocol: #NotReal     // => false
   /// ```
-  class sealed isProtocol: name :: Symbol -> Boolean =>
-    @primitive "protocolIsProtocol"
+  class isProtocol: name :: Symbol -> Boolean => @primitive "protocolIsProtocol"
 
   /// Return the provided (trait) method selectors for a protocol (ADR 0127).
   ///
@@ -67,7 +66,7 @@ sealed typed Object subclass: Protocol
   /// ```beamtalk
   /// Protocol providedMethods: #Comparable   // => [#between:and:, #min:, #max:]
   /// ```
-  class sealed providedMethods: protocolName :: Symbol -> List(Symbol) =>
+  class providedMethods: protocolName :: Symbol -> List(Symbol) =>
     @primitive "protocolProvidedMethods"
 
   /// Return the classes that compose (`uses:`) a protocol (ADR 0127 §12).
@@ -81,7 +80,7 @@ sealed typed Object subclass: Protocol
   /// ```beamtalk
   /// Protocol usersOf: #Comparable   // => [DateTime, Money, ...]
   /// ```
-  class sealed usersOf: protocolName :: Symbol -> List(Behaviour) =>
+  class usersOf: protocolName :: Symbol -> List(Behaviour) =>
     @primitive "protocolUsersOf"
 
   /// Return all registered protocol names.
@@ -90,4 +89,4 @@ sealed typed Object subclass: Protocol
   /// ```beamtalk
   /// Protocol allProtocols   // => [#Printable, #Comparable, ...]
   /// ```
-  class sealed allProtocols -> List(Symbol) => @primitive "protocolAllProtocols"
+  class allProtocols -> List(Symbol) => @primitive "protocolAllProtocols"

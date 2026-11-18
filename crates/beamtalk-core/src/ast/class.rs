@@ -260,6 +260,39 @@ impl ClassDefinition {
         }
     }
 
+    /// Whether this class's own `sealed` modifier makes every one of its
+    /// methods unoverridable: the class is `sealed` and not `abstract`.
+    ///
+    /// `abstract sealed` classes (`Boolean`) are excluded because the stdlib
+    /// gives them internal subclasses (`True`/`False`) through the builtin
+    /// exemption in the sealed checks, so their methods *can* be overridden.
+    /// Non-abstract sealed stdlib classes with a stdlib-internal subclass
+    /// (`Integer` → `Character`, `Class` → `Metaclass`) cannot be told apart
+    /// from the AST of one class, so they count as sealing their methods; the
+    /// few methods their subclass overrides are allowed by the same builtin
+    /// exemption, and the metadata is approximate for those. This is the one
+    /// predicate behind both [`Self::is_method_sealed`] and the
+    /// `redundant_sealed` lint (BT-5008).
+    #[must_use]
+    pub fn seals_its_methods(&self) -> bool {
+        self.is_sealed && !self.is_abstract
+    }
+
+    /// Whether `method` of this class counts as sealed (cannot be overridden).
+    ///
+    /// A method is sealed when it carries the `sealed` keyword **or** when its
+    /// class seals its methods ([`Self::seals_its_methods`]): a sealed class
+    /// cannot be subclassed by user code, so the keyword adds nothing (BT-5008).
+    /// This is the one derivation every reader of the per-method flag goes
+    /// through (hierarchy `MethodInfo`, class metadata, `beamtalk doc`, hover);
+    /// reading `MethodDefinition::is_sealed` directly sees only the keyword and
+    /// is only right for source-fidelity uses such as unparsing, token
+    /// counting for rename, and the redundancy lint.
+    #[must_use]
+    pub fn is_method_sealed(&self, method: &MethodDefinition) -> bool {
+        self.seals_its_methods() || method.is_sealed
+    }
+
     /// Creates a class definition with modifiers.
     #[must_use]
     pub fn with_modifiers(

@@ -37,7 +37,7 @@ sealed typed Object subclass: Program native: beamtalk_program
   /// Program commandName
   /// // => "beamtalk"
   /// ```
-  class sealed commandName -> String => self delegate
+  class commandName -> String => self delegate
 
   /// The program's root `Package` — the package whose manifest this program
   /// was launched from. The same answer under the REPL, `beamtalk run` (script
@@ -53,7 +53,7 @@ sealed typed Object subclass: Program native: beamtalk_program
   /// Program package name
   /// // => "my_app"
   /// ```
-  class sealed package -> Package => self delegate
+  class package -> Package => self delegate
 
   /// The running application's root supervisor, or `nil`.
   ///
@@ -69,7 +69,7 @@ sealed typed Object subclass: Program native: beamtalk_program
   /// ```beamtalk
   /// Program rootSupervisor                // => nil
   /// ```
-  class sealed rootSupervisor -> Supervisor | Nil => self delegate
+  class rootSupervisor -> Supervisor | Nil => self delegate
 
   // === Exiting ===
 
@@ -84,7 +84,7 @@ sealed typed Object subclass: Program native: beamtalk_program
   /// Program exit
   /// // => _
   /// ```
-  class sealed exit -> Nil => self delegate
+  class exit -> Nil => self delegate
 
   /// End this program with status `code` — the job-level, safe exit (ADR 0099).
   /// Does not return.
@@ -106,4 +106,4 @@ sealed typed Object subclass: Program native: beamtalk_program
   /// Program exit: 2
   /// // => _
   /// ```
-  class sealed exit: code :: Integer -> Nil => self delegate
+  class exit: code :: Integer -> Nil => self delegate

@@ -33,7 +33,7 @@ sealed typed Object subclass: Reference
   /// tag class                          // => Reference
   /// Reference new =:= Reference new    // => false
   /// ```
-  class sealed new -> Reference => (Erlang beamtalk_process_ops) makeRef
+  class new -> Reference => (Erlang beamtalk_process_ops) makeRef
 
   /// Convert the reference to a readable string representation.
   ///

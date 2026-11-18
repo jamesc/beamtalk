@@ -51,7 +51,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// Result ok: "hello"     // => Result ok: "hello"
   /// Result ok: nil         // => Result ok: nil
   /// ```
-  class sealed ok: value :: T -> Result(T, E) => self delegate
+  class ok: value :: T -> Result(T, E) => self delegate
 
   /// Create a failed Result wrapping an error reason (class method).
   ///
@@ -65,7 +65,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// Result error: Error new    // => Result error: <Error>
   /// ```
   /// To capture a raised exception as a Result, use `Result tryDo: [Error signal: "oops"]`.
-  class sealed error: reason :: E -> Result(T, E) => self delegate
+  class error: reason :: E -> Result(T, E) => self delegate
 
   /// Evaluate a block and return a Result (class method).
   ///
@@ -79,7 +79,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// Result tryDo: [Exception signal: "oops"]   // => Result error: <Exception>
   /// Result tryDo: [(File readAll: "missing.txt") unwrap] // => Result error: <Exception>
   /// ```
-  class sealed tryDo: block :: Block(T) -> Result(T, Exception) => self delegate
+  class tryDo: block :: Block(T) -> Result(T, Exception) => self delegate
 
   /// Convert an Erlang-style tagged tuple to a Result (class method).
   ///
@@ -91,7 +91,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// Result fromTuple: {#ok, 42}       // => Result ok: 42
   /// Result fromTuple: {#error, #oops} // => Result error: ...
   /// ```
-  class sealed fromTuple: tuple :: Tuple -> Result(T, E) => self delegate
+  class fromTuple: tuple :: Tuple -> Result(T, E) => self delegate
 
   // ===== Instance Methods — Querying =====
 
@@ -102,7 +102,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// (Result ok: 42) ok      // => true
   /// (Result error: #x) ok   // => false
   /// ```
-  sealed ok -> Boolean => self.isOk
+  ok -> Boolean => self.isOk
 
   /// True if this Result holds an error.
   ///
@@ -111,7 +111,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// (Result ok: 42) isError      // => false
   /// (Result error: #x) isError   // => true
   /// ```
-  sealed isError -> Boolean => self.isOk not
+  isError -> Boolean => self.isOk not
 
   // ===== Instance Methods — Guarded Accessors =====
 
@@ -124,7 +124,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// (Result ok: 42) value     // => 42
   /// (Result error: #x) value  // => Exception: Cannot access 'value'...
   /// ```
-  sealed value -> T =>
+  value -> T =>
     self.isOk
       ifTrue: [self.okValue]
       ifFalse: [
@@ -140,7 +140,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// (Result error: #x) error  // => #x
   /// (Result ok: 42) error     // => Exception: Cannot access 'error'...
   /// ```
-  sealed error -> E =>
+  error -> E =>
     self.isOk
       ifTrue: [
         Exception signal: "Cannot access 'error' on Result ok — use ifOk:ifError: or mapError:"
@@ -156,7 +156,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// (Result ok: 42) valueOr: 0    // => 42
   /// (Result error: #x) valueOr: 0 // => 0
   /// ```
-  sealed valueOr: default :: T -> T =>
+  valueOr: default :: T -> T =>
     self.isOk ifTrue: [self.okValue] ifFalse: [default]
 
   /// Unwrap the success value, or evaluate a block with the error reason.
@@ -166,7 +166,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// (Result ok: 42) valueOrDo: [:e | 0]       // => 42
   /// (Result error: #x) valueOrDo: [:e | -1]   // => -1
   /// ```
-  sealed valueOrDo: block :: Block(E, T) -> T =>
+  valueOrDo: block :: Block(E, T) -> T =>
     self.isOk ifTrue: [self.okValue] ifFalse: [block value: self.errReason]
 
   /// Unwrap the success value, or raise an exception.
@@ -179,7 +179,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// (Result ok: 42) unwrap         // => 42
   /// (Result error: #x) unwrap      // => Exception: unwrap called on Result error: #x
   /// ```
-  sealed unwrap -> T =>
+  unwrap -> T =>
     self.isOk ifTrue: [self.okValue] ifFalse: [self unwrapError: self.errReason]
 
   /// Internal FFI seam (ADR 0101 Part 4): raise the appropriate exception for
@@ -207,7 +207,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// (Result ok: 42) map: [:v | v + 1]        // => Result ok: 43
   /// (Result error: #x) map: [:v | v + 1]     // => Result error: #x
   /// ```
-  sealed map: block :: Block(T, R) -> Result(R, E) =>
+  map: block :: Block(T, R) -> Result(R, E) =>
     self.isOk ifTrue: [Result ok: (block value: self.okValue)] ifFalse: [self]
 
   /// Apply a block that returns a Result. Flattens the nesting.
@@ -218,7 +218,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// (Result ok: 42) andThen: [:v | Result ok: v * 2]   // => Result ok: 84
   /// (Result error: #x) andThen: [:v | Result ok: v]    // => Result error: #x
   /// ```
-  sealed andThen: block :: Block(T, Result(R, E)) -> Result(R, E) =>
+  andThen: block :: Block(T, Result(R, E)) -> Result(R, E) =>
     self.isOk ifTrue: [block value: self.okValue] ifFalse: [self]
 
   /// Apply a block to the error reason, wrapping result in a new error Result.
@@ -230,7 +230,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   ///   // => Result error: "wrapped: #x"
   /// (Result ok: 42) mapError: [:e | "oops"]   // => Result ok: 42
   /// ```
-  sealed mapError: block :: Block(E, F) -> Result(T, F) =>
+  mapError: block :: Block(E, F) -> Result(T, F) =>
     self.isOk ifTrue: [
       self
     ] ifFalse: [Result error: (block value: self.errReason)]
@@ -247,7 +247,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// chain := (Result ok: 1) andThen: [:v | Result error: #fail].
   /// chain ifError: [:_ | "handled"]                // => "handled"
   /// ```
-  sealed ifError: block :: Block(E, Object) -> Object =>
+  ifError: block :: Block(E, Object) -> Object =>
     self.isOk ifTrue: [self] ifFalse: [block value: self.errReason]
 
   // ===== Instance Methods — Pattern Matching =====
@@ -259,7 +259,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// (Result ok: 42) ifOk: [:v | v + 1] ifError: [:e | -1]    // => 43
   /// (Result error: #x) ifOk: [:v | v] ifError: [:e | 0]      // => 0
   /// ```
-  sealed ifOk: okBlock :: Block(T, R) ifError: errorBlock :: Block(E, R) -> R =>
+  ifOk: okBlock :: Block(T, R) ifError: errorBlock :: Block(E, R) -> R =>
     self.isOk ifTrue: [
       okBlock value: self.okValue
     ] ifFalse: [errorBlock value: self.errReason]
@@ -273,7 +273,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// (Result ok: 42) printString       // => "Result ok: 42"
   /// (Result error: #x) printString    // => "Result error: #x"
   /// ```
-  sealed printString -> String =>
+  printString -> String =>
     self.isOk ifTrue: [
       "Result ok: " ++ self.okValue printString
     ] ifFalse: ["Result error: " ++ self.errReason printString]
