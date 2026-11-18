@@ -75,7 +75,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0046](0046-vscode-live-workspace-sidebar.md) | VSCode Live Workspace Sidebar | Implemented | 2026-03-02 |
 | [0047](0047-return-type-arrow-token-disambiguation.md) | Return Type Arrow Token Disambiguation | Implemented | 2026-03-02 |
 | [0048](0048-class-side-method-syntax.md) | Class-Side Method Syntax Redesign | Rejected (2026-11-18) | 2026-03-02 |
-| [0049](0049-remove-method-level-sealed.md) | Remove Method-Level `sealed` — Infer Protection from `@primitive`/`@intrinsic` | Deferred | 2026-03-02 |
+| [0049](0049-remove-method-level-sealed.md) | Remove Method-Level `sealed` — Infer Protection from `@primitive`/`@intrinsic` | Rejected (2026-11-18) | 2026-03-02 |
 | [0050](0050-incremental-compiler-class-hierarchy.md) | Incremental Compiler ClassHierarchy via BEAM Metadata Streaming | Implemented | 2026-03-04 |
 | [0051](0051-subprocess-execution.md) | Subprocess Execution — System Commands and Interactive Subprocess Actor | Accepted \| Implemented | 2026-03-05 |
 | [0052](0052-recursive-descent-pratt-parsing.md) | Recursive Descent Parser with Pratt Parsing for Binary Operators | Accepted \| Implemented | 2026-03-05 |
