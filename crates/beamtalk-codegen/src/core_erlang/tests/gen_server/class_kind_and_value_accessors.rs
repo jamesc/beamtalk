@@ -496,7 +496,11 @@ fn test_generate_with_bindings_compiles_value_type() {
     );
     assert!(result.is_ok());
     let code = result.unwrap();
-    assert!(code.contains("module 'point'"));
+    assert_has(
+        "test_generate_with_bindings_compiles_value_type",
+        &code,
+        &["module 'point'"],
+    );
 }
 
 #[test]
@@ -511,9 +515,10 @@ fn test_class_method_rejects_field_access() {
         "Should reject field access in class method"
     );
     let err = format!("{}", result.unwrap_err());
-    assert!(
-        err.contains("cannot access instance field"),
-        "Error should mention field access. Got: {err}"
+    assert_has(
+        "Error should mention field access",
+        &err,
+        &["cannot access instance field"],
     );
 }
 
@@ -529,9 +534,10 @@ fn test_class_method_rejects_field_assignment() {
         "Should reject field assignment in class method"
     );
     let err = format!("{}", result.unwrap_err());
-    assert!(
-        err.contains("cannot assign to instance field"),
-        "Error should mention field assignment. Got: {err}"
+    assert_has(
+        "Error should mention field assignment",
+        &err,
+        &["cannot assign to instance field"],
     );
 }
 
@@ -543,14 +549,8 @@ fn test_value_subclass_auto_getter_exported() {
     assert!(result.is_ok(), "Codegen should succeed for Value subclass:");
     let code = result.unwrap();
     // Getter exports: 'x'/1 and 'y'/1
-    assert!(
-        code.contains("'x'/1"),
-        "Should export getter 'x'/1. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'y'/1"),
-        "Should export getter 'y'/1. Got:\n{code}"
-    );
+    assert_has("Should export getter 'x'/1", &code, &["'x'/1"]);
+    assert_has("Should export getter 'y'/1", &code, &["'y'/1"]);
 }
 
 #[test]
@@ -559,17 +559,20 @@ fn test_value_subclass_auto_getter_function() {
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
-    assert!(
-        code.contains("'x'/1 = fun (Self) ->"),
-        "Should generate x/1 getter. Got:\n{code}"
+    assert_has(
+        "Should generate x/1 getter",
+        &code,
+        &["'x'/1 = fun (Self) ->"],
     );
-    assert!(
-        code.contains("call 'maps':'get'('x', Self)"),
-        "x getter should use maps:get. Got:\n{code}"
+    assert_has(
+        "x getter should use maps:get",
+        &code,
+        &["call 'maps':'get'('x', Self)"],
     );
-    assert!(
-        code.contains("'y'/1 = fun (Self) ->"),
-        "Should generate y/1 getter. Got:\n{code}"
+    assert_has(
+        "Should generate y/1 getter",
+        &code,
+        &["'y'/1 = fun (Self) ->"],
     );
 }
 
@@ -579,14 +582,8 @@ fn test_value_subclass_auto_setter_exported() {
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
-    assert!(
-        code.contains("'withX:'/2"),
-        "Should export withX:/2. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'withY:'/2"),
-        "Should export withY:/2. Got:\n{code}"
-    );
+    assert_has("Should export withX:/2", &code, &["'withX:'/2"]);
+    assert_has("Should export withY:/2", &code, &["'withY:'/2"]);
 }
 
 #[test]
@@ -595,13 +592,15 @@ fn test_value_subclass_auto_setter_function() {
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
-    assert!(
-        code.contains("'withX:'/2 = fun (Self, NewVal) ->"),
-        "Should generate withX:/2 setter. Got:\n{code}"
+    assert_has(
+        "Should generate withX:/2 setter",
+        &code,
+        &["'withX:'/2 = fun (Self, NewVal) ->"],
     );
-    assert!(
-        code.contains("call 'maps':'put'('x', NewVal, Self)"),
-        "withX: setter should use maps:put. Got:\n{code}"
+    assert_has(
+        "withX: setter should use maps:put",
+        &code,
+        &["call 'maps':'put'('x', NewVal, Self)"],
     );
 }
 
@@ -612,9 +611,10 @@ fn test_value_subclass_keyword_constructor_exported() {
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
     // Keyword constructor selector for x, y → 'class_x:y:'/3 (ClassSelf + 2 slots)
-    assert!(
-        code.contains("'class_x:y:'/3"),
-        "Should export 'class_x:y:'/3 keyword constructor. Got:\n{code}"
+    assert_has(
+        "Should export 'class_x:y:'/3 keyword constructor",
+        &code,
+        &["'class_x:y:'/3"],
     );
 }
 
@@ -624,21 +624,25 @@ fn test_value_subclass_keyword_constructor_function() {
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
-    assert!(
-        code.contains("'class_x:y:'/3 = fun (_ClassSelf, SlotArg0, SlotArg1) ->"),
-        "Should generate keyword constructor function. Got:\n{code}"
+    assert_has(
+        "Should generate keyword constructor function",
+        &code,
+        &["'class_x:y:'/3 = fun (_ClassSelf, SlotArg0, SlotArg1) ->"],
     );
-    assert!(
-        code.contains("'$beamtalk_class' => 'Point'"),
-        "Keyword constructor should set $beamtalk_class. Got:\n{code}"
+    assert_has(
+        "Keyword constructor should set $beamtalk_class",
+        &code,
+        &["'$beamtalk_class' => 'Point'"],
     );
-    assert!(
-        code.contains("'x' => SlotArg0"),
-        "Keyword constructor should set x from SlotArg0. Got:\n{code}"
+    assert_has(
+        "Keyword constructor should set x from SlotArg0",
+        &code,
+        &["'x' => SlotArg0"],
     );
-    assert!(
-        code.contains("'y' => SlotArg1"),
-        "Keyword constructor should set y from SlotArg1. Got:\n{code}"
+    assert_has(
+        "Keyword constructor should set y from SlotArg1",
+        &code,
+        &["'y' => SlotArg1"],
     );
 }
 
@@ -648,9 +652,10 @@ fn test_value_subclass_dispatch_routes_getter() {
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
-    assert!(
-        code.contains("call 'bt@point':'x'(Self)"),
-        "dispatch/3 should route 'x' to getter. Got:\n{code}"
+    assert_has(
+        "dispatch/3 should route 'x' to getter",
+        &code,
+        &["call 'bt@point':'x'(Self)"],
     );
 }
 
@@ -660,9 +665,10 @@ fn test_value_subclass_dispatch_routes_setter() {
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
-    assert!(
-        code.contains("call 'bt@point':'withX:'(Self, DispArg0)"),
-        "dispatch/3 should route 'withX:' to setter. Got:\n{code}"
+    assert_has(
+        "dispatch/3 should route 'withX:' to setter",
+        &code,
+        &["call 'bt@point':'withX:'(Self, DispArg0)"],
     );
 }
 
@@ -672,13 +678,11 @@ fn test_value_subclass_has_method_includes_auto_methods() {
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
-    assert!(
-        code.contains("'x'"),
-        "has_method/1 should list 'x' getter. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'withX:'"),
-        "has_method/1 should list 'withX:' setter. Got:\n{code}"
+    assert_has("has_method/1 should list 'x' getter", &code, &["'x'"]);
+    assert_has(
+        "has_method/1 should list 'withX:' setter",
+        &code,
+        &["'withX:'"],
     );
 }
 
@@ -722,14 +726,16 @@ fn test_value_subclass_synthetic_accessor_metadata_injected() {
     );
 
     let class_sigs = map_body(&code, "'classMethodSignatures' => ~{");
-    assert!(
-        class_sigs.contains("'x:y:' =>"),
-        "class-side signatures should carry the keyword constructor. Got:\n{class_sigs}"
+    assert_has(
+        "class-side signatures should carry the keyword constructor",
+        &class_sigs,
+        &["'x:y:' =>"],
     );
     let class_docs = map_body(&code, "'classMethodDocs' => ~{");
-    assert!(
-        class_docs.contains("'x:y:' =>"),
-        "class-side docs should carry the keyword constructor doc. Got:\n{class_docs}"
+    assert_has(
+        "class-side docs should carry the keyword constructor doc",
+        &class_docs,
+        &["'x:y:' =>"],
     );
 }
 
@@ -742,9 +748,10 @@ fn test_value_subclass_synthetic_accessor_metadata_gated_to_value_kind() {
     module.classes[0].superclass = Some(Identifier::new("Object", Span::new(0, 0)));
     let code = generate_module(&module, CodegenOptions::new("bt@widget")).unwrap();
     let sigs = map_body(&code, "'methodSignatures' => ~{");
-    assert!(
-        !sigs.contains("'withX:' =>"),
-        "object subclass should not synthesize accessor signatures. Got:\n{sigs}"
+    assert_lacks(
+        "object subclass should not synthesize accessor signatures",
+        &sigs,
+        &["'withX:' =>"],
     );
 }
 
@@ -801,14 +808,16 @@ fn test_object_subclass_no_auto_getters() {
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
     // Object subclass should NOT have auto-getter 'x'/1
-    assert!(
-        !code.contains("'x'/1 = fun (Self) ->"),
-        "Object subclass should not generate auto-getter. Got:\n{code}"
+    assert_lacks(
+        "Object subclass should not generate auto-getter",
+        &code,
+        &["'x'/1 = fun (Self) ->"],
     );
     // And should not have withX:/2
-    assert!(
-        !code.contains("'withX:'/2"),
-        "Object subclass should not generate auto-setter. Got:\n{code}"
+    assert_lacks(
+        "Object subclass should not generate auto-setter",
+        &code,
+        &["'withX:'/2"],
     );
 }
 
@@ -885,9 +894,10 @@ fn test_value_subclass_user_defined_overrides_auto() {
     let code = result.unwrap();
     // The auto-getter would produce: call 'maps':'get'('x', Self)
     // When user defines 'x', that body should NOT appear — the user's body (99) wins.
-    assert!(
-        !code.contains("call 'maps':'get'('x', Self)"),
-        "Auto-getter body should be suppressed when user defines 'x'. Got:\n{code}"
+    assert_lacks(
+        "Auto-getter body should be suppressed when user defines 'x'",
+        &code,
+        &["call 'maps':'get'('x', Self)"],
     );
 }
 
@@ -1112,9 +1122,10 @@ Actor subclass: Counter
         .code;
 
     // Inference still ran and is still recorded for meta/REPL completion.
-    assert!(
-        code.contains("'return_type' => 'Integer'"),
-        "inferred return type should still be recorded in meta.method_info. Got:\n{code}"
+    assert_has(
+        "inferred return type should still be recorded in meta.method_info",
+        &code,
+        &["'return_type' => 'Integer'"],
     );
 
     // `methodSource` bakes as a Core Erlang binary literal (per-byte
@@ -1248,9 +1259,10 @@ Actor subclass: Counter
             "expected the size-guarded strip\n{guard}\nGot:\n{code}"
         );
     }
-    assert!(
-        !code.contains("= call 'beamtalk_actor':'strip_local_temps'("),
-        "no commit boundary should strip unconditionally. Got:\n{code}"
+    assert_lacks(
+        "no commit boundary should strip unconditionally",
+        &code,
+        &["= call 'beamtalk_actor':'strip_local_temps'("],
     );
 }
 
@@ -1313,13 +1325,15 @@ Actor subclass: Lazy
 ",
         "lazy",
     );
-    assert!(
-        code.contains("let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in"),
-        "a late slot must keep the unconditional strip. Got:\n{code}"
+    assert_has(
+        "a late slot must keep the unconditional strip",
+        &code,
+        &["let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in"],
     );
-    assert!(
-        !code.contains("'erlang':'map_size'(NewState)"),
-        "no size guard with a late slot. Got:\n{code}"
+    assert_lacks(
+        "no size guard with a late slot",
+        &code,
+        &["'erlang':'map_size'(NewState)"],
     );
 }
 
@@ -1347,9 +1361,10 @@ Actor subclass: Counter
         "handle_continue must strip __local__ threading temps from the committed \
          post-initialize state. Got:\n{code}"
     );
-    assert!(
-        code.contains("{'noreply', InitCleanState}"),
-        "handle_continue must reply with the cleaned post-initialize state. Got:\n{code}"
+    assert_has(
+        "handle_continue must reply with the cleaned post-initialize state",
+        &code,
+        &["{'noreply', InitCleanState}"],
     );
 }
 
@@ -1372,9 +1387,10 @@ Server subclass: TickServer
 
     // Sanity: this is the Server-subclass handle_info (dispatches handleInfo:), not
     // the plain Actor delegate stub.
-    assert!(
-        code.contains("'safe_dispatch'('handleInfo:', [Msg], State)"),
-        "expected a Server-subclass handle_info dispatching handleInfo:. Got:\n{code}"
+    assert_has(
+        "expected a Server-subclass handle_info dispatching handleInfo",
+        &code,
+        &["'safe_dispatch'('handleInfo:', [Msg], State)"],
     );
     assert!(
         code.contains("let CleanInfoNewState = ")
@@ -1382,9 +1398,10 @@ Server subclass: TickServer
         "handle_info must strip __local__ threading temps before committing the \
          post-handleInfo: state. Got:\n{code}"
     );
-    assert!(
-        code.contains("{'noreply', CleanInfoNewState}"),
-        "handle_info must commit the cleaned state. Got:\n{code}"
+    assert_has(
+        "handle_info must commit the cleaned state",
+        &code,
+        &["{'noreply', CleanInfoNewState}"],
     );
 }
 
@@ -1520,8 +1537,9 @@ Actor subclass: Counter
 
     // `add:` must NOT appear in method_return_types with Integer inferred from
     // the state field — it should be absent (Dynamic = no entry).
-    assert!(
-        !code.contains("'add:' => 'Integer'"),
-        "Untyped param `value` must not be mis-inferred as state field Integer. Got:\n{code}"
+    assert_lacks(
+        "Untyped param `value` must not be mis-inferred as state field Integer",
+        &code,
+        &["'add:' => 'Integer'"],
     );
 }

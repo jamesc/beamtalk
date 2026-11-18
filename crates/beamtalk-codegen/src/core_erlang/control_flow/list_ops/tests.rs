@@ -25,9 +25,10 @@ fn test_list_collect_generates_map() {
     // collect: (no mutations) generates lists:map
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items collect: [:item | item]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'map'"),
-        "collect: should generate lists:map. Got:\n{code}"
+    assert_has(
+        "collect: should generate lists:map",
+        &code,
+        &["'lists':'map'"],
     );
 }
 
@@ -38,19 +39,22 @@ fn test_list_inject_into_non_literal_value_type_generates_wrapper() {
     // arg-swap wrapper: fun (Elem, Acc) -> apply Block (Acc, Elem).
     let src = "Value subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items inject: 0 into: block\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "Non-literal inject:into: should emit inline lists:foldl. Got:\n{code}"
+    assert_has(
+        "Non-literal inject:into: should emit inline lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
     // Non-literal needs an arg-swap wrapper
-    assert!(
-        code.contains("fun (Elem, Acc) -> apply"),
-        "Non-literal inject:into: should emit arg-swap wrapper. Got:\n{code}"
+    assert_has(
+        "Non-literal inject:into: should emit arg-swap wrapper",
+        &code,
+        &["fun (Elem, Acc) -> apply"],
     );
     // Should NOT call the runtime helper
-    assert!(
-        !code.contains("'beamtalk_collection':'inject_into'"),
-        "Non-literal inject:into: should NOT delegate to runtime helper. Got:\n{code}"
+    assert_lacks(
+        "Non-literal inject:into: should NOT delegate to runtime helper",
+        &code,
+        &["'beamtalk_collection':'inject_into'"],
     );
 }
 
@@ -60,13 +64,15 @@ fn test_list_do_with_field_mutation_threads_state() {
     let src = "Actor subclass: Ctr\n  state: sum = 0\n\n  run: items =>\n    items do: [:item | self.sum := self.sum + item]\n";
     let code = codegen(src);
     // Mutation-threading uses foldl to thread state
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "do: with mutation should use lists:foldl for state threading. Got:\n{code}"
+    assert_has(
+        "do: with mutation should use lists:foldl for state threading",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("maps':'put'('sum'"),
-        "do: body should update 'sum' via maps:put. Got:\n{code}"
+    assert_has(
+        "do: body should update 'sum' via maps:put",
+        &code,
+        &["maps':'put'('sum'"],
     );
 }
 
@@ -88,9 +94,10 @@ fn test_bt1290_local_var_captured_by_nested_timer_block() {
     let code = codegen(src);
     // Y (CoreErlang name for y) must appear inside the nested fun's argument list
     // (ADR 0137: the closure's self-send is a message to `Self`).
-    assert!(
-        code.contains("'send'(Self, 'use:', [Y@])"),
-        "Y should be captured by nested block. Got:\n{code}"
+    assert_has(
+        "Y should be captured by nested block",
+        &code,
+        &["'send'(Self, 'use:', [Y@])"],
     );
     // The foldl lambda must use `let _ = <Timer_expr> in StateAcc`, not bare `<Timer_expr> in StateAcc`
     // Timer is now a direct call (no class_registry lookup), so check
@@ -121,9 +128,10 @@ fn test_bt1291_destructure_then_on_do_last_expr() {
     // Must compile without panic (before the fix this generated invalid Core Erlang)
     let code = codegen(src);
     // The last expr must be wrapped with `let _ =` to be valid Core Erlang
-    assert!(
-        code.contains("let _ = "),
-        "Last expr after destructure must use let _ = binding. Got:\n{code}"
+    assert_has(
+        "Last expr after destructure must use let _ = binding",
+        &code,
+        &["let _ = "],
     );
 }
 
@@ -219,9 +227,10 @@ fn test_do_with_local_mutation_uses_tuple_acc() {
     );
     // BT-4116: one threaded local in a `do:` is a bare accumulator — no tuple,
     // so no `element` call either.
-    assert!(
-        !code.contains("'erlang':'element'(1,"),
-        "do: with one threaded local should use a bare accumulator. Got:\n{code}"
+    assert_lacks(
+        "do: with one threaded local should use a bare accumulator",
+        &code,
+        &["'erlang':'element'(1,"],
     );
 }
 
@@ -230,9 +239,10 @@ fn test_do_with_field_mutation_uses_stateacc() {
     // do: with field mutation must still use maps:put (no tuple acc — state effects present).
     let src = "Actor subclass: Ctr\n  state: sum = 0\n\n  run: items =>\n    items do: [:item | self.sum := self.sum + item]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("maps':'put'('sum'"),
-        "do: with field mutation must still use maps:put for field. Got:\n{code}"
+    assert_has(
+        "do: with field mutation must still use maps:put for field",
+        &code,
+        &["maps':'put'('sum'"],
     );
 }
 
@@ -242,9 +252,10 @@ fn test_inject_literal_initial_elides_acc_maybe_await() {
     // maybe_await is never emitted on the fold accumulator.
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    count := 0\n    items inject: 0 into: [:acc :item | count := count + 1. acc + item]\n";
     let code = codegen(src);
-    assert!(
-        !code.contains("'maybe_await'(Acc)"),
-        "BT-1321: maybe_await should not appear on the fold accumulator. Got:\n{code}"
+    assert_lacks(
+        "BT-1321: maybe_await should not appear on the fold accumulator",
+        &code,
+        &["'maybe_await'(Acc)"],
     );
 }
 
@@ -254,9 +265,10 @@ fn test_inject_sync_var_initial_elides_acc_maybe_await() {
     // maybe_await is never emitted on the fold accumulator.
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items start: start =>\n    count := 0\n    items inject: start into: [:acc :item | count := count + 1. acc + item]\n";
     let code = codegen(src);
-    assert!(
-        !code.contains("'maybe_await'(Acc)"),
-        "BT-1321: maybe_await should not appear on the fold accumulator. Got:\n{code}"
+    assert_lacks(
+        "BT-1321: maybe_await should not appear on the fold accumulator",
+        &code,
+        &["'maybe_await'(Acc)"],
     );
 }
 
@@ -267,13 +279,15 @@ fn test_inject_non_literal_initial_no_maybe_await() {
     // binary op for `acc + item` must not wrap either operand with maybe_await.
     let src = "Actor subclass: Ctr\n  state: x = 0\n  state: initial = 0\n\n  run: items =>\n    count := 0\n    items inject: self.initial into: [:acc :item | count := count + 1. acc + item]\n";
     let code = codegen(src);
-    assert!(
-        !code.contains("'maybe_await'(Acc)"),
-        "BT-1321: binary op should not wrap acc with maybe_await. Got:\n{code}"
+    assert_lacks(
+        "BT-1321: binary op should not wrap acc with maybe_await",
+        &code,
+        &["'maybe_await'(Acc)"],
     );
-    assert!(
-        !code.contains("'maybe_await'(Item)"),
-        "BT-1321: binary op should not wrap item with maybe_await. Got:\n{code}"
+    assert_lacks(
+        "BT-1321: binary op should not wrap item with maybe_await",
+        &code,
+        &["'maybe_await'(Item)"],
     );
 }
 
@@ -283,13 +297,15 @@ fn test_inject_non_literal_initial_no_maybe_await_map_acc() {
     // map-accumulator path when the initial is a non-literal field read.
     let src = "Actor subclass: Ctr\n  state: count = 0\n  state: initial = 0\n\n  run: items =>\n    items inject: self.initial into: [:acc :item | self.count := self.count + 1. acc + item]\n";
     let code = codegen(src);
-    assert!(
-        !code.contains("'maybe_await'(Acc)"),
-        "BT-1321: binary op should not wrap acc with maybe_await (map-acc path). Got:\n{code}"
+    assert_lacks(
+        "BT-1321: binary op should not wrap acc with maybe_await (map-acc path)",
+        &code,
+        &["'maybe_await'(Acc)"],
     );
-    assert!(
-        !code.contains("'maybe_await'(Item)"),
-        "BT-1321: binary op should not wrap item with maybe_await (map-acc path). Got:\n{code}"
+    assert_lacks(
+        "BT-1321: binary op should not wrap item with maybe_await (map-acc path)",
+        &code,
+        &["'maybe_await'(Item)"],
     );
 }
 
@@ -309,9 +325,10 @@ fn test_inject_nested_scope_no_maybe_await() {
         "        acc + y]]\n",
     );
     let code = codegen(src);
-    assert!(
-        !code.contains("'maybe_await'(Acc)"),
-        "BT-1321: no fold accumulator should be wrapped with maybe_await. Got:\n{code}"
+    assert_lacks(
+        "BT-1321: no fold accumulator should be wrapped with maybe_await",
+        &code,
+        &["'maybe_await'(Acc)"],
     );
 }
 
@@ -322,9 +339,10 @@ fn test_collect_with_mutation_has_list_like_result() {
     // list → list), mirroring the pure collect: path.
     let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items collect: [:x | self.n := self.n + 1. x]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'beamtalk_collection':'from_list_like'("),
-        "BT-2342: collect: with mutations should reconstruct the result via from_list_like. Got:\n{code}"
+    assert_has(
+        "BT-2342: collect: with mutations should reconstruct the result via from_list_like",
+        &code,
+        &["'beamtalk_collection':'from_list_like'("],
     );
 }
 
@@ -334,9 +352,10 @@ fn test_select_with_mutation_has_list_like_result() {
     // receiver via beamtalk_collection:from_list_like/2.
     let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items select: [:x | self.n := self.n + 1. x > 0]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'beamtalk_collection':'from_list_like'("),
-        "BT-2342: select: with mutations should reconstruct the result via from_list_like. Got:\n{code}"
+    assert_has(
+        "BT-2342: select: with mutations should reconstruct the result via from_list_like",
+        &code,
+        &["'beamtalk_collection':'from_list_like'("],
     );
 }
 
@@ -385,17 +404,20 @@ fn test_detect_if_none_pure_dispatches_to_runtime() {
     // block as arguments.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items detect: [:item | item > 0] ifNone: [42]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'detect:ifNone:'"),
-        "Pure detect:ifNone: should dispatch with selector 'detect:ifNone:'. Got:\n{code}"
+    assert_has(
+        "Pure detect:ifNone: should dispatch with selector 'detect:ifNone:'",
+        &code,
+        &["'detect:ifNone:'"],
     );
-    assert!(
-        code.contains("'beamtalk_message_dispatch':'send'"),
-        "Pure detect:ifNone: should use beamtalk_message_dispatch:send. Got:\n{code}"
+    assert_has(
+        "Pure detect:ifNone: should use beamtalk_message_dispatch:send",
+        &code,
+        &["'beamtalk_message_dispatch':'send'"],
     );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "Pure detect:ifNone: should NOT use lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "Pure detect:ifNone: should NOT use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
 }
 
@@ -905,17 +927,20 @@ fn test_count_with_field_mutation_uses_foldl() {
     // process every element for state threading, using lists:foldl with a count accumulator.
     let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items count: [:item | self.n := self.n + 1. item > 0]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "count: with field mutation should use lists:foldl. Got:\n{code}"
+    assert_has(
+        "count: with field mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        !code.contains("'lists':'filter'"),
-        "count: with field mutation should NOT use lists:filter. Got:\n{code}"
+    assert_lacks(
+        "count: with field mutation should NOT use lists:filter",
+        &code,
+        &["'lists':'filter'"],
     );
-    assert!(
-        code.contains("maps':'put'('n'"),
-        "count: body should update 'n' field via maps:put. Got:\n{code}"
+    assert_has(
+        "count: body should update 'n' field via maps:put",
+        &code,
+        &["maps':'put'('n'"],
     );
 }
 
@@ -927,17 +952,20 @@ fn test_flat_map_with_field_mutation_uses_foldl() {
     // it uses lists:foldl with a result-list accumulator instead of lists:flatmap.
     let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items flatMap: [:item | self.n := self.n + 1. #(item, item)]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "flatMap: with field mutation should use lists:foldl. Got:\n{code}"
+    assert_has(
+        "flatMap: with field mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        !code.contains("'lists':'flatmap'"),
-        "flatMap: with field mutation should NOT use lists:flatmap. Got:\n{code}"
+    assert_lacks(
+        "flatMap: with field mutation should NOT use lists:flatmap",
+        &code,
+        &["'lists':'flatmap'"],
     );
-    assert!(
-        code.contains("maps':'put'('n'"),
-        "flatMap: body should update 'n' field via maps:put. Got:\n{code}"
+    assert_has(
+        "flatMap: body should update 'n' field via maps:put",
+        &code,
+        &["maps':'put'('n'"],
     );
 }
 
@@ -966,9 +994,10 @@ fn test_actor_do_non_literal_callable_emits_plain_guard_and_send() {
             "Actor do: with a non-literal callable should emit `{needle}`. Got:\n{code}"
         );
     }
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "Actor do: with a non-literal callable must not fold State. Got:\n{code}"
+    assert_lacks(
+        "Actor do: with a non-literal callable must not fold State",
+        &code,
+        &["'lists':'foldl'"],
     );
 }
 
@@ -1103,17 +1132,20 @@ fn test_class_method_do_non_literal_callable_does_not_fold() {
     // plain-value wrapper, like every other context.
     let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items do: block\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foreach'"),
-        "Non-literal callable do: in a class method should use lists:foreach (no fold). Got:\n{code}"
+    assert_has(
+        "Non-literal callable do: in a class method should use lists:foreach (no fold)",
+        &code,
+        &["'lists':'foreach'"],
     );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "Non-literal callable do: in a class method must NOT fold. Got:\n{code}"
+    assert_lacks(
+        "Non-literal callable do: in a class method must NOT fold",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'erlang':'is_function'"),
-        "Non-literal callable do: should still emit is_function/2 arity check (BT-909). Got:\n{code}"
+    assert_has(
+        "Non-literal callable do: should still emit is_function/2 arity check (BT-909)",
+        &code,
+        &["'erlang':'is_function'"],
     );
 }
 
@@ -1126,15 +1158,17 @@ fn test_value_type_do_with_local_mutation_open_chain() {
     // directly.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    total := 0\n    #(1, 2, 3) do: [:item | total := total + item]\n    total\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "ValueType do: with mutation should use lists:foldl. Got:\n{code}"
+    assert_has(
+        "ValueType do: with mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
     // Open chain: no ThreadedResult wrapper variable (unlike collect: / select:).
     // The caller (method body) directly continues the chain with the next expression.
-    assert!(
-        !code.contains("ThreadedResult"),
-        "ValueType do: open chain should NOT emit a ThreadedResult wrapper. Got:\n{code}"
+    assert_lacks(
+        "ValueType do: open chain should NOT emit a ThreadedResult wrapper",
+        &code,
+        &["ThreadedResult"],
     );
     // BT-4116: one threaded local folds a bare accumulator — no map, no tuple.
     assert!(
@@ -1153,19 +1187,22 @@ fn test_value_type_collect_with_local_mutation_threaded_result_wrapper() {
     // it via element(1, ThreadedResult).
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    count := 0\n    #(1, 2, 3) collect: [:item | count := count + 1. item * 2]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "ValueType collect: with mutation should use lists:foldl. Got:\n{code}"
+    assert_has(
+        "ValueType collect: with mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
     // The outer method body wraps the result via a ThreadedResult variable.
-    assert!(
-        code.contains("ThreadedResult"),
-        "ValueType collect: should produce a ThreadedResult wrapper. Got:\n{code}"
+    assert_has(
+        "ValueType collect: should produce a ThreadedResult wrapper",
+        &code,
+        &["ThreadedResult"],
     );
     // String-aware result wrapping via from_list_like.
-    assert!(
-        code.contains("'beamtalk_collection':'from_list_like'"),
-        "ValueType collect: should use from_list_like for string-aware result. Got:\n{code}"
+    assert_has(
+        "ValueType collect: should use from_list_like for string-aware result",
+        &code,
+        &["'beamtalk_collection':'from_list_like'"],
     );
 }
 
@@ -1177,19 +1214,22 @@ fn test_value_type_select_with_local_mutation_threaded_result_wrapper() {
     // method body unpacks via element(1, ThreadedResult).
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    count := 0\n    #(1, -2, 3) select: [:item | count := count + 1. item > 0]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "ValueType select: with mutation should use lists:foldl. Got:\n{code}"
+    assert_has(
+        "ValueType select: with mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
     // The outer method body wraps the result via a ThreadedResult variable.
-    assert!(
-        code.contains("ThreadedResult"),
-        "ValueType select: should produce a ThreadedResult wrapper. Got:\n{code}"
+    assert_has(
+        "ValueType select: should produce a ThreadedResult wrapper",
+        &code,
+        &["ThreadedResult"],
     );
     // String-aware result wrapping via from_list_like.
-    assert!(
-        code.contains("'beamtalk_collection':'from_list_like'"),
-        "ValueType select: should use from_list_like for string-aware result. Got:\n{code}"
+    assert_has(
+        "ValueType select: should use from_list_like for string-aware result",
+        &code,
+        &["'beamtalk_collection':'from_list_like'"],
     );
 }
 
@@ -1200,18 +1240,21 @@ fn test_value_type_do_non_literal_callable_seeds_empty_state() {
     // seeded with ~{}~ (empty map) rather than the current StateAcc.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run: items with: block =>\n    items do: block\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foreach'"),
-        "ValueType do: with non-literal callable should use lists:foreach. Got:\n{code}"
+    assert_has(
+        "ValueType do: with non-literal callable should use lists:foreach",
+        &code,
+        &["'lists':'foreach'"],
     );
-    assert!(
-        code.contains("'erlang':'is_function'"),
-        "ValueType non-literal do: should emit is_function/2 arity check (BT-909). Got:\n{code}"
+    assert_has(
+        "ValueType non-literal do: should emit is_function/2 arity check (BT-909)",
+        &code,
+        &["'erlang':'is_function'"],
     );
     // ValueType seeds the Tier-2 wrapper with ~{}~ (no actor State in scope).
-    assert!(
-        code.contains("~{}~"),
-        "ValueType non-literal do: should seed wrapper with ~{{}}~ (empty map). Got:\n{code}"
+    assert_has(
+        "ValueType non-literal do: should seed wrapper with ~{}~ (empty map)",
+        &code,
+        &["~{}~"],
     );
 }
 
@@ -1225,29 +1268,35 @@ fn test_value_type_collect_non_literal_callable_generates_map_wrapper() {
     // test does not reach.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run: items with: block =>\n    items collect: block\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'map'"),
-        "ValueType collect: with non-literal callable should use lists:map. Got:\n{code}"
+    assert_has(
+        "ValueType collect: with non-literal callable should use lists:map",
+        &code,
+        &["'lists':'map'"],
     );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "ValueType collect: with non-literal callable must NOT use lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "ValueType collect: with non-literal callable must NOT use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'erlang':'is_function'"),
-        "ValueType collect: non-literal callable should emit is_function/2 arity check. Got:\n{code}"
+    assert_has(
+        "ValueType collect: non-literal callable should emit is_function/2 arity check",
+        &code,
+        &["'erlang':'is_function'"],
     );
-    assert!(
-        code.contains("'erlang':'is_list'"),
-        "ValueType collect: should guard with erlang:is_list for list dispatch. Got:\n{code}"
+    assert_has(
+        "ValueType collect: should guard with erlang:is_list for list dispatch",
+        &code,
+        &["'erlang':'is_list'"],
     );
-    assert!(
-        code.contains("'beamtalk_message_dispatch':'send'("),
-        "ValueType collect: should fall back to beamtalk_message_dispatch:send for non-lists. Got:\n{code}"
+    assert_has(
+        "ValueType collect: should fall back to beamtalk_message_dispatch:send for non-lists",
+        &code,
+        &["'beamtalk_message_dispatch':'send'("],
     );
-    assert!(
-        code.contains("'collect:'"),
-        "ValueType collect: fallback should use 'collect:' selector. Got:\n{code}"
+    assert_has(
+        "ValueType collect: fallback should use 'collect:' selector",
+        &code,
+        &["'collect:'"],
     );
 }
 
@@ -1260,29 +1309,35 @@ fn test_value_type_select_non_literal_callable_generates_filter_wrapper() {
     // covering the third distinct operation path through these two functions.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run: items with: block =>\n    items select: block\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'filter'"),
-        "ValueType select: with non-literal callable should use lists:filter. Got:\n{code}"
+    assert_has(
+        "ValueType select: with non-literal callable should use lists:filter",
+        &code,
+        &["'lists':'filter'"],
     );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "ValueType select: with non-literal callable must NOT use lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "ValueType select: with non-literal callable must NOT use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'erlang':'is_function'"),
-        "ValueType select: non-literal callable should emit is_function/2 arity check. Got:\n{code}"
+    assert_has(
+        "ValueType select: non-literal callable should emit is_function/2 arity check",
+        &code,
+        &["'erlang':'is_function'"],
     );
-    assert!(
-        code.contains("'erlang':'is_list'"),
-        "ValueType select: should guard with erlang:is_list for list dispatch. Got:\n{code}"
+    assert_has(
+        "ValueType select: should guard with erlang:is_list for list dispatch",
+        &code,
+        &["'erlang':'is_list'"],
     );
-    assert!(
-        code.contains("'beamtalk_message_dispatch':'send'("),
-        "ValueType select: should fall back to beamtalk_message_dispatch:send for non-lists. Got:\n{code}"
+    assert_has(
+        "ValueType select: should fall back to beamtalk_message_dispatch:send for non-lists",
+        &code,
+        &["'beamtalk_message_dispatch':'send'("],
     );
-    assert!(
-        code.contains("'select:'"),
-        "ValueType select: fallback should use 'select:' selector. Got:\n{code}"
+    assert_has(
+        "ValueType select: fallback should use 'select:' selector",
+        &code,
+        &["'select:'"],
     );
 }
 
@@ -1294,18 +1349,20 @@ fn test_class_method_collect_non_literal_callable_does_not_fold() {
     // "map" operation path.
     let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items collect: block\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'map'"),
-        "Non-literal callable collect: in a class method should use lists:map (no fold). Got:\n{code}"
+    assert_has(
+        "Non-literal callable collect: in a class method should use lists:map (no fold)",
+        &code,
+        &["'lists':'map'"],
     );
     assert!(
         !code.contains("'lists':'foldl'"),
         "Non-literal callable collect: in a class method must NOT fold — class methods have no \
          State/StateAcc to seed the accumulator from. Got:\n{code}"
     );
-    assert!(
-        code.contains("'erlang':'is_function'"),
-        "Non-literal callable collect: should still emit is_function/2 arity check. Got:\n{code}"
+    assert_has(
+        "Non-literal callable collect: should still emit is_function/2 arity check",
+        &code,
+        &["'erlang':'is_function'"],
     );
 }
 
@@ -1315,13 +1372,15 @@ fn test_non_literal_callable_in_expression_position_is_a_plain_value() {
     // `{Result, NewState}` tuple to hoist: the operand is the plain value.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    (items inject: 0 into: block) + 1\n";
     let code = codegen(src);
-    assert!(
-        code.contains("fun (Elem, Acc) -> apply"),
-        "Non-literal inject:into: should use the arg-swap wrapper. Got:\n{code}"
+    assert_has(
+        "Non-literal inject:into: should use the arg-swap wrapper",
+        &code,
+        &["fun (Elem, Acc) -> apply"],
     );
-    assert!(
-        !code.contains("call 'erlang':'element'(1, _CF"),
-        "No control-flow tuple should be hoisted. Got:\n{code}"
+    assert_lacks(
+        "No control-flow tuple should be hoisted",
+        &code,
+        &["call 'erlang':'element'(1, _CF"],
     );
 }
 
@@ -1334,18 +1393,21 @@ fn test_list_reject_with_field_mutation_uses_foldl() {
     // around the predicate result in the filter condition (BodyKind::FoldlFilter{negate:true}).
     let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items reject: [:item | self.n := self.n + 1. item > 0]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "reject: with field mutation should use lists:foldl. Got:\n{code}"
+    assert_has(
+        "reject: with field mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
     // negate=true: the fold body uses erlang:not to invert the predicate in the case expression.
-    assert!(
-        code.contains("call 'erlang':'not'"),
-        "reject: with field mutation should emit erlang:not for the negate=true condition. Got:\n{code}"
+    assert_has(
+        "reject: with field mutation should emit erlang:not for the negate=true condition",
+        &code,
+        &["call 'erlang':'not'"],
     );
-    assert!(
-        code.contains("maps':'put'('n'"),
-        "reject: body should update 'n' field via maps:put. Got:\n{code}"
+    assert_has(
+        "reject: body should update 'n' field via maps:put",
+        &code,
+        &["maps':'put'('n'"],
     );
 }
 
@@ -1373,17 +1435,20 @@ fn test_each_with_index_field_mutation_desugars_in_actor() {
     // re-projected to the nil-with-state tuple (the actor state-thread contract).
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:item :i | self.total := self.total + (item * i)]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "eachWithIndex: field mutation: should desugar to lists:foldl. Got:\n{code}"
+    assert_has(
+        "eachWithIndex: field mutation: should desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'maps':'put'('total'"),
-        "eachWithIndex: field mutation: should thread the 'total' field. Got:\n{code}"
+    assert_has(
+        "eachWithIndex: field mutation: should thread the 'total' field",
+        &code,
+        &["'maps':'put'('total'"],
     );
-    assert!(
-        code.contains("{'nil', call 'erlang':'element'(2,"),
-        "eachWithIndex: field mutation: actor should re-project result to {{'nil', NewState}}. Got:\n{code}"
+    assert_has(
+        "eachWithIndex: field mutation: actor should re-project result to {'nil', NewState}",
+        &code,
+        &["{'nil', call 'erlang':'element'(2,"],
     );
 }
 
@@ -1394,17 +1459,20 @@ fn test_each_with_index_local_mutation_desugars_in_actor() {
     // bare assignment (no `| var |` declaration — that is not Beamtalk syntax).
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    acc := 0\n    items eachWithIndex: [:item :i | acc := acc + i]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "eachWithIndex: local mutation: should desugar to lists:foldl. Got:\n{code}"
+    assert_has(
+        "eachWithIndex: local mutation: should desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'maps':'put'('__local__acc'"),
-        "eachWithIndex: local mutation: should thread the 'acc' local. Got:\n{code}"
+    assert_has(
+        "eachWithIndex: local mutation: should thread the 'acc' local",
+        &code,
+        &["'maps':'put'('__local__acc'"],
     );
-    assert!(
-        code.contains("{'nil', call 'erlang':'element'(2,"),
-        "eachWithIndex: local mutation: actor should re-project to {{'nil', NewState}}. Got:\n{code}"
+    assert_has(
+        "eachWithIndex: local mutation: actor should re-project to {'nil', NewState}",
+        &code,
+        &["{'nil', call 'erlang':'element'(2,"],
     );
 }
 
@@ -1414,13 +1482,15 @@ fn test_each_with_index_pure_block_falls_through() {
     // the collection.bt method (covers the `!needs_threading` early-return).
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items eachWithIndex: [:item :i | item + i]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'send'(_items@4, 'eachWithIndex:', ["),
-        "eachWithIndex: pure block: should fall through to a dispatch call site (not just method metadata). Got:\n{code}"
+    assert_has(
+        "eachWithIndex: pure block: should fall through to a dispatch call site (not just method metadata)",
+        &code,
+        &["'send'(_items@4, 'eachWithIndex:', ["],
     );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "eachWithIndex: pure block: should NOT desugar to lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "eachWithIndex: pure block: should NOT desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
 }
 
@@ -1433,13 +1503,15 @@ fn test_each_with_index_wrong_arity_block_falls_through() {
     // to normal dispatch is a compile-time error.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x | x + 1]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'send'(_items@4, 'eachWithIndex:', ["),
-        "eachWithIndex: wrong arity: should fall through to a dispatch call site (not just method metadata). Got:\n{code}"
+    assert_has(
+        "eachWithIndex: wrong arity: should fall through to a dispatch call site (not just method metadata)",
+        &code,
+        &["'send'(_items@4, 'eachWithIndex:', ["],
     );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "eachWithIndex: wrong arity: should NOT desugar to lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "eachWithIndex: wrong arity: should NOT desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
 }
 
@@ -1460,9 +1532,10 @@ fn test_each_with_index_wrong_arity_field_mutating_block_is_compile_error() {
         crate::core_erlang::CodegenOptions::new("test"),
     );
     let code = result.expect("a field-writing block compiles (ADR 0137)");
-    assert!(
-        code.contains("call 'beamtalk_actor_state':'put'("),
-        "the block writes the field through the cell. Got:\n{code}"
+    assert_has(
+        "the block writes the field through the cell",
+        &code,
+        &["call 'beamtalk_actor_state':'put'("],
     );
 }
 
@@ -1474,17 +1547,20 @@ fn test_each_with_index_value_type_reprojects_as_a_producer() {
     // `enumeration_yields_construct_tuple` branch of finalize_enumeration_fold).
     let src = "Value subclass: Accumulator\n  state: dummy = 0\n\n  run: items =>\n    acc := 0\n    items eachWithIndex: [:item :i | acc := acc + i]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "eachWithIndex: Value type: should still desugar to lists:foldl. Got:\n{code}"
+    assert_has(
+        "eachWithIndex: Value type: should still desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'maps':'put'('__local__acc'"),
-        "eachWithIndex: Value type: should thread 'acc' through the fold accumulator. Got:\n{code}"
+    assert_has(
+        "eachWithIndex: Value type: should thread 'acc' through the fold accumulator",
+        &code,
+        &["'maps':'put'('__local__acc'"],
     );
-    assert!(
-        code.contains("{'nil', call 'erlang':'element'(2,"),
-        "eachWithIndex: Value type: should re-project for the producer (BT-3841). Got:\n{code}"
+    assert_has(
+        "eachWithIndex: Value type: should re-project for the producer (BT-3841)",
+        &code,
+        &["{'nil', call 'erlang':'element'(2,"],
     );
 }
 
@@ -1495,17 +1571,20 @@ fn test_do_separated_by_element_block_mutation_desugars_in_actor() {
     // nil-with-state re-projection is emitted.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items do: [:x | self.total := self.total + x] separatedBy: [nil]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "do:separatedBy: element mutation: should desugar to lists:foldl. Got:\n{code}"
+    assert_has(
+        "do:separatedBy: element mutation: should desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'maps':'put'('total'"),
-        "do:separatedBy: element mutation: should thread the 'total' field. Got:\n{code}"
+    assert_has(
+        "do:separatedBy: element mutation: should thread the 'total' field",
+        &code,
+        &["'maps':'put'('total'"],
     );
-    assert!(
-        code.contains("{'nil', call 'erlang':'element'(2,"),
-        "do:separatedBy: element mutation: actor should re-project to {{'nil', NewState}}. Got:\n{code}"
+    assert_has(
+        "do:separatedBy: element mutation: actor should re-project to {'nil', NewState}",
+        &code,
+        &["{'nil', call 'erlang':'element'(2,"],
     );
 }
 
@@ -1514,17 +1593,20 @@ fn test_do_separated_by_separator_block_mutation_desugars_in_actor() {
     // Even when only the *separator* block mutates state the call must desugar.
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items do: [:x | x printString] separatedBy: [self.count := self.count + 1]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "do:separatedBy: separator mutation: should desugar to lists:foldl. Got:\n{code}"
+    assert_has(
+        "do:separatedBy: separator mutation: should desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'maps':'put'('count'"),
-        "do:separatedBy: separator mutation: should thread the 'count' field. Got:\n{code}"
+    assert_has(
+        "do:separatedBy: separator mutation: should thread the 'count' field",
+        &code,
+        &["'maps':'put'('count'"],
     );
-    assert!(
-        code.contains("{'nil', call 'erlang':'element'(2,"),
-        "do:separatedBy: separator mutation: actor should re-project to {{'nil', NewState}}. Got:\n{code}"
+    assert_has(
+        "do:separatedBy: separator mutation: actor should re-project to {'nil', NewState}",
+        &code,
+        &["{'nil', call 'erlang':'element'(2,"],
     );
 }
 
@@ -1535,13 +1617,15 @@ fn test_do_separated_by_pure_blocks_fall_through() {
     // try_generate_do_separated_by).
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items do: [:item | item + 1] separatedBy: [nil]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'send'(_items@4, 'do:separatedBy:', ["),
-        "do:separatedBy: pure blocks: should fall through to a dispatch call site (not just method metadata). Got:\n{code}"
+    assert_has(
+        "do:separatedBy: pure blocks: should fall through to a dispatch call site (not just method metadata)",
+        &code,
+        &["'send'(_items@4, 'do:separatedBy:', ["],
     );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "do:separatedBy: pure blocks: should NOT desugar to lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "do:separatedBy: pure blocks: should NOT desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
 }
 
@@ -1555,13 +1639,15 @@ fn test_each_with_index_degenerate_param_names_falls_through() {
     // compile-time error (tested separately).
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x :x | x + 1]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'send'(_items@4, 'eachWithIndex:', ["),
-        "eachWithIndex: degenerate params: should fall through to a dispatch call site (not just method metadata). Got:\n{code}"
+    assert_has(
+        "eachWithIndex: degenerate params: should fall through to a dispatch call site (not just method metadata)",
+        &code,
+        &["'send'(_items@4, 'eachWithIndex:', ["],
     );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "eachWithIndex: degenerate params: should NOT desugar to lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "eachWithIndex: degenerate params: should NOT desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
 }
 
@@ -1577,13 +1663,15 @@ fn test_each_with_index_non_literal_callable_falls_through() {
     // exercised via `codegen()`'s `expect`-success helper here.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:item :i | item + i]\n    items eachWithIndex: blk\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'send'(_items@4, 'eachWithIndex:', [Blk@]"),
-        "eachWithIndex: non-literal callable: should dispatch via message send. Got:\n{code}"
+    assert_has(
+        "eachWithIndex: non-literal callable: should dispatch via message send",
+        &code,
+        &["'send'(_items@4, 'eachWithIndex:', [Blk@]"],
     );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "eachWithIndex: non-literal callable: should NOT desugar to lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "eachWithIndex: non-literal callable: should NOT desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
 }
 
@@ -1597,13 +1685,15 @@ fn test_do_separated_by_non_literal_callable_falls_through() {
     // Bracket deliberately left open (no trailing `]`) here, unlike the
     // eachWithIndex: assertion above: do:separatedBy: passes two arguments
     // (`[Blk, fun () -> 'nil']`), so `[Blk]` alone would never match.
-    assert!(
-        code.contains("'send'(_items@4, 'do:separatedBy:', [Blk"),
-        "do:separatedBy: non-literal callable: should dispatch via message send. Got:\n{code}"
+    assert_has(
+        "do:separatedBy: non-literal callable: should dispatch via message send",
+        &code,
+        &["'send'(_items@4, 'do:separatedBy:', [Blk"],
     );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "do:separatedBy: non-literal callable: should NOT desugar to lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "do:separatedBy: non-literal callable: should NOT desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
 }
 
@@ -1616,13 +1706,15 @@ fn test_do_separated_by_non_literal_separator_falls_through() {
     // a stored self-mutating block invoked this way is a compile-time error.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    sep := [nil]\n    items do: [:x | x printString] separatedBy: sep\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'send'(_items@4, 'do:separatedBy:', ["),
-        "do:separatedBy: non-literal separator: should dispatch via message send. Got:\n{code}"
+    assert_has(
+        "do:separatedBy: non-literal separator: should dispatch via message send",
+        &code,
+        &["'send'(_items@4, 'do:separatedBy:', ["],
     );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "do:separatedBy: non-literal separator: should NOT desugar to lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "do:separatedBy: non-literal separator: should NOT desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
 }
 
@@ -1632,17 +1724,20 @@ fn test_do_separated_by_value_type_reprojects_as_a_producer() {
     // do:separatedBy: (BT-3841).
     let src = "Value subclass: Accumulator\n  state: dummy = 0\n\n  run: items =>\n    acc := 0\n    items do: [:x | x printString] separatedBy: [acc := acc + 1]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "do:separatedBy: Value type: should still desugar to lists:foldl. Got:\n{code}"
+    assert_has(
+        "do:separatedBy: Value type: should still desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'maps':'put'('__local__acc'"),
-        "do:separatedBy: Value type: should thread 'acc' through the fold accumulator. Got:\n{code}"
+    assert_has(
+        "do:separatedBy: Value type: should thread 'acc' through the fold accumulator",
+        &code,
+        &["'maps':'put'('__local__acc'"],
     );
-    assert!(
-        code.contains("{'nil', call 'erlang':'element'(2,"),
-        "do:separatedBy: Value type: should re-project for the producer (BT-3841). Got:\n{code}"
+    assert_has(
+        "do:separatedBy: Value type: should re-project for the producer (BT-3841)",
+        &code,
+        &["{'nil', call 'erlang':'element'(2,"],
     );
 }
 
@@ -1655,13 +1750,15 @@ fn test_each_with_index_zero_arity_block_falls_through() {
     // is a compile-time error.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [1]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'send'(_items@4, 'eachWithIndex:', ["),
-        "eachWithIndex: zero-arity block: should fall through to a dispatch call site. Got:\n{code}"
+    assert_has(
+        "eachWithIndex: zero-arity block: should fall through to a dispatch call site",
+        &code,
+        &["'send'(_items@4, 'eachWithIndex:', ["],
     );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "eachWithIndex: zero-arity block: should NOT desugar to lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "eachWithIndex: zero-arity block: should NOT desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
 }
 
@@ -1674,13 +1771,15 @@ fn test_do_separated_by_separator_with_param_falls_through() {
     // is a compile-time error.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items do: [:x | x printString] separatedBy: [:y | y + 1]\n";
     let code = codegen(src);
-    assert!(
-        code.contains("'send'(_items@4, 'do:separatedBy:', ["),
-        "do:separatedBy: separator with param: should fall through to a dispatch call site. Got:\n{code}"
+    assert_has(
+        "do:separatedBy: separator with param: should fall through to a dispatch call site",
+        &code,
+        &["'send'(_items@4, 'do:separatedBy:', ["],
     );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "do:separatedBy: separator with param: should NOT desugar to lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "do:separatedBy: separator with param: should NOT desugar to lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
 }
 
@@ -1777,22 +1876,22 @@ fn test_select_nested_in_direct_params_loop() {
         "    count\n",
     );
     let code = codegen(src);
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
+    assert_has("Outer to:do: should generate a letrec", &code, &["letrec"]);
+    assert_has(
+        "select: with local mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "select: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'filter'"),
-        "Mutation-threaded select: must NOT use lists:filter. Got:\n{code}"
+    assert_lacks(
+        "Mutation-threaded select: must NOT use lists:filter",
+        &code,
+        &["'lists':'filter'"],
     );
     // Direct-params outer loop rebuilds `StateAcc` exactly once at exit (ExitSA).
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    assert_has(
+        "Direct-params outer loop should rebuild StateAcc at exit",
+        &code,
+        &["ExitSA"],
     );
 }
 
@@ -1813,23 +1912,23 @@ fn test_reject_nested_in_direct_params_loop() {
         "    count\n",
     );
     let code = codegen(src);
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "reject: with local mutation should use lists:foldl. Got:\n{code}"
+    assert_has("Outer to:do: should generate a letrec", &code, &["letrec"]);
+    assert_has(
+        "reject: with local mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
     // negate=true: the fold body wraps the predicate with erlang:not.
-    assert!(
-        code.contains("call 'erlang':'not'"),
-        "reject: (negate=true) in direct-params loop must emit erlang:not. Got:\n{code}"
+    assert_has(
+        "reject: (negate=true) in direct-params loop must emit erlang:not",
+        &code,
+        &["call 'erlang':'not'"],
     );
     // Direct-params outer loop rebuilds `StateAcc` exactly once at exit (ExitSA).
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    assert_has(
+        "Direct-params outer loop should rebuild StateAcc at exit",
+        &code,
+        &["ExitSA"],
     );
 }
 
@@ -1850,22 +1949,22 @@ fn test_do_nested_in_direct_params_loop() {
         "    count\n",
     );
     let code = codegen(src);
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
+    assert_has("Outer to:do: should generate a letrec", &code, &["letrec"]);
+    assert_has(
+        "do: with local mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "do: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'foreach'"),
-        "Mutation-threaded do: must NOT use lists:foreach. Got:\n{code}"
+    assert_lacks(
+        "Mutation-threaded do: must NOT use lists:foreach",
+        &code,
+        &["'lists':'foreach'"],
     );
     // Direct-params outer loop rebuilds `StateAcc` exactly once at exit (ExitSA).
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    assert_has(
+        "Direct-params outer loop should rebuild StateAcc at exit",
+        &code,
+        &["ExitSA"],
     );
 }
 
@@ -1933,27 +2032,28 @@ fn test_collect_nested_in_direct_params_loop() {
         "    count\n",
     );
     let code = codegen(src);
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
+    assert_has("Outer to:do: should generate a letrec", &code, &["letrec"]);
+    assert_has(
+        "collect: with local mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "collect: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'map'"),
-        "Mutation-threaded collect: must NOT use lists:map. Got:\n{code}"
+    assert_lacks(
+        "Mutation-threaded collect: must NOT use lists:map",
+        &code,
+        &["'lists':'map'"],
     );
     // collect: reverses the accumulated list after foldl.
-    assert!(
-        code.contains("'lists':'reverse'"),
-        "collect: should reverse the accumulated result list. Got:\n{code}"
+    assert_has(
+        "collect: should reverse the accumulated result list",
+        &code,
+        &["'lists':'reverse'"],
     );
     // Direct-params outer loop rebuilds `StateAcc` exactly once at exit (ExitSA).
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    assert_has(
+        "Direct-params outer loop should rebuild StateAcc at exit",
+        &code,
+        &["ExitSA"],
     );
 }
 
@@ -1980,21 +2080,21 @@ fn test_count_nested_in_direct_params_loop() {
         "    count\n",
     );
     let code = codegen(src);
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
+    assert_has("Outer to:do: should generate a letrec", &code, &["letrec"]);
+    assert_has(
+        "count: with local mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "count: with local mutation should use lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "Mutation-threaded count: must NOT use lists:filter",
+        &code,
+        &["'lists':'filter'"],
     );
-    assert!(
-        !code.contains("'lists':'filter'"),
-        "Mutation-threaded count: must NOT use lists:filter. Got:\n{code}"
-    );
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    assert_has(
+        "Direct-params outer loop should rebuild StateAcc at exit",
+        &code,
+        &["ExitSA"],
     );
 }
 
@@ -2015,29 +2115,31 @@ fn test_flat_map_nested_in_direct_params_loop() {
         "    count\n",
     );
     let code = codegen(src);
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
+    assert_has("Outer to:do: should generate a letrec", &code, &["letrec"]);
+    assert_has(
+        "flatMap: with local mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "flatMap: with local mutation should use lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "Mutation-threaded flatMap: must NOT use lists:flatmap",
+        &code,
+        &["'lists':'flatmap'"],
     );
-    assert!(
-        !code.contains("'lists':'flatmap'"),
-        "Mutation-threaded flatMap: must NOT use lists:flatmap. Got:\n{code}"
+    assert_has(
+        "flatMap: in direct-params loop should reverse the accumulated result",
+        &code,
+        &["'lists':'reverse'"],
     );
-    assert!(
-        code.contains("'lists':'reverse'"),
-        "flatMap: in direct-params loop should reverse the accumulated result. Got:\n{code}"
+    assert_has(
+        "flatMap: in direct-params loop should flatten via lists:append",
+        &code,
+        &["'lists':'append'"],
     );
-    assert!(
-        code.contains("'lists':'append'"),
-        "flatMap: in direct-params loop should flatten via lists:append. Got:\n{code}"
-    );
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    assert_has(
+        "Direct-params outer loop should rebuild StateAcc at exit",
+        &code,
+        &["ExitSA"],
     );
 }
 
@@ -2058,17 +2160,16 @@ fn test_inject_nested_in_direct_params_loop() {
         "    count\n",
     );
     let code = codegen(src);
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
+    assert_has("Outer to:do: should generate a letrec", &code, &["letrec"]);
+    assert_has(
+        "inject:into: with local mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "inject:into: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    assert_has(
+        "Direct-params outer loop should rebuild StateAcc at exit",
+        &code,
+        &["ExitSA"],
     );
 }
 
@@ -2089,25 +2190,26 @@ fn test_take_while_nested_in_direct_params_loop() {
         "    count\n",
     );
     let code = codegen(src);
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
+    assert_has("Outer to:do: should generate a letrec", &code, &["letrec"]);
+    assert_has(
+        "takeWhile: with local mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "takeWhile: with local mutation should use lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "Mutation-threaded takeWhile: must NOT use lists:takewhile",
+        &code,
+        &["'lists':'takewhile'"],
     );
-    assert!(
-        !code.contains("'lists':'takewhile'"),
-        "Mutation-threaded takeWhile: must NOT use lists:takewhile. Got:\n{code}"
+    assert_has(
+        "takeWhile: in direct-params loop should reverse the accumulated result",
+        &code,
+        &["'lists':'reverse'"],
     );
-    assert!(
-        code.contains("'lists':'reverse'"),
-        "takeWhile: in direct-params loop should reverse the accumulated result. Got:\n{code}"
-    );
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    assert_has(
+        "Direct-params outer loop should rebuild StateAcc at exit",
+        &code,
+        &["ExitSA"],
     );
 }
 
@@ -2128,25 +2230,26 @@ fn test_drop_while_nested_in_direct_params_loop() {
         "    count\n",
     );
     let code = codegen(src);
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
+    assert_has("Outer to:do: should generate a letrec", &code, &["letrec"]);
+    assert_has(
+        "dropWhile: with local mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "dropWhile: with local mutation should use lists:foldl. Got:\n{code}"
+    assert_lacks(
+        "Mutation-threaded dropWhile: must NOT use lists:dropwhile",
+        &code,
+        &["'lists':'dropwhile'"],
     );
-    assert!(
-        !code.contains("'lists':'dropwhile'"),
-        "Mutation-threaded dropWhile: must NOT use lists:dropwhile. Got:\n{code}"
+    assert_has(
+        "dropWhile: in direct-params loop should reverse the accumulated result",
+        &code,
+        &["'lists':'reverse'"],
     );
-    assert!(
-        code.contains("'lists':'reverse'"),
-        "dropWhile: in direct-params loop should reverse the accumulated result. Got:\n{code}"
-    );
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    assert_has(
+        "Direct-params outer loop should rebuild StateAcc at exit",
+        &code,
+        &["ExitSA"],
     );
 }
 
@@ -2167,21 +2270,21 @@ fn test_partition_nested_in_direct_params_loop() {
         "    count\n",
     );
     let code = codegen(src);
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
+    assert_has("Outer to:do: should generate a letrec", &code, &["letrec"]);
+    assert_has(
+        "partition: with local mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "partition: with local mutation should use lists:foldl. Got:\n{code}"
+    assert_has(
+        "partition: in direct-params loop should reverse both sublists",
+        &code,
+        &["'lists':'reverse'"],
     );
-    assert!(
-        code.contains("'lists':'reverse'"),
-        "partition: in direct-params loop should reverse both sublists. Got:\n{code}"
-    );
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    assert_has(
+        "Direct-params outer loop should rebuild StateAcc at exit",
+        &code,
+        &["ExitSA"],
     );
 }
 
@@ -2202,21 +2305,21 @@ fn test_group_by_nested_in_direct_params_loop() {
         "    count\n",
     );
     let code = codegen(src);
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
+    assert_has("Outer to:do: should generate a letrec", &code, &["letrec"]);
+    assert_has(
+        "groupBy: with local mutation should use lists:foldl",
+        &code,
+        &["'lists':'foldl'"],
     );
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "groupBy: with local mutation should use lists:foldl. Got:\n{code}"
+    assert_has(
+        "groupBy: in direct-params loop should call reverse_group_values",
+        &code,
+        &["'beamtalk_list':'reverse_group_values'"],
     );
-    assert!(
-        code.contains("'beamtalk_list':'reverse_group_values'"),
-        "groupBy: in direct-params loop should call reverse_group_values. Got:\n{code}"
-    );
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    assert_has(
+        "Direct-params outer loop should rebuild StateAcc at exit",
+        &code,
+        &["ExitSA"],
     );
 }
 
@@ -2244,17 +2347,20 @@ fn test_sort_with_local_mutation_uses_process_dict() {
         "    items sort: [:a :b | n := n + 1. a < b]\n",
     );
     let code = codegen(src);
-    assert!(
-        code.contains("'lists':'sort'"),
-        "sort: with local mutation should use lists:sort. Got:\n{code}"
+    assert_has(
+        "sort: with local mutation should use lists:sort",
+        &code,
+        &["'lists':'sort'"],
     );
-    assert!(
-        code.contains("'erlang':'make_ref'"),
-        "sort: should use a fresh per-invocation process dictionary key (BT-2948). Got:\n{code}"
+    assert_has(
+        "sort: should use a fresh per-invocation process dictionary key (BT-2948)",
+        &code,
+        &["'erlang':'make_ref'"],
     );
-    assert!(
-        code.contains("'__local__n'"),
-        "sort: local var mutation should thread '__local__n' via maps:put. Got:\n{code}"
+    assert_has(
+        "sort: local var mutation should thread '__local__n' via maps:put",
+        &code,
+        &["'__local__n'"],
     );
 }
 
@@ -2393,9 +2499,10 @@ fn test_actor_match_in_direct_params_loop_never_reaches_private_scratch_error() 
     let code = codegen(src);
     // The loop really is direct-params (it rebuilds StateAcc once at exit), so
     // the success of `codegen` above shows the error branch is not reached.
-    assert!(
-        code.contains("ExitSA"),
-        "Outer loop should be direct-params (rebuild StateAcc at exit). Got:\n{code}"
+    assert_has(
+        "Outer loop should be direct-params (rebuild StateAcc at exit)",
+        &code,
+        &["ExitSA"],
     );
 }
 
@@ -2475,9 +2582,10 @@ fn test_do_fold_and_pure_inject_do_not_use_receiver_guard() {
     );
     let pure_src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items inject: 0 into: [:a :x | a + x]\n";
     let code = codegen(pure_src);
-    assert!(
-        !code.contains("to_list_for_threading"),
-        "A pure inject:into: must not call the receiver guard. Got:\n{code}"
+    assert_lacks(
+        "A pure inject:into: must not call the receiver guard",
+        &code,
+        &["to_list_for_threading"],
     );
 }
 
@@ -2494,13 +2602,15 @@ fn test_closed_do_discarded_locals_skip_map_repack() {
         "    #(1, 2) do: [:v | total := total + v]\n",
     );
     let code = codegen(src);
-    assert!(
-        code.contains("{'nil'} in let _ThreadedValue"),
-        "discarded do: should answer a bare carrier. Got:\n{code}"
+    assert_has(
+        "discarded do: should answer a bare carrier",
+        &code,
+        &["{'nil'} in let _ThreadedValue"],
     );
-    assert!(
-        !code.contains("'__local__total'"),
-        "discarded do: must not repack locals into a map. Got:\n{code}"
+    assert_lacks(
+        "discarded do: must not repack locals into a map",
+        &code,
+        &["'__local__total'"],
     );
 }
 
@@ -2520,9 +2630,10 @@ fn test_discarded_fold_flag_does_not_leak_into_rebind_producer() {
         "    #(3) do: [:v | total := total + v]\n",
     );
     let code = codegen(src);
-    assert!(
-        code.contains("let Total@ = _FoldResult@"),
-        "the non-last do: must rebind its fold result. Got:\n{code}"
+    assert_has(
+        "the non-last do: must rebind its fold result",
+        &code,
+        &["let Total@ = _FoldResult@"],
     );
     assert_eq!(
         code.matches("{'nil'} in let _ThreadedValue").count(),
@@ -2563,13 +2674,15 @@ fn test_closed_do_writing_self_field_keeps_carrier_slots() {
         "    #(1, 2) do: [:v | total := total + v. self.n := self.n + 1]\n",
     );
     let code = codegen(src);
-    assert!(
-        !code.contains("{'nil'} in let _ThreadedValue"),
-        "a self-field-writing fold must keep its carrier slots. Got:\n{code}"
+    assert_lacks(
+        "a self-field-writing fold must keep its carrier slots",
+        &code,
+        &["{'nil'} in let _ThreadedValue"],
     );
-    assert!(
-        code.contains("{'nil', "),
-        "the carrier must still hold the fold's slots. Got:\n{code}"
+    assert_has(
+        "the carrier must still hold the fold's slots",
+        &code,
+        &["{'nil', "],
     );
 }
 

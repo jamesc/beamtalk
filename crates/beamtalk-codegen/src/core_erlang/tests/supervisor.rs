@@ -92,9 +92,10 @@ fn test_static_supervisor_has_supervisor_behaviour() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    assert!(
-        code.contains("'behaviour' = ['supervisor']"),
-        "Static supervisor must have supervisor behaviour. Got:\n{code}"
+    assert_has(
+        "Static supervisor must have supervisor behaviour",
+        &code,
+        &["'behaviour' = ['supervisor']"],
     );
 }
 
@@ -103,9 +104,10 @@ fn test_static_supervisor_no_gen_server_behaviour() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    assert!(
-        !code.contains("'behaviour' = ['gen_server']"),
-        "Static supervisor must NOT have gen_server behaviour. Got:\n{code}"
+    assert_lacks(
+        "Static supervisor must NOT have gen_server behaviour",
+        &code,
+        &["'behaviour' = ['gen_server']"],
     );
 }
 
@@ -114,9 +116,10 @@ fn test_static_supervisor_exports_start_link() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    assert!(
-        code.contains("'start_link'/0"),
-        "Static supervisor must export start_link/0. Got:\n{code}"
+    assert_has(
+        "Static supervisor must export start_link/0",
+        &code,
+        &["'start_link'/0"],
     );
 }
 
@@ -125,10 +128,7 @@ fn test_static_supervisor_exports_init() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    assert!(
-        code.contains("'init'/1"),
-        "Static supervisor must export init/1. Got:\n{code}"
-    );
+    assert_has("Static supervisor must export init/1", &code, &["'init'/1"]);
 }
 
 #[test]
@@ -136,13 +136,15 @@ fn test_static_supervisor_start_link_calls_supervisor_start_link() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    assert!(
-        code.contains("call 'supervisor':'start_link'"),
-        "start_link/0 must call supervisor:start_link. Got:\n{code}"
+    assert_has(
+        "start_link/0 must call supervisor:start_link",
+        &code,
+        &["call 'supervisor':'start_link'"],
     );
-    assert!(
-        code.contains("{'local', 'bt@webapp'}"),
-        "start_link/0 must register locally under module name. Got:\n{code}"
+    assert_has(
+        "start_link/0 must register locally under module name",
+        &code,
+        &["{'local', 'bt@webapp'}"],
     );
 }
 
@@ -156,18 +158,21 @@ fn test_static_supervisor_init_delegates_to_static_init() {
     // so calling class_send from init/1 would deadlock. ADR 0135: the start args are
     // forwarded so the configuration methods can read `self args`.
     // Match the exact call shape to verify argument order (module, class, args).
-    assert!(
-        code.contains("'init'/1 = fun (Args) ->"),
-        "init/1 must bind its start args. Got:\n{code}"
+    assert_has(
+        "init/1 must bind its start args",
+        &code,
+        &["'init'/1 = fun (Args) ->"],
     );
-    assert!(
-        code.contains("call 'beamtalk_supervisor':'static_init'('bt@webapp', 'WebApp', Args)"),
-        "init/1 must delegate to beamtalk_supervisor:static_init/3 with module, class and args. Got:\n{code}"
+    assert_has(
+        "init/1 must delegate to beamtalk_supervisor:static_init/3 with module, class and args",
+        &code,
+        &["call 'beamtalk_supervisor':'static_init'('bt@webapp', 'WebApp', Args)"],
     );
     // Must NOT contain direct class_send calls — those would deadlock.
-    assert!(
-        !code.contains("beamtalk_object_class':'class_send'"),
-        "init/1 must NOT call class_send directly (causes deadlock). Got:\n{code}"
+    assert_lacks(
+        "init/1 must NOT call class_send directly (causes deadlock)",
+        &code,
+        &["beamtalk_object_class':'class_send'"],
     );
 }
 
@@ -176,9 +181,10 @@ fn test_static_supervisor_has_on_load_register_class() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    assert!(
-        code.contains("'on_load' = [{'register_class', 0}]"),
-        "Supervisor module must have on_load register_class. Got:\n{code}"
+    assert_has(
+        "Supervisor module must have on_load register_class",
+        &code,
+        &["'on_load' = [{'register_class', 0}]"],
     );
 }
 
@@ -187,9 +193,10 @@ fn test_static_supervisor_has_register_class_function() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    assert!(
-        code.contains("'register_class'/0"),
-        "Supervisor module must export register_class/0. Got:\n{code}"
+    assert_has(
+        "Supervisor module must export register_class/0",
+        &code,
+        &["'register_class'/0"],
     );
 }
 
@@ -198,13 +205,15 @@ fn test_static_supervisor_has_superclass_function() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    assert!(
-        code.contains("'superclass'/0"),
-        "Supervisor module must export superclass/0. Got:\n{code}"
+    assert_has(
+        "Supervisor module must export superclass/0",
+        &code,
+        &["'superclass'/0"],
     );
-    assert!(
-        code.contains("'Supervisor'"),
-        "superclass/0 must return 'Supervisor'. Got:\n{code}"
+    assert_has(
+        "superclass/0 must return 'Supervisor'",
+        &code,
+        &["'Supervisor'"],
     );
 }
 
@@ -213,9 +222,10 @@ fn test_dynamic_supervisor_has_supervisor_behaviour() {
     let module = make_dynamic_supervisor_module();
     let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
         .expect("codegen should succeed");
-    assert!(
-        code.contains("'behaviour' = ['supervisor']"),
-        "Dynamic supervisor must have supervisor behaviour. Got:\n{code}"
+    assert_has(
+        "Dynamic supervisor must have supervisor behaviour",
+        &code,
+        &["'behaviour' = ['supervisor']"],
     );
 }
 
@@ -245,9 +255,10 @@ fn test_supervisor_start_link_forms() {
     ] {
         let code =
             generate_module(&module, CodegenOptions::new(name)).expect("codegen should succeed");
-        assert!(
-            code.contains("'start_link'/0, 'start_link'/1, 'start_link'/2, 'init'/1"),
-            "must export start_link/0,1,2. Got:\n{code}"
+        assert_has(
+            "must export start_link/0,1,2",
+            &code,
+            &["'start_link'/0, 'start_link'/1, 'start_link'/2, 'init'/1"],
         );
         assert!(
             code.contains(&format!(
@@ -279,9 +290,10 @@ fn test_dynamic_supervisor_init_does_not_fetch_children() {
     // (though 'children' may appear in other contexts like the selector atom in class_send args)
     // The key is that 'children' as a selector should NOT appear in the dynamic init/1.
     // We check that childClass IS present and simple_one_for_one IS used instead.
-    assert!(
-        !code.contains("'children'"),
-        "Dynamic supervisor init/1 must NOT call 'children'. Got:\n{code}"
+    assert_lacks(
+        "Dynamic supervisor init/1 must NOT call 'children'",
+        &code,
+        &["'children'"],
     );
 }
 
@@ -293,9 +305,10 @@ fn test_dynamic_supervisor_does_not_emit_class_side_child_class() {
     let module = make_dynamic_supervisor_module();
     let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
         .expect("codegen should succeed");
-    assert!(
-        !code.contains("'childClass'/0"),
-        "Dynamic supervisor must not export/define 'childClass'/0. Got:\n{code}"
+    assert_lacks(
+        "Dynamic supervisor must not export/define 'childClass'/0",
+        &code,
+        &["'childClass'/0"],
     );
 }
 
@@ -446,9 +459,10 @@ fn test_static_supervisor_with_user_class_method_exports_it() {
     };
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    assert!(
-        code.contains("'class_children'/1"),
-        "Static supervisor with user class method must export class_children/1. Got:\n{code}"
+    assert_has(
+        "Static supervisor with user class method must export class_children/1",
+        &code,
+        &["'class_children'/1"],
     );
 }
 
@@ -537,13 +551,15 @@ fn test_static_supervisor_class_method_alias_param_emits_user_type_and_named_typ
     };
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    assert!(
-        code.contains("{'user_type', 0, 'restart_strategy', []}"),
-        "class method param typed with the alias should emit a user_type reference. Got:\n{code}"
+    assert_has(
+        "class method param typed with the alias should emit a user_type reference",
+        &code,
+        &["{'user_type', 0, 'restart_strategy', []}"],
     );
-    assert!(
-        code.contains("'restart_strategy'"),
-        "module must declare the matching named -type for the alias. Got:\n{code}"
+    assert_has(
+        "module must declare the matching named -type for the alias",
+        &code,
+        &["'restart_strategy'"],
     );
 }
 
@@ -649,9 +665,10 @@ fn test_static_supervisor_cross_module_alias_reference_emits_user_type() {
         "class method param typed with a cross-module alias should emit a user_type reference. \
          Got:\n{code}"
     );
-    assert!(
-        code.contains("'restart_strategy'"),
-        "module must declare the matching named -type for the cross-module alias. Got:\n{code}"
+    assert_has(
+        "module must declare the matching named -type for the cross-module alias",
+        &code,
+        &["'restart_strategy'"],
     );
 }
 
@@ -757,9 +774,10 @@ fn test_dynamic_supervisor_cross_module_alias_reference_emits_user_type() {
         "class method param typed with a cross-module alias should emit a user_type reference. \
          Got:\n{code}"
     );
-    assert!(
-        code.contains("'restart_strategy'"),
-        "module must declare the matching named -type for the cross-module alias. Got:\n{code}"
+    assert_has(
+        "module must declare the matching named -type for the cross-module alias",
+        &code,
+        &["'restart_strategy'"],
     );
 }
 
@@ -858,13 +876,15 @@ fn test_class_ref_spawn_family_on_supervisor_lowers_to_class_start() {
             "Leaf {selector} must lower to class_start. Got:\n{code}"
         );
     }
-    assert!(
-        code.contains("call 'beamtalk_supervisor':'class_start'('Pool', 'bt@pool', 'spawn', [])"),
-        "a DynamicSupervisor receiver takes the same carve-out. Got:\n{code}"
+    assert_has(
+        "a DynamicSupervisor receiver takes the same carve-out",
+        &code,
+        &["call 'beamtalk_supervisor':'class_start'('Pool', 'bt@pool', 'spawn', [])"],
     );
-    assert!(
-        !code.contains("'bt@leaf':'spawn'"),
-        "must not call the actor spawn intrinsic on a supervisor module. Got:\n{code}"
+    assert_lacks(
+        "must not call the actor spawn intrinsic on a supervisor module",
+        &code,
+        &["'bt@leaf':'spawn'"],
     );
 }
 
@@ -884,21 +904,24 @@ fn test_spawn_monitored_on_supervisor_lowers_to_class_start() {
             "Leaf {selector} must lower to class_start. Got:\n{code}"
         );
     }
-    assert!(
-        !code.contains("'spawn_monitored'"),
-        "must not call a spawn_monitored export on a supervisor module. Got:\n{code}"
+    assert_lacks(
+        "must not call a spawn_monitored export on a supervisor module",
+        &code,
+        &["'spawn_monitored'"],
     );
 
     let src =
         "Supervisor subclass: Leaf\n  class one => self spawnMonitored\n  childSpecs => #()\n";
     let code = codegen_named(src, "bt@leaf");
-    assert!(
-        code.contains("'spawnMonitored', []"),
-        "self spawnMonitored in a supervisor class method must lower to class_start. Got:\n{code}"
+    assert_has(
+        "self spawnMonitored in a supervisor class method must lower to class_start",
+        &code,
+        &["'spawnMonitored', []"],
     );
-    assert!(
-        !code.contains("class_self_spawn_monitored"),
-        "must not use the actor class_self_spawn_monitored helper. Got:\n{code}"
+    assert_lacks(
+        "must not use the actor class_self_spawn_monitored helper",
+        &code,
+        &["class_self_spawn_monitored"],
     );
 }
 
@@ -909,14 +932,8 @@ fn test_spawn_monitored_on_actor_keeps_actor_intrinsics() {
     // class_self_spawn_monitored.
     let src = "Object subclass: Foo\n  a => Counter spawnMonitored\n  b => Counter spawnMonitoredWith: #{#n => 1}\n\nActor subclass: Counter\n  state: n = 0\n";
     let code = codegen_named(src, "foo");
-    assert!(
-        code.contains("call 'bt@counter':'spawn_monitored'()"),
-        "Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'bt@counter':'spawn_monitored'(~{"),
-        "Got:\n{code}"
-    );
+    assert_has("Got", &code, &["call 'bt@counter':'spawn_monitored'()"]);
+    assert_has("Got", &code, &["call 'bt@counter':'spawn_monitored'(~{"]);
     assert!(!code.contains("'class_start'"), "Got:\n{code}");
 
     let src = "Actor subclass: Counter\n  state: n = 0\n  class make => self spawnMonitored\n  class makeWith: m => self spawnMonitoredWith: m\n";
@@ -938,9 +955,10 @@ fn test_class_ref_spawn_on_actor_keeps_actor_intrinsic() {
     let src =
         "Object subclass: Foo\n  a => Counter spawn\n\nActor subclass: Counter\n  state: n = 0\n";
     let code = codegen_named(src, "foo");
-    assert!(
-        code.contains("call 'bt@counter':'spawn'()"),
-        "an actor receiver keeps the spawn intrinsic. Got:\n{code}"
+    assert_has(
+        "an actor receiver keeps the spawn intrinsic",
+        &code,
+        &["call 'bt@counter':'spawn'()"],
     );
     assert!(!code.contains("'class_start'"), "Got:\n{code}");
 }
@@ -959,9 +977,10 @@ fn test_self_spawn_family_in_supervisor_class_method_lowers_to_class_start() {
         "self spawn… must lower to class_start with the receiver's class. Got:\n{code}"
     );
     assert!(code.contains("'spawnWith:', ["), "Got:\n{code}");
-    assert!(
-        !code.contains("class_self_spawn"),
-        "must not use the actor class_self_spawn helper. Got:\n{code}"
+    assert_lacks(
+        "must not use the actor class_self_spawn helper",
+        &code,
+        &["class_self_spawn"],
     );
 }
 
@@ -980,9 +999,10 @@ fn test_spawn_monitored_async_on_supervisor_lowers_to_class_start() {
             "Leaf {selector} must lower to class_start. Got:\n{code}"
         );
     }
-    assert!(
-        !code.contains("'spawn_monitored_async'"),
-        "must not call a spawn_monitored_async export on a supervisor module. Got:\n{code}"
+    assert_lacks(
+        "must not call a spawn_monitored_async export on a supervisor module",
+        &code,
+        &["'spawn_monitored_async'"],
     );
 }
 
@@ -993,13 +1013,15 @@ fn test_spawn_monitored_async_on_actor_keeps_actor_intrinsics() {
     // a class method lowers to class_self_spawn_monitored_async.
     let src = "Object subclass: Foo\n  a => Counter spawnMonitoredAsync\n  b => Counter spawnMonitoredAsyncWith: #{#n => 1}\n\nActor subclass: Counter\n  state: n = 0\n";
     let code = codegen_named(src, "foo");
-    assert!(
-        code.contains("call 'bt@counter':'spawn_monitored_async'()"),
-        "Got:\n{code}"
+    assert_has(
+        "Got",
+        &code,
+        &["call 'bt@counter':'spawn_monitored_async'()"],
     );
-    assert!(
-        code.contains("call 'bt@counter':'spawn_monitored_async'(~{"),
-        "Got:\n{code}"
+    assert_has(
+        "Got",
+        &code,
+        &["call 'bt@counter':'spawn_monitored_async'(~{"],
     );
     assert!(!code.contains("'class_start'"), "Got:\n{code}");
 

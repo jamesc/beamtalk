@@ -28,22 +28,25 @@ fn test_actor_with_initialize_defers_to_handle_continue() {
     // init/1 must contain the __skip_initialize__ guard so that when
     // a subclass calls this as a parent state-builder, initialize is not
     // dispatched a second time.
-    assert!(
-        code.contains("'__skip_initialize__'"),
-        "init/1 must guard against double-dispatch with __skip_initialize__. Got:\n{code}"
+    assert_has(
+        "init/1 must guard against double-dispatch with __skip_initialize__",
+        &code,
+        &["'__skip_initialize__'"],
     );
 
     // The non-helper branch must return {ok, State, {continue, initialize}} to
     // hand off to handle_continue.
-    assert!(
-        code.contains("{'continue', 'initialize'}"),
-        "init/1 must return {{continue, initialize}} to defer initialize dispatch. Got:\n{code}"
+    assert_has(
+        "init/1 must return {continue, initialize} to defer initialize dispatch",
+        &code,
+        &["{'continue', 'initialize'}"],
     );
 
     // The CleanState variants strip the flag from state before returning.
-    assert!(
-        code.contains("'__skip_initialize__', FinalState"),
-        "init/1 must strip __skip_initialize__ flag from FinalState. Got:\n{code}"
+    assert_has(
+        "init/1 must strip __skip_initialize__ flag from FinalState",
+        &code,
+        &["'__skip_initialize__', FinalState"],
     );
 }
 
@@ -63,15 +66,17 @@ fn test_handle_continue_dispatches_initialize_chain() {
     let code = codegen_named(src, "counter");
 
     // The callback function must be present.
-    assert!(
-        code.contains("'handle_continue'/2 = fun (Continue, State) ->"),
-        "handle_continue/2 must be generated. Got:\n{code}"
+    assert_has(
+        "handle_continue/2 must be generated",
+        &code,
+        &["'handle_continue'/2 = fun (Continue, State) ->"],
     );
 
     // The <'initialize'> pattern dispatches the chain.
-    assert!(
-        code.contains("<'initialize'> when 'true' ->"),
-        "handle_continue/2 must match on 'initialize' continuation. Got:\n{code}"
+    assert_has(
+        "handle_continue/2 must match on 'initialize' continuation",
+        &code,
+        &["<'initialize'> when 'true' ->"],
     );
 
     // pdict stash/restore brackets every safe_dispatch call to
@@ -83,15 +88,17 @@ fn test_handle_continue_dispatches_initialize_chain() {
     );
 
     // The chain dispatches initialize via safe_dispatch on the class module.
-    assert!(
-        code.contains("'safe_dispatch'('initialize',"),
-        "handle_continue/2 must dispatch 'initialize' via safe_dispatch. Got:\n{code}"
+    assert_has(
+        "handle_continue/2 must dispatch 'initialize' via safe_dispatch",
+        &code,
+        &["'safe_dispatch'('initialize',"],
     );
 
     // On success (the reply arm), the outer result is a noreply continuation.
-    assert!(
-        code.contains("'noreply'"),
-        "handle_continue/2 must return noreply on successful initialize. Got:\n{code}"
+    assert_has(
+        "handle_continue/2 must return noreply on successful initialize",
+        &code,
+        &["'noreply'"],
     );
 }
 
@@ -117,39 +124,46 @@ fn test_init_parent_actor_subclass_calls_parent_init() {
     let code = codegen_named(src, "logging_counter");
 
     // init/1 must delegate to the parent module's init/1.
-    assert!(
-        code.contains("'bt@counter':'init'("),
-        "init/1 must call parent bt@counter:init/1. Got:\n{code}"
+    assert_has(
+        "init/1 must call parent bt@counter:init/1",
+        &code,
+        &["'bt@counter':'init'("],
     );
 
     // The parent's returned state is bound and then merged with child fields.
-    assert!(
-        code.contains("ParentState"),
-        "init/1 must bind parent state as ParentState. Got:\n{code}"
+    assert_has(
+        "init/1 must bind parent state as ParentState",
+        &code,
+        &["ParentState"],
     );
-    assert!(
-        code.contains("ChildFields"),
-        "init/1 must create ChildFields map for child-only state. Got:\n{code}"
+    assert_has(
+        "init/1 must create ChildFields map for child-only state",
+        &code,
+        &["ChildFields"],
     );
-    assert!(
-        code.contains("MergedState"),
-        "init/1 must merge parent and child state into MergedState. Got:\n{code}"
+    assert_has(
+        "init/1 must merge parent and child state into MergedState",
+        &code,
+        &["MergedState"],
     );
-    assert!(
-        code.contains("FinalState"),
-        "init/1 must produce FinalState (MergedState + InitArgs overrides). Got:\n{code}"
+    assert_has(
+        "init/1 must produce FinalState (MergedState + InitArgs overrides)",
+        &code,
+        &["FinalState"],
     );
 
     // Parent init errors must be propagated, not swallowed.
-    assert!(
-        code.contains("{'error', Reason}"),
-        "init/1 must propagate parent {{error, Reason}} without modification. Got:\n{code}"
+    assert_has(
+        "init/1 must propagate parent {error, Reason} without modification",
+        &code,
+        &["{'error', Reason}"],
     );
 
     // The child's own state field must appear in ChildFields.
-    assert!(
-        code.contains("'logCount'"),
-        "ChildFields must include the child's own logCount state field. Got:\n{code}"
+    assert_has(
+        "ChildFields must include the child's own logCount state field",
+        &code,
+        &["'logCount'"],
     );
 }
 
@@ -166,9 +180,10 @@ fn test_init_base_actor_writes_shape_version_one() {
     );
     let code = codegen_named(src, "counter");
 
-    assert!(
-        code.contains("'__shape_version__' => 1"),
-        "init/1's DefaultState must stamp '__shape_version__' => 1. Got:\n{code}"
+    assert_has(
+        "init/1's DefaultState must stamp '__shape_version__' => 1",
+        &code,
+        &["'__shape_version__' => 1"],
     );
 }
 
@@ -182,9 +197,10 @@ fn test_init_subclass_actor_writes_shape_version_one() {
     );
     let code = codegen_named(src, "logging_counter");
 
-    assert!(
-        code.contains("'__shape_version__' => 1"),
-        "init/1's ChildFields must stamp '__shape_version__' => 1. Got:\n{code}"
+    assert_has(
+        "init/1's ChildFields must stamp '__shape_version__' => 1",
+        &code,
+        &["'__shape_version__' => 1"],
     );
 }
 
@@ -199,13 +215,15 @@ fn test_init_actor_with_declared_shape_version_writes_real_value() {
     );
     let code = codegen_named(src, "cart");
 
-    assert!(
-        code.contains("'__shape_version__' => 3"),
-        "init/1's DefaultState must stamp the declared shapeVersion: 3, not the default. Got:\n{code}"
+    assert_has(
+        "init/1's DefaultState must stamp the declared shapeVersion: 3, not the default",
+        &code,
+        &["'__shape_version__' => 3"],
     );
-    assert!(
-        !code.contains("'__shape_version__' => 1"),
-        "init/1 must not also stamp the default 1 for a class declaring shapeVersion: 3. Got:\n{code}"
+    assert_lacks(
+        "init/1 must not also stamp the default 1 for a class declaring shapeVersion: 3",
+        &code,
+        &["'__shape_version__' => 1"],
     );
 }
 
@@ -296,20 +314,23 @@ fn test_actor_typed_union_nil_field_is_nilable() {
     let result = generate_module(&module, CodegenOptions::new("bt@test_actor"));
     assert!(result.is_ok(), "Codegen should succeed: {result:?}");
     let code = result.unwrap();
-    assert!(
-        !code.contains("{'continue', 'initialize'}"),
-        "Nil-union field is nilable so no initialize continuation is needed. Got:\n{code}"
+    assert_lacks(
+        "Nil-union field is nilable so no initialize continuation is needed",
+        &code,
+        &["{'continue', 'initialize'}"],
     );
     // Positive guard (symmetric with test 2): a nilable field must NOT emit the
     // typed-no-default validation. Without this, the negative assertion above
     // would pass trivially if init generation broke for any unrelated reason.
-    assert!(
-        !code.contains("'uninitialized_state_error'"),
-        "Nilable Union field should not trigger typed-no-default validation. Got:\n{code}"
+    assert_lacks(
+        "Nilable Union field should not trigger typed-no-default validation",
+        &code,
+        &["'uninitialized_state_error'"],
     );
-    assert!(
-        code.contains("'init'"),
-        "init/1 callback should still be generated for the actor. Got:\n{code}"
+    assert_has(
+        "init/1 callback should still be generated for the actor",
+        &code,
+        &["'init'"],
     );
 }
 
@@ -329,9 +350,10 @@ fn test_actor_typed_union_non_nil_field_triggers_validation() {
     let result = generate_module(&module, CodegenOptions::new("bt@test_actor"));
     assert!(result.is_ok(), "Codegen should succeed: {result:?}");
     let code = result.unwrap();
-    assert!(
-        code.contains("'uninitialized_state_error'"),
-        "Non-nil Union field should trigger typed-no-default validation. Got:\n{code}"
+    assert_has(
+        "Non-nil Union field should trigger typed-no-default validation",
+        &code,
+        &["'uninitialized_state_error'"],
     );
     // the typed-no-default field-check path must also strip __local__
     // threading temps from the committed post-initialize state — the `let
@@ -342,9 +364,10 @@ fn test_actor_typed_union_non_nil_field_triggers_validation() {
             && code.contains("call 'beamtalk_actor':'strip_local_temps'(InitNewState)"),
         "typed-no-default post-init path must strip __local__ temps. Got:\n{code}"
     );
-    assert!(
-        code.contains("{'noreply', InitCleanState}"),
-        "typed-no-default post-init success arm must reply with the cleaned state. Got:\n{code}"
+    assert_has(
+        "typed-no-default post-init success arm must reply with the cleaned state",
+        &code,
+        &["{'noreply', InitCleanState}"],
     );
 }
 
@@ -360,9 +383,10 @@ fn test_actor_typed_singleton_field_triggers_validation() {
     let result = generate_module(&module, CodegenOptions::new("bt@test_actor"));
     assert!(result.is_ok(), "Codegen should succeed: {result:?}");
     let code = result.unwrap();
-    assert!(
-        code.contains("'uninitialized_state_error'"),
-        "Singleton-typed field should trigger typed-no-default validation. Got:\n{code}"
+    assert_has(
+        "Singleton-typed field should trigger typed-no-default validation",
+        &code,
+        &["'uninitialized_state_error'"],
     );
 }
 
@@ -379,9 +403,10 @@ fn test_actor_typed_generic_field_triggers_validation() {
     let result = generate_module(&module, CodegenOptions::new("bt@test_actor"));
     assert!(result.is_ok(), "Codegen should succeed: {result:?}");
     let code = result.unwrap();
-    assert!(
-        code.contains("'uninitialized_state_error'"),
-        "Generic-typed field should trigger typed-no-default validation. Got:\n{code}"
+    assert_has(
+        "Generic-typed field should trigger typed-no-default validation",
+        &code,
+        &["'uninitialized_state_error'"],
     );
 }
 
@@ -394,9 +419,10 @@ fn test_actor_typed_false_or_field_triggers_validation() {
     let result = generate_module(&module, CodegenOptions::new("bt@test_actor"));
     assert!(result.is_ok(), "Codegen should succeed: {result:?}");
     let code = result.unwrap();
-    assert!(
-        code.contains("'uninitialized_state_error'"),
-        "FalseOr-typed field should trigger typed-no-default validation. Got:\n{code}"
+    assert_has(
+        "FalseOr-typed field should trigger typed-no-default validation",
+        &code,
+        &["'uninitialized_state_error'"],
     );
 }
 
@@ -412,9 +438,10 @@ fn test_actor_typed_class_of_field_triggers_validation() {
     let result = generate_module(&module, CodegenOptions::new("bt@test_actor"));
     assert!(result.is_ok(), "Codegen should succeed: {result:?}");
     let code = result.unwrap();
-    assert!(
-        code.contains("'uninitialized_state_error'"),
-        "ClassOf-typed field should trigger typed-no-default validation. Got:\n{code}"
+    assert_has(
+        "ClassOf-typed field should trigger typed-no-default validation",
+        &code,
+        &["'uninitialized_state_error'"],
     );
 }
 
@@ -634,19 +661,24 @@ fn test_bt_2720_native_object_instance_delegate_lowers_to_native_call() {
         ),
         "select: should lower to native_call('beamtalk_stream', 'select', [Self, Pred], ...). Got:\n{code}"
     );
-    assert!(
-        code.contains("{'Stream', 'select:'}"),
-        "native_call should carry {{Class, Sel}} = {{'Stream', 'select:'}}. Got:\n{code}"
+    assert_has(
+        "native_call should carry {Class, Sel} = {'Stream', 'select:'}",
+        &code,
+        &["{'Stream', 'select:'}"],
     );
     // Unary delegate: asList -> native_call(..., 'asList', [Self], {'Stream', 'asList'})
-    assert!(
-        code.contains("call 'beamtalk_erlang_proxy':'native_call'('beamtalk_stream', 'asList', [Self], {'Stream', 'asList'}, 'beamtalk')"),
-        "asList should lower to native_call('beamtalk_stream', 'asList', [Self], {{'Stream', 'asList'}}, 'beamtalk'). Got:\n{code}"
+    assert_has(
+        "asList should lower to native_call('beamtalk_stream', 'asList', [Self], {'Stream', 'asList'}, 'beamtalk')",
+        &code,
+        &[
+            "call 'beamtalk_erlang_proxy':'native_call'('beamtalk_stream', 'asList', [Self], {'Stream', 'asList'}, 'beamtalk')",
+        ],
     );
     // Must NOT emit a bare module:fn call for the delegate body.
-    assert!(
-        !code.contains("call 'beamtalk_stream':'select'"),
-        "native: delegate must route through the proxy, not a bare beamtalk_stream:select. Got:\n{code}"
+    assert_lacks(
+        "native: delegate must route through the proxy, not a bare beamtalk_stream:select",
+        &code,
+        &["call 'beamtalk_stream':'select'"],
     );
 }
 
@@ -666,9 +698,10 @@ fn test_bt_2720_native_object_class_delegate_omits_self() {
     );
     // The class-side arg list must omit ClassSelf (class methods
     // are not instances).
-    assert!(
-        !code.contains("'native_call'('beamtalk_stream', 'from', [ClassSelf"),
-        "class-side native_call must omit ClassSelf from the arg list. Got:\n{code}"
+    assert_lacks(
+        "class-side native_call must omit ClassSelf from the arg list",
+        &code,
+        &["'native_call'('beamtalk_stream', 'from', [ClassSelf"],
     );
 }
 
@@ -691,40 +724,43 @@ fn test_actor_with_parent_init_and_initialize_defers_to_handle_continue() {
     let code = codegen_named(src, "logging_init_counter");
 
     // init/1 must delegate to the parent module's init/1.
-    assert!(
-        code.contains("'bt@counter':'init'("),
-        "init/1 must call parent bt@counter:init/1. Got:\n{code}"
+    assert_has(
+        "init/1 must call parent bt@counter:init/1",
+        &code,
+        &["'bt@counter':'init'("],
     );
 
     // Parent state must be merged with child fields.
-    assert!(
-        code.contains("ParentState"),
-        "init/1 must bind parent state as ParentState. Got:\n{code}"
+    assert_has(
+        "init/1 must bind parent state as ParentState",
+        &code,
+        &["ParentState"],
     );
-    assert!(
-        code.contains("FinalState"),
-        "init/1 must produce FinalState. Got:\n{code}"
-    );
+    assert_has("init/1 must produce FinalState", &code, &["FinalState"]);
 
     // Because initialize is defined, init/1 must use the __skip_initialize__ guard
     // and defer to handle_continue — NOT call initialize inline.
-    assert!(
-        code.contains("'__skip_initialize__'"),
-        "init/1 must guard initialize dispatch with __skip_initialize__. Got:\n{code}"
+    assert_has(
+        "init/1 must guard initialize dispatch with __skip_initialize__",
+        &code,
+        &["'__skip_initialize__'"],
     );
-    assert!(
-        code.contains("{'continue', 'initialize'}"),
-        "init/1 must return {{continue, initialize}} to defer initialize. Got:\n{code}"
+    assert_has(
+        "init/1 must return {continue, initialize} to defer initialize",
+        &code,
+        &["{'continue', 'initialize'}"],
     );
 
     // handle_continue must exist and dispatch initialize.
-    assert!(
-        code.contains("'handle_continue'/2"),
-        "Module must export handle_continue/2. Got:\n{code}"
+    assert_has(
+        "Module must export handle_continue/2",
+        &code,
+        &["'handle_continue'/2"],
     );
-    assert!(
-        code.contains("'safe_dispatch'('initialize'"),
-        "handle_continue must dispatch initialize via safe_dispatch. Got:\n{code}"
+    assert_has(
+        "handle_continue must dispatch initialize via safe_dispatch",
+        &code,
+        &["'safe_dispatch'('initialize'"],
     );
 }
 
@@ -815,13 +851,15 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
     let code = result.unwrap();
 
     // reqField :: Integer is not nilable → typed-no-default validation must fire.
-    assert!(
-        code.contains("'uninitialized_state_error'"),
-        "Non-nilable cross-file ancestor field must trigger typed-no-default validation. Got:\n{code}"
+    assert_has(
+        "Non-nilable cross-file ancestor field must trigger typed-no-default validation",
+        &code,
+        &["'uninitialized_state_error'"],
     );
-    assert!(
-        code.contains("'reqField'"),
-        "Non-nilable field 'reqField' must appear in the validation error hint. Got:\n{code}"
+    assert_has(
+        "Non-nilable field 'reqField' must appear in the validation error hint",
+        &code,
+        &["'reqField'"],
     );
 
     // The committed-state guard (BT-4113) names every declared field, so
@@ -833,34 +871,39 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
         .join("\n");
 
     // nilField :: Nil — excluded by is_nilable_type_name.
-    assert!(
-        !code.contains("'nilField'"),
-        "Nil-typed field must be excluded by is_nilable_type_name. Got:\n{code}"
+    assert_lacks(
+        "Nil-typed field must be excluded by is_nilable_type_name",
+        &code,
+        &["'nilField'"],
     );
 
     // nilUnionField :: Integer | Nil — excluded (union member is nilable).
-    assert!(
-        !code.contains("'nilUnionField'"),
-        "Integer|Nil union field must be excluded by is_nilable_type_name. Got:\n{code}"
+    assert_lacks(
+        "Integer|Nil union field must be excluded by is_nilable_type_name",
+        &code,
+        &["'nilUnionField'"],
     );
 
     // undefinedObjectField :: String | UndefinedObject — excluded (ADR 0124
     // §7: UndefinedObject is the canonical nil class, not just `Nil`).
-    assert!(
-        !code.contains("'undefinedObjectField'"),
-        "String|UndefinedObject union field must be excluded by is_nilable_type_name. Got:\n{code}"
+    assert_lacks(
+        "String|UndefinedObject union field must be excluded by is_nilable_type_name",
+        &code,
+        &["'undefinedObjectField'"],
     );
 
     // Because BaseActor ≠ Actor/Object (has_parent_init=true) AND reqField is a
     // typed-no-default field (has_initialize=true via chain_has_typed_no_default),
     // init/1 must call the parent and defer to handle_continue.
-    assert!(
-        code.contains("'bt@base_actor':'init'("),
-        "init/1 must call parent bt@base_actor:init/1 for has_parent_init path. Got:\n{code}"
+    assert_has(
+        "init/1 must call parent bt@base_actor:init/1 for has_parent_init path",
+        &code,
+        &["'bt@base_actor':'init'("],
     );
-    assert!(
-        code.contains("{'continue', 'initialize'}"),
-        "init/1 must return {{continue, initialize}} to defer post-initialize check. Got:\n{code}"
+    assert_has(
+        "init/1 must return {continue, initialize} to defer post-initialize check",
+        &code,
+        &["{'continue', 'initialize'}"],
     );
 }
 
@@ -925,20 +968,23 @@ fn test_cross_file_ancestor_late_field_excluded_from_validation() {
     let code = result.unwrap();
 
     // reqField :: Integer, eager, no default → validation must fire.
-    assert!(
-        code.contains("'uninitialized_state_error'"),
-        "Eager non-nilable cross-file ancestor field must trigger typed-no-default validation. Got:\n{code}"
+    assert_has(
+        "Eager non-nilable cross-file ancestor field must trigger typed-no-default validation",
+        &code,
+        &["'uninitialized_state_error'"],
     );
-    assert!(
-        code.contains("'reqField'"),
-        "Non-nilable field 'reqField' must appear in the validation error hint. Got:\n{code}"
+    assert_has(
+        "Non-nilable field 'reqField' must appear in the validation error hint",
+        &code,
+        &["'reqField'"],
     );
 
     // lateField :: Integer, `late`, no default — excluded despite being
     // non-nilable: `late` short-circuits before nilability is even
     // considered (mirroring `requires_definite_assignment`'s AST-path rule).
-    assert!(
-        !code.contains("'lateField'"),
-        "`late` cross-file ancestor field must be excluded from the post-initialize check regardless of nilability. Got:\n{code}"
+    assert_lacks(
+        "`late` cross-file ancestor field must be excluded from the post-initialize check regardless of nilability",
+        &code,
+        &["'lateField'"],
     );
 }

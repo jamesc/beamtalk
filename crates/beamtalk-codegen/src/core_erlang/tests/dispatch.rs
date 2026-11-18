@@ -442,16 +442,31 @@ fn test_generate_spawn_function() {
         generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
 
     // Check that spawn/0 and spawn/1 are exported
-    assert!(code.contains("'spawn'/0"));
-    assert!(code.contains("'spawn'/1"));
+    assert_has(
+        "test_generate_spawn_function",
+        &code,
+        &["'spawn'/0", "'spawn'/1"],
+    );
 
     // Check that spawn/0 function exists and calls safe_spawn with empty map
-    assert!(code.contains("'spawn'/0 = fun () ->"));
+    assert_has(
+        "test_generate_spawn_function",
+        &code,
+        &["'spawn'/0 = fun () ->"],
+    );
 
     // Check that spawn/1 function exists and calls gen_server:start_link with InitArgs
-    assert!(code.contains("'spawn'/1 = fun (InitArgs) ->"));
+    assert_has(
+        "test_generate_spawn_function",
+        &code,
+        &["'spawn'/1 = fun (InitArgs) ->"],
+    );
     // spawn/1 also uses safe_spawn
-    assert!(code.contains("call 'beamtalk_actor':'safe_spawn'('counter', InitArgs)"));
+    assert_has(
+        "test_generate_spawn_function",
+        &code,
+        &["call 'beamtalk_actor':'safe_spawn'('counter', InitArgs)"],
+    );
 
     // spawn uses safe_spawn for trap_exit + initialize sync
     assert_has(
@@ -459,7 +474,11 @@ fn test_generate_spawn_function() {
         &code,
         &["call 'beamtalk_actor':'safe_spawn'('counter', ~{}~)"],
     );
-    assert!(code.contains("<{'ok', Pid}> when 'true' ->"));
+    assert_has(
+        "test_generate_spawn_function",
+        &code,
+        &["<{'ok', Pid}> when 'true' ->"],
+    );
 
     // Check that it returns a #beamtalk_object{} record (class='Counter', class_mod='counter', pid=Pid)
     assert_has(
@@ -469,10 +488,20 @@ fn test_generate_spawn_function() {
     );
 
     // Check that it handles errors
-    assert!(code.contains("<{'error', Reason}> when 'true' ->"));
+    assert_has(
+        "test_generate_spawn_function",
+        &code,
+        &["<{'error', Reason}> when 'true' ->"],
+    );
     // Error now includes hint with actual Reason
-    assert!(code.contains("call 'beamtalk_error':'with_hint'(SpawnErr1, Reason)"));
-    assert!(code.contains("call 'beamtalk_error':'raise'(SpawnErr2)"));
+    assert_has(
+        "test_generate_spawn_function",
+        &code,
+        &[
+            "call 'beamtalk_error':'with_hint'(SpawnErr1, Reason)",
+            "call 'beamtalk_error':'raise'(SpawnErr2)",
+        ],
+    );
 
     // class_name/0 replaces $beamtalk_class in init state: correct after hot-reload
     assert_has(
@@ -481,22 +510,34 @@ fn test_generate_spawn_function() {
         &["'class_name'/0 = fun () -> 'Counter'"],
     );
     // Check that init/1 creates the default state with fields and merges with InitArgs
-    assert!(code.contains("'init'/1 = fun (InitArgs) ->"));
-    assert!(code.contains("let DefaultState = ~{"));
+    assert_has(
+        "test_generate_spawn_function",
+        &code,
+        &["'init'/1 = fun (InitArgs) ->", "let DefaultState = ~{"],
+    );
     assert_lacks(
         "$beamtalk_class must not appear in compiled actor init state.",
         &code,
         &["'$beamtalk_class' => 'Counter'"],
     );
-    assert!(code.contains("'__class_mod__' => 'counter'"));
-    assert!(code.contains("'value' => 0"));
+    assert_has(
+        "test_generate_spawn_function",
+        &code,
+        &["'__class_mod__' => 'counter'", "'value' => 0"],
+    );
     // Check that InitArgs is merged into DefaultState (BT-4030: validated
     // against the merged state first, raising unknown_field for undeclared
     // keys instead of silently merging them)
-    assert!(code.contains("call 'beamtalk_class_instantiation':'check_init_args'"));
-    assert!(code.contains("call 'maps':'merge'(DefaultState, CheckedArgs)"));
-    assert!(code.contains("call 'beamtalk_actor':'take_init_ack'(FinalState, 'initialized')"));
-    assert!(code.contains("{'ok', AckState}"));
+    assert_has(
+        "test_generate_spawn_function",
+        &code,
+        &[
+            "call 'beamtalk_class_instantiation':'check_init_args'",
+            "call 'maps':'merge'(DefaultState, CheckedArgs)",
+            "call 'beamtalk_actor':'take_init_ack'(FinalState, 'initialized')",
+            "{'ok', AckState}",
+        ],
+    );
 }
 
 #[test]
@@ -701,19 +742,34 @@ fn test_generate_actor_new_error_methods() {
         .expect("codegen should succeed");
 
     // Check that new/0 and new/1 are exported
-    assert!(code.contains("'new'/0"));
-    assert!(code.contains("'new'/1"));
+    assert_has(
+        "test_generate_actor_new_error_methods",
+        &code,
+        &["'new'/0", "'new'/1"],
+    );
 
     // Check that new/0 function exists and uses beamtalk_error
-    assert!(code.contains("'new'/0 = fun () ->"));
-    assert!(code.contains("call 'beamtalk_error':'new'('instantiation_error', 'Actor')"));
-    assert!(code.contains("call 'beamtalk_error':'with_selector'(Error0, 'new')"));
-    assert!(code.contains("call 'beamtalk_error':'with_hint'(Error1,"));
-    assert!(code.contains("call 'beamtalk_error':'raise'(Error2)"));
+    assert_has(
+        "test_generate_actor_new_error_methods",
+        &code,
+        &[
+            "'new'/0 = fun () ->",
+            "call 'beamtalk_error':'new'('instantiation_error', 'Actor')",
+            "call 'beamtalk_error':'with_selector'(Error0, 'new')",
+            "call 'beamtalk_error':'with_hint'(Error1,",
+            "call 'beamtalk_error':'raise'(Error2)",
+        ],
+    );
 
     // Check that new/1 function exists and uses beamtalk_error
-    assert!(code.contains("'new'/1 = fun (_InitArgs) ->"));
-    assert!(code.contains("call 'beamtalk_error':'with_selector'(Error0, 'new:')"));
+    assert_has(
+        "test_generate_actor_new_error_methods",
+        &code,
+        &[
+            "'new'/1 = fun (_InitArgs) ->",
+            "call 'beamtalk_error':'with_selector'(Error0, 'new:')",
+        ],
+    );
 }
 
 #[test]

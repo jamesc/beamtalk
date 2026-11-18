@@ -107,14 +107,16 @@ fn test_native_facade_spawn_calls_backing_module() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
-    assert!(
-        code.contains("'test_backing_mod':'start_link'(Config)"),
-        "spawn/1 should call backing module's start_link. Got:\n{code}"
+    assert_has(
+        "spawn/1 should call backing module's start_link",
+        &code,
+        &["'test_backing_mod':'start_link'(Config)"],
     );
     // Should NOT contain gen_server:start_link (that's for regular actors)
-    assert!(
-        !code.contains("'gen_server':'start_link'"),
-        "Native facade should not use gen_server:start_link. Got:\n{code}"
+    assert_lacks(
+        "Native facade should not use gen_server:start_link",
+        &code,
+        &["'gen_server':'start_link'"],
     );
 }
 
@@ -124,9 +126,10 @@ fn test_native_facade_spawn_wraps_beamtalk_object() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
-    assert!(
-        code.contains("{'beamtalk_object', 'TestNative', 'bt@test_native', Pid}"),
-        "spawn should wrap result as beamtalk_object. Got:\n{code}"
+    assert_has(
+        "spawn should wrap result as beamtalk_object",
+        &code,
+        &["{'beamtalk_object', 'TestNative', 'bt@test_native', Pid}"],
     );
 }
 
@@ -136,13 +139,11 @@ fn test_native_facade_spawn_0_delegates_to_spawn_1() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
-    assert!(
-        code.contains("'spawn'/0 = fun () ->"),
-        "Should have spawn/0. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'bt@test_native':'spawn'(~{}~)"),
-        "spawn/0 should call spawn/1 with empty map. Got:\n{code}"
+    assert_has("Should have spawn/0", &code, &["'spawn'/0 = fun () ->"]);
+    assert_has(
+        "spawn/0 should call spawn/1 with empty map",
+        &code,
+        &["'bt@test_native':'spawn'(~{}~)"],
     );
 }
 
@@ -155,13 +156,15 @@ fn test_native_facade_has_method_includes_all_selectors() {
     // Extract the has_method/1 function body to avoid matching selectors in method_info/meta
     let has_method_fn =
         extract_core_fn(&code, "'has_method'/1 = fun").expect("has_method/1 not found");
-    assert!(
-        has_method_fn.contains("'doWork'"),
-        "has_method/1 body should include 'doWork'. Got:\n{has_method_fn}"
+    assert_has(
+        "has_method/1 body should include 'doWork'",
+        &has_method_fn,
+        &["'doWork'"],
     );
-    assert!(
-        has_method_fn.contains("'process:'"),
-        "has_method/1 body should include 'process:'. Got:\n{has_method_fn}"
+    assert_has(
+        "has_method/1 body should include 'process:'",
+        &has_method_fn,
+        &["'process:'"],
     );
 }
 
@@ -174,13 +177,15 @@ fn test_native_facade_meta_includes_native_flag() {
     // Extract the __beamtalk_meta/0 function body to avoid matching keys in BuilderState.meta
     let meta_fn =
         extract_core_fn(&code, "'__beamtalk_meta'/0 = fun").expect("__beamtalk_meta/0 not found");
-    assert!(
-        meta_fn.contains("'native' => 'true'"),
-        "__beamtalk_meta/0 body should include native => true. Got:\n{meta_fn}"
+    assert_has(
+        "__beamtalk_meta/0 body should include native => true",
+        &meta_fn,
+        &["'native' => 'true'"],
     );
-    assert!(
-        meta_fn.contains("'backing_module' => 'test_backing_mod'"),
-        "__beamtalk_meta/0 body should include backing_module. Got:\n{meta_fn}"
+    assert_has(
+        "__beamtalk_meta/0 body should include backing_module",
+        &meta_fn,
+        &["'backing_module' => 'test_backing_mod'"],
     );
 }
 
@@ -194,13 +199,15 @@ fn test_meta_superclass_is_single_quoted_atom() {
     let code = result.unwrap();
     let meta_fn =
         extract_core_fn(&code, "'__beamtalk_meta'/0 = fun").expect("__beamtalk_meta/0 not found");
-    assert!(
-        meta_fn.contains("'superclass' => 'Actor'"),
-        "__beamtalk_meta/0 body should include 'superclass' => 'Actor'. Got:\n{meta_fn}"
+    assert_has(
+        "__beamtalk_meta/0 body should include 'superclass' => 'Actor'",
+        &meta_fn,
+        &["'superclass' => 'Actor'"],
     );
-    assert!(
-        !meta_fn.contains("=> ''"),
-        "__beamtalk_meta/0 must not emit doubled-quote atoms (e.g. ''Actor'). Got:\n{meta_fn}"
+    assert_lacks(
+        "__beamtalk_meta/0 must not emit doubled-quote atoms (e.g. ''Actor')",
+        &meta_fn,
+        &["=> ''"],
     );
 }
 
@@ -210,9 +217,10 @@ fn test_native_facade_no_gen_server_behaviour() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
-    assert!(
-        !code.contains("'behaviour' = ['gen_server']"),
-        "Native facade should not declare gen_server behaviour. Got:\n{code}"
+    assert_lacks(
+        "Native facade should not declare gen_server behaviour",
+        &code,
+        &["'behaviour' = ['gen_server']"],
     );
 }
 
@@ -222,17 +230,16 @@ fn test_native_facade_no_gen_server_callbacks() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
-    assert!(
-        !code.contains("'init'/1"),
-        "Native facade should not have init/1. Got:\n{code}"
+    assert_lacks("Native facade should not have init/1", &code, &["'init'/1"]);
+    assert_lacks(
+        "Native facade should not have handle_cast/2",
+        &code,
+        &["'handle_cast'/2"],
     );
-    assert!(
-        !code.contains("'handle_cast'/2"),
-        "Native facade should not have handle_cast/2. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'handle_call'/3"),
-        "Native facade should not have handle_call/3. Got:\n{code}"
+    assert_lacks(
+        "Native facade should not have handle_call/3",
+        &code,
+        &["'handle_call'/3"],
     );
 }
 
@@ -245,22 +252,26 @@ fn test_native_facade_register_class_includes_meta() {
     // Extract the register_class/0 function body
     let register_fn =
         extract_core_fn(&code, "'register_class'/0 = fun").expect("register_class/0 not found");
-    assert!(
-        register_fn.contains("'beamtalk_class_builder':'register'"),
-        "register_class/0 should call beamtalk_class_builder:register. Got:\n{register_fn}"
+    assert_has(
+        "register_class/0 should call beamtalk_class_builder:register",
+        &register_fn,
+        &["'beamtalk_class_builder':'register'"],
     );
-    assert!(
-        register_fn.contains("'isConstructible' => 'false'"),
-        "BuilderState should mark native actors as not constructible. Got:\n{register_fn}"
+    assert_has(
+        "BuilderState should mark native actors as not constructible",
+        &register_fn,
+        &["'isConstructible' => 'false'"],
     );
     // BuilderState.meta should contain native-specific keys
-    assert!(
-        register_fn.contains("'native' => 'true'"),
-        "BuilderState.meta should include native => true. Got:\n{register_fn}"
+    assert_has(
+        "BuilderState.meta should include native => true",
+        &register_fn,
+        &["'native' => 'true'"],
     );
-    assert!(
-        register_fn.contains("'backing_module' => 'test_backing_mod'"),
-        "BuilderState.meta should include backing_module. Got:\n{register_fn}"
+    assert_has(
+        "BuilderState.meta should include backing_module",
+        &register_fn,
+        &["'backing_module' => 'test_backing_mod'"],
     );
 }
 
@@ -277,27 +288,32 @@ fn test_native_facade_register_class_bakes_method_xref() {
     let register_fn =
         extract_core_fn(&code, "'register_class'/0 = fun").expect("register_class/0 not found");
     // The methodXref field is present and a list (not a `~{ }~` map).
-    assert!(
-        register_fn.contains("'methodXref' => ["),
-        "native register_class/0 should bake a methodXref list. Got:\n{register_fn}"
+    assert_has(
+        "native register_class/0 should bake a methodXref list",
+        &register_fn,
+        &["'methodXref' => ["],
     );
     // The instance methods `doWork` and `process:` are recorded, instance-side,
     // and tagged indexed (they carry analysable Beamtalk source).
-    assert!(
-        register_fn.contains("'selector' => 'doWork'"),
-        "doWork xref entry missing. Got:\n{register_fn}"
+    assert_has(
+        "doWork xref entry missing",
+        &register_fn,
+        &["'selector' => 'doWork'"],
     );
-    assert!(
-        register_fn.contains("'selector' => 'process:'"),
-        "process: xref entry missing. Got:\n{register_fn}"
+    assert_has(
+        "process: xref entry missing",
+        &register_fn,
+        &["'selector' => 'process:'"],
     );
-    assert!(
-        register_fn.contains("'class_side' => 'false'"),
-        "instance-side entries should carry 'class_side' => 'false'. Got:\n{register_fn}"
+    assert_has(
+        "instance-side entries should carry 'class_side' => 'false'",
+        &register_fn,
+        &["'class_side' => 'false'"],
     );
-    assert!(
-        register_fn.contains("'source_status' => 'indexed'"),
-        "native instance-method rows should be tagged indexed. Got:\n{register_fn}"
+    assert_has(
+        "native instance-method rows should be tagged indexed",
+        &register_fn,
+        &["'source_status' => 'indexed'"],
     );
 }
 
@@ -307,13 +323,15 @@ fn test_native_facade_spawn_error_raises_instantiation_error() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
-    assert!(
-        code.contains("'instantiation_error'"),
-        "Should raise instantiation_error on spawn failure. Got:\n{code}"
+    assert_has(
+        "Should raise instantiation_error on spawn failure",
+        &code,
+        &["'instantiation_error'"],
     );
-    assert!(
-        code.contains("'reason' => Reason"),
-        "Should include reason in error details. Got:\n{code}"
+    assert_has(
+        "Should include reason in error details",
+        &code,
+        &["'reason' => Reason"],
     );
 }
 
@@ -323,13 +341,15 @@ fn test_native_facade_spawn_handles_ignore() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
-    assert!(
-        code.contains("<'ignore'> when 'true' ->"),
-        "spawn/1 should have an 'ignore' match arm. Got:\n{code}"
+    assert_has(
+        "spawn/1 should have an 'ignore' match arm",
+        &code,
+        &["<'ignore'> when 'true' ->"],
     );
-    assert!(
-        code.contains("'reason' => 'ignore'"),
-        "ignore case should set reason => 'ignore' in details. Got:\n{code}"
+    assert_has(
+        "ignore case should set reason => 'ignore' in details",
+        &code,
+        &["'reason' => 'ignore'"],
     );
 }
 
@@ -339,25 +359,30 @@ fn test_native_facade_spawn_wraps_crash_in_try_catch() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
-    assert!(
-        code.contains("let StartResult = try call"),
-        "spawn/1 should wrap start_link in try-catch. Got:\n{code}"
+    assert_has(
+        "spawn/1 should wrap start_link in try-catch",
+        &code,
+        &["let StartResult = try call"],
     );
-    assert!(
-        code.contains("of _StartOk -> _StartOk"),
-        "try-catch should have of clause for success passthrough. Got:\n{code}"
+    assert_has(
+        "try-catch should have of clause for success passthrough",
+        &code,
+        &["of _StartOk -> _StartOk"],
     );
-    assert!(
-        code.contains("{'__bt_spawn_crash', SpawnCrashReason}"),
-        "catch arm should wrap crash reason in __bt_spawn_crash tuple. Got:\n{code}"
+    assert_has(
+        "catch arm should wrap crash reason in __bt_spawn_crash tuple",
+        &code,
+        &["{'__bt_spawn_crash', SpawnCrashReason}"],
     );
-    assert!(
-        code.contains("<{'__bt_spawn_crash', SpawnCrashReason}> when 'true' ->"),
-        "case should match __bt_spawn_crash tuple. Got:\n{code}"
+    assert_has(
+        "case should match __bt_spawn_crash tuple",
+        &code,
+        &["<{'__bt_spawn_crash', SpawnCrashReason}> when 'true' ->"],
     );
-    assert!(
-        code.contains("'reason' => SpawnCrashReason"),
-        "crash case should include SpawnCrashReason in details. Got:\n{code}"
+    assert_has(
+        "crash case should include SpawnCrashReason in details",
+        &code,
+        &["'reason' => SpawnCrashReason"],
     );
 }
 
@@ -457,9 +482,10 @@ fn test_native_facade_class_methods_exported() {
     let module = make_native_actor_with_class_methods();
     let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
     let code = result.unwrap();
-    assert!(
-        code.contains("'class_connect:'/2"),
-        "Should export class method 'class_connect:'/2. Got:\n{code}"
+    assert_has(
+        "Should export class method 'class_connect:'/2",
+        &code,
+        &["'class_connect:'/2"],
     );
 }
 
@@ -493,13 +519,15 @@ fn test_native_facade_class_method_alias_param_emits_user_type_and_named_type() 
 
     let code = generate_module(&module, CodegenOptions::new("bt@test_rich"))
         .expect("codegen should succeed");
-    assert!(
-        code.contains("{'user_type', 0, 'restart_strategy', []}"),
-        "class method param typed with the alias should emit a user_type reference. Got:\n{code}"
+    assert_has(
+        "class method param typed with the alias should emit a user_type reference",
+        &code,
+        &["{'user_type', 0, 'restart_strategy', []}"],
     );
-    assert!(
-        code.contains("'restart_strategy'"),
-        "module must declare the matching named -type for the alias. Got:\n{code}"
+    assert_has(
+        "module must declare the matching named -type for the alias",
+        &code,
+        &["'restart_strategy'"],
     );
 }
 
@@ -547,9 +575,10 @@ fn test_native_facade_cross_module_alias_reference_emits_user_type() {
         "class method param typed with a cross-module alias should emit a user_type reference. \
          Got:\n{code}"
     );
-    assert!(
-        code.contains("'restart_strategy'"),
-        "module must declare the matching named -type for the cross-module alias. Got:\n{code}"
+    assert_has(
+        "module must declare the matching named -type for the cross-module alias",
+        &code,
+        &["'restart_strategy'"],
     );
 }
 
@@ -559,9 +588,10 @@ fn test_native_facade_class_variables_in_builder_state() {
     let module = make_native_actor_with_class_methods();
     let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
     let code = result.unwrap();
-    assert!(
-        code.contains("'classState' => ~{'current' =>"),
-        "BuilderState should include class variables. Got:\n{code}"
+    assert_has(
+        "BuilderState should include class variables",
+        &code,
+        &["'classState' => ~{'current' =>"],
     );
 }
 
@@ -571,14 +601,16 @@ fn test_native_facade_doc_comments_in_builder_state() {
     let module = make_native_actor_with_class_methods();
     let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
     let code = result.unwrap();
-    assert!(
-        code.contains("'classDoc' =>"),
-        "BuilderState should include classDoc. Got:\n{code}"
+    assert_has(
+        "BuilderState should include classDoc",
+        &code,
+        &["'classDoc' =>"],
     );
     // classDoc should not be 'none' since we set a doc comment
-    assert!(
-        !code.contains("'classDoc' => 'none'"),
-        "classDoc should not be 'none' when doc comment is set. Got:\n{code}"
+    assert_lacks(
+        "classDoc should not be 'none' when doc comment is set",
+        &code,
+        &["'classDoc' => 'none'"],
     );
 }
 
@@ -592,13 +624,15 @@ fn test_native_facade_dispatch_exported() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
-    assert!(
-        code.contains("'dispatch_doWork'/1"),
-        "dispatch_doWork/1 should be exported. Got:\n{code}"
+    assert_has(
+        "dispatch_doWork/1 should be exported",
+        &code,
+        &["'dispatch_doWork'/1"],
     );
-    assert!(
-        code.contains("'dispatch_process:'/2"),
-        "dispatch_process:/2 should be exported. Got:\n{code}"
+    assert_has(
+        "dispatch_process:/2 should be exported",
+        &code,
+        &["'dispatch_process:'/2"],
     );
 }
 
@@ -613,9 +647,10 @@ fn test_native_facade_dispatch_extracts_pid() {
         .split("'dispatch_doWork'/1 = fun")
         .nth(1)
         .expect("dispatch_doWork function body should exist");
-    assert!(
-        dispatch_dowork.contains("call 'erlang':'element'(4, Self)"),
-        "dispatch should extract pid via element(4, Self). Got:\n{dispatch_dowork}"
+    assert_has(
+        "dispatch should extract pid via element(4, Self)",
+        &dispatch_dowork,
+        &["call 'erlang':'element'(4, Self)"],
     );
 }
 
@@ -626,9 +661,10 @@ fn test_native_facade_dispatch_calls_sync_send_known_with_static_class() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
-    assert!(
-        code.contains("call 'beamtalk_actor':'sync_send_known'(Pid, 'TestNative', 'doWork', [])"),
-        "dispatch_doWork should call sync_send_known with the static class and empty args. Got:\n{code}"
+    assert_has(
+        "dispatch_doWork should call sync_send_known with the static class and empty args",
+        &code,
+        &["call 'beamtalk_actor':'sync_send_known'(Pid, 'TestNative', 'doWork', [])"],
     );
     assert!(
         code.contains(
@@ -644,9 +680,10 @@ fn test_native_facade_dispatch_unary_arity() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
-    assert!(
-        code.contains("'dispatch_doWork'/1 = fun (Self) ->"),
-        "Unary dispatch should take only Self. Got:\n{code}"
+    assert_has(
+        "Unary dispatch should take only Self",
+        &code,
+        &["'dispatch_doWork'/1 = fun (Self) ->"],
     );
 }
 
@@ -656,9 +693,10 @@ fn test_native_facade_dispatch_keyword_arity() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
-    assert!(
-        code.contains("'dispatch_process:'/2 = fun (Data@, Self) ->"),
-        "Keyword dispatch should take params then Self. Got:\n{code}"
+    assert_has(
+        "Keyword dispatch should take params then Self",
+        &code,
+        &["'dispatch_process:'/2 = fun (Data@, Self) ->"],
     );
 }
 
@@ -669,9 +707,10 @@ fn test_native_facade_no_dispatch_for_beamtalk_body() {
     let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
     let code = result.unwrap();
     // status => self (not self delegate) should not have a dispatch function
-    assert!(
-        !code.contains("'dispatch_status'"),
-        "Non-delegate method should NOT get a dispatch function. Got:\n{code}"
+    assert_lacks(
+        "Non-delegate method should NOT get a dispatch function",
+        &code,
+        &["'dispatch_status'"],
     );
 }
 
@@ -691,24 +730,28 @@ fn test_bt_2998_native_class_without_fields_raises_on_new() {
     );
     let code = super::codegen(src);
 
-    assert!(
-        code.contains("call 'beamtalk_error':'new'('instantiation_error', 'DateTime')"),
-        "bare new on an opaque native class must raise instantiation_error. Got:\n{code}"
+    assert_has(
+        "bare new on an opaque native class must raise instantiation_error",
+        &code,
+        &["call 'beamtalk_error':'new'('instantiation_error', 'DateTime')"],
     );
-    assert!(
-        !code.contains("~{'$beamtalk_class' => 'DateTime'}~"),
-        "must not still build the hollow tagged map. Got:\n{code}"
+    assert_lacks(
+        "must not still build the hollow tagged map",
+        &code,
+        &["~{'$beamtalk_class' => 'DateTime'}~"],
     );
     // (The hint text itself is a Core Erlang binary literal, so it is asserted
     // on in `value_type_codegen`'s unit tests rather than the emitted code.)
     // `new:` merges over `new`, so it is just as hollow and refuses too.
-    assert!(
-        code.contains("'new'/1 = fun (_InitArgs) ->"),
-        "new/1 must also refuse rather than merge over a hollow default. Got:\n{code}"
+    assert_has(
+        "new/1 must also refuse rather than merge over a hollow default",
+        &code,
+        &["'new'/1 = fun (_InitArgs) ->"],
     );
-    assert!(
-        code.contains("call 'beamtalk_error':'with_selector'(Error0, 'new:')"),
-        "the new/1 refusal must name selector 'new:'. Got:\n{code}"
+    assert_has(
+        "the new/1 refusal must name selector 'new:'",
+        &code,
+        &["call 'beamtalk_error':'with_selector'(Error0, 'new:')"],
     );
 }
 
@@ -722,13 +765,15 @@ fn test_bt_2998_native_class_with_declared_fields_still_builds_default_instance(
         "  class sealed named: n :: String -> Package => self delegate\n",
     );
     let code = super::codegen(src);
-    assert!(
-        code.contains("'$beamtalk_class' => 'Package'"),
-        "field-carrying native class must still build its default map. Got:\n{code}"
+    assert_has(
+        "field-carrying native class must still build its default map",
+        &code,
+        &["'$beamtalk_class' => 'Package'"],
     );
-    assert!(
-        !code.contains("'instantiation_error', 'Package'"),
-        "field-carrying native class must not refuse new. Got:\n{code}"
+    assert_lacks(
+        "field-carrying native class must not refuse new",
+        &code,
+        &["'instantiation_error', 'Package'"],
     );
 }
 
@@ -742,13 +787,15 @@ fn test_bt_2998_native_class_with_own_class_new_keeps_it() {
     );
     let code = super::codegen(src);
     let new_body = extract_core_fn(&code, "'new'/0 = fun").expect("should have new/0");
-    assert!(
-        new_body.contains("'class_new'('undefined')"),
-        "new/0 must delegate to the declared class method. Got:\n{new_body}"
+    assert_has(
+        "new/0 must delegate to the declared class method",
+        &new_body,
+        &["'class_new'('undefined')"],
     );
-    assert!(
-        !new_body.contains("instantiation_error"),
-        "a class with its own `new` must not get the refusal. Got:\n{new_body}"
+    assert_lacks(
+        "a class with its own `new` must not get the refusal",
+        &new_body,
+        &["instantiation_error"],
     );
 }
 
@@ -761,13 +808,15 @@ fn test_bt_2998_non_native_value_class_unaffected() {
         "  field: y = 0\n",
     );
     let code = super::codegen(src);
-    assert!(
-        !code.contains("'instantiation_error', 'Point'"),
-        "non-native value class must still be constructible. Got:\n{code}"
+    assert_lacks(
+        "non-native value class must still be constructible",
+        &code,
+        &["'instantiation_error', 'Point'"],
     );
-    assert!(
-        code.contains("'$beamtalk_class' => 'Point'"),
-        "non-native value class must build its default map. Got:\n{code}"
+    assert_has(
+        "non-native value class must build its default map",
+        &code,
+        &["'$beamtalk_class' => 'Point'"],
     );
 }
 
@@ -780,9 +829,10 @@ fn test_bt_2998_opaque_native_class_registers_as_non_constructible() {
         "  class sealed v4 -> Uuid => self delegate\n",
     );
     let code = super::codegen(src);
-    assert!(
-        code.contains("'isConstructible' => 'false'"),
-        "opaque native class must register isConstructible => false. Got:\n{code}"
+    assert_has(
+        "opaque native class must register isConstructible => false",
+        &code,
+        &["'isConstructible' => 'false'"],
     );
 }
 
@@ -796,12 +846,10 @@ fn test_native_facade_class_side_same_file_extension_is_folded() {
     let module = beamtalk_core::source_analysis::parse(tokens).0;
     let code =
         generate_module(&module, CodegenOptions::new("bt@test_native")).expect("codegen succeeds");
-    assert!(
-        !code.contains("call 'beamtalk_extensions':'register'"),
-        "same-file extension must not register. Got:\n{code}"
+    assert_lacks(
+        "same-file extension must not register",
+        &code,
+        &["call 'beamtalk_extensions':'register'"],
     );
-    assert!(
-        code.contains("extra"),
-        "folded class method missing. Got:\n{code}"
-    );
+    assert_has("folded class method missing", &code, &["extra"]);
 }
