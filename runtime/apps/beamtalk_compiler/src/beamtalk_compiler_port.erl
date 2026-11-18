@@ -923,7 +923,12 @@ normalize_categories(Categories) ->
         {ok, [normalize_category(C) || C <- Categories]}
     catch
         error:{malformed_categorize_methods_response, Malformed} ->
-            unexpected_port_response("Malformed categorize-methods category/method", Malformed)
+            %% The malformed term is a single small category/method map, and its
+            %% contents (e.g. an unrecognised `side`) are what debugging needs.
+            ?LOG_ERROR("Malformed categorize-methods category/method", #{
+                domain => [beamtalk, runtime], malformed => Malformed
+            }),
+            {error, port_error, <<"Unexpected compiler response">>}
     end.
 
 %% Reshape one raw decoded category map into its canonical Erlang-side

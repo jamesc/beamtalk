@@ -86,6 +86,29 @@ to avoid temp files on disk.
 ]).
 -endif.
 
+%% The `beamtalk_compiler_port` functions the `{port_call, F, Args}` request may
+%% forward to: each takes the port first, then the request's arguments.
+-define(PORT_FORWARDS, [
+    find_senders_in_source,
+    find_all_sends_in_source,
+    find_references_to_in_source,
+    find_field_readers_in_source,
+    find_field_writers_in_source,
+    find_ffi_sites_in_source,
+    find_announce_sites_in_source,
+    resolve_method_span,
+    resolve_class_span,
+    find_selector_send_spans,
+    find_definition_selector_spans,
+    categorize_methods,
+    class_state_field_defaults,
+    build_class_module_index_in_source,
+    module_name_for_path,
+    scan_source_dependencies,
+    reindent_method_source,
+    complete_method_source
+]).
+
 -record(state, {
     port :: port() | undefined,
     %% ADR 0050 Phase 3: Accumulated class metadata cache.
@@ -822,7 +845,7 @@ Not called from production code: `beamtalk_class_lifecycle:purge_compiler_cache/
 with a raw `gen_server:cast(beamtalk_compiler_server, {remove_class, ClassName})`
 to avoid a compile-time dependency in the wrong direction (`beamtalk_runtime`
 must not depend on `beamtalk_compiler` — see that module's doc). This
-exported function exists for same-app callers and is exercised directly by
+function is exported only under TEST and is exercised directly by
 its own tests.
 """.
 -spec remove_class(atom()) -> ok.
@@ -875,7 +898,7 @@ Not called from production code: `beamtalk_protocol_registry:unregister_protocol
 (the real caller, in `beamtalk_runtime`) intentionally bypasses this wrapper
 with a raw `gen_server:cast(beamtalk_compiler_server, {remove_protocol, ProtocolName})`,
 for the identical wrong-direction-dependency reason documented on
-`remove_class/1`. This exported function exists for same-app callers and is
+`remove_class/1`. This function is exported only under TEST and is
 exercised directly by its own tests.
 """.
 -spec remove_protocol(atom()) -> ok.
@@ -1177,9 +1200,16 @@ handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
     {reply, Result, State};
 handle_call({port_call, Fun, Args}, _From, #state{port = Port} = State) ->
     %% The pure forwards (BT-5046): every request that is just
-    %% `beamtalk_compiler_port:Fun(Port, Args...)` shares this one clause.
-    Result = erlang:apply(beamtalk_compiler_port, Fun, [Port | Args]),
-    {reply, Result, State};
+    %% `beamtalk_compiler_port:Fun(Port, Args...)` shares this one clause. The
+    %% set is closed (`?PORT_FORWARDS`): anything else is an unknown call, so a
+    %% stray request cannot run an arbitrary port function in the server.
+    case lists:member(Fun, ?PORT_FORWARDS) andalso is_list(Args) of
+        true ->
+            Result = erlang:apply(beamtalk_compiler_port, Fun, [Port | Args]),
+            {reply, Result, State};
+        false ->
+            {reply, {error, unknown_call}, State}
+    end;
 handle_call(version, _From, State) ->
     Result = do_version(State#state.port),
     {reply, Result, State};

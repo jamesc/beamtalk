@@ -10,6 +10,12 @@ handlers (the transcript, `Logger enableDebug:`). A call carries a `domain`
 either on the call itself or by a process-level default: the module sets one in
 its `init` (`beamtalk_logging_config:set_domain/1` or
 `logger:set_process_metadata/1`). A module with neither fails this test.
+
+This is an approximation: process metadata covers only the process that set it,
+so a call in an API function (run in the caller) or in a spawned helper is not
+covered by `init`. The test therefore exempts a module only when it sets the
+default inside `init(`, and anything run outside that process must carry an
+explicit `domain` on the call.
 """.
 -include_lib("eunit/include/eunit.hrl").
 
@@ -24,9 +30,7 @@ no_log_call_lacks_a_domain_test() ->
 undomained_calls(File) ->
     {ok, Bin} = file:read_file(File),
     Src = binary_to_list(Bin),
-    HasDefault =
-        string:find(Src, "set_domain(") =/= nomatch orelse
-            string:find(Src, "set_process_metadata(") =/= nomatch,
+    HasDefault = sets_default_in_init(Src),
     case HasDefault of
         true ->
             [];
@@ -61,3 +65,20 @@ balanced([$( | T], D, Acc) -> balanced(T, D + 1, [$( | Acc]);
 balanced([$) | _], 1, Acc) -> lists:reverse(Acc);
 balanced([$) | T], D, Acc) -> balanced(T, D - 1, [$) | Acc]);
 balanced([C | T], D, Acc) -> balanced(T, D, [C | Acc]).
+
+%% True when the module's `init(` function body (the text up to the next
+%% top-level clause head that is not `init(`) sets a process-level default.
+sets_default_in_init(Src) ->
+    case re:run(Src, "\\ninit\\(", [{capture, first, index}]) of
+        nomatch ->
+            false;
+        {match, [{Start, _}]} ->
+            Rest = lists:nthtail(Start, Src),
+            Body =
+                case re:run(Rest, "\\n\\.|\\n\\n[a-z_]+\\(", [{capture, first, index}]) of
+                    {match, [{End, _}]} -> lists:sublist(Rest, End);
+                    nomatch -> Rest
+                end,
+            string:find(Body, "set_domain(") =/= nomatch orelse
+                string:find(Body, "set_process_metadata(") =/= nomatch
+    end.
