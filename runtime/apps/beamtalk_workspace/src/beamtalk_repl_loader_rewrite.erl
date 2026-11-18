@@ -247,7 +247,7 @@ name — that only applies when a rename changes what name a class is
 registered under, which is `renameTo:`'s own concern (out of scope: this
 function never touches `beamtalk_class_registry`). Per-site xref reindexing
 IS covered, but not via an explicit purge call: `activate_module/4`'s
-`register_classes/2` → generated `register_class/0` → `beamtalk_object_class:
+`register_class_module/1` → generated `register_class/0` → `beamtalk_object_class:
 update_class/2` → `refresh_xref/2` already purges-then-reregisters a class's
 xref rows on every ordinary recompile (ADR 0087 Phase 2) — this function's
 job is simply to make sure THAT existing pipeline runs for every rewritten

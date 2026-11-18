@@ -693,8 +693,8 @@ leaf classes with zero direct subclasses, and are therefore about to lose
 that status once `Classes` installs.
 
 **Must be called before the caller's own `code:load_binary/3`, not just
-before `register_classes/2`** — see `activate_module/4`'s doc for why the
-naive "before `register_classes/2`, inside `activate_module`" placement
+before `register_class_module/1`** — see `activate_module/4`'s doc for why the
+naive "before `register_class_module/1`, inside `activate_module`" placement
 this function first shipped with was still too late (`code:load_binary/3`'s
 synchronous `on_load` hook already registers the new subclass link before
 `activate_module/*` is ever reached).

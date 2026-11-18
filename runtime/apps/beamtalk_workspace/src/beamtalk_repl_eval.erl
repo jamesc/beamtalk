@@ -1202,69 +1202,27 @@ handle_protocol_definition(ProtocolInfo, Warnings, State) ->
     %% is drained, instead of a bare `code:load_binary/3` that never sees it.
     case beamtalk_repl_loader:load_protocol_module(ProtocolInfo, undefined, State) of
         {ok, _ProtocolClassNames, NewState} ->
-            %% The loader's activation swallows `register_class/0` failures;
-            %% the REPL surfaces them, so re-run it strictly (idempotent).
-            case maybe_register_protocol_class(ModuleName) of
-                ok ->
-                    ProtocolNames = [binary_to_list(P) || P <- Protocols],
-                    DisplayStr =
-                        case ProtocolNames of
-                            [Single] ->
-                                list_to_binary("Protocol " ++ Single ++ " defined");
-                            Multiple ->
-                                list_to_binary(
-                                    "Protocols " ++ string:join(Multiple, ", ") ++ " defined"
-                                )
-                        end,
-                    {ok, DisplayStr, <<>>, Warnings, NewState};
-                {error, RegError} ->
-                    %% Registration failed — clean up the loaded module to avoid
-                    %% leaving it resident but untracked in State.
-                    cleanup_module(ModuleName),
-                    {error, RegError, <<>>, Warnings, State}
-            end;
+            ProtocolNames = [binary_to_list(P) || P <- Protocols],
+            DisplayStr =
+                case ProtocolNames of
+                    [Single] ->
+                        list_to_binary("Protocol " ++ Single ++ " defined");
+                    Multiple ->
+                        list_to_binary(
+                            "Protocols " ++ string:join(Multiple, ", ") ++ " defined"
+                        )
+                end,
+            {ok, DisplayStr, <<>>, Warnings, NewState};
         {error, Reason, ErrState} ->
             Err = beamtalk_repl_errors:ensure_structured_error(Reason),
+            %% BT-5015: the loader fails the load when `register_class/0` fails
+            %% (kind `registration_error`) but leaves the module resident —
+            %% purge it so it is not resident yet untracked in State.
+            case Err of
+                #beamtalk_error{kind = registration_error} -> cleanup_module(ModuleName);
+                _ -> ok
+            end,
             {error, Err, <<>>, Warnings, ErrState}
-    end.
-
--doc """
-Attempt to call register_class/0 on a protocol module.
-Returns ok if successful or not exported, or {error, #beamtalk_error{}} on failure.
-""".
--spec maybe_register_protocol_class(atom()) -> ok | {error, #beamtalk_error{}}.
-maybe_register_protocol_class(ModuleName) ->
-    case erlang:function_exported(ModuleName, register_class, 0) of
-        true ->
-            %% bt-catcher-audit: not-applicable-no-block - compiled register_class/0, registration
-            %% only
-            try ModuleName:register_class() of
-                {error, RegReason} ->
-                    ?LOG_ERROR(
-                        "Protocol register_class/0 returned error for ~p: ~p",
-                        [ModuleName, RegReason],
-                        #{domain => [beamtalk, runtime]}
-                    ),
-                    Err = beamtalk_repl_errors:ensure_structured_error(
-                        {registration_error, {ModuleName, RegReason}}
-                    ),
-                    {error, Err};
-                _Ok ->
-                    ok
-            catch
-                Class:Reason:Stacktrace ->
-                    ?LOG_ERROR(
-                        "Protocol register_class/0 failed for ~p: ~p:~p~n~p",
-                        [ModuleName, Class, Reason, Stacktrace],
-                        #{domain => [beamtalk, runtime]}
-                    ),
-                    Err = beamtalk_repl_errors:ensure_structured_error(
-                        {registration_error, {ModuleName, Reason}}
-                    ),
-                    {error, Err}
-            end;
-        false ->
-            ok
     end.
 
 -doc "Evaluate a loaded module: capture IO, execute, process result, cleanup.".

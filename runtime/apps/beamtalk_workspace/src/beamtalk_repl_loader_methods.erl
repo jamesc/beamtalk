@@ -711,12 +711,25 @@ load_recompiled_method(
     %% Pass the class's on-disk source path (when known) so `code:which/1`
     %% reports a real path — keeping a patched project class classified as a
     %% project class, not "stdlib"/"dynamic".
-    case beamtalk_repl_loader_support:load_binary_scoped(ModName, SourcePath, Binary, Classes) of
+    %% BT-5015: activation (`register_class/0`) is part of the install — a
+    %% failure there is reported like a failed load, not as a live patch.
+    InstallResult =
+        case
+            beamtalk_repl_loader_support:load_binary_scoped(ModName, SourcePath, Binary, Classes)
+        of
+            {module, ModName} ->
+                case beamtalk_repl_loader_activate:activate_module(ModName, Classes) of
+                    ok -> {module, ModName};
+                    {error, _} = ActivateError -> {activation_failed, ActivateError}
+                end;
+            LoadError ->
+                LoadError
+        end,
+    case InstallResult of
         {module, ModName} ->
             %% (2) Install in memory. The memory install is the visible effect;
             %% the ChangeEntry below is step (3) — emitted only after install
             %% succeeds (all-or-nothing between install and log, ADR 0082).
-            beamtalk_repl_loader_activate:activate_module(ModName, Classes),
             %% Update all classes compiled in this module so sibling class entries
             %% reflect the latest combined source and stay consistent for future >> calls.
             lists:foreach(
@@ -768,6 +781,11 @@ load_recompiled_method(
             ),
             Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
             {ok, Result, <<>>, AllWarnings, State};
+        {activation_failed, {error, ActivationReason}} ->
+            beamtalk_repl_loader_recheck:rollback_signature_generation(
+                ClassNameBin, SelectorBin, Side, CaptureOutcome
+            ),
+            {error, ActivationReason, <<>>, AllWarnings, State};
         {error, LoadReason} ->
             %% ADR 0105 Phase 1: the install this capture described
             %% never happened — undo it so the store still reflects the actually

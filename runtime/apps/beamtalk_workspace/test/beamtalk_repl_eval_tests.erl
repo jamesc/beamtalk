@@ -589,10 +589,10 @@ is_internal_key_regular_atom_test() ->
 is_internal_key_empty_atom_test() ->
     ?assertNot(beamtalk_repl_compiler:is_internal_key('')).
 
-%%% register_classes/2 tests
+%%% register_class_module/1 tests
 
-register_classes_no_function_test() ->
-    ?assertEqual(ok, beamtalk_repl_loader_activate:register_classes([], lists)).
+register_class_module_no_function_test() ->
+    ?assertEqual(ok, beamtalk_repl_loader_activate:register_class_module(lists)).
 
 %%% trigger_hot_reload/2 tests
 
