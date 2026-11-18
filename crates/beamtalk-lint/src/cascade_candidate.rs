@@ -31,9 +31,8 @@
 use std::cell::OnceCell;
 
 use crate::{LintContext, LintPass};
-use beamtalk_core::ast::{
-    BinarySegment, Block, Expression, ExpressionStatement, Identifier, Module,
-};
+use beamtalk_core::ast::{Block, Expression, ExpressionStatement, Identifier, Module};
+use beamtalk_core::ast_walker::for_each_child;
 use beamtalk_core::semantic_analysis::type_checker::cascade_drops_update;
 use beamtalk_core::semantic_analysis::{ClassHierarchy, TypeMap, infer_types};
 use beamtalk_core::source_analysis::Diagnostic;
@@ -186,103 +185,8 @@ fn check_sequence(
 /// themselves contain cascade candidates.
 fn recurse(expr: &Expression, types: &Types<'_>, diagnostics: &mut Vec<Diagnostic>) {
     match expr {
-        Expression::Block(Block { body, .. }) => {
-            check_sequence(body, types, diagnostics);
-        }
-
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            recurse(receiver, types, diagnostics);
-            for arg in arguments {
-                recurse(arg, types, diagnostics);
-            }
-        }
-
-        Expression::Assignment { target, value, .. } => {
-            recurse(target, types, diagnostics);
-            recurse(value, types, diagnostics);
-        }
-
-        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
-            recurse(value, types, diagnostics);
-        }
-
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            recurse(receiver, types, diagnostics);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    recurse(arg, types, diagnostics);
-                }
-            }
-        }
-
-        Expression::Parenthesized { expression, .. } => {
-            recurse(expression, types, diagnostics);
-        }
-
-        Expression::FieldAccess { receiver, .. } => {
-            recurse(receiver, types, diagnostics);
-        }
-
-        Expression::Match { value, arms, .. } => {
-            recurse(value, types, diagnostics);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    recurse(guard, types, diagnostics);
-                }
-                recurse(&arm.body, types, diagnostics);
-            }
-        }
-
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                recurse(&pair.key, types, diagnostics);
-                recurse(&pair.value, types, diagnostics);
-            }
-        }
-
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                recurse(elem, types, diagnostics);
-            }
-            if let Some(t) = tail {
-                recurse(t, types, diagnostics);
-            }
-        }
-
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for elem in elements {
-                recurse(elem, types, diagnostics);
-            }
-        }
-
-        Expression::StringInterpolation { segments, .. } => {
-            for seg in segments {
-                if let beamtalk_core::ast::StringSegment::Interpolation(e) = seg {
-                    recurse(e, types, diagnostics);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                recurse(e, types, diagnostics);
-            }
-        }
-
-        // Leaf nodes — nothing to recurse into.
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::ClassReference { .. }
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Error { .. }
-        | Expression::Spread { .. } => {}
+        Expression::Block(Block { body, .. }) => check_sequence(body, types, diagnostics),
+        _ => for_each_child(expr, &mut |child| recurse(child, types, diagnostics)),
     }
 }
 
