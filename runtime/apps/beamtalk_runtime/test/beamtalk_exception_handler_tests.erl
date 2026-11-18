@@ -103,6 +103,9 @@ kind_to_class_callback_failed_test() ->
 kind_to_class_actor_dead_test() ->
     ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(actor_dead)).
 
+kind_to_class_future_expired_test() ->
+    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(future_expired)).
+
 kind_to_class_future_not_awaited_test() ->
     ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(future_not_awaited)).
 
