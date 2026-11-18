@@ -233,29 +233,11 @@ fn test_generate_class_entry_auto_ctors_anchor() {
 #[test]
 fn test_generate_class_entry_root_class() {
     let meta = ClassMeta {
-        module_name: "bt@stdlib@proto_object".to_string(),
-        class_name: "ProtoObject".to_string(),
-        superclass_name: "none".to_string(),
         modifiers: ClassModifiers {
             is_abstract: true,
             ..ClassModifiers::default()
         },
-        class_kind: beamtalk_core::ast::ClassKind::Object,
-        state: vec![],
-        state_types: vec![],
-        state_has_default: vec![],
-        state_kinds: vec![],
-        initialize_assigns: vec![],
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        handle_scope: None,
-        auto_kw: None,
-        is_value_subclass: false,
-        in_caller_new1: false,
+        ..ClassMeta::test("bt@stdlib@proto_object", "ProtoObject", "none")
     };
     let mut code = String::new();
     generate_class_entry(&mut code, &meta);
@@ -340,52 +322,13 @@ fn test_generate_superclass_type_args_concrete_escaped() {
 #[test]
 fn test_generate_builtins_sorted_deterministic() {
     let meta = [
+        ClassMeta::test("bt@stdlib@zebra", "Zebra", "Object"),
         ClassMeta {
-            module_name: "bt@stdlib@zebra".to_string(),
-            class_name: "Zebra".to_string(),
-            superclass_name: "Object".to_string(),
-            modifiers: ClassModifiers::default(),
-            class_kind: beamtalk_core::ast::ClassKind::Object,
-            state: vec![],
-            state_types: vec![],
-            state_has_default: vec![],
-            state_kinds: vec![],
-            initialize_assigns: vec![],
-            has_dynamic_field_writer: false,
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            superclass_type_args: vec![],
-            handle_scope: None,
-            auto_kw: None,
-            is_value_subclass: false,
-            in_caller_new1: false,
-        },
-        ClassMeta {
-            module_name: "bt@stdlib@alpha".to_string(),
-            class_name: "Alpha".to_string(),
-            superclass_name: "Object".to_string(),
             modifiers: ClassModifiers {
                 is_sealed: true,
                 ..ClassModifiers::default()
             },
-            class_kind: beamtalk_core::ast::ClassKind::Object,
-            state: vec![],
-            state_types: vec![],
-            state_has_default: vec![],
-            state_kinds: vec![],
-            initialize_assigns: vec![],
-            has_dynamic_field_writer: false,
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            superclass_type_args: vec![],
-            handle_scope: None,
-            auto_kw: None,
-            is_value_subclass: false,
-            in_caller_new1: false,
+            ..ClassMeta::test("bt@stdlib@alpha", "Alpha", "Object")
         },
     ];
 
@@ -584,11 +527,6 @@ fn test_write_generated_file_if_changed_reports_write_error() {
 #[test]
 fn test_generate_class_entry_multi_item_fields_use_separators() {
     let meta = ClassMeta {
-        module_name: "bt@stdlib@pair".to_string(),
-        class_name: "Pair".to_string(),
-        superclass_name: "Object".to_string(),
-        modifiers: ClassModifiers::default(),
-        class_kind: beamtalk_core::ast::ClassKind::Object,
         state: vec!["first".to_string(), "second".to_string()],
         state_types: vec![
             ("first".to_string(), DeclaredType::simple("Integer")),
@@ -600,9 +538,6 @@ fn test_generate_class_entry_multi_item_fields_use_separators() {
             ("second".to_string(), beamtalk_core::ast::SlotKind::Late),
         ],
         initialize_assigns: vec!["first".to_string()],
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
         class_variables: vec![
             ClassVarMeta {
                 name: "counterA".to_string(),
@@ -619,10 +554,7 @@ fn test_generate_class_entry_multi_item_fields_use_separators() {
         ],
         type_params: vec!["T".to_string(), "U".to_string()],
         superclass_type_args: vec![DeclaredType::simple("T"), DeclaredType::simple("Concrete")],
-        handle_scope: None,
-        auto_kw: None,
-        is_value_subclass: false,
-        in_caller_new1: false,
+        ..ClassMeta::test("bt@stdlib@pair", "Pair", "Object")
     };
     let mut code = String::new();
     generate_class_entry(&mut code, &meta);
