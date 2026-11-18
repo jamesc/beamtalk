@@ -65,7 +65,7 @@ File writeAll: _fooPath contents: _fooSource
 // => Result ok: nil
 
 Workspace load: _fooPath
-// => _
+// => ["Bt3526SeqRenameFoo"]
 
 Bt3526SeqRenameFoo new greet
 // => "hi from the sequential rename e2e"
@@ -177,7 +177,7 @@ Bt3526SeqRenameBaz removeFromSystem
 // => nil
 
 (Erlang file) delete: _bazPath
-// => _
+// => Result ok: nil
 
 (Erlang file) del_dir: _projDir
 // => Result ok: nil
