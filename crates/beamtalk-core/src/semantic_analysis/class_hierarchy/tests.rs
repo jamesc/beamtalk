@@ -4555,3 +4555,24 @@ fn methods_of_sealed_class_are_sealed_with_or_without_keyword() {
     assert!(!flag("Open", "makePlain", true));
     assert!(flag("Open", "makeMarked", true));
 }
+
+#[test]
+fn abstract_sealed_class_methods_are_sealed_only_with_the_keyword() {
+    // `abstract sealed` classes (e.g. `Boolean`) have stdlib-internal
+    // subclasses, so only an explicit `sealed` marks a method (BT-5008).
+    let src = "abstract sealed Object subclass: Gate\n  plain => 1\n  sealed marked => 2\n";
+    let (module, diags) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
+    assert!(diags.is_empty(), "{diags:?}");
+    let (h, _) = ClassHierarchy::build(&module);
+    let h = h.unwrap();
+    let methods = &h.get_class("Gate").unwrap().methods;
+    let flag = |sel: &str| {
+        methods
+            .iter()
+            .find(|m| m.selector.as_str() == sel)
+            .unwrap()
+            .is_sealed
+    };
+    assert!(!flag("plain"));
+    assert!(flag("marked"));
+}

@@ -86,6 +86,7 @@ use std::sync::Arc;
 /// assert!(hover.is_some());
 /// ```
 #[must_use]
+#[allow(clippy::too_many_lines)] // one flat walk over each declaration site; splitting it would only scatter the sealed-flag threading (BT-5008)
 pub fn compute_hover(
     module: &Module,
     source: &str,
@@ -152,7 +153,13 @@ pub fn compute_hover(
     // Also search inside class method bodies
     for class in &module.classes {
         for method in &class.methods {
-            if let Some(hover) = find_hover_on_method_signature(method, source, offset_val, false) {
+            if let Some(hover) = find_hover_on_method_signature(
+                method,
+                class.is_method_sealed(method),
+                source,
+                offset_val,
+                false,
+            ) {
                 return Some(hover);
             }
             for body_stmt in &method.body {
@@ -170,7 +177,13 @@ pub fn compute_hover(
             }
         }
         for method in &class.class_methods {
-            if let Some(hover) = find_hover_on_method_signature(method, source, offset_val, true) {
+            if let Some(hover) = find_hover_on_method_signature(
+                method,
+                class.is_method_sealed(method),
+                source,
+                offset_val,
+                true,
+            ) {
                 return Some(hover);
             }
             for body_stmt in &method.body {
@@ -191,9 +204,17 @@ pub fn compute_hover(
 
     // Also search standalone method definitions (Tonel-style)
     for smd in &module.method_definitions {
-        if let Some(hover) =
-            find_hover_on_method_signature(&smd.method, source, offset_val, smd.is_class_method)
-        {
+        if let Some(hover) = find_hover_on_method_signature(
+            &smd.method,
+            smd.method.is_sealed
+                || module
+                    .classes
+                    .iter()
+                    .any(|c| c.name.name == smd.class_name.name && c.seals_its_methods()),
+            source,
+            offset_val,
+            smd.is_class_method,
+        ) {
             return Some(hover);
         }
         for body_stmt in &smd.method.body {
@@ -344,6 +365,7 @@ fn alias_definition_hover_info(alias: &beamtalk_core::ast::TypeAliasDefinition) 
 /// Includes selector, parameter names, parameter types, and return type annotations.
 fn find_hover_on_method_signature(
     method: &MethodDefinition,
+    is_sealed: bool,
     source: &str,
     offset: u32,
     is_class_method: bool,
@@ -395,6 +417,7 @@ fn find_hover_on_method_signature(
     if offset >= selector_span.start() && offset < selector_span.end() {
         Some(method_declaration_selector_hover_info(
             method,
+            is_sealed,
             selector_span,
             is_class_method,
         ))
@@ -406,6 +429,7 @@ fn find_hover_on_method_signature(
 /// Creates hover info for a method declaration selector with signature + docs.
 fn method_declaration_selector_hover_info(
     method: &MethodDefinition,
+    is_sealed: bool,
     span: Span,
     is_class_method: bool,
 ) -> HoverInfo {
@@ -435,7 +459,7 @@ fn method_declaration_selector_hover_info(
         "instance-side"
     };
     let mut meta = side.to_string();
-    if method.is_sealed {
+    if is_sealed {
         meta.push_str(", sealed");
     }
     // Show visibility annotation for internal methods (ADR 0071)
@@ -2270,6 +2294,25 @@ mod tests {
             "Unexpected hover contents: {}",
             hover.contents
         );
+    }
+
+    #[test]
+    fn hover_on_declaration_in_sealed_class_shows_sealed_without_keyword() {
+        // BT-5008: a method of a sealed class hovers as sealed whether or not it
+        // carries the keyword; an open class's plain method does not.
+        let hover_meta = |source: &str, needle: &str| {
+            let (module, _) = parse(lex_with_eof(source));
+            let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+            let pos = pos_at(source, source.find(needle).unwrap());
+            let hover = compute_hover(&module, source, pos, &hierarchy, None, None, None);
+            let hover = hover.expect("hover on declaration");
+            format!("{} {:?}", hover.contents, hover.documentation)
+        };
+        let sealed = "sealed Object subclass: Leaf\n  value => 42\n  class make => 1";
+        assert!(hover_meta(sealed, "value =>").contains("sealed"));
+        assert!(hover_meta(sealed, "make =>").contains("sealed"));
+        let open = "Object subclass: Open\n  value => 42";
+        assert!(!hover_meta(open, "value =>").contains("sealed"));
     }
 
     #[test]

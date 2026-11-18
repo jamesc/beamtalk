@@ -23,9 +23,11 @@
 //!   sealed area => ...
 //! ```
 //!
-//! The check reads the class's own declared `sealed` modifier only. A class
-//! that merely inherits from a sealed class cannot exist (a sealed class
-//! cannot be subclassed), so there is no "sealed through an ancestor" case.
+//! Only classes that seal their methods are checked
+//! (`ClassDefinition::seals_its_methods`: `sealed` and not `abstract`), the same
+//! predicate the derived per-method flag uses. `abstract sealed` classes such as
+//! `Boolean` have stdlib-internal subclasses (`True`/`False`), so their
+//! method-level `sealed` is meaningful and is left alone.
 //! Covers instance-side and class-side methods, including the
 //! `class sealed` / `class internal sealed` spellings, and inline and
 //! standalone (`Foo >> bar`) definitions.
@@ -40,7 +42,7 @@ pub(crate) struct RedundantSealedPass;
 impl LintPass for RedundantSealedPass {
     fn check(&self, module: &Module, _ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
         for class in &module.classes {
-            if !class.is_sealed || class.is_abstract {
+            if !class.seals_its_methods() {
                 continue;
             }
             for method in class.methods.iter().chain(&class.class_methods) {
@@ -53,7 +55,7 @@ impl LintPass for RedundantSealedPass {
             if module
                 .classes
                 .iter()
-                .any(|c| c.is_sealed && !c.is_abstract && c.name.name == standalone.class_name.name)
+                .any(|c| c.seals_its_methods() && c.name.name == standalone.class_name.name)
             {
                 check_method(&standalone.class_name.name, &standalone.method, diagnostics);
             }
