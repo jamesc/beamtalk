@@ -151,3 +151,15 @@ eval_with_self_running_process_survives() ->
     Holder ! go,
     ?awaitMessage({done, 42}, 2000),
     ?awaitMessage({'DOWN', Ref, process, Holder, normal}, 1000).
+
+%% A closure from another module that captures an eval-module block keeps the
+%% module alive too.
+eval_with_self_captured_block_survives_test_() ->
+    {setup, fun compiler_setup/0, fun(_) -> ok end,
+        {spawn, ?_test(eval_with_self_captured_block_survives())}}.
+
+eval_with_self_captured_block_survives() ->
+    Wrap = fun(B) -> fun(X) -> B(X) end end,
+    {ok, Closure} = beamtalk_repl_eval:eval_with_self(Wrap, <<"self value: [:x | x + 1]">>),
+    ?assertEqual({ok, 1}, beamtalk_repl_eval:eval_with_self(1, <<"self">>)),
+    ?assertEqual(3, Closure(2)).

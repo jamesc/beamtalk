@@ -923,10 +923,18 @@ get_list(Key) ->
         L -> L
     end.
 
-%% Does `Term` contain a fun defined in `Module`?
+%% Does `Term` contain a fun defined in `Module`, directly or captured in the
+%% environment of another fun?
 -spec holds_fun_of(term(), atom()) -> boolean().
 holds_fun_of(F, Module) when is_function(F) ->
-    erlang:fun_info(F, module) =:= {module, Module};
+    case erlang:fun_info(F, module) of
+        {module, Module} ->
+            true;
+        _ ->
+            %% A closure from another module may capture one of ours.
+            {env, Env} = erlang:fun_info(F, env),
+            holds_fun_of(Env, Module)
+    end;
 holds_fun_of([H | T], Module) ->
     holds_fun_of(H, Module) orelse holds_fun_of(T, Module);
 holds_fun_of(T, Module) when is_tuple(T) ->
