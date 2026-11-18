@@ -117,6 +117,17 @@ pub(super) fn build_detached_node_command(
     if let Ok(home) = std::env::var("HOME") {
         cmd.env("HOME", home);
     }
+    // BT-5027: the CLI derives the workspace directory from `BEAMTALK_HOME`
+    // (`beamtalk_env::beamtalk_root_dir`), and the node resolves its `port`
+    // file the same way (`beamtalk_platform:beamtalk_root_dir/0`). Without this
+    // the node falls back to `$HOME/.beamtalk`, writes the port file somewhere
+    // the CLI never looks, and startup times out. A path, not a secret. An
+    // empty value is treated as unset by both resolvers, so it is not forwarded.
+    if let Ok(root) = std::env::var("BEAMTALK_HOME")
+        && !root.is_empty()
+    {
+        cmd.env("BEAMTALK_HOME", root);
+    }
     // Keep Erlang distribution off untrusted networks by default (ADR 0091
     // Decision 5) — see `beamtalk_workspace::pin_epmd_loopback`'s doc
     // comment for the full rationale, shared with
@@ -475,5 +486,50 @@ mod tests {
             .and_then(|(_, v)| v)
             .map(|v| v.to_string_lossy().into_owned());
         assert_eq!(value.as_deref(), Some("/opt/custom/compiler-port"));
+    }
+
+    // --- BEAMTALK_HOME forwarding (BT-5027) ---
+
+    fn env_of(cmd: &Command, key: &str) -> Option<String> {
+        cmd.get_envs()
+            .find(|(k, _)| k == &OsStr::new(key))
+            .and_then(|(_, v)| v)
+            .map(|v| v.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn beamtalk_home_override_is_forwarded_to_the_detached_node() {
+        // The CLI derives the workspace directory from BEAMTALK_HOME; the node
+        // resolves its own `port` file through `beamtalk_platform:beamtalk_root_dir/0`,
+        // which reads the same variable. If it is not forwarded the two disagree.
+        // SAFETY: serialized via #[serial(env_var)]; restored before returning.
+        unsafe { std::env::set_var("BEAMTALK_HOME", "/opt/custom/beamtalk-home") };
+        let cmd = build_test_command();
+        // SAFETY: see above.
+        unsafe { std::env::remove_var("BEAMTALK_HOME") };
+
+        assert_eq!(
+            env_of(&cmd, "BEAMTALK_HOME").as_deref(),
+            Some("/opt/custom/beamtalk-home")
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn unset_or_empty_beamtalk_home_is_not_forwarded() {
+        // Empty is treated as unset by both resolvers (conformance fixture), so
+        // forwarding it would only add noise.
+        // SAFETY: serialized via #[serial(env_var)]; restored before returning.
+        unsafe { std::env::remove_var("BEAMTALK_HOME") };
+        let unset = build_test_command();
+        // SAFETY: see above.
+        unsafe { std::env::set_var("BEAMTALK_HOME", "") };
+        let empty = build_test_command();
+        // SAFETY: see above.
+        unsafe { std::env::remove_var("BEAMTALK_HOME") };
+
+        assert_eq!(env_of(&unset, "BEAMTALK_HOME"), None);
+        assert_eq!(env_of(&empty, "BEAMTALK_HOME"), None);
     }
 }

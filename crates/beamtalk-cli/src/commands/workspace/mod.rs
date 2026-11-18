@@ -1238,6 +1238,49 @@ mod tests {
         })
     }
 
+    /// BT-5027: with `BEAMTALK_HOME` redirected to a temp directory, the CLI
+    /// creates the workspace under `$BEAMTALK_HOME/workspaces/<id>`, so the
+    /// detached node must write its `port` file there too (it resolves the
+    /// root via `beamtalk_platform:beamtalk_root_dir/0`, which reads the same
+    /// variable). Before the fix the env allowlist dropped `BEAMTALK_HOME`, the
+    /// node wrote under `~/.beamtalk`, and startup failed with "BEAM node did
+    /// not report its port".
+    ///
+    /// Uses `BeamtalkHomeOverride` (the shared hermetic-home guard), so it
+    /// never touches the real `~/.beamtalk`.
+    #[test]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
+    fn test_workspace_starts_under_overridden_beamtalk_home_integration() {
+        let home = tempfile::TempDir::new().expect("tempdir");
+        let _override = crate::commands::test_support::BeamtalkHomeOverride::new(home.path());
+
+        let id = format!("integ_home_{}", std::process::id());
+        let project_path = std::env::current_dir().unwrap();
+        let paths = beam_dirs_for_tests();
+        let config = test_workspace_config();
+
+        let (info, started, _) =
+            get_or_start_workspace_with_retry(&project_path, &id, &paths, &config);
+        let _guard = NodeGuard::new(&info);
+        assert!(started, "should start a new node");
+        assert!(
+            is_node_running(&info, Some(&id)),
+            "node should be running and reachable"
+        );
+        assert!(
+            home.path()
+                .join("workspaces")
+                .join(&id)
+                .join("port")
+                .is_file(),
+            "node must write its port file under $BEAMTALK_HOME/workspaces/<id>"
+        );
+
+        stop_workspace(Some(&id), true).expect("force stop should succeed");
+        assert_node_stopped(&info, "node should not be running after stop");
+    }
+
     /// Regression test: even after the retry wrapper has exhausted
     /// all three attempts (each running `cleanup_stale_node_info` after failure),
     /// a pre-existing `startup.log` must still be present so the panic message's

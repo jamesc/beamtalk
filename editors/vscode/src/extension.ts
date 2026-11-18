@@ -4,7 +4,6 @@
 import { execFile } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import {
@@ -13,6 +12,7 @@ import {
   RevealOutputChannelOn,
   type ServerOptions,
 } from "vscode-languageclient/node";
+import { workspacesBaseDir } from "./beamtalkRoot";
 import { type DocumentMovedParams, planDocumentRetarget } from "./documentMoved";
 import {
   aliasSourceContentFor,
@@ -777,7 +777,11 @@ function handlePortFileRemoved(portUri: vscode.Uri): void {
  * an immediate connect if a port file already exists.
  */
 function setupAutoConnect(context: vscode.ExtensionContext): void {
-  const workspacesDir = path.join(os.homedir(), ".beamtalk", "workspaces");
+  const workspacesDir = workspacesBaseDir();
+  if (workspacesDir === undefined) {
+    outputChannel?.warn("Auto-connect disabled: cannot determine the Beamtalk home directory");
+    return;
+  }
 
   // Ensure the directory exists so the FileSystemWatcher has something to watch.
   // On a fresh install, ~/.beamtalk/workspaces/ doesn't exist yet and inotify
