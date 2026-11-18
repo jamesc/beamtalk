@@ -135,21 +135,20 @@ install_shape_version_stub(ClassName, StubBasename, ShapeVersion) ->
 
 shape_skew_test_() ->
     {timeout, 120,
-        {setup, fun setup/0, fun cleanup/1, fun({_Peer, PeerNode}) ->
+        {setup, fun setup/0, fun cleanup/1, fun({Peer, PeerNode}) ->
             [
                 {
                     "connecting two nodes with a class at different shapeVersions "
                     "announces exactly one NodeShapeSkew for it",
-                    fun() -> skew_announced_once_on_connect(PeerNode) end
+                    {timeout, 60, fun() -> skew_announced_once_on_connect(Peer, PeerNode) end}
                 },
                 {
                     "a shared class at matching versions, and a class not shared "
                     "with the peer at all, announce no skew",
-                    fun() -> no_skew_for_matching_or_non_shared(PeerNode) end
+                    {timeout, 60, fun() -> no_skew_for_matching_or_non_shared(Peer, PeerNode) end}
                 },
-                {"reloading a class on one side while connected re-announces skew", fun() ->
-                    reload_reannounces_skew(PeerNode)
-                end}
+                {"reloading a class on one side while connected re-announces skew",
+                    {timeout, 60, fun() -> reload_reannounces_skew(Peer, PeerNode) end}}
             ]
         end}}.
 
@@ -157,15 +156,15 @@ shape_skew_test_() ->
 %% Connect-time: exactly one NodeShapeSkew per skewed shared class
 %%====================================================================
 
-skew_announced_once_on_connect(PeerNode) ->
-    ok = load_fixture(shape_skew_cart, 'ShapeSkewCart'),
-    ok = erpc:call(PeerNode, ?MODULE, load_fixture, [shape_skew_cart, 'ShapeSkewCart']),
+skew_announced_once_on_connect(Peer, PeerNode) ->
+    force_disconnect(PeerNode),
+    ok = peer_call(Peer, load_fixture, [shape_skew_cart, 'ShapeSkewCart']),
     %% Only the peer's copy is skewed to version 2 — the local side stays
     %% at the real module's implicit version 1.
-    ok = erpc:call(PeerNode, ?MODULE, install_shape_version_stub, [
+    ok = peer_call(Peer, install_shape_version_stub, [
         'ShapeSkewCart', shape_skew_cart_v2_stub, 2
     ]),
-    force_disconnect(PeerNode),
+    ok = load_fixture_settled(shape_skew_cart, 'ShapeSkewCart'),
     Sub = subscribe_self('NodeShapeSkew'),
     try
         reconnect(PeerNode),
@@ -184,13 +183,13 @@ skew_announced_once_on_connect(PeerNode) ->
 %% No skew for a matching-version shared class or a non-shared class
 %%====================================================================
 
-no_skew_for_matching_or_non_shared(PeerNode) ->
+no_skew_for_matching_or_non_shared(Peer, PeerNode) ->
     %% Registered identically (the very same compiled module) on both sides.
-    ok = load_fixture(shape_skew_match_cart, 'ShapeSkewMatchCart'),
-    ok = erpc:call(PeerNode, ?MODULE, load_fixture, [shape_skew_match_cart, 'ShapeSkewMatchCart']),
-    %% Registered locally only — deliberately never touches the peer.
-    ok = load_fixture(shape_skew_local_only_cart, 'ShapeSkewLocalOnlyCart'),
     force_disconnect(PeerNode),
+    ok = peer_call(Peer, load_fixture, [shape_skew_match_cart, 'ShapeSkewMatchCart']),
+    ok = load_fixture_settled(shape_skew_match_cart, 'ShapeSkewMatchCart'),
+    %% Registered locally only — deliberately never touches the peer.
+    ok = load_fixture_settled(shape_skew_local_only_cart, 'ShapeSkewLocalOnlyCart'),
     Sub = subscribe_self('NodeShapeSkew'),
     try
         reconnect(PeerNode),
@@ -204,12 +203,10 @@ no_skew_for_matching_or_non_shared(PeerNode) ->
 %% Reload-time: matching on connect, skewed after a local reload
 %%====================================================================
 
-reload_reannounces_skew(PeerNode) ->
-    ok = load_fixture(shape_skew_reload_cart, 'ShapeSkewReloadCart'),
-    ok = erpc:call(PeerNode, ?MODULE, load_fixture, [
-        shape_skew_reload_cart, 'ShapeSkewReloadCart'
-    ]),
+reload_reannounces_skew(Peer, PeerNode) ->
     force_disconnect(PeerNode),
+    ok = peer_call(Peer, load_fixture, [shape_skew_reload_cart, 'ShapeSkewReloadCart']),
+    ok = load_fixture_settled(shape_skew_reload_cart, 'ShapeSkewReloadCart'),
     Sub = subscribe_self('NodeShapeSkew'),
     try
         reconnect(PeerNode),
@@ -233,6 +230,48 @@ reload_reannounces_skew(PeerNode) ->
 %%====================================================================
 
 -doc """
+Load a fixture locally while disconnected from the peer and wait until
+`beamtalk_node_monitor` has finished reacting to the resulting `ClassLoaded`.
+
+BT-4999: registering a class fires `ClassLoaded`; the monitor reacts by
+spawning a reload-time skew re-check against `nodes()` (a *second*, legitimate
+trigger besides `nodeup`). That chain (dispatch process -> monitor mailbox ->
+spawned check) is asynchronous, so under CPU load it could land *after* the
+scenario's reconnect, see the peer, and announce a duplicate `NodeShapeSkew`
+inside the "exactly once" window. Production announces once per trigger; the
+race was the test's. Loading while disconnected makes that re-check a no-op
+(`nodes()` is empty), and draining the chain before reconnecting keeps it so.
+""".
+-spec load_fixture_settled(atom(), atom()) -> ok.
+load_fixture_settled(Basename, ClassName) ->
+    Self = self(),
+    Handler = fun(#{className := C}) -> Self ! {class_loaded_seen, C} end,
+    {ok, Sub} = beamtalk_announcements:subscribe('ClassLoaded', Self, Handler, false),
+    try
+        %% `ensure_fixture_loaded` is idempotent: only a first registration
+        %% announces `ClassLoaded`, so only then is there an event to wait for.
+        Fresh = beamtalk_class_registry:whereis_class(ClassName) =:= undefined,
+        ok = load_fixture(Basename, ClassName),
+        case Fresh of
+            true ->
+                receive
+                    {class_loaded_seen, ClassName} -> ok
+                after 5000 -> ok
+                end;
+            false ->
+                ok
+        end
+    after
+        beamtalk_announcements:unsubscribe(Sub)
+    end,
+    %% The monitor has now been handed (or is about to drain) its own copy of
+    %% the event; a synchronous call flushes it, and the spawned re-check it
+    %% starts sees `nodes() =:= []` and exits at once.
+    _ = sys:get_state(beamtalk_node_monitor),
+    _ = sys:get_state(beamtalk_node_monitor),
+    ok.
+
+-doc """
 Disconnect from `PeerNode` and wait until `nodes()` no longer lists it, so
 the following `reconnect/1` produces a fresh, unambiguous `nodeup` for the
 scenario under test rather than racing a disconnect already in flight.
@@ -243,6 +282,17 @@ side never halts the peer.
 force_disconnect(PeerNode) ->
     _ = erlang:disconnect_node(PeerNode),
     beamtalk_test_wait:until(fun() -> not lists:member(PeerNode, nodes()) end, 5000).
+
+-doc """
+Call `?MODULE:Fun(Args)` on the peer over `peer`'s own control channel, which
+is independent of Erlang distribution. BT-4999: while the nodes are
+disconnected, an `erpc` would silently re-dial the peer and produce a
+`nodeup` (hence a `NodeShapeSkew`) *before* the scenario subscribes, so the
+scenario's own `reconnect/1` would then be a no-op and its event lost.
+""".
+-spec peer_call(peer:server_ref(), atom(), [term()]) -> term().
+peer_call(Peer, Fun, Args) ->
+    peer:call(Peer, ?MODULE, Fun, Args, 60000).
 
 -doc "Reconnect to `PeerNode`, asserting the connection actually came up.".
 -spec reconnect(node()) -> ok.
