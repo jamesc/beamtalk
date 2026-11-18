@@ -288,12 +288,17 @@ netsplit_heal_resolves_conflict(Peer, PeerNode) ->
         []
     ]),
 
-    %% Generous headroom (resolve_global_conflict/3 compares microsecond
-    %% start-time markers) so the two registrants' ages are unambiguously
-    %% ordered — this is not a tight race, just avoiding same-microsecond
-    %% ties on a fast host.
-    %% sleep: waits for a clock tick between registrants (class 3)
-    timer:sleep(50),
+    %% resolve_global_conflict/3 compares microsecond start-time markers:
+    %% wait until this node's clock is past the peer registrant's marker, so
+    %% the two registrants' ages are unambiguously ordered (no
+    %% same-microsecond tie on a fast host).
+    PeerStartedAt = peer:call(Peer, beamtalk_actor_registry, started_at_from_dictionary, [
+        PeerPid
+    ]),
+    ?assert(is_integer(PeerStartedAt)),
+    ok = beamtalk_test_wait:until(fun() ->
+        erlang:system_time(microsecond) > PeerStartedAt
+    end),
 
     %% Register the YOUNGER registrant here, on the origin node. Same
     %% link-then-unlink reasoning as PeerPid above — this test process would

@@ -289,7 +289,7 @@ structural_from_state_nested_test() ->
 %% never exercises `unassigned_late_fields/2`. Mirrors
 %% `beamtalk_object_class_tests.erl`'s `get_class_var_declared_late_
 %% unassigned_errors_without_crashing_test_` — a real meta-carrying module
-%% built via `compile:forms/2`, registered as a live class with
+%% built via `beamtalk_test_module`, registered as a live class with
 %% `beamtalk_object_class:start_link/1`.
 
 setup() ->

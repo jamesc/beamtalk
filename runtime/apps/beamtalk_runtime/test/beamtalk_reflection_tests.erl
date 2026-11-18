@@ -191,8 +191,8 @@ source_file_from_module_utf8_bytes_via_core_pipeline_test() ->
     ),
     {ok, Toks, _} = core_scan:string(binary_to_list(Core)),
     {ok, Ast} = core_parse:parse(Toks),
-    {ok, Mod, Bin} = compile:forms(Ast, [from_core, return_errors]),
-    {module, Mod} = code:load_binary(Mod, "bt4370_core.beam", Bin),
+    {Mod, Bin} = beamtalk_test_module:compile(Ast, [from_core]),
+    ok = beamtalk_test_module:load_binary(Mod, Bin),
     try
         ?assertEqual(<<"/jos", 195, 169, ".bt">>, beamtalk_reflection:source_file_from_module(Mod))
     after
@@ -210,8 +210,7 @@ load_source_module(Mod, Path) ->
         {attribute, 2, beamtalk_source, [Path]},
         {eof, 3}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-    {module, Mod} = code:load_binary(Mod, "bt4370.beam", Bin),
+    ok = beamtalk_test_module:load(Mod, Forms),
     ok.
 
 unload_module(Mod) ->

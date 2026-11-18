@@ -16,21 +16,25 @@ fn test_match_array_pattern_arm_generates_is_map_guard_chain() {
     let src = "Object subclass: Foo\n  test: arr =>\n    arr match: [\n      #[h, t] -> h + t;\n      _ -> 0\n    ]\n";
     let code = codegen_named(src, "foo");
 
-    assert!(
-        code.contains("call 'erlang':'is_map'("),
-        "Should emit is_map guard check for array pattern. Got:\n{code}"
+    assert_has(
+        "Should emit is_map guard check for array pattern",
+        &code,
+        &["call 'erlang':'is_map'("],
     );
-    assert!(
-        code.contains("'$beamtalk_class'"),
-        "Should check '$beamtalk_class' key for array type guard. Got:\n{code}"
+    assert_has(
+        "Should check '$beamtalk_class' key for array type guard",
+        &code,
+        &["'$beamtalk_class'"],
     );
-    assert!(
-        code.contains("call 'beamtalk_array':'size'("),
-        "Should check array size. Got:\n{code}"
+    assert_has(
+        "Should check array size",
+        &code,
+        &["call 'beamtalk_array':'size'("],
     );
-    assert!(
-        code.contains("'at:'"),
-        "Should extract elements via at: dispatch. Got:\n{code}"
+    assert_has(
+        "Should extract elements via at: dispatch",
+        &code,
+        &["'at:'"],
     );
 }
 
@@ -41,17 +45,20 @@ fn test_match_map_pattern_arm_generates_core_erlang_map_pattern() {
     let src = "Object subclass: Foo\n  test: d =>\n    d match: [\n      #{#event => evName} -> evName;\n      _ -> \"none\"\n    ]\n";
     let code = codegen_named(src, "foo");
 
-    assert!(
-        code.contains("~{"),
-        "Should emit Core Erlang map pattern ~{{...}}~. Got:\n{code}"
+    assert_has(
+        "Should emit Core Erlang map pattern ~{...}~",
+        &code,
+        &["~{"],
     );
-    assert!(
-        code.contains(":="),
-        "Should use := binding syntax in map pattern. Got:\n{code}"
+    assert_has(
+        "Should use := binding syntax in map pattern",
+        &code,
+        &[":="],
     );
-    assert!(
-        code.contains("'event'"),
-        "Should include the 'event' key in the map pattern. Got:\n{code}"
+    assert_has(
+        "Should include the 'event' key in the map pattern",
+        &code,
+        &["'event'"],
     );
 }
 
@@ -64,14 +71,16 @@ fn test_match_array_pattern_fallthrough_to_wildcard() {
     let code = codegen_named(src, "foo");
 
     // The fallback (42) should appear in the generated code
-    assert!(
-        code.contains("42"),
-        "Fallback value should appear in generated code. Got:\n{code}"
+    assert_has(
+        "Fallback value should appear in generated code",
+        &code,
+        &["42"],
     );
     // The is_map check should be present — if false, falls through to 42
-    assert!(
-        code.contains("call 'erlang':'is_map'("),
-        "Should emit is_map check. Got:\n{code}"
+    assert_has(
+        "Should emit is_map check",
+        &code,
+        &["call 'erlang':'is_map'("],
     );
 }
 
@@ -110,9 +119,10 @@ fn test_match_array_pattern_uses_maps_get_with_default_not_map_get() {
         code.contains("call 'maps':'get'('$beamtalk_class',") && code.contains(", 'undefined')"),
         "Should use maps:get/3 with 'undefined' default. Got:\n{code}"
     );
-    assert!(
-        !code.contains("call 'erlang':'map_get'("),
-        "Must NOT use erlang:map_get/2 — throws badkey when '$beamtalk_class' absent. Got:\n{code}"
+    assert_lacks(
+        "Must NOT use erlang:map_get/2 — throws badkey when '$beamtalk_class' absent",
+        &code,
+        &["call 'erlang':'map_get'("],
     );
 }
 
@@ -125,19 +135,22 @@ fn test_match_array_pattern_duplicate_variable_emits_equality_check() {
     let code = codegen_named(src, "foo");
 
     // Must emit a strict-equality call for the duplicate variable.
-    assert!(
-        code.contains("call 'erlang':'=:='("),
-        "Should emit erlang:=:= equality check for duplicate variable. Got:\n{code}"
+    assert_has(
+        "Should emit erlang:=:= equality check for duplicate variable",
+        &code,
+        &["call 'erlang':'=:='("],
     );
     // The primary binding `let X = ... at: [1]` should appear.
-    assert!(
-        code.contains("'at:', [1]"),
-        "Should extract first element for primary binding. Got:\n{code}"
+    assert_has(
+        "Should extract first element for primary binding",
+        &code,
+        &["'at:', [1]"],
     );
     // A second extraction for position 2 must also be present (into a temp var).
-    assert!(
-        code.contains("'at:', [2]"),
-        "Should extract second element into temp for equality check. Got:\n{code}"
+    assert_has(
+        "Should extract second element into temp for equality check",
+        &code,
+        &["'at:', [2]"],
     );
 }
 
@@ -150,9 +163,10 @@ fn test_match_nil_pattern_compiles_to_atom_literal() {
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      nil -> 0;\n      _ -> 1\n    ]\n";
     let code = codegen_named(src, "foo");
 
-    assert!(
-        code.contains("<'nil'>"),
-        "nil pattern should compile to the atom-literal case pattern 'nil'. Got:\n{code}"
+    assert_has(
+        "nil pattern should compile to the atom-literal case pattern 'nil'",
+        &code,
+        &["<'nil'>"],
     );
 }
 
@@ -166,13 +180,15 @@ fn test_match_type_pattern_string_compiles_to_tag_test() {
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      s :: String -> s;\n      _ -> \"none\"\n    ]\n";
     let code = codegen_named(src, "foo");
 
-    assert!(
-        code.contains("'beamtalk_string'"),
-        "String type pattern should test the beamtalk_string tag. Got:\n{code}"
+    assert_has(
+        "String type pattern should test the beamtalk_string tag",
+        &code,
+        &["'beamtalk_string'"],
     );
-    assert!(
-        !code.contains("'erlang':'is_binary'"),
-        "String type pattern must not test is_binary (bare binaries are Binary). Got:\n{code}"
+    assert_lacks(
+        "String type pattern must not test is_binary (bare binaries are Binary)",
+        &code,
+        &["'erlang':'is_binary'"],
     );
 }
 
@@ -184,13 +200,15 @@ fn test_match_type_pattern_binary_compiles_to_subclass_aware_test() {
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      b :: Binary -> b;\n      _ -> \"none\"\n    ]\n";
     let code = codegen_named(src, "foo");
 
-    assert!(
-        code.contains("'erlang':'is_binary'"),
-        "Binary type pattern should test is_binary. Got:\n{code}"
+    assert_has(
+        "Binary type pattern should test is_binary",
+        &code,
+        &["'erlang':'is_binary'"],
     );
-    assert!(
-        code.contains("'beamtalk_string'"),
-        "Binary type pattern must also match the String subclass tag. Got:\n{code}"
+    assert_has(
+        "Binary type pattern must also match the String subclass tag",
+        &code,
+        &["'beamtalk_string'"],
     );
 }
 
@@ -201,17 +219,20 @@ fn test_match_type_pattern_bitstring_compiles_to_unaligned_test() {
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      b :: Bitstring -> b;\n      _ -> \"none\"\n    ]\n";
     let code = codegen_named(src, "foo");
 
-    assert!(
-        code.contains("'erlang':'is_bitstring'"),
-        "Bitstring type pattern should test is_bitstring. Got:\n{code}"
+    assert_has(
+        "Bitstring type pattern should test is_bitstring",
+        &code,
+        &["'erlang':'is_bitstring'"],
     );
-    assert!(
-        code.contains("'erlang':'is_binary'"),
-        "Bitstring type pattern should exclude byte-aligned binaries. Got:\n{code}"
+    assert_has(
+        "Bitstring type pattern should exclude byte-aligned binaries",
+        &code,
+        &["'erlang':'is_binary'"],
     );
-    assert!(
-        !code.contains("'maps':'get'('$beamtalk_class', X"),
-        "Bitstring is a raw term, never a tagged-map test. Got:\n{code}"
+    assert_lacks(
+        "Bitstring is a raw term, never a tagged-map test",
+        &code,
+        &["'maps':'get'('$beamtalk_class', X"],
     );
 }
 
@@ -225,17 +246,20 @@ fn test_match_type_pattern_tagged_class_compiles_to_map_tag_check() {
     let src = "Value subclass: Bar\n  field: n = 0\n\n  test: x =>\n    x match: [\n      b :: Bar -> b;\n      _ -> \"none\"\n    ]\n";
     let code = codegen_named(src, "bar");
 
-    assert!(
-        code.contains("'erlang':'is_map'"),
-        "Tagged-class type pattern should test is_map first. Got:\n{code}"
+    assert_has(
+        "Tagged-class type pattern should test is_map first",
+        &code,
+        &["'erlang':'is_map'"],
     );
-    assert!(
-        code.contains("'maps':'get'('$beamtalk_class'"),
-        "Tagged-class type pattern should check '$beamtalk_class'. Got:\n{code}"
+    assert_has(
+        "Tagged-class type pattern should check '$beamtalk_class'",
+        &code,
+        &["'maps':'get'('$beamtalk_class'"],
     );
-    assert!(
-        code.contains("'Bar'"),
-        "Tagged-class type pattern should match the class name atom. Got:\n{code}"
+    assert_has(
+        "Tagged-class type pattern should match the class name atom",
+        &code,
+        &["'Bar'"],
     );
 }
 
@@ -258,9 +282,10 @@ fn test_match_type_pattern_non_leaf_class_compiles_to_runtime_kind_of_test() {
     )
     .expect("codegen should succeed");
 
-    assert!(
-        code.contains("call 'beamtalk_behaviour_intrinsics':'valueIsKindOfClass'("),
-        "Non-leaf type pattern should call the runtime kind-of test. Got:\n{code}"
+    assert_has(
+        "Non-leaf type pattern should call the runtime kind-of test",
+        &code,
+        &["call 'beamtalk_behaviour_intrinsics':'valueIsKindOfClass'("],
     );
     assert!(
         code.lines().any(|l| {
@@ -280,13 +305,15 @@ fn test_match_type_pattern_leaf_class_keeps_exact_tag_fast_path_with_kind_of_fal
     // subclass declared elsewhere (or hot-loaded later) still matches.
     let src = "Value subclass: Bar\n  test: x =>\n    x match: [\n      b :: Bar -> b;\n      _ -> \"none\"\n    ]\n";
     let code = codegen_named(src, "bar");
-    assert!(
-        code.contains("'maps':'get'('$beamtalk_class'"),
-        "Leaf type pattern keeps the exact-tag fast path. Got:\n{code}"
+    assert_has(
+        "Leaf type pattern keeps the exact-tag fast path",
+        &code,
+        &["'maps':'get'('$beamtalk_class'"],
     );
-    assert!(
-        code.contains("'valueIsKindOfClass'("),
-        "Leaf type pattern falls back to the runtime kind-of test. Got:\n{code}"
+    assert_has(
+        "Leaf type pattern falls back to the runtime kind-of test",
+        &code,
+        &["'valueIsKindOfClass'("],
     );
     assert_compiles_through_erlc("bar", &code);
 }
@@ -299,13 +326,11 @@ fn test_match_type_pattern_mixed_with_nil_and_native_arms_compiles() {
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      nil -> 0;\n      n :: Integer -> n;\n      _ -> -1\n    ]\n";
     let code = codegen_named(src, "foo");
 
-    assert!(
-        code.contains("<'nil'>"),
-        "Should still contain the nil arm. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'is_integer'"),
-        "Should still contain the Integer arm's test. Got:\n{code}"
+    assert_has("Should still contain the nil arm", &code, &["<'nil'>"]);
+    assert_has(
+        "Should still contain the Integer arm's test",
+        &code,
+        &["'erlang':'is_integer'"],
     );
 }
 
@@ -317,9 +342,10 @@ fn test_match_type_pattern_block_compiles_to_is_function_test() {
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      blk :: Block -> blk;\n      _ -> \"none\"\n    ]\n";
     let code = codegen_named(src, "foo");
 
-    assert!(
-        code.contains("'erlang':'is_function'"),
-        "Block type pattern should test is_function. Got:\n{code}"
+    assert_has(
+        "Block type pattern should test is_function",
+        &code,
+        &["'erlang':'is_function'"],
     );
 }
 
@@ -344,9 +370,10 @@ fn test_match_type_pattern_true_false_nil_use_exact_atom_match() {
         .nth(1)
         .and_then(|rest| rest.split("\n\n").next())
         .expect("generated code should contain a 'test:'/2 function");
-    assert!(
-        !test_fn.contains("is_map"),
-        "None of True/False/Nil/UndefinedObject should use the tagged-class is_map check. Got 'test:'/2 body:\n{test_fn}"
+    assert_lacks(
+        "None of True/False/Nil/UndefinedObject should use the tagged-class is_map check. Got 'test:'/2 body",
+        test_fn,
+        &["is_map"],
     );
     assert!(
         test_fn.matches("<'true'>").count() >= 1,
@@ -372,17 +399,20 @@ fn test_match_type_pattern_actor_class_uses_tuple_tag_check_and_compiles() {
     let src = "Actor subclass: Counter\n  state: count = 0\n\n  test: x =>\n    x match: [\n      c :: Counter -> c;\n      _ -> \"none\"\n    ]\n";
     let code = codegen_named(src, "counter");
 
-    assert!(
-        code.contains("'erlang':'is_tuple'"),
-        "Actor-class type pattern should test is_tuple. Got:\n{code}"
+    assert_has(
+        "Actor-class type pattern should test is_tuple",
+        &code,
+        &["'erlang':'is_tuple'"],
     );
-    assert!(
-        code.contains("'beamtalk_object'"),
-        "Actor-class type pattern should check the 'beamtalk_object' tag. Got:\n{code}"
+    assert_has(
+        "Actor-class type pattern should check the 'beamtalk_object' tag",
+        &code,
+        &["'beamtalk_object'"],
     );
-    assert!(
-        code.contains("'Counter'"),
-        "Actor-class type pattern should match the class name atom. Got:\n{code}"
+    assert_has(
+        "Actor-class type pattern should match the class name atom",
+        &code,
+        &["'Counter'"],
     );
 
     assert_compiles_through_erlc("counter", &code);
@@ -396,17 +426,20 @@ fn test_match_type_pattern_pid_reference_port_use_guard_safe_bifs() {
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      p :: Pid -> 1;\n      r :: Reference -> 2;\n      pt :: Port -> 3;\n      _ -> 0\n    ]\n";
     let code = codegen_named(src, "foo");
 
-    assert!(
-        code.contains("'erlang':'is_pid'"),
-        "Pid type pattern should test is_pid. Got:\n{code}"
+    assert_has(
+        "Pid type pattern should test is_pid",
+        &code,
+        &["'erlang':'is_pid'"],
     );
-    assert!(
-        code.contains("'erlang':'is_reference'"),
-        "Reference type pattern should test is_reference. Got:\n{code}"
+    assert_has(
+        "Reference type pattern should test is_reference",
+        &code,
+        &["'erlang':'is_reference'"],
     );
-    assert!(
-        code.contains("'erlang':'is_port'"),
-        "Port type pattern should test is_port. Got:\n{code}"
+    assert_has(
+        "Port type pattern should test is_port",
+        &code,
+        &["'erlang':'is_port'"],
     );
 }
 
@@ -419,21 +452,25 @@ fn test_match_type_pattern_tuple_excludes_actor_reference_shape() {
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      t :: Tuple -> 1;\n      _ -> 0\n    ]\n";
     let code = codegen_named(src, "foo");
 
-    assert!(
-        code.contains("'erlang':'is_tuple'"),
-        "Tuple type pattern should test is_tuple. Got:\n{code}"
+    assert_has(
+        "Tuple type pattern should test is_tuple",
+        &code,
+        &["'erlang':'is_tuple'"],
     );
-    assert!(
-        code.contains("'beamtalk_object'"),
-        "Tuple type pattern should exclude the actor-reference tag. Got:\n{code}"
+    assert_has(
+        "Tuple type pattern should exclude the actor-reference tag",
+        &code,
+        &["'beamtalk_object'"],
     );
-    assert!(
-        code.contains("'beamtalk_supervisor'"),
-        "Tuple type pattern should exclude the supervisor-reference tag. Got:\n{code}"
+    assert_has(
+        "Tuple type pattern should exclude the supervisor-reference tag",
+        &code,
+        &["'beamtalk_supervisor'"],
     );
-    assert!(
-        code.contains("'beamtalk_string'"),
-        "Tuple type pattern should exclude the String tag (BT-4173). Got:\n{code}"
+    assert_has(
+        "Tuple type pattern should exclude the String tag (BT-4173)",
+        &code,
+        &["'beamtalk_string'"],
     );
 }
 
@@ -456,17 +493,20 @@ fn test_match_type_pattern_supervisor_subclass_uses_tuple_tag_check_and_compiles
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      s :: WebApp -> s;\n      _ -> \"none\"\n    ]\n\nSupervisor subclass: WebApp\n  childSpecs => #()\n";
     let code = codegen_named(src, "webapp");
 
-    assert!(
-        code.contains("'erlang':'is_tuple'"),
-        "Supervisor-class type pattern should test is_tuple. Got:\n{code}"
+    assert_has(
+        "Supervisor-class type pattern should test is_tuple",
+        &code,
+        &["'erlang':'is_tuple'"],
     );
-    assert!(
-        code.contains("'beamtalk_supervisor'"),
-        "Supervisor-class type pattern should check the 'beamtalk_supervisor' tag. Got:\n{code}"
+    assert_has(
+        "Supervisor-class type pattern should check the 'beamtalk_supervisor' tag",
+        &code,
+        &["'beamtalk_supervisor'"],
     );
-    assert!(
-        code.contains("'WebApp'"),
-        "Supervisor-class type pattern should match the class name atom. Got:\n{code}"
+    assert_has(
+        "Supervisor-class type pattern should match the class name atom",
+        &code,
+        &["'WebApp'"],
     );
 
     assert_compiles_through_erlc("webapp", &code);
@@ -483,18 +523,20 @@ fn test_match_type_pattern_dynamic_supervisor_subclass_uses_tuple_tag_check_and_
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      p :: Pool -> p;\n      _ -> \"none\"\n    ]\n\nObject subclass: Widget\n\nDynamicSupervisor(Widget) subclass: Pool\n  childClass => Widget\n";
     let code = codegen_named(src, "pool");
 
-    assert!(
-        code.contains("'erlang':'is_tuple'"),
-        "DynamicSupervisor-class type pattern should test is_tuple. Got:\n{code}"
+    assert_has(
+        "DynamicSupervisor-class type pattern should test is_tuple",
+        &code,
+        &["'erlang':'is_tuple'"],
     );
     assert!(
         code.contains("'beamtalk_supervisor'"),
         "DynamicSupervisor-class type pattern should check the 'beamtalk_supervisor' tag. \
          Got:\n{code}"
     );
-    assert!(
-        code.contains("'Pool'"),
-        "DynamicSupervisor-class type pattern should match the class name atom. Got:\n{code}"
+    assert_has(
+        "DynamicSupervisor-class type pattern should match the class name atom",
+        &code,
+        &["'Pool'"],
     );
 
     assert_compiles_through_erlc("pool", &code);
@@ -535,9 +577,10 @@ fn test_match_type_pattern_actor_subclass_resolves_through_cross_file_stub_chain
         "Actor-class type pattern should check the 'beamtalk_object' tag even through a \
          cross-file stub chain. Got:\n{code}"
     );
-    assert!(
-        code.contains("'LeafActor'"),
-        "Actor-class type pattern should match the class name atom. Got:\n{code}"
+    assert_has(
+        "Actor-class type pattern should match the class name atom",
+        &code,
+        &["'LeafActor'"],
     );
 
     assert_compiles_through_erlc("leaf_actor", &code);
@@ -576,9 +619,10 @@ fn test_match_type_pattern_supervisor_subclass_resolves_through_cross_file_stub_
         "Supervisor-class type pattern should check the 'beamtalk_supervisor' tag even through \
          a cross-file stub chain. Got:\n{code}"
     );
-    assert!(
-        code.contains("'LeafSupervisor'"),
-        "Supervisor-class type pattern should match the class name atom. Got:\n{code}"
+    assert_has(
+        "Supervisor-class type pattern should match the class name atom",
+        &code,
+        &["'LeafSupervisor'"],
     );
 
     assert_compiles_through_erlc("leaf_supervisor", &code);
@@ -598,13 +642,15 @@ fn test_match_type_pattern_dictionary_and_tagged_class_arms_interleave_in_one_ca
         "Should contain at least two independent is_map checks (Dictionary arm + Bar arm; \
          other class-boilerplate `is_map` checks may also appear). Got:\n{code}"
     );
-    assert!(
-        code.contains("'undefined'"),
-        "Should still contain the Dictionary arm's 'undefined' tag check. Got:\n{code}"
+    assert_has(
+        "Should still contain the Dictionary arm's 'undefined' tag check",
+        &code,
+        &["'undefined'"],
     );
-    assert!(
-        code.contains("'Bar'"),
-        "Should still contain the Bar arm's class-tag check. Got:\n{code}"
+    assert_has(
+        "Should still contain the Bar arm's class-tag check",
+        &code,
+        &["'Bar'"],
     );
 }
 

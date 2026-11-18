@@ -2079,20 +2079,17 @@ ffi_boundary_preserves_wrapped_error_test() ->
         beamtalk_error:raise(beamtalk_error:new(dispatch_error, 'File', 'exists:'))
     end,
     with_temp_file("_bt_test_ffi_raise.txt", <<"x">>, fun() ->
-        Got =
-            try
-                beamtalk_erlang_proxy:native_call(
-                    beamtalk_file,
-                    open,
-                    [<<"_bt_test_ffi_raise.txt">>, Raiser],
-                    {'File', 'open:do:'}
-                ),
-                no_raise
-            catch
-                %% BT-4900: kept hand-written - value-returning helper (hands {Kind, Selector} back)
-                error:#{error := #beamtalk_error{kind = K, selector = S}} -> {K, S}
-            end,
-        ?assertEqual({dispatch_error, 'exists:'}, Got)
+        ?assertBtError(
+            dispatch_error,
+            _,
+            'exists:',
+            beamtalk_erlang_proxy:native_call(
+                beamtalk_file,
+                open,
+                [<<"_bt_test_ffi_raise.txt">>, Raiser],
+                {'File', 'open:do:'}
+            )
+        )
     end).
 
 %%% ============================================================================

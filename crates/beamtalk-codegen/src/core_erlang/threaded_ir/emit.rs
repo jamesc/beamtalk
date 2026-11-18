@@ -1611,6 +1611,7 @@ fn render_bind(
                 put
             }
         }
+        #[cfg(test)]
         BindOp::Unpack { field } => form::let_prefix(
             leaf::var(target_name),
             form::call(

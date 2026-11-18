@@ -18,12 +18,10 @@ reports, so a change to the shared helper cannot silently change them.
 %% The raised error's {Kind, Class, Selector, Hint-or-Message}. `hint` and
 %% `message` are tagged Strings; the hint wins when set.
 raised(Fun) ->
-    try
-        Fun(),
-        no_error
-    catch
-        %% BT-4900: kept hand-written - value-returning helper (maps the error to a comparison tuple)
-        error:#{error := #beamtalk_error{} = E} ->
+    case beamtalk_test_assert:raised_error(Fun) of
+        no_error ->
+            no_error;
+        E ->
             Text =
                 case E#beamtalk_error.hint of
                     undefined -> E#beamtalk_error.message;

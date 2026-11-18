@@ -1664,7 +1664,7 @@ fn test_generate_map_literal_compiles() {
     // Verify the generated Core Erlang contains the map literal syntax
     assert_has("Should contain Core Erlang map syntax ~{", &code, &["~{"]);
     // Symbols become atoms in Core Erlang
-    assert!(code.contains("'key'"));
+    assert_has("test_generate_map_literal_compiles", &code, &["'key'"]);
     // Strings are represented as binaries with character codes
     assert_has("String should be represented as binary", &code, &["#<"]);
 

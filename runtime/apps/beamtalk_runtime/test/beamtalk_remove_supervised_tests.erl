@@ -70,7 +70,13 @@ crash_after_refusal_keeps_supervisor_alive() ->
     with_fixture(permanent, static, fun(#{class := C, sup := Sup, child := Child}) ->
         _ = remove_error(C),
         exit(Child, kill),
-        timer:sleep(100),
+        %% Wait for the supervisor to restart the child.
+        ok = beamtalk_test_wait:until(fun() ->
+            case supervisor:which_children(Sup) of
+                [{child1, P, _, _}] -> is_pid(P) andalso P =/= Child;
+                _ -> false
+            end
+        end),
         ?assert(is_process_alive(Sup)),
         [{child1, NewChild, _, _}] = supervisor:which_children(Sup),
         ?assert(is_pid(NewChild))
@@ -94,7 +100,7 @@ refuses_nested_tree() ->
 refuses_transient_child_that_exited_normally() ->
     with_fixture(transient, static, fun(#{class := C, sup := Sup, child := Child}) ->
         Child ! stop_normal,
-        timer:sleep(100),
+        ok = beamtalk_test_wait:dead(Child),
         ?assertNot(is_process_alive(Child)),
         ?assertMatch(#beamtalk_error{}, remove_error(C)),
         ?assert(is_process_alive(Sup))
@@ -143,13 +149,10 @@ unsupervised_class_still_removed() ->
 %%% ============================================================================
 
 remove_error(Class) ->
-    try
-        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(Class),
-        ?assert(false)
-    catch
-        error:#{error := #beamtalk_error{} = E} -> E;
-        error:#beamtalk_error{} = E -> E
-    end.
+    #beamtalk_error{} =
+        beamtalk_test_assert:raised_error(fun() ->
+            beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(Class)
+        end).
 
 msg(#beamtalk_error{message = {beamtalk_string, M}}) -> M.
 
@@ -168,14 +171,12 @@ with_fixture(Restart, Shape, Fun) ->
         catch
             _:_ -> ok
         end,
-        timer:sleep(20),
+        ok = beamtalk_test_wait:dead(Sup),
         case beamtalk_class_registry:whereis_class(Class) of
             undefined -> ok;
             P -> beamtalk_test_proc:stop(P)
         end,
-        code:purge(Mod),
-        code:delete(Mod),
-        code:purge(Mod)
+        beamtalk_test_module:unload(Mod)
     end.
 
 load_class(Tag) ->
@@ -189,8 +190,7 @@ load_class(Tag) ->
         "init(Parent) -> proc_lib:init_ack(Parent, {ok, self()}), loop().",
         "loop() -> receive stop_normal -> ok after infinity -> " ++ M ++ ":loop() end."
     ]),
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-    {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".erl", Bin),
+    ok = beamtalk_test_module:load(Mod, Forms),
     {ok, _} = beamtalk_object_class:start(Class, #{
         name => Class,
         module => Mod,

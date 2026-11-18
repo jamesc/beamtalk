@@ -13,8 +13,14 @@ fn test_generate_empty_module() {
     let result = generate(&module);
     assert!(result.is_ok());
     let code = result.unwrap();
-    assert!(code.contains("module 'bt_module'"));
-    assert!(code.contains("attributes ['behaviour' = ['gen_server']]"));
+    assert_has(
+        "test_generate_empty_module",
+        &code,
+        &[
+            "module 'bt_module'",
+            "attributes ['behaviour' = ['gen_server']]",
+        ],
+    );
 }
 
 #[test]
@@ -123,83 +129,99 @@ fn test_class_registration_generation() {
         generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
 
     // Check that on_load attribute is present
-    assert!(
-        code.contains("'on_load' = [{'register_class', 0}]"),
-        "Should have on_load attribute. Got:\n{code}"
+    assert_has(
+        "Should have on_load attribute",
+        &code,
+        &["'on_load' = [{'register_class', 0}]"],
     );
 
     // Check that register_class/0 is exported
-    assert!(
-        code.contains("'register_class'/0"),
-        "Should export register_class/0. Got:\n{code}"
+    assert_has(
+        "Should export register_class/0",
+        &code,
+        &["'register_class'/0"],
     );
 
     // Check that register_class/0 function exists
-    assert!(
-        code.contains("'register_class'/0 = fun () ->"),
-        "Should generate register_class function. Got:\n{code}"
+    assert_has(
+        "Should generate register_class function",
+        &code,
+        &["'register_class'/0 = fun () ->"],
     );
 
     // Check that it calls beamtalk_class_builder:register
-    assert!(
-        code.contains("call 'beamtalk_class_builder':'register'(_BuilderState0)"),
-        "Should call beamtalk_class_builder:register. Got:\n{code}"
+    assert_has(
+        "Should call beamtalk_class_builder:register",
+        &code,
+        &["call 'beamtalk_class_builder':'register'(_BuilderState0)"],
     );
 
     // Check ClassBuilder state fields
-    assert!(
-        code.contains("'className' => 'Counter'"),
-        "Should include className in builder state. Got:\n{code}"
+    assert_has(
+        "Should include className in builder state",
+        &code,
+        &["'className' => 'Counter'"],
     );
-    assert!(
-        code.contains("'moduleName' => 'counter'"),
-        "Should include moduleName in builder state. Got:\n{code}"
+    assert_has(
+        "Should include moduleName in builder state",
+        &code,
+        &["'moduleName' => 'counter'"],
     );
-    assert!(
-        code.contains("'superclassRef' => 'Actor'"),
-        "Should include superclassRef in builder state. Got:\n{code}"
+    assert_has(
+        "Should include superclassRef in builder state",
+        &code,
+        &["'superclassRef' => 'Actor'"],
     );
 
     // Check beamtalk_class module attribute for dependency sorting
-    assert!(
-        code.contains("'beamtalk_class' = [{'Counter', 'Actor'}]"),
-        "Should include beamtalk_class attribute with class and superclass. Got:\n{code}"
+    assert_has(
+        "Should include beamtalk_class attribute with class and superclass",
+        &code,
+        &["'beamtalk_class' = [{'Counter', 'Actor'}]"],
     );
 
     // methodSpecs, fieldSpecs, classMethods removed from BuilderState.
     // Methods and fields now live in meta map.
-    assert!(
-        code.contains("'meta' => ~{"),
-        "Should include meta map in builder state. Got:\n{code}"
+    assert_has(
+        "Should include meta map in builder state",
+        &code,
+        &["'meta' => ~{"],
     );
     // Check method_info contains instance methods with arity
-    assert!(
-        code.contains("'method_info' => ~{"),
-        "Should include method_info in meta map. Got:\n{code}"
+    assert_has(
+        "Should include method_info in meta map",
+        &code,
+        &["'method_info' => ~{"],
     );
-    assert!(
-        code.contains("'class_method_info' => ~{"),
-        "Should include class_method_info in meta map. Got:\n{code}"
+    assert_has(
+        "Should include class_method_info in meta map",
+        &code,
+        &["'class_method_info' => ~{"],
     );
     // Check fields in meta
-    assert!(
-        code.contains("'fields' => ['value']"),
-        "Should include fields in meta map. Got:\n{code}"
+    assert_has(
+        "Should include fields in meta map",
+        &code,
+        &["'fields' => ['value']"],
     );
 
     // modifiers removed from BuilderState; is_sealed/is_abstract now in meta map
-    assert!(
-        code.contains("'is_sealed' => 'false'"),
-        "Should include is_sealed in meta map. Got:\n{code}"
+    assert_has(
+        "Should include is_sealed in meta map",
+        &code,
+        &["'is_sealed' => 'false'"],
     );
 
     // Check function returns ok
     assert!(code.contains("'ok'"), "Should return 'ok'. Got:\n{code}");
 
     // catch clause must re-raise, not silently swallow errors
-    assert!(
-        code.contains("catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)"),
-        "register_class/0 catch clause must re-raise via primop 'raw_raise' (BT-998). Got:\n{code}"
+    assert_has(
+        "register_class/0 catch clause must re-raise via primop 'raw_raise' (BT-998)",
+        &code,
+        &[
+            "catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)",
+        ],
     );
 
     // every generated class module must export method_table/0 and
@@ -217,9 +239,10 @@ fn test_class_registration_generation() {
         header_exports.contains("'method_table'/0"),
         "Generated class module must export method_table/0 in header. Got header:\n{header_exports}\n\nFull code:\n{code}"
     );
-    assert!(
-        header_exports.contains("'has_method'/1"),
-        "Generated class module must export has_method/1 in header. Got header:\n{header_exports}"
+    assert_has(
+        "Generated class module must export has_method/1 in header. Got header",
+        &header_exports,
+        &["'has_method'/1"],
     );
     // superclass/0 and class_name/0 must always be in the header. class_name/0
     // is still reachable via `is_class_auto_export_selector`'s self-send
@@ -234,19 +257,22 @@ fn test_class_registration_generation() {
     // `class_self_send/3`'s class-object protocol fallthrough (BT-4252). This
     // assertion exists to keep the export set stable/uniform across class
     // modules regardless — not because anything currently calls it.
-    assert!(
-        header_exports.contains("'superclass'/0"),
-        "Generated class module must export superclass/0 in header. Got header:\n{header_exports}"
+    assert_has(
+        "Generated class module must export superclass/0 in header. Got header",
+        &header_exports,
+        &["'superclass'/0"],
     );
-    assert!(
-        header_exports.contains("'class_name'/0"),
-        "Generated class module must export class_name/0 in header. Got header:\n{header_exports}"
+    assert_has(
+        "Generated class module must export class_name/0 in header. Got header",
+        &header_exports,
+        &["'class_name'/0"],
     );
     // The old mistaken auto-export `methods/0` must NOT appear — the
     // classifier no longer includes it and no codegen site emits it.
-    assert!(
-        !header_exports.contains("'methods'/0"),
-        "Generated class module must NOT export methods/0 in header — removed after BT-2007. Got header:\n{header_exports}"
+    assert_lacks(
+        "Generated class module must NOT export methods/0 in header — removed after BT-2007. Got header",
+        &header_exports,
+        &["'methods'/0"],
     );
 }
 
@@ -264,14 +290,16 @@ fn test_class_state_emits_class_fields_in_meta() {
     let code = codegen_named(src, "counter");
 
     // Instance-side fields unchanged.
-    assert!(
-        code.contains("'fields' => ['value']"),
-        "Should include instance fields in meta map. Got:\n{code}"
+    assert_has(
+        "Should include instance fields in meta map",
+        &code,
+        &["'fields' => ['value']"],
     );
     // Class-side fields emitted in declaration order.
-    assert!(
-        code.contains("'class_fields' => ['total', 'label']"),
-        "Should include class_fields (class variables) in meta map. Got:\n{code}"
+    assert_has(
+        "Should include class_fields (class variables) in meta map",
+        &code,
+        &["'class_fields' => ['total', 'label']"],
     );
 }
 
@@ -282,9 +310,10 @@ fn test_no_class_state_emits_empty_class_fields() {
     let src = concat!("Actor subclass: Counter\n", "  state: value = 0\n");
     let code = codegen_named(src, "counter");
 
-    assert!(
-        code.contains("'class_fields' => []"),
-        "Class with no class state should emit empty class_fields. Got:\n{code}"
+    assert_has(
+        "Class with no class state should emit empty class_fields",
+        &code,
+        &["'class_fields' => []"],
     );
 }
 
@@ -304,13 +333,15 @@ fn test_late_state_and_classstate_emit_field_kinds_in_meta() {
     );
     let code = codegen_named(src, "codex_client");
 
-    assert!(
-        code.contains("'field_kinds' => ~{'proc' => 'late', 'id' => 'eager'}~"),
-        "Should include instance field_kinds (late proc, eager id) in meta map. Got:\n{code}"
+    assert_has(
+        "Should include instance field_kinds (late proc, eager id) in meta map",
+        &code,
+        &["'field_kinds' => ~{'proc' => 'late', 'id' => 'eager'}~"],
     );
-    assert!(
-        code.contains("'class_field_kinds' => ~{'current' => 'late', 'total' => 'eager'}~"),
-        "Should include class_field_kinds (late current, eager total) in meta map. Got:\n{code}"
+    assert_has(
+        "Should include class_field_kinds (late current, eager total) in meta map",
+        &code,
+        &["'class_field_kinds' => ~{'current' => 'late', 'total' => 'eager'}~"],
     );
 }
 
@@ -337,13 +368,15 @@ fn test_late_state_omitted_from_init_state_literal() {
         .next()
         .expect("DefaultState map literal must close with }~");
 
-    assert!(
-        !default_state.contains("'proc'"),
-        "Unassigned `late` slot 'proc' must be absent from DefaultState entirely. Got DefaultState body:\n{default_state}"
+    assert_lacks(
+        "Unassigned `late` slot 'proc' must be absent from DefaultState entirely. Got DefaultState body",
+        default_state,
+        &["'proc'"],
     );
-    assert!(
-        default_state.contains("'id' => 0"),
-        "Eager field 'id' must still get its default in DefaultState. Got DefaultState body:\n{default_state}"
+    assert_has(
+        "Eager field 'id' must still get its default in DefaultState. Got DefaultState body",
+        default_state,
+        &["'id' => 0"],
     );
 }
 
@@ -369,13 +402,15 @@ fn test_late_classstate_omitted_from_classstate_map() {
         .next()
         .expect("classState map literal must close with }~");
 
-    assert!(
-        !class_state.contains("'current'"),
-        "Unassigned `late classState:` slot 'current' must be absent from the classState map entirely. Got classState body:\n{class_state}"
+    assert_lacks(
+        "Unassigned `late classState:` slot 'current' must be absent from the classState map entirely. Got classState body",
+        class_state,
+        &["'current'"],
     );
-    assert!(
-        class_state.contains("'total' => 0"),
-        "Eager class var 'total' must still get its default in the classState map. Got classState body:\n{class_state}"
+    assert_has(
+        "Eager class var 'total' must still get its default in the classState map. Got classState body",
+        class_state,
+        &["'total' => 0"],
     );
 }
 
@@ -388,13 +423,15 @@ fn test_no_late_fields_emit_empty_field_kinds_when_no_state() {
     let src = "Actor subclass: Empty\n  noop => nil\n";
     let code = codegen_named(src, "empty");
 
-    assert!(
-        code.contains("'field_kinds' => ~{}~"),
-        "Should emit empty field_kinds map. Got:\n{code}"
+    assert_has(
+        "Should emit empty field_kinds map",
+        &code,
+        &["'field_kinds' => ~{}~"],
     );
-    assert!(
-        code.contains("'class_field_kinds' => ~{}~"),
-        "Should emit empty class_field_kinds map. Got:\n{code}"
+    assert_has(
+        "Should emit empty class_field_kinds map",
+        &code,
+        &["'class_field_kinds' => ~{}~"],
     );
 }
 
@@ -406,21 +443,24 @@ fn test_no_class_registration_for_empty_module() {
         .expect("codegen should succeed");
 
     // Should NOT have on_load attribute
-    assert!(
-        !code.contains("'on_load'"),
-        "Module without classes should not have on_load. Got:\n{code}"
+    assert_lacks(
+        "Module without classes should not have on_load",
+        &code,
+        &["'on_load'"],
     );
 
     // Should NOT export register_class/0
-    assert!(
-        !code.contains("'register_class'/0"),
-        "Module without classes should not export register_class. Got:\n{code}"
+    assert_lacks(
+        "Module without classes should not export register_class",
+        &code,
+        &["'register_class'/0"],
     );
 
     // Should NOT have beamtalk_class attribute
-    assert!(
-        !code.contains("'beamtalk_class'"),
-        "Module without classes should not have beamtalk_class attribute. Got:\n{code}"
+    assert_lacks(
+        "Module without classes should not have beamtalk_class attribute",
+        &code,
+        &["'beamtalk_class'"],
     );
 }
 
@@ -495,77 +535,92 @@ fn test_multiple_classes_registration() {
         .expect("codegen should succeed");
 
     // Should have on_load attribute
-    assert!(
-        code.contains("'on_load' = [{'register_class', 0}]"),
-        "Should have on_load attribute for multiple classes. Got:\n{code}"
+    assert_has(
+        "Should have on_load attribute for multiple classes",
+        &code,
+        &["'on_load' = [{'register_class', 0}]"],
     );
 
     // Should register both classes via ClassBuilder
-    assert!(
-        code.contains("call 'beamtalk_class_builder':'register'(_BuilderState0)"),
-        "Should register Counter via ClassBuilder. Got:\n{code}"
+    assert_has(
+        "Should register Counter via ClassBuilder",
+        &code,
+        &["call 'beamtalk_class_builder':'register'(_BuilderState0)"],
     );
-    assert!(
-        code.contains("'className' => 'Counter'"),
-        "Should include Counter metadata. Got:\n{code}"
+    assert_has(
+        "Should include Counter metadata",
+        &code,
+        &["'className' => 'Counter'"],
     );
     // fieldSpecs removed from BuilderState; fields now in meta map
-    assert!(
-        code.contains("'fields' => ['value']"),
-        "Should include Counter fields in meta. Got:\n{code}"
+    assert_has(
+        "Should include Counter fields in meta",
+        &code,
+        &["'fields' => ['value']"],
     );
 
-    assert!(
-        code.contains("call 'beamtalk_class_builder':'register'(_BuilderState1)"),
-        "Should register Logger via ClassBuilder. Got:\n{code}"
+    assert_has(
+        "Should register Logger via ClassBuilder",
+        &code,
+        &["call 'beamtalk_class_builder':'register'(_BuilderState1)"],
     );
-    assert!(
-        code.contains("'className' => 'Logger'"),
-        "Should include Logger metadata. Got:\n{code}"
+    assert_has(
+        "Should include Logger metadata",
+        &code,
+        &["'className' => 'Logger'"],
     );
-    assert!(
-        code.contains("'fields' => ['messages']"),
-        "Should include Logger fields in meta. Got:\n{code}"
+    assert_has(
+        "Should include Logger fields in meta",
+        &code,
+        &["'fields' => ['messages']"],
     );
 
     // Should use let-binding chain to sequence registrations
-    assert!(
-        code.contains("let _BuilderState0 = ~{"),
-        "Should have first BuilderState binding. Got:\n{code}"
+    assert_has(
+        "Should have first BuilderState binding",
+        &code,
+        &["let _BuilderState0 = ~{"],
     );
-    assert!(
-        code.contains("let _Reg0 = case"),
-        "Should have first registration with _Reg0. Got:\n{code}"
+    assert_has(
+        "Should have first registration with _Reg0",
+        &code,
+        &["let _Reg0 = case"],
     );
-    assert!(
-        code.contains("let _BuilderState1 = ~{"),
-        "Should have second BuilderState binding. Got:\n{code}"
+    assert_has(
+        "Should have second BuilderState binding",
+        &code,
+        &["let _BuilderState1 = ~{"],
     );
-    assert!(
-        code.contains("let _Reg1 = case"),
-        "Should chain second registration with _Reg1. Got:\n{code}"
+    assert_has(
+        "Should chain second registration with _Reg1",
+        &code,
+        &["let _Reg1 = case"],
     );
 
     // Final result propagates last _Reg.
-    assert!(
-        code.contains("in _Reg1"),
-        "Should propagate last _Reg result after all registrations. Got:\n{code}"
+    assert_has(
+        "Should propagate last _Reg result after all registrations",
+        &code,
+        &["in _Reg1"],
     );
 
     // Short-circuit: earlier error must propagate before executing later classes.
-    assert!(
-        code.contains("in case _Reg0 of"),
-        "Should short-circuit on _Reg0 error. Got:\n{code}"
+    assert_has(
+        "Should short-circuit on _Reg0 error",
+        &code,
+        &["in case _Reg0 of"],
     );
-    assert!(
-        code.contains("<{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}"),
-        "Should propagate _Reg0 error. Got:\n{code}"
+    assert_has(
+        "Should propagate _Reg0 error",
+        &code,
+        &["<{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}"],
     );
 
     // Check beamtalk_class attribute lists both classes
-    assert!(
-        code.contains("'beamtalk_class' = [{'Counter', 'Actor'}, {'Logger', 'Actor'}]"),
-        "Should include beamtalk_class attribute with both classes. Got:\n{code}"
+    assert_has(
+        "Should include beamtalk_class attribute with both classes",
+        &code,
+        &["'beamtalk_class' = [{'Counter', 'Actor'}, {'Logger', 'Actor'}]"],
     );
 }
 
@@ -638,26 +693,26 @@ fn test_multi_class_early_error_short_circuits() {
         .expect("codegen should succeed");
 
     // First class must be wrapped in a short-circuit case check.
-    assert!(
-        code.contains("in case _Reg0 of"),
-        "Should wrap _Reg0 in a short-circuit case. Got:\n{code}"
+    assert_has(
+        "Should wrap _Reg0 in a short-circuit case",
+        &code,
+        &["in case _Reg0 of"],
     );
-    assert!(
-        code.contains("<{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}"),
-        "Should propagate _Reg0 error before executing later classes. Got:\n{code}"
+    assert_has(
+        "Should propagate _Reg0 error before executing later classes",
+        &code,
+        &["<{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}"],
     );
 
     // The last class's result is returned directly (no further wrapping needed).
-    assert!(
-        code.contains("in _Reg1"),
-        "Should use _Reg1 as the final result. Got:\n{code}"
-    );
+    assert_has("Should use _Reg1 as the final result", &code, &["in _Reg1"]);
 
     // The second class must NOT be wrapped in its own short-circuit case
     // (it is the last, so its result flows out directly).
-    assert!(
-        !code.contains("in case _Reg1 of"),
-        "Last _Reg should not be wrapped in a short-circuit case. Got:\n{code}"
+    assert_lacks(
+        "Last _Reg should not be wrapped in a short-circuit case",
+        &code,
+        &["in case _Reg1 of"],
     );
 }
 
@@ -724,30 +779,32 @@ fn test_three_class_short_circuit_nesting() {
         .expect("codegen should succeed");
 
     // Classes 0 and 1 (non-last) must have short-circuit case wrappers.
-    assert!(
-        code.contains("in case _Reg0 of"),
-        "Should short-circuit on _Reg0 error. Got:\n{code}"
+    assert_has(
+        "Should short-circuit on _Reg0 error",
+        &code,
+        &["in case _Reg0 of"],
     );
-    assert!(
-        code.contains("<{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}"),
-        "Should propagate _Reg0 error. Got:\n{code}"
+    assert_has(
+        "Should propagate _Reg0 error",
+        &code,
+        &["<{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}"],
     );
-    assert!(
-        code.contains("in case _Reg1 of"),
-        "Should short-circuit on _Reg1 error. Got:\n{code}"
+    assert_has(
+        "Should short-circuit on _Reg1 error",
+        &code,
+        &["in case _Reg1 of"],
     );
-    assert!(
-        code.contains("<{'error', _RegErr1}> when 'true' -> {'error', _RegErr1}"),
-        "Should propagate _Reg1 error. Got:\n{code}"
+    assert_has(
+        "Should propagate _Reg1 error",
+        &code,
+        &["<{'error', _RegErr1}> when 'true' -> {'error', _RegErr1}"],
     );
 
     // Class 2 (last) must be returned directly — no extra case wrapping.
-    assert!(
-        code.contains("in _Reg2"),
-        "Should use _Reg2 as final result. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("in case _Reg2 of"),
-        "Last _Reg should not be wrapped in a short-circuit case. Got:\n{code}"
+    assert_has("Should use _Reg2 as final result", &code, &["in _Reg2"]);
+    assert_lacks(
+        "Last _Reg should not be wrapped in a short-circuit case",
+        &code,
+        &["in case _Reg2 of"],
     );
 }

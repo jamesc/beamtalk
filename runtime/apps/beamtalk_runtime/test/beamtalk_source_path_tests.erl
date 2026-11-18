@@ -71,15 +71,13 @@ marker_root_wins_over_enclosing_package_test() ->
     ok = file:write_file(DepFile, <<>>),
     ok = file:write_file(filename:join(Ebin, ".beamtalk-source-root"), list_to_binary(Dep)),
     Mod = bt4940_marker_mod,
-    {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
-    BeamFile = filename:join(Ebin, "bt4940_marker_mod.beam"),
-    ok = file:write_file(BeamFile, Bin),
-    {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
+    Mod = beamtalk_test_module:load_from_dir(Ebin, [
+        {attribute, 1, module, Mod}, {attribute, 2, export, []}
+    ]),
     try
         ?assertEqual(DepFile, resolve(Mod, "src/x.bt"))
     after
-        code:purge(Mod),
-        code:delete(Mod),
+        beamtalk_test_module:unload(Mod),
         file:del_dir_r(Base)
     end.
 
@@ -94,10 +92,9 @@ missing_file_is_not_taken_from_another_root_test() ->
     ok = file:write_file(filename:join(Ws, "src/y.bt"), <<>>),
     ok = file:write_file(filename:join(Own, "beamtalk.toml"), <<"[package]\n">>),
     Mod = bt4940_noleak_mod,
-    {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
-    BeamFile = filename:join([Own, "ebin", "bt4940_noleak_mod.beam"]),
-    ok = file:write_file(BeamFile, Bin),
-    {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
+    Mod = beamtalk_test_module:load_from_dir(filename:join([Own, "ebin"]), [
+        {attribute, 1, module, Mod}, {attribute, 2, export, []}
+    ]),
     application:set_env(beamtalk_runtime, workspace_project_root, list_to_binary(Ws)),
     try
         ?assertEqual(
@@ -105,8 +102,7 @@ missing_file_is_not_taken_from_another_root_test() ->
         )
     after
         application:unset_env(beamtalk_runtime, workspace_project_root),
-        code:purge(Mod),
-        code:delete(Mod),
+        beamtalk_test_module:unload(Mod),
         file:del_dir_r(Base)
     end.
 
@@ -159,15 +155,13 @@ non_utf8_marker_never_resolves_against_the_consumer_test() ->
     ok = file:write_file(filename:join(Base, "src/a.bt"), <<>>),
     ok = file:write_file(filename:join(Ebin, ".beamtalk-source-root"), <<255, 254, 253>>),
     Mod = bt4940_badmarker_mod,
-    {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
-    BeamFile = filename:join(Ebin, "bt4940_badmarker_mod.beam"),
-    ok = file:write_file(BeamFile, Bin),
-    {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
+    Mod = beamtalk_test_module:load_from_dir(Ebin, [
+        {attribute, 1, module, Mod}, {attribute, 2, export, []}
+    ]),
     try
         ?assertEqual(unresolvable, beamtalk_source_path:resolve_strict(Mod, "src/a.bt"))
     after
-        code:purge(Mod),
-        code:delete(Mod),
+        beamtalk_test_module:unload(Mod),
         file:del_dir_r(Base)
     end.
 
@@ -193,18 +187,16 @@ relative_marker_survives_a_moved_tree_test() ->
     ok = file:rename(Base, Moved),
     MovedEbin = filename:join([Moved, "app", "_build", "deps", "dep", "ebin"]),
     Mod = bt4957_moved_mod,
-    {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
-    BeamFile = filename:join(MovedEbin, "bt4957_moved_mod.beam"),
-    ok = file:write_file(BeamFile, Bin),
-    {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
+    Mod = beamtalk_test_module:load_from_dir(MovedEbin, [
+        {attribute, 1, module, Mod}, {attribute, 2, export, []}
+    ]),
     try
         ?assertEqual(
             filename:join([beamtalk_source_path:real_dir(Moved), "dep", "src", "x.bt"]),
             resolve(Mod, "src/x.bt")
         )
     after
-        code:purge(Mod),
-        code:delete(Mod),
+        beamtalk_test_module:unload(Mod),
         file:del_dir_r(Base),
         file:del_dir_r(Moved)
     end.
@@ -225,17 +217,15 @@ absolute_marker_line_covers_a_dependency_outside_the_moved_tree_test() ->
         iolist_to_binary(["../../../../nowhere\n", Dep])
     ),
     Mod = bt4957_outside_mod,
-    {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
-    BeamFile = filename:join(Ebin, "bt4957_outside_mod.beam"),
-    ok = file:write_file(BeamFile, Bin),
-    {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
+    Mod = beamtalk_test_module:load_from_dir(Ebin, [
+        {attribute, 1, module, Mod}, {attribute, 2, export, []}
+    ]),
     try
         ?assertEqual(
             filename:join([Dep, "src", "x.bt"]), resolve(Mod, "src/x.bt")
         )
     after
-        code:purge(Mod),
-        code:delete(Mod),
+        beamtalk_test_module:unload(Mod),
         file:del_dir_r(Base)
     end.
 
@@ -249,20 +239,16 @@ non_utf8_marker_is_unresolvable_and_source_file_is_nil_test() ->
     ok = file:write_file(filename:join(Base, "beamtalk.toml"), <<"[package]\n">>),
     ok = file:write_file(filename:join(Ebin, ".beamtalk-source-root"), <<255, 254, 253>>),
     Mod = bt4957_badmarker_mod,
-    {ok, Mod, Bin} = compile:forms([
+    Mod = beamtalk_test_module:load_from_dir(Ebin, [
         {attribute, 1, module, Mod},
         {attribute, 2, export, []},
         {attribute, 3, beamtalk_source, ["src/a.bt"]}
     ]),
-    BeamFile = filename:join(Ebin, "bt4957_badmarker_mod.beam"),
-    ok = file:write_file(BeamFile, Bin),
-    {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
     try
         ?assertEqual(unresolvable, beamtalk_source_path:resolve_strict(Mod, "src/a.bt")),
         ?assertEqual(nil, beamtalk_reflection:source_file_from_module(Mod))
     after
-        code:purge(Mod),
-        code:delete(Mod),
+        beamtalk_test_module:unload(Mod),
         file:del_dir_r(Base)
     end.
 
@@ -287,17 +273,15 @@ absolute_root_wins_over_a_lookalike_relative_package_test() ->
         iolist_to_binary(["../../../../../dep\n", Dep])
     ),
     Mod = bt4957_lookalike_mod,
-    {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
-    BeamFile = filename:join(Ebin, "bt4957_lookalike_mod.beam"),
-    ok = file:write_file(BeamFile, Bin),
-    {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
+    Mod = beamtalk_test_module:load_from_dir(Ebin, [
+        {attribute, 1, module, Mod}, {attribute, 2, export, []}
+    ]),
     try
         ?assertEqual(
             filename:join([Dep, "src", "x.bt"]), resolve(Mod, "src/x.bt")
         )
     after
-        code:purge(Mod),
-        code:delete(Mod),
+        beamtalk_test_module:unload(Mod),
         file:del_dir_r(Base)
     end.
 
@@ -312,17 +296,15 @@ unreadable_marker_frame_has_no_source_path_test() ->
     ok = file:write_file(filename:join([Base, "src", "a.bt"]), <<>>),
     ok = file:write_file(filename:join(Ebin, ".beamtalk-source-root"), <<255, 254, 253>>),
     Mod = bt4957_frame_mod,
-    {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
-    BeamFile = filename:join(Ebin, "bt4957_frame_mod.beam"),
-    ok = file:write_file(BeamFile, Bin),
-    {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
+    Mod = beamtalk_test_module:load_from_dir(Ebin, [
+        {attribute, 1, module, Mod}, {attribute, 2, export, []}
+    ]),
     try
         ?assertEqual(
             nil, beamtalk_stack_frame:frame_source_path(#{module => Mod, file => <<"src/a.bt">>})
         )
     after
-        code:purge(Mod),
-        code:delete(Mod),
+        beamtalk_test_module:unload(Mod),
         file:del_dir_r(Base)
     end.
 
@@ -352,17 +334,15 @@ symlinked_build_dir_resolves_the_relative_line_from_the_real_path_test() ->
         iolist_to_binary(["../../../../../../dep\n", filename:join(Base, "gone")])
     ),
     Mod = bt4966_symlink_mod,
-    {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
-    BeamFile = filename:join([
-        Base, "app", "_build", "deps", "dep", "ebin", "bt4966_symlink_mod.beam"
-    ]),
-    ok = file:write_file(BeamFile, Bin),
-    {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
+    Mod = beamtalk_test_module:load_from_dir(
+        filename:join([Base, "app", "_build", "deps", "dep", "ebin"]), [
+            {attribute, 1, module, Mod}, {attribute, 2, export, []}
+        ]
+    ),
     try
         ?assertEqual(filename:join([Dep, "src", "x.bt"]), resolve(Mod, "src/x.bt"))
     after
-        code:purge(Mod),
-        code:delete(Mod),
+        beamtalk_test_module:unload(Mod),
         file:del_dir_r(Base)
     end.
 

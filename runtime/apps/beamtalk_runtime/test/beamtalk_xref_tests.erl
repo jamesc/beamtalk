@@ -1686,6 +1686,16 @@ bt3218_hierarchy_classes() ->
         {'Bt3218Sibling', 'Bt3218Root'}
     ].
 
+%% The xref server plus the BT-3218 class hierarchy.
+bt3218_setup() ->
+    Pid = setup(),
+    bt3218_hierarchy_setup(),
+    Pid.
+
+bt3218_cleanup(Pid) ->
+    bt3218_hierarchy_cleanup(),
+    cleanup(Pid).
+
 bt3218_hierarchy_setup() ->
     lists:foreach(
         fun({Name, Super}) ->
@@ -1704,36 +1714,23 @@ bt3218_hierarchy_cleanup() ->
 %% class, direct subclass, transitive subclass, direct/transitive ancestor,
 %% unrelated sibling branch.
 hierarchy_related_classes_relatedness_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            Pid = setup(),
-            bt3218_hierarchy_setup(),
-            Pid
-        end,
-        fun(Pid) ->
-            bt3218_hierarchy_cleanup(),
-            cleanup(Pid)
-        end,
-        fun(_Pid) ->
-            [
-                ?_test(begin
-                    Related = beamtalk_xref:hierarchy_related_classes('Bt3218Mid'),
-                    %% Same class.
-                    ?assert(sets:is_element('Bt3218Mid', Related)),
-                    %% Direct subclass.
-                    ?assert(sets:is_element('Bt3218Leaf', Related)),
-                    %% Transitive subclass.
-                    ?assert(sets:is_element('Bt3218GrandLeaf', Related)),
-                    %% Direct ancestor.
-                    ?assert(sets:is_element('Bt3218Root', Related)),
-                    %% Transitive ancestor.
-                    ?assert(sets:is_element('Bt3218SuperRoot', Related)),
-                    %% Unrelated sibling branch.
-                    ?assertNot(sets:is_element('Bt3218Sibling', Related))
-                end)
-            ]
-        end}.
+    {foreach, fun bt3218_setup/0, fun bt3218_cleanup/1, [
+        ?_test(begin
+            Related = beamtalk_xref:hierarchy_related_classes('Bt3218Mid'),
+            %% Same class.
+            ?assert(sets:is_element('Bt3218Mid', Related)),
+            %% Direct subclass.
+            ?assert(sets:is_element('Bt3218Leaf', Related)),
+            %% Transitive subclass.
+            ?assert(sets:is_element('Bt3218GrandLeaf', Related)),
+            %% Direct ancestor.
+            ?assert(sets:is_element('Bt3218Root', Related)),
+            %% Transitive ancestor.
+            ?assert(sets:is_element('Bt3218SuperRoot', Related)),
+            %% Unrelated sibling branch.
+            ?assertNot(sets:is_element('Bt3218Sibling', Related))
+        end)
+    ]}.
 
 %% A protocol-conformance fixture: a class defining the required method
 %% directly (conforms), a class defining nothing at all and with no
@@ -1796,8 +1793,7 @@ bt3218_protocol_fixture_cleanup(Pids) ->
 %% class, a non-conforming class, a class conforming via inherited default
 %% methods.
 protocol_conformance_predicate_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
+    {foreach,
         fun() ->
             setup(),
             bt3218_protocol_fixture_setup()
@@ -1806,100 +1802,45 @@ protocol_conformance_predicate_test_() ->
             bt3218_protocol_fixture_cleanup(Pids),
             cleanup(Pids)
         end,
-        fun(_Pids) ->
-            [
-                {timeout, 30,
-                    ?_test(begin
-                        %% Root itself defines the required method — conforms.
-                        ?assert(
-                            beamtalk_protocol_registry:conforms_to(
-                                'Bt3218ProtoRoot', 'Bt3218TestProtocol'
-                            )
-                        ),
-                        %% Inherits the method from Root — conforms via
-                        %% inheritance.
-                        ?assert(
-                            beamtalk_protocol_registry:conforms_to(
-                                'Bt3218ProtoInherits', 'Bt3218TestProtocol'
-                            )
-                        ),
-                        %% Defines nothing and has no conforming ancestor —
-                        %% does not conform.
-                        ?assertNot(
-                            beamtalk_protocol_registry:conforms_to(
-                                'Bt3218ProtoNonConforming', 'Bt3218TestProtocol'
-                            )
-                        ),
-
-                        %% Exercised through beamtalk_xref's own read path: a
-                        %% protocol-typed site is included in senders_of/2 only
-                        %% for classes that actually conform.
-                        ok = beamtalk_xref:register_class('Bt3218ProtoSiteOwner', [
-                            #{
-                                class_side => false,
-                                selector => 'probeConforms',
-                                line => 1,
-                                sends => [
-                                    #{
-                                        selector => 'bt3218ProtoProbeSel',
-                                        line => 2,
-                                        recv_kind => other,
-                                        recv_type => 'Bt3218TestProtocol'
-                                    }
-                                ],
-                                references => [],
-                                source_status => indexed,
-                                provenance => class_body
-                            }
-                        ]),
-                        try
-                            ?assertEqual(
-                                1,
-                                length(
-                                    beamtalk_xref:senders_of(
-                                        'bt3218ProtoProbeSel', 'Bt3218ProtoInherits'
-                                    )
-                                )
-                            ),
-                            ?assertEqual(
-                                0,
-                                length(
-                                    beamtalk_xref:senders_of(
-                                        'bt3218ProtoProbeSel', 'Bt3218ProtoNonConforming'
-                                    )
-                                )
-                            )
-                        after
-                            ok = beamtalk_xref:purge_class('Bt3218ProtoSiteOwner')
-                        end
-                    end)}
-            ]
-        end}.
-
-%% EUnit: legacy row (no `recv_type` field) always included, regardless of
-%% `ChangedClass`.
-legacy_row_always_included_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            Pid = setup(),
-            bt3218_hierarchy_setup(),
-            Pid
-        end,
-        fun(Pid) ->
-            bt3218_hierarchy_cleanup(),
-            cleanup(Pid)
-        end,
-        fun(_Pid) ->
-            [
+        [
+            {timeout, 30,
                 ?_test(begin
-                    ok = beamtalk_xref:register_class('Bt3218LegacyOwner', [
+                    %% Root itself defines the required method — conforms.
+                    ?assert(
+                        beamtalk_protocol_registry:conforms_to(
+                            'Bt3218ProtoRoot', 'Bt3218TestProtocol'
+                        )
+                    ),
+                    %% Inherits the method from Root — conforms via
+                    %% inheritance.
+                    ?assert(
+                        beamtalk_protocol_registry:conforms_to(
+                            'Bt3218ProtoInherits', 'Bt3218TestProtocol'
+                        )
+                    ),
+                    %% Defines nothing and has no conforming ancestor —
+                    %% does not conform.
+                    ?assertNot(
+                        beamtalk_protocol_registry:conforms_to(
+                            'Bt3218ProtoNonConforming', 'Bt3218TestProtocol'
+                        )
+                    ),
+
+                    %% Exercised through beamtalk_xref's own read path: a
+                    %% protocol-typed site is included in senders_of/2 only
+                    %% for classes that actually conform.
+                    ok = beamtalk_xref:register_class('Bt3218ProtoSiteOwner', [
                         #{
                             class_side => false,
-                            selector => 'legacyMethod',
+                            selector => 'probeConforms',
                             line => 1,
                             sends => [
-                                #{selector => 'bt3218LegacySel', line => 2, recv_kind => other}
+                                #{
+                                    selector => 'bt3218ProtoProbeSel',
+                                    line => 2,
+                                    recv_kind => other,
+                                    recv_type => 'Bt3218TestProtocol'
+                                }
                             ],
                             references => [],
                             source_status => indexed,
@@ -1907,195 +1848,204 @@ legacy_row_always_included_test_() ->
                         }
                     ]),
                     try
-                        %% Hierarchy-related ChangedClass.
-                        ?assertEqual(
-                            1,
-                            length(beamtalk_xref:senders_of('bt3218LegacySel', 'Bt3218Mid'))
-                        ),
-                        %% A totally unrelated / unresolvable ChangedClass.
                         ?assertEqual(
                             1,
                             length(
                                 beamtalk_xref:senders_of(
-                                    'bt3218LegacySel', 'Bt3218NoSuchChangedClassAtAll'
+                                    'bt3218ProtoProbeSel', 'Bt3218ProtoInherits'
+                                )
+                            )
+                        ),
+                        ?assertEqual(
+                            0,
+                            length(
+                                beamtalk_xref:senders_of(
+                                    'bt3218ProtoProbeSel', 'Bt3218ProtoNonConforming'
                                 )
                             )
                         )
                     after
-                        ok = beamtalk_xref:purge_class('Bt3218LegacyOwner')
+                        ok = beamtalk_xref:purge_class('Bt3218ProtoSiteOwner')
                     end
-                end)
-            ]
-        end}.
+                end)}
+        ]}.
+
+bt3218_relevance_test_() ->
+    {foreach, fun bt3218_setup/0, fun bt3218_cleanup/1, [
+        fun legacy_row_always_included/0,
+        fun unresolvable_name_defaults_to_relevant/0,
+        fun meta_class_object_receiver/0
+    ]}.
+
+%% EUnit: legacy row (no `recv_type` field) always included, regardless of
+%% `ChangedClass`.
+legacy_row_always_included() ->
+    ok = beamtalk_xref:register_class('Bt3218LegacyOwner', [
+        #{
+            class_side => false,
+            selector => 'legacyMethod',
+            line => 1,
+            sends => [
+                #{selector => 'bt3218LegacySel', line => 2, recv_kind => other}
+            ],
+            references => [],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ]),
+    try
+        %% Hierarchy-related ChangedClass.
+        ?assertEqual(
+            1,
+            length(beamtalk_xref:senders_of('bt3218LegacySel', 'Bt3218Mid'))
+        ),
+        %% A totally unrelated / unresolvable ChangedClass.
+        ?assertEqual(
+            1,
+            length(
+                beamtalk_xref:senders_of(
+                    'bt3218LegacySel', 'Bt3218NoSuchChangedClassAtAll'
+                )
+            )
+        )
+    after
+        ok = beamtalk_xref:purge_class('Bt3218LegacyOwner')
+    end.
 
 %% EUnit: unresolvable-name defaults to relevant (Amendment 2) — both cases
 %% from the spike's fixture table: a name unknown to both registries, and a
 %% protocol not currently registered.
-unresolvable_name_defaults_to_relevant_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            Pid = setup(),
-            bt3218_hierarchy_setup(),
-            Pid
-        end,
-        fun(Pid) ->
-            bt3218_hierarchy_cleanup(),
-            cleanup(Pid)
-        end,
-        fun(_Pid) ->
-            [
-                ?_test(begin
-                    ok = beamtalk_xref:register_class('Bt3218UnresolvableOwner', [
-                        #{
-                            class_side => false,
-                            selector => 'mUnknownClass',
-                            line => 1,
-                            sends => [
-                                #{
-                                    selector => 'bt3218UnresolvableSel',
-                                    line => 2,
-                                    recv_kind => other,
-                                    %% A name unknown to both registries (native/
-                                    %% FFI type, alias display name, or simply
-                                    %% never registered).
-                                    recv_type => 'NoSuchBt3218ClassXYZ'
-                                }
-                            ],
-                            references => [],
-                            source_status => indexed,
-                            provenance => class_body
-                        },
-                        #{
-                            class_side => false,
-                            selector => 'mUnloadedProto',
-                            line => 3,
-                            sends => [
-                                #{
-                                    selector => 'bt3218UnresolvableSel',
-                                    line => 4,
-                                    recv_kind => other,
-                                    %% A protocol name not currently registered
-                                    %% (defining module not loaded yet).
-                                    recv_type => 'Bt3218UnloadedProto'
-                                }
-                            ],
-                            references => [],
-                            source_status => indexed,
-                            provenance => class_body
-                        }
-                    ]),
-                    try
-                        Sites = beamtalk_xref:senders_of('bt3218UnresolvableSel', 'Bt3218Mid'),
-                        Methods = lists:sort([maps:get(method, S) || S <- Sites]),
-                        ?assertEqual(['mUnknownClass', 'mUnloadedProto'], Methods)
-                    after
-                        ok = beamtalk_xref:purge_class('Bt3218UnresolvableOwner')
-                    end
-                end)
-            ]
-        end}.
+unresolvable_name_defaults_to_relevant() ->
+    ok = beamtalk_xref:register_class('Bt3218UnresolvableOwner', [
+        #{
+            class_side => false,
+            selector => 'mUnknownClass',
+            line => 1,
+            sends => [
+                #{
+                    selector => 'bt3218UnresolvableSel',
+                    line => 2,
+                    recv_kind => other,
+                    %% A name unknown to both registries (native/
+                    %% FFI type, alias display name, or simply
+                    %% never registered).
+                    recv_type => 'NoSuchBt3218ClassXYZ'
+                }
+            ],
+            references => [],
+            source_status => indexed,
+            provenance => class_body
+        },
+        #{
+            class_side => false,
+            selector => 'mUnloadedProto',
+            line => 3,
+            sends => [
+                #{
+                    selector => 'bt3218UnresolvableSel',
+                    line => 4,
+                    recv_kind => other,
+                    %% A protocol name not currently registered
+                    %% (defining module not loaded yet).
+                    recv_type => 'Bt3218UnloadedProto'
+                }
+            ],
+            references => [],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ]),
+    try
+        Sites = beamtalk_xref:senders_of('bt3218UnresolvableSel', 'Bt3218Mid'),
+        Methods = lists:sort([maps:get(method, S) || S <- Sites]),
+        ?assertEqual(['mUnknownClass', 'mUnloadedProto'], Methods)
+    after
+        ok = beamtalk_xref:purge_class('Bt3218UnresolvableOwner')
+    end.
 
 %% EUnit: the `Meta{C}` read-path case (Amendment 3) — a `'Counter class'`-
 %% shaped site is relevant for a class-side change to `Counter` (or an
 %% ancestor/descendant class-side method), and NOT relevant for an
 %% instance-side change to the same class name.
-meta_class_object_receiver_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            Pid = setup(),
-            bt3218_hierarchy_setup(),
-            Pid
-        end,
-        fun(Pid) ->
-            bt3218_hierarchy_cleanup(),
-            cleanup(Pid)
-        end,
-        fun(_Pid) ->
-            [
-                ?_test(begin
-                    ok = beamtalk_xref:register_class('Bt3218MetaOwner', [
-                        #{
-                            class_side => false,
-                            selector => 'mMetaSelf',
-                            line => 1,
-                            sends => [
-                                #{
-                                    selector => 'bt3218MetaSel',
-                                    line => 2,
-                                    recv_kind => other,
-                                    recv_type => 'Bt3218Mid class'
-                                }
-                            ],
-                            references => [],
-                            source_status => indexed,
-                            provenance => class_body
-                        },
-                        #{
-                            class_side => false,
-                            selector => 'mMetaDescendant',
-                            line => 3,
-                            sends => [
-                                #{
-                                    selector => 'bt3218MetaSel',
-                                    line => 4,
-                                    recv_kind => other,
-                                    recv_type => 'Bt3218Leaf class'
-                                }
-                            ],
-                            references => [],
-                            source_status => indexed,
-                            provenance => class_body
-                        },
-                        #{
-                            class_side => false,
-                            selector => 'mPlainSelf',
-                            line => 5,
-                            sends => [
-                                #{
-                                    selector => 'bt3218MetaSel',
-                                    line => 6,
-                                    recv_kind => other,
-                                    recv_type => 'Bt3218Mid'
-                                }
-                            ],
-                            references => [],
-                            source_status => indexed,
-                            provenance => class_body
-                        }
-                    ]),
-                    try
-                        %% A class-side change to Mid ('Bt3218Mid class'): the
-                        %% Meta{C} sites (self, and a class-side descendant) are
-                        %% relevant; the plain instance-typed site is not.
-                        ClassSideSites = beamtalk_xref:senders_of(
-                            'bt3218MetaSel', 'Bt3218Mid class'
-                        ),
-                        ClassSideMethods = lists:sort([
-                            maps:get(method, S)
-                         || S <- ClassSideSites
-                        ]),
-                        ?assertEqual(['mMetaDescendant', 'mMetaSelf'], ClassSideMethods),
+meta_class_object_receiver() ->
+    ok = beamtalk_xref:register_class('Bt3218MetaOwner', [
+        #{
+            class_side => false,
+            selector => 'mMetaSelf',
+            line => 1,
+            sends => [
+                #{
+                    selector => 'bt3218MetaSel',
+                    line => 2,
+                    recv_kind => other,
+                    recv_type => 'Bt3218Mid class'
+                }
+            ],
+            references => [],
+            source_status => indexed,
+            provenance => class_body
+        },
+        #{
+            class_side => false,
+            selector => 'mMetaDescendant',
+            line => 3,
+            sends => [
+                #{
+                    selector => 'bt3218MetaSel',
+                    line => 4,
+                    recv_kind => other,
+                    recv_type => 'Bt3218Leaf class'
+                }
+            ],
+            references => [],
+            source_status => indexed,
+            provenance => class_body
+        },
+        #{
+            class_side => false,
+            selector => 'mPlainSelf',
+            line => 5,
+            sends => [
+                #{
+                    selector => 'bt3218MetaSel',
+                    line => 6,
+                    recv_kind => other,
+                    recv_type => 'Bt3218Mid'
+                }
+            ],
+            references => [],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ]),
+    try
+        %% A class-side change to Mid ('Bt3218Mid class'): the
+        %% Meta{C} sites (self, and a class-side descendant) are
+        %% relevant; the plain instance-typed site is not.
+        ClassSideSites = beamtalk_xref:senders_of(
+            'bt3218MetaSel', 'Bt3218Mid class'
+        ),
+        ClassSideMethods = lists:sort([
+            maps:get(method, S)
+         || S <- ClassSideSites
+        ]),
+        ?assertEqual(['mMetaDescendant', 'mMetaSelf'], ClassSideMethods),
 
-                        %% An instance-side change to the SAME class name: the
-                        %% Meta{C} sites are now excluded (never collapse to the
-                        %% plain instance-side test) — only the plain site is
-                        %% relevant.
-                        InstanceSideSites = beamtalk_xref:senders_of(
-                            'bt3218MetaSel', 'Bt3218Mid'
-                        ),
-                        InstanceSideMethods = lists:sort([
-                            maps:get(method, S)
-                         || S <- InstanceSideSites
-                        ]),
-                        ?assertEqual(['mPlainSelf'], InstanceSideMethods)
-                    after
-                        ok = beamtalk_xref:purge_class('Bt3218MetaOwner')
-                    end
-                end)
-            ]
-        end}.
+        %% An instance-side change to the SAME class name: the
+        %% Meta{C} sites are now excluded (never collapse to the
+        %% plain instance-side test) — only the plain site is
+        %% relevant.
+        InstanceSideSites = beamtalk_xref:senders_of(
+            'bt3218MetaSel', 'Bt3218Mid'
+        ),
+        InstanceSideMethods = lists:sort([
+            maps:get(method, S)
+         || S <- InstanceSideSites
+        ]),
+        ?assertEqual(['mPlainSelf'], InstanceSideMethods)
+    after
+        ok = beamtalk_xref:purge_class('Bt3218MetaOwner')
+    end.
 
 %% EUnit: memoization call-count assertion (Amendment 1) — N sites sharing
 %% the SAME protocol-typed `recv_type` must cost exactly one
@@ -2213,14 +2163,8 @@ bt3218_drain_trace_counts(Conforms, IsProtocol) ->
 %% ADR 0115 follow-up: composed Union/Intersection recv_type
 %%====================================================================
 
-%% EUnit: `{union, Names}` — relevant iff *any* member matches (OR-semantics).
-%% `'Bt3218Sibling'` and `'Bt3218Leaf'` sit on different branches of the
-%% `bt3218_hierarchy_setup/0` tree (Sibling is a direct child of Root; Leaf is
-%% two levels down the Mid branch), so a `ChangedClass` can be related to
-%% exactly one, the other, both, or neither.
-union_recv_type_relevant_iff_any_member_matches_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
+composed_recv_type_test_() ->
+    {foreach,
         fun() ->
             Pid = setup(),
             bt3218_hierarchy_setup(),
@@ -2234,217 +2178,188 @@ union_recv_type_relevant_iff_any_member_matches_test_() ->
             bt3218_hierarchy_cleanup(),
             cleanup(Pid)
         end,
-        fun(_Pid) ->
-            [
-                ?_test(begin
-                    ok = beamtalk_xref:register_class('Bt3215UnionOwner', [
-                        #{
-                            class_side => false,
-                            selector => 'mUnion',
-                            line => 1,
-                            sends => [
-                                #{
-                                    selector => 'bt3215UnionSel',
-                                    line => 2,
-                                    recv_kind => other,
-                                    recv_type => {union, ['Bt3218Sibling', 'Bt3218Leaf']}
-                                }
-                            ],
-                            references => [],
-                            source_status => indexed,
-                            provenance => class_body
-                        }
-                    ]),
-                    try
-                        %% Only the second member (`Leaf`, an ancestor of
-                        %% GrandLeaf) matches — still relevant.
-                        ?assertEqual(
-                            1,
-                            length(
-                                beamtalk_xref:senders_of('bt3215UnionSel', 'Bt3218GrandLeaf')
-                            )
-                        ),
-                        %% Only the first member (`Sibling`, matching itself)
-                        %% matches — still relevant.
-                        ?assertEqual(
-                            1,
-                            length(
-                                beamtalk_xref:senders_of('bt3215UnionSel', 'Bt3218Sibling')
-                            )
-                        ),
-                        %% Both members match (SuperRoot is ancestor of, and
-                        %% therefore hierarchy-related to, everything).
-                        ?assertEqual(
-                            1,
-                            length(
-                                beamtalk_xref:senders_of('bt3215UnionSel', 'Bt3218SuperRoot')
-                            )
-                        ),
-                        %% Neither member matches — a standalone class related
-                        %% to nothing in the fixture hierarchy.
-                        ?assertEqual(
-                            0,
-                            length(
-                                beamtalk_xref:senders_of('bt3215UnionSel', 'Bt3215Standalone')
-                            )
-                        )
-                    after
-                        ok = beamtalk_xref:purge_class('Bt3215UnionOwner')
-                    end
-                end)
-            ]
-        end}.
+        [
+            fun union_recv_type_relevant_iff_any_member_matches/0,
+            fun intersection_recv_type_relevant_iff_all_members_match/0
+        ]}.
+
+%% EUnit: `{union, Names}` — relevant iff *any* member matches (OR-semantics).
+%% `'Bt3218Sibling'` and `'Bt3218Leaf'` sit on different branches of the
+%% `bt3218_hierarchy_setup/0` tree (Sibling is a direct child of Root; Leaf is
+%% two levels down the Mid branch), so a `ChangedClass` can be related to
+%% exactly one, the other, both, or neither.
+union_recv_type_relevant_iff_any_member_matches() ->
+    ok = beamtalk_xref:register_class('Bt3215UnionOwner', [
+        #{
+            class_side => false,
+            selector => 'mUnion',
+            line => 1,
+            sends => [
+                #{
+                    selector => 'bt3215UnionSel',
+                    line => 2,
+                    recv_kind => other,
+                    recv_type => {union, ['Bt3218Sibling', 'Bt3218Leaf']}
+                }
+            ],
+            references => [],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ]),
+    try
+        %% Only the second member (`Leaf`, an ancestor of
+        %% GrandLeaf) matches — still relevant.
+        ?assertEqual(
+            1,
+            length(
+                beamtalk_xref:senders_of('bt3215UnionSel', 'Bt3218GrandLeaf')
+            )
+        ),
+        %% Only the first member (`Sibling`, matching itself)
+        %% matches — still relevant.
+        ?assertEqual(
+            1,
+            length(
+                beamtalk_xref:senders_of('bt3215UnionSel', 'Bt3218Sibling')
+            )
+        ),
+        %% Both members match (SuperRoot is ancestor of, and
+        %% therefore hierarchy-related to, everything).
+        ?assertEqual(
+            1,
+            length(
+                beamtalk_xref:senders_of('bt3215UnionSel', 'Bt3218SuperRoot')
+            )
+        ),
+        %% Neither member matches — a standalone class related
+        %% to nothing in the fixture hierarchy.
+        ?assertEqual(
+            0,
+            length(
+                beamtalk_xref:senders_of('bt3215UnionSel', 'Bt3215Standalone')
+            )
+        )
+    after
+        ok = beamtalk_xref:purge_class('Bt3215UnionOwner')
+    end.
 
 %% EUnit: `{intersection, Names}` — relevant iff *all* members match
 %% (AND-semantics). `'Bt3218Root'` is an ancestor of every fixture class;
 %% `'Bt3218Sibling'` is related only to itself, `Root`, and `SuperRoot`, so a
 %% `ChangedClass` matching `Root` alone (without also matching `Sibling`) is
 %% the case that distinguishes AND from OR.
-intersection_recv_type_relevant_iff_all_members_match_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            Pid = setup(),
-            bt3218_hierarchy_setup(),
-            ok = beamtalk_class_metadata:insert(
-                'Bt3215Standalone', undefined, undefined, none, undefined
-            ),
-            Pid
-        end,
-        fun(Pid) ->
-            beamtalk_class_metadata:delete('Bt3215Standalone'),
-            bt3218_hierarchy_cleanup(),
-            cleanup(Pid)
-        end,
-        fun(_Pid) ->
-            [
-                ?_test(begin
-                    ok = beamtalk_xref:register_class('Bt3215IntersectionOwner', [
-                        #{
-                            class_side => false,
-                            selector => 'mIntersection',
-                            line => 1,
-                            sends => [
-                                #{
-                                    selector => 'bt3215IntersectionSel',
-                                    line => 2,
-                                    recv_kind => other,
-                                    recv_type => {intersection, ['Bt3218Root', 'Bt3218Sibling']}
-                                }
-                            ],
-                            references => [],
-                            source_status => indexed,
-                            provenance => class_body
-                        }
-                    ]),
-                    try
-                        %% Both members match: Sibling is itself, and Root is
-                        %% its ancestor.
-                        ?assertEqual(
-                            1,
-                            length(
-                                beamtalk_xref:senders_of(
-                                    'bt3215IntersectionSel', 'Bt3218Sibling'
-                                )
-                            )
-                        ),
-                        %% Only `Root` matches (Mid is unrelated to Sibling's
-                        %% branch) — the intersection as a whole is NOT
-                        %% relevant, proving this is AND, not OR.
-                        ?assertEqual(
-                            0,
-                            length(
-                                beamtalk_xref:senders_of('bt3215IntersectionSel', 'Bt3218Mid')
-                            )
-                        ),
-                        %% Neither member matches.
-                        ?assertEqual(
-                            0,
-                            length(
-                                beamtalk_xref:senders_of(
-                                    'bt3215IntersectionSel', 'Bt3215Standalone'
-                                )
-                            )
-                        )
-                    after
-                        ok = beamtalk_xref:purge_class('Bt3215IntersectionOwner')
-                    end
-                end)
-            ]
-        end}.
+intersection_recv_type_relevant_iff_all_members_match() ->
+    ok = beamtalk_xref:register_class('Bt3215IntersectionOwner', [
+        #{
+            class_side => false,
+            selector => 'mIntersection',
+            line => 1,
+            sends => [
+                #{
+                    selector => 'bt3215IntersectionSel',
+                    line => 2,
+                    recv_kind => other,
+                    recv_type => {intersection, ['Bt3218Root', 'Bt3218Sibling']}
+                }
+            ],
+            references => [],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ]),
+    try
+        %% Both members match: Sibling is itself, and Root is
+        %% its ancestor.
+        ?assertEqual(
+            1,
+            length(
+                beamtalk_xref:senders_of(
+                    'bt3215IntersectionSel', 'Bt3218Sibling'
+                )
+            )
+        ),
+        %% Only `Root` matches (Mid is unrelated to Sibling's
+        %% branch) — the intersection as a whole is NOT
+        %% relevant, proving this is AND, not OR.
+        ?assertEqual(
+            0,
+            length(
+                beamtalk_xref:senders_of('bt3215IntersectionSel', 'Bt3218Mid')
+            )
+        ),
+        %% Neither member matches.
+        ?assertEqual(
+            0,
+            length(
+                beamtalk_xref:senders_of(
+                    'bt3215IntersectionSel', 'Bt3215Standalone'
+                )
+            )
+        )
+    after
+        ok = beamtalk_xref:purge_class('Bt3215IntersectionOwner')
+    end.
 
 %% EUnit regression: the pre-existing single-name and `dynamic` `recv_type`
 %% paths are unaffected by the `{union, _}`/`{intersection, _}` clauses added
 %% to `is_relevant/5`.
 single_name_and_dynamic_recv_type_unaffected_by_composed_types_test_() ->
-    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup,
-        fun() ->
-            Pid = setup(),
-            bt3218_hierarchy_setup(),
-            Pid
-        end,
-        fun(Pid) ->
-            bt3218_hierarchy_cleanup(),
-            cleanup(Pid)
-        end,
-        fun(_Pid) ->
-            [
-                ?_test(begin
-                    ok = beamtalk_xref:register_class('Bt3215RegressionOwner', [
+    {foreach, fun bt3218_setup/0, fun bt3218_cleanup/1, [
+        ?_test(begin
+            ok = beamtalk_xref:register_class('Bt3215RegressionOwner', [
+                #{
+                    class_side => false,
+                    selector => 'mPlainName',
+                    line => 1,
+                    sends => [
                         #{
-                            class_side => false,
-                            selector => 'mPlainName',
-                            line => 1,
-                            sends => [
-                                #{
-                                    selector => 'bt3215RegressionSel',
-                                    line => 2,
-                                    recv_kind => other,
-                                    recv_type => 'Bt3218Leaf'
-                                }
-                            ],
-                            references => [],
-                            source_status => indexed,
-                            provenance => class_body
-                        },
-                        #{
-                            class_side => false,
-                            selector => 'mDynamic',
-                            line => 3,
-                            sends => [
-                                #{
-                                    selector => 'bt3215RegressionSel',
-                                    line => 4,
-                                    recv_kind => other,
-                                    recv_type => dynamic
-                                }
-                            ],
-                            references => [],
-                            source_status => indexed,
-                            provenance => class_body
+                            selector => 'bt3215RegressionSel',
+                            line => 2,
+                            recv_kind => other,
+                            recv_type => 'Bt3218Leaf'
                         }
-                    ]),
-                    try
-                        %% Plain single-name: relevant for a related class...
-                        RelatedMethods = lists:sort([
-                            maps:get(method, S)
-                         || S <- beamtalk_xref:senders_of('bt3215RegressionSel', 'Bt3218Mid')
-                        ]),
-                        ?assertEqual(['mDynamic', 'mPlainName'], RelatedMethods),
-                        %% ...and NOT relevant for an unrelated one, while
-                        %% `dynamic` is always relevant regardless.
-                        UnrelatedMethods = lists:sort([
-                            maps:get(method, S)
-                         || S <- beamtalk_xref:senders_of('bt3215RegressionSel', 'Bt3218Sibling')
-                        ]),
-                        ?assertEqual(['mDynamic'], UnrelatedMethods)
-                    after
-                        ok = beamtalk_xref:purge_class('Bt3215RegressionOwner')
-                    end
-                end)
-            ]
-        end}.
+                    ],
+                    references => [],
+                    source_status => indexed,
+                    provenance => class_body
+                },
+                #{
+                    class_side => false,
+                    selector => 'mDynamic',
+                    line => 3,
+                    sends => [
+                        #{
+                            selector => 'bt3215RegressionSel',
+                            line => 4,
+                            recv_kind => other,
+                            recv_type => dynamic
+                        }
+                    ],
+                    references => [],
+                    source_status => indexed,
+                    provenance => class_body
+                }
+            ]),
+            try
+                %% Plain single-name: relevant for a related class...
+                RelatedMethods = lists:sort([
+                    maps:get(method, S)
+                 || S <- beamtalk_xref:senders_of('bt3215RegressionSel', 'Bt3218Mid')
+                ]),
+                ?assertEqual(['mDynamic', 'mPlainName'], RelatedMethods),
+                %% ...and NOT relevant for an unrelated one, while
+                %% `dynamic` is always relevant regardless.
+                UnrelatedMethods = lists:sort([
+                    maps:get(method, S)
+                 || S <- beamtalk_xref:senders_of('bt3215RegressionSel', 'Bt3218Sibling')
+                ]),
+                ?assertEqual(['mDynamic'], UnrelatedMethods)
+            after
+                ok = beamtalk_xref:purge_class('Bt3215RegressionOwner')
+            end
+        end)
+    ]}.
 
 %%====================================================================
 %% Internal helpers

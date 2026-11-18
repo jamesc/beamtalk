@@ -4075,15 +4075,6 @@ bt3967_every_actor_intrinsic_is_mapped_test() ->
 
 %%% BT-3968: continueWith: / deferred continuations
 
-%% The kind of the structured error a raising send-site helper reraises.
-continuation_error_kind(Fun) ->
-    try Fun() of
-        Other -> {no_error, Other}
-    catch
-        %% BT-4900: kept hand-written - value-returning kind helper ({no_error, V} on success)
-        error:#{error := #beamtalk_error{kind = Kind}} -> Kind
-    end.
-
 bt3968_continuation_becomes_continue_action_on_noreply_test() ->
     in_dispatch(fun() ->
         State = #{value => 0},
@@ -4232,34 +4223,26 @@ bt3968_clear_pending_actions_discards_stale_continuations_test() ->
 
 bt3968_request_outside_dispatch_raises_test() ->
     %% Self, but no dispatching callback running: nothing would consume it.
-    ?assertEqual(
+    ?assertBtError(
         invalid_continuation,
-        continuation_error_kind(fun() ->
-            beamtalk_actor:request_continuation(self(), 'continueWith:', x, none)
-        end)
+        beamtalk_actor:request_continuation(self(), 'continueWith:', x, none)
     ),
     ?assertEqual({noreply, #{}}, beamtalk_actor:apply_pending_actions({noreply, #{}})).
 
 bt3968_request_for_another_process_raises_test() ->
     Other = spawn(fun() -> ok end),
     in_dispatch(fun() ->
-        ?assertEqual(
+        ?assertBtError(
             invalid_continuation,
-            continuation_error_kind(fun() ->
-                beamtalk_actor:sync_send(Other, 'continueWith:', [x])
-            end)
+            beamtalk_actor:sync_send(Other, 'continueWith:', [x])
         ),
-        ?assertEqual(
+        ?assertBtError(
             invalid_continuation,
-            continuation_error_kind(fun() ->
-                beamtalk_actor:cast_send(Other, 'continueWith:withArguments:', [x, []])
-            end)
+            beamtalk_actor:cast_send(Other, 'continueWith:withArguments:', [x, []])
         ),
-        ?assertEqual(
+        ?assertBtError(
             invalid_continuation,
-            continuation_error_kind(fun() ->
-                beamtalk_actor:sync_send(Other, 'continueWith:', [x], 1000)
-            end)
+            beamtalk_actor:sync_send(Other, 'continueWith:', [x], 1000)
         ),
         ?assertEqual({noreply, #{}}, beamtalk_actor:apply_pending_actions({noreply, #{}}))
     end).
@@ -4275,29 +4258,21 @@ bt3968_async_request_for_another_process_rejects_future_test() ->
 
 bt3968_request_validates_selector_and_arity_test() ->
     in_dispatch(fun() ->
-        ?assertEqual(
+        ?assertBtError(
             type_error,
-            continuation_error_kind(fun() ->
-                beamtalk_actor:sync_send(self(), 'continueWith:', [<<"x">>])
-            end)
+            beamtalk_actor:sync_send(self(), 'continueWith:', [<<"x">>])
         ),
-        ?assertEqual(
+        ?assertBtError(
             type_error,
-            continuation_error_kind(fun() ->
-                beamtalk_actor:sync_send(self(), 'continueWith:withArguments:', [x, not_a_list])
-            end)
+            beamtalk_actor:sync_send(self(), 'continueWith:withArguments:', [x, not_a_list])
         ),
-        ?assertEqual(
+        ?assertBtError(
             arity_mismatch,
-            continuation_error_kind(fun() ->
-                beamtalk_actor:sync_send(self(), 'continueWith:', ['at:'])
-            end)
+            beamtalk_actor:sync_send(self(), 'continueWith:', ['at:'])
         ),
-        ?assertEqual(
+        ?assertBtError(
             arity_mismatch,
-            continuation_error_kind(fun() ->
-                beamtalk_actor:sync_send(self(), 'continueWith:withArguments:', ['at:put:', [1]])
-            end)
+            beamtalk_actor:sync_send(self(), 'continueWith:withArguments:', ['at:put:', [1]])
         ),
         %% Binary selectors take one argument.
         ?assertEqual(
@@ -4329,23 +4304,19 @@ bt3968_runtime_handle_continue_ignores_unknown_term_test() ->
 
 bt3968_perform_of_continue_with_from_another_process_raises_test() ->
     {ok, Counter} = test_counter:start_link(0),
-    ?assertEqual(
+    ?assertBtError(
         invalid_continuation,
-        continuation_error_kind(fun() ->
-            beamtalk_actor:sync_send(
-                Counter, 'perform:withArguments:', ['continueWith:', [increment]]
-            )
-        end)
+        beamtalk_actor:sync_send(
+            Counter, 'perform:withArguments:', ['continueWith:', [increment]]
+        )
     ),
-    ?assertEqual(
+    ?assertBtError(
         invalid_continuation,
-        continuation_error_kind(fun() ->
-            beamtalk_actor:sync_send(
-                Counter,
-                'perform:withArguments:',
-                ['continueWith:withArguments:', [increment, []]]
-            )
-        end)
+        beamtalk_actor:sync_send(
+            Counter,
+            'perform:withArguments:',
+            ['continueWith:withArguments:', [increment, []]]
+        )
     ),
     %% Nothing was scheduled.
     ?assertEqual(0, beamtalk_actor:sync_send(Counter, getValue, [])),

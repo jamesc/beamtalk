@@ -231,8 +231,7 @@ load_value_eval(Mod, Value) ->
             ]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, [], Bin).
+    beamtalk_test_module:load(Mod, Forms).
 
 load_crashing_eval(Mod) ->
     Forms = [
@@ -244,8 +243,7 @@ load_crashing_eval(Mod) ->
             ]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, [], Bin).
+    beamtalk_test_module:load(Mod, Forms).
 
 load_atom_error_eval(Mod, Kind) ->
     Forms = [
@@ -257,8 +255,7 @@ load_atom_error_eval(Mod, Kind) ->
             ]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, [], Bin).
+    beamtalk_test_module:load(Mod, Forms).
 
 load_bt_error_eval(Mod, Kind) ->
     %% Raise a #beamtalk_error{} record — matched by run_one's direct-record clause.
@@ -279,8 +276,7 @@ load_bt_error_eval(Mod, Kind) ->
             {clause, 1, [{var, 1, 'Bindings'}], [], [{call, 1, {atom, 1, error}, [ErrTuple]}]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, [], Bin).
+    beamtalk_test_module:load(Mod, Forms).
 
 load_wrapped_bt_error_eval(Mod, Kind) ->
     %% Raise an ADR-0015 wrapped exception: error(#{'$beamtalk_class' := _, error := Record}).
@@ -314,8 +310,7 @@ load_wrapped_bt_error_eval(Mod, Kind) ->
             {clause, 1, [{var, 1, 'Bindings'}], [], [{call, 1, {atom, 1, error}, [PatchedMap]}]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, [], Bin).
+    beamtalk_test_module:load(Mod, Forms).
 
 load_future_rejected_eval(Mod, Kind) ->
     %% Throw a future_rejected tuple — matched by run_one's future-rejected clause.
@@ -337,8 +332,7 @@ load_future_rejected_eval(Mod, Kind) ->
             {clause, 1, [{var, 1, 'Bindings'}], [], [{call, 1, {atom, 1, throw}, [ThrowArg]}]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, [], Bin).
+    beamtalk_test_module:load(Mod, Forms).
 
 %%% ============================================================================
 %%% run_and_assert/2 — Output-suppression and module-lifetime helpers

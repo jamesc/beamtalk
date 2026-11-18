@@ -224,8 +224,7 @@ mock_otel_ctx_test_() ->
                     ]}
                 ]}
             ],
-            {ok, otel_ctx, Bin} = compile:forms(Forms, []),
-            {module, otel_ctx} = code:load_binary(otel_ctx, "otel_ctx.beam", Bin),
+            ok = beamtalk_test_module:load(otel_ctx, Forms),
             ok
         end,
         fun(_) ->

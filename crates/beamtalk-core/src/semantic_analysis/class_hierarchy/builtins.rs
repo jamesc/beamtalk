@@ -149,6 +149,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             handle_scope: None,
             surface_incomplete: false,
+            // Runtime-only: no `.bt` `new:` to inspect, so the class process owns it.
             in_caller_new1: false,
             // Runtime-only with no `.bt` module (native-backed): truthfully
             // module-less. Static dispatch excludes `Future` via the builtin

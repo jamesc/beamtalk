@@ -340,11 +340,8 @@ collect_spawns(N, Acc) ->
     end.
 
 wait_queue(N) ->
-    {message_queue_len, Len} = process_info(self(), message_queue_len),
-    case Len >= N of
-        true ->
-            ok;
-        false ->
-            timer:sleep(1),
-            wait_queue(N)
-    end.
+    Self = self(),
+    beamtalk_test_wait:until(fun() ->
+        {message_queue_len, Len} = process_info(Self, message_queue_len),
+        Len >= N
+    end).

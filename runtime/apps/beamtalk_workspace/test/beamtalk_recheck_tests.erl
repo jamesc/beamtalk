@@ -485,12 +485,99 @@ counter_hierarchy(MethodInfo) ->
 
 signature_change_finding_and_receiver_filter_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    %% ReCheckCounter>>size now returns String (was Integer) —
-                    %% the ambient class cache already reflects the just-installed
-                    %% new generation, exactly as it would post-reload in production.
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                %% ReCheckCounter>>size now returns String (was Integer) —
+                %% the ambient class cache already reflects the just-installed
+                %% new generation, exactly as it would post-reload in production.
+                beamtalk_compiler_server:register_class(
+                    'ReCheckCounter',
+                    counter_hierarchy(#{
+                        size => #{arity => 0, param_types => [], return_type => 'String'}
+                    })
+                ),
+                ok = beamtalk_xref:register_class(
+                    'ReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)
+                ),
+                ok = beamtalk_xref:register_class(
+                    'ReCheckListView', beamtalk_test_recheck_fixtures:listview_xref([])
+                ),
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"ReCheckDashboard">>,
+                    beamtalk_test_recheck_fixtures:dashboard_source(?PREFIX)
+                ),
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"ReCheckListView">>,
+                    beamtalk_test_recheck_fixtures:listview_list_source(?PREFIX)
+                ),
+
+                Result = beamtalk_recheck:trigger(
+                    <<"ReCheckCounter">>, <<"size">>, instance, signature_change
+                ),
+                #{findings := Findings, checked := Checked, not_checked := NotChecked} = Result,
+
+                %% Both candidates were re-checked (xref is selector-keyed and
+                %% cannot tell them apart on its own) ...
+                ?assertEqual(2, Checked),
+                ?assertEqual(0, NotChecked),
+
+                %% ... but only the real dependent produced a finding — the
+                %% unrelated ListView site re-checks clean because `xs` is
+                %% statically `List`, not `ReCheckCounter`.
+                ?assertEqual(1, length(Findings)),
+                [Finding] = Findings,
+                ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, Finding)),
+                ?assertEqual(signature_change, maps:get(classification, Finding)),
+                %% The checker reports "String does not understand '+'"
+                %% as a Dnu-category diagnostic (an unresolved selector on
+                %% the new return type), not a Type mismatch — see
+                %% beamtalk_recheck's moduledoc.
+                ?assertEqual(<<"Dnu">>, maps:get(category, Finding)),
+                ?assert(lists:member(maps:get(severity, Finding), [<<"warning">>, <<"hint">>]))
+            end)
+        ]}}.
+
+removed_selector_hint_test_() ->
+    {timeout, 30,
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                %% ReCheckCounter no longer has `reset` at all — the ambient
+                %% class cache reflects the post-removal generation.
+                beamtalk_compiler_server:register_class(
+                    'ReCheckCounter', counter_hierarchy(#{})
+                ),
+                ok = beamtalk_xref:register_class('ReCheckDashboard', dashboard_reset_xref()),
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"ReCheckDashboard">>, dashboard_reset_source()
+                ),
+
+                Result = beamtalk_recheck:trigger(
+                    <<"ReCheckCounter">>, <<"reset">>, instance, removal
+                ),
+                #{findings := Findings, checked := Checked} = Result,
+
+                ?assertEqual(1, Checked),
+                ?assertEqual(1, length(Findings)),
+                [Finding] = Findings,
+                ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, Finding)),
+                ?assertEqual(removal, maps:get(classification, Finding)),
+                ?assertEqual(<<"Dnu">>, maps:get(category, Finding)),
+                %% ADR 0100 Rule 1: an unresolved selector on a single
+                %% closed-complete receiver is a Hint, never escalated.
+                ?assertEqual(<<"hint">>, maps:get(severity, Finding)),
+                ?assertEqual(
+                    <<"removed by the reload of ReCheckCounter">>, maps:get(note, Finding)
+                )
+            end)
+        ]}}.
+
+caller_cap_note_test_() ->
+    {timeout, 30,
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                PrevCap = application:get_env(beamtalk_workspace, recheck_caller_cap, 20),
+                application:set_env(beamtalk_workspace, recheck_caller_cap, 1),
+                try
                     beamtalk_compiler_server:register_class(
                         'ReCheckCounter',
                         counter_hierarchy(#{
@@ -498,7 +585,8 @@ signature_change_finding_and_receiver_filter_test_() ->
                         })
                     ),
                     ok = beamtalk_xref:register_class(
-                        'ReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)
+                        'ReCheckDashboard',
+                        beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)
                     ),
                     ok = beamtalk_xref:register_class(
                         'ReCheckListView', beamtalk_test_recheck_fixtures:listview_xref([])
@@ -515,116 +603,22 @@ signature_change_finding_and_receiver_filter_test_() ->
                     Result = beamtalk_recheck:trigger(
                         <<"ReCheckCounter">>, <<"size">>, instance, signature_change
                     ),
-                    #{findings := Findings, checked := Checked, not_checked := NotChecked} = Result,
-
-                    %% Both candidates were re-checked (xref is selector-keyed and
-                    %% cannot tell them apart on its own) ...
-                    ?assertEqual(2, Checked),
-                    ?assertEqual(0, NotChecked),
-
-                    %% ... but only the real dependent produced a finding — the
-                    %% unrelated ListView site re-checks clean because `xs` is
-                    %% statically `List`, not `ReCheckCounter`.
-                    ?assertEqual(1, length(Findings)),
-                    [Finding] = Findings,
-                    ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, Finding)),
-                    ?assertEqual(signature_change, maps:get(classification, Finding)),
-                    %% The checker reports "String does not understand '+'"
-                    %% as a Dnu-category diagnostic (an unresolved selector on
-                    %% the new return type), not a Type mismatch — see
-                    %% beamtalk_recheck's moduledoc.
-                    ?assertEqual(<<"Dnu">>, maps:get(category, Finding)),
-                    ?assert(lists:member(maps:get(severity, Finding), [<<"warning">>, <<"hint">>]))
-                end)
-            ]
-        end}}.
-
-removed_selector_hint_test_() ->
-    {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    %% ReCheckCounter no longer has `reset` at all — the ambient
-                    %% class cache reflects the post-removal generation.
-                    beamtalk_compiler_server:register_class(
-                        'ReCheckCounter', counter_hierarchy(#{})
-                    ),
-                    ok = beamtalk_xref:register_class('ReCheckDashboard', dashboard_reset_xref()),
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckDashboard">>, dashboard_reset_source()
-                    ),
-
-                    Result = beamtalk_recheck:trigger(
-                        <<"ReCheckCounter">>, <<"reset">>, instance, removal
-                    ),
-                    #{findings := Findings, checked := Checked} = Result,
+                    #{
+                        checked := Checked,
+                        total_candidates := Total,
+                        not_checked := NotChecked,
+                        cap_note := CapNote
+                    } = Result,
 
                     ?assertEqual(1, Checked),
-                    ?assertEqual(1, length(Findings)),
-                    [Finding] = Findings,
-                    ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, Finding)),
-                    ?assertEqual(removal, maps:get(classification, Finding)),
-                    ?assertEqual(<<"Dnu">>, maps:get(category, Finding)),
-                    %% ADR 0100 Rule 1: an unresolved selector on a single
-                    %% closed-complete receiver is a Hint, never escalated.
-                    ?assertEqual(<<"hint">>, maps:get(severity, Finding)),
-                    ?assertEqual(
-                        <<"removed by the reload of ReCheckCounter">>, maps:get(note, Finding)
-                    )
-                end)
-            ]
-        end}}.
-
-caller_cap_note_test_() ->
-    {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    PrevCap = application:get_env(beamtalk_workspace, recheck_caller_cap, 20),
-                    application:set_env(beamtalk_workspace, recheck_caller_cap, 1),
-                    try
-                        beamtalk_compiler_server:register_class(
-                            'ReCheckCounter',
-                            counter_hierarchy(#{
-                                size => #{arity => 0, param_types => [], return_type => 'String'}
-                            })
-                        ),
-                        ok = beamtalk_xref:register_class(
-                            'ReCheckDashboard',
-                            beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)
-                        ),
-                        ok = beamtalk_xref:register_class(
-                            'ReCheckListView', beamtalk_test_recheck_fixtures:listview_xref([])
-                        ),
-                        ok = beamtalk_workspace_meta:set_class_source(
-                            <<"ReCheckDashboard">>,
-                            beamtalk_test_recheck_fixtures:dashboard_source(?PREFIX)
-                        ),
-                        ok = beamtalk_workspace_meta:set_class_source(
-                            <<"ReCheckListView">>,
-                            beamtalk_test_recheck_fixtures:listview_list_source(?PREFIX)
-                        ),
-
-                        Result = beamtalk_recheck:trigger(
-                            <<"ReCheckCounter">>, <<"size">>, instance, signature_change
-                        ),
-                        #{
-                            checked := Checked,
-                            total_candidates := Total,
-                            not_checked := NotChecked,
-                            cap_note := CapNote
-                        } = Result,
-
-                        ?assertEqual(1, Checked),
-                        ?assertEqual(2, Total),
-                        ?assertEqual(1, NotChecked),
-                        ?assertEqual(<<"1 more not checked">>, CapNote)
-                    after
-                        application:set_env(beamtalk_workspace, recheck_caller_cap, PrevCap)
-                    end
-                end)
-            ]
-        end}}.
+                    ?assertEqual(2, Total),
+                    ?assertEqual(1, NotChecked),
+                    ?assertEqual(<<"1 more not checked">>, CapNote)
+                after
+                    application:set_env(beamtalk_workspace, recheck_caller_cap, PrevCap)
+                end
+            end)
+        ]}}.
 
 %% xref payload: `ReCheckDashboard` sends `size` from TWO different methods —
 %% multiple sites in one caller class must collapse into one re-check
@@ -661,104 +655,100 @@ dashboard_two_sites_source() ->
 
 multi_site_same_owner_collapses_to_one_check_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    beamtalk_compiler_server:register_class(
-                        'ReCheckCounter',
-                        counter_hierarchy(#{
-                            size => #{arity => 0, param_types => [], return_type => 'String'}
-                        })
-                    ),
-                    ok = beamtalk_xref:register_class(
-                        'ReCheckDashboard', dashboard_two_sites_xref()
-                    ),
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckDashboard">>, dashboard_two_sites_source()
-                    ),
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                beamtalk_compiler_server:register_class(
+                    'ReCheckCounter',
+                    counter_hierarchy(#{
+                        size => #{arity => 0, param_types => [], return_type => 'String'}
+                    })
+                ),
+                ok = beamtalk_xref:register_class(
+                    'ReCheckDashboard', dashboard_two_sites_xref()
+                ),
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"ReCheckDashboard">>, dashboard_two_sites_source()
+                ),
 
-                    Result = beamtalk_recheck:trigger(
-                        <<"ReCheckCounter">>, <<"size">>, instance, signature_change
-                    ),
-                    #{
-                        findings := Findings,
-                        checked := Checked,
-                        total_candidates := Total
-                    } = Result,
+                Result = beamtalk_recheck:trigger(
+                    <<"ReCheckCounter">>, <<"size">>, instance, signature_change
+                ),
+                #{
+                    findings := Findings,
+                    checked := Checked,
+                    total_candidates := Total
+                } = Result,
 
-                    %% ONE candidate (ReCheckDashboard), not two, even though
-                    %% it has two distinct call sites of the changed selector.
-                    ?assertEqual(1, Total),
-                    ?assertEqual(1, Checked),
-                    %% Both stale sends surface as separate diagnostics from
-                    %% the single re-check, and both are attributed to the
-                    %% one owner with all of its known trigger sites listed.
-                    ?assert(length(Findings) >= 1),
-                    [FirstFinding | _] = Findings,
-                    ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, FirstFinding)),
-                    SiteMethods = [
-                        maps:get(method, S)
-                     || F <- Findings, S <- maps:get(sites, F)
-                    ],
-                    ?assertEqual(
-                        [<<"refresh:">>, <<"refreshTwice:">>],
-                        lists:usort(SiteMethods)
-                    )
-                end)
-            ]
-        end}}.
+                %% ONE candidate (ReCheckDashboard), not two, even though
+                %% it has two distinct call sites of the changed selector.
+                ?assertEqual(1, Total),
+                ?assertEqual(1, Checked),
+                %% Both stale sends surface as separate diagnostics from
+                %% the single re-check, and both are attributed to the
+                %% one owner with all of its known trigger sites listed.
+                ?assert(length(Findings) >= 1),
+                [FirstFinding | _] = Findings,
+                ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, FirstFinding)),
+                SiteMethods = [
+                    maps:get(method, S)
+                 || F <- Findings, S <- maps:get(sites, F)
+                ],
+                ?assertEqual(
+                    [<<"refresh:">>, <<"refreshTwice:">>],
+                    lists:usort(SiteMethods)
+                )
+            end)
+        ]}}.
 
 no_live_source_is_skipped_not_checked_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    beamtalk_compiler_server:register_class(
-                        'ReCheckCounter',
-                        counter_hierarchy(#{
-                            size => #{arity => 0, param_types => [], return_type => 'String'}
-                        })
-                    ),
-                    %% xref knows about a sender, but no `set_class_source/2`
-                    %% was ever recorded for it (e.g. a stdlib/dependency
-                    %% class, never installed through beamtalk_repl_loader).
-                    ok = beamtalk_xref:register_class(
-                        'ReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)
-                    ),
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                beamtalk_compiler_server:register_class(
+                    'ReCheckCounter',
+                    counter_hierarchy(#{
+                        size => #{arity => 0, param_types => [], return_type => 'String'}
+                    })
+                ),
+                %% xref knows about a sender, but no `set_class_source/2`
+                %% was ever recorded for it (e.g. a stdlib/dependency
+                %% class, never installed through beamtalk_repl_loader).
+                ok = beamtalk_xref:register_class(
+                    'ReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)
+                ),
 
-                    Result = beamtalk_recheck:trigger(
-                        <<"ReCheckCounter">>, <<"size">>, instance, signature_change
-                    ),
-                    #{
-                        findings := Findings,
-                        checked := Checked,
-                        total_candidates := Total,
-                        not_checked := NotChecked,
-                        checked_owners := CheckedOwners,
-                        not_checked_owners := NotCheckedOwners,
-                        not_verified_owners := NotVerifiedOwners
-                    } = Result,
+                Result = beamtalk_recheck:trigger(
+                    <<"ReCheckCounter">>, <<"size">>, instance, signature_change
+                ),
+                #{
+                    findings := Findings,
+                    checked := Checked,
+                    total_candidates := Total,
+                    not_checked := NotChecked,
+                    checked_owners := CheckedOwners,
+                    not_checked_owners := NotCheckedOwners,
+                    not_verified_owners := NotVerifiedOwners
+                } = Result,
 
-                    %% The candidate was a total candidate and NOT cap-dropped
-                    %% (not_checked counts only cap overflow) — it was simply
-                    %% never successfully checked, so `checked` must not count
-                    %% it either.
-                    ?assertEqual(1, Total),
-                    ?assertEqual(0, Checked),
-                    ?assertEqual(0, NotChecked),
-                    ?assertEqual([], Findings),
+                %% The candidate was a total candidate and NOT cap-dropped
+                %% (not_checked counts only cap overflow) — it was simply
+                %% never successfully checked, so `checked` must not count
+                %% it either.
+                ?assertEqual(1, Total),
+                ?assertEqual(0, Checked),
+                ?assertEqual(0, NotChecked),
+                ?assertEqual([], Findings),
 
-                    %% A `skipped` outcome (no live source) is not
-                    %% cap-dropped, so `not_checked_owners` stays empty — but
-                    %% it must still show up in `not_verified_owners`, or
-                    %% `beamtalk_repl_loader` would neither replace nor mark
-                    %% stale any pre-existing finding for it.
-                    ?assertEqual([], CheckedOwners),
-                    ?assertEqual([], NotCheckedOwners),
-                    ?assertEqual([<<"ReCheckDashboard">>], NotVerifiedOwners)
-                end)
-            ]
-        end}}.
+                %% A `skipped` outcome (no live source) is not
+                %% cap-dropped, so `not_checked_owners` stays empty — but
+                %% it must still show up in `not_verified_owners`, or
+                %% `beamtalk_repl_loader` would neither replace nor mark
+                %% stale any pre-existing finding for it.
+                ?assertEqual([], CheckedOwners),
+                ?assertEqual([], NotCheckedOwners),
+                ?assertEqual([<<"ReCheckDashboard">>], NotVerifiedOwners)
+            end)
+        ]}}.
 
 %% `trigger/4`'s headline safety guarantee (see its moduledoc: "Never
 %% raises") — a selector atom that was never compiled into any live class
@@ -768,29 +758,27 @@ no_live_source_is_skipped_not_checked_test_() ->
 %% because the advisory re-check blew up).
 trigger_never_raises_on_unknown_selector_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    NeverCompiledSelector = <<"reCheckNeverCompiledSelectorXyz">>,
-                    Result = beamtalk_recheck:trigger(
-                        <<"ReCheckCounter">>, NeverCompiledSelector, instance, signature_change
-                    ),
-                    ?assertEqual(
-                        #{
-                            findings => [],
-                            checked => 0,
-                            total_candidates => 0,
-                            not_checked => 0,
-                            cap_note => undefined,
-                            checked_owners => [],
-                            not_checked_owners => [],
-                            not_verified_owners => []
-                        },
-                        Result
-                    )
-                end)
-            ]
-        end}}.
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                NeverCompiledSelector = <<"reCheckNeverCompiledSelectorXyz">>,
+                Result = beamtalk_recheck:trigger(
+                    <<"ReCheckCounter">>, NeverCompiledSelector, instance, signature_change
+                ),
+                ?assertEqual(
+                    #{
+                        findings => [],
+                        checked => 0,
+                        total_candidates => 0,
+                        not_checked => 0,
+                        cap_note => undefined,
+                        checked_owners => [],
+                        not_checked_owners => [],
+                        not_verified_owners => []
+                    },
+                    Result
+                )
+            end)
+        ]}}.
 
 %%====================================================================
 %% Receiver-type-aware dependent lookup (ADR 0115 Phase 4)
@@ -866,90 +854,88 @@ register_fanout_candidate(Name, Selector, RecvType) ->
 %% filter_test_` above demonstrates for legacy (`recv_type`-less) rows.
 receiver_type_filter_narrows_pool_before_cap_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    ChangedClass = 'ReCheckFanoutCounter',
-                    UnrelatedClass = 'ReCheckFanoutUnrelated',
-                    Selector = fanoutSel,
-                    SelectorBin = <<"fanoutSel">>,
-                    %% A small synthetic hierarchy, written directly into
-                    %% `beamtalk_class_metadata` (mirrors
-                    %% `beamtalk_xref_tests.erl`'s
-                    %% `bt3218_hierarchy_setup/0` pattern) — both classes must
-                    %% be *known* to `beamtalk_class_metadata` for
-                    %% `senders_of/2`'s relatedness check to actually run the
-                    %% hierarchy-membership test rather than fall through to
-                    %% Amendment 2's "unresolvable name, default relevant"
-                    %% branch, which would defeat this test's whole point.
-                    ok = beamtalk_class_metadata:insert(
-                        ChangedClass, undefined, undefined, none, undefined
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                ChangedClass = 'ReCheckFanoutCounter',
+                UnrelatedClass = 'ReCheckFanoutUnrelated',
+                Selector = fanoutSel,
+                SelectorBin = <<"fanoutSel">>,
+                %% A small synthetic hierarchy, written directly into
+                %% `beamtalk_class_metadata` (mirrors
+                %% `beamtalk_xref_tests.erl`'s
+                %% `bt3218_hierarchy_setup/0` pattern) — both classes must
+                %% be *known* to `beamtalk_class_metadata` for
+                %% `senders_of/2`'s relatedness check to actually run the
+                %% hierarchy-membership test rather than fall through to
+                %% Amendment 2's "unresolvable name, default relevant"
+                %% branch, which would defeat this test's whole point.
+                ok = beamtalk_class_metadata:insert(
+                    ChangedClass, undefined, undefined, none, undefined
+                ),
+                ok = beamtalk_class_metadata:insert(
+                    UnrelatedClass, undefined, undefined, none, undefined
+                ),
+                try
+                    beamtalk_compiler_server:register_class(
+                        ChangedClass,
+                        counter_hierarchy(#{
+                            Selector => #{
+                                arity => 0, param_types => [], return_type => 'String'
+                            }
+                        })
                     ),
-                    ok = beamtalk_class_metadata:insert(
-                        UnrelatedClass, undefined, undefined, none, undefined
+
+                    RealNames = ['ReCheckFanoutReal1', 'ReCheckFanoutReal2'],
+                    UnrelatedNames = [
+                        'ReCheckFanoutFalse1',
+                        'ReCheckFanoutFalse2',
+                        'ReCheckFanoutFalse3'
+                    ],
+                    lists:foreach(
+                        fun(Name) ->
+                            register_fanout_candidate(Name, Selector, ChangedClass)
+                        end,
+                        RealNames
                     ),
-                    try
-                        beamtalk_compiler_server:register_class(
-                            ChangedClass,
-                            counter_hierarchy(#{
-                                Selector => #{
-                                    arity => 0, param_types => [], return_type => 'String'
-                                }
-                            })
-                        ),
+                    lists:foreach(
+                        fun(Name) ->
+                            register_fanout_candidate(Name, Selector, UnrelatedClass)
+                        end,
+                        UnrelatedNames
+                    ),
 
-                        RealNames = ['ReCheckFanoutReal1', 'ReCheckFanoutReal2'],
-                        UnrelatedNames = [
-                            'ReCheckFanoutFalse1',
-                            'ReCheckFanoutFalse2',
-                            'ReCheckFanoutFalse3'
-                        ],
-                        lists:foreach(
-                            fun(Name) ->
-                                register_fanout_candidate(Name, Selector, ChangedClass)
-                            end,
-                            RealNames
-                        ),
-                        lists:foreach(
-                            fun(Name) ->
-                                register_fanout_candidate(Name, Selector, UnrelatedClass)
-                            end,
-                            UnrelatedNames
-                        ),
+                    Result = beamtalk_recheck:trigger(
+                        atom_to_binary(ChangedClass, utf8),
+                        SelectorBin,
+                        instance,
+                        signature_change
+                    ),
+                    #{
+                        checked := Checked,
+                        total_candidates := Total,
+                        not_checked := NotChecked,
+                        checked_owners := CheckedOwners
+                    } = Result,
 
-                        Result = beamtalk_recheck:trigger(
-                            atom_to_binary(ChangedClass, utf8),
-                            SelectorBin,
-                            instance,
-                            signature_change
-                        ),
-                        #{
-                            checked := Checked,
-                            total_candidates := Total,
-                            not_checked := NotChecked,
-                            checked_owners := CheckedOwners
-                        } = Result,
-
-                        %% `total_candidates` is `length(group_by_owner(Sites))`
-                        %% computed straight from `senders_of/2`'s
-                        %% already-filtered result, before `apply_cap/2` runs
-                        %% — if the unrelated-type candidates had merely been
-                        %% re-checked and discarded (the pre-Phase-4 behaviour),
-                        %% `Total` would be 5 (2 real + 3 unrelated), not 2.
-                        ?assertEqual(length(RealNames), Total),
-                        ?assertEqual(length(RealNames), Checked),
-                        ?assertEqual(0, NotChecked),
-                        ?assertEqual(
-                            lists:sort([atom_to_binary(N, utf8) || N <- RealNames]),
-                            lists:sort(CheckedOwners)
-                        )
-                    after
-                        beamtalk_class_metadata:delete(ChangedClass),
-                        beamtalk_class_metadata:delete(UnrelatedClass)
-                    end
-                end)
-            ]
-        end}}.
+                    %% `total_candidates` is `length(group_by_owner(Sites))`
+                    %% computed straight from `senders_of/2`'s
+                    %% already-filtered result, before `apply_cap/2` runs
+                    %% — if the unrelated-type candidates had merely been
+                    %% re-checked and discarded (the pre-Phase-4 behaviour),
+                    %% `Total` would be 5 (2 real + 3 unrelated), not 2.
+                    ?assertEqual(length(RealNames), Total),
+                    ?assertEqual(length(RealNames), Checked),
+                    ?assertEqual(0, NotChecked),
+                    ?assertEqual(
+                        lists:sort([atom_to_binary(N, utf8) || N <- RealNames]),
+                        lists:sort(CheckedOwners)
+                    )
+                after
+                    beamtalk_class_metadata:delete(ChangedClass),
+                    beamtalk_class_metadata:delete(UnrelatedClass)
+                end
+            end)
+        ]}}.
 
 %%====================================================================
 %% Shape-change re-check (ADR 0105 Phase 2)
@@ -1242,42 +1228,40 @@ counter_actor_hierarchy(FieldTypes) ->
 
 removed_field_accessor_is_flagged_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    %% ReCheckCounter's `name` field was removed — only `count`
-                    %% remains in the ambient (post-reload) hierarchy.
-                    beamtalk_compiler_server:register_class(
-                        'ReCheckCounter', counter_actor_hierarchy(#{count => 'Integer'})
-                    ),
-                    ok = beamtalk_xref:register_class(
-                        'ReCheckDashboard',
-                        beamtalk_test_recheck_fixtures:dashboard_name_accessor_xref(?PREFIX)
-                    ),
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckDashboard">>,
-                        beamtalk_test_recheck_fixtures:dashboard_name_accessor_source(?PREFIX)
-                    ),
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                %% ReCheckCounter's `name` field was removed — only `count`
+                %% remains in the ambient (post-reload) hierarchy.
+                beamtalk_compiler_server:register_class(
+                    'ReCheckCounter', counter_actor_hierarchy(#{count => 'Integer'})
+                ),
+                ok = beamtalk_xref:register_class(
+                    'ReCheckDashboard',
+                    beamtalk_test_recheck_fixtures:dashboard_name_accessor_xref(?PREFIX)
+                ),
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"ReCheckDashboard">>,
+                    beamtalk_test_recheck_fixtures:dashboard_name_accessor_source(?PREFIX)
+                ),
 
-                    Result = beamtalk_recheck:trigger_shape(
-                        <<"ReCheckCounter">>, [{removed, <<"name">>}]
-                    ),
-                    #{findings := Findings, checked := Checked} = Result,
+                Result = beamtalk_recheck:trigger_shape(
+                    <<"ReCheckCounter">>, [{removed, <<"name">>}]
+                ),
+                #{findings := Findings, checked := Checked} = Result,
 
-                    ?assertEqual(1, Checked),
-                    ?assertEqual(1, length(Findings)),
-                    [Finding] = Findings,
-                    ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, Finding)),
-                    ?assertEqual(shape_change, maps:get(classification, Finding)),
-                    ?assertEqual(<<"name">>, maps:get(selector, Finding)),
-                    ?assertEqual(<<"Dnu">>, maps:get(category, Finding)),
-                    ?assertEqual(
-                        <<"state field `name` removed by the reload of ReCheckCounter">>,
-                        maps:get(note, Finding)
-                    )
-                end)
-            ]
-        end}}.
+                ?assertEqual(1, Checked),
+                ?assertEqual(1, length(Findings)),
+                [Finding] = Findings,
+                ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, Finding)),
+                ?assertEqual(shape_change, maps:get(classification, Finding)),
+                ?assertEqual(<<"name">>, maps:get(selector, Finding)),
+                ?assertEqual(<<"Dnu">>, maps:get(category, Finding)),
+                ?assertEqual(
+                    <<"state field `name` removed by the reload of ReCheckCounter">>,
+                    maps:get(note, Finding)
+                )
+            end)
+        ]}}.
 
 %% xref payload: `ReCheckDashboard>>build` sends `spawnWith:` to the class
 %% literal `ReCheckCounter`.
@@ -1302,38 +1286,36 @@ dashboard_spawn_with_source() ->
 
 removed_field_flags_spawn_with_site_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    beamtalk_compiler_server:register_class(
-                        'ReCheckCounter', counter_actor_hierarchy(#{count => 'Integer'})
-                    ),
-                    ok = beamtalk_xref:register_class(
-                        'ReCheckDashboard', dashboard_spawn_with_xref()
-                    ),
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckDashboard">>, dashboard_spawn_with_source()
-                    ),
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                beamtalk_compiler_server:register_class(
+                    'ReCheckCounter', counter_actor_hierarchy(#{count => 'Integer'})
+                ),
+                ok = beamtalk_xref:register_class(
+                    'ReCheckDashboard', dashboard_spawn_with_xref()
+                ),
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"ReCheckDashboard">>, dashboard_spawn_with_source()
+                ),
 
-                    Result = beamtalk_recheck:trigger_shape(
-                        <<"ReCheckCounter">>, [{removed, <<"name">>}]
-                    ),
-                    #{findings := Findings, checked := Checked} = Result,
+                Result = beamtalk_recheck:trigger_shape(
+                    <<"ReCheckCounter">>, [{removed, <<"name">>}]
+                ),
+                #{findings := Findings, checked := Checked} = Result,
 
-                    ?assertEqual(1, Checked),
-                    ?assertEqual(1, length(Findings)),
-                    [Finding] = Findings,
-                    ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, Finding)),
-                    ?assertEqual(shape_change, maps:get(classification, Finding)),
-                    ?assertEqual(<<"name">>, maps:get(selector, Finding)),
-                    ?assertEqual(<<"Type">>, maps:get(category, Finding)),
-                    ?assert(
-                        binary:match(maps:get(message, Finding), <<"unknown state key">>) =/=
-                            nomatch
-                    )
-                end)
-            ]
-        end}}.
+                ?assertEqual(1, Checked),
+                ?assertEqual(1, length(Findings)),
+                [Finding] = Findings,
+                ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, Finding)),
+                ?assertEqual(shape_change, maps:get(classification, Finding)),
+                ?assertEqual(<<"name">>, maps:get(selector, Finding)),
+                ?assertEqual(<<"Type">>, maps:get(category, Finding)),
+                ?assert(
+                    binary:match(maps:get(message, Finding), <<"unknown state key">>) =/=
+                        nomatch
+                )
+            end)
+        ]}}.
 
 %% Added field clears a previously-invalid spawnWith: key — the same class
 %% hierarchy as above but with `name` back in the ambient shape, exercising
@@ -1342,30 +1324,28 @@ removed_field_flags_spawn_with_site_test_() ->
 %% needs to replace a stale entry with an empty one.
 added_field_clears_previously_invalid_spawn_with_key_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    beamtalk_compiler_server:register_class(
-                        'ReCheckCounter',
-                        counter_actor_hierarchy(#{count => 'Integer', name => 'Dynamic'})
-                    ),
-                    ok = beamtalk_xref:register_class(
-                        'ReCheckDashboard', dashboard_spawn_with_xref()
-                    ),
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckDashboard">>, dashboard_spawn_with_source()
-                    ),
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                beamtalk_compiler_server:register_class(
+                    'ReCheckCounter',
+                    counter_actor_hierarchy(#{count => 'Integer', name => 'Dynamic'})
+                ),
+                ok = beamtalk_xref:register_class(
+                    'ReCheckDashboard', dashboard_spawn_with_xref()
+                ),
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"ReCheckDashboard">>, dashboard_spawn_with_source()
+                ),
 
-                    Result = beamtalk_recheck:trigger_shape(
-                        <<"ReCheckCounter">>, [{added, <<"name">>}]
-                    ),
-                    #{findings := Findings, checked := Checked} = Result,
+                Result = beamtalk_recheck:trigger_shape(
+                    <<"ReCheckCounter">>, [{added, <<"name">>}]
+                ),
+                #{findings := Findings, checked := Checked} = Result,
 
-                    ?assertEqual(1, Checked),
-                    ?assertEqual([], Findings)
-                end)
-            ]
-        end}}.
+                ?assertEqual(1, Checked),
+                ?assertEqual([], Findings)
+            end)
+        ]}}.
 
 %%====================================================================
 %% Integration — trigger_pending/5 (ADR 0105 Phase 3, pre-save advisory)
@@ -1373,82 +1353,78 @@ added_field_clears_previously_invalid_spawn_with_key_test_() ->
 
 trigger_pending_finds_stale_dependent_without_installing_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    %% Currently-live (installed) signature: size -> Integer.
-                    beamtalk_compiler_server:register_class(
-                        'ReCheckCounter',
-                        counter_hierarchy(#{
-                            size => #{arity => 0, param_types => [], return_type => 'Integer'}
-                        })
-                    ),
-                    ok = beamtalk_xref:register_class(
-                        'ReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)
-                    ),
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckDashboard">>,
-                        beamtalk_test_recheck_fixtures:dashboard_source(?PREFIX)
-                    ),
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                %% Currently-live (installed) signature: size -> Integer.
+                beamtalk_compiler_server:register_class(
+                    'ReCheckCounter',
+                    counter_hierarchy(#{
+                        size => #{arity => 0, param_types => [], return_type => 'Integer'}
+                    })
+                ),
+                ok = beamtalk_xref:register_class(
+                    'ReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)
+                ),
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"ReCheckDashboard">>,
+                    beamtalk_test_recheck_fixtures:dashboard_source(?PREFIX)
+                ),
 
-                    %% Pending, NOT YET installed edit: size -> String.
-                    PendingSignature = #{return_type => <<"String">>, param_types => []},
-                    Result = beamtalk_recheck:trigger_pending(
-                        <<"ReCheckCounter">>,
-                        <<"size">>,
-                        instance,
-                        signature_change,
-                        PendingSignature
-                    ),
-                    #{findings := Findings, checked := Checked} = Result,
-                    ?assertEqual(1, Checked),
-                    ?assertEqual(1, length(Findings)),
-                    [Finding] = Findings,
-                    ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, Finding)),
-                    ?assertEqual(signature_change, maps:get(classification, Finding)),
+                %% Pending, NOT YET installed edit: size -> String.
+                PendingSignature = #{return_type => <<"String">>, param_types => []},
+                Result = beamtalk_recheck:trigger_pending(
+                    <<"ReCheckCounter">>,
+                    <<"size">>,
+                    instance,
+                    signature_change,
+                    PendingSignature
+                ),
+                #{findings := Findings, checked := Checked} = Result,
+                ?assertEqual(1, Checked),
+                ?assertEqual(1, length(Findings)),
+                [Finding] = Findings,
+                ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, Finding)),
+                ?assertEqual(signature_change, maps:get(classification, Finding)),
 
-                    %% Never installed: the pending signature travels only as
-                    %% a per-request overlay — the ambient class
-                    %% cache in `beamtalk_compiler_server` is never written to
-                    %% by a pre-save advisory, so it still holds exactly the
-                    %% real, still-live signature untouched.
-                    #{'ReCheckCounter' := RestoredMeta} = beamtalk_compiler_server:get_classes(),
-                    #{method_info := #{size := RestoredEntry}} = RestoredMeta,
-                    ?assertEqual('Integer', maps:get(return_type, RestoredEntry))
-                end)
-            ]
-        end}}.
+                %% Never installed: the pending signature travels only as
+                %% a per-request overlay — the ambient class
+                %% cache in `beamtalk_compiler_server` is never written to
+                %% by a pre-save advisory, so it still holds exactly the
+                %% real, still-live signature untouched.
+                #{'ReCheckCounter' := RestoredMeta} = beamtalk_compiler_server:get_classes(),
+                #{method_info := #{size := RestoredEntry}} = RestoredMeta,
+                ?assertEqual('Integer', maps:get(return_type, RestoredEntry))
+            end)
+        ]}}.
 
 trigger_pending_no_ambient_meta_is_empty_result_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    %% ReCheckCounter was never registered this session at
-                    %% all — no baseline to splice a pending signature into.
-                    Result = beamtalk_recheck:trigger_pending(
-                        <<"ReCheckCounter">>,
-                        <<"size">>,
-                        instance,
-                        signature_change,
-                        #{return_type => <<"String">>, param_types => []}
-                    ),
-                    ?assertEqual(
-                        #{
-                            findings => [],
-                            checked => 0,
-                            total_candidates => 0,
-                            not_checked => 0,
-                            cap_note => undefined,
-                            checked_owners => [],
-                            not_checked_owners => [],
-                            not_verified_owners => []
-                        },
-                        Result
-                    )
-                end)
-            ]
-        end}}.
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                %% ReCheckCounter was never registered this session at
+                %% all — no baseline to splice a pending signature into.
+                Result = beamtalk_recheck:trigger_pending(
+                    <<"ReCheckCounter">>,
+                    <<"size">>,
+                    instance,
+                    signature_change,
+                    #{return_type => <<"String">>, param_types => []}
+                ),
+                ?assertEqual(
+                    #{
+                        findings => [],
+                        checked => 0,
+                        total_candidates => 0,
+                        not_checked => 0,
+                        cap_note => undefined,
+                        checked_owners => [],
+                        not_checked_owners => [],
+                        not_verified_owners => []
+                    },
+                    Result
+                )
+            end)
+        ]}}.
 
 %% A pre-save advisory must never clobber a genuinely concurrent
 %% `register_class/2` commit (e.g. a real save from another session) that
@@ -1459,73 +1435,71 @@ trigger_pending_no_ambient_meta_is_empty_result_test_() ->
 %% relative to the advisory's diagnostics calls.
 trigger_pending_does_not_clobber_concurrent_register_class_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    %% Pre-advisory (installed) generation: size -> Integer.
-                    beamtalk_compiler_server:register_class(
-                        'ReCheckCounter',
-                        counter_hierarchy(#{
-                            size => #{arity => 0, param_types => [], return_type => 'Integer'}
-                        })
-                    ),
-                    ok = beamtalk_xref:register_class(
-                        'ReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)
-                    ),
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckDashboard">>,
-                        beamtalk_test_recheck_fixtures:dashboard_source(?PREFIX)
-                    ),
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                %% Pre-advisory (installed) generation: size -> Integer.
+                beamtalk_compiler_server:register_class(
+                    'ReCheckCounter',
+                    counter_hierarchy(#{
+                        size => #{arity => 0, param_types => [], return_type => 'Integer'}
+                    })
+                ),
+                ok = beamtalk_xref:register_class(
+                    'ReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)
+                ),
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"ReCheckDashboard">>,
+                    beamtalk_test_recheck_fixtures:dashboard_source(?PREFIX)
+                ),
 
-                    %% A distinct, independently-installed generation — models
-                    %% a real `compile:source:`/reload commit from a different
-                    %% session, landing shortly after the advisory below has
-                    %% already read the pre-advisory generation.
-                    ConcurrentGeneration = counter_hierarchy(#{
-                        size => #{arity => 0, param_types => [], return_type => 'Boolean'}
-                    }),
-                    _ = spawn(fun() ->
-                        %% sleep: simulates the concurrent session committing
-                        %% shortly after the advisory read its generation
-                        timer:sleep(1),
-                        ok = beamtalk_compiler_server:register_class(
-                            'ReCheckCounter', ConcurrentGeneration
-                        )
-                    end),
+                %% A distinct, independently-installed generation — models
+                %% a real `compile:source:`/reload commit from a different
+                %% session, landing shortly after the advisory below has
+                %% already read the pre-advisory generation.
+                ConcurrentGeneration = counter_hierarchy(#{
+                    size => #{arity => 0, param_types => [], return_type => 'Boolean'}
+                }),
+                _ = spawn(fun() ->
+                    %% sleep: simulates the concurrent session committing
+                    %% shortly after the advisory read its generation
+                    timer:sleep(1),
+                    ok = beamtalk_compiler_server:register_class(
+                        'ReCheckCounter', ConcurrentGeneration
+                    )
+                end),
 
-                    PendingSignature = #{return_type => <<"String">>, param_types => []},
-                    _ = beamtalk_recheck:trigger_pending(
-                        <<"ReCheckCounter">>,
-                        <<"size">>,
-                        instance,
-                        signature_change,
-                        PendingSignature
-                    ),
+                PendingSignature = #{return_type => <<"String">>, param_types => []},
+                _ = beamtalk_recheck:trigger_pending(
+                    <<"ReCheckCounter">>,
+                    <<"size">>,
+                    instance,
+                    signature_change,
+                    PendingSignature
+                ),
 
-                    %% Let the concurrent cast land if it somehow has not yet,
-                    %% then assert ambient state shows the concurrent commit —
-                    %% never reverted to the pre-advisory snapshot.
-                    ok = beamtalk_test_wait:until(
-                        fun() ->
-                            case beamtalk_compiler_server:get_classes() of
-                                #{
-                                    'ReCheckCounter' := #{
-                                        method_info := #{size := #{return_type := 'Boolean'}}
-                                    }
-                                } ->
-                                    true;
-                                _ ->
-                                    false
-                            end
+                %% Let the concurrent cast land if it somehow has not yet,
+                %% then assert ambient state shows the concurrent commit —
+                %% never reverted to the pre-advisory snapshot.
+                ok = beamtalk_test_wait:until(
+                    fun() ->
+                        case beamtalk_compiler_server:get_classes() of
+                            #{
+                                'ReCheckCounter' := #{
+                                    method_info := #{size := #{return_type := 'Boolean'}}
+                                }
+                            } ->
+                                true;
+                            _ ->
+                                false
                         end
-                    ),
-                    ok = beamtalk_test_wait:sync(beamtalk_compiler_server),
-                    #{'ReCheckCounter' := FinalMeta} = beamtalk_compiler_server:get_classes(),
-                    #{method_info := #{size := FinalEntry}} = FinalMeta,
-                    ?assertEqual('Boolean', maps:get(return_type, FinalEntry))
-                end)
-            ]
-        end}}.
+                    end
+                ),
+                ok = beamtalk_test_wait:sync(beamtalk_compiler_server),
+                #{'ReCheckCounter' := FinalMeta} = beamtalk_compiler_server:get_classes(),
+                #{method_info := #{size := FinalEntry}} = FinalMeta,
+                ?assertEqual('Boolean', maps:get(return_type, FinalEntry))
+            end)
+        ]}}.
 
 %%====================================================================
 %% Integration — trigger_image/0 (ADR 0105 Phase 3, :recheck image)
@@ -1539,48 +1513,44 @@ recheck_image_broken_source() ->
 
 trigger_image_reports_checked_and_stale_across_the_image_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckImageClean">>, recheck_image_clean_source()
-                    ),
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckImageBroken">>, recheck_image_broken_source()
-                    ),
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"ReCheckImageClean">>, recheck_image_clean_source()
+                ),
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"ReCheckImageBroken">>, recheck_image_broken_source()
+                ),
 
-                    Result = beamtalk_recheck:trigger_image(),
-                    #{findings := Findings, checked := Checked, stale := Stale} = Result,
+                Result = beamtalk_recheck:trigger_image(),
+                #{findings := Findings, checked := Checked, stale := Stale} = Result,
 
-                    %% Both live classes' diagnostics round-trips completed...
-                    ?assertEqual(2, Checked),
-                    %% ...but only the genuinely-broken one is stale.
-                    ?assertEqual(1, Stale),
-                    ?assert(length(Findings) >= 1),
-                    ?assert(
-                        lists:all(
-                            fun(F) ->
-                                maps:get(owner, F) =:= {beamtalk_string, <<"ReCheckImageBroken">>}
-                            end,
-                            Findings
-                        )
+                %% Both live classes' diagnostics round-trips completed...
+                ?assertEqual(2, Checked),
+                %% ...but only the genuinely-broken one is stale.
+                ?assertEqual(1, Stale),
+                ?assert(length(Findings) >= 1),
+                ?assert(
+                    lists:all(
+                        fun(F) ->
+                            maps:get(owner, F) =:= {beamtalk_string, <<"ReCheckImageBroken">>}
+                        end,
+                        Findings
                     )
-                end)
-            ]
-        end}}.
+                )
+            end)
+        ]}}.
 
 trigger_image_empty_when_no_classes_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(
-                    ?assertEqual(
-                        #{findings => [], checked => 0, stale => 0},
-                        beamtalk_recheck:trigger_image()
-                    )
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(
+                ?assertEqual(
+                    #{findings => [], checked => 0, stale => 0},
+                    beamtalk_recheck:trigger_image()
                 )
-            ]
-        end}}.
+            )
+        ]}}.
 
 %%====================================================================
 %% Compiler-port exit-catch coverage (trigger_image/0 and
@@ -1612,62 +1582,58 @@ recheck_exit_fault_source() ->
 
 trigger_image_degrades_on_compiler_port_exit_without_aborting_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckExitFaultClass">>, recheck_exit_fault_source()
-                    ),
-                    ok = beamtalk_compiler_server:inject_diagnostics_exit(),
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"ReCheckExitFaultClass">>, recheck_exit_fault_source()
+                ),
+                ok = beamtalk_compiler_server:inject_diagnostics_exit(),
 
-                    %% The injected exit degrades this class to `failed`
-                    %% (recheck_image_class/2's catch clause) — trigger_image/0
-                    %% itself must not crash or propagate the exit.
-                    ?assertEqual(
-                        #{findings => [], checked => 0, stale => 0},
-                        beamtalk_recheck:trigger_image()
-                    ),
+                %% The injected exit degrades this class to `failed`
+                %% (recheck_image_class/2's catch clause) — trigger_image/0
+                %% itself must not crash or propagate the exit.
+                ?assertEqual(
+                    #{findings => [], checked => 0, stale => 0},
+                    beamtalk_recheck:trigger_image()
+                ),
 
-                    %% Not left permanently broken: after the supervisor
-                    %% restarts the server, the same class checks clean.
-                    ok = beamtalk_compiler_test_helper:wait_for_compiler_server_restart(),
-                    Recovered = beamtalk_recheck:trigger_image(),
-                    ?assertEqual(1, maps:get(checked, Recovered)),
-                    ?assertEqual([], maps:get(findings, Recovered))
-                end)
-            ]
-        end}}.
+                %% Not left permanently broken: after the supervisor
+                %% restarts the server, the same class checks clean.
+                ok = beamtalk_compiler_test_helper:wait_for_compiler_server_restart(),
+                Recovered = beamtalk_recheck:trigger_image(),
+                ?assertEqual(1, maps:get(checked, Recovered)),
+                ?assertEqual([], maps:get(findings, Recovered))
+            end)
+        ]}}.
 
 trigger_leaf_change_degrades_on_compiler_port_exit_without_aborting_test_() ->
     {timeout, 30,
-        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckExitFaultClass">>, recheck_exit_fault_source()
-                    ),
-                    ok = beamtalk_compiler_server:inject_diagnostics_exit(),
+        {foreach, fun recheck_setup/0, fun recheck_teardown/1, [
+            ?_test(begin
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"ReCheckExitFaultClass">>, recheck_exit_fault_source()
+                ),
+                ok = beamtalk_compiler_server:inject_diagnostics_exit(),
 
-                    %% The injected exit degrades this class to `failed`
-                    %% (recheck_owner_for_leaf_change/3's catch clause) —
-                    %% trigger_leaf_change/1 itself must not crash or
-                    %% propagate the exit. Never checked, so it lands in
-                    %% not_verified_owners rather
-                    %% than being silently dropped.
-                    Result = beamtalk_recheck:trigger_leaf_change([<<"SomeSuperclass">>]),
-                    ?assertEqual([], maps:get(findings, Result)),
-                    ?assertEqual(0, maps:get(checked, Result)),
-                    ?assertEqual([], maps:get(checked_owners, Result)),
-                    ?assertEqual(
-                        [<<"ReCheckExitFaultClass">>], maps:get(not_verified_owners, Result)
-                    ),
+                %% The injected exit degrades this class to `failed`
+                %% (recheck_owner_for_leaf_change/3's catch clause) —
+                %% trigger_leaf_change/1 itself must not crash or
+                %% propagate the exit. Never checked, so it lands in
+                %% not_verified_owners rather
+                %% than being silently dropped.
+                Result = beamtalk_recheck:trigger_leaf_change([<<"SomeSuperclass">>]),
+                ?assertEqual([], maps:get(findings, Result)),
+                ?assertEqual(0, maps:get(checked, Result)),
+                ?assertEqual([], maps:get(checked_owners, Result)),
+                ?assertEqual(
+                    [<<"ReCheckExitFaultClass">>], maps:get(not_verified_owners, Result)
+                ),
 
-                    %% Not left permanently broken: after the supervisor
-                    %% restarts the server, the same class checks clean.
-                    ok = beamtalk_compiler_test_helper:wait_for_compiler_server_restart(),
-                    Recovered = beamtalk_recheck:trigger_leaf_change([<<"SomeSuperclass">>]),
-                    ?assertEqual(1, maps:get(checked, Recovered)),
-                    ?assertEqual([<<"ReCheckExitFaultClass">>], maps:get(checked_owners, Recovered))
-                end)
-            ]
-        end}}.
+                %% Not left permanently broken: after the supervisor
+                %% restarts the server, the same class checks clean.
+                ok = beamtalk_compiler_test_helper:wait_for_compiler_server_restart(),
+                Recovered = beamtalk_recheck:trigger_leaf_change([<<"SomeSuperclass">>]),
+                ?assertEqual(1, maps:get(checked, Recovered)),
+                ?assertEqual([<<"ReCheckExitFaultClass">>], maps:get(checked_owners, Recovered))
+            end)
+        ]}}.

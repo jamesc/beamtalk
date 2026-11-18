@@ -483,7 +483,7 @@ create_beam_with_raw_docs_chunk(RawDocsBin) ->
         {attribute, 2, export, [{foo, 0}]},
         {function, 3, foo, 0, [{clause, 3, [], [], [{atom, 3, ok}]}]}
     ],
-    {ok, Module, BeamBin} = compile:forms(Forms),
+    {Module, BeamBin} = beamtalk_test_module:compile(Forms),
     %% Inject custom Docs chunk into the beam binary
     {ok, _, Chunks} = beam_lib:all_chunks(BeamBin),
     Chunks2 = [{"Docs", RawDocsBin} | lists:keydelete("Docs", 1, Chunks)],

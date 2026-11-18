@@ -1334,7 +1334,7 @@ define_dynamic_class(NamePrefix) ->
         {attribute, 1, module, ModAtom},
         {attribute, 2, export, []}
     ],
-    {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
+    {ModAtom, Bin} = beamtalk_test_module:compile(Forms),
     %% An empty filename (rather than a fake ".erl" path) is what makes
     %% `code:which/1` answer `[]` — the "loaded from binary with no file"
     %% signal `no_source_reason/1` reads as `"dynamic"` rather than "stdlib"

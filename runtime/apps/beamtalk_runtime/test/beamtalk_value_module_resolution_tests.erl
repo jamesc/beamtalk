@@ -818,6 +818,7 @@ fast_outcome(Self, Selector, Args) ->
     try
         {ok, fast_send(Self, Selector, Args)}
     catch
+        %% Kept hand-written: value-returning outcome helper (also catches non-Beamtalk raises)
         error:#{error := #beamtalk_error{kind = K, class = C, selector = S, hint = H}} ->
             {bt_error, K, C, S, H};
         Class:Reason ->
@@ -906,8 +907,7 @@ load_accessor_module(Module, Field) ->
             ]}
         ]}
     ],
-    {ok, Module, Binary} = compile:forms(Forms),
-    {module, Module} = code:load_binary(Module, atom_to_list(Module) ++ ".erl", Binary),
+    ok = beamtalk_test_module:load(Module, Forms),
     ok.
 
 -doc """

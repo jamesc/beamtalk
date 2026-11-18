@@ -23,19 +23,40 @@ pub(super) fn temp_utf8_dir() -> (TempDir, Utf8PathBuf) {
     (temp, dir)
 }
 
+impl ClassMeta {
+    /// Test fixture: a plain class with every field but its names at the
+    /// neutral value. Override fields with struct-update syntax:
+    /// `ClassMeta { state: …, ..ClassMeta::test("bt@stdlib@x", "X", "Object") }`.
+    pub(super) fn test(module_name: &str, class_name: &str, superclass_name: &str) -> Self {
+        ClassMeta {
+            module_name: module_name.to_string(),
+            class_name: class_name.to_string(),
+            superclass_name: superclass_name.to_string(),
+            modifiers: ClassModifiers::default(),
+            class_kind: beamtalk_core::ast::ClassKind::Object,
+            state: vec![],
+            state_types: vec![],
+            state_has_default: vec![],
+            state_kinds: vec![],
+            initialize_assigns: vec![],
+            has_dynamic_field_writer: false,
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
+            handle_scope: None,
+            auto_kw: None,
+            is_value_subclass: false,
+            in_caller_new1: false,
+        }
+    }
+}
+
 pub(super) fn sample_class_meta() -> ClassMeta {
     ClassMeta {
-        module_name: "bt@stdlib@counter".to_string(),
-        class_name: "Counter".to_string(),
-        superclass_name: "Actor".to_string(),
-        modifiers: ClassModifiers::default(),
         class_kind: beamtalk_core::ast::ClassKind::Actor,
         state: vec!["count".to_string()],
-        state_types: vec![],
-        state_has_default: vec![],
-        state_kinds: vec![],
-        initialize_assigns: vec![],
-        has_dynamic_field_writer: false,
         methods: vec![
             MethodMeta {
                 selector: "increment".to_string(),
@@ -80,13 +101,7 @@ pub(super) fn sample_class_meta() -> ClassMeta {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        handle_scope: None,
-        auto_kw: None,
-        is_value_subclass: false,
-        in_caller_new1: false,
+        ..ClassMeta::test("bt@stdlib@counter", "Counter", "Actor")
     }
 }
 

@@ -89,15 +89,19 @@ every_do_non_integer_delay_test() ->
 %%% ============================================================================
 
 sleep_returns_nil_test() ->
+    %% sleep: the code under test is the sleep itself
     ?assertEqual(nil, beamtalk_timer:sleep(1)).
 
 sleep_zero_test() ->
+    %% sleep: the code under test is the sleep itself
     ?assertEqual(nil, beamtalk_timer:sleep(0)).
 
 sleep_negative_test() ->
+    %% sleep: the code under test is the sleep itself
     ?assertBtError(type_error, beamtalk_timer:sleep(-1)).
 
 sleep_non_integer_test() ->
+    %% sleep: the code under test is the sleep itself
     ?assertBtError(type_error, beamtalk_timer:sleep(<<"500">>)).
 
 %%% ============================================================================

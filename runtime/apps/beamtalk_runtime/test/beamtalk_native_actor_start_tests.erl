@@ -84,10 +84,9 @@ local_and_anonymous_native_actors_record_no_start_time_test() ->
 
 global_native_conflict_keeps_the_older_test() ->
     {ok, Older} = beamtalk_actor_registry:'spawnAsGlobal'(bt4956_eunit_older, ?FACADE, #{}),
-    %% sleep: waits for a clock tick between the starts (class 3)
-    timer:sleep(5),
+    ok = await_clock_past_start(Older),
     {ok, Younger1} = beamtalk_actor_registry:'spawnAsGlobal'(bt4956_eunit_younger1, ?FACADE, #{}),
-    timer:sleep(5),
+    ok = await_clock_past_start(Younger1),
     {ok, Younger2} = beamtalk_actor_registry:'spawnAsGlobal'(bt4956_eunit_younger2, ?FACADE, #{}),
     %% The resolver stops the loser with `{shutdown, global_name_conflict}`,
     %% which would take a linked test process down with it.
@@ -142,3 +141,10 @@ non_map_config_is_type_error_test() ->
         {error, #beamtalk_error{kind = type_error}},
         beamtalk_actor:safe_spawn_linked(?FACADE, [not_a_map])
     ).
+
+%% Wait for the clock to move past `Pid`'s recorded start time, so the next
+%% start is strictly younger (start times are microsecond stamps).
+await_clock_past_start(Pid) ->
+    StartedAt = beamtalk_actor_registry:started_at_from_dictionary(Pid),
+    ?assert(is_integer(StartedAt)),
+    beamtalk_test_wait:until(fun() -> erlang:system_time(microsecond) > StartedAt end).

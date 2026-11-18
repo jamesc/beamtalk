@@ -11,7 +11,7 @@
 //!   [`TokenId`].
 //! - Statements: [`ThreadedStmt`], [`BindOp`], [`ThreadingMode`].
 //! - Expression-position state effects (ADR 0118): [`ThreadedValue`],
-//!   [`CloseContext`].
+//!   `CloseContext` (test-only).
 //!
 //! `VersionPrefix::Local`, `ThreadingMode::DirectParams`,
 //! `ThreadingMode::Hybrid`, [`LoopCounter`], and `ThreadedStmt::ConditionalLoop`
@@ -164,9 +164,8 @@ impl FrameId {
 /// not IR construction; `ValueRef::Version`'s own first production call site
 /// is ADR 0122's `append_family_slots`, a later addition). `Local` gets its
 /// own production call site via
-/// [`verify_tuple_acc_unpack_invariant`]. `#[allow(dead_code)]` here
-/// documents that the remaining variants stay test-only for now, instead of
-/// forcing artificial non-test construction sites.
+/// [`verify_tuple_acc_unpack_invariant`]. (Historical: every variant now
+/// has a production constructor; `BindOp::Unpack` is the one test-only op.)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(in crate::core_erlang) enum VersionPrefix {
     /// Actor/instance state (`State`, `State1`, … — rendered as `StateAcc{N}`
@@ -512,12 +511,8 @@ pub(in crate::core_erlang) enum ValueRef {
     /// through `RenderCtx`'s own prefix resolution, which is exactly what
     /// gives `VersionPrefix::State` its loop-context-aware `StateAcc` vs.
     /// `State` spelling for free (this variant's whole reason to exist over
-    /// a plain [`Self::Var`]/[`Self::Doc`]). `#[allow(dead_code)]` because
-    /// that helper is itself not yet wired into any live emission site
-    /// (ADR 0122, BT-3511 — the helper only; migrating a site to call it is
-    /// each site's own later issue) — only its own unit tests construct
-    /// this today.
-    #[allow(dead_code)]
+    /// a plain [`Self::Var`]/[`Self::Doc`]). Live since the ADR 0122 site
+    /// migrations (BT-3512–BT-3516).
     Version(VersionedVar),
     /// A fresh, non-versioned Core Erlang variable name (e.g. a computed
     /// `_Val0` RHS temp).
@@ -554,14 +549,12 @@ pub(in crate::core_erlang) enum BindOp {
     /// only inside a [`ThreadingMode::StateAcc`] body; see
     /// [`VerifyError::ThreadingModeUnpackMismatch`].
     ///
-    /// Still genuinely unconstructed in production —
-    /// `generate_unpack_at_iteration_start`'s `StateAcc`-mode per-iteration
-    /// unpack never migrated to real `ThreadedIr` emission (only the
-    /// `TupleAcc`-mode unpack did, via
-    /// [`ThreadedStmt::TupleAccUnpack`]). `render_bind`'s arm for
-    /// it is real, tested production code (see `render_bind_tests`) —
-    /// only a lowering-side constructor is missing.
-    #[allow(dead_code)]
+    /// Test-only: `generate_unpack_at_iteration_start`'s `StateAcc`-mode
+    /// per-iteration unpack never migrated to `ThreadedIr` emission (only the
+    /// `TupleAcc`-mode unpack did, via [`ThreadedStmt::TupleAccUnpack`]) and
+    /// no open issue plans to, so the variant and its render/verify arms
+    /// exist only to keep the verifier's mode check under test (BT-5005).
+    #[cfg(test)]
     Unpack { field: String },
     /// A direct rebind from a computed value (e.g. a direct-params loop's
     /// per-iteration local rebind, or a value-type `Self{N}` rebind).
@@ -663,7 +656,7 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// [`AccParam`], never a [`VersionedVar`] — see its doc comment);
     /// `gate_slots` is the number of leading tuple positions this node skips
     /// before `targets` begins (invariant class 4). Distinct from
-    /// [`BindOp::Unpack`] (`maps:get`, `StateAcc`-mode only) — this is
+    /// `BindOp::Unpack` (`maps:get`, `StateAcc`-mode only, test-only) — this is
     /// invariant class 1, "the flat positional-unpack accumulator distinct
     /// from parameter threading."
     TupleAccUnpack {
@@ -1363,17 +1356,15 @@ impl UserCodeRegion {
 
 // ─── ADR 0131: LocalRebind lowering ─────────────────────────────────────────
 //
-// ADR 0131 Phase 2's local-threading producer (BT-3749) is the first
-// production caller. It lowers only at the method root, so the loop-frame
-// and map lowerings (`CarrierSlot::Pos`, `RebindLowering::{LoopParam,
-// MapPut}`) are still built only by tests — hence the `#[allow(dead_code)]`s
-// left below.
+// ADR 0131 Phase 2's local-threading producer (BT-3749) was the first
+// production caller, at the method root; Phase 2b (BT-3793) added the
+// loop-frame and map lowerings (`CarrierSlot::Pos`, `RebindLowering::{LoopParam,
+// MapPut}`).
 
 /// Where a [`ThreadedStmt::LocalRebind`] reads its local's new value from
 /// the construct tuple (ADR 0131 §2's `<read>`). The construct reports which,
 /// because the construct built the tuple.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(in crate::core_erlang) enum CarrierSlot {
     /// A `StateAcc`-carrying construct (`{Value, StateAcc}`): the local is the
     /// map key (`__local__t`, or the bare name in the REPL) —
@@ -1562,7 +1553,6 @@ impl RebindFrame {
 /// `LocalRebindModeMismatch` re-derives the shape from the enclosing node
 /// ([`RebindFrame::shape_for`]) and compares (this is its `lowered_as`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(in crate::core_erlang) enum RebindLowering {
     /// `let V = <read> in` — a plain, unthreaded binding.
     Let,
@@ -1970,13 +1960,12 @@ pub(in crate::core_erlang) struct ThreadedValue {
 /// versioned `Bind`s in its prelude — the single input to
 /// [`ThreadedValue::close`]'s escape check (ADR 0118 §Decision 5).
 ///
-/// ADR 0118 phase 1a: constructed only by [`ThreadedValue::close`]'s
-/// unit tests so far — every phase-1a consumer *splices*; the production
-/// `close()` call sites arrive with the consumers that must produce a
-/// self-contained `Document` (`expression_doc` in Actor context, phase 2b —
-/// see that function's doc comment for why not sooner). Same status as
-/// [`ValueRef::Version`]'s constructor.
-#[allow(dead_code)]
+/// Test-only: ADR 0118 finished (BT-3413) with every consumer *splicing*
+/// its prelude, so `close()` never gained a production caller; it and this
+/// enum are kept under `cfg(test)` as the executable statement of the
+/// escape rule that the production `opaque_escapes` check implements
+/// (BT-5005).
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum CloseContext {
     /// Nothing outside the closed `Document` can observe a version the
@@ -1998,8 +1987,8 @@ impl ThreadedValue {
     ///
     /// ADR 0118 phase 1a: `threaded_expression` builds its pure results
     /// inline (it always has a prelude `Vec` in hand); used by `close()`'s
-    /// unit tests. Same status as [`CloseContext`].
-    #[allow(dead_code)]
+    /// unit tests. Same status as `CloseContext`.
+    #[cfg(test)]
     pub(in crate::core_erlang) fn pure(value: ValueRef) -> Self {
         Self {
             prelude: Vec::new(),

@@ -79,8 +79,7 @@ load_fake_class_module(ClassNameAtom) ->
             {clause, 3, [], [], [{atom, 3, ok}]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".beam", Bin),
+    Mod = beamtalk_test_module:load(Forms),
     Mod.
 
 %% like load_fake_class_module/1, but under the package-qualified module name
@@ -104,8 +103,7 @@ load_fake_class_module_qualified(ClassNameAtom, PackageName, Segments) ->
             {clause, 3, [], [], [{atom, 3, ok}]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".beam", Bin),
+    Mod = beamtalk_test_module:load(Forms),
     Mod.
 
 %% Resolve via the shared resolver (BT-3680) so tests check the same file the

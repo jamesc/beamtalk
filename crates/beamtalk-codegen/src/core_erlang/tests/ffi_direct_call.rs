@@ -7,7 +7,7 @@
 //! (`beamtalk_erlang_proxy:ffi_call_raised/8`, `/9` for a binary or map argument). Anything the FFI type table
 //! cannot prove keeps `beamtalk_erlang_proxy:direct_call/4`.
 
-use super::codegen_named;
+use super::{assert_has, assert_lacks, codegen_named};
 use beamtalk_core::semantic_analysis::type_checker::{
     FunctionSignature, NativeTypeRegistry, ParamType,
 };
@@ -129,19 +129,22 @@ fn assert_direct(code: &str, module: &str, function: &str, mode: &str) {
             || (code.contains(&try_let) && code.contains(&format!("= {call}"))),
         "expected a `try` around `{call}` in:\n{code}"
     );
-    assert!(
-        code.contains("call 'beamtalk_erlang_proxy':'ffi_call_raised'("),
-        "a direct call keeps the proxy's error translation:\n{code}"
+    assert_has(
+        "a direct call keeps the proxy's error translation",
+        code,
+        &["call 'beamtalk_erlang_proxy':'ffi_call_raised'("],
     );
     // The catch variable is the raw stacktrace; the helper takes the list,
     // plus the call site's frame, read only on the error path.
-    assert!(
-        code.contains("primop 'build_stacktrace'(_FfiStk"),
-        "the raw stacktrace is built before the hand-off:\n{code}"
+    assert_has(
+        "the raw stacktrace is built before the hand-off",
+        code,
+        &["primop 'build_stacktrace'(_FfiStk"],
     );
-    assert!(
-        code.contains("call 'erlang':'process_info'(_FfiSelf"),
-        "the call site is read in the catch:\n{code}"
+    assert_has(
+        "the call site is read in the catch",
+        code,
+        &["call 'erlang':'process_info'(_FfiSelf"],
     );
     let tail = format!("'{module}', '{function}', [");
     assert!(code.contains(&tail), "expected `{tail}` in:\n{code}");
@@ -155,10 +158,7 @@ fn assert_direct(code: &str, module: &str, function: &str, mode: &str) {
 /// A direct call with arguments checks them at run time and falls back to
 /// the proxy for a value its static type did not promise.
 fn assert_guarded(code: &str, module: &str, function: &str) {
-    assert!(
-        code.contains("case <> of <> when "),
-        "expected a guard in:\n{code}"
-    );
+    assert_has("expected a guard in", code, &["case <> of <> when "]);
     for bif in beamtalk_core::semantic_analysis::type_checker::FFI_ARG_RUNTIME_GUARDS {
         let test = format!("call 'erlang':'{bif}'(_FfiArg");
         assert!(code.contains(&test), "expected `{test}` in:\n{code}");
@@ -175,9 +175,10 @@ fn assert_guarded(code: &str, module: &str, function: &str) {
 fn assert_proxied(code: &str, module: &str, function: &str) {
     let call = format!("call 'beamtalk_erlang_proxy':'direct_call'('{module}', '{function}',");
     assert!(code.contains(&call), "expected `{call}` in:\n{code}");
-    assert!(
-        !code.contains("'ffi_call_raised'("),
-        "an unproved call stays on the proxy:\n{code}"
+    assert_lacks(
+        "an unproved call stays on the proxy",
+        code,
+        &["'ffi_call_raised'("],
     );
 }
 
@@ -233,15 +234,17 @@ fn string_arg_is_direct_behind_is_binary_guard() {
     let code = compile_run_body("Erlang erlang phash2: s");
     assert_direct(&code, "erlang", "phash2", "stock");
     assert_guarded(&code, "erlang", "phash2");
-    assert!(
-        code.contains("call 'erlang':'is_binary'(_FfiArg"),
-        "the String argument is guarded by is_binary:\n{code}"
+    assert_has(
+        "the String argument is guarded by is_binary",
+        &code,
+        &["call 'erlang':'is_binary'(_FfiArg"],
     );
     // A binary argument can retry on `badarg`, so the call site keeps the
     // pre-call class-variable snapshot for it (as the proxy does).
-    assert!(
-        code.contains("= call 'beamtalk_class_vars':'snapshot'() in try call 'erlang':'phash2'("),
-        "the snapshot is read before the call:\n{code}"
+    assert_has(
+        "the snapshot is read before the call",
+        &code,
+        &["= call 'beamtalk_class_vars':'snapshot'() in try call 'erlang':'phash2'("],
     );
     assert!(
         code.contains("'stock', _FfiSite@") && code.contains(", _FfiSnap@"),
@@ -254,9 +257,10 @@ fn string_arg_is_direct_behind_is_binary_guard() {
         1,
         "only the fallback arm calls the proxy:\n{code}"
     );
-    assert!(
-        !code.contains("'beamtalk_message_dispatch':'send'"),
-        "no dynamic send in:\n{code}"
+    assert_lacks(
+        "no dynamic send in",
+        &code,
+        &["'beamtalk_message_dispatch':'send'"],
     );
 }
 
@@ -392,21 +396,25 @@ fn ok_value_result_is_built_inline() {
         code.contains("<{'ok', _FfiPayload") && code.contains("<{'error', _FfiPayload"),
         "the ok and error arms match the tagged tuples:\n{code}"
     );
-    assert!(
-        code.contains("call 'erlang':'not'(call 'erlang':'is_list'(_FfiPayload"),
-        "a list payload is left to the proxy's charlist coercion:\n{code}"
+    assert_has(
+        "a list payload is left to the proxy's charlist coercion",
+        &code,
+        &["call 'erlang':'not'(call 'erlang':'is_list'(_FfiPayload"],
     );
-    assert!(
-        code.contains("call 'beamtalk_result':'from_tagged_tuple'(_FfiRaw"),
-        "the Result is the constructor the proxy ends in:\n{code}"
+    assert_has(
+        "the Result is the constructor the proxy ends in",
+        &code,
+        &["call 'beamtalk_result':'from_tagged_tuple'(_FfiRaw"],
     );
-    assert!(
-        code.contains("call 'beamtalk_result':'from_tagged_tuple'({'ok', 'nil'})"),
-        "a bare `ok` is `{{ok, nil}}`:\n{code}"
+    assert_has(
+        "a bare `ok` is `{ok, nil}`",
+        &code,
+        &["call 'beamtalk_result':'from_tagged_tuple'({'ok', 'nil'})"],
     );
-    assert!(
-        code.contains("call 'beamtalk_erlang_proxy':'coerce_ffi_result'('erlang', _FfiOther"),
-        "everything else is coerced by the proxy on the value already returned:\n{code}"
+    assert_has(
+        "everything else is coerced by the proxy on the value already returned",
+        &code,
+        &["call 'beamtalk_erlang_proxy':'coerce_ffi_result'('erlang', _FfiOther"],
     );
     // No dynamic send, class-process call or `Result ok:` dispatch.
     for banned in [
@@ -452,9 +460,10 @@ fn list_value_result_stays_on_proxy() {
 fn dynamic_value_result_is_built_inline() {
     let code = compile_run_body("Erlang erlang find_dyn: n");
     assert_direct(&code, "erlang", "find_dyn", "stock");
-    assert!(
-        code.contains("call 'erlang':'not'(call 'erlang':'is_list'(_FfiPayload"),
-        "a list payload is left to the proxy:\n{code}"
+    assert_has(
+        "a list payload is left to the proxy",
+        &code,
+        &["call 'erlang':'not'(call 'erlang':'is_list'(_FfiPayload"],
     );
     assert!(
         code.contains("call 'beamtalk_erlang_proxy':'coerce_ffi_result'('erlang', _FfiOther"),
@@ -471,14 +480,16 @@ fn dictionary_arg_is_direct_behind_is_map_guard() {
     let code = compile_run_body("Erlang erlang map_size: d");
     assert_direct(&code, "erlang", "map_size", "stock");
     assert_guarded(&code, "erlang", "map_size");
-    assert!(
-        code.contains("call 'erlang':'is_map'(_FfiArg"),
-        "the Dictionary argument is guarded by is_map:\n{code}"
+    assert_has(
+        "the Dictionary argument is guarded by is_map",
+        &code,
+        &["call 'erlang':'is_map'(_FfiArg"],
     );
     assert!(!code.contains("'is_binary'"), "{code}");
-    assert!(
-        code.contains("= call 'beamtalk_class_vars':'snapshot'() in try call 'erlang':'map_size'("),
-        "the snapshot is read before the call:\n{code}"
+    assert_has(
+        "the snapshot is read before the call",
+        &code,
+        &["= call 'beamtalk_class_vars':'snapshot'() in try call 'erlang':'map_size'("],
     );
     assert!(
         code.contains("'stock', _FfiSite@") && code.contains(", _FfiSnap@"),

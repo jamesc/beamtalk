@@ -284,6 +284,7 @@ impl ClassHierarchy {
                     is_native: false,
                     handle_scope: None,
                     surface_incomplete: false,
+                    // Synthetic: no `.bt` `new:` to inspect.
                     in_caller_new1: false,
                     // Synthetic entry: no compiled module exists.
                     is_module_less: true,
@@ -678,6 +679,7 @@ impl ClassHierarchy {
                         // whose chain includes it must never be classified
                         // ClosedComplete.
                         surface_incomplete: true,
+                        // Stub: its `new:` (if any) is unknown; the class process is the safe default.
                         in_caller_new1: false,
                         // Stub: no compiled module is known.
                         is_module_less: true,

@@ -1588,7 +1588,7 @@ read_specs_no_debug_info_test() ->
             {eof, erl_anno:new(1)}
         ],
         %% Compile WITHOUT debug_info
-        {ok, test_no_debug, BeamBin} = compile:forms(Forms, []),
+        {test_no_debug, BeamBin} = beamtalk_test_module:compile(Forms),
         BeamFile = filename:join(TmpDir, "test_no_debug.beam"),
         ok = file:write_file(BeamFile, BeamBin),
         Result = beamtalk_spec_reader:read_specs(BeamFile),
@@ -2056,7 +2056,7 @@ read_raw_specs_module_qualified_spec_test() ->
         ]},
         {eof, 5}
     ],
-    {ok, modqual_spec_test, BeamBin} = compile:forms(Forms, [debug_info]),
+    {modqual_spec_test, BeamBin} = beamtalk_test_module:compile(Forms, [debug_info]),
     TmpDir = make_tmp_dir(),
     BeamFile = filename:join(TmpDir, "modqual_spec_test.beam"),
     ok = file:write_file(BeamFile, BeamBin),
