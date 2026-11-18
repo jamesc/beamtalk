@@ -285,7 +285,7 @@ fn batched_erlc_verdict() -> &'static Result<(), String> {
 ///
 /// This test is skipped if `erlc` is not available on the system PATH.
 /// `erlc` runs once for the whole corpus (see [`batched_erlc_verdict`]); each
-/// case's test then fails only if the output names that case's `<module>.core`.
+/// case's test only recompiles its own module when that batch run failed.
 fn test_codegen_compiles(case_name: &str) {
     if !beamtalk_core::test_helpers::test_support::erlc_available() {
         eprintln!(
@@ -297,23 +297,20 @@ fn test_codegen_compiles(case_name: &str) {
 
     let (module_name, core_erlang) = generate_core_erlang(case_name);
 
-    if let Err(output) = batched_erlc_verdict() {
-        let core_file = format!("{module_name}.core");
-        let mine: Vec<&str> = output
-            .lines()
-            .filter(|line| line.contains(&core_file))
-            .collect();
-        // A spawn failure or output naming no file fails every case.
-        let unattributed = !output.contains(".core");
+    // The batch is only the fast path: `erlc` stops at the first failing file
+    // of a batch, and its output cannot be attributed reliably by substring.
+    // So when the batch failed, recompile this case alone: every failing case
+    // then reports its own diagnostics, and a passing case stays green.
+    if batched_erlc_verdict().is_err() {
+        let result = beamtalk_core::test_helpers::test_support::erlc_batched_in_temp_dir(
+            "package_compiler_case",
+            &[(module_name, core_erlang.clone())],
+        );
         assert!(
-            mine.is_empty() && !unattributed,
+            result.is_ok(),
             "erlc compilation failed for '{}':\n{}\n\nGenerated Core Erlang:\n{}",
             case_name,
-            if unattributed {
-                output.as_str().to_string()
-            } else {
-                mine.join("\n")
-            },
+            result.unwrap_err(),
             core_erlang
         );
     }
