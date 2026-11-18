@@ -16,6 +16,7 @@ use miette::{IntoDiagnostic, Result};
 use crate::paths::beamtalk_dir;
 
 use super::color;
+use super::commands::REPL_COMMAND_TABLE;
 
 /// Selects [`OutputMode::Ansi`] when colour is enabled, otherwise plain.
 pub(crate) fn output_mode() -> OutputMode {
@@ -56,47 +57,40 @@ pub(crate) fn format_error(msg: &str) -> String {
     fmt::format_diagnostic(&FmtDiagnostic::new(msg), output_mode())
 }
 
+/// Render the `:help` command list from [`REPL_COMMAND_TABLE`], so a command or
+/// alias added to the table can never be missing from the help output.
+pub(crate) fn render_command_help() -> String {
+    use std::fmt::Write as _;
+    let rows: Vec<(String, &str)> = REPL_COMMAND_TABLE
+        .iter()
+        .map(|c| {
+            let forms: Vec<&str> = std::iter::once(c.name)
+                .chain(c.aliases.iter().copied())
+                .collect();
+            (forms.join(", "), c.help)
+        })
+        .collect();
+    let width = rows.iter().map(|(f, _)| f.len()).max().unwrap_or(0);
+    let mut out = String::new();
+    for (forms, help) in rows {
+        let _ = writeln!(out, "  {forms:<width$}  {help}");
+    }
+    out
+}
+
 /// Print help message.
 pub(crate) fn print_help() {
     println!("Beamtalk REPL Commands:");
     println!();
-    println!("  :help, :h               Show this help message");
-    println!("  :help <Class>           Show instance-side class docs and methods");
-    println!("  :help <Class> <sel>     Show instance-side method documentation");
-    println!("  :help <Class> class     Show class-side docs (name, allMethods, reload, ...)");
+    print!("{}", render_command_help());
+    println!();
+    println!("Documentation lookups (`:help`):");
+    println!("  :help <Class>              Show instance-side class docs and methods");
+    println!("  :help <Class> <sel>        Show instance-side method documentation");
+    println!("  :help <Class> class        Show class-side docs (name, allMethods, reload, ...)");
     println!("  :help <Class> class <sel>  Show class-side method documentation");
-    println!("  :help Erlang <module>   Show Erlang module docs and function signatures");
-    println!("  :help Erlang <mod> <fn> Show Erlang function docs and type signature");
-    println!("  :exit, :q       Exit the REPL");
-    println!("  :clear          Clear all variable bindings");
-    println!("  :raw-mfa [on|off]  List every error stack frame with its raw MFA");
-    println!("                  (this session only; bare :raw-mfa toggles)");
-    println!("  :bindings       Show current variable bindings");
-    println!(
-        "  :sync, :s       Sync workspace with project in current dir (requires beamtalk.toml)"
-    );
-    println!("  :unload <Class> Unload a class from the workspace");
-    println!("  :test           Run all test classes (→ Workspace test)");
-    println!("  :test <Class>   Run a test class (→ Workspace test: ClassName)");
-    println!("  :show-codegen <expr>  Show generated Core Erlang for an expression");
-    println!("  :sc <expr>      Short alias for :show-codegen");
-    println!("  :interrupt, :int  Cancel a running evaluation (sends out-of-band interrupt)");
-    println!("  :changes        Show the ChangeLog (→ Workspace changes)");
-    println!("  :dirty          Per-class dirty selectors (→ Workspace changes dirtyMethods)");
-    println!("  :flush          Flush pending changes to disk (→ Workspace flush)");
-    println!("  :flush <sel>    Flush a subset (→ Workspace flush: <sel>); <sel> is a Class,");
-    println!("                  a Symbol like #'new-class', or #{{ #file => \"path\" }}");
-    println!("  :remove-method <Class> <sel>  Remove a method (→ <Class> removeSelector: #<sel>)");
-    println!("  :remove-class <Class>  Remove a class (prompts y/N; memory-only)");
-    println!(
-        "  :flush-destructive [<sel>]  Flush pending destructive entries, deleting files (prompts y/N)"
-    );
-    println!(
-        "  :rename-class <Class> <NewName>  Rename a class (prompts y/N; memory-only until flush-destructive)"
-    );
-    println!(
-        "  :rename-method <Class> <sel> <newSel>  Rename a method (prompts y/N; memory-only until flush-destructive)"
-    );
+    println!("  :help Erlang <module>      Show Erlang module docs and function signatures");
+    println!("  :help Erlang <mod> <fn>    Show Erlang function docs and type signature");
     println!();
     println!("Expression examples:");
     println!("  x := 42              # Variable assignment");
