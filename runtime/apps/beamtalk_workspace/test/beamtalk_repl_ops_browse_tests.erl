@@ -1154,7 +1154,7 @@ protocols_unknown_class_is_error_test() ->
         self()
     ),
     Decoded = beamtalk_test_repl:assert_error_response(Response),
-    ?assertNotEqual(nomatch, binary:match(maps:get(<<"error">>, Decoded), <<"not found">>)).
+    ?assertNotEqual(nomatch, binary:match(maps:get(<<"error">>, Decoded), <<"Unknown class">>)).
 
 method_source_missing_selector_is_error_test() ->
     %% Class resolves (registered in the fixture setup is not active here, so use

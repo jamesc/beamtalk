@@ -1622,7 +1622,9 @@ system_announce_safe(EventClass, Fields) when is_atom(EventClass), is_map(Fields
             ok;
         _Pid ->
             try
-                system_announce_running(EventClass, Fields)
+                %% Fully qualified so the call goes through the module boundary
+                %% (callers and spies see it exactly as a direct call).
+                ?MODULE:system_announce(EventClass, Fields)
             catch
                 _:_ -> ok
             end
