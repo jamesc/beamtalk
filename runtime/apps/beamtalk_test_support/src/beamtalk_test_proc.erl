@@ -7,7 +7,20 @@
 
 -moduledoc """
 Shared EUnit process helpers (BT-4677): dummy processes and deterministic
-stop/kill. Every stop waits on a monitor `'DOWN'`, never a `timer:sleep`.
+stop/kill. Every stop waits on a monitor `'DOWN'` (5 s budget), never a
+`timer:sleep`, and none waits without a timeout.
+
+## Which stop function
+
+| Need | Use |
+|---|---|
+| A process the test linked to or spawned and does not care how it dies (marker processes, idle helpers) | `kill_and_wait/1` (unlinks, `kill`) |
+| An OTP process that should run `terminate/2` (gen_server, supervisor) | `stop/1` (`gen_server:stop`; plain processes get a `stop` message) |
+| A process linked to the test process, where `stop/1` would race the link | `shutdown/1` (unlinks, `shutdown`; gives up silently after 5 s) |
+| A singleton registered under a name | `stop_registered/1`, or `restart/1` to get a fresh one |
+| A singleton the test may have started bare (cleanup half of "start it if not running") | `stop_if_bare/1` |
+| A class process (`beamtalk_class_registry`) | `beamtalk_test_class:stop/1` / `stop_graceful/1` |
+| Wait for an existing monitor, or for a pid to be gone | `await_down/2`, `beamtalk_test_wait:dead/1,2` |
 """.
 
 -export([
@@ -39,9 +52,14 @@ dead_pid() ->
     ok = await_down(MRef, Pid),
     Pid.
 
--doc "Kill `Pid` (`kill` reason) and block until it is dead. No-op on a dead pid.".
+-doc """
+Unlink `Pid`, kill it (`kill` reason) and block until it is dead (5 s budget,
+then `error({wait_timeout, {alive, [Pid]}})`). Unlinking first means a linked
+process's death never takes the test process with it. No-op on a dead pid.
+""".
 -spec kill_and_wait(pid()) -> ok.
 kill_and_wait(Pid) ->
+    unlink(Pid),
     MRef = monitor(process, Pid),
     exit(Pid, kill),
     await_down(MRef, Pid).

@@ -31,6 +31,7 @@ gap (whose `DOWN` was lost to the dead bus process).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Setup / teardown
@@ -102,12 +103,7 @@ spawn_subscriber(Collector) ->
 %% gone.
 stop_subscriber(Sub) ->
     Sub ! {stop, self()},
-    receive
-        {stopped, Sub} -> ok
-    after 500 ->
-        exit(Sub, kill),
-        ok
-    end.
+    ?awaitMessage({stopped, Sub}, 500).
 
 subscriber_loop(Collector) ->
     receive
@@ -251,10 +247,7 @@ deliver_to_subscriber_test_() ->
             %% Kill the subscriber and wait for it to be gone.
             MRef = erlang:monitor(process, Sub),
             exit(Sub, kill),
-            receive
-                {'DOWN', MRef, process, Sub, _} -> ok
-            after 1000 -> ?assert(false)
-            end,
+            ?awaitMessage({'DOWN', MRef, process, Sub, _}, 1000),
 
             %% The bus processes the DOWN asynchronously; sync on it via a
             %% gen_server call (subscribe of a throwaway ref forces the
@@ -470,9 +463,9 @@ deliver_to_subscriber_test_() ->
                 ),
                 ok = beamtalk_announcements:announceAndWait('SyncEvent', {payload, 1}),
                 %% The handler ran (the sync gather waited for it).
-                receive
-                    {ran, Got} -> ?assertEqual({payload, 1}, Got)
-                after 1000 -> ?assert(false)
+                begin
+                    ?awaitMessage({ran, Got}, 1000),
+                    ?assertEqual({payload, 1}, Got)
                 end
             after
                 stop_idle(Sub)
@@ -494,9 +487,9 @@ deliver_to_subscriber_test_() ->
                 {ok, _} = beamtalk_announcements:subscribe('UIEvent', Sub, Handler, false),
                 %% Announce the subclass synchronously; the ancestor handler runs.
                 ok = beamtalk_announcements:announceAndWait('ButtonClicked', click),
-                receive
-                    {anc_ran, Got} -> ?assertEqual(click, Got)
-                after 1000 -> ?assert(false)
+                begin
+                    ?awaitMessage({anc_ran, Got}, 1000),
+                    ?assertEqual(click, Got)
                 end
             after
                 stop_idle(Sub)
@@ -575,9 +568,9 @@ announce_and_wait_handler_crash_isolated_test_() ->
                     ?assertEqual(
                         ok, beamtalk_announcements:announceAndWait('FaultEvent', e)
                     ),
-                    receive
-                        {healthy_ran, Got} -> ?assertEqual(e, Got)
-                    after 1000 -> ?assert(false)
+                    begin
+                        ?awaitMessage({healthy_ran, Got}, 1000),
+                        ?assertEqual(e, Got)
                     end,
                     %% The announcer process (this test process) survived intact.
                     ?assert(is_integer(beamtalk_announcements:subscription_count()))
@@ -661,14 +654,11 @@ announce_and_wait_handler_crash_isolated_test_() ->
                     ?assertEqual(
                         ok, beamtalk_announcements:announceAndWait('OuterEvent', start)
                     ),
-                    receive
-                        {inner, Got} -> ?assertEqual(nested, Got)
-                    after 1000 -> ?assert(false)
+                    begin
+                        ?awaitMessage({inner, Got}, 1000),
+                        ?assertEqual(nested, Got)
                     end,
-                    receive
-                        {outer_done} -> ok
-                    after 1000 -> ?assert(false)
-                    end
+                    ?awaitMessage({outer_done}, 1000)
                 after
                     stop_idle(Sub)
                 end
@@ -733,10 +723,7 @@ announce_and_wait_handler_crash_isolated_test_() ->
                     [P ! {go, Barrier} || P <- Pids],
                     %% Wait for all announcers to finish.
                     [
-                        receive
-                            {announced, P} -> ok
-                        after 5000 -> ?assert(false)
-                        end
+                        ?awaitMessage({announced, P})
                      || P <- Pids
                     ],
                     %% Exactly one delivery total, despite N concurrent announces.
@@ -759,9 +746,9 @@ announce_and_wait_handler_crash_isolated_test_() ->
                     'OnceSyncEvent', Sub, Handler, true
                 ),
                 ok = beamtalk_announcements:announceAndWait('OnceSyncEvent', a),
-                receive
-                    {once_sync, GotA} -> ?assertEqual(a, GotA)
-                after 1000 -> ?assert(false)
+                begin
+                    ?awaitMessage({once_sync, GotA}, 1000),
+                    ?assertEqual(a, GotA)
                 end,
                 %% Consumed — the subscription is gone.
                 ?assertNot(beamtalk_announcements:is_active(SubRef)),
@@ -968,10 +955,7 @@ announce_with_remote_subscriber_test_() ->
             Handler = fun(Event) -> Collector ! {remote_handler_ran, Event} end,
             _RemoteRef = insert_subscription_row('RemoteSyncEvent', RemotePid, Handler, false),
             ok = beamtalk_announcements:announceAndWait('RemoteSyncEvent', sync_payload),
-            receive
-                {remote_handler_ran, sync_payload} -> ok
-            after 1000 -> ?assert(false)
-            end
+            ?awaitMessage({remote_handler_ran, sync_payload}, 1000)
         end),
         %% Veneer async dispatch (the `system_announce/2` path): must not crash, and the
         %% remote subscription's block handler runs caller-side as for any subscriber.
@@ -982,10 +966,7 @@ announce_with_remote_subscriber_test_() ->
             Handler = fun(Event) -> Collector ! {veneer_handler_ran, Event} end,
             _RemoteRef = insert_subscription_row('RemoteVeneerEvent', RemotePid, Handler, false),
             ok = beamtalk_announcements:system_announce('RemoteVeneerEvent', #{k => v}),
-            receive
-                {veneer_handler_ran, #{k := v}} -> ok
-            after 1000 -> ?assert(false)
-            end
+            ?awaitMessage({veneer_handler_ran, #{k := v}}, 1000)
         end),
         %%====================================================================
         %% Veneer async path: inert handler is delivered the native message
@@ -1025,10 +1006,7 @@ announce_with_remote_subscriber_test_() ->
                 ok = beamtalk_announcements:system_announce('BlockEvent', #{k => v}),
                 %% The block handler runs (sends {block_ran, _}); the subscriber's
                 %% mailbox never receives a native announcement message.
-                receive
-                    {block_ran, #{k := v}} -> ok
-                after 1000 -> ?assert(false)
-                end,
+                ?awaitMessage({block_ran, #{k := v}}, 1000),
                 refute_received()
             after
                 stop_subscriber(Sub)
@@ -1098,19 +1076,13 @@ heir_crash_survival_impl() ->
                     unlink(BusPid),
                     BusMon = erlang:monitor(process, BusPid),
                     exit(BusPid, kill),
-                    receive
-                        {'DOWN', BusMon, process, BusPid, _} -> ok
-                    after 2000 -> ?assert(false)
-                    end,
+                    ?awaitMessage({'DOWN', BusMon, process, BusPid, _}, 2000),
 
                     %% Kill one subscriber during the gap — its DOWN goes nowhere
                     %% because the bus process is dead.
                     DyingMon = erlang:monitor(process, DyingSub),
                     exit(DyingSub, kill),
-                    receive
-                        {'DOWN', DyingMon, process, DyingSub, _} -> ok
-                    after 1000 -> ?assert(false)
-                    end,
+                    ?awaitMessage({'DOWN', DyingMon, process, DyingSub, _}, 1000),
 
                     %% The tables still exist (heir-preserved), confirm the rows are
                     %% still there (both subscriptions still in ETS).
@@ -1187,10 +1159,7 @@ heir_rearm_monitor_fires_on_later_death_impl() ->
                     unlink(BusPid),
                     BusMon = erlang:monitor(process, BusPid),
                     exit(BusPid, kill),
-                    receive
-                        {'DOWN', BusMon, process, BusPid, _} -> ok
-                    after 2000 -> ?assert(false)
-                    end,
+                    ?awaitMessage({'DOWN', BusMon, process, BusPid, _}, 2000),
                     {ok, _NewBus} = beamtalk_announcements:start_link(),
 
                     %% Subscription survived.
@@ -1200,10 +1169,7 @@ heir_rearm_monitor_fires_on_later_death_impl() ->
                     %% should fire and prune it.
                     SubMon = erlang:monitor(process, Sub),
                     exit(Sub, kill),
-                    receive
-                        {'DOWN', SubMon, process, Sub, _} -> ok
-                    after 1000 -> ?assert(false)
-                    end,
+                    ?awaitMessage({'DOWN', SubMon, process, Sub, _}, 1000),
 
                     %% Wait for the bus to process the DOWN and prune.
                     ok = beamtalk_test_wait:until(fun() ->
@@ -1273,10 +1239,7 @@ heir_rearm_with_remote_subscriber_impl() ->
                     unlink(BusPid),
                     BusMon = erlang:monitor(process, BusPid),
                     exit(BusPid, kill),
-                    receive
-                        {'DOWN', BusMon, process, BusPid, _} -> ok
-                    after 2000 -> ?assert(false)
-                    end,
+                    ?awaitMessage({'DOWN', BusMon, process, BusPid, _}, 2000),
 
                     %% Restart — re-arm must not badarg on the remote pid.
                     {ok, NewBus} = beamtalk_announcements:start_link(),
@@ -1468,12 +1431,7 @@ idle_loop() ->
 
 stop_idle(Pid) ->
     Pid ! {stop, self()},
-    receive
-        {stopped, Pid} -> ok
-    after 500 ->
-        exit(Pid, kill),
-        ok
-    end.
+    ?awaitMessage({stopped, Pid}, 500).
 
 %% Ensure the bus process is registered and running. Used by the heir tests that
 %% operate independently of the `{setup, ...}` fixtures.
@@ -1497,15 +1455,7 @@ stop_existing_bus() ->
             unlink(Pid),
             Mon = erlang:monitor(process, Pid),
             gen_server:stop(Pid, normal, 2000),
-            receive
-                {'DOWN', Mon, process, Pid, _} -> ok
-            after 2000 ->
-                exit(Pid, kill),
-                receive
-                    {'DOWN', Mon, process, Pid, _} -> ok
-                after 1000 -> ok
-                end
-            end
+            ?awaitMessage({'DOWN', Mon, process, Pid, _}, 2000)
     end,
     %% Delete any leftover tables so they get recreated with the correct heir.
     try

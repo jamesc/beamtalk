@@ -32,7 +32,6 @@ idempotent (a normal stdlib load skips a module whose on_load already ran).
     reload_stdlib_modules/0,
     wait_for_class/2,
     registry/0,
-    runtime/0,
     start_app/1,
     compiler/0,
     extensions/0,
@@ -349,25 +348,6 @@ system_announcer_subscribed() ->
         beamtalk_announcements:subscription_count() > 0
     catch
         _:_ -> false
-    end.
-
--doc """
-Start the `beamtalk_runtime` application (and the bootstrap process, as
-`boot_real_stdlib/1` does) without loading stdlib on a normal start. Returns a
-teardown handle that stops the application only if this call started it.
-Started through `start_app/1`, so if an earlier suite left the app running
-without the bootstrap `Object` class it is restarted and the stdlib classes are
-reloaded (see `start_app/1`).
-""".
--spec runtime() -> fun(() -> ok).
-runtime() ->
-    {ok, Started} = start_app(beamtalk_runtime),
-    fun() ->
-        case lists:member(beamtalk_runtime, Started) of
-            true -> application:stop(beamtalk_runtime);
-            false -> ok
-        end,
-        ok
     end.
 
 -doc """

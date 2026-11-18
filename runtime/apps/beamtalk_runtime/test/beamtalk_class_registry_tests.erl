@@ -12,6 +12,7 @@ and class object identity functions.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% ============================================================================
 %%% registry_name tests
@@ -558,18 +559,18 @@ live_class_entries_no_cross_class_deadlock_test_() ->
             ],
             %% Wait until both class processes are inside their handlers, then release.
             InHandler = [
-                receive
-                    {in_handler, H} -> H
-                after 10000 -> error(handler_not_entered)
+                begin
+                    ?awaitMessage({in_handler, H}, 10000),
+                    H
                 end
              || _ <- Callers
             ],
             [H ! {go, H} || H <- InHandler],
             Start = erlang:monotonic_time(millisecond),
             Results = [
-                receive
-                    {result, P, Names} -> {P, Names}
-                after 15000 -> error({no_result, P})
+                begin
+                    ?awaitMessage({result, P, Names}, 15000),
+                    {P, Names}
                 end
              || P <- [PidA, PidB]
             ],
@@ -610,9 +611,7 @@ live_class_entries_skips_dead_pg_member_test() ->
     try
         Ref = monitor(process, Pid),
         exit(Pid, kill),
-        receive
-            {'DOWN', Ref, process, Pid, _} -> ok
-        end,
+        ?awaitMessage({'DOWN', Ref, process, Pid, _}),
         ?assert(lists:member(Pid, beamtalk_class_registry:all_classes())),
         ?assertNot(
             lists:member(Pid, [P || {_, _, P} <- beamtalk_class_registry:live_class_entries()])
@@ -638,9 +637,7 @@ class_identity_skips_unregistered_dead_and_remote_pids_test() ->
     %% Dead pid.
     Dead = spawn(fun() -> ok end),
     Ref = monitor(process, Dead),
-    receive
-        {'DOWN', Ref, process, Dead, _} -> ok
-    end,
+    ?awaitMessage({'DOWN', Ref, process, Dead, _}),
     ?assertEqual(skip, beamtalk_class_registry:class_identity(Dead)),
     %% Live pid with no reverse-index row (stands in for the init/1 window).
     Live = spawn(fun() ->
@@ -1119,11 +1116,7 @@ pid_table_survives_owner_death_test_() ->
                                     %% Kill the owner process and wait for it to exit
                                     MRef = erlang:monitor(process, Spawned),
                                     Spawned ! stop,
-                                    receive
-                                        {'DOWN', MRef, process, Spawned, _} -> ok
-                                    after 5000 ->
-                                        ?assert(false)
-                                    end,
+                                    ?awaitMessage({'DOWN', MRef, process, Spawned, _}),
                                     %% Table should still exist (inherited by beamtalk_ets_heir)
                                     ?assertNotEqual(undefined, ets:info(beamtalk_class_pids))
                             after 5000 ->
@@ -1197,11 +1190,7 @@ restart_class_recovery_test_() ->
                 %% Kill the class process and wait for it to exit
                 MRef = erlang:monitor(process, OldPid),
                 exit(OldPid, kill),
-                receive
-                    {'DOWN', MRef, process, OldPid, _} -> ok
-                after 5000 ->
-                    ?assert(false)
-                end,
+                ?awaitMessage({'DOWN', MRef, process, OldPid, _}),
                 %% Should be unregistered now
                 ?assertEqual(undefined, beamtalk_class_registry:whereis_class('RestartTest1888')),
                 %% Restart it
@@ -1742,18 +1731,18 @@ bt3826_two_busy_classes(Tag, Extra, Site) ->
          || {N, P} <- Named
         ],
         InHandler = [
-            receive
-                {in_handler, H} -> H
-            after 10000 -> error(handler_not_entered)
+            begin
+                ?awaitMessage({in_handler, H}, 10000),
+                H
             end
          || _ <- Named
         ],
         [H ! {go, H} || H <- InHandler],
         Start = erlang:monotonic_time(millisecond),
         Results = [
-            receive
-                {result, N, R} -> {N, R}
-            after 15000 -> error({no_result, N})
+            begin
+                ?awaitMessage({result, N, R}, 15000),
+                {N, R}
             end
          || {N, _} <- Named
         ],
@@ -2152,9 +2141,7 @@ bt4552_prune_dead_class_pids_caps_dead_rows_test() ->
         begin
             P = spawn(fun() -> ok end),
             MRef = monitor(process, P),
-            receive
-                {'DOWN', MRef, process, P, _} -> ok
-            end,
+            ?awaitMessage({'DOWN', MRef, process, P, _}),
             beamtalk_class_registry:record_class_pid(P, Name),
             P
         end
@@ -2192,11 +2179,8 @@ bt4622_callback_crash_keeps_class_restartable_test() ->
     MRef = monitor(process, Pid),
     %% No handle_call clause matches: function_clause, then terminate/2.
     ?assertExit(_, gen_server:call(Pid, bt4622_no_such_call)),
-    receive
-        {'DOWN', MRef, process, Pid, Reason} ->
-            ?assertNot(beamtalk_class_registry:is_deliberate_stop(Reason))
-    after 5000 -> ?assert(false)
-    end,
+    ?awaitMessage({'DOWN', MRef, process, Pid, Reason}),
+    ?assertNot(beamtalk_class_registry:is_deliberate_stop(Reason)),
     %% Metadata and the dead pid's row survive the crash.
     ?assertEqual({ok, beamtalk_class_bt}, beamtalk_class_metadata:lookup_module(Name)),
     ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(Pid)),
@@ -2232,9 +2216,7 @@ bt4552_rename_class_pids_moves_rows_test() ->
     New = 'BT4552RenameNew',
     DeadPid = spawn(fun() -> ok end),
     MRef = monitor(process, DeadPid),
-    receive
-        {'DOWN', MRef, process, DeadPid, _} -> ok
-    end,
+    ?awaitMessage({'DOWN', MRef, process, DeadPid, _}),
     beamtalk_class_registry:record_class_pid(DeadPid, Old),
     %% A live pid naming OldName (restarted mid-rename) keeps its name.
     Live = self(),
@@ -2320,10 +2302,8 @@ bt4646_assert_removed(Name, Pid) ->
     ?assertEqual([], ets:match_object(beamtalk_class_method_funs, {{Name, '_'}, '_', '_'})).
 
 bt4646_await_down(Pid, MRef) ->
-    receive
-        {'DOWN', MRef, process, Pid, Reason} -> Reason
-    after 5000 -> error(timeout_waiting_for_class_down)
-    end.
+    ?awaitMessage({'DOWN', MRef, process, Pid, Reason}),
+    Reason.
 
 bt4646_count_removed(Name, Acc) ->
     receive
@@ -2430,12 +2410,9 @@ bt4646_removal_does_not_evict_caller_from_pg_test() ->
             stop -> ok
         end
     end),
-    receive
-        {bt4646_done, Result, InGroup} ->
-            ?assertEqual({error, {module_less_class_removed, Builder}}, Result),
-            ?assert(InGroup)
-    after 5000 -> error(timeout)
-    end,
+    ?awaitMessage({bt4646_done, Result, InGroup}),
+    ?assertEqual({error, {module_less_class_removed, Builder}}, Result),
+    ?assert(InGroup),
     Helper ! stop,
     receive
         {'DOWN', HRef, process, Helper, _} -> ok
@@ -2528,9 +2505,9 @@ bt4794_rebuild_at(Mod, Fun, When, Super) ->
         try
             Result = beamtalk_class_registry:restart_class(Name),
             NewPid =
-                receive
-                    {bt4794_rebuilt, P} -> P
-                after 0 -> error(rebuild_not_injected)
+                begin
+                    ?awaitMessage({bt4794_rebuilt, P}, 0),
+                    P
                 end,
             ?assertEqual({ok, NewPid}, Result),
             ?assertEqual(NewPid, beamtalk_class_registry:whereis_class(Name)),
@@ -2596,9 +2573,9 @@ bt4808_rebuild_inside_cleanup(Name, Super, RebuildHasClassVars) ->
         try
             Result = beamtalk_class_registry:restart_class(Name),
             NewPid =
-                receive
-                    {bt4808_rebuilt, P} -> P
-                after 0 -> error(rebuild_not_injected)
+                begin
+                    ?awaitMessage({bt4808_rebuilt, P}, 0),
+                    P
                 end,
             ?assertEqual({ok, NewPid}, Result),
             bt4808_assert_dependents_intact(Name, Super, NewPid, RebuildHasClassVars),
@@ -2676,10 +2653,7 @@ bt4808_flag_clear_rechecks_under_the_tag_lock_test() ->
             end),
             persistent_term:put(Key, Live)
         end),
-        receive
-            bt4808_cleared -> ok
-        after 5000 -> error(clear_not_finished)
-        end,
+        ?awaitMessage(bt4808_cleared),
         ?assertEqual(Live, persistent_term:get(Key, false)),
         %% And the dead owner's own flag is erased.
         persistent_term:put(Key, Dead),
@@ -2741,10 +2715,7 @@ bt4808_rename_copies_its_own_facts_not_a_same_name_class_test() ->
         case N =:= New andalso self() =:= Pid of
             true ->
                 Test ! {bt4808_parked, self()},
-                receive
-                    bt4808_go -> ok
-                after 5000 -> error(not_released)
-                end;
+                ?awaitMessage(bt4808_go);
             false ->
                 ok
         end,
@@ -2755,19 +2726,17 @@ bt4808_rename_copies_its_own_facts_not_a_same_name_class_test() ->
             Test ! {bt4808_renamed, beamtalk_object_class:rename(Old, New)}
         end),
         Parked =
-            receive
-                {bt4808_parked, P} -> P
-            after 5000 -> error(rename_not_parked)
+            begin
+                ?awaitMessage({bt4808_parked, P}),
+                P
             end,
         %% The old name is free now: a class with class variables takes it.
         Interloper = bt4808_builder_class(Old, 'Object', true),
         ok = beamtalk_class_monitor:unwatch(Old),
         ?assertEqual(true, beamtalk_class_metadata:lookup_has_class_variables(Old)),
         Parked ! bt4808_go,
-        receive
-            {bt4808_renamed, Result} -> ?assertEqual({ok, Pid}, Result)
-        after 5000 -> error(rename_not_finished)
-        end,
+        ?awaitMessage({bt4808_renamed, Result}),
+        ?assertEqual({ok, Pid}, Result),
         ?assertEqual(false, beamtalk_class_metadata:lookup_has_class_variables(New)),
         ?assertNot(beamtalk_class_shadow_flags:is_set(class_vars, New)),
         %% And the same-name class keeps its own row and fact.

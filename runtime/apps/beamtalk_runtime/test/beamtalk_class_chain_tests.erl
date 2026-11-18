@@ -158,11 +158,7 @@ test_fallthrough_absent_class() ->
     %% Use monitor + DOWN to avoid flaky timer:sleep on loaded CI nodes.
     Ref = erlang:monitor(process, ClassPid),
     exit(ClassPid, kill),
-    receive
-        {'DOWN', Ref, process, ClassPid, _Reason} -> ok
-    after 1000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({'DOWN', Ref, process, ClassPid, _Reason}, 1000),
 
     try
         %% Should raise does_not_understand, not crash

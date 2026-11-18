@@ -4,6 +4,8 @@
 -module(beamtalk_test_fake_native).
 -behaviour(gen_server).
 
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
+
 -moduledoc """
 Fixture for the workspace actor-list tests (BT-4960): a fake `native:` backing
 gen_server (ADR 0056: no `'$beamtalk_actor'` marker, found by its
@@ -39,9 +41,7 @@ with_system_native(Classes, Fun) ->
     after
         MRef = erlang:monitor(process, Sup),
         exit(Sup, shutdown),
-        receive
-            {'DOWN', MRef, process, Sup, _} -> ok
-        end
+        ?awaitMessage({'DOWN', MRef, process, Sup, _})
     end.
 
 with_index(Pid, Classes, Fun) ->

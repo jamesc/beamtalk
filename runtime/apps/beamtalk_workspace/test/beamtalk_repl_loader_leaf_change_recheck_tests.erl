@@ -75,33 +75,31 @@ superclasses_losing_leaf_status_never_crashes_the_caller_test() ->
 
 superclasses_losing_leaf_status_dedupes_test_() ->
     {timeout, 30,
-        {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    ShapePath = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_helper_shape_~s.bt", [
-                            beamtalk_test_unique:id()
-                        ])
-                    ),
-                    ok = file:write_file(ShapePath, <<"Object subclass: LeafHelperShape\n">>),
-                    State0 = beamtalk_repl_state:new(undefined, 0),
-                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
+        {foreach, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, [
+            ?_test(begin
+                ShapePath = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("leaf_helper_shape_~s.bt", [
+                        beamtalk_test_unique:id()
+                    ])
+                ),
+                ok = file:write_file(ShapePath, <<"Object subclass: LeafHelperShape\n">>),
+                State0 = beamtalk_repl_state:new(undefined, 0),
+                {ok, _, _State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
 
-                    %% Two classes declaring the SAME superclass in one
-                    %% `Classes` list (as if compiled from the same file) —
-                    %% the result names it once, not twice.
-                    Classes = [
-                        #{name => "LeafHelperCircle", superclass => "LeafHelperShape"},
-                        #{name => "LeafHelperSquare", superclass => "LeafHelperShape"}
-                    ],
-                    ?assertEqual(
-                        [<<"LeafHelperShape">>],
-                        beamtalk_repl_loader_recheck:superclasses_losing_leaf_status(Classes)
-                    )
-                end)
-            ]
-        end}}.
+                %% Two classes declaring the SAME superclass in one
+                %% `Classes` list (as if compiled from the same file) —
+                %% the result names it once, not twice.
+                Classes = [
+                    #{name => "LeafHelperCircle", superclass => "LeafHelperShape"},
+                    #{name => "LeafHelperSquare", superclass => "LeafHelperShape"}
+                ],
+                ?assertEqual(
+                    [<<"LeafHelperShape">>],
+                    beamtalk_repl_loader_recheck:superclasses_losing_leaf_status(Classes)
+                )
+            end)
+        ]}}.
 
 %% `superclass` arriving as a `binary()` (as it does on the real
 %% `load_class_module/3` -> `handle_load/2` path) must not badarg
@@ -110,34 +108,32 @@ superclasses_losing_leaf_status_dedupes_test_() ->
 %% own end-to-end test failing with `{error, badarg, [{erlang, list_to_binary, ...`).
 superclasses_losing_leaf_status_accepts_binary_superclass_test_() ->
     {timeout, 30,
-        {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    ShapePath = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_helper_binary_shape_~s.bt", [
-                            beamtalk_test_unique:id()
-                        ])
-                    ),
-                    ok = file:write_file(
-                        ShapePath, <<"Object subclass: LeafHelperBinaryShape\n">>
-                    ),
-                    State0 = beamtalk_repl_state:new(undefined, 0),
-                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
+        {foreach, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, [
+            ?_test(begin
+                ShapePath = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("leaf_helper_binary_shape_~s.bt", [
+                        beamtalk_test_unique:id()
+                    ])
+                ),
+                ok = file:write_file(
+                    ShapePath, <<"Object subclass: LeafHelperBinaryShape\n">>
+                ),
+                State0 = beamtalk_repl_state:new(undefined, 0),
+                {ok, _, _State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
 
-                    Classes = [
-                        #{
-                            name => "LeafHelperBinaryCircle",
-                            superclass => <<"LeafHelperBinaryShape">>
-                        }
-                    ],
-                    ?assertEqual(
-                        [<<"LeafHelperBinaryShape">>],
-                        beamtalk_repl_loader_recheck:superclasses_losing_leaf_status(Classes)
-                    )
-                end)
-            ]
-        end}}.
+                Classes = [
+                    #{
+                        name => "LeafHelperBinaryCircle",
+                        superclass => <<"LeafHelperBinaryShape">>
+                    }
+                ],
+                ?assertEqual(
+                    [<<"LeafHelperBinaryShape">>],
+                    beamtalk_repl_loader_recheck:superclasses_losing_leaf_status(Classes)
+                )
+            end)
+        ]}}.
 
 %%====================================================================
 %% Integration fixture: real compiler port + xref + workspace_meta + stores
@@ -180,57 +176,55 @@ circle_source() ->
 
 gaining_a_first_subclass_does_not_flag_a_plain_type_pattern_dependent_test_() ->
     {timeout, 30,
-        {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    %% `LeafRecheckShape` — leaf, zero subclasses.
-                    ShapePath = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_shape_~s.bt", [
-                            beamtalk_test_unique:id()
-                        ])
-                    ),
-                    ok = file:write_file(ShapePath, shape_source()),
-                    State0 = beamtalk_repl_state:new(undefined, 0),
-                    {ok, _, State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
+        {foreach, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, [
+            ?_test(begin
+                %% `LeafRecheckShape` — leaf, zero subclasses.
+                ShapePath = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("leaf_recheck_shape_~s.bt", [
+                        beamtalk_test_unique:id()
+                    ])
+                ),
+                ok = file:write_file(ShapePath, shape_source()),
+                State0 = beamtalk_repl_state:new(undefined, 0),
+                {ok, _, State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
 
-                    %% `LeafRecheckUser` — the dependent, compiles clean while
-                    %% `LeafRecheckShape` is still leaf. Its live source is
-                    %% recorded the same way `beamtalk_repl_loader_shape_recheck_tests`'s
-                    %% dependent fixtures are (`set_class_source/2` directly),
-                    %% since `trigger_leaf_change/1` reads from
-                    %% `beamtalk_workspace_meta:all_class_sources/0`, not xref.
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"LeafRecheckUser">>, user_source()
-                    ),
+                %% `LeafRecheckUser` — the dependent, compiles clean while
+                %% `LeafRecheckShape` is still leaf. Its live source is
+                %% recorded the same way `beamtalk_repl_loader_shape_recheck_tests`'s
+                %% dependent fixtures are (`set_class_source/2` directly),
+                %% since `trigger_leaf_change/1` reads from
+                %% `beamtalk_workspace_meta:all_class_sources/0`, not xref.
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"LeafRecheckUser">>, user_source()
+                ),
 
-                    %% `LeafRecheckShape subclass: LeafRecheckCircle` —
-                    %% `LeafRecheckShape` was leaf until this exact install;
-                    %% `activate_module/3`'s `superclasses_losing_leaf_status/1`
-                    %% detects the transition before this install even lands,
-                    %% enqueues the leaf-change re-check, and the worker runs
-                    %% it to completion (`wait_for_leaf_change_worker/0`) —
-                    %% asynchronously, off this call's own return.
-                    CirclePath = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_circle_~s.bt", [
-                            beamtalk_test_unique:id()
-                        ])
-                    ),
-                    ok = file:write_file(CirclePath, circle_source()),
-                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(CirclePath, State1),
+                %% `LeafRecheckShape subclass: LeafRecheckCircle` —
+                %% `LeafRecheckShape` was leaf until this exact install;
+                %% `activate_module/3`'s `superclasses_losing_leaf_status/1`
+                %% detects the transition before this install even lands,
+                %% enqueues the leaf-change re-check, and the worker runs
+                %% it to completion (`wait_for_leaf_change_worker/0`) —
+                %% asynchronously, off this call's own return.
+                CirclePath = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("leaf_recheck_circle_~s.bt", [
+                        beamtalk_test_unique:id()
+                    ])
+                ),
+                ok = file:write_file(CirclePath, circle_source()),
+                {ok, _, _State2} = beamtalk_repl_loader:handle_load(CirclePath, State1),
 
-                    %% The sweep ran (the worker is drained) and found
-                    %% nothing: the dependent's arm is subclass-aware, so a
-                    %% `LeafRecheckCircle` instance still takes it.
-                    ok = wait_for_leaf_change_worker(),
-                    ?assertEqual(
-                        [],
-                        beamtalk_workspace_findings_store:for_owner(<<"LeafRecheckUser">>)
-                    )
-                end)
-            ]
-        end}}.
+                %% The sweep ran (the worker is drained) and found
+                %% nothing: the dependent's arm is subclass-aware, so a
+                %% `LeafRecheckCircle` instance still takes it.
+                ok = wait_for_leaf_change_worker(),
+                ?assertEqual(
+                    [],
+                    beamtalk_workspace_findings_store:for_owner(<<"LeafRecheckUser">>)
+                )
+            end)
+        ]}}.
 
 %%====================================================================
 %% Regression: reloading the SAME subclass again (e.g. a method-only edit
@@ -240,47 +234,45 @@ gaining_a_first_subclass_does_not_flag_a_plain_type_pattern_dependent_test_() ->
 
 reloading_the_same_subclass_again_does_not_refire_test_() ->
     {timeout, 30,
-        {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    ShapePath = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_shape2_~s.bt", [
-                            beamtalk_test_unique:id()
-                        ])
-                    ),
-                    ok = file:write_file(ShapePath, <<"Object subclass: LeafRecheckShape2\n">>),
-                    State0 = beamtalk_repl_state:new(undefined, 0),
-                    {ok, _, State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
+        {foreach, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, [
+            ?_test(begin
+                ShapePath = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("leaf_recheck_shape2_~s.bt", [
+                        beamtalk_test_unique:id()
+                    ])
+                ),
+                ok = file:write_file(ShapePath, <<"Object subclass: LeafRecheckShape2\n">>),
+                State0 = beamtalk_repl_state:new(undefined, 0),
+                {ok, _, State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
 
-                    CirclePath = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_circle2_~s.bt", [
-                            beamtalk_test_unique:id()
-                        ])
-                    ),
-                    ok = file:write_file(
-                        CirclePath, <<"LeafRecheckShape2 subclass: LeafRecheckCircle2\n">>
-                    ),
-                    {ok, _, State2} = beamtalk_repl_loader:handle_load(CirclePath, State1),
-                    wait_for_leaf_change_worker(),
+                CirclePath = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("leaf_recheck_circle2_~s.bt", [
+                        beamtalk_test_unique:id()
+                    ])
+                ),
+                ok = file:write_file(
+                    CirclePath, <<"LeafRecheckShape2 subclass: LeafRecheckCircle2\n">>
+                ),
+                {ok, _, State2} = beamtalk_repl_loader:handle_load(CirclePath, State1),
+                wait_for_leaf_change_worker(),
 
-                    %% Second install of the *same* subclass file (e.g. a
-                    %% no-op re-save) — `LeafRecheckShape2` was already
-                    %% non-leaf before this call, so
-                    %% `superclasses_losing_leaf_status/1` must find nothing
-                    %% and no second re-check/announcement fires.
-                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
-                    {ok, _, _State3} = beamtalk_repl_loader:handle_load(CirclePath, State2),
-                    wait_for_leaf_change_worker(),
+                %% Second install of the *same* subclass file (e.g. a
+                %% no-op re-save) — `LeafRecheckShape2` was already
+                %% non-leaf before this call, so
+                %% `superclasses_losing_leaf_status/1` must find nothing
+                %% and no second re-check/announcement fires.
+                beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
+                {ok, _, _State3} = beamtalk_repl_loader:handle_load(CirclePath, State2),
+                wait_for_leaf_change_worker(),
 
-                    ?assertError(
-                        timeout_waiting_for_reload_check_announcement,
-                        beamtalk_test_recheck_fixtures:receive_reload_check_announcement()
-                    )
-                end)
-            ]
-        end}}.
+                ?assertError(
+                    timeout_waiting_for_reload_check_announcement,
+                    beamtalk_test_recheck_fixtures:receive_reload_check_announcement()
+                )
+            end)
+        ]}}.
 
 %%====================================================================
 %% Regression (PR #2965 review): a leaf-change sweep that finds nothing and
@@ -295,47 +287,45 @@ reloading_the_same_subclass_again_does_not_refire_test_() ->
 
 clean_leaf_change_recheck_does_not_announce_test_() ->
     {timeout, 30,
-        {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
+        {foreach, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, [
+            ?_test(begin
+                beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
 
-                    %% `LeafRecheckCleanShape` — leaf, zero subclasses, and no
-                    %% live class anywhere `match:`es on it, so the sweep
-                    %% cannot attribute a single finding to the transition,
-                    %% and no owner has a stored finding to clear either.
-                    ShapePath = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_clean_shape_~s.bt", [
-                            beamtalk_test_unique:id()
-                        ])
-                    ),
-                    ok = file:write_file(
-                        ShapePath, <<"Object subclass: LeafRecheckCleanShape\n">>
-                    ),
-                    State0 = beamtalk_repl_state:new(undefined, 0),
-                    {ok, _, State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
+                %% `LeafRecheckCleanShape` — leaf, zero subclasses, and no
+                %% live class anywhere `match:`es on it, so the sweep
+                %% cannot attribute a single finding to the transition,
+                %% and no owner has a stored finding to clear either.
+                ShapePath = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("leaf_recheck_clean_shape_~s.bt", [
+                        beamtalk_test_unique:id()
+                    ])
+                ),
+                ok = file:write_file(
+                    ShapePath, <<"Object subclass: LeafRecheckCleanShape\n">>
+                ),
+                State0 = beamtalk_repl_state:new(undefined, 0),
+                {ok, _, State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
 
-                    CirclePath = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_clean_circle_~s.bt", [
-                            beamtalk_test_unique:id()
-                        ])
-                    ),
-                    ok = file:write_file(
-                        CirclePath,
-                        <<"LeafRecheckCleanShape subclass: LeafRecheckCleanCircle\n">>
-                    ),
-                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(CirclePath, State1),
-                    wait_for_leaf_change_worker(),
+                CirclePath = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("leaf_recheck_clean_circle_~s.bt", [
+                        beamtalk_test_unique:id()
+                    ])
+                ),
+                ok = file:write_file(
+                    CirclePath,
+                    <<"LeafRecheckCleanShape subclass: LeafRecheckCleanCircle\n">>
+                ),
+                {ok, _, _State2} = beamtalk_repl_loader:handle_load(CirclePath, State1),
+                wait_for_leaf_change_worker(),
 
-                    ?assertError(
-                        timeout_waiting_for_reload_check_announcement,
-                        beamtalk_test_recheck_fixtures:receive_reload_check_announcement()
-                    )
-                end)
-            ]
-        end}}.
+                ?assertError(
+                    timeout_waiting_for_reload_check_announcement,
+                    beamtalk_test_recheck_fixtures:receive_reload_check_announcement()
+                )
+            end)
+        ]}}.
 
 %%====================================================================
 %% Regression (PR #2965 review): the other half of the same gate — a
@@ -350,63 +340,61 @@ clean_leaf_change_recheck_does_not_announce_test_() ->
 
 leaf_change_recheck_announces_when_it_clears_a_stale_finding_test_() ->
     {timeout, 30,
-        {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    OwnerBin = <<"LeafRecheckClearingOwner">>,
-                    SuperclassBin = <<"LeafRecheckClearingShape">>,
+        {foreach, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, [
+            ?_test(begin
+                OwnerBin = <<"LeafRecheckClearingOwner">>,
+                SuperclassBin = <<"LeafRecheckClearingShape">>,
 
-                    %% A finding an earlier re-check of the same class left
-                    %% on this owner, under the origin key the leaf-change
-                    %% sweep replaces.
-                    StaleFinding = #{
-                        owner => OwnerBin,
-                        changed_class => SuperclassBin,
-                        classification => signature_change,
-                        category => <<"Type">>,
-                        severity => <<"error">>,
-                        message => <<"stale finding from an earlier re-check">>,
-                        selector => <<"draw">>,
-                        note => undefined,
-                        sites => [],
-                        start => 0,
-                        'end' => 1
-                    },
-                    _ = beamtalk_workspace_findings_store:put_owner_origin(
-                        OwnerBin, SuperclassBin, [StaleFinding]
-                    ),
+                %% A finding an earlier re-check of the same class left
+                %% on this owner, under the origin key the leaf-change
+                %% sweep replaces.
+                StaleFinding = #{
+                    owner => OwnerBin,
+                    changed_class => SuperclassBin,
+                    classification => signature_change,
+                    category => <<"Type">>,
+                    severity => <<"error">>,
+                    message => <<"stale finding from an earlier re-check">>,
+                    selector => <<"draw">>,
+                    note => undefined,
+                    sites => [],
+                    start => 0,
+                    'end' => 1
+                },
+                _ = beamtalk_workspace_findings_store:put_owner_origin(
+                    OwnerBin, SuperclassBin, [StaleFinding]
+                ),
 
-                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
+                beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
 
-                    %% A clean sweep: no findings at all, but it checked the
-                    %% owner above, so its store write clears that bucket.
-                    CleanResult = #{
-                        findings => [],
-                        checked => 1,
-                        total_candidates => 1,
-                        not_checked => 0,
-                        cap_note => undefined,
-                        checked_owners => [OwnerBin],
-                        not_checked_owners => [],
-                        not_verified_owners => []
-                    },
-                    ok = beamtalk_repl_loader_recheck:publish_leaf_change_recheck_outcome(
-                        SuperclassBin, CleanResult
-                    ),
+                %% A clean sweep: no findings at all, but it checked the
+                %% owner above, so its store write clears that bucket.
+                CleanResult = #{
+                    findings => [],
+                    checked => 1,
+                    total_candidates => 1,
+                    not_checked => 0,
+                    cap_note => undefined,
+                    checked_owners => [OwnerBin],
+                    not_checked_owners => [],
+                    not_verified_owners => []
+                },
+                ok = beamtalk_repl_loader_recheck:publish_leaf_change_recheck_outcome(
+                    SuperclassBin, CleanResult
+                ),
 
-                    Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
-                    ?assertEqual(SuperclassBin, maps:get(changedClass, Event)),
-                    ?assertEqual(leaf_change, maps:get(classification, Event)),
-                    ?assertEqual([], maps:get(findings, Event)),
-                    ?assertEqual([OwnerBin], maps:get(checkedOwners, Event)),
+                Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
+                ?assertEqual(SuperclassBin, maps:get(changedClass, Event)),
+                ?assertEqual(leaf_change, maps:get(classification, Event)),
+                ?assertEqual([], maps:get(findings, Event)),
+                ?assertEqual([OwnerBin], maps:get(checkedOwners, Event)),
 
-                    %% And the stale finding really is gone from the store.
-                    ?assertEqual(
-                        [], beamtalk_workspace_findings_store:for_owner(OwnerBin)
-                    )
-                end)
-            ]
-        end}}.
+                %% And the stale finding really is gone from the store.
+                ?assertEqual(
+                    [], beamtalk_workspace_findings_store:for_owner(OwnerBin)
+                )
+            end)
+        ]}}.
 
 %%====================================================================
 %% End-to-end: a leaf class gaining its first subclass invalidates a
@@ -439,76 +427,74 @@ exhaustive_circle_source() ->
 
 gaining_a_first_subclass_invalidates_a_matchexhaustive_proof_test_() ->
     {timeout, 30,
-        {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
-            [
-                ?_test(begin
-                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
+        {foreach, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, [
+            ?_test(begin
+                beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
 
-                    ShapePath = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_exhaustive_shape_~s.bt", [
-                            beamtalk_test_unique:id()
-                        ])
-                    ),
-                    ok = file:write_file(ShapePath, exhaustive_source()),
-                    State0 = beamtalk_repl_state:new(undefined, 0),
-                    {ok, _, State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
+                ShapePath = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("leaf_recheck_exhaustive_shape_~s.bt", [
+                        beamtalk_test_unique:id()
+                    ])
+                ),
+                ok = file:write_file(ShapePath, exhaustive_source()),
+                State0 = beamtalk_repl_state:new(undefined, 0),
+                {ok, _, State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
 
-                    %% Sanity: the dependent's `matchExhaustive:` compiles
-                    %% clean while the shape is still leaf — no findings, no
-                    %% error, exactly what ADR 0107 Phase A promises.
-                    ok = beamtalk_workspace_meta:set_class_source(
-                        <<"LeafRecheckExhaustiveUser">>, exhaustive_user_source()
-                    ),
-                    {ok, SanityDiagnostics} = beamtalk_compiler:diagnostics(
-                        exhaustive_user_source(), <<"expression">>, #{class_hierarchy => true}
-                    ),
-                    ?assertEqual(
-                        [],
-                        [D || D <- SanityDiagnostics, maps:get(severity, D) =:= <<"error">>]
-                    ),
+                %% Sanity: the dependent's `matchExhaustive:` compiles
+                %% clean while the shape is still leaf — no findings, no
+                %% error, exactly what ADR 0107 Phase A promises.
+                ok = beamtalk_workspace_meta:set_class_source(
+                    <<"LeafRecheckExhaustiveUser">>, exhaustive_user_source()
+                ),
+                {ok, SanityDiagnostics} = beamtalk_compiler:diagnostics(
+                    exhaustive_user_source(), <<"expression">>, #{class_hierarchy => true}
+                ),
+                ?assertEqual(
+                    [],
+                    [D || D <- SanityDiagnostics, maps:get(severity, D) =:= <<"error">>]
+                ),
 
-                    CirclePath = filename:join(
-                        beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_exhaustive_circle_~s.bt", [
-                            beamtalk_test_unique:id()
-                        ])
-                    ),
-                    ok = file:write_file(CirclePath, exhaustive_circle_source()),
-                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(CirclePath, State1),
+                CirclePath = filename:join(
+                    beamtalk_test_fs:base_dir(),
+                    io_lib:format("leaf_recheck_exhaustive_circle_~s.bt", [
+                        beamtalk_test_unique:id()
+                    ])
+                ),
+                ok = file:write_file(CirclePath, exhaustive_circle_source()),
+                {ok, _, _State2} = beamtalk_repl_loader:handle_load(CirclePath, State1),
 
-                    Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
-                    ?assertEqual(
-                        <<"LeafRecheckExhaustiveShape">>, maps:get(changedClass, Event)
-                    ),
-                    ?assertEqual(leaf_change, maps:get(classification, Event)),
+                Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
+                ?assertEqual(
+                    <<"LeafRecheckExhaustiveShape">>, maps:get(changedClass, Event)
+                ),
+                ?assertEqual(leaf_change, maps:get(classification, Event)),
 
-                    %% The `Type` arm itself stays legal (BT-4319), so only the
-                    %% `matchExhaustive:` exhaustiveness gate's "cannot verify"
-                    %% error is newly raised.
-                    Findings = beamtalk_workspace_findings_store:for_owner(
-                        <<"LeafRecheckExhaustiveUser">>
-                    ),
-                    ?assertEqual(1, length(Findings)),
-                    ?assert(
-                        lists:all(
-                            fun(F) ->
-                                maps:get(category, F) =:= <<"Type">> andalso
-                                    maps:get(severity, F) =:= <<"error">> andalso
-                                    binary:match(
-                                        maps:get(message, F), <<"LeafRecheckExhaustiveShape">>
-                                    ) =/= nomatch
-                            end,
-                            Findings
-                        )
-                    ),
-                    Messages = [maps:get(message, F) || F <- Findings],
-                    ?assert(
-                        lists:any(
-                            fun(M) -> binary:match(M, <<"cannot verify">>) =/= nomatch end,
-                            Messages
-                        )
+                %% The `Type` arm itself stays legal (BT-4319), so only the
+                %% `matchExhaustive:` exhaustiveness gate's "cannot verify"
+                %% error is newly raised.
+                Findings = beamtalk_workspace_findings_store:for_owner(
+                    <<"LeafRecheckExhaustiveUser">>
+                ),
+                ?assertEqual(1, length(Findings)),
+                ?assert(
+                    lists:all(
+                        fun(F) ->
+                            maps:get(category, F) =:= <<"Type">> andalso
+                                maps:get(severity, F) =:= <<"error">> andalso
+                                binary:match(
+                                    maps:get(message, F), <<"LeafRecheckExhaustiveShape">>
+                                ) =/= nomatch
+                        end,
+                        Findings
                     )
-                end)
-            ]
-        end}}.
+                ),
+                Messages = [maps:get(message, F) || F <- Findings],
+                ?assert(
+                    lists:any(
+                        fun(M) -> binary:match(M, <<"cannot verify">>) =/= nomatch end,
+                        Messages
+                    )
+                )
+            end)
+        ]}}.

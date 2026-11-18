@@ -160,10 +160,7 @@ is_active_repeating_stays_active_test() ->
     T = beamtalk_timer:every(20, fun() -> Self ! tick end),
     %% Let the timer fire several times: a repeating timer stays active.
     [
-        receive
-            tick -> ok
-        after 2000 -> error(timer_did_not_tick)
-        end
+        ?awaitMessage(tick, 2000)
      || _ <- [1, 2, 3]
     ],
     ?assert(beamtalk_timer:'isActive'(T)),
@@ -226,9 +223,9 @@ after_timer_dies_when_caller_dies_test() ->
         exit(shutdown)
     end),
     T =
-        receive
-            {timer, Timer} -> Timer
-        after 1000 -> error(timeout)
+        begin
+            ?awaitMessage({timer, Timer}, 1000),
+            Timer
         end,
     wait_for_exit(Wrapper, 1000),
     wait_for_exit(maps:get(pid, T), 1000).
@@ -241,9 +238,9 @@ every_timer_dies_when_caller_dies_test() ->
         exit(shutdown)
     end),
     T =
-        receive
-            {timer, Timer} -> Timer
-        after 1000 -> error(timeout)
+        begin
+            ?awaitMessage({timer, Timer}, 1000),
+            Timer
         end,
     wait_for_exit(Wrapper, 1000),
     wait_for_exit(maps:get(pid, T), 1000).
@@ -255,20 +252,14 @@ every_timer_dies_when_caller_dies_test() ->
 send_after_to_pid_delivers_message_test() ->
     T = beamtalk_timer:sendAfter({tick, 1}, self(), 10),
     ?assertMatch(#{'$beamtalk_class' := 'Timer', tref := _}, T),
-    receive
-        {tick, 1} -> ok
-    after 1000 -> ?assert(false, "message not delivered")
-    end,
+    ?awaitMessage({tick, 1}, 1000),
     ?assertNot(beamtalk_timer:'isActive'(T)),
     ?assertNot(beamtalk_timer:cancel(T)).
 
 send_after_to_actor_object_delivers_message_test() ->
     Obj = #beamtalk_object{class = 'Foo', class_mod = foo, pid = self()},
     _ = beamtalk_timer:'sendAfter'(tick, Obj, 5),
-    receive
-        tick -> ok
-    after 1000 -> ?assert(false, "message not delivered")
-    end.
+    ?awaitMessage(tick, 1000).
 
 send_after_to_registered_name_test() ->
     Name = beamtalk_timer_tests_target,
@@ -276,10 +267,7 @@ send_after_to_registered_name_test() ->
     try
         Obj = #beamtalk_object{class = 'Foo', class_mod = foo, pid = {registered, Name}},
         _ = beamtalk_timer:sendAfter(tick, Obj, 5),
-        receive
-            tick -> ok
-        after 1000 -> ?assert(false, "message not delivered")
-        end
+        ?awaitMessage(tick, 1000)
     after
         unregister(Name)
     end.
@@ -374,9 +362,9 @@ send_every_does_not_drift_test() ->
     T0 = erlang:monotonic_time(millisecond),
     T = beamtalk_timer:sendEvery(tick, self(), Ms),
     Arrivals = [
-        receive
-            tick -> erlang:monotonic_time(millisecond)
-        after 5000 -> ?assert(false, io_lib:format("tick ~p never arrived", [K]))
+        begin
+            ?awaitMessage(tick),
+            erlang:monotonic_time(millisecond)
         end
      || K <- lists:seq(1, 5)
     ],
@@ -410,10 +398,7 @@ send_every_skips_missed_ticks_test() ->
     Ms = 20,
     T = beamtalk_timer:sendEvery(tick, self(), Ms),
     Pid = maps:get(pid, T),
-    receive
-        tick -> ok
-    after 1000 -> ?assert(false, "no first tick")
-    end,
+    ?awaitMessage(tick, 1000),
     true = erlang:suspend_process(Pid),
     MissedUntil = erlang:monotonic_time(millisecond) + 10 * Ms,
     wait_until(MissedUntil),
@@ -421,10 +406,7 @@ send_every_skips_missed_ticks_test() ->
     %% Nothing can be sent while suspended; drop any tick sent before it.
     flush_ticks(),
     true = erlang:resume_process(Pid),
-    receive
-        tick -> ok
-    after 1000 -> ?assert(false, "no overdue tick after resume")
-    end,
+    ?awaitMessage(tick, 1000),
     wait_for_status(Pid, waiting, 5000),
     ?assert(beamtalk_timer:cancel(T)),
     ?assert(count_ticks(0) =< 1).
@@ -499,10 +481,7 @@ send_every_delivers_until_cancelled_test() ->
     ?assertMatch(#{'$beamtalk_class' := 'Timer', pid := _}, T),
     lists:foreach(
         fun(_) ->
-            receive
-                tick -> ok
-            after 1000 -> ?assert(false, "tick not delivered")
-            end
+            ?awaitMessage(tick, 1000)
         end,
         [1, 2, 3]
     ),

@@ -13,6 +13,7 @@ spawn not guaranteed); a cost guard bounds the time per process.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %% proc_lib entry point for the fake `native:` backing process.
 -export([init/1]).
@@ -20,14 +21,6 @@ spawn not guaranteed); a cost guard bounds the time per process.
 %%% ---------------------------------------------------------------------
 %%% Helpers
 %%% ---------------------------------------------------------------------
-
-stop(Pid) ->
-    unlink(Pid),
-    MonRef = erlang:monitor(process, Pid),
-    exit(Pid, kill),
-    receive
-        {'DOWN', MonRef, process, Pid, _} -> ok
-    end.
 
 pids(Entries) -> lists:sort([P || {P, _, _} <- Entries]).
 
@@ -65,7 +58,7 @@ compiled_actor_found_test() ->
         ?assertEqual([{Pid, Class, StartedAt}], beamtalk_actor_scan:info(Pid)),
         ?assert(lists:member({Pid, StartedAt}, beamtalk_actor_scan:scan_class('Counter')))
     after
-        stop(Pid)
+        beamtalk_test_proc:kill_and_wait(Pid)
     end.
 
 named_actor_found_test() ->
@@ -75,7 +68,7 @@ named_actor_found_test() ->
         ?assertMatch([{Pid, 'Counter', _}], beamtalk_actor_scan:info(Pid)),
         ?assert(lists:keymember(Pid, 1, beamtalk_actor_scan:scan_class('Counter')))
     after
-        stop(Pid)
+        beamtalk_test_proc:kill_and_wait(Pid)
     end.
 
 supervised_actor_found_test() ->
@@ -92,9 +85,7 @@ supervised_actor_found_test() ->
         unlink(Sup),
         MonRef = erlang:monitor(process, Sup),
         exit(Sup, shutdown),
-        receive
-            {'DOWN', MonRef, process, Sup, _} -> ok
-        end
+        ?awaitMessage({'DOWN', MonRef, process, Sup, _})
     end.
 
 %% A `native:` backing gen_server carries no marker; the scan matches its
@@ -179,7 +170,7 @@ scan_classes_groups_in_one_pass_test() ->
 
 dead_process_is_skipped_test() ->
     Pid = marked('Bt4944Dead', 1),
-    stop(Pid),
+    beamtalk_test_proc:kill_and_wait(Pid),
     ?assertEqual([], beamtalk_actor_scan:info(Pid)),
     ?assertNot(lists:member(Pid, pids(beamtalk_actor_scan:scan_actors()))).
 
@@ -195,10 +186,7 @@ processes_dying_during_scan_do_not_crash_test() ->
         lists:seq(1, 20)
     ),
     MonRef = erlang:monitor(process, Killer),
-    receive
-        {'DOWN', MonRef, process, Killer, _} -> ok
-    after 5000 -> ?assert(false)
-    end,
+    ?awaitMessage({'DOWN', MonRef, process, Killer, _}),
     ok = beamtalk_test_wait:until(fun() -> not lists:any(fun erlang:is_process_alive/1, Victims) end),
     ?assertEqual([], beamtalk_actor_scan:scan_class('Bt4944Victim')).
 
@@ -213,7 +201,7 @@ sync_spawn_is_visible_to_the_next_scan_test() ->
     try
         ?assert(lists:member(Pid, pids(beamtalk_actor_scan:scan_actors())))
     after
-        stop(Pid)
+        beamtalk_test_proc:kill_and_wait(Pid)
     end.
 
 async_spawn_is_not_guaranteed_visible_test() ->
@@ -228,7 +216,7 @@ async_spawn_is_not_guaranteed_visible_test() ->
         ?assert(lists:member(Pid, pids(beamtalk_actor_scan:scan_actors())))
     after
         erlang:demonitor(MonRef, [flush]),
-        stop(Pid)
+        beamtalk_test_proc:kill_and_wait(Pid)
     end.
 
 %%% ---------------------------------------------------------------------

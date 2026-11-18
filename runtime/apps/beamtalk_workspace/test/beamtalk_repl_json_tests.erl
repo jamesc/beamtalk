@@ -12,6 +12,7 @@ term_to_json, format_error_message, parse_json.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% ============================================================================
 %%% parse_json tests
@@ -209,9 +210,7 @@ term_to_json_pid_alive_test() ->
 term_to_json_pid_dead_test() ->
     Pid = spawn(fun() -> ok end),
     MRef = monitor(process, Pid),
-    receive
-        {'DOWN', MRef, process, Pid, _} -> ok
-    end,
+    ?awaitMessage({'DOWN', MRef, process, Pid, _}),
     Result = beamtalk_repl_json:term_to_json(Pid),
     ?assertMatch(<<"#Dead<", _/binary>>, Result).
 
@@ -222,9 +221,7 @@ term_to_json_dead_actor_fallback_test() ->
     %% Actor(ClassName, pid) — without hanging or crashing the REPL formatter.
     Pid = spawn(fun() -> ok end),
     MRef = monitor(process, Pid),
-    receive
-        {'DOWN', MRef, process, Pid, _} -> ok
-    end,
+    ?awaitMessage({'DOWN', MRef, process, Pid, _}),
     Obj = {beamtalk_object, 'WedgedCounter', bt@wedged, Pid},
     Result = beamtalk_repl_json:term_to_json(Obj),
     ?assertMatch(<<"Actor(WedgedCounter, ", _/binary>>, Result),
@@ -483,11 +480,7 @@ term_to_json_map_with_integer_key_test() ->
 term_to_json_dead_pid_test() ->
     Pid = spawn(fun() -> ok end),
     Ref = erlang:monitor(process, Pid),
-    receive
-        {'DOWN', Ref, process, Pid, _} -> ok
-    after 1000 ->
-        error(process_did_not_die)
-    end,
+    ?awaitMessage({'DOWN', Ref, process, Pid, _}, 1000),
     ?assertNot(is_process_alive(Pid)),
     Result = beamtalk_repl_json:term_to_json(Pid),
     ?assert(binary:match(Result, <<"#Dead<">>) =/= nomatch).
@@ -1003,10 +996,7 @@ encode_error_5_test() ->
 term_to_json_future_completed_test() ->
     Pid = spawn(fun() -> ok end),
     MRef = erlang:monitor(process, Pid),
-    receive
-        {'DOWN', MRef, process, Pid, _} -> ok
-    after 1000 -> error(timeout)
-    end,
+    ?awaitMessage({'DOWN', MRef, process, Pid, _}, 1000),
     Result = beamtalk_repl_json:term_to_json({beamtalk_future, Pid}),
     ?assertEqual(<<"#Future<completed>">>, Result).
 

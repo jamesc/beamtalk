@@ -2249,10 +2249,7 @@ kind_of_entry(Class, Behaviour) ->
 stop_without_terminate(Pid) ->
     Ref = monitor(process, Pid),
     exit(Pid, kill),
-    receive
-        {'DOWN', Ref, process, Pid, _} -> ok
-    after 5000 -> error(timeout)
-    end.
+    ?awaitMessage({'DOWN', Ref, process, Pid, _}).
 
 object_is_kind_of_fast_path_test_() ->
     Names = ['BT4221Grand', 'BT4221Bottom', 'BT4221Other'],
@@ -2433,10 +2430,7 @@ is_kind_of_named_test_() ->
                 %% did before the name-only path; a live one is answered by name.
                 {Grand, _} = register_class('BT4757Grand', #{}, #{}),
                 {Pid, Ref} = spawn_monitor(fun() -> ok end),
-                receive
-                    {'DOWN', Ref, process, Pid, _} -> ok
-                after 5000 -> error(timeout)
-                end,
+                ?awaitMessage({'DOWN', Ref, process, Pid, _}),
                 DeadActor = #beamtalk_object{
                     class = 'BT4757Grand', class_mod = undefined, pid = Pid
                 },
@@ -2603,10 +2597,7 @@ is_kind_of_named_probe_pid_test_() ->
             ),
             %% A dead local actor is undecided; a live one is answered.
             {Pid, Ref} = spawn_monitor(fun() -> ok end),
-            receive
-                {'DOWN', Ref, process, Pid, _} -> ok
-            after 5000 -> error(timeout)
-            end,
+            ?awaitMessage({'DOWN', Ref, process, Pid, _}),
             Dead = #beamtalk_object{class = 'BT4754Grand', class_mod = undefined, pid = Pid},
             Live = #beamtalk_object{class = 'BT4754Grand', class_mod = undefined, pid = self()},
             ?assertEqual(

@@ -8,19 +8,16 @@
 -moduledoc "EUnit tests for beamtalk_process_ops (BT-4049).".
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 send_delivers_raw_term_and_answers_nil_test() ->
     ?assertEqual(nil, beamtalk_process_ops:send(self(), {ok, 1})),
-    receive
-        Msg -> ?assertEqual({ok, 1}, Msg)
-    after 1000 -> ?assert(false)
-    end.
+    ?awaitMessage(Msg, 1000),
+    ?assertEqual({ok, 1}, Msg).
 
 send_to_dead_pid_is_noop_test() ->
     {Pid, Ref} = spawn_monitor(fun() -> ok end),
-    receive
-        {'DOWN', Ref, process, Pid, _} -> ok
-    end,
+    ?awaitMessage({'DOWN', Ref, process, Pid, _}),
     ?assertEqual(nil, beamtalk_process_ops:send(Pid, hello)).
 
 make_ref_is_unique_test() ->

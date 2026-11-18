@@ -354,11 +354,9 @@ test_async_methods(_) ->
             'Actor',
             counter
         ),
-        receive
-            {resolve, Keys} ->
-                ?assertEqual(lists:sort([increment, getValue]), lists:sort(Keys))
-        after 1000 ->
-            ?assert(false)
+        begin
+            ?awaitMessage({resolve, Keys}, 1000),
+            ?assertEqual(lists:sort([increment, getValue]), lists:sort(Keys))
         end,
         _ = Ref
     end}.
@@ -373,11 +371,7 @@ test_async_superclass_atom(_) ->
             'Actor',
             counter
         ),
-        receive
-            {resolve, 'Actor'} -> ok
-        after 1000 ->
-            ?assert(false)
-        end
+        ?awaitMessage({resolve, 'Actor'}, 1000)
     end}.
 
 test_async_superclass_none(_) ->
@@ -390,11 +384,7 @@ test_async_superclass_none(_) ->
             none,
             proto_object
         ),
-        receive
-            {resolve, nil} -> ok
-        after 1000 ->
-            ?assert(false)
-        end
+        ?awaitMessage({resolve, nil}, 1000)
     end}.
 
 test_async_class_name(_) ->
@@ -407,11 +397,7 @@ test_async_class_name(_) ->
             none,
             my_test_module
         ),
-        receive
-            {resolve, 'MyTestClass'} -> ok
-        after 1000 ->
-            ?assert(false)
-        end
+        ?awaitMessage({resolve, 'MyTestClass'}, 1000)
     end}.
 
 test_async_module_name(_) ->
@@ -424,11 +410,7 @@ test_async_module_name(_) ->
             none,
             my_test_module
         ),
-        receive
-            {resolve, my_test_module} -> ok
-        after 1000 ->
-            ?assert(false)
-        end
+        ?awaitMessage({resolve, my_test_module}, 1000)
     end}.
 
 test_async_method_query(_) ->
@@ -441,11 +423,7 @@ test_async_method_query(_) ->
             'Actor',
             counter
         ),
-        receive
-            {reject, #beamtalk_error{kind = type_error}} -> ok
-        after 1000 ->
-            ?assert(false)
-        end
+        ?awaitMessage({reject, #beamtalk_error{kind = type_error}}, 1000)
     end}.
 
 test_async_unknown_selector(_) ->
@@ -458,11 +436,7 @@ test_async_unknown_selector(_) ->
             'Actor',
             counter
         ),
-        receive
-            {reject, #beamtalk_error{kind = does_not_understand}} -> ok
-        after 1000 ->
-            ?assert(false)
-        end
+        ?awaitMessage({reject, #beamtalk_error{kind = does_not_understand}}, 1000)
     end}.
 
 test_async_bad_message(_) ->
@@ -742,10 +716,7 @@ test_class_send_ignores_dead_entry_group_leader() ->
     Dead = spawn_sink(),
     Ref = monitor(process, Dead),
     Dead ! stop,
-    receive
-        {'DOWN', Ref, process, Dead, _} -> ok
-    after 5000 -> error(sink_did_not_exit)
-    end,
+    ?awaitMessage({'DOWN', Ref, process, Dead, _}),
     try
         put(beamtalk_entry_group_leader, Dead),
         with_group_leader_probe_class('BT2963DeadGlTest', fun(Pid) ->
@@ -2936,10 +2907,7 @@ with_gen_calls_traced(Pids, Fun) ->
             [erlang:trace(P, false, ['receive']) || P <- Live]
         end,
     [
-        receive
-            {trace_delivered, P, Ref} -> ok
-        after 5000 -> error({trace_not_delivered, P})
-        end
+        ?awaitMessage({trace_delivered, P, Ref})
      || P <- Live, Ref <- [erlang:trace_delivered(P)]
     ],
     {Result, drain_gen_calls([])}.

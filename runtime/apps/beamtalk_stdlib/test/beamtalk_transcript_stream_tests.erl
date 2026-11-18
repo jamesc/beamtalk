@@ -18,6 +18,7 @@ Tests all TranscriptStream behaviours:
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% ============================================================================
 %%% Helper
@@ -84,11 +85,7 @@ subscribe_unsubscribe_test() ->
     gen_server:cast(Pid, {subscribe, self()}),
     %% Use call to show: so we know it's processed after subscribe
     _ = gen_server:call(Pid, {'show:', [<<"sub">>]}),
-    receive
-        {transcript_output, <<"sub">>} -> ok
-    after 500 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({transcript_output, <<"sub">>}, 500),
     %% Unsubscribe
     gen_server:cast(Pid, {unsubscribe, self()}),
     %% Sync barrier: ensure unsubscribe is processed
@@ -109,16 +106,8 @@ subscriber_receives_output_test() ->
     gen_server:cast(Pid, {subscribe, self()}),
     _ = gen_server:call(Pid, {'show:', [<<"msg1">>]}),
     _ = gen_server:call(Pid, {'show:', [<<"msg2">>]}),
-    receive
-        {transcript_output, <<"msg1">>} -> ok
-    after 500 ->
-        ?assert(false)
-    end,
-    receive
-        {transcript_output, <<"msg2">>} -> ok
-    after 500 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({transcript_output, <<"msg1">>}, 500),
+    ?awaitMessage({transcript_output, <<"msg2">>}, 500),
     flush_transcript(),
     gen_server:stop(Pid).
 
@@ -197,11 +186,7 @@ duplicate_subscribe_test() ->
     gen_server:cast(Pid, {subscribe, self()}),
     %% Sync barrier + show via call
     _ = gen_server:call(Pid, {'show:', [<<"once">>]}),
-    receive
-        {transcript_output, <<"once">>} -> ok
-    after 500 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({transcript_output, <<"once">>}, 500),
     %% Check no duplicate message
     receive
         {transcript_output, <<"once">>} -> ?assert(false)
@@ -407,11 +392,7 @@ sync_subscribe_unsubscribe_test() ->
     ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
     %% Should receive output after subscribing
     _ = gen_server:call(Pid, {'show:', [<<"sync_sub">>]}),
-    receive
-        {transcript_output, <<"sync_sub">>} -> ok
-    after 500 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({transcript_output, <<"sync_sub">>}, 500),
     %% Unsubscribe via sync call
     _ = gen_server:call(Pid, {unsubscribe, []}),
     %% Should NOT receive output after unsubscribing
@@ -484,11 +465,7 @@ async_show_notifies_subscriber_test() ->
     FuturePid = beamtalk_future:pid(Future),
     gen_server:cast(Pid, {'show:', [<<"async_msg">>], FuturePid}),
     _ = beamtalk_future:await(Future, 1000),
-    receive
-        {transcript_output, <<"async_msg">>} -> ok
-    after 500 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({transcript_output, <<"async_msg">>}, 500),
     flush_transcript(),
     gen_server:stop(Pid).
 

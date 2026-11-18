@@ -666,9 +666,9 @@ open_do_closes_on_exception_test() ->
             )
         ),
         Handle =
-            receive
-                {handle, H} -> H
-            after 5000 -> error(timeout)
+            begin
+                ?awaitMessage({handle, H}),
+                H
             end,
         ?assertNot(beamtalk_file_handle:isOpen(Handle))
     end).
@@ -1959,9 +1959,9 @@ open_mode_do_closes_handle_on_exception_test() ->
             )
         ),
         Handle =
-            receive
-                {handle, H} -> H
-            after 5000 -> error(timeout)
+            begin
+                ?awaitMessage({handle, H}),
+                H
             end,
         ?assertNot(beamtalk_file_handle:isOpen(Handle))
     end).
@@ -2201,10 +2201,8 @@ run_in(Dict, Fun) ->
             stop -> ok
         end
     end),
-    receive
-        {Ref, Result} -> {Pid, Result}
-    after 5000 -> error(timeout)
-    end.
+    ?awaitMessage({Ref, Result}),
+    {Pid, Result}.
 
 -doc "A process that just waits to be told to stop — a session or caller stand-in.".
 spawn_idle() ->
@@ -2224,10 +2222,7 @@ open_mode_listed(Path) ->
 stop_and_wait(Pid) ->
     Mon = monitor(process, Pid),
     Pid ! stop,
-    receive
-        {'DOWN', Mon, process, Pid, _} -> ok
-    after 5000 -> error(timeout)
-    end.
+    ?awaitMessage({'DOWN', Mon, process, Pid, _}).
 
 %% The registry reclaims asynchronously on 'DOWN'; poll briefly for the entry.
 wait_unlisted(Path) ->

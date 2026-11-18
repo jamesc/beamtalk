@@ -69,17 +69,17 @@ gather_all_down_path_marks_killed_slot_as_error_test() ->
         Caller
     ),
     SlowPid =
-        receive
-            {worker_pid, P} -> P
-        after 1000 -> error(no_worker_pid_registered)
+        begin
+            ?awaitMessage({worker_pid, P}, 1000),
+            P
         end,
     %% Kill the worker externally — exit/2 with `kill` is untrappable and
     %% bypasses run_worker/4's try/catch, so the 'DOWN' path fires.
     exit(SlowPid, kill),
     Results =
-        receive
-            {helper_result, R} -> R
-        after 2000 -> error(gather_all_down_path_timeout)
+        begin
+            ?awaitMessage({helper_result, R}, 2000),
+            R
         end,
     %% Slot 2 completed normally → Result ok: 42
     ?assertMatch(#{'isOk' := true, 'okValue' := 42}, lists:nth(2, Results)),
@@ -105,15 +105,15 @@ gather_all_down_path_other_slots_unaffected_test() ->
         Caller
     ),
     SlowPid =
-        receive
-            {worker_pid, P} -> P
-        after 1000 -> error(no_worker_pid_registered)
+        begin
+            ?awaitMessage({worker_pid, P}, 1000),
+            P
         end,
     exit(SlowPid, kill),
     Results =
-        receive
-            {helper_result, R} -> R
-        after 2000 -> error(gather_all_down_path_other_slots_timeout)
+        begin
+            ?awaitMessage({helper_result, R}, 2000),
+            R
         end,
     ?assertMatch(#{'isOk' := true, 'okValue' := 100}, lists:nth(1, Results)),
     ?assertMatch(#{'isOk' := false}, lists:nth(2, Results)),
@@ -147,21 +147,21 @@ gather_any_down_path_all_killed_returns_error_test() ->
         Caller
     ),
     Pid1 =
-        receive
-            {worker_pid, 1, P1} -> P1
-        after 1000 -> error(no_pid_1)
+        begin
+            ?awaitMessage({worker_pid, 1, P1}, 1000),
+            P1
         end,
     Pid2 =
-        receive
-            {worker_pid, 2, P2} -> P2
-        after 1000 -> error(no_pid_2)
+        begin
+            ?awaitMessage({worker_pid, 2, P2}, 1000),
+            P2
         end,
     exit(Pid1, kill),
     exit(Pid2, kill),
     Result =
-        receive
-            {helper_result, R} -> R
-        after 2000 -> error(gather_any_all_killed_timeout)
+        begin
+            ?awaitMessage({helper_result, R}, 2000),
+            R
         end,
     %% When all workers fail (via 'DOWN'), any: returns Result error: with a
     %% List of the individual wrapped reasons, in input order.
@@ -199,15 +199,15 @@ gather_any_down_path_one_killed_winner_succeeds_test() ->
         Caller
     ),
     SlowPid =
-        receive
-            {worker_pid, P} -> P
-        after 1000 -> error(no_worker_pid_registered)
+        begin
+            ?awaitMessage({worker_pid, P}, 1000),
+            P
         end,
     exit(SlowPid, kill),
     Result =
-        receive
-            {helper_result, R} -> R
-        after 2000 -> error(gather_any_one_killed_timeout)
+        begin
+            ?awaitMessage({helper_result, R}, 2000),
+            R
         end,
     ?assertMatch(#{'isOk' := true, 'okValue' := winner}, Result).
 

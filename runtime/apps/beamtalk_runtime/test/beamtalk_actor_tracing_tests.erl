@@ -104,21 +104,22 @@ sync_send_emits_stop_event_test_() ->
                     ?assertEqual(0, Result),
 
                     %% Verify stop event was emitted
-                    receive
-                        {telemetry_event, [beamtalk, actor, dispatch, stop], Measurements,
-                            Metadata} ->
-                            ?assert(maps:is_key(duration, Measurements)),
-                            %% `>= 0`, not `> 0`: Windows' monotonic
-                            %% clock has 1ms resolution, so a fast
-                            %% dispatch measures 0 there (BT-3980).
-                            ?assert(maps:get(duration, Measurements) >= 0),
-                            ?assertEqual(Pid, maps:get(pid, Metadata)),
-                            ?assertEqual('Counter', maps:get(class, Metadata)),
-                            ?assertEqual(getValue, maps:get(selector, Metadata)),
-                            ?assertEqual(sync, maps:get(mode, Metadata)),
-                            ?assertEqual(ok, maps:get(outcome, Metadata))
-                    after 1000 ->
-                        ?assert(false)
+                    begin
+                        ?awaitMessage(
+                            {telemetry_event, [beamtalk, actor, dispatch, stop], Measurements,
+                                Metadata},
+                            1000
+                        ),
+                        ?assert(maps:is_key(duration, Measurements)),
+                        %% `>= 0`, not `> 0`: Windows' monotonic
+                        %% clock has 1ms resolution, so a fast
+                        %% dispatch measures 0 there (BT-3980).
+                        ?assert(maps:get(duration, Measurements) >= 0),
+                        ?assertEqual(Pid, maps:get(pid, Metadata)),
+                        ?assertEqual('Counter', maps:get(class, Metadata)),
+                        ?assertEqual(getValue, maps:get(selector, Metadata)),
+                        ?assertEqual(sync, maps:get(mode, Metadata)),
+                        ?assertEqual(ok, maps:get(outcome, Metadata))
                     end
                 after
                     gen_server:stop(Pid)
@@ -140,17 +141,18 @@ sync_send_emits_stop_event_test_() ->
                     beamtalk_actor:async_send(Pid, getValue, [], FuturePid),
 
                     %% Verify stop event was emitted
-                    receive
-                        {telemetry_event, [beamtalk, actor, dispatch, stop], Measurements,
-                            Metadata} ->
-                            ?assert(maps:is_key(duration, Measurements)),
-                            ?assertEqual(Pid, maps:get(pid, Metadata)),
-                            ?assertEqual('Counter', maps:get(class, Metadata)),
-                            ?assertEqual(getValue, maps:get(selector, Metadata)),
-                            ?assertEqual(async, maps:get(mode, Metadata)),
-                            ?assertEqual(ok, maps:get(outcome, Metadata))
-                    after 1000 ->
-                        ?assert(false)
+                    begin
+                        ?awaitMessage(
+                            {telemetry_event, [beamtalk, actor, dispatch, stop], Measurements,
+                                Metadata},
+                            1000
+                        ),
+                        ?assert(maps:is_key(duration, Measurements)),
+                        ?assertEqual(Pid, maps:get(pid, Metadata)),
+                        ?assertEqual('Counter', maps:get(class, Metadata)),
+                        ?assertEqual(getValue, maps:get(selector, Metadata)),
+                        ?assertEqual(async, maps:get(mode, Metadata)),
+                        ?assertEqual(ok, maps:get(outcome, Metadata))
                     end
                 after
                     gen_server:stop(Pid)
@@ -170,17 +172,18 @@ sync_send_emits_stop_event_test_() ->
                     beamtalk_actor:cast_send(Pid, increment, []),
 
                     %% Verify stop event was emitted
-                    receive
-                        {telemetry_event, [beamtalk, actor, dispatch, stop], Measurements,
-                            Metadata} ->
-                            ?assert(maps:is_key(duration, Measurements)),
-                            ?assertEqual(Pid, maps:get(pid, Metadata)),
-                            ?assertEqual('Counter', maps:get(class, Metadata)),
-                            ?assertEqual(increment, maps:get(selector, Metadata)),
-                            ?assertEqual(cast, maps:get(mode, Metadata)),
-                            ?assertEqual(cast, maps:get(outcome, Metadata))
-                    after 1000 ->
-                        ?assert(false)
+                    begin
+                        ?awaitMessage(
+                            {telemetry_event, [beamtalk, actor, dispatch, stop], Measurements,
+                                Metadata},
+                            1000
+                        ),
+                        ?assert(maps:is_key(duration, Measurements)),
+                        ?assertEqual(Pid, maps:get(pid, Metadata)),
+                        ?assertEqual('Counter', maps:get(class, Metadata)),
+                        ?assertEqual(increment, maps:get(selector, Metadata)),
+                        ?assertEqual(cast, maps:get(mode, Metadata)),
+                        ?assertEqual(cast, maps:get(outcome, Metadata))
                     end
                 after
                     gen_server:stop(Pid)
@@ -198,12 +201,13 @@ sync_send_emits_stop_event_test_() ->
                 Pid = start_counter(42),
                 try
                     _Result = beamtalk_actor:sync_send(Pid, getValue, []),
-                    receive
-                        {telemetry_event, [beamtalk, actor, dispatch, stop], _Measurements,
-                            Metadata} ->
-                            ?assertEqual('Counter', maps:get(class, Metadata))
-                    after 1000 ->
-                        ?assert(false)
+                    begin
+                        ?awaitMessage(
+                            {telemetry_event, [beamtalk, actor, dispatch, stop], _Measurements,
+                                Metadata},
+                            1000
+                        ),
+                        ?assertEqual('Counter', maps:get(class, Metadata))
                     end
                 after
                     gen_server:stop(Pid)
@@ -222,12 +226,13 @@ sync_send_emits_stop_event_test_() ->
                 {ok, Pid} = test_counter:start_link(0),
                 try
                     _Result = beamtalk_actor:sync_send(Pid, getValue, []),
-                    receive
-                        {telemetry_event, [beamtalk, actor, dispatch, stop], _Measurements,
-                            Metadata} ->
-                            ?assertEqual('Counter', maps:get(class, Metadata))
-                    after 1000 ->
-                        ?assert(false)
+                    begin
+                        ?awaitMessage(
+                            {telemetry_event, [beamtalk, actor, dispatch, stop], _Measurements,
+                                Metadata},
+                            1000
+                        ),
+                        ?assertEqual('Counter', maps:get(class, Metadata))
                     end
                 after
                     gen_server:stop(Pid)
@@ -351,11 +356,13 @@ sync_send_emits_stop_event_test_() ->
                 beamtalk_actor:async_send(Pid, getValue, [], FuturePid),
 
                 %% Telemetry stop event should still be emitted (with error outcome)
-                receive
-                    {telemetry_event, [beamtalk, actor, dispatch, stop], _Measurements, Metadata} ->
-                        ?assertEqual(error, maps:get(outcome, Metadata))
-                after 1000 ->
-                    ?assert(false)
+                begin
+                    ?awaitMessage(
+                        {telemetry_event, [beamtalk, actor, dispatch, stop], _Measurements,
+                            Metadata},
+                        1000
+                    ),
+                    ?assertEqual(error, maps:get(outcome, Metadata))
                 end
             after
                 telemetry:detach(StopHandler)
@@ -458,12 +465,14 @@ sync_send_emits_stop_event_test_() ->
                 ?assertEqual(ok, Result),
 
                 %% Telemetry stop event should still be emitted
-                receive
-                    {telemetry_event, [beamtalk, actor, dispatch, stop], _Measurements, Metadata} ->
-                        ?assertEqual(cast, maps:get(mode, Metadata)),
-                        ?assertEqual(cast, maps:get(outcome, Metadata))
-                after 1000 ->
-                    ?assert(false)
+                begin
+                    ?awaitMessage(
+                        {telemetry_event, [beamtalk, actor, dispatch, stop], _Measurements,
+                            Metadata},
+                        1000
+                    ),
+                    ?assertEqual(cast, maps:get(mode, Metadata)),
+                    ?assertEqual(cast, maps:get(outcome, Metadata))
                 end
             after
                 telemetry:detach(StopHandler)
@@ -515,13 +524,14 @@ sync_send_emits_stop_event_test_() ->
                 Pid = start_counter(0),
                 try
                     %% Verify lifecycle start event was emitted
-                    receive
-                        {telemetry_event, [beamtalk, actor, lifecycle, start], _Measurements,
-                            Metadata} ->
-                            ?assertEqual(Pid, maps:get(pid, Metadata)),
-                            ?assertEqual('Counter', maps:get(class, Metadata))
-                    after 1000 ->
-                        ?assert(false)
+                    begin
+                        ?awaitMessage(
+                            {telemetry_event, [beamtalk, actor, lifecycle, start], _Measurements,
+                                Metadata},
+                            1000
+                        ),
+                        ?assertEqual(Pid, maps:get(pid, Metadata)),
+                        ?assertEqual('Counter', maps:get(class, Metadata))
                     end
                 after
                     gen_server:stop(Pid)
@@ -542,13 +552,15 @@ sync_send_emits_stop_event_test_() ->
                 %% Verify lifecycle stop event was emitted from terminate/2
                 %% (There may also be a stop event from sync_send, but we
                 %% just need at least one with reason => normal)
-                receive
-                    {telemetry_event, [beamtalk, actor, lifecycle, stop], _Measurements, Metadata} ->
-                        ?assertEqual(Pid, maps:get(pid, Metadata)),
-                        ?assertEqual('Counter', maps:get(class, Metadata)),
-                        ?assertEqual(normal, maps:get(reason, Metadata))
-                after 1000 ->
-                    ?assert(false)
+                begin
+                    ?awaitMessage(
+                        {telemetry_event, [beamtalk, actor, lifecycle, stop], _Measurements,
+                            Metadata},
+                        1000
+                    ),
+                    ?assertEqual(Pid, maps:get(pid, Metadata)),
+                    ?assertEqual('Counter', maps:get(class, Metadata)),
+                    ?assertEqual(normal, maps:get(reason, Metadata))
                 end
             after
                 telemetry:detach(StopHandler)
@@ -564,13 +576,15 @@ sync_send_emits_stop_event_test_() ->
                 %% Use sync_send stop which emits lifecycle event
                 beamtalk_actor:sync_send(Pid, stop, []),
                 %% Verify lifecycle stop event was emitted
-                receive
-                    {telemetry_event, [beamtalk, actor, lifecycle, stop], _Measurements, Metadata} ->
-                        ?assertEqual(Pid, maps:get(pid, Metadata)),
-                        ?assertEqual('Counter', maps:get(class, Metadata)),
-                        ?assertEqual(normal, maps:get(reason, Metadata))
-                after 1000 ->
-                    ?assert(false)
+                begin
+                    ?awaitMessage(
+                        {telemetry_event, [beamtalk, actor, lifecycle, stop], _Measurements,
+                            Metadata},
+                        1000
+                    ),
+                    ?assertEqual(Pid, maps:get(pid, Metadata)),
+                    ?assertEqual('Counter', maps:get(class, Metadata)),
+                    ?assertEqual(normal, maps:get(reason, Metadata))
                 end
             after
                 telemetry:detach(StopHandler)
@@ -592,12 +606,14 @@ sync_send_emits_stop_event_test_() ->
                 after 100 -> ok
                 end,
                 %% Verify lifecycle kill event was emitted
-                receive
-                    {telemetry_event, [beamtalk, actor, lifecycle, kill], _Measurements, Metadata} ->
-                        ?assertEqual(Pid, maps:get(pid, Metadata)),
-                        ?assertEqual('Counter', maps:get(class, Metadata))
-                after 1000 ->
-                    ?assert(false)
+                begin
+                    ?awaitMessage(
+                        {telemetry_event, [beamtalk, actor, lifecycle, kill], _Measurements,
+                            Metadata},
+                        1000
+                    ),
+                    ?assertEqual(Pid, maps:get(pid, Metadata)),
+                    ?assertEqual('Counter', maps:get(class, Metadata))
                 end
             after
                 process_flag(trap_exit, OldTrap),
@@ -714,13 +730,15 @@ sync_send_emits_stop_event_test_() ->
                 {beamtalk_future, FuturePid} = beamtalk_future:new(),
                 beamtalk_actor:async_send(Pid, stop, [], FuturePid),
                 %% Verify lifecycle stop event was emitted
-                receive
-                    {telemetry_event, [beamtalk, actor, lifecycle, stop], _Measurements, Metadata} ->
-                        ?assertEqual(Pid, maps:get(pid, Metadata)),
-                        ?assertEqual('Counter', maps:get(class, Metadata)),
-                        ?assertEqual(normal, maps:get(reason, Metadata))
-                after 1000 ->
-                    ?assert(false)
+                begin
+                    ?awaitMessage(
+                        {telemetry_event, [beamtalk, actor, lifecycle, stop], _Measurements,
+                            Metadata},
+                        1000
+                    ),
+                    ?assertEqual(Pid, maps:get(pid, Metadata)),
+                    ?assertEqual('Counter', maps:get(class, Metadata)),
+                    ?assertEqual(normal, maps:get(reason, Metadata))
                 end
             after
                 telemetry:detach(StopHandler)
@@ -742,12 +760,14 @@ sync_send_emits_stop_event_test_() ->
                 after 100 -> ok
                 end,
                 %% Verify lifecycle kill event was emitted
-                receive
-                    {telemetry_event, [beamtalk, actor, lifecycle, kill], _Measurements, Metadata} ->
-                        ?assertEqual(Pid, maps:get(pid, Metadata)),
-                        ?assertEqual('Counter', maps:get(class, Metadata))
-                after 1000 ->
-                    ?assert(false)
+                begin
+                    ?awaitMessage(
+                        {telemetry_event, [beamtalk, actor, lifecycle, kill], _Measurements,
+                            Metadata},
+                        1000
+                    ),
+                    ?assertEqual(Pid, maps:get(pid, Metadata)),
+                    ?assertEqual('Counter', maps:get(class, Metadata))
                 end
             after
                 process_flag(trap_exit, OldTrap),

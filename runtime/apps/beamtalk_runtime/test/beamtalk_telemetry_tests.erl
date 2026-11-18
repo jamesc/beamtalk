@@ -13,6 +13,7 @@ detach/1, handle_event/4) and the runtime helpers moved from beamtalk_actor
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -export([forward_event/4]).
 
@@ -206,10 +207,8 @@ attach_calls_block_through_handle_event() ->
     Block = fun(E, M, Md) -> Self ! {block, E, M, Md} end,
     ?assertMatch(#{isOk := true}, beamtalk_telemetry:attach(bt4025_block, [bt4025, b], Block)),
     beamtalk_telemetry:execute([bt4025, b], #{n => 1}, #{who => me}),
-    receive
-        Msg -> ?assertEqual({block, [bt4025, b], #{n => 1}, #{who => me}}, Msg)
-    after 1000 -> ?assert(false)
-    end,
+    ?awaitMessage(Msg, 1000),
+    ?assertEqual({block, [bt4025, b], #{n => 1}, #{who => me}}, Msg),
     nil = beamtalk_telemetry:detach(bt4025_block).
 
 attach_stores_block_in_config_with_external_handler() ->
@@ -284,10 +283,7 @@ raising_handler_is_detached() ->
     after
         logger:remove_primary_filter(bt4025_quiet)
     end,
-    receive
-        raised -> ok
-    after 1000 -> ?assert(false)
-    end,
+    ?awaitMessage(raised, 1000),
     receive
         raised -> ?assert(false)
     after 0 -> ok

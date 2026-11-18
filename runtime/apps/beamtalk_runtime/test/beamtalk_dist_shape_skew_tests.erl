@@ -52,6 +52,7 @@ and consumed itself before any fixture is registered:
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -export([
     load_fixture/2,
@@ -313,11 +314,10 @@ subscribe_self(EventClass) ->
 %% system bus concurrently.
 expect_skew_event(PeerNode, ClassName) ->
     PeerValue = beamtalk_node:from_atom(PeerNode),
-    receive
-        {got, 'NodeShapeSkew', #{node := PeerValue, className := ClassName} = Event} -> Event
-    after 10000 ->
-        ?assert(false)
-    end.
+    ?awaitMessage(
+        {got, 'NodeShapeSkew', #{node := PeerValue, className := ClassName} = Event}, 10000
+    ),
+    Event.
 
 %% Confirm no 'NodeShapeSkew' for exactly `ClassName` arrives within
 %% `TimeoutMs` — used both for "no skew at all" scenarios and, after

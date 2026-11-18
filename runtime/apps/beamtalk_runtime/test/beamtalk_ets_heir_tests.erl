@@ -16,6 +16,7 @@ a crash.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -define(TABLE, bt3787_heir_test_table).
 
@@ -92,11 +93,7 @@ reclaim_hands_table_back() ->
     ?assertEqual(self(), ets:info(?TABLE, owner)),
     %% The heir option is a table property: it survives the hand-back.
     ?assertEqual(HeirPid, ets:info(?TABLE, heir)),
-    receive
-        {'ETS-TRANSFER', ?TABLE, HeirPid, reclaimed} -> ok
-    after 1000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({'ETS-TRANSFER', ?TABLE, HeirPid, reclaimed}, 1000),
     delete_test_table().
 
 reclaim_not_owner() ->
@@ -137,20 +134,16 @@ adopt_owned_tables_sets_heir() ->
             stop -> ok
         end
     end),
-    receive
-        {adopted, Anon, NamedHeir, AnonHeir} ->
-            ?assertEqual(HeirPid, NamedHeir),
-            ?assertEqual(HeirPid, AnonHeir),
-            %% Tables this process owns are untouched by another's adoption.
-            ?assertNotEqual(Self, ets:info(?TABLE, owner)),
-            beamtalk_test_proc:kill_and_wait(Worker),
-            sync_heir(),
-            ?assertEqual(HeirPid, ets:info(?TABLE, owner)),
-            ?assertEqual(HeirPid, ets:info(Anon, owner)),
-            ets:delete(Anon)
-    after 1000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({adopted, Anon, NamedHeir, AnonHeir}, 1000),
+    ?assertEqual(HeirPid, NamedHeir),
+    ?assertEqual(HeirPid, AnonHeir),
+    %% Tables this process owns are untouched by another's adoption.
+    ?assertNotEqual(Self, ets:info(?TABLE, owner)),
+    beamtalk_test_proc:kill_and_wait(Worker),
+    sync_heir(),
+    ?assertEqual(HeirPid, ets:info(?TABLE, owner)),
+    ?assertEqual(HeirPid, ets:info(Anon, owner)),
+    ets:delete(Anon),
     delete_test_table().
 
 ensure_shared_table_creates_then_adopts() ->
@@ -223,13 +216,9 @@ ensure_table_creates_then_reclaims() ->
         end)
     end,
     First = Run(),
-    receive
-        {owned, First, Owner1, Heir1} ->
-            ?assertEqual(First, Owner1),
-            ?assertEqual(HeirPid, Heir1)
-    after 1000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({owned, First, Owner1, Heir1}, 1000),
+    ?assertEqual(First, Owner1),
+    ?assertEqual(HeirPid, Heir1),
     ets:insert(?TABLE, {survives, crash}),
     with_supervisor_receive_trace(fun() ->
         beamtalk_test_proc:kill_and_wait(First),
@@ -237,13 +226,9 @@ ensure_table_creates_then_reclaims() ->
     end),
     ?assertEqual(HeirPid, ets:info(?TABLE, owner)),
     Second = Run(),
-    receive
-        {owned, Second, Owner2, Heir2} ->
-            ?assertEqual(Second, Owner2),
-            ?assertEqual(HeirPid, Heir2)
-    after 1000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({owned, Second, Owner2, Heir2}, 1000),
+    ?assertEqual(Second, Owner2),
+    ?assertEqual(HeirPid, Heir2),
     ?assertEqual([{survives, crash}], ets:lookup(?TABLE, survives)),
     beamtalk_test_proc:kill_and_wait(Second),
     delete_test_table().
@@ -324,11 +309,7 @@ with_supervisor_receive_trace(Fun) ->
     %% A trace message for a delivery that happened before trace-off is in
     %% our mailbox once the trace delivery is flushed.
     Ref = erlang:trace_delivered(SupPid),
-    receive
-        {trace_delivered, SupPid, Ref} -> ok
-    after 5000 ->
-        ?assert(false)
-    end,
+    ?awaitMessage({trace_delivered, SupPid, Ref}),
     ?assertEqual([], drain_transfer_traces(SupPid, [])).
 
 drain_transfer_traces(SupPid, Acc) ->
@@ -350,11 +331,8 @@ spawn_table_owner(Table, HeirOpts) ->
             stop -> ok
         end
     end),
-    receive
-        {table_created, Pid} -> Pid
-    after 1000 ->
-        error(table_owner_timeout)
-    end.
+    ?awaitMessage({table_created, Pid}, 1000),
+    Pid.
 
 %% A synchronous call is processed after the 'ETS-TRANSFER' already queued.
 sync_heir() ->

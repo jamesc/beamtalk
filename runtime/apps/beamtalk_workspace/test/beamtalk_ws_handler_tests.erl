@@ -13,6 +13,7 @@ These live in this module, the `_tests` companion of `beamtalk_ws_handler`.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include("beamtalk_ws_state.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% ===========================================================================
 %%% methods op: list_class_methods_for_ws/1
@@ -538,10 +539,7 @@ run_entry_unary_selector_accepted_test() ->
     }),
     {ok, State1} = beamtalk_ws_handler:websocket_handle({text, Json}, authed_state()),
     ?assertNotEqual(undefined, State1#ws_state.pending_eval),
-    receive
-        {'$gen_cast', {dispatch_async, <<"Greeter">>, <<"run">>, [], _}} -> ok
-    after 0 -> ?assert(false)
-    end.
+    ?awaitMessage({'$gen_cast', {dispatch_async, <<"Greeter">>, <<"run">>, [], _}}, 0).
 
 run_entry_single_keyword_selector_accepted_test() ->
     Json = op_json(<<"run-entry">>, #{
@@ -551,10 +549,9 @@ run_entry_single_keyword_selector_accepted_test() ->
     }),
     {ok, State1} = beamtalk_ws_handler:websocket_handle({text, Json}, authed_state()),
     ?assertNotEqual(undefined, State1#ws_state.pending_eval),
-    receive
-        {'$gen_cast', {dispatch_async, <<"Greeter">>, <<"main:">>, [<<"a">>, <<"b">>], _}} -> ok
-    after 0 -> ?assert(false)
-    end.
+    ?awaitMessage(
+        {'$gen_cast', {dispatch_async, <<"Greeter">>, <<"main:">>, [<<"a">>, <<"b">>], _}}, 0
+    ).
 
 stdin_without_pending_input_errors_test() ->
     Json = op_json(<<"stdin">>, #{<<"value">> => <<"hello\n">>}),
@@ -568,20 +565,14 @@ stdin_with_pending_routes_value_test() ->
     {ok, State1} = beamtalk_ws_handler:websocket_handle({text, Json}, State),
     ?assertEqual(undefined, State1#ws_state.io_capture_pid),
     ?assertEqual(undefined, State1#ws_state.stdin_ref),
-    receive
-        {stdin_input, Ref, <<"line\n">>} -> ok
-    after 500 -> ?assert(false)
-    end.
+    ?awaitMessage({stdin_input, Ref, <<"line\n">>}, 500).
 
 stdin_with_pending_routes_eof_test() ->
     Ref = make_ref(),
     State = (authed_state())#ws_state{io_capture_pid = self(), stdin_ref = Ref},
     Json = op_json(<<"stdin">>, #{<<"value">> => <<"eof">>}),
     {ok, _State1} = beamtalk_ws_handler:websocket_handle({text, Json}, State),
-    receive
-        {stdin_input, Ref, eof} -> ok
-    after 500 -> ?assert(false)
-    end.
+    ?awaitMessage({stdin_input, Ref, eof}, 500).
 
 stdin_with_pending_invalid_value_errors_test() ->
     Ref = make_ref(),

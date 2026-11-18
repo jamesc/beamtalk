@@ -935,10 +935,8 @@ in_other_process(Fun) ->
                     error:E -> {error, E}
                 end}
     end),
-    receive
-        {Ref, R} -> R
-    after 5000 -> error(timeout)
-    end.
+    ?awaitMessage({Ref, R}),
+    R.
 
 -define(assertAccessDenied(Result),
     ?assertBtErrorTuple(access_denied, 'Ets', _, Result)

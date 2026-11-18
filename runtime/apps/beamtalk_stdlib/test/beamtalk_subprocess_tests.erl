@@ -23,6 +23,7 @@ Tests cover:
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% ============================================================================
 %%% Cross-platform command helpers
@@ -147,10 +148,9 @@ readLine_blocks_until_data_arrives_test() ->
     %% Write a line — the blocked readLine should now resolve
     gen_server:call(Pid, {'writeLine:', [<<"world">>]}),
     Line =
-        receive
-            {readLine_result, V} -> V
-        after 5000 ->
-            error(timeout_waiting_for_readline)
+        begin
+            ?awaitMessage({readLine_result, V}),
+            V
         end,
     ?assertEqual({beamtalk_string, <<"world">>}, Line),
     gen_server:call(Pid, {close, []}),

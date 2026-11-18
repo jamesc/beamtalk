@@ -188,4 +188,36 @@
     )
 ).
 
+%% Await one message matching Pattern (BT-5038). Replaces the hand-written
+%%   receive Pattern -> ok after N -> error(...) end
+%% blocks. Variables bound by Pattern are usable afterwards (the timeout branch
+%% binds them too, to a call that never returns), so
+%%   ?awaitMessage({worker_ready, Pid}),
+%% leaves `Pid` bound. The expression's value is `ok`. On timeout the test fails
+%% with `{await_message_timeout, [{pattern, ..}, {timeout_ms, ..}, {line, ..},
+%% {mailbox, [..]}]}`: the pattern's source text and the process mailbox.
+%% Default budget is 5 s; pass TimeoutMs for any other. A pattern with a guard
+%% cannot be a macro argument: keep a hand-written `receive` for those.
+-define(awaitMessage(Pattern, TimeoutMs),
+    receive
+        Pattern ->
+            ok
+    after TimeoutMs ->
+        Pattern = beamtalk_test_assert:await_timeout(??Pattern, TimeoutMs, ?LINE)
+    end
+).
+-define(awaitMessage(Pattern), ?awaitMessage(Pattern, 5000)).
+
+%% Assert no message matching Pattern arrives within Ms milliseconds. Fails with
+%% `{unexpected_message, [{pattern, ..}, {line, ..}]}`. The wait
+%% is the point of the assertion, so Ms is required.
+-define(assertNoMessage(Pattern, Ms),
+    receive
+        Pattern ->
+            beamtalk_test_assert:no_message(??Pattern, ?LINE)
+    after Ms ->
+        ok
+    end
+).
+
 -endif.

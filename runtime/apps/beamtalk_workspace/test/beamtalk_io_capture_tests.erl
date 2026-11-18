@@ -18,6 +18,7 @@ General start/stop and io_capture_with_output coverage lives in
 beamtalk_repl_eval_tests.erl.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Helpers
@@ -29,11 +30,7 @@ spawn_monitored(Fun) ->
     {Pid, Ref}.
 
 await_down(Ref) ->
-    receive
-        {'DOWN', Ref, process, _, _} -> ok
-    after 5000 ->
-        error(timeout_waiting_for_down)
-    end.
+    ?awaitMessage({'DOWN', Ref, process, _, _}).
 
 %%====================================================================
 %% Tests: reset_captured_group_leaders — dead process guard
@@ -213,17 +210,9 @@ io_capture_loop_forwards_chunk_to_subscriber_test() ->
     LoopPid = spawn(fun() -> beamtalk_io_capture:io_capture_loop(<<>>, Self) end),
     try
         LoopPid ! {io_request, Self, ReplyAs, {put_chars, unicode, <<"hello">>}},
-        receive
-            {io_reply, ReplyAs, ok} -> ok
-        after 1000 ->
-            error(timeout_waiting_for_io_reply)
-        end,
-        receive
-            {eval_out, Chunk} ->
-                ?assertEqual(<<"hello">>, Chunk)
-        after 1000 ->
-            error(timeout_waiting_for_eval_out)
-        end
+        ?awaitMessage({io_reply, ReplyAs, ok}, 1000),
+        ?awaitMessage({eval_out, Chunk}, 1000),
+        ?assertEqual(<<"hello">>, Chunk)
     after
         exit(LoopPid, kill)
     end.

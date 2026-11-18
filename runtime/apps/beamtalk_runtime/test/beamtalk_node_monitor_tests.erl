@@ -19,6 +19,7 @@ and are exercised by `beamtalk_dist_shape_skew_tests`.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
 %% Setup / teardown
@@ -44,122 +45,118 @@ teardown(_) ->
 %%====================================================================
 
 skew_count_unknown_node_returns_zero_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_assertEqual(0, beamtalk_node_monitor:skew_count('unknown@host'))
-        ]
-    end}.
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_assertEqual(0, beamtalk_node_monitor:skew_count('unknown@host'))
+    ]}.
 
 %%====================================================================
 %% handle_call — unknown-request fallback
 %%====================================================================
 
 unknown_call_returns_error_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_assertEqual(
-                {error, unknown_request},
-                gen_server:call(beamtalk_node_monitor, unrecognised_request)
-            )
-        ]
-    end}.
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_assertEqual(
+            {error, unknown_request},
+            gen_server:call(beamtalk_node_monitor, unrecognised_request)
+        )
+    ]}.
 
 %%====================================================================
 %% handle_cast — {skew_detected, Node, ClassName}
 %%====================================================================
 
 skew_detected_increments_count_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             gen_server:cast(beamtalk_node_monitor, {skew_detected, 'peer@host', 'MyClass'}),
             ?assertEqual(1, beamtalk_node_monitor:skew_count('peer@host'))
         end
-    end}.
+    ]}.
 
 skew_detected_multiple_classes_counted_individually_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             gen_server:cast(beamtalk_node_monitor, {skew_detected, 'peer@host', 'ClassA'}),
             gen_server:cast(beamtalk_node_monitor, {skew_detected, 'peer@host', 'ClassB'}),
             ?assertEqual(2, beamtalk_node_monitor:skew_count('peer@host'))
         end
-    end}.
+    ]}.
 
 skew_detected_same_class_twice_is_idempotent_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             gen_server:cast(beamtalk_node_monitor, {skew_detected, 'peer@host', 'MyClass'}),
             gen_server:cast(beamtalk_node_monitor, {skew_detected, 'peer@host', 'MyClass'}),
             ?assertEqual(1, beamtalk_node_monitor:skew_count('peer@host'))
         end
-    end}.
+    ]}.
 
 %%====================================================================
 %% handle_cast — {skew_cleared, Node, ClassName}
 %%====================================================================
 
 skew_cleared_after_detect_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             gen_server:cast(beamtalk_node_monitor, {skew_detected, 'peer@host', 'MyClass'}),
             ?assertEqual(1, beamtalk_node_monitor:skew_count('peer@host')),
             gen_server:cast(beamtalk_node_monitor, {skew_cleared, 'peer@host', 'MyClass'}),
             ?assertEqual(0, beamtalk_node_monitor:skew_count('peer@host'))
         end
-    end}.
+    ]}.
 
 skew_cleared_only_that_class_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             gen_server:cast(beamtalk_node_monitor, {skew_detected, 'peer@host', 'ClassA'}),
             gen_server:cast(beamtalk_node_monitor, {skew_detected, 'peer@host', 'ClassB'}),
             gen_server:cast(beamtalk_node_monitor, {skew_cleared, 'peer@host', 'ClassA'}),
             ?assertEqual(1, beamtalk_node_monitor:skew_count('peer@host'))
         end
-    end}.
+    ]}.
 
 skew_cleared_for_unknown_peer_is_noop_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             ok = gen_server:cast(beamtalk_node_monitor, {skew_cleared, 'unknown@host', 'MyClass'}),
             %% Sync: the subsequent skew_count call proves the cast completed.
             ?assertEqual(0, beamtalk_node_monitor:skew_count('unknown@host'))
         end
-    end}.
+    ]}.
 
 %%====================================================================
 %% handle_cast — unknown-message fallback
 %%====================================================================
 
 unknown_cast_is_ignored_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             ok = gen_server:cast(beamtalk_node_monitor, unrecognised_cast),
             %% Sync via a subsequent call — proves the server is still alive.
             ?assertEqual(0, beamtalk_node_monitor:skew_count('any@node'))
         end
-    end}.
+    ]}.
 
 %%====================================================================
 %% handle_info — unrecognised message
 %%====================================================================
 
 handle_info_unknown_message_ignored_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             beamtalk_node_monitor ! unexpected_info,
             %% Sync via a gen_server:call — proves the server processed the
             %% info message and is still alive.
             ?assertEqual(0, beamtalk_node_monitor:skew_count('any@node'))
         end
-    end}.
+    ]}.
 
 %%====================================================================
 %% handle_info — own nodedown clears own_name
 %%====================================================================
 
 own_nodedown_clears_own_name_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             FakeSelf = 'fake_self@testhost',
             sys:replace_state(beamtalk_node_monitor, fun(S) -> setelement(2, S, FakeSelf) end),
@@ -169,14 +166,14 @@ own_nodedown_clears_own_name_test_() ->
             State = sys:get_state(beamtalk_node_monitor),
             ?assertEqual(undefined, element(2, State))
         end
-    end}.
+    ]}.
 
 %%====================================================================
 %% handle_info — peer nodedown clears skew entry
 %%====================================================================
 
 peer_nodedown_clears_skew_entry_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             Peer = 'peer@testhost',
             gen_server:cast(beamtalk_node_monitor, {skew_detected, Peer, 'SomeClass'}),
@@ -184,7 +181,7 @@ peer_nodedown_clears_skew_entry_test_() ->
             beamtalk_node_monitor ! {nodedown, Peer, [{nodedown_reason, disconnect}]},
             ?assertEqual(0, beamtalk_node_monitor:skew_count(Peer))
         end
-    end}.
+    ]}.
 
 %%====================================================================
 %% terminate/2 — both branches
@@ -193,7 +190,7 @@ peer_nodedown_clears_skew_entry_test_() ->
 %% Covers terminate/2 lines 213-215, 218: the normal supervised-start case
 %% where beamtalk_announcements is up and class_loaded_sub holds a real ref.
 terminate_with_subscription_ref_unsubscribes_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             State = sys:get_state(beamtalk_node_monitor),
             ClassLoadedSub = element(3, State),
@@ -201,34 +198,26 @@ terminate_with_subscription_ref_unsubscribes_test_() ->
             Pid = whereis(beamtalk_node_monitor),
             Ref = erlang:monitor(process, Pid),
             ok = gen_server:stop(beamtalk_node_monitor),
-            receive
-                {'DOWN', Ref, process, Pid, normal} -> ok
-            after 2000 ->
-                error(down_timeout)
-            end,
+            ?awaitMessage({'DOWN', Ref, process, Pid, normal}, 2000),
             ok = wait_for_restart(beamtalk_node_monitor, 2000),
             ?assertEqual(0, beamtalk_node_monitor:skew_count('any@node'))
         end
-    end}.
+    ]}.
 
 %% Covers terminate/2 line 216: class_loaded_sub = undefined (gen_server
 %% stopped when beamtalk_announcements was not running at init time).
 terminate_without_subscription_ref_is_noop_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             sys:replace_state(beamtalk_node_monitor, fun(S) -> setelement(3, S, undefined) end),
             Pid = whereis(beamtalk_node_monitor),
             Ref = erlang:monitor(process, Pid),
             ok = gen_server:stop(beamtalk_node_monitor),
-            receive
-                {'DOWN', Ref, process, Pid, normal} -> ok
-            after 2000 ->
-                error(down_timeout)
-            end,
+            ?awaitMessage({'DOWN', Ref, process, Pid, normal}, 2000),
             ok = wait_for_restart(beamtalk_node_monitor, 2000),
             ?assertEqual(0, beamtalk_node_monitor:skew_count('any@node'))
         end
-    end}.
+    ]}.
 
 %%====================================================================
 %% normalize_reason/1 — pure function, no gen_server needed
@@ -253,7 +242,7 @@ normalize_reason_non_atom_returns_unknown_test() ->
 %% matching nodeup (Node =:= node()) stores the current identity so the
 %% later own nodedown can be recognised even after node() reverts.
 own_nodeup_sets_own_name_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             OwnNode = node(),
             beamtalk_node_monitor ! {nodeup, OwnNode, []},
@@ -262,7 +251,7 @@ own_nodeup_sets_own_name_test_() ->
             State = sys:get_state(beamtalk_node_monitor),
             ?assertEqual(OwnNode, element(2, State))
         end
-    end}.
+    ]}.
 
 %%====================================================================
 %% handle_info — peer nodeup announces and spawns skew check
@@ -273,13 +262,13 @@ own_nodeup_sets_own_name_test_() ->
 %% for a non-existent node, is caught and logged, and must not crash the
 %% gen_server.
 peer_nodeup_server_survives_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             beamtalk_node_monitor ! {nodeup, 'fake_peer@testhost', []},
             %% Sync: proves the gen_server is alive after announce + spawn.
             ?assertEqual(0, beamtalk_node_monitor:skew_count('fake_peer@testhost'))
         end
-    end}.
+    ]}.
 
 %%====================================================================
 %% handle_info — class_loaded spawns reload check (no-op with no peers)
@@ -289,13 +278,13 @@ peer_nodeup_server_survives_test_() ->
 %% check_shape_skew_on_reload/2 which hits the [] base-case immediately
 %% when no distributed peers are connected (the common unit-test scenario).
 class_loaded_info_server_survives_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         fun() ->
             beamtalk_node_monitor ! {'$beamtalk_class_loaded', 'SomeClass'},
             %% Sync: call proves the server processed the message and is alive.
             ?assertEqual(0, beamtalk_node_monitor:skew_count('any@node'))
         end
-    end}.
+    ]}.
 
 wait_for_restart(Name, TimeoutMs) ->
     try

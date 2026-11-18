@@ -19,6 +19,7 @@ path is untouched.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -define(FACADE, beamtalk_test_native_counter_facade).
 
@@ -57,7 +58,7 @@ anonymous_start_and_stop() ->
         {ok, Pid} = beamtalk_actor:safe_spawn_linked(?FACADE, #{initial => 1}),
         Class = scan_class(Pid),
         ?assertMatch(#{pid := Pid, actorClass := Class}, expect('ActorSpawned', Pid)),
-        stop(Pid),
+        beamtalk_test_proc:kill_and_wait(Pid),
         ?assertMatch(
             #{pid := Pid, actorClass := Class, reason := _}, expect('ActorStopped', Pid)
         )
@@ -67,7 +68,7 @@ crash_is_announced() ->
     with_subscription(fun() ->
         {ok, Pid} = beamtalk_actor:safe_spawn_linked(?FACADE, #{initial => 1}),
         expect('ActorSpawned', Pid),
-        stop(Pid),
+        beamtalk_test_proc:kill_and_wait(Pid),
         ?assertMatch(#{reason := crashed}, expect('ActorStopped', Pid))
     end).
 
@@ -75,7 +76,7 @@ named_start_announces_once() ->
     with_subscription(fun() ->
         {ok, Pid} = beamtalk_actor_registry:'spawnAs'(bt4970_eunit_named, ?FACADE, #{initial => 2}),
         expect('ActorSpawned', Pid),
-        stop(Pid),
+        beamtalk_test_proc:kill_and_wait(Pid),
         expect('ActorStopped', Pid),
         ?assertEqual(none, next_for(Pid, 200))
     end).
@@ -110,9 +111,7 @@ failing_lookup_does_not_fail() ->
 already_gone_is_announced_as_crashed() ->
     with_subscription(fun() ->
         {Pid, MonRef} = spawn_monitor(fun() -> ok end),
-        receive
-            {'DOWN', MonRef, process, Pid, _} -> ok
-        end,
+        ?awaitMessage({'DOWN', MonRef, process, Pid, _}),
         ok = beamtalk_actor:native_started(Pid),
         expect('ActorSpawned', Pid),
         ?assertMatch(#{reason := crashed}, expect('ActorStopped', Pid))
@@ -138,7 +137,7 @@ observer_hibernates_and_wakes() ->
         {ok, Pid} = beamtalk_actor:safe_spawn_linked(?FACADE, #{initial => 1}),
         expect('ActorSpawned', Pid),
         ?assertMatch({ok, _}, await_hibernated_observer(Pid)),
-        stop(Pid),
+        beamtalk_test_proc:kill_and_wait(Pid),
         ?assertMatch(#{reason := crashed}, expect('ActorStopped', Pid))
     end).
 
@@ -156,7 +155,7 @@ stray_message_rehibernates() ->
         %% queue and a hibernated process mean it woke, dropped the message and
         %% went back to sleep.
         ?assertEqual(ok, await(fun() -> is_rehibernated(Observer) end)),
-        stop(Pid),
+        beamtalk_test_proc:kill_and_wait(Pid),
         ?assertMatch(#{reason := crashed}, expect('ActorStopped', Pid))
     end).
 
@@ -198,7 +197,7 @@ observer_leaves_no_trace() ->
     {ok, Pid} = beamtalk_actor:safe_spawn_linked(?FACADE, #{initial => 1}),
     ?assertEqual(TablesBefore, lists:sort(ets:all())),
     ?assertEqual(NamesBefore, lists:sort(registered())),
-    stop(Pid).
+    beamtalk_test_proc:kill_and_wait(Pid).
 
 %%% ---------------------------------------------------------------------
 
@@ -224,10 +223,8 @@ scan_class(Pid) ->
 
 %% The next announcement of `Class` for `Pid`, ignoring other pids' events.
 expect(Class, Pid) ->
-    receive
-        {got, #{'$beamtalk_class' := Class, pid := Pid} = Event} -> Event
-    after 2000 -> error({no_announcement, Class, Pid})
-    end.
+    ?awaitMessage({got, #{'$beamtalk_class' := Class, pid := Pid} = Event}, 2000),
+    Event.
 
 next_for(Pid, Timeout) ->
     receive
@@ -248,10 +245,3 @@ flush() ->
     end.
 
 %% Kill a linked test process without taking the test process down.
-stop(Pid) ->
-    unlink(Pid),
-    MonRef = erlang:monitor(process, Pid),
-    exit(Pid, kill),
-    receive
-        {'DOWN', MonRef, process, Pid, _} -> ok
-    end.

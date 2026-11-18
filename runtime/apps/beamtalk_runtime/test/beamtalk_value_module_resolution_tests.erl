@@ -711,9 +711,7 @@ fast_other_receivers_dispatch_as_before() ->
         %% an actor-shaped record whose process is gone
         Dead = spawn(fun() -> ok end),
         MRef = erlang:monitor(process, Dead),
-        receive
-            {'DOWN', MRef, process, Dead, _} -> ok
-        end,
+        ?awaitMessage({'DOWN', MRef, process, Dead, _}),
         Actor = #beamtalk_object{class = 'ZzFastNoSuchActor', class_mod = 'zz_no_mod', pid = Dead},
         ?assertMatch({bt_error, _, _, x, _}, fast_outcome(Actor, x))
     after
@@ -961,10 +959,8 @@ calls_during(Patterns, ExtraPids, Fun) ->
         try
             lists:foreach(fun(P) -> 1 = erlang:trace(P, true, [call]) end, [Worker | ExtraPids]),
             Worker ! go,
-            receive
-                {result, Worker, R} -> R
-            after 5000 -> error(worker_timeout)
-            end
+            ?awaitMessage({result, Worker, R}),
+            R
         after
             lists:foreach(fun(P) -> erlang:trace_pattern(P, false, [local]) end, Patterns),
             exit(Worker, kill)
@@ -974,10 +970,7 @@ calls_during(Patterns, ExtraPids, Fun) ->
     lists:foreach(
         fun(P) ->
             Ref = erlang:trace_delivered(P),
-            receive
-                {trace_delivered, P, Ref} -> ok
-            after 5000 -> error(trace_delivery_timeout)
-            end
+            ?awaitMessage({trace_delivered, P, Ref})
         end,
         Pids
     ),

@@ -16,6 +16,7 @@ non-map config, and that a compiled-actor module is not mistaken for one.
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 -define(FACADE, beamtalk_test_native_counter_facade).
 
@@ -23,14 +24,6 @@ get_value(Pid) ->
     gen_server:call(Pid, {getValue, []}).
 
 %% Stop a linked test process without taking the test process down.
-stop(Pid) ->
-    unlink(Pid),
-    MonRef = erlang:monitor(process, Pid),
-    exit(Pid, kill),
-    receive
-        {'DOWN', MonRef, process, Pid, _} -> ok
-    end.
-
 backing_module_test() ->
     ?assertEqual(
         beamtalk_test_native_counter, beamtalk_actor:native_backing_module(?FACADE)
@@ -43,21 +36,21 @@ anonymous_linked_start_test() ->
     {links, Links} = process_info(self(), links),
     ?assert(lists:member(Pid, Links)),
     ?assertEqual({ok, 3}, get_value(Pid)),
-    stop(Pid).
+    beamtalk_test_proc:kill_and_wait(Pid).
 
 local_named_start_test() ->
     Name = bt4577_eunit_local,
     {ok, Pid} = beamtalk_actor_registry:'spawnAs'(Name, ?FACADE, #{initial => 4}),
     ?assertEqual(Pid, whereis(Name)),
     ?assertEqual({ok, 4}, get_value(Name)),
-    stop(Pid).
+    beamtalk_test_proc:kill_and_wait(Pid).
 
 global_named_start_test() ->
     Name = bt4577_eunit_global,
     {ok, Pid} = beamtalk_actor_registry:'spawnAsGlobal'(Name, ?FACADE, #{initial => 5}),
     ?assertEqual(Pid, global:whereis_name(Name)),
     ?assertEqual({ok, 5}, get_value(Pid)),
-    stop(Pid).
+    beamtalk_test_proc:kill_and_wait(Pid).
 
 %% BT-4956: a `native:` actor registered `#global` has a start time, written by
 %% the runtime's registration path (the backing module has no `init/1` of ours),
@@ -72,15 +65,15 @@ global_native_actor_records_start_time_test() ->
     StartedAt = beamtalk_actor_registry:started_at_from_dictionary(Pid),
     ?assert(is_integer(StartedAt)),
     ?assert(StartedAt >= Before andalso StartedAt =< After),
-    stop(Pid).
+    beamtalk_test_proc:kill_and_wait(Pid).
 
 local_and_anonymous_native_actors_record_no_start_time_test() ->
     {ok, Anon} = beamtalk_actor:safe_spawn_linked(?FACADE, #{initial => 1}),
     ?assertEqual(undefined, beamtalk_actor_registry:started_at_from_dictionary(Anon)),
     {ok, Local} = beamtalk_actor_registry:'spawnAs'(bt4956_eunit_local, ?FACADE, #{}),
     ?assertEqual(undefined, beamtalk_actor_registry:started_at_from_dictionary(Local)),
-    stop(Anon),
-    stop(Local).
+    beamtalk_test_proc:kill_and_wait(Anon),
+    beamtalk_test_proc:kill_and_wait(Local).
 
 global_native_conflict_keeps_the_older_test() ->
     {ok, Older} = beamtalk_actor_registry:'spawnAsGlobal'(bt4956_eunit_older, ?FACADE, #{}),
@@ -97,16 +90,10 @@ global_native_conflict_keeps_the_older_test() ->
     %% start-time rule keeps the older whichever order the pids arrive in.
     ?assertEqual(Older, beamtalk_actor_registry:resolve_global_conflict(name, Older, Younger1)),
     ?assertEqual(Older, beamtalk_actor_registry:resolve_global_conflict(name, Younger2, Older)),
-    receive
-        {'DOWN', Mon1, process, Younger1, {shutdown, global_name_conflict}} -> ok
-    after 5000 -> ?assert(false)
-    end,
-    receive
-        {'DOWN', Mon2, process, Younger2, {shutdown, global_name_conflict}} -> ok
-    after 5000 -> ?assert(false)
-    end,
+    ?awaitMessage({'DOWN', Mon1, process, Younger1, {shutdown, global_name_conflict}}),
+    ?awaitMessage({'DOWN', Mon2, process, Younger2, {shutdown, global_name_conflict}}),
     ?assert(is_process_alive(Older)),
-    stop(Older).
+    beamtalk_test_proc:kill_and_wait(Older).
 
 taken_name_is_refused_before_start_test() ->
     Name = bt4577_eunit_taken,
@@ -134,7 +121,7 @@ unlinked_named_start_test() ->
         {'EXIT', Pid, _} -> ?assert(false)
     after 0 -> ok
     end,
-    stop(Pid).
+    beamtalk_test_proc:kill_and_wait(Pid).
 
 non_map_config_is_type_error_test() ->
     ?assertMatch(

@@ -302,9 +302,7 @@ live_registry_test_() ->
             {"liveClassName is nil for a class whose process has exited", fun() ->
                 Dead = spawn(fun() -> ok end),
                 MRef = monitor(process, Dead),
-                receive
-                    {'DOWN', MRef, process, Dead, _} -> ok
-                end,
+                ?awaitMessage({'DOWN', MRef, process, Dead, _}),
                 ?assertEqual(
                     nil,
                     beamtalk_interface:liveClassName({beamtalk_object, 'Gone class', gone, Dead})
@@ -315,9 +313,7 @@ live_registry_test_() ->
             {"liveClassName still names a crashed class whose row survives", fun() ->
                 Dead = spawn(fun() -> ok end),
                 MRef = monitor(process, Dead),
-                receive
-                    {'DOWN', MRef, process, Dead, _} -> ok
-                end,
+                ?awaitMessage({'DOWN', MRef, process, Dead, _}),
                 ok = beamtalk_class_registry:record_class_pid(Dead, 'BT4095Crashed'),
                 try
                     ?assertEqual(

@@ -88,9 +88,7 @@ pid_is_alive() ->
     %% Dead process
     Pid = spawn(fun() -> ok end),
     MRef = monitor(process, Pid),
-    receive
-        {'DOWN', MRef, process, Pid, _} -> ok
-    end,
+    ?awaitMessage({'DOWN', MRef, process, Pid, _}),
     ?assertEqual(false, beamtalk_primitive:send(Pid, 'isAlive', [])).
 
 pid_equality_inherited() ->
