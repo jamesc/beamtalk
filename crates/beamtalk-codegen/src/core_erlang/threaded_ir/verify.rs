@@ -166,7 +166,6 @@ pub(in crate::core_erlang) enum VerifyError {
     /// ADR 0118 phase 1a: constructed by [`ThreadedValue::close`].
     ///
     /// No production caller yet — see [`CloseContext`].
-    #[allow(dead_code)]
     StateEffectEscapesExpression { prefix: VersionPrefix, at: Span },
 
     /// ADR 0130 §4: a compiled `on:do:`'s catch is a class-variable catch

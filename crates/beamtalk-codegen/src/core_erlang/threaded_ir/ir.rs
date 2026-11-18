@@ -517,7 +517,6 @@ pub(in crate::core_erlang) enum ValueRef {
     /// (ADR 0122, BT-3511 — the helper only; migrating a site to call it is
     /// each site's own later issue) — only its own unit tests construct
     /// this today.
-    #[allow(dead_code)]
     Version(VersionedVar),
     /// A fresh, non-versioned Core Erlang variable name (e.g. a computed
     /// `_Val0` RHS temp).
@@ -561,7 +560,6 @@ pub(in crate::core_erlang) enum BindOp {
     /// [`ThreadedStmt::TupleAccUnpack`]). `render_bind`'s arm for
     /// it is real, tested production code (see `render_bind_tests`) —
     /// only a lowering-side constructor is missing.
-    #[allow(dead_code)]
     Unpack { field: String },
     /// A direct rebind from a computed value (e.g. a direct-params loop's
     /// per-iteration local rebind, or a value-type `Self{N}` rebind).
@@ -1373,7 +1371,6 @@ impl UserCodeRegion {
 /// the construct tuple (ADR 0131 §2's `<read>`). The construct reports which,
 /// because the construct built the tuple.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(in crate::core_erlang) enum CarrierSlot {
     /// A `StateAcc`-carrying construct (`{Value, StateAcc}`): the local is the
     /// map key (`__local__t`, or the bare name in the REPL) —
@@ -1562,7 +1559,6 @@ impl RebindFrame {
 /// `LocalRebindModeMismatch` re-derives the shape from the enclosing node
 /// ([`RebindFrame::shape_for`]) and compares (this is its `lowered_as`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(in crate::core_erlang) enum RebindLowering {
     /// `let V = <read> in` — a plain, unthreaded binding.
     Let,
@@ -1976,7 +1972,6 @@ pub(in crate::core_erlang) struct ThreadedValue {
 /// self-contained `Document` (`expression_doc` in Actor context, phase 2b —
 /// see that function's doc comment for why not sooner). Same status as
 /// [`ValueRef::Version`]'s constructor.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum CloseContext {
     /// Nothing outside the closed `Document` can observe a version the
@@ -1999,7 +1994,6 @@ impl ThreadedValue {
     /// ADR 0118 phase 1a: `threaded_expression` builds its pure results
     /// inline (it always has a prelude `Vec` in hand); used by `close()`'s
     /// unit tests. Same status as [`CloseContext`].
-    #[allow(dead_code)]
     pub(in crate::core_erlang) fn pure(value: ValueRef) -> Self {
         Self {
             prelude: Vec::new(),

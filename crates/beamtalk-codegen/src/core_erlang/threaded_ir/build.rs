@@ -382,7 +382,6 @@ impl ThreadedValue {
     /// never differ in bytes for the statements they share.
     ///
     /// ADR 0118 phase 1a: no production caller yet — see [`CloseContext`].
-    #[allow(dead_code)]
     pub(in crate::core_erlang) fn close(
         self,
         ctx: &mut RenderCtx<'_>,
