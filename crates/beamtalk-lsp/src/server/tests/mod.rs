@@ -31,6 +31,9 @@
 //! - [`code_actions`] — `textDocument/codeAction` quick-fixes
 //! - [`references`] — `textDocument/references` declaration-merge,
 //!   driven through the [`open_test_file`] / [`real_did_open`] harness below
+//! - [`rename`] — `textDocument/prepareRename` + `rename` (BT-5007):
+//!   capabilities, refusals, and the `WorkspaceEdit` shape per client
+//!   capability set
 //! - [`type_hierarchy`] — goto-implementation and
 //!   `prepare_type_hierarchy/supertypes/subtypes`
 //! - [`symbol_unification`] — workspace/document symbol unification
@@ -192,6 +195,7 @@ mod package_qualifiers;
 mod preload_files;
 mod preload_racing;
 mod references;
+mod rename;
 mod stdlib_ffi_registry;
 mod symbol_unification;
 mod type_hierarchy;

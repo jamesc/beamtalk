@@ -550,7 +550,7 @@ fn split_keyword_parts(selector: &str) -> Vec<String> {
 /// Returns `None` only if `source[pos..]` has no token at all (e.g. `pos`
 /// is at/past EOF) — not expected for a well-formed send (there is always
 /// at least the selector token following the receiver), but never panics.
-fn first_token_span_after(source: &str, pos: u32) -> Option<Span> {
+pub fn first_token_span_after(source: &str, pos: u32) -> Option<Span> {
     let tail = source.get(pos as usize..)?;
     let tail_tokens = lex_with_eof(tail);
     let tok_span = tail_tokens.first()?.span();

@@ -54,6 +54,7 @@
 mod hierarchy;
 mod identifier_lookup;
 mod project_index;
+mod rename;
 // ADR 0117 Decision step 3: the query-provider modules
 // (`completion_provider`, `definition_provider`, `hover_provider`, ...) that
 // used to be the sibling top-level `queries` module — merged in here because
@@ -77,6 +78,7 @@ mod value_objects;
 
 // Re-export value objects at the module level
 pub use project_index::{ProjectIndex, STDLIB_PACKAGE_MARKER};
+pub use rename::{FileMove, PreparedRename, RenameEdit, RenameKind, RenamePlan, RenameRefusal};
 pub use runtime_delegate::{
     NavQuery, NavQueryResponse, NavSite, NavSymbolClass, NavSymbolMethod, NavSymbolsResponse,
     RuntimeLocation, line_to_position, nav_site_to_location,

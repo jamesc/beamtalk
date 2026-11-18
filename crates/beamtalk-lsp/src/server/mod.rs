@@ -223,6 +223,8 @@ pub struct Backend {
     preload_config: Mutex<Option<PreloadConfig>>,
     /// Paths of stdlib files loaded during preload; used to emit `beamtalk-stdlib://` URIs.
     stdlib_paths: Mutex<HashSet<Utf8PathBuf>>,
+    /// What the client declared about `WorkspaceEdit` support (for rename).
+    rename_caps: Mutex<handlers::RenameClientCaps>,
     /// Workspace roots discovered at initialization, plus any package root
     /// registered later by `did_open`'s per-file discovery (BT-4158); used
     /// for native delegate `.erl` lookup, `did_close`'s preload coverage
@@ -540,6 +542,20 @@ impl LanguageServer for Backend {
         params: ReferenceParams,
     ) -> Result<Option<Vec<tower_lsp::lsp_types::Location>>> {
         self.handle_references(params).await
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: tower_lsp::lsp_types::TextDocumentPositionParams,
+    ) -> Result<Option<tower_lsp::lsp_types::PrepareRenameResponse>> {
+        self.handle_prepare_rename(params).await
+    }
+
+    async fn rename(
+        &self,
+        params: tower_lsp::lsp_types::RenameParams,
+    ) -> Result<Option<WorkspaceEdit>> {
+        self.handle_rename(params).await
     }
 
     async fn goto_implementation(

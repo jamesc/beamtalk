@@ -1,0 +1,327 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! `textDocument/prepareRename` and `textDocument/rename` (BT-5007).
+//!
+//! The language service plans the rename ([`SimpleLanguageService::plan_rename`]);
+//! this module turns the plan into a `WorkspaceEdit`. It follows ADR 0114's
+//! two tiers: confirmed sites are plain edits, candidate sites are edits
+//! under a `ChangeAnnotation` with `needsConfirmation: true` (so an editor
+//! with a refactor preview shows them unticked). A client that does not
+//! declare `changeAnnotationSupport` gets the confirmed edits only, and the
+//! candidates are listed in a `window/showMessage`.
+
+use super::super::Backend;
+use super::super::convert::{path_to_uri, span_to_range, to_bt_position};
+use beamtalk_language_service::{RenameEdit, RenamePlan};
+use camino::Utf8PathBuf;
+use std::collections::{BTreeMap, HashMap};
+use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
+use tower_lsp::lsp_types::{
+    AnnotatedTextEdit, ChangeAnnotation, DocumentChangeOperation, DocumentChanges, MessageType,
+    OneOf, OptionalVersionedTextDocumentIdentifier, PrepareRenameResponse, RenameFile,
+    RenameParams, ResourceOp, TextDocumentEdit, TextDocumentPositionParams, TextEdit, Url,
+    WorkspaceEdit,
+};
+
+/// `RequestFailed` (LSP 3.17): the request was valid but could not be done.
+const REQUEST_FAILED: i64 = -32803;
+/// Id of the annotation that marks candidate sites.
+const CANDIDATE_ANNOTATION: &str = "beamtalk.rename.candidates";
+/// How many candidate sites a fallback message lists before summarising.
+const MESSAGE_SITE_LIMIT: usize = 20;
+
+/// What the connected client told us at `initialize` about workspace edits.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(in crate::server) struct RenameClientCaps {
+    /// `workspace.workspaceEdit.documentChanges`.
+    pub document_changes: bool,
+    /// `workspace.workspaceEdit.changeAnnotationSupport` is declared.
+    pub change_annotations: bool,
+    /// `workspace.workspaceEdit.resourceOperations` includes `rename`.
+    pub rename_file: bool,
+}
+
+impl RenameClientCaps {
+    pub(in crate::server) fn from_params(params: &tower_lsp::lsp_types::InitializeParams) -> Self {
+        let edit = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|w| w.workspace_edit.as_ref());
+        Self {
+            document_changes: edit.is_some_and(|e| e.document_changes == Some(true)),
+            change_annotations: edit.is_some_and(|e| e.change_annotation_support.is_some()),
+            rename_file: edit.is_some_and(|e| {
+                e.resource_operations.as_ref().is_some_and(|ops| {
+                    ops.contains(&tower_lsp::lsp_types::ResourceOperationKind::Rename)
+                })
+            }),
+        }
+    }
+}
+
+/// A built rename: the edit, plus a message for whatever the edit left out.
+#[derive(Debug)]
+pub(in crate::server) struct RenameOutcome {
+    pub edit: WorkspaceEdit,
+    pub message: Option<String>,
+}
+
+fn refusal(message: impl Into<String>) -> Error {
+    Error {
+        code: ErrorCode::ServerError(REQUEST_FAILED),
+        message: message.into().into(),
+        data: None,
+    }
+}
+
+/// Builds the `WorkspaceEdit` for `plan`, honouring what the client supports.
+///
+/// `source_of` returns a file's current text (for byte span → LSP range);
+/// `versions` supplies the document version for open files.
+pub(in crate::server) fn build_rename_edit(
+    plan: &RenamePlan,
+    caps: RenameClientCaps,
+    source_of: &dyn Fn(&Utf8PathBuf) -> Option<String>,
+    versions: &HashMap<Utf8PathBuf, i32>,
+) -> RenameOutcome {
+    let annotate = caps.document_changes && caps.change_annotations;
+    let mut notes: Vec<String> = Vec::new();
+
+    // file → (confirmed edits, candidate edits), in file order.
+    let mut by_file: BTreeMap<&Utf8PathBuf, (Vec<&RenameEdit>, Vec<&RenameEdit>)> = BTreeMap::new();
+    for edit in &plan.confirmed {
+        by_file.entry(&edit.file).or_default().0.push(edit);
+    }
+    if annotate {
+        for edit in plan.candidates.iter().flatten() {
+            by_file.entry(&edit.file).or_default().1.push(edit);
+        }
+    } else if !plan.candidates.is_empty() {
+        notes.push(candidate_message(plan, source_of));
+    }
+
+    let to_range =
+        |edit: &RenameEdit| source_of(&edit.file).map(|src| span_to_range(edit.span, &src));
+
+    let mut text_edits: Vec<FileEdits> = Vec::new();
+    for (file, (confirmed, candidates)) in by_file {
+        let Some(uri) = path_to_uri(file) else {
+            continue;
+        };
+        let mut edits = Vec::new();
+        for edit in confirmed {
+            if let Some(range) = to_range(edit) {
+                edits.push(OneOf::Left(TextEdit {
+                    range,
+                    new_text: edit.new_text.clone(),
+                }));
+            }
+        }
+        for edit in candidates {
+            if let Some(range) = to_range(edit) {
+                edits.push(OneOf::Right(AnnotatedTextEdit {
+                    text_edit: TextEdit {
+                        range,
+                        new_text: edit.new_text.clone(),
+                    },
+                    annotation_id: CANDIDATE_ANNOTATION.to_string(),
+                }));
+            }
+        }
+        text_edits.push(FileEdits {
+            uri,
+            version: versions.get(file).copied(),
+            edits,
+        });
+    }
+
+    let file_move = plan.file_move.as_ref().and_then(|mv| {
+        let (from, to) = (path_to_uri(&mv.from)?, path_to_uri(&mv.to)?);
+        if caps.document_changes && caps.rename_file {
+            Some((from, to))
+        } else {
+            notes.push(format!(
+                "Rename the file {} to {} to match the new class name.",
+                mv.from, mv.to
+            ));
+            None
+        }
+    });
+
+    let edit = if caps.document_changes {
+        document_changes_edit(
+            text_edits,
+            file_move,
+            annotate && !plan.candidates.is_empty(),
+        )
+    } else {
+        changes_map_edit(text_edits)
+    };
+
+    RenameOutcome {
+        edit,
+        message: (!notes.is_empty()).then(|| notes.join("\n")),
+    }
+}
+
+/// The edits for one file, ready for a `TextDocumentEdit`.
+struct FileEdits {
+    uri: Url,
+    version: Option<i32>,
+    edits: Vec<OneOf<TextEdit, AnnotatedTextEdit>>,
+}
+
+/// `documentChanges` shape: typed text edits, then the file rename (the
+/// edits are addressed to the old URI, so the move goes last).
+fn document_changes_edit(
+    files: Vec<FileEdits>,
+    file_move: Option<(Url, Url)>,
+    with_annotation: bool,
+) -> WorkspaceEdit {
+    let mut ops: Vec<DocumentChangeOperation> = files
+        .into_iter()
+        .map(|file| {
+            DocumentChangeOperation::Edit(TextDocumentEdit {
+                text_document: OptionalVersionedTextDocumentIdentifier {
+                    uri: file.uri,
+                    version: file.version,
+                },
+                edits: file.edits,
+            })
+        })
+        .collect();
+    if let Some((old_uri, new_uri)) = file_move {
+        ops.push(DocumentChangeOperation::Op(ResourceOp::Rename(
+            RenameFile {
+                old_uri,
+                new_uri,
+                options: None,
+                annotation_id: None,
+            },
+        )));
+    }
+    let change_annotations = with_annotation.then(|| {
+        HashMap::from([(
+            CANDIDATE_ANNOTATION.to_string(),
+            ChangeAnnotation {
+                label: "Possible callers (review)".to_string(),
+                needs_confirmation: Some(true),
+                description: Some(
+                    "Sends of this selector the editor cannot prove belong to the renamed \
+                     method; they may call an unrelated method of the same name."
+                        .to_string(),
+                ),
+            },
+        )])
+    });
+    WorkspaceEdit {
+        document_changes: Some(DocumentChanges::Operations(ops)),
+        change_annotations,
+        ..Default::default()
+    }
+}
+
+/// Legacy `changes` map for a client without `documentChanges`.
+fn changes_map_edit(files: Vec<FileEdits>) -> WorkspaceEdit {
+    let changes = files
+        .into_iter()
+        .map(|file| {
+            let flat = file
+                .edits
+                .into_iter()
+                .map(|e| match e {
+                    OneOf::Left(t) => t,
+                    OneOf::Right(a) => a.text_edit,
+                })
+                .collect();
+            (file.uri, flat)
+        })
+        .collect();
+    WorkspaceEdit {
+        changes: Some(changes),
+        ..Default::default()
+    }
+}
+
+/// The `window/showMessage` text listing candidate sites the edit omitted.
+fn candidate_message(
+    plan: &RenamePlan,
+    source_of: &dyn Fn(&Utf8PathBuf) -> Option<String>,
+) -> String {
+    let total = plan.candidates.len();
+    let mut lines = vec![format!(
+        "Renamed the definition and the self/super sends that provably call it. {total} other \
+         send(s) of this selector were not changed because they may call an unrelated method; \
+         review and rename them by hand:"
+    )];
+    for group in plan.candidates.iter().take(MESSAGE_SITE_LIMIT) {
+        let site = &group[0];
+        let line =
+            source_of(&site.file).map_or(0, |src| span_to_range(site.span, &src).start.line + 1);
+        lines.push(format!("  {}:{line}", site.file));
+    }
+    if total > MESSAGE_SITE_LIMIT {
+        lines.push(format!("  ... and {} more", total - MESSAGE_SITE_LIMIT));
+    }
+    lines.join("\n")
+}
+
+impl Backend {
+    /// `textDocument/prepareRename`: the token range of a project class or selector.
+    #[allow(
+        clippy::unused_async,
+        reason = "mirrors the async LanguageServer::prepare_rename signature it's dispatched from"
+    )]
+    pub(in crate::server) async fn handle_prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let Some(path) = self.resolve_path_for_uri(&params.text_document.uri) else {
+            return Err(refusal("This document cannot be renamed in."));
+        };
+        let svc = self.service.lock().expect("service lock poisoned");
+        let Some(source) = svc.file_source(&path) else {
+            return Err(refusal("This document is not open."));
+        };
+        let pos = to_bt_position(params.position, &source);
+        match svc.prepare_rename(&path, pos) {
+            Ok(prepared) => Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
+                range: span_to_range(prepared.span, &source),
+                placeholder: prepared.placeholder.to_string(),
+            })),
+            Err(refused) => Err(refusal(refused.message)),
+        }
+    }
+
+    /// `textDocument/rename`: ADR 0114's confirmed sites applied, candidates annotated.
+    pub(in crate::server) async fn handle_rename(
+        &self,
+        params: RenameParams,
+    ) -> Result<Option<WorkspaceEdit>> {
+        let uri = &params.text_document_position.text_document.uri;
+        let Some(path) = self.resolve_path_for_uri(uri) else {
+            return Err(refusal("This document cannot be renamed in."));
+        };
+        let caps = *self.rename_caps.lock().expect("rename_caps lock poisoned");
+        let outcome = {
+            let svc = self.service.lock().expect("service lock poisoned");
+            let Some(source) = svc.file_source(&path) else {
+                return Err(refusal("This document is not open."));
+            };
+            let pos = to_bt_position(params.text_document_position.position, &source);
+            let plan = svc
+                .plan_rename(&path, pos, &params.new_name)
+                .map_err(|refused| refusal(refused.message))?;
+            let versions = self.versions.lock().expect("versions lock poisoned");
+            build_rename_edit(&plan, caps, &|f| svc.file_source(f), &versions)
+        };
+        if let Some(message) = outcome.message {
+            self.client
+                .show_message(MessageType::WARNING, message)
+                .await;
+        }
+        Ok(Some(outcome.edit))
+    }
+}
