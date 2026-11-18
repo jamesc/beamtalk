@@ -360,6 +360,7 @@ dependencies = [
  "clap",
  "eetf",
  "libc",
+ "serial_test",
  "tracing",
  "tracing-subscriber",
  "windows-sys",
