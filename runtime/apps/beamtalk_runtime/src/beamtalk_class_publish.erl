@@ -162,11 +162,11 @@ the `SystemAnnouncer` bus (ADR 0093 §2).
 
 The announcements bus is a `beamtalk_runtime_sup` worker started *after*
 `beamtalk_bootstrap`, so during early stdlib bootstrap (and on a minimal
-embedded runtime) it may not be running yet. The whole call is therefore wrapped
-in try/catch and a `whereis` guard: announcing is a best-effort observability
-side effect and must never fail or delay class load/teardown. The
-`beamtalk_announcements:system_announce/2` entry point builds the typed event
-payload and dispatches it caller-side, fire-and-forget.
+embedded runtime) it may not be running yet. The call therefore goes through
+`beamtalk_announcements:system_announce_safe/2`, which skips a missing bus and
+swallows any failure: announcing is a best-effort observability side effect and
+must never fail or delay class load/teardown. The typed event payload is built
+and dispatched caller-side, fire-and-forget.
 """.
 -spec announce_class_lifecycle('ClassLoaded' | 'ClassRemoved', class_name()) -> ok.
 announce_class_lifecycle(EventClass, ClassName) ->
