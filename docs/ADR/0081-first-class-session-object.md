@@ -568,7 +568,7 @@ The meta-commands existed only on the REPL surface. Removing them is a small los
 ## Implementation Tracking
 
 **Epic:** [BT-2364](https://linear.app/beamtalk/issue/BT-2364) — First-Class Session Object (ADR 0081)
-**Status:** Planned
+**Status:** Done
 
 | # | Issue | Scope | Blocked by |
 |---|-------|-------|------------|

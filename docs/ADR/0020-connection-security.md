@@ -5,6 +5,7 @@ Implemented (2026-02-18)
 
 **Update (2026-02-17):** Phase 0 (WebSocket transport + cookie auth) implemented in BT-683. ADR accepted based on validated implementation.
 **Update (2026-02-18):** Phases 0–2 complete (BT-683, BT-691, BT-692). Phase 3 (SPIFFE/SPIRE) remains future.
+**Update (2026-11-18):** Phase 3 is not planned: BT-693 (SPIFFE/SPIRE) was cancelled.
 **Update (2026-03-15):** TLS distribution support removed (PR #1401). `beamtalk workspace attach` and `beamtalk transcript` moved under `beamtalk workspace` subcommand. References below reflect the original design; current commands are `beamtalk workspace attach` and `beamtalk workspace transcript`.
 
 ## Context
@@ -511,14 +512,14 @@ This ADR does **not** cover:
 ## Implementation Tracking
 
 **Epic:** BT-685
-**Status:** Phases 0–2 Done
+**Status:** Phases 0–2 Done; Phase 3 (BT-693) cancelled
 
 | Phase | Issue | Title | Size | Status |
 |-------|-------|-------|------|--------|
 | 0 | BT-683 | Migrate REPL transport from TCP to WebSocket with cookie auth | L | Done |
 | 1 | BT-691 | Network bind options and reverse proxy documentation | M | Done |
 | 2 | BT-692 | mTLS for Erlang distribution | L | Done |
-| 3 | BT-693 | SPIFFE/SPIRE workload identity integration | XL | Future |
+| 3 | BT-693 | SPIFFE/SPIRE workload identity integration | XL | Cancelled |
 
 ## References
 - Related ADRs: [ADR 0004 — Persistent Workspace Management](0004-persistent-workspace-management.md), [ADR 0009 — OTP Application Structure](0009-otp-application-structure.md)

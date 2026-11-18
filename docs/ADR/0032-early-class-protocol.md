@@ -657,7 +657,7 @@ The `methods` selector on class objects already returned flattened (inherited) s
 - BT-733: Remove Flattened Method Table (M)
 - BT-734: Bootstrap Intrinsics and Stdlib Behaviour/Class (L)
 - BT-735: Cleanup — Consolidate Duplicate Dispatch Paths (M)
-**Status:** Planned
+**Status:** Done
 
 ## References
 - Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (Object Model), [ADR 0006](0006-unified-method-dispatch.md) (Unified Dispatch), [ADR 0007](0007-compilable-stdlib-with-primitive-injection.md) (Compilable Stdlib), [ADR 0013](0013-class-variables-class-methods-instantiation.md) (Virtual Metaclasses), [ADR 0015](0015-repl-error-objects-and-exception-hierarchy.md) (Error Hierarchy — new intrinsics must use `beamtalk_error:raise/1`), [ADR 0035](0035-field-based-reflection-api.md) (Field-Based Reflection API — `instVarNames`/`instVarAt:`/`instVarAt:put:` renamed to `fieldNames`/`fieldAt:`/`fieldAt:put:`)

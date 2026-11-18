@@ -1,7 +1,7 @@
 # ADR 0069: Actor Observability and Tracing
 
 ## Status
-Accepted | Implemented (2026-03-21). Amended 2026-10-21 (BT-4025): Beamtalk code can emit and attach to application `telemetry` events through a `Telemetry` facade; see "Amendment (2026-10-21): application events (BT-4025)" below. Amended 2026-10-22 (BT-4103): always-on aggregates are keyed by `{Class, Selector}` and per-actor detail exists only while tracing is enabled; the per-actor monitor and retirement are gone — see "Amendment (2026-10-22): class-keyed always-on aggregates (BT-4103)" below. Amended 2026-10-28 (BT-4113): the `[beamtalk, actor, dispatch, *]` telemetry events are opt-in, and the aggregates are recorded directly — see "Amendment (2026-10-28): dispatch events are opt-in (BT-4113)" below.
+Implemented (2026-03-21). Amended 2026-10-21 (BT-4025): Beamtalk code can emit and attach to application `telemetry` events through a `Telemetry` facade; see "Amendment (2026-10-21): application events (BT-4025)" below. Amended 2026-10-22 (BT-4103): always-on aggregates are keyed by `{Class, Selector}` and per-actor detail exists only while tracing is enabled; the per-actor monitor and retirement are gone — see "Amendment (2026-10-22): class-keyed always-on aggregates (BT-4103)" below. Amended 2026-10-28 (BT-4113): the `[beamtalk, actor, dispatch, *]` telemetry events are opt-in, and the aggregates are recorded directly — see "Amendment (2026-10-28): dispatch events are opt-in (BT-4113)" below.
 
 > **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** Class lookup no longer uses the `beamtalk_object_instances` ETS bag (deleted). The class travels with the send (`*_known` functions, from the `#beamtalk_object{}` record), and a bare pid reads the `'$beamtalk_actor'` marker (`beamtalk_actor:lookup_class/1`, via `beamtalk_actor_scan:info/1`). `bottlenecks:` scans actors by marker. The statements below about `beamtalk_object_instances` describe the original design.
 
@@ -845,7 +845,7 @@ This spike should be a single branch with ~100 lines of test code. If the teleme
 - BT-1606: MCP tracing tools — lean surface (S) — Phase 4, blocked by BT-1605
 - BT-1607: Tracing documentation and examples (S) — Phase 5, blocked by BT-1605
 
-**Status:** Planned
+**Status:** Done
 **Recommended start:** BT-1601 (validation spike, no dependencies)
 
 ## References

@@ -447,7 +447,7 @@ TranscriptStream does not understand 'show:'
 
 **Epic:** BT-487 — Singleton Access via Class Variables (ADR 0019)
 **Issues:** BT-488, BT-489, BT-490, BT-491, BT-492
-**Status:** Planned
+**Status:** Done
 
 | Phase | Issue | Title | Size |
 |-------|-------|-------|------|

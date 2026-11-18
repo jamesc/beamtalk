@@ -12,7 +12,7 @@ entry before this ADR was superseded, and ADR 0133 Phase 2 removes them.
 ## Implementation Tracking
 
 **Epic (Phases 0 and 1):** [BT-3865](https://linear.app/beamtalk/issue/BT-3865)
-**Status:** Planned. Phases 2 to 6 are not scheduled: Open Question 5 asks for a count of real §6 hits first.
+**Status:** Not built. ADR 0133 superseded this ADR and the epic was cancelled (2026-10-18).
 
 | Phase | Issue | Description | Size | PR |
 |---|---|---|---|---|

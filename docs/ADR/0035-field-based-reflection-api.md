@@ -299,7 +299,7 @@ All `classVar:` declarations must be changed to `classState:`. This is a simple 
 - BT-807 — Rename class-side reflection API across runtime, codegen, stdlib — Phase 2 (blocked by BT-806)
 - BT-808 — Update tests and docs — Phase 3 (blocked by BT-805, BT-807)
 
-**Status:** Planned
+**Status:** Done
 
 ## References
 - Related issues: BT-796 (remove Flavors before/after infrastructure)

@@ -5,7 +5,7 @@ Implemented (2026-11-01)
 
 ## Implementation Tracking
 
-**Epic:** [BT-3743](https://linear.app/beamtalk/issue/BT-3743) (closed 2026-10-17 at a boundary); open follow-ups: [BT-3883](https://linear.app/beamtalk/issue/BT-3883)
+**Epic:** [BT-3743](https://linear.app/beamtalk/issue/BT-3743) (closed 2026-10-17 at a boundary). The follow-up epic [BT-3883](https://linear.app/beamtalk/issue/BT-3883) was cancelled and replaced by BT-3901 under [ADR 0133](0133-scope-of-captured-variable-mutation-in-blocks.md).
 **Status:** All phases merged. The Phase 0 position diagnostic is retired ([BT-3913](https://linear.app/beamtalk/issue/BT-3913), ADR 0133 Phase 3 close-out): the 733-shape oracle reports zero silent drops and zero `erlc` failures.
 
 | Phase | Issue | Description | Size | PR |
