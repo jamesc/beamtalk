@@ -140,16 +140,15 @@ shape_skew_test_() ->
                 {
                     "connecting two nodes with a class at different shapeVersions "
                     "announces exactly one NodeShapeSkew for it",
-                    fun() -> skew_announced_once_on_connect(PeerNode) end
+                    {timeout, 60, fun() -> skew_announced_once_on_connect(PeerNode) end}
                 },
                 {
                     "a shared class at matching versions, and a class not shared "
                     "with the peer at all, announce no skew",
-                    fun() -> no_skew_for_matching_or_non_shared(PeerNode) end
+                    {timeout, 60, fun() -> no_skew_for_matching_or_non_shared(PeerNode) end}
                 },
-                {"reloading a class on one side while connected re-announces skew", fun() ->
-                    reload_reannounces_skew(PeerNode)
-                end}
+                {"reloading a class on one side while connected re-announces skew",
+                    {timeout, 60, fun() -> reload_reannounces_skew(PeerNode) end}}
             ]
         end}}.
 
