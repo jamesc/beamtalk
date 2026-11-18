@@ -372,16 +372,7 @@ fn append_dependency_to_manifest(manifest_path: &Utf8Path, toml_fragment: &str) 
         result
     };
 
-    // Validate the new TOML parses correctly before writing
-    let _: toml::Value = toml::from_str(&new_content)
-        .into_diagnostic()
-        .wrap_err("Generated beamtalk.toml is invalid TOML — this is a bug")?;
-
-    std::fs::write(manifest_path, new_content)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to write '{manifest_path}'"))?;
-
-    Ok(())
+    crate::commands::toml_utils::write_validated_manifest(manifest_path, &new_content)
 }
 
 // ---------------------------------------------------------------------------
