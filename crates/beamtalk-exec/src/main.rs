@@ -470,6 +470,21 @@ fn configure_process_group(cmd: &mut Command) {
     }
 }
 
+/// Grace period between SIGTERM and SIGKILL.
+#[cfg(unix)]
+const KILL_GRACE: Duration = Duration::from_secs(2);
+/// Poll interval while waiting for a child to be reaped.
+#[cfg(unix)]
+const KILL_POLL: Duration = Duration::from_millis(50);
+
+/// Whether `child_id` is still registered with process group `pgid`.
+#[cfg(unix)]
+fn still_running(children: &ChildMap, child_id: u32, pgid: libc::pid_t) -> bool {
+    children
+        .lock()
+        .is_ok_and(|m| m.get(&child_id).is_some_and(|e| e.pgid == pgid))
+}
+
 fn handle_kill(request: &Map, children: &ChildMap) -> Result<(), String> {
     let child_id = map_get(request, "child_id")
         .and_then(term_to_child_id)
@@ -501,23 +516,23 @@ fn handle_kill(request: &Map, children: &ChildMap) -> Result<(), String> {
             warn!("SIGTERM to pgid -{pgid} failed: {err}");
         }
 
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            {
-                let map = children
-                    .lock()
-                    .map_err(|e| format!("children lock poisoned: {e}"))?;
-                if !map.contains_key(&child_id) {
-                    break; // Reaper thread already cleaned it up.
+        // Escalate to SIGKILL on a helper thread: waiting here would freeze
+        // spawn / write_stdin / close_stdin for every other child.
+        let children = Arc::clone(children);
+        thread::spawn(move || {
+            let deadline = Instant::now() + KILL_GRACE;
+            while Instant::now() < deadline {
+                if !still_running(&children, child_id, pgid) {
+                    return; // Reaper thread already cleaned it up.
                 }
+                thread::sleep(KILL_POLL);
             }
-            if Instant::now() >= deadline {
+            // Re-check so a reused child_id (a new child) is never signalled.
+            if still_running(&children, child_id, pgid) {
                 // SAFETY: SIGKILL to process group.
                 unsafe { libc::kill(-pgid, libc::SIGKILL) };
-                break;
             }
-            thread::sleep(Duration::from_millis(50));
-        }
+        });
     }
 
     #[cfg(windows)]
@@ -625,21 +640,56 @@ fn handle_command(term: &Term, writer: &SharedWriter, children: &ChildMap) -> Re
     }
 }
 
+/// The `child_id` that needs a synthetic exit event after `term` failed, if any.
+///
+/// Only a failed `spawn` qualifies, and only when no live child holds the id:
+/// a duplicate-id spawn is rejected while the id belongs to a different,
+/// still-running child, and an exit event for it would tell the BEAM that
+/// child had died.
+fn failed_spawn_child_id(term: &Term, children: &ChildMap) -> Option<u32> {
+    let Term::Map(map) = term else { return None };
+    if !matches!(map_get(map, "command"), Some(Term::Atom(a)) if a.name == "spawn") {
+        return None;
+    }
+    let child_id = map_get(map, "child_id").and_then(term_to_child_id)?;
+    let live = children.lock().is_ok_and(|m| m.contains_key(&child_id));
+    (!live).then_some(child_id)
+}
+
 /// Send SIGTERM to all running process groups, wait up to 2 s, then SIGKILL.
 fn kill_all_children(children: &ChildMap) {
     #[cfg(unix)]
+    kill_all_children_within(children, KILL_GRACE);
+
+    #[cfg(windows)]
+    kill_all_children_windows(children);
+}
+
+/// Unix: SIGTERM every group, wait up to `grace` for the reapers, then SIGKILL.
+#[cfg(unix)]
+fn kill_all_children_within(children: &ChildMap, grace: Duration) {
     {
         let pgids: Vec<libc::pid_t> = children
             .lock()
             .map(|m| m.values().map(|e| e.pgid).collect())
             .unwrap_or_default();
 
+        if pgids.is_empty() {
+            return; // Nothing to wait for — exit promptly.
+        }
         for pgid in &pgids {
             // SAFETY: SIGTERM to a valid process group.
             unsafe { libc::kill(-pgid, libc::SIGTERM) };
         }
 
-        thread::sleep(Duration::from_secs(2));
+        // Wait for the reaper threads to drain the map, up to the grace period.
+        let deadline = Instant::now() + grace;
+        while Instant::now() < deadline {
+            if children.lock().is_ok_and(|m| m.is_empty()) {
+                return;
+            }
+            thread::sleep(KILL_POLL);
+        }
 
         // Send SIGKILL to any survivors.
         let pgids: Vec<libc::pid_t> = children
@@ -651,9 +701,11 @@ fn kill_all_children(children: &ChildMap) {
             unsafe { libc::kill(-pgid, libc::SIGKILL) };
         }
     }
+}
 
-    // Windows: terminate all Job Objects to kill all process trees.
-    #[cfg(windows)]
+/// Windows: terminate all Job Objects to kill all process trees.
+#[cfg(windows)]
+fn kill_all_children_windows(children: &ChildMap) {
     {
         if let Ok(map) = children.lock() {
             for (child_id, entry) in map.iter() {
@@ -747,10 +799,7 @@ fn main() {
             warn!("Command error: {e}");
             // If a spawn command failed, emit a synthetic exit event so the
             // BEAM caller does not wait forever for an exit that will never arrive.
-            if let Term::Map(map) = &term
-                && matches!(map_get(map, "command"), Some(Term::Atom(a)) if a.name == "spawn")
-                && let Some(child_id) = map_get(map, "child_id").and_then(term_to_child_id)
-            {
+            if let Some(child_id) = failed_spawn_child_id(&term, &children) {
                 send_event(&writer, &exit_event(child_id, -1));
             }
         }
@@ -1168,6 +1217,90 @@ mod tests {
                 }
             }
             assert!(Instant::now() < deadline, "child 1 not reaped within 5s");
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    // ── Shutdown / kill behaviour (BT-5028) ─────────────────────
+
+    #[test]
+    #[cfg(unix)]
+    fn kill_all_children_with_no_children_does_not_wait() {
+        // An hour-long grace would hang the test (not just slow it) if the
+        // empty case waited, so no wall-clock assertion is needed.
+        let children: ChildMap = Arc::new(Mutex::new(HashMap::new()));
+        kill_all_children_within(&children, Duration::from_hours(1));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn failed_spawn_of_live_child_id_emits_no_exit_event() {
+        let children: ChildMap = Arc::new(Mutex::new(HashMap::new()));
+        children.lock().unwrap().insert(
+            7,
+            ChildEntry {
+                stdin: None,
+                stdin_closed: false,
+                pgid: 1,
+            },
+        );
+        let spawn = |id: i32| {
+            Term::from(Map::from([
+                (atom("command"), atom("spawn")),
+                (atom("child_id"), int_term(id)),
+            ]))
+        };
+        assert_eq!(failed_spawn_child_id(&spawn(7), &children), None);
+        assert_eq!(failed_spawn_child_id(&spawn(8), &children), Some(8));
+        let kill = Term::from(Map::from([
+            (atom("command"), atom("kill")),
+            (atom("child_id"), int_term(8)),
+        ]));
+        assert_eq!(failed_spawn_child_id(&kill, &children), None);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn kill_of_term_ignoring_child_returns_without_blocking_the_loop() {
+        let writer: SharedWriter = Arc::new(Mutex::new(io::stdout()));
+        let children: ChildMap = Arc::new(Mutex::new(HashMap::new()));
+        let args = Term::from(eetf::List::from(vec![
+            binary_term(b"-c"),
+            binary_term(b"while :; do sleep 1; done"),
+        ]));
+        let spawn = Term::from(Map::from([
+            (atom("command"), atom("spawn")),
+            (atom("child_id"), int_term(30)),
+            (atom("executable"), binary_term(b"/bin/sh")),
+            (atom("args"), args),
+            (
+                atom("env"),
+                Term::from(Map::from(HashMap::<Term, Term>::new())),
+            ),
+        ]));
+        // SIG_IGN survives exec, so the child starts with SIGTERM ignored and
+        // there is no window in which a `trap` is not yet installed.
+        // SAFETY: signal(2) with SIG_IGN/SIG_DFL is async-signal-safe.
+        unsafe { libc::signal(libc::SIGTERM, libc::SIG_IGN) };
+        let spawned = handle_command(&spawn, &writer, &children);
+        // SAFETY: as above, restoring the default disposition.
+        unsafe { libc::signal(libc::SIGTERM, libc::SIG_DFL) };
+        spawned.expect("spawn must succeed");
+
+        let kill = Map::from([(atom("child_id"), int_term(30))]);
+        handle_kill(&kill, &children).expect("kill must succeed");
+        // SIGTERM is ignored, so the child is only escalated to SIGKILL by the
+        // helper thread after the grace period; the command loop got control
+        // back with the child still registered.
+        assert!(
+            children.lock().unwrap().contains_key(&30),
+            "handle_kill must not wait for the child to exit"
+        );
+
+        // Cleanup: the helper escalates to SIGKILL; wait for the reaper.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while children.lock().unwrap().contains_key(&30) {
+            assert!(Instant::now() < deadline, "child 30 not reaped");
             thread::sleep(Duration::from_millis(50));
         }
     }

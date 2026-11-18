@@ -92,6 +92,7 @@ use serde::{Deserialize, Serialize};
 
 pub use beamtalk_workspace::pid_liveness::proc_start_time;
 use beamtalk_workspace::pid_liveness::{is_process_alive, kill_process};
+use beamtalk_workspace::pid_liveness::{start_time_matches, still_same_process};
 
 use crate::error::Result;
 
@@ -545,33 +546,6 @@ pub fn classify_record(
     }
 }
 
-/// Pure comparison shared by [`classify_record`] and `terminate_process`'s
-/// pre-`SIGKILL` re-check: is `actual` consistent with `expected`?
-///
-/// - `(None, _)` — no recorded start time (old record predating this field,
-///   or a platform `proc_start_time` never returns a real value on) —
-///   treated as a match, the same best-effort stance `beamtalk-cli`'s own
-///   `NodeInfo.start_time` handling takes when start time isn't available.
-/// - `(Some(_), None)` — a start time *was* recorded, but this observation
-///   came back empty. Unlike the case above, this is **not**
-///   ambiguous: `expected` can only be `Some(_)` if this exact platform's
-///   `proc_start_time` already produced a real value once, for this same
-///   PID, when the record was saved — so a platform that genuinely can't
-///   read start time would have recorded `None` to begin with, never
-///   `Some(_)`. The only way to reach `Some(_)` here paired with an observed
-///   `None` is `proc_start_time` racing the process actually exiting between
-///   `sweep`'s `is_process_alive` check and its own call (see this module's
-///   doc comment) — treated as a **mismatch**, so the caller skips signaling
-///   rather than trusting a liveness snapshot that may already be stale.
-/// - `(Some(e), Some(a))` — compared directly.
-fn start_time_matches(expected: Option<u64>, actual: Option<u64>) -> bool {
-    match (expected, actual) {
-        (Some(e), Some(a)) => e == a,
-        (Some(_), None) => false,
-        (None, _) => true,
-    }
-}
-
 /// Result of a full sweep.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SweepReport {
@@ -666,16 +640,6 @@ fn terminate_process(pid: u32, expected_start_time: Option<u64>) {
     let _ = kill_process(pid, Some(TERMINATE_GRACE), || {
         still_same_process(pid, expected_start_time)
     });
-}
-
-/// Re-read `pid`'s *current* start time and check it against
-/// `expected_start_time` — the same [`start_time_matches`] comparison
-/// [`classify_record`] uses, applied again immediately before killing to
-/// close the PID-reuse window between `classify_record`'s check and the
-/// actual kill call (see `terminate_process`'s doc comment). Available
-/// wherever `proc_start_time` returns a real value (Linux, Windows).
-fn still_same_process(pid: u32, expected_start_time: Option<u64>) -> bool {
-    start_time_matches(expected_start_time, proc_start_time(pid))
 }
 
 #[cfg(test)]
