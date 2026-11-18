@@ -15,7 +15,8 @@ use crate::ast::{
     Expression, Identifier, MessageSelector, Module, TypeAnnotation, WellKnownSelector,
 };
 use crate::ast_walker::{
-    SendRef, cascade_sends, cascade_shared_receiver, walk_expression, walk_module,
+    SendRef, cascade_sends, cascade_shared_receiver, later_cascade_sends, walk_expression,
+    walk_module,
 };
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::type_checker::{DynamicReason, InferredType, TypeMap};
@@ -127,22 +128,18 @@ fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<D
                 .with_category(DiagnosticCategory::Lint),
         );
     }
-    // Also check cascade messages — `true ifTrue: [1]; ifFalse: [2]` has a literal
-    // boolean receiver with each cascade message going to the same receiver.
-    if let Expression::Cascade {
-        receiver, messages, ..
-    } = expr
-        && let Some(is_true) = receiver.as_literal_bool()
-    {
-        let literal_name = if is_true { "true" } else { "false" };
-        for msg in messages {
-            if let Some(well_known) = boolean_conditional(&msg.selector) {
-                diagnostics.push(
-                    Diagnostic::warning(format!("Condition is always `{literal_name}`"), msg.span)
-                        .with_hint(dead_branch_hint(is_true, well_known))
-                        .with_category(DiagnosticCategory::Lint),
-                );
-            }
+    // The folded first cascade message is the plain send above; the later
+    // ones go to the same literal receiver (`true ifTrue: [1]; ifFalse: [2]`).
+    for send in later_cascade_sends(expr) {
+        if let Some(is_true) = send.receiver.as_literal_bool()
+            && let Some(well_known) = boolean_conditional(send.selector)
+        {
+            let literal_name = if is_true { "true" } else { "false" };
+            diagnostics.push(
+                Diagnostic::warning(format!("Condition is always `{literal_name}`"), send.span)
+                    .with_hint(dead_branch_hint(is_true, well_known))
+                    .with_category(DiagnosticCategory::Lint),
+            );
         }
     }
 }
@@ -1573,8 +1570,8 @@ mod tests {
         assert_eq!(diagnostics[0].severity, Severity::Warning);
     }
 
-    /// Message with literal boolean receiver should warn (receiver of first message before cascade).
-    /// `true ifTrue: [1]; ifFalse: [2]` — warns for the first message's receiver.
+    /// Each message of a cascade on a literal boolean warns (BT-5025): the first
+    /// is the folded plain send, the later one is judged against the shared receiver.
     #[test]
     fn literal_bool_cascade_warns_for_each_message() {
         let src = "true ifTrue: [1]; ifFalse: [2]";
@@ -1583,8 +1580,8 @@ mod tests {
         check_literal_boolean_condition(&module, &mut diagnostics);
         assert_eq!(
             diagnostics.len(),
-            1,
-            "Expected 1 warning for cascade starting with literal true, got: {diagnostics:?}"
+            2,
+            "Expected one warning per cascade message, got: {diagnostics:?}"
         );
         assert!(diagnostics.iter().all(|d| d.severity == Severity::Warning));
         assert!(
