@@ -468,22 +468,28 @@ impl SimpleLanguageService {
             if !seen.insert((loc.file.clone(), loc.span.start(), loc.span.end())) {
                 continue;
             }
-            let Some(data) = self.files.get(&loc.file) else {
-                continue;
+            // A site we cannot rewrite would leave a dangling reference that
+            // fails later with `class_not_found`, so refuse the whole rename.
+            let unresolved = |why: &str| {
+                RenameRefusal::new(format!(
+                    "Cannot rename {old} to {new}: a reference in {} {why}, so it cannot be \
+                     rewritten safely. Nothing was changed.",
+                    loc.file
+                ))
             };
             if self.is_readonly_file(&loc.file) {
-                continue;
+                return Err(unresolved("is in the standard library or a dependency"));
             }
             // Narrow to the bare name: a qualified `pkg@Name` reference may span more.
-            let Some(text) = data
-                .source
-                .get(loc.span.start() as usize..loc.span.end() as usize)
-            else {
-                continue;
-            };
-            let Some(rel) = whole_word_offset(text, old) else {
-                continue;
-            };
+            let rel = self
+                .files
+                .get(&loc.file)
+                .and_then(|data| {
+                    data.source
+                        .get(loc.span.start() as usize..loc.span.end() as usize)
+                })
+                .and_then(|text| whole_word_offset(text, old))
+                .ok_or_else(|| unresolved("could not be narrowed to the bare class name"))?;
             let start = loc.span.start() + u32::try_from(rel).unwrap_or(0);
             confirmed.push(RenameEdit {
                 file: loc.file,
@@ -656,4 +662,18 @@ fn validate_new_selector(old: &str, new: &str) -> Result<(), RenameRefusal> {
         return bad("a binary selector must be made of operator characters");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::whole_word_offset;
+
+    #[test]
+    fn whole_word_offset_requires_exactly_one_whole_word_match() {
+        assert_eq!(whole_word_offset("Foo", "Foo"), Some(0));
+        assert_eq!(whole_word_offset("pkg@Foo", "Foo"), Some(4));
+        assert_eq!(whole_word_offset("Foo@Foo", "Foo"), None);
+        assert_eq!(whole_word_offset("FooBar", "Foo"), None);
+        assert_eq!(whole_word_offset("Bar", "Foo"), None);
+    }
 }
