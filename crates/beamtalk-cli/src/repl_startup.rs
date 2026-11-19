@@ -20,8 +20,6 @@ use std::ffi::OsString;
 use std::net::Ipv4Addr;
 #[cfg(test)]
 use std::path::Path;
-#[cfg(all(test, windows))]
-use std::path::PathBuf;
 
 use crate::path_util::to_forward_slash;
 
