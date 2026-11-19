@@ -62,7 +62,16 @@ fn list_arity(arg: &str, before: &str) -> Option<usize> {
     }
     let (name, _) = leading_ident(arg)?;
     let bound = format!("{name} = [");
-    let at = before.rfind(&bound)?;
+    // The nearest binding of exactly `name`: not the tail of `extra_args = [`.
+    let starts: Vec<usize> = before
+        .match_indices(bound.as_str())
+        .map(|(i, _)| i)
+        .collect();
+    let at = *starts.iter().rev().find(|&&i| {
+        i == 0
+            || !(before.as_bytes()[i - 1].is_ascii_alphanumeric()
+                || before.as_bytes()[i - 1] == b'_')
+    })?;
     count_args(&before[at + bound.len()..])
 }
 
@@ -194,6 +203,13 @@ fn every_liveview_rpc_target_is_exported() {
          Update the call, or export the function from the runtime module:\n  {}",
         problems.join("\n  ")
     );
+}
+
+#[test]
+fn a_variable_argument_list_binds_by_whole_name() {
+    let before = "extra_args = [a, b, c]\n    args = [x]\n    other_args = [p, q]\n";
+    assert_eq!(list_arity("args", before), Some(1));
+    assert_eq!(list_arity("missing", before), None);
 }
 
 #[test]

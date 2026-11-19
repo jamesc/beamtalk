@@ -198,6 +198,7 @@ jobs:
           # Defined once, here.
           desktop=$(flag matches 'desktop/*' 'crates/beamtalk-desktop-broker/*' \
               'crates/beamtalk-desktop-shell/*' 'crates/beamtalk-env/*' 'crates/beamtalk-workspace/*' \
+              'crates/beamtalk-repl-protocol/*' 'crates/beamtalk-build/*' 'crates/beamtalk-cerl-doc/*' \
               Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml '.github/actions/test-desktop/*')
 
           {
