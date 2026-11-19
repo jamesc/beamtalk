@@ -22,6 +22,8 @@ to avoid temp files on disk.
 
 %% Default `gen_server:call' budget for requests that reach the compiler port.
 -define(CALL_TIMEOUT_MS, 30000).
+-define(MAX_PORT_REOPENS, 3).
+-define(PORT_REOPEN_WINDOW_MS, 60000).
 %% Budget for cheap, cache-only or latency-sensitive calls.
 -define(QUICK_CALL_TIMEOUT_MS, 5000).
 %% `safe_call/4' fallbacks, one pair per result shape.
@@ -176,7 +178,11 @@ port_forwards() -> ?PORT_FORWARDS.
     %% session's names from either cache would need to weigh the same
     %% cost/benefit for both, so a fix to one without the other would just
     %% leave them inconsistent).
-    aliases = #{} :: #{binary() => binary()}
+    aliases = #{} :: #{binary() => binary()},
+    %% BT-5021: monotonic-ms times of recent in-place port reopens, bounding
+    %% them (`?MAX_PORT_REOPENS` per `?PORT_REOPEN_WINDOW_MS`) so a compiler
+    %% that dies on every request still escalates to the supervisor.
+    port_reopens = [] :: [integer()]
 }).
 
 %%% Public API
@@ -1270,15 +1276,29 @@ handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
 handle_info({'EXIT', Port, normal}, #state{port = Port} = State) ->
     %% BT-5021: a port that closed normally is the one `port_roundtrip/6`
     %% closes after a request timeout (a late reply must not poison the next
-    %% request), or one that finished after `exit_status` was consumed there.
+    %% request), or one that died after `exit_status` was consumed there.
     %% Stopping here discarded the `aliases`/`protocols` caches and every class
     %% not backed by a loaded module, which a restart cannot rebuild. Open a
-    %% fresh port and keep the state. A crash (`exit_status` message above, or
-    %% an abnormal EXIT below) still stops the server for its supervisor.
-    ?LOG_ERROR("Compiler port closed; opening a new port", #{
-        domain => [beamtalk, runtime], reason => normal
-    }),
-    {noreply, State#state{port = open_port()}};
+    %% fresh port and keep the state, but only a few times per window: a
+    %% compiler that dies on every request must still reach the supervisor's
+    %% restart intensity. A crash seen as an `exit_status` message above, or
+    %% an abnormal EXIT below, stops the server at once.
+    Now = erlang:monotonic_time(millisecond),
+    Recent = [T || T <- State#state.port_reopens, Now - T < ?PORT_REOPEN_WINDOW_MS],
+    case length(Recent) >= ?MAX_PORT_REOPENS of
+        true ->
+            ?LOG_ERROR(#{
+                domain => [beamtalk, runtime],
+                msg => <<"Compiler port keeps closing; stopping the compiler server">>,
+                reopens => length(Recent)
+            }),
+            {stop, {port_exit, normal}, State};
+        false ->
+            ?LOG_ERROR(#{
+                domain => [beamtalk, runtime], msg => <<"Compiler port closed; opening a new port">>
+            }),
+            {noreply, State#state{port = open_port(), port_reopens = [Now | Recent]}}
+    end;
 handle_info({'EXIT', Port, Reason}, #state{port = Port} = State) ->
     ?LOG_ERROR("Compiler port EXIT", #{domain => [beamtalk, runtime], reason => Reason}),
     {stop, {port_exit, Reason}, State};

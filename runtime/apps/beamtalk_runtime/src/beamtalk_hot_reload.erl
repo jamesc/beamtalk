@@ -316,9 +316,12 @@ try_change_code(Pid, Module, Extra) ->
             %% any failed `code_change`, but never silently: the next
             %% `reload` re-suspends and retries.
             ?LOG_ERROR(
-                "Code change for ~p timed out; actor ~p may be left suspended "
-                "until the next reload retries the migration",
-                [Module, Pid],
+                #{
+                    msg =>
+                        <<"code change timed out; actor left suspended until the next reload retries">>,
+                    module => Module,
+                    pid => Pid
+                },
                 #{domain => [beamtalk, runtime]}
             ),
             {error, timeout};
