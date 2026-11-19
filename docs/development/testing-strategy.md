@@ -1034,6 +1034,25 @@ an issue for a red `main` run, a PR that should have carried `ci:corpus` but
 didn't is caught one merge later. Locally, `just ci-changed` still runs the
 tier whenever `scripts/ci/corpus-gate.sh` matches the changed paths.
 
+Two cheap parts of that tier do not wait for the label (BT-5033). When a PR
+touches `runtime/apps/*/test/fixtures/**` or the crates that read those fixtures
+(`beamtalk-core`, `beamtalk-codegen`, `beamtalk-repl`), the `test-rust` job also
+runs `just test-fixture-readers`: the `*_matches_shared_corpus`,
+`*_match_the_corpus` and `*_conformance` tests, a few seconds on that job's
+existing build. And the cross-language contract tests
+(`runtime_export_contract_tests`, `cross_language_contract_tests` in
+`beamtalk-codegen`) are ordinary fast-tier tests: they check the codegen's, the
+CLI's, the release launchers' and LiveView's `workspace.ex` calls against the
+runtime's exports, and the MCP, CLI and LSP expression templates against the
+selectors declared in `stdlib/src`. Their LiveView half is why
+`liveview-e2e.yml` need not trigger on every runtime path.
+
+The VS Code extension has its own path-gated job, `test-vscode` (`tsc`, Biome
+lint and the whole vitest suite), triggered by `editors/vscode/**`, `beamtalk.hrl`
+and the shared fixtures its tests read. A change to
+`repl_op_payloads.json` therefore reaches all three readers: Rust and Erlang run
+in `test-rust` and `test-runtime` on every PR, TypeScript in `test-vscode`.
+
 Coverage is not on the PR path at all: see § Code Coverage (`coverage.yml`,
 nightly).
 

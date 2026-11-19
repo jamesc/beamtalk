@@ -99,6 +99,12 @@ jobs:
       # Rust/Cargo sources, the recipes or workflows that build them changed:
       # check-release-build runs.
       rust: ${{ steps.filter.outputs.rust }}
+      # The VS Code extension, or something its tests read from outside
+      # editors/vscode (BT-5033): test-vscode runs.
+      vscode: ${{ steps.filter.outputs.vscode }}
+      # A shared runtime fixture, or a Rust crate that reads one, changed:
+      # test-rust runs the corpus-tier fixture readers (BT-5033).
+      fixture_readers: ${{ steps.filter.outputs.fixture_readers }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -115,7 +121,7 @@ jobs:
             # desktop (ci-platforms.yml's).
             {
               echo "desktop=false"
-              for k in core_diff_modes learn runtime rust; do echo "$k=true"; done
+              for k in core_diff_modes learn runtime rust vscode fixture_readers; do echo "$k=true"; done
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -163,12 +169,36 @@ jobs:
           rust=$(flag matches 'crates/*' Cargo.toml Cargo.lock rust-toolchain.toml \
               clippy.toml Justfile '.github/workflows/*' 'scripts/ci/*')
 
+          # BT-5033: `npm test` and `tsc` for the extension. Besides the
+          # extension itself, its tests read the runtime's `?PROTOCOL_VERSION`
+          # (beamtalk.hrl, workspaceClient.test.ts), the shared cross-language
+          # fixtures under runtime/apps/*/test/fixtures (beamtalkRoot.test.ts,
+          # opPayloads.test.ts: the TypeScript reader of repl_op_payloads.json,
+          # whose Erlang and Rust readers run in test-runtime and test-rust on
+          # every PR, so this gate is what makes a fixture change reach all
+          # three) and the section-divider grammar fixture.
+          vscode=$(flag matches 'editors/vscode/*' \
+              runtime/apps/beamtalk_runtime/include/beamtalk.hrl \
+              'runtime/apps/*/test/fixtures/*' \
+              crates/beamtalk-core/tests/fixtures/section_divider_grammar_cases.json \
+              Justfile .github/workflows/ci.yml)
+
+          # BT-5033: the runtime's shared fixtures are read by corpus-tier Rust
+          # tests (`*_matches_shared_corpus`), which a PR otherwise runs only
+          # with the `ci:corpus` label. `just test-fixture-readers` is the
+          # cheap subset: a fixture change, or a change to the three crates
+          # that read them, runs it on the test-rust job's existing build.
+          fixture_readers=$(flag matches 'runtime/apps/*/test/fixtures/*' \
+              'crates/beamtalk-core/*' 'crates/beamtalk-codegen/*' 'crates/beamtalk-repl/*' \
+              Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml)
+
           # The desktop app's own paths (the crate, the workspace crates it
           # links, the root manifest and lockfile those crates take their
           # `.workspace = true` deps from, the recipe and this workflow).
           # Defined once, here.
           desktop=$(flag matches 'desktop/*' 'crates/beamtalk-desktop-broker/*' \
               'crates/beamtalk-desktop-shell/*' 'crates/beamtalk-env/*' 'crates/beamtalk-workspace/*' \
+              'crates/beamtalk-repl-protocol/*' 'crates/beamtalk-build/*' 'crates/beamtalk-cerl-doc/*' \
               Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml '.github/actions/test-desktop/*')
 
           {
@@ -177,6 +207,8 @@ jobs:
             echo "learn=$learn"
             echo "runtime=$runtime"
             echo "rust=$rust"
+            echo "vscode=$vscode"
+            echo "fixture_readers=$fixture_readers"
           } >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
@@ -291,6 +323,10 @@ jobs:
   # corpus.yml's test-corpus job). Full test-stdlib/test-bunit/test-runtime
   # run in the test-beam / test-runtime jobs.
   test-rust:
+    needs: changes
+    # Run even if `changes` failed (the fixture step then skips, its output is
+    # empty): a skipped test-rust would read as passing to branch protection.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -339,6 +375,54 @@ jobs:
       # against the built runtime and stdlib.
       - name: Build and Rust tests
         run: just build test-rust
+
+      # BT-5033: the corpus tier is corpus.yml's and runs on a PR only with the
+      # `ci:corpus` label, but its tests that read the runtime's shared
+      # fixtures are cheap on this job's build (nextest reuses the test
+      # binaries above). Without this step a PR that edits a fixture, or the
+      # Rust side of one, passed here and went red on main after the merge.
+      # On a push to main the whole tier runs in corpus.yml.
+      - name: Corpus-tier tests that read the shared runtime fixtures
+        if: github.event_name == 'pull_request' && needs.changes.outputs.fixture_readers == 'true'
+        run: just test-fixture-readers
+
+      # BT-5035: the CLI unit tests with HOME at an empty directory; fails if a
+      # test writes under it instead of a BeamtalkHomeOverride temp home.
+      # Builds `beamtalk-cli`'s unit-test binary (the nextest run above builds
+      # it with the whole workspace's features, so cargo may rebuild it) and
+      # runs ~1,700 tests in about 20 s.
+      - name: CLI tests do not touch the real HOME
+        run: just test-hermetic-home
+
+  # ─── VS Code extension: type-check, lint, tests (BT-5033) ──────────────
+  # CI used to run only `npm run test:grammar` (2 of the extension's test
+  # files) and the Biome format check, so `tsc` and the rest of `npm test`
+  # never ran: among them workspaceClient.test.ts, which pins
+  # WORKSPACE_PROTOCOL_VERSION to the runtime's ?PROTOCOL_VERSION, and
+  # opPayloads.test.ts, the TypeScript reader of the per-op wire payload
+  # fixture. Gated by the `vscode` path decision above; always on main.
+  test-vscode:
+    needs: changes
+    if: needs.changes.outputs.vscode == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: tsc, Biome lint and vitest
+        run: just test-vscode
 
   # ─── Desktop app (Tauri) crate tests (BT-3061) ─────────────────────────
   # desktop/src-tauri is excluded from the root Cargo workspace (root

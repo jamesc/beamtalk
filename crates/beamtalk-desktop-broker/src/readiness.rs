@@ -75,6 +75,16 @@ pub enum FailureReason {
     /// epmd has no record of the target node, or it died between connect and
     /// the version RPC.
     DeadWorkspace,
+    /// The workspace is reachable but speaks a different REPL/RPC protocol
+    /// version than this broker (BT-5033): the version lock the REPL, MCP,
+    /// LSP and VS Code enforce, applied to the LiveView attach path. Not a
+    /// `/readiness` bucket; made by [`require_protocol`].
+    ProtocolMismatch {
+        /// `protocol_version` the workspace reported (`"unknown"` if absent).
+        workspace: String,
+        /// The protocol version this broker was built for.
+        expected: String,
+    },
     /// A reason string outside the three known buckets — kept rather than
     /// discarded so an older/future front's taxonomy change doesn't crash
     /// the broker, just surfaces an unrecognized string.
@@ -88,6 +98,28 @@ impl From<&str> for FailureReason {
             "bad_cookie" => Self::BadCookie,
             "dead_workspace" => Self::DeadWorkspace,
             other => Self::Unknown(other.to_string()),
+        }
+    }
+}
+
+impl FailureReason {
+    /// A sentence for the user. Every bucket gets one, so a caller does not
+    /// have to print the `Debug` form.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        match self {
+            Self::EpmdAbsent => "this app could not register with the local epmd".to_string(),
+            Self::BadCookie => "the workspace rejected this app's cookie".to_string(),
+            Self::DeadWorkspace => "the workspace node is not running".to_string(),
+            Self::ProtocolMismatch {
+                workspace,
+                expected,
+            } => format!(
+                "the workspace speaks protocol {workspace} but this app expects {expected}; \
+                 stop the workspace (`beamtalk workspace list`, then `beamtalk workspace \
+                 stop <id>`) and start it again from a matching Beamtalk install"
+            ),
+            Self::Unknown(reason) => format!("unrecognised readiness failure `{reason}`"),
         }
     }
 }
@@ -172,6 +204,41 @@ pub fn advance(state: ReadinessState, outcome: ProbeOutcome) -> ReadinessState {
         // already WaitingReadiness): hold steady.
         (state, _) => state,
     }
+}
+
+/// Turn a [`ReadinessState::Ready`] whose workspace speaks a different protocol
+/// than `expected` into [`ReadinessState::Failed`] with
+/// [`FailureReason::ProtocolMismatch`] (BT-5033). Any other state passes
+/// through. Exact match, as `handshake::verify_server_versions` does for the
+/// REPL, MCP and LSP: a workspace whose report lacks `protocol_version`
+/// (`"unknown"`) predates the lock and is refused too.
+///
+/// This is an attach-time check. The post-attach monitor (`monitor.rs`) does
+/// not re-compare the protocol: a workspace restarted from a different
+/// install while the window is open is not refused until the next attach.
+///
+/// Pure, so the refusal is testable without a node; the caller passes
+/// `beamtalk_repl_protocol::handshake::PROTOCOL_VERSION`.
+#[must_use]
+pub fn require_protocol(state: ReadinessState, expected: &str) -> ReadinessState {
+    match state {
+        ReadinessState::Ready(version) if version.protocol_version != expected => {
+            ReadinessState::Failed(FailureReason::ProtocolMismatch {
+                workspace: version.protocol_version,
+                expected: expected.to_string(),
+            })
+        }
+        other => other,
+    }
+}
+
+/// [`require_protocol`] against the protocol version this build speaks
+/// (`beamtalk_repl_protocol::handshake::PROTOCOL_VERSION`, the constant the
+/// REPL, MCP and LSP lock on). What the desktop shell calls after
+/// [`wait_ready`].
+#[must_use]
+pub fn require_matching_protocol(state: ReadinessState) -> ReadinessState {
+    require_protocol(state, beamtalk_repl_protocol::handshake::PROTOCOL_VERSION)
 }
 
 /// Poll `state` forward with `probe` (real I/O) until it reaches [`ReadinessState::Ready`],
@@ -468,6 +535,48 @@ mod tests {
         assert_eq!(report.protocol_version, "2.0");
         assert_eq!(report.otp_release, "unknown");
         assert_eq!(report.erts_version, "unknown");
+    }
+
+    #[test]
+    fn require_protocol_passes_a_matching_workspace_and_other_states() {
+        let ready = ReadinessState::Ready(version());
+        assert_eq!(require_protocol(ready.clone(), "2.0"), ready);
+        for other in [
+            ReadinessState::WaitingHttp,
+            ReadinessState::Failed(FailureReason::DeadWorkspace),
+            ReadinessState::TimedOut(Stage::Readiness),
+        ] {
+            assert_eq!(require_protocol(other.clone(), "9.9"), other);
+        }
+    }
+
+    #[test]
+    fn require_protocol_refuses_a_different_or_missing_protocol() {
+        let mismatch = require_protocol(ReadinessState::Ready(version()), "3.0");
+        assert_eq!(
+            mismatch,
+            ReadinessState::Failed(FailureReason::ProtocolMismatch {
+                workspace: "2.0".to_string(),
+                expected: "3.0".to_string(),
+            })
+        );
+        let mut unknown = version();
+        unknown.protocol_version = "unknown".to_string();
+        assert!(matches!(
+            require_protocol(ReadinessState::Ready(unknown), "2.0"),
+            ReadinessState::Failed(FailureReason::ProtocolMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn this_brokers_protocol_is_the_repl_protocol_constant() {
+        // The version the desktop passes to `require_protocol` is the one the
+        // REPL, MCP and LSP lock on; the report in `version()` is a fixture,
+        // so this ties the fixture to the real constant.
+        assert_eq!(
+            version().protocol_version,
+            beamtalk_repl_protocol::handshake::PROTOCOL_VERSION
+        );
     }
 
     #[test]
