@@ -490,6 +490,17 @@ fn execute_build_passes(
                     );
                 }
             }
+            // The cache holds the diagnostics a build produced, not that
+            // build's verdict, so judge them against *this* run's options:
+            // `--warnings-as-errors` must fail on a replayed warning exactly
+            // as it does on a freshly compiled one (CI runs on warm caches).
+            if crate::beam_compiler::diagnostics_are_errors(
+                cached_diags,
+                options,
+                &compile_ctx.diagnostics_overrides,
+            ) {
+                miette::bail!("Failed to compile '{file}'");
+            }
             // A replayed provision diagnostic joins the other users' so it is
             // still reported once, against the protocol's file.
             compile_ctx.provision_sink.report(

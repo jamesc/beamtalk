@@ -54,7 +54,7 @@ name_registered_test() ->
 %% --- Supervisor error kinds --------------------------------------------------
 
 child_not_found_test() ->
-    E = beamtalk_supervisor:child_not_found_error('S', 'childWithId:', a),
+    E = beamtalk_supervisor_errors:child_not_found_error('S', 'childWithId:', a),
     ?assertEqual(child_not_found, E#beamtalk_error.kind),
     ?assertEqual('S', E#beamtalk_error.class),
     ?assertEqual('childWithId:', E#beamtalk_error.selector),
@@ -62,7 +62,7 @@ child_not_found_test() ->
     ?assertEqual(#{id => a}, E#beamtalk_error.details).
 
 child_running_test() ->
-    E = beamtalk_supervisor:child_running_error('S', 'deleteChild:', a, running),
+    E = beamtalk_supervisor_errors:child_running_error('S', 'deleteChild:', a, running),
     ?assertEqual(child_running, E#beamtalk_error.kind),
     ?assertEqual(?HINT(<<"Child a is running">>), E#beamtalk_error.message),
     ?assertEqual(
@@ -71,7 +71,7 @@ child_running_test() ->
     ?assertEqual(#{id => a, status => running}, E#beamtalk_error.details).
 
 ambiguous_child_test() ->
-    E = beamtalk_supervisor:ambiguous_child_error(
+    E = beamtalk_supervisor_errors:ambiguous_child_error(
         'S', 'terminateChild:', [{b, undefined, worker, []}, {a, undefined, worker, []}]
     ),
     ?assertEqual(ambiguous_child, E#beamtalk_error.kind),
@@ -79,12 +79,12 @@ ambiguous_child_test() ->
     ?assertEqual(#{ids => [a, b]}, E#beamtalk_error.details).
 
 delete_failed_test() ->
-    E = beamtalk_supervisor:delete_failed_error('S', 'deleteChild:', running),
+    E = beamtalk_supervisor_errors:delete_failed_error('S', 'deleteChild:', running),
     ?assertEqual(delete_failed, E#beamtalk_error.kind),
     ?assertEqual(?HINT(<<"running">>), E#beamtalk_error.hint).
 
 stop_timeout_test() ->
-    E = beamtalk_supervisor:stop_timeout_error('S', 50),
+    E = beamtalk_supervisor_errors:stop_timeout_error('S', 50),
     ?assertEqual(timeout, E#beamtalk_error.kind),
     ?assertEqual('stopWithin:', E#beamtalk_error.selector),
     ?assertEqual(
@@ -100,14 +100,14 @@ check_stop_timeout_test() ->
     ?assertEqual(#{value => -1}, E#beamtalk_error.details).
 
 check_integer_test() ->
-    {error, E} = beamtalk_supervisor:check_integer('S', maxRestarts, x, 0),
+    {error, E} = beamtalk_supervisor_init_config:check_integer('S', maxRestarts, x, 0),
     ?assertEqual(type_error, E#beamtalk_error.kind),
     ?assertEqual(maxRestarts, E#beamtalk_error.selector),
     ?assertEqual(?HINT(<<"maxRestarts must be an Integer >= 0, got x">>), E#beamtalk_error.hint),
     ?assertEqual(#{value => x}, E#beamtalk_error.details).
 
 check_strategy_test() ->
-    {error, E} = beamtalk_supervisor:check_strategy('S', nope),
+    {error, E} = beamtalk_supervisor_init_config:check_strategy('S', nope),
     ?assertEqual(type_error, E#beamtalk_error.kind),
     ?assertEqual(strategy, E#beamtalk_error.selector),
     ?assertEqual(
@@ -135,7 +135,7 @@ check_max_children_test() ->
 
 unavailable_node_down_test() ->
     Self = {beamtalk_supervisor, 'S', mod, self()},
-    {error, E} = beamtalk_supervisor:supervisor_unavailable_error(
+    {error, E} = beamtalk_supervisor_errors:supervisor_unavailable_error(
         Self, 'count', {unreachable, nodedown}
     ),
     ?assertEqual(node_down, E#beamtalk_error.kind),
@@ -153,7 +153,7 @@ unavailable_node_down_test() ->
 
 unavailable_stale_test() ->
     Self = {beamtalk_supervisor, 'S', mod, self()},
-    {error, E} = beamtalk_supervisor:supervisor_unavailable_error(Self, 'count', dead),
+    {error, E} = beamtalk_supervisor_errors:supervisor_unavailable_error(Self, 'count', dead),
     ?assertEqual(stale_handle, E#beamtalk_error.kind),
     ?assertEqual(
         ?HINT(<<"supervisor is not running; the handle is stale">>), E#beamtalk_error.hint
