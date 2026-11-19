@@ -241,3 +241,66 @@ fn test_shows_the_warning_by_default_and_no_warnings_suppresses_it() {
         .success()
         .stderr(contains(WARNING_TEXT).not());
 }
+
+// ---------------------------------------------------------------------------
+// Warm caches: `build` replays an unchanged file's cached diagnostics, and
+// `--warnings-as-errors` must judge the replayed ones too (CI runs on warm
+// caches).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn build_warnings_as_errors_fails_on_every_run_with_a_warm_cache() {
+    let project = project_with_a_warning();
+    let build = |args: &[&str]| {
+        cli_common::beamtalk()
+            .current_dir(project.path())
+            .args(args)
+            .assert()
+    };
+
+    // A plain build warms the cache: the warning is reported, the build passes.
+    build(&["build"]).success().stderr(contains(WARNING_TEXT));
+
+    // Same sources, now gated: the cached warning must fail the build, each time.
+    for _ in 0..2 {
+        build(&["build", "--warnings-as-errors"])
+            .failure()
+            .stderr(contains(WARNING_TEXT));
+    }
+
+    // `--no-warnings` on the warm cache still passes and stays quiet.
+    build(&["build", "--no-warnings"])
+        .success()
+        .stderr(contains(WARNING_TEXT).not());
+}
+
+#[test]
+fn test_warnings_as_errors_fails_with_a_warm_build_cache() {
+    // `test` builds the package first; that build replays cached diagnostics.
+    let project = project_with_a_warning();
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .success();
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["test", "--quiet", "--warnings-as-errors"])
+        .assert()
+        .failure()
+        .stderr(contains(WARNING_TEXT));
+}
+
+#[test]
+fn check_warnings_as_errors_fails_on_every_run() {
+    // `check` never replays a cache (always a cold full check); pin that.
+    let project = project_with_a_warning();
+    for _ in 0..2 {
+        cli_common::beamtalk()
+            .current_dir(project.path())
+            .args(["check", "--warnings-as-errors"])
+            .assert()
+            .failure()
+            .stderr(contains(WARNING_TEXT));
+    }
+}
