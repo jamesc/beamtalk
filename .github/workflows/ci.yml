@@ -323,6 +323,9 @@ jobs:
   # run in the test-beam / test-runtime jobs.
   test-rust:
     needs: changes
+    # Run even if `changes` failed (the fixture step then skips, its output is
+    # empty): a skipped test-rust would read as passing to branch protection.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

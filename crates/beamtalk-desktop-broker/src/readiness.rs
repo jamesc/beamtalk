@@ -213,6 +213,10 @@ pub fn advance(state: ReadinessState, outcome: ProbeOutcome) -> ReadinessState {
 /// REPL, MCP and LSP: a workspace whose report lacks `protocol_version`
 /// (`"unknown"`) predates the lock and is refused too.
 ///
+/// This is an attach-time check. The post-attach monitor (`monitor.rs`) does
+/// not re-compare the protocol: a workspace restarted from a different
+/// install while the window is open is not refused until the next attach.
+///
 /// Pure, so the refusal is testable without a node; the caller passes
 /// `beamtalk_repl_protocol::handshake::PROTOCOL_VERSION`.
 #[must_use]

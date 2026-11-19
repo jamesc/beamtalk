@@ -1,5 +1,8 @@
 {
   "compilerOptions": {
+    // node16 resolution reads package "exports" (vscode-languageclient/node);
+    // the default "node10" cannot, so `tsc` failed. Output stays CommonJS
+    // because package.json has no "type": "module" (BT-5033).
     "module": "node16",
     "moduleResolution": "node16",
     "target": "ES2020",
