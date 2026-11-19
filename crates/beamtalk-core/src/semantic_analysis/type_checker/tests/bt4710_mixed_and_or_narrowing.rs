@@ -23,19 +23,11 @@ typed Object subclass: Repro
 }
 
 fn assert_clean(name: &str, body: &str) {
-    let diags = type_dnu_diags(&method(body));
-    assert!(
-        diags.is_empty(),
-        "[{name}] expected no diagnostics for:\n{body}\ngot: {diags:#?}"
-    );
+    assert_clean_diags(&type_dnu_diags(&method(body)), &format!("[{name}] {body}"));
 }
 
 fn assert_rejected(name: &str, body: &str) {
-    let diags = type_dnu_diags(&method(body));
-    assert!(
-        !diags.is_empty(),
-        "[{name}] expected a diagnostic for:\n{body}\ngot none"
-    );
+    assert_has_diags(&type_dnu_diags(&method(body)), &format!("[{name}] {body}"));
 }
 
 // --- BT-4908: the narrowing cases, as tables ------------------------------

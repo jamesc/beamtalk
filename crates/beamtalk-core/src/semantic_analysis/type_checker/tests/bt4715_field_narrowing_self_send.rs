@@ -30,8 +30,7 @@ fn assert_nil_leak(body: &str) {
 }
 
 fn assert_clean(body: &str) {
-    let diags = type_diags(&class_with(body));
-    assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
+    assert_clean_diags(&type_diags(&class_with(body)), body);
 }
 
 #[test]

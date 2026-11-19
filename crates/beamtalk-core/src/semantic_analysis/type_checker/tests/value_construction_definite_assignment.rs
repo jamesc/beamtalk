@@ -162,12 +162,6 @@ fn definite_assignment_diags(checker: &TypeChecker) -> Vec<Diagnostic> {
         .collect()
 }
 
-fn build_hierarchy(class: ClassDefinition) -> ClassHierarchy {
-    ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
-        .0
-        .unwrap()
-}
-
 // --- Tests -------------------------------------------------------------
 
 #[test]
@@ -176,7 +170,7 @@ fn bare_new_on_typed_no_default_field_warns() {
     // `new` resolves to the auto-generated constructor.
     let class = stored_snapshot_value(vec![state_field(), event_id_field()], vec![]);
     let module = make_module(vec![bare_new()]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     let diags = definite_assignment_diags(&checker);
     assert_eq!(
@@ -212,7 +206,7 @@ fn literal_new_with_map_supplying_field_does_not_warn() {
     // StoredSnapshot new: #{#state => s} — the literal map supplies `state`.
     let class = stored_snapshot_value(vec![state_field()], vec![]);
     let module = make_module(vec![new_with(map_lit(vec![(key("state"), var("s"))]))]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
@@ -226,7 +220,7 @@ fn literal_new_with_map_missing_field_warns() {
     // StoredSnapshot new: #{} — the literal map does not supply `state`.
     let class = stored_snapshot_value(vec![state_field()], vec![]);
     let module = make_module(vec![new_with(map_lit(vec![]))]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     let diags = definite_assignment_diags(&checker);
     assert_eq!(
@@ -245,7 +239,7 @@ fn non_literal_new_map_argument_is_silent() {
         assign("someMap", map_lit(vec![])),
         new_with(var("someMap")),
     ]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
@@ -258,7 +252,7 @@ fn non_literal_new_map_argument_is_silent() {
 fn defaulted_field_does_not_warn() {
     let class = stored_snapshot_value(vec![event_id_field()], vec![]);
     let module = make_module(vec![bare_new()]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
@@ -271,7 +265,7 @@ fn defaulted_field_does_not_warn() {
 fn untyped_field_does_not_warn() {
     let class = stored_snapshot_value(vec![untyped_field("note")], vec![]);
     let module = make_module(vec![bare_new()]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
@@ -284,7 +278,7 @@ fn untyped_field_does_not_warn() {
 fn nilable_field_does_not_warn() {
     let class = stored_snapshot_value(vec![nilable_field("note")], vec![]);
     let module = make_module(vec![bare_new()]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
@@ -307,7 +301,7 @@ fn keyword_constructor_is_not_checked() {
         ]),
         vec![var("s"), int_lit(5)],
     )]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
@@ -325,7 +319,7 @@ fn class_with_user_defined_new_is_exempt_on_bare_new() {
     new_method.is_class_method = true;
     let class = stored_snapshot_value(vec![state_field()], vec![new_method]);
     let module = make_module(vec![bare_new()]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
@@ -342,7 +336,7 @@ fn overriding_new_does_not_exempt_new_colon() {
     new_method.is_class_method = true;
     let class = stored_snapshot_value(vec![state_field()], vec![new_method]);
     let module = make_module(vec![new_with(map_lit(vec![]))]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert_eq!(
         definite_assignment_diags(&checker).len(),
@@ -430,7 +424,7 @@ fn factory_self_new_colon_supplying_every_field_is_clean() {
         span: span(),
     };
     let module = make_module(vec![]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
@@ -443,7 +437,7 @@ fn factory_self_new_colon_supplying_every_field_is_clean() {
 fn native_ancestor_downgrades_severity_to_hint() {
     let class = native_value_class(vec![state_field()]);
     let module = make_module(vec![bare_new()]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     let diags = definite_assignment_diags(&checker);
     assert_eq!(
@@ -467,7 +461,7 @@ fn actor_class_is_never_checked() {
     // not also fire.
     let class = counter_actor(vec![state_field()]);
     let module = make_module(vec![bare_new_for("Counter")]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
