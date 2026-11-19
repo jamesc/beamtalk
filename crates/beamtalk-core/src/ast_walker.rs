@@ -608,6 +608,17 @@ pub fn cascade_sends(expr: &Expression) -> impl Iterator<Item = SendRef<'_>> {
     parts.into_iter().flatten()
 }
 
+/// The second and later messages of the cascade `expr`, each paired with the
+/// cascade's shared receiver. Empty when `expr` is not a cascade.
+///
+/// For a pass driven by [`walk_expression`]: the walker already reaches the
+/// folded first message as a plain `MessageSend` (it is `Cascade::receiver`),
+/// so a pass judging every send visits plain sends there and the later
+/// messages here, and judges each message exactly once.
+pub fn later_cascade_sends(expr: &Expression) -> impl Iterator<Item = SendRef<'_>> {
+    cascade_sends(expr).filter(|s| s.site == SendSite::CascadeLater)
+}
+
 /// [`cascade_sends`] for a cascade already taken apart into its `receiver`
 /// (the folded first `MessageSend`, or a bare receiver) and its later
 /// `messages`, as the type checker holds it.

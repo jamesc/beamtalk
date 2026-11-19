@@ -22,7 +22,7 @@ use crate::ast::{
     ClassKind, ConstructorSelectors, DeclaredKeyword, Expression, Identifier, MessageSelector,
     MethodDefinition, Module, migrate_from_v_version,
 };
-use crate::ast_walker::{walk_expression, walk_module};
+use crate::ast_walker::{later_cascade_sends, walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, MethodSide, Span};
@@ -81,15 +81,13 @@ fn visit_abstract_instantiation(
                 }
             }
         }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            if let Some(name) = receiver_class_name(receiver) {
-                for msg in messages {
-                    let sel = msg.selector.name();
-                    if is_instantiation_selector(&sel) && hierarchy.is_abstract(name) {
-                        diagnostics.push(abstract_class_error(name, msg.span));
-                    }
+        Expression::Cascade { .. } => {
+            for send in later_cascade_sends(expr) {
+                if let Some(name) = receiver_class_name(send.receiver)
+                    && is_instantiation_selector(&send.selector.name())
+                    && hierarchy.is_abstract(name)
+                {
+                    diagnostics.push(abstract_class_error(name, send.span));
                 }
             }
         }
@@ -260,19 +258,15 @@ fn visit_actor_new(
             diagnostics.push(actor_must_spawn_error(class_name, &sel, *span));
         }
     }
-    // Also check cascade messages
-    if let Expression::Cascade {
-        receiver, messages, ..
-    } = expr
-        && let Some(class_name) = receiver_class_name(receiver)
-    {
-        for msg in messages {
-            let sel = msg.selector.name();
+    // The folded first cascade message is the plain send above; the rest:
+    for send in later_cascade_sends(expr) {
+        if let Some(class_name) = receiver_class_name(send.receiver) {
+            let sel = send.selector.name();
             if (sel == "new" || sel == "new:")
                 && !WellKnownClass::Actor.is(class_name)
                 && hierarchy.is_actor_subclass(class_name)
             {
-                diagnostics.push(actor_must_spawn_error(class_name, &sel, msg.span));
+                diagnostics.push(actor_must_spawn_error(class_name, &sel, send.span));
             }
         }
     }
@@ -342,11 +336,9 @@ fn check_object_new_in_class_methods(
                             span,
                             ..
                         } => check(receiver, &selector.name(), *span),
-                        Expression::Cascade {
-                            receiver, messages, ..
-                        } => {
-                            for msg in messages {
-                                check(receiver, &msg.selector.name(), msg.span);
+                        Expression::Cascade { .. } => {
+                            for send in later_cascade_sends(expr) {
+                                check(send.receiver, &send.selector.name(), send.span);
                             }
                         }
                         _ => {}
@@ -455,17 +447,12 @@ fn visit_uninstantiable_new(
             ));
         }
     }
-    // Also check cascade messages
-    if let Expression::Cascade {
-        receiver, messages, ..
-    } = expr
-        && let Some(class_name) = receiver_class_name(receiver)
-    {
-        for msg in messages {
-            let sel = msg.selector.name();
+    for send in later_cascade_sends(expr) {
+        if let Some(class_name) = receiver_class_name(send.receiver) {
+            let sel = send.selector.name();
             if let Some(kind) = uninstantiable_new(class_name, &sel, hierarchy) {
                 diagnostics.push(uninstantiable_new_error(
-                    kind, class_name, &sel, hierarchy, msg.span,
+                    kind, class_name, &sel, hierarchy, send.span,
                 ));
             }
         }
@@ -504,16 +491,11 @@ fn visit_new_field_names(
             }
         }
     }
-    // Also check cascade messages
-    if let Expression::Cascade {
-        receiver, messages, ..
-    } = expr
-        && let Some(class_name) = receiver_class_name(receiver)
-    {
-        for msg in messages {
-            let sel = msg.selector.name();
+    for send in later_cascade_sends(expr) {
+        if let Some(class_name) = receiver_class_name(send.receiver) {
+            let sel = send.selector.name();
             if (sel == "new:" || sel == "spawn:")
-                && let Some(Expression::MapLiteral { pairs, .. }) = msg.arguments.first()
+                && let Some(Expression::MapLiteral { pairs, .. }) = send.arguments.first()
             {
                 let declared_state = hierarchy.all_state(class_name);
                 if !declared_state.is_empty() {
@@ -620,23 +602,18 @@ fn visit_classvar_access(
             );
         }
     }
-    // Also check cascade messages
-    if let Expression::Cascade {
-        receiver, messages, ..
-    } = expr
-        && let Some(class_name) = receiver_class_name(receiver)
-    {
-        for msg in messages {
-            let sel = msg.selector.name();
+    for send in later_cascade_sends(expr) {
+        if let Some(class_name) = receiver_class_name(send.receiver) {
+            let sel = send.selector.name();
             if sel == "classState:"
                 && let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
-                    msg.arguments.first()
+                    send.arguments.first()
                 && let Some(hint) = undefined_class_variable_hint(hierarchy, class_name, var_name)
             {
                 diagnostics.push(
                     Diagnostic::warning(
                         format!("Undefined class variable `{var_name}` on class `{class_name}`"),
-                        msg.span,
+                        send.span,
                     )
                     .with_hint(hint)
                     .with_category(DiagnosticCategory::Type),
