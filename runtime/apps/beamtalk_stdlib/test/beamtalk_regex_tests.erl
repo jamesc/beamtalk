@@ -338,3 +338,37 @@ split_regex_invalid_pattern_test() ->
 
 split_regex_type_error_test() ->
     ?assertBtError(type_error, beamtalk_regex:split_regex(42, <<",">>)).
+
+%%% ============================================================================
+%%% Unicode vs byte mode (BT-5030)
+%%% ============================================================================
+
+unicode_mode_tagged_string_test() ->
+    Text = {beamtalk_string, <<"héllo"/utf8>>},
+    Pattern = {beamtalk_string, <<".">>},
+    ?assertEqual(5, length(beamtalk_regex:all_matches(Text, Pattern))),
+    ?assertEqual(
+        {beamtalk_string, <<"xxxxx">>},
+        beamtalk_regex:replace_all_regex(Text, Pattern, {beamtalk_string, <<"x">>})
+    ).
+
+byte_mode_bare_binary_pattern_test() ->
+    %% A bare-binary (FFI) pattern keeps byte semantics: `.` is one byte, so a
+    %% match that splits "é" is rejected by validated_match.
+    ?assertBtError(parse_error, beamtalk_regex:all_matches(<<"héllo"/utf8>>, <<".">>)).
+
+invalid_utf8_subject_with_unicode_pattern_test() ->
+    Pattern = {beamtalk_string, <<"a">>},
+    ?assertBtError(parse_error, beamtalk_regex:matches_regex(<<255>>, Pattern)),
+    ?assertBtError(
+        parse_error, beamtalk_regex:matches_regex_options(<<255>>, Pattern, [caseless])
+    ),
+    ?assertBtError(
+        parse_error, beamtalk_regex:all_matches(<<255>>, make_regex({beamtalk_string, <<"a">>}))
+    ).
+
+invalid_utf8_replacement_test() ->
+    Str = {beamtalk_string, <<"abc">>},
+    Pattern = {beamtalk_string, <<"b">>},
+    ?assertBtError(parse_error, beamtalk_regex:replace_regex(Str, Pattern, <<255>>)),
+    ?assertBtError(parse_error, beamtalk_regex:replace_all_regex(Str, Pattern, <<255>>)).

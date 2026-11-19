@@ -215,8 +215,8 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// subset of CLDR/strftime-style date-time patterns; see `parse:format:`
   /// for the inverse).
   ///
-  /// Recognized pattern letters — a run of N identical letters controls
-  /// width: `y`/`yy`/`yyyy` (year: unpadded / last-2-digits / zero-padded
+  /// Recognized pattern letters — a run of N identical letters (at most 9;
+  /// a longer run raises `type_error`) controls width: `y`/`yy`/`yyyy` (year: unpadded / last-2-digits / zero-padded
   /// to N digits), `M`/`MM`, `d`/`dd`, `H`/`HH`, `m`/`mm`, `s`/`ss` (month,
   /// day, hour 24h, minute, second: unpadded / zero-padded to N digits).
   /// Any other character (`-`, `:`, `T`, ` `, ...) passes through literally.

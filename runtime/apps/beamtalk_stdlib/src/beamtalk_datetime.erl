@@ -68,6 +68,11 @@ adopted.
 
 %% Gregorian seconds at Unix epoch (1970-01-01 00:00:00)
 -define(EPOCH_GREGORIAN, 62167219200).
+%% Year used by parse:format: when the pattern has no year token (BT-5030).
+-define(DEFAULT_PARSE_YEAR, 1970).
+%% Longest accepted run of one pattern letter (e.g. `yyyy`); also bounds the
+%% `\\d{N}` quantifier, which `re` rejects past 65535.
+-define(MAX_PATTERN_RUN, 9).
 
 %%% ============================================================================
 %%% Class Methods — Constructors
@@ -164,7 +169,7 @@ year(_, _, _, _, _, _, _) ->
 -doc "Construct a DateTime from a Unix epoch timestamp (seconds); UTC (offsetMinutes 0).".
 -spec fromTimestamp(integer()) -> t().
 fromTimestamp(Ts) when is_integer(Ts) ->
-    from_timestamp_with_offset(Ts, 0);
+    from_timestamp_with_offset(Ts, 0, 'fromTimestamp:');
 fromTimestamp(_) ->
     beamtalk_error:raise_type_error(
         'DateTime', 'fromTimestamp:', <<"Argument must be an Integer (Unix epoch seconds)">>
@@ -206,7 +211,8 @@ of `format:`).
 
 Returns `Result ok: dateTime` on success, `Result error:` if `Str` doesn't
 match `Pattern` or the parsed fields form an invalid date/time (e.g. month
-13). Fields absent from the pattern default to: year 0, month 1, day 1,
+13). Fields absent from the pattern default to: year 1970 (the Unix epoch year, not a leap year, so `02-29` with
+`MM-dd` is rejected), month 1, day 1,
 hour/minute/second 0. The pattern has no offset token, so the result is
 always UTC (offsetMinutes 0) — this is a fallible, Result-based counterpart
 to the exception-raising `fromString:`.
@@ -307,7 +313,7 @@ second(#{second := V}) -> V.
 -doc "Convert to the equivalent UTC (offsetMinutes 0) DateTime, same instant.".
 -spec 'toUtc'(t()) -> t().
 'toUtc'(Self) ->
-    from_timestamp_with_offset('asTimestamp'(Self), 0).
+    from_timestamp_with_offset('asTimestamp'(Self), 0, 'toUtc').
 
 -doc """
 Convert to an equivalent DateTime expressed at a different fixed UTC offset
@@ -323,7 +329,7 @@ offsetMinutes change.
 -spec toOffset(t(), OffsetMinutes :: integer()) -> t().
 toOffset(Self, Off) when is_integer(Off) ->
     validate_offset(Off, 'toOffset:'),
-    from_timestamp_with_offset('asTimestamp'(Self), Off);
+    from_timestamp_with_offset('asTimestamp'(Self), Off, 'toOffset:');
 toOffset(_, _) ->
     beamtalk_error:raise_type_error(
         'DateTime', 'toOffset:', <<"Argument must be an Integer (offset minutes)">>
@@ -339,7 +345,8 @@ toOffset(_, _) ->
 Format the wall-clock fields using a documented pattern language (a small
 subset of CLDR/strftime-style date-time patterns; see also `parse:format:`).
 
-Recognized pattern letters — a run of N identical letters controls width:
+Recognized pattern letters — a run of N identical letters (at most 9; a longer
+run raises `type_error`) controls width:
 - `y`/`yy`/`yyyy` — year: unpadded / last-2-digits / zero-padded to N digits.
 - `M`/`MM`, `d`/`dd`, `H`/`HH`, `m`/`mm`, `s`/`ss` — month, day, hour (24h),
   minute, second: unpadded / zero-padded to N digits.
@@ -365,7 +372,7 @@ format(Self, PatternArg) ->
     Pattern = beamtalk_text:unwrap_or_raise(
         PatternArg, 'DateTime', 'format:', <<"Argument must be a String pattern">>
     ),
-    Tokens = tokenize_pattern(Pattern),
+    Tokens = tokenize_pattern(Pattern, 'format:'),
     beamtalk_primitive:string_from_binary(
         iolist_to_binary([render_pattern_token(Token, Self) || Token <- Tokens])
     ).
@@ -377,16 +384,14 @@ format(Self, PatternArg) ->
 -doc "Add seconds, return new DateTime. Preserves self's offsetMinutes.".
 -spec addSeconds(t(), Secs :: integer()) -> t().
 addSeconds(Self, Secs) when is_integer(Secs) ->
-    Ts = 'asTimestamp'(Self) + Secs,
-    Off = maps:get(offsetMinutes, Self, 0),
-    from_timestamp_with_offset(Ts, Off);
+    add_seconds(Self, Secs, 'addSeconds:');
 addSeconds(_, _) ->
     beamtalk_error:raise_type_error('DateTime', 'addSeconds:', <<"Argument must be an Integer">>).
 
 -doc "Add days, return new DateTime.".
 -spec addDays(t(), Days :: integer()) -> t().
 addDays(Self, Days) when is_integer(Days) ->
-    addSeconds(Self, Days * 86400);
+    add_seconds(Self, Days * 86400, 'addDays:');
 addDays(_, _) ->
     beamtalk_error:raise_type_error('DateTime', 'addDays:', <<"Argument must be an Integer">>).
 
@@ -398,7 +403,7 @@ Duration are truncated toward zero.
 """.
 -spec addDuration(t(), beamtalk_duration:t()) -> t().
 addDuration(Self, #{'$beamtalk_class' := 'Duration'} = D) ->
-    addSeconds(Self, beamtalk_duration:'asSeconds'(D));
+    add_seconds(Self, beamtalk_duration:'asSeconds'(D), 'addDuration:');
 addDuration(_, _) ->
     beamtalk_error:raise_type_error('DateTime', 'addDuration:', <<"Argument must be a Duration">>).
 
@@ -549,10 +554,23 @@ make_datetime(Y, Mo, D, H, Mi, S, Off) ->
         offsetMinutes => Off
     }.
 
+-doc "Add `Secs` seconds to `Self`, preserving its offset; `Selector` names the caller in errors.".
+-spec add_seconds(t(), integer(), atom()) -> t().
+add_seconds(Self, Secs, Selector) ->
+    Ts = 'asTimestamp'(Self) + Secs,
+    Off = maps:get(offsetMinutes, Self, 0),
+    from_timestamp_with_offset(Ts, Off, Selector).
+
 -doc "Build a DateTime for the instant `Ts` (Unix epoch seconds), expressed at `OffsetMinutes`.".
--spec from_timestamp_with_offset(integer(), integer()) -> t().
-from_timestamp_with_offset(Ts, OffsetMinutes) ->
+-spec from_timestamp_with_offset(integer(), integer(), atom()) -> t().
+from_timestamp_with_offset(Ts, OffsetMinutes, Selector) ->
     GregSec = Ts + ?EPOCH_GREGORIAN + (OffsetMinutes * 60),
+    GregSec >= 0 orelse
+        beamtalk_error:raise_type_error(
+            'DateTime',
+            Selector,
+            <<"Wall-clock date at this offset falls before year 0, the earliest DateTime">>
+        ),
     {{Y, Mo, D}, {H, Mi, S}} = calendar:gregorian_seconds_to_datetime(GregSec),
     make_datetime(Y, Mo, D, H, Mi, S, OffsetMinutes).
 
@@ -611,7 +629,7 @@ parse_iso8601(Str) ->
     case
         re:run(
             Str,
-            <<"^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(Z|[+-]\\d{2}:\\d{2})?$">>,
+            <<"^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(Z|[+-]\\d{2}:\\d{2})?\\z">>,
             [{capture, all_but_first, binary}]
         )
     of
@@ -676,23 +694,35 @@ parse_offset_suffix(_) ->
 %% format and matched exactly on parse. Deliberately has no offset token —
 %% offset-aware round-trips go through asString/fromString: instead.
 
--spec tokenize_pattern(binary()) -> [{field(), pos_integer()} | {lit, binary()}].
-tokenize_pattern(Pattern) ->
-    group_pattern_chars(unicode:characters_to_list(Pattern)).
+-spec tokenize_pattern(binary(), atom()) -> [{field(), pos_integer()} | {lit, binary()}].
+tokenize_pattern(Pattern, Selector) ->
+    group_pattern_chars(unicode:characters_to_list(Pattern), Selector).
 
--spec group_pattern_chars([non_neg_integer()]) -> [{field(), pos_integer()} | {lit, binary()}].
-group_pattern_chars([]) ->
+-spec group_pattern_chars([non_neg_integer()], atom()) ->
+    [{field(), pos_integer()} | {lit, binary()}].
+group_pattern_chars([], _Selector) ->
     [];
-group_pattern_chars([C | _] = Chars) when
+group_pattern_chars([C | _] = Chars, Selector) when
     C =:= $y; C =:= $M; C =:= $d; C =:= $H; C =:= $m; C =:= $s
 ->
     {Run, Rest} = lists:splitwith(fun(X) -> X =:= C end, Chars),
-    [{pattern_field(C), length(Run)} | group_pattern_chars(Rest)];
-group_pattern_chars(Chars) ->
+    length(Run) =< ?MAX_PATTERN_RUN orelse
+        beamtalk_error:raise_type_error(
+            'DateTime',
+            Selector,
+            beamtalk_error:chars_to_binary(
+                io_lib:format(
+                    "Pattern letter '~tc' repeated ~B times (maximum ~B)",
+                    [C, length(Run), ?MAX_PATTERN_RUN]
+                )
+            )
+        ),
+    [{pattern_field(C), length(Run)} | group_pattern_chars(Rest, Selector)];
+group_pattern_chars(Chars, Selector) ->
     {Run, Rest} = lists:splitwith(
         fun(X) -> not lists:member(X, [$y, $M, $d, $H, $m, $s]) end, Chars
     ),
-    [{lit, unicode:characters_to_binary(Run)} | group_pattern_chars(Rest)].
+    [{lit, unicode:characters_to_binary(Run)} | group_pattern_chars(Rest, Selector)].
 
 -spec pattern_field(non_neg_integer()) -> field().
 pattern_field($y) -> year;
@@ -727,11 +757,18 @@ zero_pad(V, Width) ->
 -spec parse_with_pattern(binary(), binary()) ->
     {ok, integer(), integer(), integer(), integer(), integer(), integer()} | {error, binary()}.
 parse_with_pattern(Str, Pattern) ->
-    Tokens = tokenize_pattern(Pattern),
+    Tokens = tokenize_pattern(Pattern, 'parse:format:'),
     {Regex, Fields} = build_pattern_regex(Tokens),
     case re:run(Str, Regex, [{capture, all_but_first, binary}]) of
         {match, Captures} when length(Captures) =:= length(Fields) ->
-            Defaults = #{year => 0, month => 1, day => 1, hour => 0, minute => 0, second => 0},
+            Defaults = #{
+                year => ?DEFAULT_PARSE_YEAR,
+                month => 1,
+                day => 1,
+                hour => 0,
+                minute => 0,
+                second => 0
+            },
             FieldMap =
                 lists:foldl(
                     fun({{Field, Count}, Cap}, Acc) ->
@@ -771,7 +808,7 @@ build_pattern_regex(Tokens) ->
             {[], []},
             Tokens
         ),
-    {iolist_to_binary([<<"^">>, RegexParts, <<"$">>]), lists:reverse(FieldsRev)}.
+    {iolist_to_binary([<<"^">>, RegexParts, <<"\\z">>]), lists:reverse(FieldsRev)}.
 
 -spec field_regex(field(), pos_integer()) -> binary().
 field_regex(year, 2) ->
