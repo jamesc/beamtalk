@@ -5,7 +5,7 @@
 
 use super::*;
 use beamtalk_core::test_helpers::test_support::{
-    fragment_from, mismatched_brackets_from, truncated_from,
+    fragment_from, mismatched_brackets_from, proptest_config_default, truncated_from,
 };
 
 /// Near-valid Beamtalk source fragments (reuses patterns from parser property tests).
@@ -42,7 +42,7 @@ fn compile_input_strategy() -> impl Strategy<Value = String> {
 }
 
 proptest! {
-    #![proptest_config(proptest_config())]
+    #![proptest_config(proptest_config_default())]
 
     /// Property 1a: `handle_compile` never panics on arbitrary string input.
     #[test]

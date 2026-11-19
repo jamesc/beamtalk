@@ -166,17 +166,6 @@ pub(crate) fn response_warning_messages(term: &Term) -> Vec<String> {
         .collect()
 }
 
-/// Default is 512 cases for standard CI; override via `PROPTEST_CASES` env var
-/// for nightly extended runs (e.g., `PROPTEST_CASES=10000`).
-pub(crate) fn proptest_config() -> ProptestConfig {
-    let default = ProptestConfig::default();
-    ProptestConfig {
-        // Use at least 512 cases, but allow PROPTEST_CASES to increase beyond that
-        cases: default.cases.max(512),
-        ..default
-    }
-}
-
 mod class_module_index_and_categorization;
 mod compile_method;
 mod compile_roundtrip_proptest;
