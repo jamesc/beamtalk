@@ -196,7 +196,7 @@ fn test_class_in_module(
         .iter()
         .find(|c| inherits_from_test_case(c.superclass_name(), superclass_index))?;
     let class_name = class.name.name.to_string();
-    let stem = beamtalk_codegen::core_erlang::to_module_name(&class_name);
+    let stem = beamtalk_core::ast::to_module_name(&class_name);
     let module_name = format!("bt@{stem}");
 
     let test_methods: Vec<String> = class
@@ -578,7 +578,7 @@ fn discover_and_compile_doc_tests(
             continue;
         }
 
-        let class_slug = beamtalk_codegen::core_erlang::to_module_name(&class_doc.class_name);
+        let class_slug = beamtalk_core::ast::to_module_name(&class_doc.class_name);
         let eunit_module = format!("{class_slug}_doc_tests");
 
         // Compile each expression to a Core Erlang eval module
