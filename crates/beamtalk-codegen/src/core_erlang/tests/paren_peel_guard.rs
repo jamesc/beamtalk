@@ -96,6 +96,8 @@ const CEILINGS: &[(&str, usize)] = &[
     // A binary construction segment's value (BT-4407: a nested construction
     // needs no `String` unwrap).
     ("beamtalk-codegen/src/core_erlang/binary_construction.rs", 1),
+    // BT-5031: a non-last block-body statement (`generate_block_body_slice`).
+    ("beamtalk-codegen/src/core_erlang/blocks.rs", 1),
     (
         "beamtalk-codegen/src/core_erlang/blocks/tier2_value_calls.rs",
         3,
@@ -124,6 +126,11 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-codegen/src/core_erlang/control_flow/exception_handling.rs",
         1,
     ),
+    // BT-5031: a non-tail while-condition statement.
+    (
+        "beamtalk-codegen/src/core_erlang/control_flow/while_loops.rs",
+        1,
+    ),
     ("beamtalk-codegen/src/core_erlang/expr_shape.rs", 2),
     ("beamtalk-codegen/src/core_erlang/field_types.rs", 1),
     ("beamtalk-codegen/src/core_erlang/gen_server/methods.rs", 4),
@@ -147,9 +154,11 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-codegen/src/core_erlang/value_type_codegen/body.rs",
         9,
     ),
+    // BT-5031: two more statement peels: each statement of a value-type
+    // conditional arm, and the same statement handed to the field-write guard.
     (
         "beamtalk-codegen/src/core_erlang/value_type_codegen/conditionals.rs",
-        2,
+        4,
     ),
     // Expression helpers in the AST leaf (`as_literal_bool`).
     // `Expression::is_self` is a deliberate mixed-position predicate: it peels

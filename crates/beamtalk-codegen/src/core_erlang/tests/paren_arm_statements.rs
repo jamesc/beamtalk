@@ -11,8 +11,8 @@
 use super::{assert_compiles_through_erlc, codegen_named};
 
 /// The `run:` function of the generated module: the part under test.
-fn run_fn(code: &str) -> &str {
-    let start = code.find("'run:'/2 =").expect("run: is generated");
+fn run_fn<'a>(code: &'a str, name: &str) -> &'a str {
+    let start = code.find(name).expect("method is generated");
     let rest = &code[start..];
     rest.find("\n\n'").map_or(rest, |end| &rest[..end])
 }
@@ -34,8 +34,8 @@ fn parenthesised_arm_local_rebind_matches_bare() {
     let bare = codegen_named(&vt_method("x := x + 1"), "bt@paren_arm_local");
     let paren = codegen_named(&vt_method("(x := x + 1)"), "bt@paren_arm_local");
     assert_eq!(
-        run_fn(&bare),
-        run_fn(&paren),
+        run_fn(&bare, "'run:'/2 ="),
+        run_fn(&paren, "'run:'/2 ="),
         "`(x := x + 1)` must lower exactly like `x := x + 1`"
     );
     assert_compiles_through_erlc("bt@paren_arm_local", &paren);
@@ -52,8 +52,8 @@ fn parenthesised_arm_field_write_matches_bare() {
         "bt@paren_arm_field",
     );
     assert_eq!(
-        run_fn(&bare),
-        run_fn(&paren),
+        run_fn(&bare, "'run:'/2 ="),
+        run_fn(&paren, "'run:'/2 ="),
         "`(self.n := ...)` must lower exactly like `self.n := ...`"
     );
     assert_compiles_through_erlc("bt@paren_arm_field", &paren);
@@ -70,7 +70,8 @@ fn parenthesised_plain_block_local_rebind_matches_bare() {
     let bare = codegen_named(&src("x := x + 1"), "bt@paren_block_local");
     let paren = codegen_named(&src("(x := x + 1)"), "bt@paren_block_local");
     assert_eq!(
-        bare, paren,
+        run_fn(&bare, "'run'/1 ="),
+        run_fn(&paren, "'run'/1 ="),
         "`(x := x + 1)` in a block body must lower exactly like `x := x + 1`"
     );
     assert_compiles_through_erlc("bt@paren_block_local", &paren);
