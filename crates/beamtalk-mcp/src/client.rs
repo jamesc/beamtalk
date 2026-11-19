@@ -1083,7 +1083,7 @@ mod tests {
     /// Auto-started REPL workspace for integration tests.
     ///
     /// Uses the same startup path as `beamtalk-mcp --start`: runs
-    /// `beamtalk repl --port 0 --timeout 300` with stdin closed, parses the
+    /// `beamtalk repl --port 0 --idle-timeout 300` with stdin closed, parses the
     /// port and workspace ID from stdout (via `workspace::parse_repl_port` /
     /// `workspace::parse_workspace_id`), then reads the cookie from workspace
     /// storage. The workspace is stopped on `Drop`.
@@ -1128,7 +1128,7 @@ mod tests {
 
         // Start REPL with stdin=null so it exits after workspace startup.
         // The workspace node remains alive as a detached BEAM process.
-        // --timeout 300: short idle timeout (5 min) so the workspace dies quickly
+        // --idle-timeout 300: short idle timeout (5 min) so the workspace dies quickly
         // after the test binary exits, rather than lingering for the default 4h.
         //
         // Stdout and stderr are redirected to temp files instead of piped. On
@@ -1148,7 +1148,7 @@ mod tests {
             .map_err(|e| format!("Failed to create stderr temp file: {e}"))?;
 
         let mut child = Command::new(&bin)
-            .args(["repl", "--port", "0", "--timeout", "300"])
+            .args(["repl", "--port", "0", "--idle-timeout", "300"])
             .stdin(Stdio::null())
             .stdout(stdout_writer)
             .stderr(stderr_writer)

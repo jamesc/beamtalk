@@ -39,7 +39,7 @@ use crate::commands::build::{
 /// would, and fails when any file contains error-severity diagnostics.
 #[allow(clippy::too_many_lines)] // orchestration function mirroring `build`'s phases — split adds indirection, not clarity
 #[instrument(skip_all, fields(path = %path))]
-pub fn run_check(path: &str) -> Result<()> {
+pub fn run_check(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()> {
     info!("Starting check");
 
     crate::commands::build_stamp::require_supported_otp()?;
@@ -48,7 +48,7 @@ pub fn run_check(path: &str) -> Result<()> {
     let env = setup_build_environment(path)?;
 
     // Same `CompilerOptions` shaping as `build`, by the same function.
-    let options = prepare_options(&env, path, &beamtalk_core::CompilerOptions::default());
+    let options = prepare_options(&env, path, options);
     let options = &options;
 
     let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
@@ -173,7 +173,8 @@ mod tests {
     fn check_valid_project_succeeds_without_emitting_bytecode() {
         let (_temp, project) = test_project_with("main.bt", "main := [42].");
 
-        run_check(project.as_str()).expect("check should succeed on valid sources");
+        run_check(project.as_str(), &beamtalk_core::CompilerOptions::default())
+            .expect("check should succeed on valid sources");
 
         // No bytecode artifacts (`.core`/`.beam`) anywhere under the project.
         let emitted = files_with_extensions(&project, &["core", "beam"]);
@@ -187,7 +188,8 @@ mod tests {
     fn check_syntax_error_fails_like_build() {
         let (_temp, project) = test_project_with("main.bt", "test := [1 + ].");
 
-        let err = run_check(project.as_str()).expect_err("check should fail on syntax error");
+        let err = run_check(project.as_str(), &beamtalk_core::CompilerOptions::default())
+            .expect_err("check should fail on syntax error");
         assert!(
             format!("{err:?}").contains("check failed"),
             "unexpected error: {err:?}"
@@ -214,7 +216,8 @@ mod tests {
         // parse error.
         let (_temp, project) = test_project_with("main.bt", "main := [nosuchvar].");
 
-        let err = run_check(project.as_str()).expect_err("check should fail on type error");
+        let err = run_check(project.as_str(), &beamtalk_core::CompilerOptions::default())
+            .expect_err("check should fail on type error");
         assert!(
             format!("{err:?}").contains("check failed"),
             "unexpected error: {err:?}"
@@ -259,7 +262,8 @@ mod tests {
         )
         .unwrap();
 
-        run_check(project.as_str()).expect("check should succeed with cross-file knowledge");
+        run_check(project.as_str(), &beamtalk_core::CompilerOptions::default())
+            .expect("check should succeed with cross-file knowledge");
 
         let emitted = files_with_extensions(&project, &["core", "beam"]);
         assert!(
@@ -274,7 +278,8 @@ mod tests {
         // exactly like `build` without `--warnings-as-errors`.
         let (_temp, project) = test_project_with("main.bt", "\"hello\" frobnicate");
 
-        run_check(project.as_str()).expect("check should succeed on hint-only diagnostics");
+        run_check(project.as_str(), &beamtalk_core::CompilerOptions::default())
+            .expect("check should succeed on hint-only diagnostics");
     }
 
     #[test]
@@ -288,7 +293,8 @@ mod tests {
         std::fs::write(src.join("bad1.bt"), "test := [1 + ].").unwrap();
         std::fs::write(src.join("bad2.bt"), "main := [nosuchvar].").unwrap();
 
-        let err = run_check(project.as_str()).expect_err("check should fail");
+        let err = run_check(project.as_str(), &beamtalk_core::CompilerOptions::default())
+            .expect_err("check should fail");
         assert!(
             format!("{err:?}").contains("2 of 2 file(s) contain errors"),
             "unexpected error: {err:?}"
@@ -314,7 +320,8 @@ mod tests {
         let file = src.join("main.bt");
         std::fs::write(&file, "main := [42].").unwrap();
 
-        run_check(file.as_str()).expect("check should succeed on a valid single file");
+        run_check(file.as_str(), &beamtalk_core::CompilerOptions::default())
+            .expect("check should succeed on a valid single file");
 
         let emitted = files_with_extensions(&project, &["core", "beam"]);
         assert!(
@@ -344,7 +351,8 @@ mod tests {
         )
         .unwrap();
 
-        let err = run_check(project.as_str()).expect_err("check should fail on broken stub");
+        let err = run_check(project.as_str(), &beamtalk_core::CompilerOptions::default())
+            .expect_err("check should fail on broken stub");
         assert!(
             format!("{err:?}").contains("stub declarations contain errors"),
             "unexpected error: {err:?}"
@@ -405,8 +413,11 @@ mod tests {
                 "Object subclass: Main\n  run => 42 shout + 42 doubled + Integer fromShout + Codec make\n",
             )],
         );
-        run_check(consumer.as_str())
-            .expect("selectors the dependency's extensions define must not be reported");
+        run_check(
+            consumer.as_str(),
+            &beamtalk_core::CompilerOptions::default(),
+        )
+        .expect("selectors the dependency's extensions define must not be reported");
     }
 
     #[test]
@@ -419,8 +430,11 @@ mod tests {
             &producer_with_extensions(),
             &[("main.bt", "Object subclass: Main\n  run => 42 whisper\n")],
         );
-        let err = run_check(consumer.as_str())
-            .expect_err("an undefined selector must be reported as does-not-understand");
+        let err = run_check(
+            consumer.as_str(),
+            &beamtalk_core::CompilerOptions::default(),
+        )
+        .expect_err("an undefined selector must be reported as does-not-understand");
         assert!(format!("{err:?}").contains("check failed"), "{err:?}");
     }
 
@@ -437,7 +451,11 @@ mod tests {
                 "Object subclass: Main\n  run => Codec validateHeader: 1 value: 2\n",
             )],
         );
-        run_check(consumer.as_str()).expect_err("the removed class method must be reported");
+        run_check(
+            consumer.as_str(),
+            &beamtalk_core::CompilerOptions::default(),
+        )
+        .expect_err("the removed class method must be reported");
     }
 
     #[test]
@@ -448,8 +466,11 @@ mod tests {
             &[("codec.bt", PRODUCER_CODEC)],
             &[("main.bt", "Object subclass: Main\n  run => 42 shout\n")],
         );
-        run_check(consumer.as_str())
-            .expect_err("without the producer's extension, `shout` is not understood");
+        run_check(
+            consumer.as_str(),
+            &beamtalk_core::CompilerOptions::default(),
+        )
+        .expect_err("without the producer's extension, `shout` is not understood");
     }
 
     #[test]
@@ -470,13 +491,19 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let consumer =
             consumer_with_dependency(&temp, &producer_with_extensions(), &consumer_files);
-        run_check(consumer.as_str())
-            .expect("Integer conforms to Shouter through the dependency's `Object >> shout`");
+        run_check(
+            consumer.as_str(),
+            &beamtalk_core::CompilerOptions::default(),
+        )
+        .expect("Integer conforms to Shouter through the dependency's `Object >> shout`");
 
         let temp = TempDir::new().unwrap();
         let consumer =
             consumer_with_dependency(&temp, &[("codec.bt", PRODUCER_CODEC)], &consumer_files);
-        run_check(consumer.as_str())
-            .expect_err("without the extension, Integer does not conform to Shouter");
+        run_check(
+            consumer.as_str(),
+            &beamtalk_core::CompilerOptions::default(),
+        )
+        .expect_err("without the extension, Integer does not conform to Shouter");
     }
 }

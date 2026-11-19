@@ -20,9 +20,9 @@ use crate::commands::{attach, logs, transcript};
 pub enum WorkspaceCommand {
     /// List all workspaces
     List {
-        /// Output as JSON for machine-readable consumption
-        #[arg(long)]
-        json: bool,
+        /// Output format (`text` or `json` for machine-readable consumption)
+        #[arg(long, default_value = "text")]
+        format: crate::commands::OutputFormat,
 
         /// Only show workspaces with this status (`running` or `stopped`)
         #[arg(long)]
@@ -84,9 +84,8 @@ pub enum WorkspaceCommand {
     /// Use `--follow` to stream new lines, `--level` to filter by severity,
     /// or `--path` to print the log file path.
     Logs {
-        /// Select a specific workspace by name or ID
-        #[arg(long)]
-        workspace: Option<String>,
+        /// Workspace name or ID (default: the most recent workspace)
+        name: Option<String>,
 
         /// Stream new log lines as they appear (like `tail -f`)
         #[arg(long, short)]
@@ -96,9 +95,9 @@ pub enum WorkspaceCommand {
         #[arg(long)]
         level: Option<String>,
 
-        /// Expected log format for level filtering (text, json)
-        #[arg(long)]
-        format: Option<String>,
+        /// Format of the log file, used for level filtering
+        #[arg(long, value_enum, ignore_case = true)]
+        log_format: Option<crate::commands::logs::LogFormat>,
 
         /// Print the log file path and exit
         #[arg(long)]
@@ -156,10 +155,14 @@ pub enum WorkspaceCommand {
 pub fn run(command: WorkspaceCommand) -> Result<()> {
     match command {
         WorkspaceCommand::List {
-            json,
+            format,
             status,
             project,
-        } => run_list(json, status.as_deref(), project.as_deref()),
+        } => run_list(
+            format == crate::commands::OutputFormat::Json,
+            status.as_deref(),
+            project.as_deref(),
+        ),
         WorkspaceCommand::Stop { name, force } => stop_workspace(name.as_deref(), force),
         WorkspaceCommand::Prune { dry_run, project } => run_prune(dry_run, project.as_deref()),
         WorkspaceCommand::Status { name } => run_status(name.as_deref()),
@@ -171,18 +174,12 @@ pub fn run(command: WorkspaceCommand) -> Result<()> {
         } => attach::run(name.as_deref(), port, cookie.as_deref(), no_color),
         WorkspaceCommand::Transcript { name, recent } => transcript::run(name.as_deref(), recent),
         WorkspaceCommand::Logs {
-            workspace,
+            name,
             follow,
             level,
-            format,
+            log_format,
             path,
-        } => logs::run(
-            workspace.as_deref(),
-            follow,
-            level.as_deref(),
-            format.as_deref(),
-            path,
-        ),
+        } => logs::run(name.as_deref(), follow, level.as_deref(), log_format, path),
         WorkspaceCommand::Create {
             name,
             background,
@@ -431,7 +428,7 @@ fn print_list_table(mut rows: Vec<ListRow>, total: usize) {
 ///
 /// `status_filter` accepts `"running"`/`"stopped"` (case-insensitive);
 /// `project_filter` is a case-insensitive substring matched against the
-/// project path or workspace ID. Both filters also apply to `--json` output
+/// project path or workspace ID. Both filters also apply to `--format json` output
 /// so scripts can use them too.
 fn run_list(json: bool, status_filter: Option<&str>, project_filter: Option<&str>) -> Result<()> {
     let status_filter = parse_list_status_filter(status_filter)?;
@@ -694,7 +691,7 @@ mod tests {
         );
     }
 
-    /// `run_list`'s success path, both table and `--json` output:
+    /// `run_list`'s success path, both table and `--format json` output:
     /// with at least one real workspace present, exercises the non-empty
     /// table-printing loop (current-project marker detection, path
     /// abbreviation, port formatting) and the JSON-serialization branch —

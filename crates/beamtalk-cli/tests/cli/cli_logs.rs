@@ -28,12 +28,7 @@ fn logs_with_unknown_workspace_name_errors() {
     let project = cli_common::fixture_project();
     cli_common::beamtalk()
         .current_dir(project.path())
-        .args([
-            "workspace",
-            "logs",
-            "--workspace",
-            "no-such-workspace-12345",
-        ])
+        .args(["workspace", "logs", "no-such-workspace-12345"])
         .assert()
         .failure()
         .stderr(contains("does not exist"));
@@ -57,10 +52,10 @@ fn logs_with_invalid_format_errors_before_resolving_workspace() {
     let project = cli_common::fixture_project();
     cli_common::beamtalk()
         .current_dir(project.path())
-        .args(["workspace", "logs", "--format", "yaml"])
+        .args(["workspace", "logs", "--log-format", "yaml"])
         .assert()
         .failure()
-        .stderr(contains("Unknown log format"));
+        .stderr(contains("invalid value 'yaml'"));
 }
 
 #[test]
@@ -75,7 +70,7 @@ fn logs_valid_level_and_format_still_fails_without_a_workspace() {
             "logs",
             "--level",
             "warning",
-            "--format",
+            "--log-format",
             "json",
         ])
         .assert()

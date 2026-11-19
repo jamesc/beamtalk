@@ -708,6 +708,8 @@ struct TestPipeline {
     snapshot_only: bool,
     /// Whether to treat warnings as errors.
     warnings_as_errors: bool,
+    /// Whether to suppress warning diagnostics (`--no-warnings`).
+    suppress_warnings: bool,
     /// Discovered packages: `(canonical_root, manifest)`.
     discovered_packages: Vec<(Utf8PathBuf, manifest::PackageManifest)>,
     /// Package root to package name mapping.
@@ -838,6 +840,7 @@ impl TestPipeline {
                 hierarchy,
                 current_package,
                 known_erlang_modules: &self.known_erlang_modules,
+                suppress_warnings: self.suppress_warnings,
             },
         }
     }
@@ -853,7 +856,7 @@ impl TestPipeline {
 #[instrument(skip_all)]
 pub fn run_tests(
     path: &str,
-    warnings_as_errors: bool,
+    warnings: super::WarningFlags,
     jobs: usize,
     quiet: bool,
     raw_mfa: bool,
@@ -884,7 +887,7 @@ pub fn run_tests(
         test_files,
         build_dir,
         core_output_dir_guard.snapshot_only(),
-        warnings_as_errors,
+        warnings,
         jobs,
     )?;
     pipeline.raw_mfa = raw_mfa;
@@ -1259,7 +1262,7 @@ fn initialize_pipeline(
     test_files: Vec<Utf8PathBuf>,
     build_dir: Utf8PathBuf,
     snapshot_only: bool,
-    warnings_as_errors: bool,
+    warnings: super::WarningFlags,
     jobs: usize,
 ) -> Result<TestPipeline> {
     let discovered_packages = discover_packages_with_manifests(&test_path, &test_files)?;
@@ -1310,7 +1313,8 @@ fn initialize_pipeline(
         snapshot_only,
         native_type_registry,
         known_erlang_modules,
-        warnings_as_errors,
+        warnings_as_errors: warnings.warnings_as_errors,
+        suppress_warnings: warnings.no_warnings,
         discovered_packages,
         pkg_root_to_name,
         pkg_class_indexes,
@@ -1852,6 +1856,7 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
             stdlib_mode: false,
             allow_primitives: false,
             warnings_as_errors: pipeline.warnings_as_errors,
+            suppress_warnings: pipeline.suppress_warnings,
             ..Default::default()
         };
         super::build::build(pkg_root.as_str(), &build_options, false).wrap_err_with(|| {

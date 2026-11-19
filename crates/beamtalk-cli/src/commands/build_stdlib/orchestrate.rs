@@ -57,7 +57,7 @@ pub(super) const STDLIB_APP_FILE: &str = "beamtalk_stdlib.app";
 /// and writes `.beam` files to `runtime/apps/beamtalk_stdlib/ebin/`.
 /// Skips the build if all outputs are newer than all inputs (incremental).
 #[instrument(skip_all)]
-pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
+pub fn build_stdlib(quiet: bool, warnings: crate::commands::WarningFlags) -> Result<()> {
     info!("Starting stdlib build");
 
     let lib_dir = Utf8PathBuf::from(STDLIB_SOURCE_DIR);
@@ -121,7 +121,8 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     }
 
     // Compiler options: stdlib mode enabled
-    let options = stdlib_compiler_options(warnings_as_errors);
+    let mut options = stdlib_compiler_options(warnings.warnings_as_errors);
+    options.suppress_warnings = warnings.no_warnings;
 
     // ADR 0007 Phase 3: Build primitive binding table from ALL stdlib sources.
     // This is used during compilation so that @primitive expressions in method bodies

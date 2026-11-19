@@ -189,7 +189,7 @@ async fn resolve_port_and_cookie(
 
 /// Start a beamtalk workspace for the current directory by running `beamtalk repl`.
 ///
-/// Shells out to `beamtalk repl --port 0 --timeout N` with stdin closed so the
+/// Shells out to `beamtalk repl --port 0 --idle-timeout N` with stdin closed so the
 /// process exits once the workspace node is up. The node continues running
 /// detached. The assigned port is read by **streaming** `beamtalk repl` stdout
 /// line-by-line until the port line appears, rather than waiting for the pipe to
@@ -225,7 +225,7 @@ async fn start_workspace(
             "repl",
             "--port",
             "0",
-            "--timeout",
+            "--idle-timeout",
             &idle_timeout.to_string(),
         ])
         .stdin(std::process::Stdio::null())
