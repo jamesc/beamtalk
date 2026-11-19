@@ -85,7 +85,7 @@ init([]) ->
 
 -doc """
 Instance-side dispatch for the supervisor handle: answers `initialize` only
-(`beamtalk_supervisor:run_initialize/1` sends it to the new supervisor).
+(`beamtalk_supervisor_init_gate:run_initialize/1` sends it to the new supervisor).
 """.
 dispatch(initialize, [], _Self, State) ->
     {reply, initialize_hook(), State}.

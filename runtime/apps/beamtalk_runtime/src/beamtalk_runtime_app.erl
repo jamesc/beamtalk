@@ -66,7 +66,7 @@ start(_StartType, _StartArgs) ->
     %% Root application supervisor registry (`Program rootSupervisor`), owned by
     %% the runtime so it works in REPL, run, service and release alike.
     beamtalk_supervisor:ensure_root_table(),
-    beamtalk_supervisor:ensure_init_gate_table(),
+    beamtalk_supervisor_init_gate:ensure_init_gate_table(),
     %% BT-3994: `supervise`'s start lock (owned here so it outlives callers).
     beamtalk_fifo_lock:ensure_table(),
 

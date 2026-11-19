@@ -1159,7 +1159,7 @@ child_handle_row(_Other) ->
 
 %% A live, drillable handle for a child whose Beamtalk class is resolvable; `null`
 %% for a foreign OTP process (no Beamtalk wrapper) so the row renders but is not
-%% drillable. The handle tag mirrors `beamtalk_supervisor:wrap_child/3`: a
+%% drillable. The handle tag mirrors `beamtalk_supervisor_announce:wrap_child/3`: a
 %% supervisor child becomes `{beamtalk_supervisor, ...}`, anything else
 %% `{beamtalk_object, ...}` — the exact shapes the Inspector already follows.
 -spec child_handle(atom(), beamtalk_object() | nil, pid()) -> tuple() | null.
