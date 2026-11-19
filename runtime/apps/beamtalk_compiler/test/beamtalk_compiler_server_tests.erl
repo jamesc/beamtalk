@@ -962,28 +962,18 @@ port_close_keeps_ambient_caches() ->
     true = port_close(OldPort),
     %% Until the server has handled the EXIT, requests meet the closed port;
     %% poll until one succeeds on the replacement port.
-    ok = wait_until(fun() ->
-        erlang:port_info(OldPort) =:= undefined andalso
-            element(1, beamtalk_compiler_server:compile_expression(<<"1 + 2">>, <<"t">>, [])) =:=
-                ok
-    end),
+    ok = beamtalk_test_wait:until(
+        fun() ->
+            erlang:port_info(OldPort) =:= undefined andalso
+                element(1, beamtalk_compiler_server:compile_expression(<<"1 + 2">>, <<"t">>, [])) =:=
+                    ok
+        end,
+        5000
+    ),
     ?assertEqual(Server, whereis(beamtalk_compiler_server)),
     ?assertEqual(Aliases, beamtalk_compiler_server:get_aliases()),
     ?assertEqual(Protocols, beamtalk_compiler_server:get_protocols()),
     ?assert(maps:is_key('BT5021NoModule', beamtalk_compiler_server:get_classes())).
-
-wait_until(Fun) -> wait_until(Fun, 50).
-wait_until(_Fun, 0) ->
-    {error, not_reached};
-wait_until(Fun, N) ->
-    case Fun() of
-        true ->
-            ok;
-        _ ->
-            %% sleep: poll for the server to open its replacement port
-            timer:sleep(100),
-            wait_until(Fun, N - 1)
-    end.
 
 %%% ---------------------------------------------------------------
 %%% Helpers

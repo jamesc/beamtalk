@@ -318,7 +318,7 @@ try_change_code(Pid, Module, Extra) ->
             ?LOG_ERROR(
                 #{
                     msg =>
-                        <<"code change timed out; actor left suspended until the next reload retries">>,
+                        <<"code change timed out; actor may be left suspended until the next reload retries">>,
                     module => Module,
                     pid => Pid
                 },
