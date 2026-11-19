@@ -1072,6 +1072,7 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        crate::core_erlang::reach::hit("generate_vt_field_assignment_open");
         if let Expression::Assignment { target, value, .. } = expr
             && let Expression::FieldAccess { field, .. } = target.as_ref()
         {
@@ -1123,6 +1124,7 @@ impl CoreErlangGenerator {
         expr: &Expression,
         mutations: &[String],
     ) -> Result<Document<'static>> {
+        crate::core_erlang::reach::hit("generate_vt_block_value_open");
         let (block, arguments) = if let Expression::MessageSend {
             receiver,
             arguments,
@@ -1307,6 +1309,7 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        crate::core_erlang::reach::hit("generate_vt_while_open");
         // computed BEFORE `expression_doc` runs the loop's own codegen —
         // keeping it adjacent to the other pre-loop reads
         // (`get_while_threaded_locals`) matches the loop codegen's own read
@@ -1359,6 +1362,7 @@ impl CoreErlangGenerator {
         result_var_prefix: &str,
         state_var_prefix: &str,
     ) -> Document<'static> {
+        crate::core_erlang::reach::hit("emit_vt_loop_open_extraction");
         if threaded_locals.is_empty() && families.as_slice().is_empty() {
             // Fallback: just sequence the expression
             let tmp = self.fresh_temp_var("seq");
@@ -1543,6 +1547,7 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        crate::core_erlang::reach::hit("generate_vt_counted_loop_open");
         // see the analogous comment in `generate_vt_while_open`.
         let families = self.vt_loop_threaded_families(expr);
         // Generate the counted loop expression (returns {'nil', StateAcc} tuple).
@@ -1615,6 +1620,7 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        crate::core_erlang::reach::hit("generate_vt_foldl_list_op_open");
         // BT-3827: the `Self` family a field-writing fold carries at element 3.
         let families = self.vt_loop_threaded_families(expr);
         // Generate the list-op expression (returns a {value, StateAcc} tuple).
@@ -1673,6 +1679,7 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        crate::core_erlang::reach::hit("generate_value_type_do_open");
         let (receiver, block_expr, body) = match expr {
             Expression::MessageSend {
                 receiver,
@@ -1847,13 +1854,14 @@ impl CoreErlangGenerator {
     ///
     /// # Reached by
     /// BT-5009: reached from [`Self::generate_value_type_do_open`] whenever the `do:` threads
-    /// more than one local (or a bare accumulator); same inputs as that function.
+    /// more than one local (or a bare accumulator), e.g. `stdlib/test/fixtures/do_accumulator_value.bt`.
     fn generate_value_type_do_open_tuple(
         &mut self,
         receiver: &Expression,
         body: &beamtalk_core::ast::Block,
         fold_plan: &ThreadingPlan,
     ) -> Result<Document<'static>> {
+        crate::core_erlang::reach::hit("generate_value_type_do_open_tuple");
         let init_acc = fold_plan.initial_vars_tuple_doc(self);
         let acc_var = self.fresh_temp_var("AccSt");
         let list_var = self.fresh_temp_var("temp");

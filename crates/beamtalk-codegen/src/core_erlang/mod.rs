@@ -156,6 +156,7 @@ mod options;
 mod patterns;
 pub mod primitive_bindings;
 mod primitives;
+mod reach;
 pub mod repl_nlr;
 mod routing;
 #[cfg(test)]
