@@ -4,11 +4,12 @@
 use super::builtins::builtin_method;
 use super::*;
 use crate::ast::{
-    ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword, Identifier, MethodDefinition,
+    ClassDefinition, ClassKind, CommentAttachment, Identifier, MethodDefinition,
     ParameterDefinition, StateDeclaration, TypeAnnotation,
 };
 use crate::semantic_analysis::test_helpers::test_span;
 use crate::source_analysis::Span;
+use crate::test_helpers::test_support::module_with_classes;
 use std::collections::BTreeSet;
 // --- Value object method tests ---
 #[test]
@@ -354,19 +355,7 @@ fn resolves_selector_through_unknown_external_parent_to_object() {
     // Simulate file 2 compiling CondimentDecorator (extends Beverage from file 1).
     // Beverage is NOT in the hierarchy — only CondimentDecorator is.
     // subclassResponsibility lives on Object, two hops above CondimentDecorator.
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("CondimentDecorator", "Beverage")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("CondimentDecorator", "Beverage")]);
     let (h, _diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     // Object method must be reachable even though Beverage is unknown.
@@ -394,70 +383,14 @@ fn resolves_selector_through_unknown_external_parent_to_object() {
 // --- User-defined class tests ---
 fn make_user_class(name: &str, superclass: &str) -> ClassDefinition {
     ClassDefinition {
-        name: Identifier::new(name, test_span()),
-        superclass: Some(Identifier::new(superclass, test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::from_superclass_name(superclass),
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![StateDeclaration {
-            name: Identifier::new("count", test_span()),
-            type_annotation: None,
-            default_value: None,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            declared_keyword: DeclaredKeyword::default(),
-            slot_kind: crate::ast::SlotKind::default(),
-            span: test_span(),
-        }],
-        methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: crate::ast::MessageSelector::Unary("increment".into()),
-            parameters: vec![],
-            body: vec![],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
-        }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        state: vec![StateDeclaration::test("count")],
+        methods: vec![MethodDefinition::test("increment")],
+        ..ClassDefinition::test_subclass(name, superclass)
     }
 }
 #[test]
 fn user_defined_class_added_to_hierarchy() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("Counter", "Actor")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("Counter", "Actor")]);
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     assert!(diags.is_empty());
@@ -470,19 +403,7 @@ fn user_defined_class_added_to_hierarchy() {
 }
 #[test]
 fn user_class_inherits_from_actor_chain() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("Counter", "Actor")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("Counter", "Actor")]);
     let h = ClassHierarchy::build(&module).0.unwrap();
     let chain = h.superclass_chain("Counter");
     assert_eq!(
@@ -496,19 +417,7 @@ fn user_class_inherits_from_actor_chain() {
 }
 #[test]
 fn user_class_resolves_inherited_selectors() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("Counter", "Actor")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("Counter", "Actor")]);
     let h = ClassHierarchy::build(&module).0.unwrap();
     // Local method
     assert!(h.resolves_selector("Counter", "increment"));
@@ -527,19 +436,7 @@ fn user_class_resolves_inherited_selectors() {
 // --- Sealed class enforcement tests ---
 #[test]
 fn sealed_class_subclassing_rejected() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("MyInt", "Integer")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("MyInt", "Integer")]);
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     assert_eq!(diags.len(), 1);
@@ -550,38 +447,14 @@ fn sealed_class_subclassing_rejected() {
 }
 #[test]
 fn sealed_string_subclassing_rejected() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("MyString", "String")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("MyString", "String")]);
     let (_, diags) = ClassHierarchy::build(&module);
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed"));
 }
 #[test]
 fn non_sealed_subclassing_allowed() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("MyActor", "Actor")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("MyActor", "Actor")]);
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     assert!(diags.is_empty());
@@ -591,19 +464,7 @@ fn non_sealed_subclassing_allowed() {
 #[test]
 fn stdlib_mode_exempts_builtin_class_from_sealed_check() {
     // In stdlib_mode, a class named "Character" extending sealed "Integer" is allowed.
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("Character", "Integer")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("Character", "Integer")]);
     let (h, diags) = ClassHierarchy::build_with_options(&module, true);
     let h = h.unwrap();
     assert!(
@@ -615,19 +476,7 @@ fn stdlib_mode_exempts_builtin_class_from_sealed_check() {
 #[test]
 fn user_code_character_subclassing_integer_rejected() {
     // Without stdlib_mode, even a class named "Character" is rejected.
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("Character", "Integer")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("Character", "Integer")]);
     let (h, diags) = ClassHierarchy::build_with_options(&module, false);
     let h = h.unwrap();
     assert_eq!(diags.len(), 1);
@@ -639,19 +488,7 @@ fn user_code_character_subclassing_integer_rejected() {
 #[test]
 fn stdlib_mode_does_not_exempt_non_builtin_class() {
     // Even in stdlib_mode, a non-builtin name extending a sealed class is rejected.
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("MyCustomClass", "Integer")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("MyCustomClass", "Integer")]);
     let (_, diags) = ClassHierarchy::build_with_options(&module, true);
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed"));
@@ -719,43 +556,11 @@ fn make_class_with_sealed_method(
     sealed: bool,
 ) -> ClassDefinition {
     ClassDefinition {
-        name: Identifier::new(name, test_span()),
-        superclass: Some(Identifier::new(superclass, test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::from_superclass_name(superclass),
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: crate::ast::MessageSelector::Unary(method_name.into()),
-            parameters: vec![],
-            body: vec![],
-            return_type: None,
             is_sealed: sealed,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test(method_name)
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test_subclass(name, superclass)
     }
 }
 fn make_class_with_sealed_class_method(
@@ -765,43 +570,12 @@ fn make_class_with_sealed_class_method(
     sealed: bool,
 ) -> ClassDefinition {
     ClassDefinition {
-        name: Identifier::new(name, test_span()),
-        superclass: Some(Identifier::new(superclass, test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::from_superclass_name(superclass),
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
         class_methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: crate::ast::MessageSelector::Unary(method_name.into()),
-            parameters: vec![],
-            body: vec![],
-            return_type: None,
             is_sealed: sealed,
-            is_internal: false,
             is_class_method: true,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test(method_name)
         }],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test_subclass(name, superclass)
     }
 }
 #[test]
@@ -809,19 +583,7 @@ fn sealed_method_override_rejected() {
     // Parent defines sealed method "doCustomWork", child tries to override it
     let parent = make_class_with_sealed_method("Parent", "Actor", "doCustomWork", true);
     let child = make_class_with_sealed_method("Child", "Parent", "doCustomWork", false);
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![parent, child],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![parent, child]);
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     assert_eq!(diags.len(), 1);
@@ -836,19 +598,7 @@ fn non_sealed_method_override_allowed() {
     // Parent defines non-sealed method, child overrides it — no diagnostic
     let parent = make_class_with_sealed_method("Parent", "Actor", "doWork", false);
     let child = make_class_with_sealed_method("Child", "Parent", "doWork", false);
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![parent, child],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![parent, child]);
     let (_, diags) = ClassHierarchy::build(&module);
     assert!(diags.is_empty());
 }
@@ -858,19 +608,7 @@ fn sealed_method_in_grandparent_enforced() {
     let grandparent = make_class_with_sealed_method("GrandParent", "Actor", "locked", true);
     let parent = make_class_with_sealed_method("Parent", "GrandParent", "doWork", false);
     let grandchild = make_class_with_sealed_method("GrandChild", "Parent", "locked", false);
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![grandparent, parent, grandchild],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![grandparent, parent, grandchild]);
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     assert_eq!(diags.len(), 1);
@@ -883,19 +621,7 @@ fn sealed_method_in_grandparent_enforced() {
 fn builtin_sealed_method_override_rejected() {
     // Object's respondsTo: is sealed in builtins — user class cannot override it
     let child = make_class_with_sealed_method("MyObj", "Object", "respondsTo:", false);
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![child],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![child]);
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     assert_eq!(diags.len(), 1);
@@ -908,19 +634,7 @@ fn builtin_sealed_method_override_rejected() {
 fn builtin_actor_spawn_override_rejected() {
     // Actor's class-side spawn is sealed in builtins — subclass cannot override it
     let child = make_class_with_sealed_class_method("MyActor", "Actor", "spawn", false);
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![child],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![child]);
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     assert_eq!(diags.len(), 1);
@@ -933,19 +647,7 @@ fn builtin_actor_spawn_override_rejected() {
 #[test]
 fn mro_is_depth_first() {
     // Counter -> Actor -> Object -> ProtoObject
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("Counter", "Actor")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("Counter", "Actor")]);
     let h = ClassHierarchy::build(&module).0.unwrap();
     let methods = h.all_methods("Counter");
     // First method should be from Counter (most specific)
@@ -992,96 +694,14 @@ fn cycle_detection_in_superclass_chain() {
 #[allow(clippy::too_many_lines)] // long AST fixture
 fn multiple_user_classes_in_module() {
     let base = ClassDefinition {
-        name: Identifier::new("Base", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: crate::ast::MessageSelector::Unary("baseMethod".into()),
-            parameters: vec![],
-            body: vec![],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
-        }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        methods: vec![MethodDefinition::test("baseMethod")],
+        ..ClassDefinition::test("Base", Some("Actor"), ClassKind::Actor)
     };
     let derived = ClassDefinition {
-        name: Identifier::new("Derived", test_span()),
-        superclass: Some(Identifier::new("Base", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: crate::ast::MessageSelector::Unary("derivedMethod".into()),
-            parameters: vec![],
-            body: vec![],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
-        }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        methods: vec![MethodDefinition::test("derivedMethod")],
+        ..ClassDefinition::test("Derived", Some("Base"), ClassKind::Object)
     };
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![base, derived],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![base, derived]);
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     assert!(diags.is_empty());
@@ -1099,19 +719,7 @@ fn multiple_user_classes_in_module() {
 }
 #[test]
 fn user_class_with_unknown_superclass() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("Orphan", "NonExistent")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("Orphan", "NonExistent")]);
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     // No diagnostic for unknown superclass (sealed check passes)
@@ -1128,16 +736,6 @@ fn user_class_with_unknown_superclass() {
 #[test]
 fn duplicate_instance_method_detected() {
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![
             MethodDefinition {
                 pipeline_sends: crate::ast::PipelineSends::default(),
@@ -1172,31 +770,9 @@ fn duplicate_instance_method_detected() {
                 span: Span::new(30, 40),
             },
         ],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let (_, diags) = ClassHierarchy::build(&module);
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("Duplicate method"));
@@ -1208,17 +784,6 @@ fn duplicate_instance_method_detected() {
 #[test]
 fn duplicate_class_method_detected() {
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
         class_methods: vec![
             MethodDefinition {
                 pipeline_sends: crate::ast::PipelineSends::default(),
@@ -1253,30 +818,9 @@ fn duplicate_class_method_detected() {
                 span: Span::new(30, 40),
             },
         ],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let (_, diags) = ClassHierarchy::build(&module);
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("Duplicate class method"));
@@ -1285,75 +829,13 @@ fn duplicate_class_method_detected() {
 #[test]
 fn no_duplicate_for_different_selectors() {
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![
-            MethodDefinition {
-                pipeline_sends: crate::ast::PipelineSends::default(),
-                literal_comments: crate::ast::LiteralComments::default(),
-                selector: crate::ast::MessageSelector::Unary("increment".into()),
-                parameters: vec![],
-                body: vec![],
-                return_type: None,
-                is_sealed: false,
-                is_internal: false,
-                is_class_method: false,
-                kind: MethodKind::Primary,
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                span: test_span(),
-            },
-            MethodDefinition {
-                pipeline_sends: crate::ast::PipelineSends::default(),
-                literal_comments: crate::ast::LiteralComments::default(),
-                selector: crate::ast::MessageSelector::Unary("decrement".into()),
-                parameters: vec![],
-                body: vec![],
-                return_type: None,
-                is_sealed: false,
-                is_internal: false,
-                is_class_method: false,
-                kind: MethodKind::Primary,
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                span: test_span(),
-            },
+            MethodDefinition::test("increment"),
+            MethodDefinition::test("decrement"),
         ],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let (_, diags) = ClassHierarchy::build(&module);
     assert!(diags.is_empty());
 }
@@ -1362,19 +844,7 @@ fn no_duplicate_for_different_selectors() {
 fn typed_class_is_typed() {
     let mut class = make_class_with_sealed_method("StrictCounter", "Actor", "increment", false);
     class.is_typed = true;
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     assert!(
         hierarchy.is_typed("StrictCounter"),
@@ -1387,19 +857,7 @@ fn typed_class_inheritance() {
     let mut parent = make_class_with_sealed_method("TypedParent", "Actor", "method", false);
     parent.is_typed = true;
     let child = make_class_with_sealed_method("UntypedChild", "TypedParent", "method", false);
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![parent, child],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![parent, child]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     assert!(hierarchy.is_typed("TypedParent"), "parent should be typed");
     assert!(
@@ -1414,19 +872,7 @@ fn typed_class_inheritance_reverse_order() {
     parent.is_typed = true;
     let child = make_class_with_sealed_method("UntypedChild", "TypedParent", "method", false);
     // Note: child comes first in the vec! (reverse definition order)
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![child, parent],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![child, parent]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     assert!(hierarchy.is_typed("TypedParent"), "parent should be typed");
     assert!(
@@ -1439,19 +885,7 @@ fn non_typed_class_not_inherited() {
     // Parent is NOT typed, child should not be typed
     let parent = make_class_with_sealed_method("Parent", "Actor", "method", false);
     let child = make_class_with_sealed_method("Child", "Parent", "method", false);
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![parent, child],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![parent, child]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     assert!(!hierarchy.is_typed("Parent"));
     assert!(!hierarchy.is_typed("Child"));
@@ -1487,57 +921,13 @@ fn stdlib_unary_method_has_empty_param_types() {
 #[test]
 fn user_class_return_type_propagated() {
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Object", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: crate::ast::MessageSelector::Unary("getValue".into()),
-            parameters: vec![],
-            body: vec![],
             return_type: Some(TypeAnnotation::simple("Integer", test_span())),
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("getValue")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        is_sealed: false,
-        is_internal: false,
-        is_abstract: false,
-        is_typed: false,
-        supervisor_kind: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Object"), ClassKind::Object)
     };
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     let method = hierarchy
         .find_method("Counter", "getValue")
@@ -1547,11 +937,6 @@ fn user_class_return_type_propagated() {
 #[test]
 fn user_class_param_types_propagated() {
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Object", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        state: vec![],
         methods: vec![MethodDefinition {
             pipeline_sends: crate::ast::PipelineSends::default(),
             literal_comments: crate::ast::LiteralComments::default(),
@@ -1574,36 +959,9 @@ fn user_class_param_types_propagated() {
             doc_comment: None,
             span: test_span(),
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        is_sealed: false,
-        is_internal: false,
-        is_abstract: false,
-        is_typed: false,
-        supervisor_kind: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Object"), ClassKind::Object)
     };
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     let method = hierarchy
         .find_method("Counter", "add:")
@@ -1617,15 +975,7 @@ fn user_class_param_types_propagated() {
 // --- State field type tests ---
 fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
     ClassDefinition {
-        name: Identifier::new(name, test_span()),
-        superclass: Some(Identifier::new(superclass, test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::from_superclass_name(superclass),
-        is_abstract: false,
-        is_sealed: false,
         is_typed: true,
-        is_internal: false,
-        supervisor_kind: None,
         state: vec![
             StateDeclaration::with_type(
                 Identifier::new("count", test_span()),
@@ -1634,18 +984,7 @@ fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
             ),
             StateDeclaration::new(Identifier::new("label", test_span()), test_span()),
         ],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test_subclass(name, superclass)
     }
 }
 /// BT-4679: the former `state_field_type_returns_type_for_annotated_field`,
@@ -1655,19 +994,7 @@ fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
 /// `build` includes the builtins, so `DoesNotExist` is unknown in both.)
 #[test]
 fn state_field_type_table() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_typed_state_class("Counter", "Actor")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_typed_state_class("Counter", "Actor")]);
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     assert!(diags.is_empty());
@@ -1695,46 +1022,14 @@ fn state_field_type_table() {
 fn state_field_type_inherited_from_parent() {
     let parent = make_typed_state_class("TypedParent", "Actor");
     let child = ClassDefinition {
-        name: Identifier::new("Child", test_span()),
-        superclass: Some(Identifier::new("TypedParent", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
         state: vec![StateDeclaration::with_type(
             Identifier::new("extra", test_span()),
             TypeAnnotation::simple("String", test_span()),
             test_span(),
         )],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Child", Some("TypedParent"), ClassKind::Object)
     };
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![parent, child],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![parent, child]);
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     assert!(diags.is_empty());
@@ -1764,45 +1059,13 @@ fn state_field_type_shadowed_untyped_field() {
     // The child's untyped declaration should shadow the parent's type.
     let parent = make_typed_state_class("TypedParent", "Actor");
     let child = ClassDefinition {
-        name: Identifier::new("Child", test_span()),
-        superclass: Some(Identifier::new("TypedParent", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
         state: vec![StateDeclaration::new(
             Identifier::new("count", test_span()),
             test_span(),
         )],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Child", Some("TypedParent"), ClassKind::Object)
     };
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![parent, child],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![parent, child]);
     let h = ClassHierarchy::build(&module).0.unwrap();
     // Child's untyped `count` shadows parent's typed `count: Integer`
     assert_eq!(h.state_field_type("Child", "count"), None);
@@ -1930,30 +1193,7 @@ fn add_external_superclasses_does_not_overwrite_existing() {
 // --- ClassKind / is_value integration tests ---
 #[test]
 fn value_subclass_sets_is_value_flag() {
-    let class = ClassDefinition {
-        name: Identifier::new("Point", test_span()),
-        superclass: Some(Identifier::new("Value", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
-    };
+    let class = ClassDefinition::test("Point", Some("Value"), ClassKind::Value);
     let module = Module::new(vec![], test_span());
     let mut module_with_class = module;
     module_with_class.classes.push(class);
@@ -1967,45 +1207,13 @@ fn value_subclass_sets_is_value_flag() {
 #[test]
 fn value_subclass_auto_generates_slot_methods() {
     let class = ClassDefinition {
-        name: Identifier::new("Point", test_span()),
-        superclass: Some(Identifier::new("Value", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
         state: vec![
             StateDeclaration::new(Identifier::new("x", test_span()), test_span()),
             StateDeclaration::new(Identifier::new("y", test_span()), test_span()),
         ],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Point", Some("Value"), ClassKind::Value)
     };
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let (Ok(h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -2048,42 +1256,10 @@ fn value_subclass_auto_methods_have_generated_docs() {
         test_span(),
     )];
     let class = ClassDefinition {
-        name: Identifier::new("Point", test_span()),
-        superclass: Some(Identifier::new("Value", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
         state,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Point", Some("Value"), ClassKind::Value)
     };
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let (Ok(h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -2168,19 +1344,7 @@ fn value_subclass_auto_methods_respect_user_overrides() {
         shape_version: None,
         span: test_span(),
     };
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let (Ok(h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -2196,19 +1360,7 @@ fn value_subclass_auto_methods_respect_user_overrides() {
 }
 #[test]
 fn actor_subclass_does_not_set_is_value_flag() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("Counter", "Actor")],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("Counter", "Actor")]);
     let (Ok(h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -2226,98 +1378,19 @@ fn actor_subclass_does_not_set_is_value_flag() {
 fn sealed_override_checks_with_external_superclasses() {
     // ClassB (in module) has sealed method foo
     let sealed_base = ClassDefinition {
-        name: Identifier::new("ClassB", test_span()),
-        superclass: Some(Identifier::new("Object", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: crate::ast::MessageSelector::Unary("foo".into()),
-            parameters: vec![],
-            body: vec![],
-            return_type: None,
             is_sealed: true,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("foo")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("ClassB", Some("Object"), ClassKind::Object)
     };
     // ClassC (in module) inherits from UnknownClass (external)
     // UnknownClass will later be declared to inherit from ClassB
     let override_class = ClassDefinition {
-        name: Identifier::new("ClassC", test_span()),
-        superclass: Some(Identifier::new("UnknownClass", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: crate::ast::MessageSelector::Unary("foo".into()),
-            parameters: vec![],
-            body: vec![],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
-        }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        methods: vec![MethodDefinition::test("foo")],
+        ..ClassDefinition::test("ClassC", Some("UnknownClass"), ClassKind::Object)
     };
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![sealed_base, override_class],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![sealed_base, override_class]);
     let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -2855,22 +1928,10 @@ fn indirect_value_subclass_sets_is_value_in_hierarchy() {
     // MyValueBase inherits from Value, MyValueChild inherits from MyValueBase.
     // MyValueChild should get is_value = true even though its direct superclass
     // is MyValueBase, not Value.
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![
-            make_user_class("MyValueBase", "Value"),
-            make_user_class("MyValueChild", "MyValueBase"),
-        ],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![
+        make_user_class("MyValueBase", "Value"),
+        make_user_class("MyValueChild", "MyValueBase"),
+    ]);
     let (Ok(h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -2893,22 +1954,10 @@ fn indirect_value_subclass_sets_is_value_in_hierarchy() {
 fn indirect_value_subclass_gets_auto_methods() {
     // MyValueChild inherits from MyValueBase which inherits from Value.
     // MyValueChild should get auto-slot methods synthesized.
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![
-            make_user_class("MyValueBase", "Value"),
-            make_user_class("MyValueChild", "MyValueBase"),
-        ],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![
+        make_user_class("MyValueBase", "Value"),
+        make_user_class("MyValueChild", "MyValueBase"),
+    ]);
     let (Ok(h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -2935,22 +1984,10 @@ fn indirect_value_subclass_gets_auto_methods() {
 fn testcase_indirect_value_subclass() {
     // TestCase inherits from Value, MyTest inherits from TestCase.
     // MyTest should get is_value = true.
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![
-            make_user_class("TestCase", "Value"),
-            make_user_class("MyTest", "TestCase"),
-        ],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![
+        make_user_class("TestCase", "Value"),
+        make_user_class("MyTest", "TestCase"),
+    ]);
     let (Ok(h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -2965,19 +2002,7 @@ fn testcase_indirect_value_subclass() {
 fn supervisor_subclass_stays_object() {
     // Supervisor inherits from Object. WebApp inherits from Supervisor.
     // WebApp should remain ClassKind::Object.
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("WebApp", "Supervisor")],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("WebApp", "Supervisor")]);
     let (Ok(h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -2996,19 +2021,7 @@ fn supervisor_subclass_stays_object() {
 fn cross_file_indirect_value_subclass() {
     // Simulate: File A defines MyValueBase as Value subclass (external).
     // File B defines MyChild as MyValueBase subclass (in module).
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("MyChild", "MyValueBase")],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("MyChild", "MyValueBase")]);
     let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -3082,19 +2095,7 @@ fn cross_file_value_sub_subclass_finds_new() {
         doc_comment: None,
         span: test_span(),
     });
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![child_class],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![child_class]);
     let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -3144,19 +2145,7 @@ fn cross_file_value_sub_subclass_finds_new() {
 /// compilation.
 #[test]
 fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("B", "A")],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("B", "A")]);
     let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -3241,19 +2230,7 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
 /// `ClassInfo::initialize_assigns` summary is.
 #[test]
 fn cross_file_all_initialize_assigns_includes_parent_summary() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("B", "A")],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("B", "A")]);
     let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -3290,19 +2267,7 @@ fn all_initialize_assigns_includes_own_summary() {
     // Directly seed ClassInfo's initialize_assigns rather than parsing a
     // real body — this test is about the flattening accessor, not the
     // must-analysis itself (covered by `initialize_assigns.rs`'s own tests).
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -3325,19 +2290,7 @@ fn all_initialize_assigns_includes_own_summary() {
 /// or replacing the (partial) answer.
 #[test]
 fn all_initialize_assigns_native_ancestor_marks_incomplete() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("Child", "NativeParent")],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("Child", "NativeParent")]);
     let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
@@ -3369,19 +2322,7 @@ fn all_initialize_assigns_native_ancestor_marks_incomplete() {
 /// incomplete, distinct from a merely-empty result.
 #[test]
 fn all_initialize_assigns_missing_chain_link_marks_incomplete() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_user_class("Orphan", "UnknownAncestor")],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![make_user_class("Orphan", "UnknownAncestor")]);
     let (Ok(h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
