@@ -224,6 +224,18 @@ pub struct ClassDefinition {
 }
 
 impl ClassDefinition {
+    /// This class's state and class-variable default expressions (BT-5026) —
+    /// the one enumeration of them; [`Module::state_default_exprs`] and the
+    /// name resolver / analyser all go through it.
+    ///
+    /// [`Module::state_default_exprs`]: crate::ast::Module::state_default_exprs
+    pub fn state_default_exprs(&self) -> impl Iterator<Item = &Expression> {
+        self.state
+            .iter()
+            .chain(&self.class_variables)
+            .filter_map(|d| d.default_value.as_ref())
+    }
+
     /// Creates a new class definition.
     #[must_use]
     pub fn new(

@@ -62,6 +62,7 @@ mod adr0123_shape_version_and_migrations;
 mod analyser_core_and_block_context;
 mod bt4573_setup_cascade_single_diagnostic;
 mod bt5025_cascade_later_messages;
+mod bt5026_state_defaults_and_protocol_bodies;
 mod class_hierarchy_and_method_validators;
 mod class_state_abroad;
 mod cross_file_extension_checks;
