@@ -12,28 +12,8 @@ use super::*;
 /// Helper: create an abstract class definition for validator tests.
 fn make_abstract_class(name: &str) -> ClassDefinition {
     ClassDefinition {
-        name: Identifier::new(name, test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
         is_abstract: true,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test(name, Some("Actor"), ClassKind::Actor)
     }
 }
 
@@ -54,40 +34,15 @@ fn make_spawn_expr(class_name: &str) -> Expression {
 
 #[test]
 fn test_abstract_instantiation_in_class_method() {
-    use crate::ast::MethodKind;
-
     // abstract instantiation inside a class-side method should be detected
     let mut shape = make_abstract_class("Shape");
     shape.class_methods.push(MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("create".into()),
-        parameters: vec![],
         body: vec![bare(make_spawn_expr("Shape"))],
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
         is_class_method: true,
-        kind: MethodKind::Primary,
-        expect: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        span: test_span(),
+        ..MethodDefinition::test("create")
     });
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![shape],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![shape]);
 
     let result = analyse(&module);
     let abstract_errors: Vec<_> = result
@@ -119,17 +74,9 @@ fn test_abstract_instantiation_in_string_interpolation() {
     };
 
     let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
         classes: vec![shape],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
         expressions: vec![bare(interp)],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
 
     let result = analyse(&module);
@@ -150,7 +97,7 @@ fn test_abstract_instantiation_in_string_interpolation() {
 
 #[test]
 fn test_abstract_instantiation_in_standalone_method() {
-    use crate::ast::{MethodKind, StandaloneMethodDefinition};
+    use crate::ast::StandaloneMethodDefinition;
 
     // abstract instantiation inside a standalone method definition should be detected
     let shape = make_abstract_class("Shape");
@@ -160,36 +107,16 @@ fn test_abstract_instantiation_in_standalone_method() {
         package: None,
         is_class_method: false,
         method: MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("build".into()),
-            parameters: vec![],
             body: vec![bare(make_spawn_expr("Shape"))],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("build")
         },
         span: test_span(),
     };
 
     let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
         classes: vec![shape],
         method_definitions: vec![standalone],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
 
     let result = analyse(&module);
@@ -210,33 +137,10 @@ fn test_abstract_instantiation_in_standalone_method() {
 
 #[test]
 fn test_actor_new_error_in_standalone_method() {
-    use crate::ast::{MethodKind, StandaloneMethodDefinition};
+    use crate::ast::StandaloneMethodDefinition;
 
     // actor `new` usage warning inside standalone method definitions
-    let counter = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
-    };
+    let counter = ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor);
 
     // Counter new (should warn — use spawn instead)
     let new_expr = Expression::MessageSend {
@@ -256,36 +160,16 @@ fn test_actor_new_error_in_standalone_method() {
         package: None,
         is_class_method: false,
         method: MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("build".into()),
-            parameters: vec![],
             body: vec![bare(new_expr)],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("build")
         },
         span: test_span(),
     };
 
     let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
         classes: vec![counter],
         method_definitions: vec![standalone],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
 
     let result = analyse(&module);

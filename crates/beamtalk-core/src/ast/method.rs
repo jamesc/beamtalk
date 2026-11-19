@@ -378,6 +378,24 @@ impl MethodDefinition {
         check.0
     }
 
+    /// Test fixture: a primary, instance-side method with a unary `selector`, no
+    /// parameters, an empty body and a zero-length span.
+    ///
+    /// Tests override the fields they care about with struct-update syntax:
+    /// `MethodDefinition { is_sealed: true, ..MethodDefinition::test("area") }`.
+    /// Compiled only for tests and the `test` feature (dependent crates'
+    /// dev-dependencies).
+    #[cfg(any(test, feature = "test"))]
+    #[must_use]
+    pub fn test(selector: &str) -> Self {
+        Self::new(
+            MessageSelector::Unary(selector.into()),
+            Vec::new(),
+            Vec::new(),
+            Span::new(0, 0),
+        )
+    }
+
     /// Creates a new method definition.
     #[must_use]
     pub fn new(
