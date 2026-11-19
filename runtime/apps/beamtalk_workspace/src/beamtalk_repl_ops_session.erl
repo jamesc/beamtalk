@@ -43,8 +43,7 @@ handle_term(<<"sessions">>, _Params, _Msg, _SessionPid) ->
                 fun
                     ({_Id, Pid, _Type, _Modules}) when is_pid(Pid) ->
                         try beamtalk_repl_shell:get_session_id(Pid, 1000) of
-                            {ok, SessionId} -> {true, #{id => SessionId}};
-                            _ -> false
+                            {ok, SessionId} -> {true, #{id => SessionId}}
                         catch
                             exit:_ -> false
                         end;

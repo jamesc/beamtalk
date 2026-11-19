@@ -137,8 +137,7 @@ stop_session(SessionPid) when is_pid(SessionPid) ->
     %% row must be removed here (BT-5012).
     SessionId =
         try beamtalk_repl_shell:get_session_id(SessionPid, 1000) of
-            {ok, Id} -> Id;
-            _ -> undefined
+            {ok, Id} -> Id
         catch
             exit:_ -> undefined
         end,
