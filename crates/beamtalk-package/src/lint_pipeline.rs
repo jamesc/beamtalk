@@ -787,11 +787,8 @@ mod tests {
         std::fs::create_dir_all(&test_dir).unwrap();
 
         // Run the check from the package root with a relative argument.
-        let prev_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(root).unwrap();
         let relative = camino::Utf8PathBuf::from("test");
-        let found = find_package_root(&relative);
-        std::env::set_current_dir(prev_cwd).unwrap();
+        let found = beamtalk_workspace::test_cwd::with_cwd(root, || find_package_root(&relative));
 
         let expected =
             camino::Utf8PathBuf::from_path_buf(beamtalk_core::paths::canonicalize(root).unwrap())

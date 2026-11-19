@@ -39,6 +39,8 @@ sha2.workspace = true
 serde_json.workspace = true
 # why: scratch workspaces roots for the port-file nonce scan tests
 tempfile.workspace = true
+# why: serialise the test_cwd guard's own tests on the process-global cwd
+serial_test.workspace = true
 
 [lints]
 workspace = true

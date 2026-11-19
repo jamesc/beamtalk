@@ -30,6 +30,8 @@ thiserror.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+# why: `cargo_workspace_root!` is the one repo-root helper for test code (BT-5039)
+beamtalk-workspace.workspace = true
 # why: shares beamtalk-core's `test_helpers::test_support` (near-valid-input
 # generator, proptest config, structural-validity checker) rather than
 # duplicating it (the "No duplicate implementations" rule) — the `test`

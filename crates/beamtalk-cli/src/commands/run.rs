@@ -882,6 +882,7 @@ mod tests {
         assert_eq!(forwarded_exit_code(status("kill -INT $$")), None);
     }
     use super::*;
+    use beamtalk_workspace::test_cwd::with_cwd;
     use serial_test::serial;
     use std::fs;
     use tempfile::TempDir;
@@ -898,18 +899,6 @@ mod tests {
         temp.path().to_string_lossy().to_string()
     }
 
-    // Helper: temporarily set CWD for tests that need a manifest in ".".
-    // The cwd is process-global, so every caller must be `#[serial(cwd)]`.
-    // That only orders them against each other — code exercised by
-    // unannotated parallel tests must not depend on the process cwd (BT-4016).
-    fn with_project_dir<F: FnOnce() -> R, R>(dir: &std::path::Path, f: F) -> R {
-        let orig = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir).unwrap();
-        let result = f();
-        std::env::set_current_dir(&orig).unwrap();
-        result
-    }
-
     #[test]
     #[serial(cwd)]
     fn test_run_no_manifest() {
@@ -918,7 +907,7 @@ mod tests {
         fs::create_dir_all(&src_path).unwrap();
         fs::write(src_path.join("main.bt"), "main := [42].").unwrap();
 
-        let result = with_project_dir(temp.path(), || run(".", None, &[], false, None, false));
+        let result = with_cwd(temp.path(), || run(".", None, &[], false, None, false));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -939,7 +928,7 @@ mod tests {
             &temp,
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
-        let result = with_project_dir(temp.path(), || run(".", None, &[], true, None, false));
+        let result = with_cwd(temp.path(), || run(".", None, &[], true, None, false));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -959,7 +948,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
         let args = vec!["Alice".to_string()];
-        let result = with_project_dir(temp.path(), || {
+        let result = with_cwd(temp.path(), || {
             run("Greeter", Some("run"), &args, true, None, false)
         });
         assert!(result.is_err());
@@ -980,7 +969,7 @@ mod tests {
             &temp,
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
-        let result = with_project_dir(temp.path(), || {
+        let result = with_cwd(temp.path(), || {
             run("bad", Some("main:"), &[], false, Some("ws"), false)
         });
         assert!(result.is_err());
@@ -1000,7 +989,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run(".", None, &[], false, None, false));
+        let result = with_cwd(temp.path(), || run(".", None, &[], false, None, false));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -1018,7 +1007,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run("Main", None, &[], false, None, false));
+        let result = with_cwd(temp.path(), || run("Main", None, &[], false, None, false));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -1036,7 +1025,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || {
+        let result = with_cwd(temp.path(), || {
             run("main", Some("run"), &[], false, None, false)
         });
         assert!(result.is_err());
@@ -1057,7 +1046,7 @@ mod tests {
             &temp,
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
-        let result = with_project_dir(temp.path(), || {
+        let result = with_cwd(temp.path(), || {
             run("/looks/like/path", None, &[], false, None, false)
         });
         assert!(result.is_err());
@@ -1077,7 +1066,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || {
+        let result = with_cwd(temp.path(), || {
             run("Main", Some("Run"), &[], false, None, false)
         });
         assert!(result.is_err());
@@ -1101,7 +1090,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = with_project_dir(temp.path(), || {
+        let result = with_cwd(temp.path(), || {
             run("Main", Some("run"), &[], false, None, false)
         });
         assert!(result.is_err());
@@ -1118,7 +1107,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\nstart = \"main\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run(".", None, &[], false, None, false));
+        let result = with_cwd(temp.path(), || run(".", None, &[], false, None, false));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(

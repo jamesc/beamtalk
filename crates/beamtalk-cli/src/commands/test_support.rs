@@ -45,6 +45,12 @@ pub(crate) fn stable_project_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// The UTF-8 path of a [`tempfile::TempDir`] (the one copy; `camino` paths are
+/// what the CLI's manifest and registry code take).
+pub(crate) fn utf8(dir: &tempfile::TempDir) -> Utf8PathBuf {
+    Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("temp dir is valid UTF-8")
+}
+
 /// Build a unique workspace ID per test so parallel `cargo test` threads
 /// never collide on the same on-disk directory or lockfile. `label` should
 /// identify the calling test module (e.g. `"shutdown"`, `"transcript"`) so a

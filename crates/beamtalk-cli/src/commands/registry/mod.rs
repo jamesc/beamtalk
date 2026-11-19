@@ -81,13 +81,10 @@ pub fn run_site(index: &str, output_dir: &str) -> Result<()> {
 mod tests {
     use super::*;
     use crate::commands::deps::registry::test_support::IsolatedRegistryCache;
+    use crate::commands::test_support::utf8;
     use camino::Utf8PathBuf;
     use std::fs;
     use tempfile::TempDir;
-
-    fn utf8(dir: &TempDir) -> Utf8PathBuf {
-        Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap()
-    }
 
     /// Build a local registry index directory with the given package files.
     fn make_index(entries: &[(&str, &str)]) -> (TempDir, Utf8PathBuf) {
