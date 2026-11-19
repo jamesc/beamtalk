@@ -37,6 +37,14 @@ failing_append_test_() ->
         ]
     end}.
 
+server_down_test() ->
+    %% No ChangeLog server running: the call exits `noproc`, which must come back
+    %% as a warning, never an exception.
+    ?assertEqual(undefined, whereis(beamtalk_workspace_changelog)),
+    ?assertMatch(
+        {warning, _}, beamtalk_repl_loader_changelog_entries:emit_change_entry(method_info())
+    ).
+
 successful_append_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Ctx) ->
         [?_assertEqual(ok, beamtalk_repl_loader_changelog_entries:emit_change_entry(method_info()))]

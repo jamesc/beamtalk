@@ -107,18 +107,20 @@ append_entry(Label, Meta, BuildFun) ->
     %% bt-catcher-audit: not-applicable-no-block - BuildFun is an Erlang closure
     %% from this module's emit_* functions that builds the entry map; it never
     %% runs a Beamtalk block.
-    try BuildFun() of
-        Entry ->
-            case beamtalk_workspace_changelog:append(Entry) of
-                {ok, _Seq} ->
-                    ok;
-                {error, Reason} ->
-                    ?LOG_ERROR(Label, Meta#{
-                        reason => Reason,
-                        domain => [beamtalk, runtime]
-                    }),
-                    {warning, unrecorded_warning(Meta)}
-            end
+    %% The append stays in the try body (not an `of` clause): a `noproc` exit
+    %% while the ChangeLog server restarts must be caught too.
+    try
+        Entry = BuildFun(),
+        case beamtalk_workspace_changelog:append(Entry) of
+            {ok, _Seq} ->
+                ok;
+            {error, AppendReason} ->
+                ?LOG_ERROR(Label, Meta#{
+                    reason => AppendReason,
+                    domain => [beamtalk, runtime]
+                }),
+                {warning, unrecorded_warning(Meta)}
+        end
     catch
         Class:Reason:Stack ->
             ?LOG_WARNING(Label, Meta#{
