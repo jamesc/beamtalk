@@ -98,8 +98,11 @@ subscribe(Level) when is_atom(Level) ->
     ensure_table(),
     Pid = self(),
     case ets:lookup(?SUB_TABLE, Pid) of
-        [{Pid, _OldLevel, MonPid, Dropped}] ->
-            ets:insert(?SUB_TABLE, {Pid, Level, MonPid, Dropped});
+        [{Pid, _OldLevel, _MonPid, _Dropped}] ->
+            %% Update only the level: rewriting the row could overwrite a drop
+            %% counted by `deliver/2` in the meantime.
+            ets:update_element(?SUB_TABLE, Pid, {2, Level}),
+            ok;
         [] ->
             %% Insert the subscription entry, then release the monitor process,
             %% which only starts watching `Pid` once told the row exists. If the
