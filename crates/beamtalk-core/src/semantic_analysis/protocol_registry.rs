@@ -955,6 +955,7 @@ impl ProtocolRegistry {
                 &method.defined_in,
                 &req.selector,
                 actual,
+                false, // protocol requirements are instance-side
                 hierarchy,
             )
             .is_some_and(|w| {
@@ -985,6 +986,21 @@ impl ProtocolRegistry {
                 continue;
             };
             if TypeChecker::is_return_type_refinement(&actual, &expected, hierarchy) {
+                continue;
+            }
+            // As on the instance side: a widening override of a parent return
+            // that already met the requirement is reported once, at the
+            // override (BT-5026 checks class-side overrides too).
+            if TypeChecker::override_return_widening(
+                &method.defined_in,
+                &req.selector,
+                &actual,
+                true,
+                hierarchy,
+            )
+            .is_some_and(|w| {
+                TypeChecker::is_return_type_refinement(&w.parent_rt, &expected, hierarchy)
+            }) {
                 continue;
             }
             mismatches.push(ReturnTypeMismatch {
@@ -1161,6 +1177,7 @@ mod tests {
         ProtocolMethodSignature, TypeAnnotation, TypeParamDecl,
     };
     use crate::semantic_analysis::class_hierarchy::ClassInfo;
+    use crate::test_helpers::test_support::empty_module;
 
     use crate::test_helpers::test_support::unit_span as span;
 
@@ -1230,10 +1247,6 @@ mod tests {
         let mut proto = make_protocol(name, methods);
         proto.extending = Some(ident(extending));
         proto
-    }
-
-    fn empty_module() -> Module {
-        Module::new(vec![], span())
     }
 
     fn make_class(name: &str, superclass: &str, methods: Vec<&str>) -> ClassDefinition {

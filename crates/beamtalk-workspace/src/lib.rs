@@ -26,6 +26,15 @@ pub mod epmd;
 /// `beamtalk-desktop-broker` (see module doc).
 pub mod pid_liveness;
 
+/// The one process-cwd guard for tests (`with_cwd`, `CwdGuard`), shared by
+/// `beamtalk-cli`, `beamtalk-core` and `beamtalk-package`. Test-only: it
+/// mutates the process cwd and panics on failure, so production code must not
+/// use it (hidden from the docs for that reason; a cargo feature cannot gate it
+/// without every consumer enabling it, and `cargo_workspace_root!` sets the
+/// precedent for test helpers living in this leaf crate).
+#[doc(hidden)]
+pub mod test_cwd;
+
 /// Returns the Cargo workspace root for the calling crate: two levels up from
 /// [`CARGO_MANIFEST_DIR`](std::env::var), which cargo sets to the manifest
 /// directory of the crate being compiled or tested.

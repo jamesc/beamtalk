@@ -25,15 +25,15 @@ fn list_json_produces_a_json_array() {
     let project = cli_common::fixture_project();
     let output = cli_common::beamtalk()
         .current_dir(project.path())
-        .args(["workspace", "list", "--json"])
+        .args(["workspace", "list", "--format", "json"])
         .assert()
         .success()
         .get_output()
         .stdout
         .clone();
 
-    let parsed: serde_json::Value =
-        serde_json::from_slice(&output).expect("workspace list --json should print valid JSON");
+    let parsed: serde_json::Value = serde_json::from_slice(&output)
+        .expect("workspace list --format json should print valid JSON");
     assert!(parsed.is_array(), "expected a JSON array, got: {parsed}");
 }
 

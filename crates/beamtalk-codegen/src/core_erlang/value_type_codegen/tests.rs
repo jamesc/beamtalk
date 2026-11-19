@@ -53,7 +53,6 @@ fn test_bt4030_new_with_args_validates_unknown_keys() {
     let mut generator = CoreErlangGenerator::new("conf");
     let out = generator
         .generate_value_type_new_with_args(&class)
-        .expect("new/1 codegen should succeed")
         .to_pretty_string();
     assert!(
         out.contains(

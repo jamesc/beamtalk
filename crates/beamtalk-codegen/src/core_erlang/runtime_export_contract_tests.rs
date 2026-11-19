@@ -54,13 +54,13 @@ use super::supervisor_codegen::{ALL_SUPERVISOR_KINDS, supervisor_init_fn};
 
 /// One `'beamtalk_m':'f'` occurrence and where it came from.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct EmittedCall {
-    module: String,
-    function: String,
+pub(super) struct EmittedCall {
+    pub(super) module: String,
+    pub(super) function: String,
     /// `None` when the argument list was not visible (a source literal
     /// that ends before the closing parenthesis).
-    arity: Option<usize>,
-    origin: String,
+    pub(super) arity: Option<usize>,
+    pub(super) origin: String,
 }
 
 /// The `name/arity` entries of every `-export([...])` block in an Erlang
@@ -98,7 +98,7 @@ pub(in crate::core_erlang) fn exported_entries(src: &str) -> BTreeSet<String> {
 }
 
 /// `module -> {"f/N", ...}` for every `.erl` under `runtime/apps/*/src`.
-fn runtime_exports(root: &Path) -> BTreeMap<String, BTreeSet<String>> {
+pub(super) fn runtime_exports(root: &Path) -> BTreeMap<String, BTreeSet<String>> {
     let apps = root.join("runtime/apps");
     let mut index = BTreeMap::new();
     for app in read_dir_sorted(&apps) {
@@ -122,7 +122,7 @@ fn runtime_exports(root: &Path) -> BTreeMap<String, BTreeSet<String>> {
     index
 }
 
-fn read_dir_sorted(dir: &Path) -> Vec<PathBuf> {
+pub(super) fn read_dir_sorted(dir: &Path) -> Vec<PathBuf> {
     let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()))
         .map(|e| e.expect("dir entry").path())
@@ -133,7 +133,7 @@ fn read_dir_sorted(dir: &Path) -> Vec<PathBuf> {
 
 /// Every non-test `.rs` file under `dir`, recursively. A directory named
 /// `tests` and a file named `tests.rs` or `*_tests.rs` are test code.
-fn non_test_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
+pub(super) fn non_test_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for path in read_dir_sorted(dir) {
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if path.is_dir() {
@@ -168,7 +168,7 @@ fn opens_inline_test_mod(lines: &[&str], i: usize) -> bool {
 /// skipped, and scanning stops at the first `#[cfg(test)]` that opens an
 /// inline `mod x {` (the in-file unit tests). An out-of-line
 /// `#[cfg(test)] mod x;` does not stop it.
-fn string_literals(src: &str) -> Vec<(usize, String)> {
+pub(super) fn string_literals(src: &str) -> Vec<(usize, String)> {
     let lines: Vec<&str> = src.lines().collect();
     let mut out = Vec::new();
     for (i, line) in lines.iter().enumerate() {
@@ -210,7 +210,7 @@ fn string_literals(src: &str) -> Vec<(usize, String)> {
 
 /// Every `'beamtalk_m':'f'` in `text`, with the arity when the argument list
 /// that follows is complete within `text`.
-fn calls_in(text: &str, origin: &str) -> Vec<EmittedCall> {
+pub(super) fn calls_in(text: &str, origin: &str) -> Vec<EmittedCall> {
     let mut out = Vec::new();
     let mut search = text;
     while let Some(start) = search.find("'beamtalk_") {
@@ -248,7 +248,7 @@ fn calls_in(text: &str, origin: &str) -> Vec<EmittedCall> {
 
 /// The number of top-level arguments in a Core Erlang argument list, given
 /// the text just after its opening `(`. `None` if the list does not close.
-fn count_args(text: &str) -> Option<usize> {
+pub(super) fn count_args(text: &str) -> Option<usize> {
     let mut depth = 0usize;
     let mut commas = 0usize;
     let mut saw_arg = false;
@@ -306,7 +306,7 @@ fn count_args(text: &str) -> Option<usize> {
 
 /// `file` relative to `root`, with `/` separators on every host, so origin
 /// strings can be matched with `/`-based checks (e.g. `"/primitives/"`).
-fn origin_path(file: &Path, root: &Path) -> String {
+pub(super) fn origin_path(file: &Path, root: &Path) -> String {
     normalize_separators(
         &file
             .strip_prefix(root)
@@ -366,7 +366,7 @@ fn primitive_table_calls(root: &Path) -> Vec<EmittedCall> {
 /// The non-test part of a Rust source file with comment lines blanked, so
 /// line numbers still match. It ends at the first `#[cfg(test)]` that opens
 /// an inline `mod x {`, the same rule as [`string_literals`].
-fn production_source(src: &str) -> String {
+pub(super) fn production_source(src: &str) -> String {
     let lines: Vec<&str> = src.lines().collect();
     let mut out = Vec::new();
     for (i, line) in lines.iter().enumerate() {
@@ -558,7 +558,10 @@ fn resolve_open_heads(
 }
 
 /// The calls among `calls` that the runtime does not export.
-fn unexported(calls: &[EmittedCall], exports: &BTreeMap<String, BTreeSet<String>>) -> Vec<String> {
+pub(super) fn unexported(
+    calls: &[EmittedCall],
+    exports: &BTreeMap<String, BTreeSet<String>>,
+) -> Vec<String> {
     let mut problems = BTreeSet::new();
     for call in calls {
         let Some(entries) = exports.get(&call.module) else {
@@ -653,52 +656,95 @@ fn cli_eval_string_calls(root: &Path) -> Vec<EmittedCall> {
         let rel = origin_path(&file, root);
         // An escaped quote would end `count_args`' string skipping early.
         let text = production_source(&src).replace("\\\"", "Q");
-        let bytes = text.as_bytes();
-        let mut from = 0;
-        while let Some(rel_pos) = text[from..].find("beamtalk_") {
-            let start = from + rel_pos;
-            from = start + "beamtalk_".len();
-            if start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_') {
-                continue;
-            }
-            let module_len = text[start..]
-                .bytes()
-                .take_while(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_')
-                .count();
-            let after = &text[start + module_len..];
-            let Some(fn_part) = after.strip_prefix(':') else {
-                continue;
-            };
-            if fn_part.starts_with(':') {
-                continue;
-            }
-            let (quoted, fn_part) = fn_part
-                .strip_prefix('\'')
-                .map_or((false, fn_part), |r| (true, r));
-            let function: String = fn_part
-                .bytes()
-                .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
-                .map(char::from)
-                .collect();
-            if function.is_empty() {
-                continue;
-            }
-            let tail = &fn_part[function.len()..];
-            let tail = if quoted {
-                tail.strip_prefix('\'')
-            } else {
-                Some(tail)
-            };
-            let Some(args) = tail.and_then(|t| t.strip_prefix('(')) else {
-                continue;
-            };
-            out.push(EmittedCall {
-                module: text[start..start + module_len].to_string(),
-                function,
-                arity: count_args(args),
-                origin: format!("{rel}:{}", text[..start].matches('\n').count() + 1),
-            });
+        out.extend(erlang_text_calls(&text, &rel));
+    }
+    out
+}
+
+/// The release launcher templates (BT-5033). `beamtalk release` writes these
+/// out as `bin/<name>` scripts that start the release's BEAM with
+/// `-eval "beamtalk_release_launcher:eval_main()."`, so they are Erlang text
+/// outside every `.rs` file and `cli_eval_string_calls` cannot see them.
+const LAUNCHER_TEMPLATES: [&str; 2] = [
+    "crates/beamtalk-cli/src/commands/release/templates/launcher.sh",
+    "crates/beamtalk-cli/src/commands/release/templates/launcher.cmd",
+];
+
+/// Calls in the launcher templates, read the same way as the CLI's eval
+/// strings. Comment lines (`#` in the shell script, `REM`/`::` in the batch
+/// file) are blanked first so prose that names a function is not a call.
+fn launcher_template_calls(root: &Path) -> Vec<EmittedCall> {
+    let mut out = Vec::new();
+    for rel in LAUNCHER_TEMPLATES {
+        let src =
+            std::fs::read_to_string(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let text: String = src
+            .lines()
+            .map(|line| {
+                let t = line.trim_start();
+                let upper = t.to_ascii_uppercase();
+                if t.starts_with('#') || upper.starts_with("REM ") || t.starts_with("::") {
+                    ""
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        out.extend(erlang_text_calls(&text, rel));
+    }
+    out
+}
+
+/// Every `beamtalk_m:f(Args)` (bare or quoted atoms) in `text`, an Erlang
+/// snippet embedded in some other file. `rel` names the file in origins.
+fn erlang_text_calls(text: &str, rel: &str) -> Vec<EmittedCall> {
+    let mut out = Vec::new();
+    let bytes = text.as_bytes();
+    let mut from = 0;
+    while let Some(rel_pos) = text[from..].find("beamtalk_") {
+        let start = from + rel_pos;
+        from = start + "beamtalk_".len();
+        if start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_') {
+            continue;
         }
+        let module_len = text[start..]
+            .bytes()
+            .take_while(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_')
+            .count();
+        let after = &text[start + module_len..];
+        let Some(fn_part) = after.strip_prefix(':') else {
+            continue;
+        };
+        if fn_part.starts_with(':') {
+            continue;
+        }
+        let (quoted, fn_part) = fn_part
+            .strip_prefix('\'')
+            .map_or((false, fn_part), |r| (true, r));
+        let function: String = fn_part
+            .bytes()
+            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+            .map(char::from)
+            .collect();
+        if function.is_empty() {
+            continue;
+        }
+        let tail = &fn_part[function.len()..];
+        let tail = if quoted {
+            tail.strip_prefix('\'')
+        } else {
+            Some(tail)
+        };
+        let Some(args) = tail.and_then(|t| t.strip_prefix('(')) else {
+            continue;
+        };
+        out.push(EmittedCall {
+            module: text[start..start + module_len].to_string(),
+            function,
+            arity: count_args(args),
+            origin: format!("{rel}:{}", text[..start].matches('\n').count() + 1),
+        });
     }
     out
 }
@@ -725,6 +771,28 @@ fn every_runtime_call_in_a_cli_eval_string_is_exported() {
             "no arity-checked call from {needle}: {calls:#?}"
         );
     }
+    let launcher = launcher_template_calls(&root);
+    // The launchers start four entry points (eval, rpc client, ping client,
+    // stop client) in each of the two scripts; each must be read with its
+    // arity, so a parsing regression cannot turn this into a name-only check.
+    for main in [
+        "eval_main",
+        "rpc_client_main",
+        "ping_client_main",
+        "stop_client_main",
+    ] {
+        for template in LAUNCHER_TEMPLATES {
+            assert!(
+                launcher.iter().any(|c| c.origin.starts_with(template)
+                    && c.module == "beamtalk_release_launcher"
+                    && c.function == main
+                    && c.arity == Some(0)),
+                "{template} does not call beamtalk_release_launcher:{main}(): {launcher:#?}"
+            );
+        }
+    }
+    let mut calls = calls;
+    calls.extend(launcher);
     let problems = unexported(&calls, &exports);
     assert!(
         problems.is_empty(),

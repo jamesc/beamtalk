@@ -59,12 +59,24 @@ doctor:
 # runtime's shared conformance fixtures the `*_matches_shared_corpus` tests read.
 corpus_tests := "package(/^beamtalk-(core|codegen|repl)$/) & (test(/agreement|_corpus|^repl_local_producer::/))"
 
+# The cheap part of the corpus tier (BT-5033): the tests that read the runtime's
+# shared cross-language fixtures (`runtime/apps/*/test/fixtures/*.json`), found
+# by the naming convention the `*_matches_shared_corpus` and
+# `*_match_the_corpus` tests follow. (`_conformance` also selects a reader, but
+# only one that is corpus-tier already; fast-tier `*_conformance` readers run
+# in test-rust anyway.) A few seconds once the test binaries are built, against
+# ~33 runner-minutes for the whole tier, so ci.yml's `test-rust` job runs it on
+# a PR that touches a fixture or the Rust crates that read them, with no
+# `ci:corpus` label needed. `test-corpus` still runs these (they are a subset
+# of `corpus_tests`).
+fixture_reader_tests := "(" + corpus_tests + ") & test(/shared_corpus|match_the_corpus|_conformance/)"
+
 # Run local CI checks (combination of GitHub Actions check + test jobs)
 # Matches: just build clippy fmt-check test (check job)
 #        + just test-integration test-mcp test-repl-protocol (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-generated-builtins check-codegen-boundary check-surface-drift test-grammar test-github-extension
+ci: build lint test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-generated-builtins check-codegen-boundary check-surface-drift test-grammar test-github-extension test-vscode test-hermetic-home
 
 [windows]
 ci: build clippy fmt-check-rust test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift
@@ -1241,6 +1253,59 @@ test-grammar:
 test-grammar:
     @echo "test-grammar: skipped on Windows (covered by Linux CI)"
 
+# BT-5033: the whole VS Code extension check CI runs: type-check (`tsc`), Biome
+# lint and the vitest suite. `npm test` is every file under src/__tests__,
+# including workspaceClient.test.ts (which pins WORKSPACE_PROTOCOL_VERSION to the
+# runtime's ?PROTOCOL_VERSION) and opPayloads.test.ts (the TypeScript reader of
+# the per-op wire payload fixture, below). `test-grammar` stays a separate,
+# cheaper recipe for the lint job: it is a subset of this one.
+[unix]
+[working-directory: 'editors/vscode']
+test-vscode:
+    @echo "🔍 Type-checking, linting and testing the VS Code extension..."
+    npm ci --quiet
+    npm run compile
+    npm run lint
+    npm test
+    @echo "✅ VS Code extension checks passed"
+
+[windows]
+test-vscode:
+    @echo "test-vscode: skipped on Windows (covered by Linux CI)"
+
+# BT-5049: the per-op wire payload fixture, checked from all three sides.
+# `runtime/apps/beamtalk_workspace/test/fixtures/repl_op_payloads.json` holds one
+# example reply per REPL op; each side below decodes or re-encodes it:
+#   Erlang      beamtalk_repl_op_table_tests (encoders vs the fixture, op coverage,
+#               handler param scan) plus the live-handler row-shape checks in
+#               beamtalk_repl_ops_dev_tests / beamtalk_repl_ops_browse_tests
+#   Rust        crates/beamtalk-repl-protocol/tests/op_payloads.rs
+#   TypeScript  editors/vscode/src/__tests__/opPayloads.test.ts
+# Each side also runs in its own suite (`just test-runtime`, `just test-rust`,
+# `npm test` in editors/vscode), and those are what CI runs (BT-5033): the
+# fixture is on the VS Code job's path gate, and test-rust and test-runtime run
+# on every PR, so a change to it reaches all three without a fourth job that
+# would rebuild the stdlib to rerun them. This recipe runs just the three entry
+# points, for a quick local check.
+# Run the per-op wire payload fixture checks (Rust, Erlang and TypeScript)
+[unix]
+test-wire-payloads: build-stdlib
+    #!/usr/bin/env bash
+    set -eo pipefail
+    echo "🔍 Rust: op payloads decode into the client types..."
+    cargo test -p beamtalk-repl-protocol --test op_payloads
+    echo "🔍 Erlang: encoders and handlers match the payload fixture..."
+    (cd runtime && BEAMTALK_NO_FILE_LOG=1 BEAMTALK_NO_FOREGROUND_PRUNE=1 \
+        rebar3 eunit --cover=false \
+        --module=beamtalk_repl_op_table_tests,beamtalk_repl_ops_dev_tests,beamtalk_repl_ops_browse_tests)
+    echo "🔍 TypeScript: WorkspaceClient reads the payloads..."
+    (cd editors/vscode && npm ci --quiet && npx vitest run src/__tests__/opPayloads.test.ts)
+    echo "✅ Wire payload fixture checks passed"
+
+[windows]
+test-wire-payloads:
+    @echo "test-wire-payloads: skipped on Windows (covered by Linux CI)"
+
 # Build the "Beamtalk for GitHub" Chrome extension (load editors/github-chrome/dist unpacked)
 [working-directory: 'editors/github-chrome']
 build-github-extension:
@@ -1458,6 +1523,25 @@ test-corpus PARTITION="":
     @echo "🧬 Running the Rust corpus tier (state-threading agreement and corpus proofs)..."
     @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E '{{ corpus_tests }}' {{ if PARTITION == "" { "" } else { "--partition " + PARTITION } }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found: the corpus tier already ran inside test-rust's cargo test fallback (no tiering without nextest)" }
     @echo "✅ Rust corpus tier complete"
+
+# The corpus-tier tests that read the runtime's shared fixtures (see
+# `fixture_reader_tests`). Run after `test-rust` in CI when a fixture or one of
+# its Rust readers changed; needs nextest, like `test-corpus`.
+[unix]
+test-fixture-readers:
+    #!/usr/bin/env bash
+    set -o pipefail
+    echo "🧬 Running the corpus-tier tests that read the shared runtime fixtures..."
+    if command -v cargo-nextest >/dev/null 2>&1; then
+        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E '{{ fixture_reader_tests }}' || exit $?
+    else
+        echo "⏭️  cargo-nextest not found: these tests already ran inside test-rust's cargo test fallback"
+    fi
+    echo "✅ Shared-fixture reader tests complete"
+
+[windows]
+test-fixture-readers:
+    @echo "test-fixture-readers: skipped on Windows (covered by Linux CI)"
 
 # The platform-sensitive subset of the Rust tests: every crate except the pure
 # compiler crates whose tests are platform-independent and dominate the run
@@ -1741,8 +1825,8 @@ test-hermetic-home:
     fake_home="$(mktemp -d)"
     trap 'rm -rf "$fake_home"' EXIT
     HOME="$fake_home" PATH="$erl_bin:$PATH" CARGO_HOME="$cargo_home" RUSTUP_HOME="$rustup_home" \
-        cargo test --locked -p beamtalk-cli --bins
-    leftover="$(find "$fake_home" -mindepth 1 -maxdepth 1 -name '.beamtalk' -o -mindepth 1 -maxdepth 1 -name '.config')"
+        cargo test --locked -p beamtalk-cli --lib --bins
+    leftover="$(find "$fake_home" -mindepth 1 -maxdepth 1 \( -name '.beamtalk' -o -name '.config' \))"
     if [ -n "$leftover" ]; then
         echo "❌ tests wrote under the fake HOME:" >&2
         find "$fake_home" -mindepth 1 | head -20 >&2

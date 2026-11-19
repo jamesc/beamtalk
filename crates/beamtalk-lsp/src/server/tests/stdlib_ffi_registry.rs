@@ -134,7 +134,7 @@ async fn real_stdlib_test_files_show_no_stale_or_ffi_registry_warnings() {
         runtime_specs_available(),
         "build the runtime first (just build-erlang)"
     );
-    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let repo = beamtalk_workspace::cargo_workspace_root!();
     for name in [
         "bt3911arm_frames_test.bt",
         "class_side_missing_class_test.bt",

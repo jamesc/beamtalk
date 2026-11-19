@@ -22,6 +22,21 @@ use super::super::well_known::WellKnownClass;
 use super::super::{DynamicReason, InferredType, TypeChecker};
 use super::UnionArgCompat;
 
+/// What identifies one argument of a call being checked against its
+/// parameter type: shared by the per-argument-kind helpers of
+/// [`TypeChecker::check_args_against_param_types`].
+#[derive(Clone, Copy)]
+struct ArgSite<'a> {
+    /// The receiver as the diagnostics name it.
+    class_name: &'a EcoString,
+    selector: &'a str,
+    /// Zero-based position of the argument.
+    index: usize,
+    span: Span,
+    arg_exprs: Option<&'a [Expression]>,
+    env: Option<&'a super::super::TypeEnv>,
+}
+
 impl TypeChecker {
     /// ADR 0103 (Phase 1): warn when a process-bound handle
     /// (`HandleScoped(#process)`) appears as a value in a `spawnWith:`
@@ -311,8 +326,7 @@ impl TypeChecker {
         // (Symbol, JsonValue)` gives `{K -> Symbol, V -> JsonValue}`. Empty
         // (a no-op below) when the receiver has no type args or the class
         // has no type params, so a non-generic call is entirely unaffected.
-        // Hoisted out of the loop since, like `metaclass_name`, it's
-        // constant across all arguments.
+        // Hoisted out of the loop since it's constant across all arguments.
         //
         // Adversarial-review follow-up: an earlier version of this fix
         // special-cased `class_subst.remove("K")` (Dictionary/Ets's
@@ -361,7 +375,6 @@ impl TypeChecker {
     /// protocol metatype `P class` whose `class` requirement supplies
     /// `param_types` (ADR 0144).
     #[allow(clippy::too_many_arguments)] // arg_exprs + env needed for origin tracing
-    #[allow(clippy::too_many_lines)] // includes the class-literal subtyping arm
     pub(in super::super) fn check_args_against_param_types(
         &mut self,
         class_name: &EcoString,
@@ -374,18 +387,17 @@ impl TypeChecker {
         arg_exprs: Option<&[Expression]>,
         env: Option<&super::super::TypeEnv>,
     ) {
-        // A class literal (e.g. `TestCase`) is a class value whose
-        // runtime type flows through the metaclass tower
-        // (Metaclass → Class → Behaviour → Object → ProtoObject). When the
-        // instance-side chain fails, re-check via `Metaclass` so parameters
-        // declared `:: Behaviour` / `:: Class` / `:: Object` / `:: ProtoObject`
-        // accept any class literal. Hoisted out of the loop since it's
-        // constant across all arguments.
-        let metaclass_name: EcoString = "Metaclass".into();
-
         for (i, (arg_ty, expected)) in arg_types.iter().zip(param_types.iter()).enumerate() {
             let Some(expected_declared) = expected else {
                 continue;
+            };
+            let site = ArgSite {
+                class_name,
+                selector,
+                index: i,
+                span,
+                arg_exprs,
+                env,
             };
             if let Some(arg) = arg_exprs.and_then(|exprs| exprs.get(i)) {
                 self.check_list_literal_elements(
@@ -430,34 +442,7 @@ impl TypeChecker {
             .then(|| self.resolve_declared_recording_aliases(expected_declared, class_subst))
             .filter(|resolved| resolved.contains_shape() || arg_ty.contains_shape());
             if let Some(expected_resolved) = expected_resolved {
-                if let Err(mismatch) = Self::shape_assignable(arg_ty, &expected_resolved, hierarchy)
-                {
-                    let param_pos = i + 1;
-                    let actual_display = arg_ty
-                        .display_for_diagnostic()
-                        .unwrap_or_else(|| EcoString::from("Dynamic"));
-                    let expected_display = expected_resolved
-                        .display_for_diagnostic()
-                        .unwrap_or_else(|| EcoString::from("Dynamic"));
-                    let mut diag = Self::shape_mismatch_diagnostic(
-                        format!(
-                            "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {actual_display}"
-                        ),
-                        &mismatch,
-                        &expected_resolved,
-                        arg_exprs
-                            .and_then(|exprs| exprs.get(i))
-                            .and_then(|arg| mismatch.key_span_in(arg, &expected_resolved))
-                            .unwrap_or(span),
-                    );
-                    if let (Some(exprs), Some(e)) = (arg_exprs, env)
-                        && let Some(Expression::Identifier(ident)) = exprs.get(i)
-                        && let Some(origin) = e.get_local_origin(&ident.name)
-                    {
-                        diag = diag.with_note(origin.description.clone(), Some(origin.span));
-                    }
-                    self.diagnostics.push(diag);
-                }
+                self.check_shape_arg(&site, arg_ty, &expected_resolved, hierarchy);
                 continue;
             }
             let expected_declared_str: EcoString = expected_declared.to_string().into();
@@ -539,84 +524,198 @@ impl TypeChecker {
             // alias — this reuses the existing, tested `Known`/`Union`
             // compatibility and diagnostic paths unchanged rather than
             // special-casing alias names here.
-            let resolved_arg_ty = match arg_ty {
-                InferredType::Known { class_name, .. } => self
-                    .alias_registry
-                    .as_ref()
-                    .and_then(|registry| registry.get(class_name))
-                    .map(|info| {
-                        let reference = TypeAnnotation::Simple(crate::ast::Identifier {
-                            name: info.name.clone(),
-                            span: info.span,
-                        });
-                        let (resolved, arg_alias_deps) =
-                            type_resolver::resolve_type_annotation_with_alias_deps(
-                                &reference,
-                                &HashMap::new(),
-                                None,
-                                self.alias_registry.as_deref(),
-                            );
-                        self.referenced_aliases.extend(arg_alias_deps);
-                        resolved
-                    }),
-                _ => None,
-            };
+            let resolved_arg_ty = self.resolve_alias_named_arg(arg_ty);
             let arg_ty = resolved_arg_ty.as_ref().unwrap_or(arg_ty);
             match arg_ty {
                 InferredType::Known {
                     class_name: actual_ty,
                     ..
-                } => {
-                    // Short-circuit: only consult the metaclass chain when the
-                    // instance-side check fails. Keeps the hot path at one
-                    // `is_type_compatible` call per argument.
-                    //
-                    // `is_type_compatible` has a shortcut where
-                    // `expected == "Class"` accepts any known class name
-                    // unconditionally. With the metaclass-tower check
-                    // handling class literals properly, that shortcut must be
-                    // scoped to class-literal arguments here so a plain
-                    // `TestCase` instance does not satisfy a `:: Class`
-                    // parameter.
-                    //
-                    // This guard must
-                    // check `expected_structural`, not the bare `expected_ty`
-                    // — otherwise `type MyAlias = Class` would resolve to
-                    // `expected_structural == "Class"` while `expected_ty`
-                    // still names the alias, silently skipping the guard and
-                    // letting `is_type_compatible`'s shortcut accept
-                    // any known class instance against a `:: MyAlias` param.
-                    //
-                    // With the shortcut suppressed, a value whose own type is
-                    // `Class` or a subclass of it (e.g. a forwarded `:: Class`
-                    // parameter, BT-4599) is still compatible: check that by
-                    // the nominal chain directly, bypassing the shortcut.
-                    let class_shortcut_applies =
-                        expected_structural.as_str() == "Class" && !is_class_ref_arg;
-                    let instance_compat = if class_shortcut_applies {
-                        hierarchy.is_subclass_of(actual_ty, "Class")
-                    } else {
-                        Self::is_type_compatible(actual_ty, &expected_structural, hierarchy)
-                    };
-                    let class_literal_compat = !instance_compat
-                        && is_class_ref_arg
-                        && hierarchy.has_class(actual_ty)
-                        && Self::is_type_compatible(
-                            &metaclass_name,
-                            &expected_structural,
-                            hierarchy,
+                } => self.check_known_arg(
+                    &site,
+                    actual_ty,
+                    &expected_structural,
+                    &expected_display,
+                    is_class_ref_arg,
+                    hierarchy,
+                ),
+                InferredType::Meta { .. } | InferredType::ProtocolMeta { .. } => self
+                    .check_metatype_arg(
+                        &site,
+                        arg_ty,
+                        &expected_structural,
+                        &expected_display,
+                        hierarchy,
+                    ),
+                InferredType::Union { members, .. } => self.check_union_arg(
+                    &site,
+                    arg_ty,
+                    members,
+                    &expected_structural,
+                    &expected_display,
+                    hierarchy,
+                ),
+                // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip
+                // conservatively like `Dynamic`/`Never` (ADR 0102). An
+                // `Intersection` (`P1 & P2`, ADR 0102) as the
+                // *argument's own* inferred type is likewise skipped — see
+                // `check_protocol_argument_conformance` for the flagship
+                // "parameter declared `P1 & P2`" conformance check.
+                // A shape argument was replaced by the `Dictionary` stand-in
+                // above, so it is unreachable here.
+                InferredType::Dynamic(_)
+                | InferredType::Never
+                | InferredType::Negation { .. }
+                | InferredType::Intersection { .. }
+                | InferredType::Shape { .. } => {}
+            }
+        }
+    }
+
+    /// When `arg_ty` is a bare `Known` type naming a registered alias,
+    /// the alias's expansion; `None` otherwise. Records the alias
+    /// dependencies the expansion touched.
+    fn resolve_alias_named_arg(&mut self, arg_ty: &InferredType) -> Option<InferredType> {
+        match arg_ty {
+            InferredType::Known { class_name, .. } => self
+                .alias_registry
+                .as_ref()
+                .and_then(|registry| registry.get(class_name))
+                .map(|info| {
+                    let reference = TypeAnnotation::Simple(crate::ast::Identifier {
+                        name: info.name.clone(),
+                        span: info.span,
+                    });
+                    let (resolved, arg_alias_deps) =
+                        type_resolver::resolve_type_annotation_with_alias_deps(
+                            &reference,
+                            &HashMap::new(),
+                            None,
+                            self.alias_registry.as_deref(),
                         );
-                    if !instance_compat && !class_literal_compat {
-                        let param_pos = i + 1;
-                        // Use hint severity for generic type params (likely false positive)
-                        let is_generic =
-                            super::super::is_type_var_placeholder(actual_ty, hierarchy);
-                        // Render `UndefinedObject` as `Nil` in user-facing messages.
-                        let actual_display =
-                            InferredType::class_name_for_diagnostic(actual_ty.as_str());
-                        let expected_display = expected_display.clone();
-                        let mut diag = if is_generic {
-                            Diagnostic::hint(
+                    self.referenced_aliases.extend(arg_alias_deps);
+                    resolved
+                }),
+            _ => None,
+        }
+    }
+
+    /// A shape argument or parameter, judged structurally (ADR 0147).
+    /// `expected_resolved` is the parameter type with the receiver's generic
+    /// params substituted. One argument of
+    /// [`Self::check_args_against_param_types`].
+    fn check_shape_arg(
+        &mut self,
+        site: &ArgSite<'_>,
+        arg_ty: &InferredType,
+        expected_resolved: &InferredType,
+        hierarchy: &ClassHierarchy,
+    ) {
+        let ArgSite {
+            class_name,
+            selector,
+            index: i,
+            span,
+            arg_exprs,
+            ..
+        } = *site;
+        if let Err(mismatch) = Self::shape_assignable(arg_ty, expected_resolved, hierarchy) {
+            let param_pos = i + 1;
+            let actual_display = arg_ty
+                .display_for_diagnostic()
+                .unwrap_or_else(|| EcoString::from("Dynamic"));
+            let expected_display = expected_resolved
+                .display_for_diagnostic()
+                .unwrap_or_else(|| EcoString::from("Dynamic"));
+            let mut diag = Self::shape_mismatch_diagnostic(
+                format!(
+                    "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {actual_display}"
+                ),
+                &mismatch,
+                expected_resolved,
+                arg_exprs
+                    .and_then(|exprs| exprs.get(i))
+                    .and_then(|arg| mismatch.key_span_in(arg, expected_resolved))
+                    .unwrap_or(span),
+            );
+            diag = Self::with_arg_origin_note(diag, site);
+            self.diagnostics.push(diag);
+        }
+    }
+
+    /// A `Known` argument against the (alias-expanded) parameter type
+    /// `expected_structural`; `expected_display` is how the diagnostic names
+    /// the parameter type and `is_class_ref_arg` says the argument is a
+    /// class literal. One argument of
+    /// [`Self::check_args_against_param_types`].
+    fn check_known_arg(
+        &mut self,
+        site: &ArgSite<'_>,
+        actual_ty: &EcoString,
+        expected_structural: &EcoString,
+        expected_display: &EcoString,
+        is_class_ref_arg: bool,
+        hierarchy: &ClassHierarchy,
+    ) {
+        let ArgSite {
+            class_name,
+            selector,
+            index: i,
+            span,
+            ..
+        } = *site;
+        // A class literal (e.g. `TestCase`) is a class value whose
+        // runtime type flows through the metaclass tower
+        // (Metaclass → Class → Behaviour → Object → ProtoObject). When the
+        // instance-side chain fails, re-check via `Metaclass` so parameters
+        // declared `:: Behaviour` / `:: Class` / `:: Object` / `:: ProtoObject`
+        // accept any class literal.
+        // Short-circuit: only consult the metaclass chain when the
+        // instance-side check fails. Keeps the hot path at one
+        // `is_type_compatible` call per argument.
+        //
+        // `is_type_compatible` has a shortcut where
+        // `expected == "Class"` accepts any known class name
+        // unconditionally. With the metaclass-tower check
+        // handling class literals properly, that shortcut must be
+        // scoped to class-literal arguments here so a plain
+        // `TestCase` instance does not satisfy a `:: Class`
+        // parameter.
+        //
+        // This guard must
+        // check `expected_structural`, not the bare `expected_ty`
+        // — otherwise `type MyAlias = Class` would resolve to
+        // `expected_structural == "Class"` while `expected_ty`
+        // still names the alias, silently skipping the guard and
+        // letting `is_type_compatible`'s shortcut accept
+        // any known class instance against a `:: MyAlias` param.
+        //
+        // With the shortcut suppressed, a value whose own type is
+        // `Class` or a subclass of it (e.g. a forwarded `:: Class`
+        // parameter, BT-4599) is still compatible: check that by
+        // the nominal chain directly, bypassing the shortcut.
+        let class_shortcut_applies = expected_structural.as_str() == "Class" && !is_class_ref_arg;
+        let instance_compat = if class_shortcut_applies {
+            hierarchy.is_subclass_of(actual_ty, "Class")
+        } else {
+            Self::is_type_compatible(actual_ty, expected_structural, hierarchy)
+        };
+        let class_literal_compat = !instance_compat
+            && is_class_ref_arg
+            && hierarchy.has_class(actual_ty)
+            && Self::is_type_compatible(
+                &EcoString::from("Metaclass"),
+                expected_structural,
+                hierarchy,
+            );
+        if !instance_compat && !class_literal_compat {
+            let param_pos = i + 1;
+            // Use hint severity for generic type params (likely false positive)
+            let is_generic = super::super::is_type_var_placeholder(actual_ty, hierarchy);
+            // Render `UndefinedObject` as `Nil` in user-facing messages.
+            let actual_display = InferredType::class_name_for_diagnostic(actual_ty.as_str());
+            let expected_display = expected_display.clone();
+            let mut diag = if is_generic {
+                Diagnostic::hint(
                                 format!(
                                     "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {actual_display}"
                                 ),
@@ -626,72 +725,101 @@ impl TypeChecker {
                                 "This is likely a false positive — `{actual_display}` is a generic type parameter that may be {expected_display} at runtime. \
                                  Use `@expect type` to suppress"
                             ))
-                        } else {
-                            Diagnostic::warning(
+            } else {
+                Diagnostic::warning(
                                 format!(
                                     "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {actual_display}"
                                 ),
                                 span,
                             )
                             .with_hint(format!("Expected {expected_display} (or a subclass), got {actual_display}"))
-                        };
-                        // Attach origin note if available
-                        if let (Some(exprs), Some(e)) = (arg_exprs, env)
-                            && let Some(Expression::Identifier(ident)) = exprs.get(i)
-                            && let Some(origin) = e.get_local_origin(&ident.name)
-                        {
-                            diag = diag.with_note(origin.description.clone(), Some(origin.span));
-                        }
-                        self.diagnostics
-                            .push(diag.with_category(DiagnosticCategory::Type));
-                    }
-                }
-                InferredType::Meta { .. } | InferredType::ProtocolMeta { .. } => {
-                    // ADR 0083: a metatype value `C class` is an instance of the
-                    // metaclass tower (`Meta{C} <: Class <: Behaviour <: Object`).
-                    // It satisfies a parameter whose declared type is `Class`,
-                    // `Behaviour`, `Object`, `ProtoObject` — anything `Class`
-                    // (the runtime class of a class object) is assignable to.
-                    // We model the metatype's own type as `Class` for the
-                    // hierarchy walk, so e.g. `:: Behaviour` accepts it but
-                    // `:: Integer` does not. ADR 0144: a `P class` parameter
-                    // accepts `C class` iff `C` conforms to `P`.
-                    let Some(class_object) = ClassObjectType::of(arg_ty) else {
-                        continue;
-                    };
-                    let compat = Self::metatype_assignable_to(
-                        class_object,
-                        &expected_structural,
-                        hierarchy,
-                        self.protocol_registry.as_deref(),
-                        Self::is_type_compatible,
-                    );
-                    if !compat {
-                        let param_pos = i + 1;
-                        let expected_display = expected_display.clone();
-                        let diag = Self::metatype_mismatch_diagnostic(
-                            class_object,
-                            &expected_structural,
-                            hierarchy,
-                            self.protocol_registry.as_deref(),
-                            format!(
-                                "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {class_object}"
-                            ),
-                            format!(
-                                "Expected {expected_display} (or a subclass), got {class_object}"
-                            ),
-                            span,
-                        );
-                        self.diagnostics.push(diag);
-                    }
-                }
-                InferredType::Union { members, .. } => {
-                    // BT-4454: class-object members are judged by the slot
-                    // rule, as a bare class object is above.
-                    let param_pos = i + 1;
-                    if let Some(diag) = self.union_class_object_diagnostic(
+            };
+            // Attach origin note if available
+            diag = Self::with_arg_origin_note(diag, site);
+            self.diagnostics
+                .push(diag.with_category(DiagnosticCategory::Type));
+        }
+    }
+
+    /// A metatype argument (`C class`, `P class`) against the parameter type.
+    /// One argument of [`Self::check_args_against_param_types`].
+    fn check_metatype_arg(
+        &mut self,
+        site: &ArgSite<'_>,
+        arg_ty: &InferredType,
+        expected_structural: &EcoString,
+        expected_display: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) {
+        let ArgSite {
+            class_name,
+            selector,
+            index: i,
+            span,
+            ..
+        } = *site;
+        // ADR 0083: a metatype value `C class` is an instance of the
+        // metaclass tower (`Meta{C} <: Class <: Behaviour <: Object`).
+        // It satisfies a parameter whose declared type is `Class`,
+        // `Behaviour`, `Object`, `ProtoObject` — anything `Class`
+        // (the runtime class of a class object) is assignable to.
+        // We model the metatype's own type as `Class` for the
+        // hierarchy walk, so e.g. `:: Behaviour` accepts it but
+        // `:: Integer` does not. ADR 0144: a `P class` parameter
+        // accepts `C class` iff `C` conforms to `P`.
+        let Some(class_object) = ClassObjectType::of(arg_ty) else {
+            return;
+        };
+        let compat = Self::metatype_assignable_to(
+            class_object,
+            expected_structural,
+            hierarchy,
+            self.protocol_registry.as_deref(),
+            Self::is_type_compatible,
+        );
+        if !compat {
+            let param_pos = i + 1;
+            let expected_display = expected_display.clone();
+            let diag = Self::metatype_mismatch_diagnostic(
+                class_object,
+                expected_structural,
+                hierarchy,
+                self.protocol_registry.as_deref(),
+                format!(
+                    "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {class_object}"
+                ),
+                format!("Expected {expected_display} (or a subclass), got {class_object}"),
+                span,
+            );
+            self.diagnostics.push(diag);
+        }
+    }
+
+    /// A union argument against the parameter type: class-object members by
+    /// the slot rule, the rest by the shared union classification. One
+    /// argument of [`Self::check_args_against_param_types`].
+    fn check_union_arg(
+        &mut self,
+        site: &ArgSite<'_>,
+        arg_ty: &InferredType,
+        members: &[InferredType],
+        expected_structural: &EcoString,
+        expected_display: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) {
+        let ArgSite {
+            class_name,
+            selector,
+            index: i,
+            span,
+            ..
+        } = *site;
+        // BT-4454: class-object members are judged by the slot
+        // rule, as a bare class object is above.
+        let param_pos = i + 1;
+        if let Some(diag) = self.union_class_object_diagnostic(
                         members,
-                        &expected_structural,
+                        expected_structural,
                         hierarchy,
                         Self::is_type_compatible,
                         span,
@@ -707,70 +835,62 @@ impl TypeChecker {
                         },
                     ) {
                         self.diagnostics.push(diag);
-                        continue;
+                        return;
                     }
-                    // Check every other union member against the
-                    // expected type via the shared classification.
-                    let instance_members = Self::non_class_object_members(members);
-                    let (compat, incompatible) = match Self::classify_union_arg_compat(
-                        &instance_members,
-                        &expected_structural,
-                        hierarchy,
-                    ) {
-                        UnionArgCompat::AllCompatible | UnionArgCompat::Unclassifiable => continue,
-                        UnionArgCompat::SomeIncompatible {
-                            compat,
-                            incompatible,
-                            ..
-                        } => (compat, incompatible),
-                    };
-                    // Accepted class objects are compatible members too.
-                    let compat = compat + (members.len() - instance_members.len());
-                    let union_display = arg_ty
-                        .display_for_diagnostic()
-                        .unwrap_or_else(|| EcoString::from("Dynamic"));
-                    let expected_display = expected_display.clone();
-                    let mut diag = if compat == 0 {
-                        Diagnostic::warning(
+        // Check every other union member against the
+        // expected type via the shared classification.
+        let instance_members = Self::non_class_object_members(members);
+        let (compat, incompatible) = match Self::classify_union_arg_compat(
+            &instance_members,
+            expected_structural,
+            hierarchy,
+        ) {
+            UnionArgCompat::AllCompatible | UnionArgCompat::Unclassifiable => return,
+            UnionArgCompat::SomeIncompatible {
+                compat,
+                incompatible,
+                ..
+            } => (compat, incompatible),
+        };
+        // Accepted class objects are compatible members too.
+        let compat = compat + (members.len() - instance_members.len());
+        let union_display = arg_ty
+            .display_for_diagnostic()
+            .unwrap_or_else(|| EcoString::from("Dynamic"));
+        let expected_display = expected_display.clone();
+        let mut diag = if compat == 0 {
+            Diagnostic::warning(
                             format!("Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {union_display}"),
                             span,
                         )
                         .with_hint(format!("No member of {union_display} is compatible with {expected_display}"))
-                    } else {
-                        let list = incompatible
-                            .iter()
-                            .map(|m| InferredType::class_name_for_diagnostic(m.as_str()))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        Diagnostic::hint(
+        } else {
+            let list = incompatible
+                .iter()
+                .map(|m| InferredType::class_name_for_diagnostic(m.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Diagnostic::hint(
                             format!("Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {union_display}"),
                             span,
                         )
                         .with_hint(format!("Some members of the union are not compatible with {expected_display}: {list}"))
-                    };
-                    if let (Some(exprs), Some(e)) = (arg_exprs, env)
-                        && let Some(Expression::Identifier(ident)) = exprs.get(i)
-                        && let Some(origin) = e.get_local_origin(&ident.name)
-                    {
-                        diag = diag.with_note(origin.description.clone(), Some(origin.span));
-                    }
-                    self.diagnostics
-                        .push(diag.with_category(DiagnosticCategory::Type));
-                }
-                // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip
-                // conservatively like `Dynamic`/`Never` (ADR 0102). An
-                // `Intersection` (`P1 & P2`, ADR 0102) as the
-                // *argument's own* inferred type is likewise skipped — see
-                // `check_protocol_argument_conformance` for the flagship
-                // "parameter declared `P1 & P2`" conformance check.
-                // A shape argument was replaced by the `Dictionary` stand-in
-                // above, so it is unreachable here.
-                InferredType::Dynamic(_)
-                | InferredType::Never
-                | InferredType::Negation { .. }
-                | InferredType::Intersection { .. }
-                | InferredType::Shape { .. } => {}
-            }
+        };
+        diag = Self::with_arg_origin_note(diag, site);
+        self.diagnostics
+            .push(diag.with_category(DiagnosticCategory::Type));
+    }
+
+    /// Attaches the argument identifier's local-origin note to `diag`, when
+    /// the argument is a local variable whose origin is tracked.
+    fn with_arg_origin_note(diag: Diagnostic, site: &ArgSite<'_>) -> Diagnostic {
+        if let (Some(exprs), Some(e)) = (site.arg_exprs, site.env)
+            && let Some(Expression::Identifier(ident)) = exprs.get(site.index)
+            && let Some(origin) = e.get_local_origin(&ident.name)
+        {
+            diag.with_note(origin.description.clone(), Some(origin.span))
+        } else {
+            diag
         }
     }
 

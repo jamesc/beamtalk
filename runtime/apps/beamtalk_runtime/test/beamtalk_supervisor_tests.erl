@@ -434,24 +434,24 @@ supervisor_child_entry_running_test() ->
             type => worker,
             childClass => nil
         },
-        beamtalk_supervisor:supervisor_child_entry({a1, Pid, worker, [no_such_mod]}, #{})
+        beamtalk_supervisor_children:supervisor_child_entry({a1, Pid, worker, [no_such_mod]}, #{})
     ).
 
 supervisor_child_entry_restarting_test() ->
     %% ADR 0092 §3 precedent: a child mid-restart never raises; child is nil.
     ?assertMatch(
         #{id := a2, child := nil, status := restarting, type := supervisor},
-        beamtalk_supervisor:supervisor_child_entry({a2, restarting, supervisor, [m]}, #{})
+        beamtalk_supervisor_children:supervisor_child_entry({a2, restarting, supervisor, [m]}, #{})
     ).
 
 supervisor_child_entry_undefined_is_stopped_test() ->
     ?assertMatch(
         #{id := 3, child := nil, status := stopped, childClass := nil},
-        beamtalk_supervisor:supervisor_child_entry({3, undefined, worker, []}, #{})
+        beamtalk_supervisor_children:supervisor_child_entry({3, undefined, worker, []}, #{})
     ).
 
 supervisor_child_entries_reverses_to_declaration_order_test() ->
-    Entries = beamtalk_supervisor:supervisor_child_entries([
+    Entries = beamtalk_supervisor_children:supervisor_child_entries([
         {c, undefined, worker, []}, {b, restarting, worker, []}, {a, undefined, worker, []}
     ]),
     ?assertEqual([a, b, c], [Id || #{id := Id} <- Entries]).
@@ -1300,7 +1300,9 @@ start_failed_error_uses_cause_hint_message_or_kind_test() ->
         message = {beamtalk_string, <<>>}, hint = undefined
     },
     Hint = fun(Reason) ->
-        (beamtalk_supervisor:start_failed_error(supervisor_start_failed, 'Sup', supervise, Reason))#beamtalk_error.hint
+        (beamtalk_supervisor_errors:start_failed_error(
+            supervisor_start_failed, 'Sup', supervise, Reason
+        ))#beamtalk_error.hint
     end,
     ?assertEqual({beamtalk_string, <<"the hint">>}, Hint(WithHint)),
     ?assertEqual({beamtalk_string, <<"the message">>}, Hint(NoHint)),
@@ -1326,7 +1328,9 @@ start_failed_error_uses_cause_hint_message_or_kind_test() ->
     ),
     ?assertMatch(
         #beamtalk_error{details = #{cause := WithHint}},
-        beamtalk_supervisor:start_failed_error(supervisor_start_failed, 'Sup', supervise, WithHint)
+        beamtalk_supervisor_errors:start_failed_error(
+            supervisor_start_failed, 'Sup', supervise, WithHint
+        )
     ).
 
 static_init_two_argument_form_rejects_pre_adr_0135_module_test() ->
@@ -2730,7 +2734,7 @@ set_child_class(Obj) ->
     ok.
 
 child_class_entry(Obj) ->
-    {beamtalk_object_class:class_name_safe(element(4, Obj)), element(3, Obj)}.
+    {beamtalk_object_class_read:class_name_safe(element(4, Obj)), element(3, Obj)}.
 
 %% Called from this module's supervisor init/1: plant the child-class entry a
 %% test stored with set_child_class/1, as dynamic_init/3 would.
@@ -2843,7 +2847,7 @@ run_initialize_sends_instance_initialize_test() ->
         {ok, Pid} = beamtalk_bt3963_sup_fixture:start_link(nil),
         try
             Sup = bt3963_sup('BT3963Sup', Pid),
-            ?assertEqual(ok, beamtalk_supervisor:run_initialize(Sup)),
+            ?assertEqual(ok, beamtalk_supervisor_init_gate:run_initialize(Sup)),
             begin
                 ?awaitMessage({initialized, Self, Count, Runner}, 2000),
                 ?assertEqual(Sup, Self),
@@ -2874,7 +2878,7 @@ run_initialize_raise_stops_supervisor_test() ->
         Sup = bt3963_sup('BT3963Sup', SupPid),
         ?assertMatch(
             #beamtalk_error{kind = runtime_error},
-            raised_beamtalk_error(fun() -> beamtalk_supervisor:run_initialize(Sup) end)
+            raised_beamtalk_error(fun() -> beamtalk_supervisor_init_gate:run_initialize(Sup) end)
         ),
         ?awaitMessage({'DOWN', SupRef, process, SupPid, _}, 2000),
         ?awaitMessage({'DOWN', WorkerRef, process, WorkerPid, _}, 2000),
@@ -4570,7 +4574,7 @@ unwrap_raised(Other) -> Other.
 %%% BT-3759 review: an armed gate that nobody claims must not wedge `supervise`.
 
 orphaned_init_gate_is_reclaimed_test() ->
-    beamtalk_supervisor:ensure_init_gate_table(),
+    beamtalk_supervisor_init_gate:ensure_init_gate_table(),
     application:set_env(beamtalk_runtime, init_wait_timeout_ms, 300),
     %% A proc_lib process stands in for the never-initialised supervisor so
     %% that stop_failed_supervisor/1 (proc_lib:stop) can stop it.
@@ -4578,11 +4582,13 @@ orphaned_init_gate_is_reclaimed_test() ->
     ets:insert(beamtalk_supervisor_init_gates, {Sup, gate}),
     try
         SupTuple = {beamtalk_supervisor, 'BT3759Orphan', undefined, Sup},
-        ?assertBtError(supervisor_start_failed, beamtalk_supervisor:await_initialized(SupTuple)),
+        ?assertBtError(
+            supervisor_start_failed, beamtalk_supervisor_init_gate:await_initialized(SupTuple)
+        ),
         %% Gate rows are gone, so the next caller is not blocked.
         ?assertEqual([], ets:lookup(beamtalk_supervisor_init_gates, Sup)),
         ?assertNot(is_process_alive(Sup)),
-        ?assertEqual(ok, beamtalk_supervisor:await_initialized(SupTuple))
+        ?assertEqual(ok, beamtalk_supervisor_init_gate:await_initialized(SupTuple))
     after
         application:unset_env(beamtalk_runtime, init_wait_timeout_ms),
         ets:delete(beamtalk_supervisor_init_gates, Sup),
@@ -4596,14 +4602,14 @@ orphaned_init_gate_is_reclaimed_test() ->
 %% BT-3759 review: waiter rows left after the gate was released must neither
 %% block a caller nor get a live, initialised supervisor stopped.
 stray_waiter_rows_do_not_hold_gate_test() ->
-    beamtalk_supervisor:ensure_init_gate_table(),
+    beamtalk_supervisor_init_gate:ensure_init_gate_table(),
     application:set_env(beamtalk_runtime, init_wait_timeout_ms, 300),
     {ok, Sup} = gen_event:start(),
     Stray = {Sup, waiter, self(), make_ref()},
     ets:insert(beamtalk_supervisor_init_gates, Stray),
     try
         SupTuple = {beamtalk_supervisor, 'BT3759Stray', undefined, Sup},
-        ?assertEqual(ok, beamtalk_supervisor:await_initialized(SupTuple)),
+        ?assertEqual(ok, beamtalk_supervisor_init_gate:await_initialized(SupTuple)),
         ?assert(is_process_alive(Sup))
     after
         application:unset_env(beamtalk_runtime, init_wait_timeout_ms),

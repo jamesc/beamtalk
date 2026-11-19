@@ -9,12 +9,16 @@ use super::common::*;
 
 // ── Post-guard narrowing for locals and self.field after diverging guards ──
 
-/// `x isNil ifTrue: [self error: "..."]` should narrow the local
-/// `x` to non-Nil for subsequent statements, even though the block has no
-/// `^` return — the `error:` call returns `Never` and therefore diverges.
-#[test]
-fn bt2049_local_narrows_after_self_error_guard() {
-    let source = r#"
+/// Sources that must produce no `Type` diagnostic once a guard has narrowed
+/// the binding: `(case, source, why it must be clean)`. The case name is in
+/// the failure message.
+const CLEAN_AFTER_GUARD: &[(&str, &str, &str)] = &[
+    // `x isNil ifTrue: [self error: "..."]` should narrow the local
+    // `x` to non-Nil for subsequent statements, even though the block has no
+    // `^` return — the `error:` call returns `Never` and therefore diverges.
+    (
+        "bt2049_local_narrows_after_self_error_guard",
+        r#"
 typed Object subclass: Receiver
   class process: v :: Integer => v
 
@@ -22,27 +26,15 @@ typed Object subclass: Caller
   run: ms :: Integer | Nil =>
     ms isNil ifTrue: [self error: "missing"]
     Receiver process: ms
-"#;
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "`ms` should be narrowed to Integer after `self error:` guard, got: {type_warnings:?}"
-    );
-}
-
-/// `self.field isNil ifTrue: [^err]` should narrow `self.field`
-/// to non-Nil for subsequent statements, so passing it to a typed parameter
-/// does not warn.
-#[test]
-fn bt2049_self_field_narrows_after_return_guard() {
-    let source = r"
+"#,
+        "`ms` should be narrowed to Integer after `self error:` guard",
+    ),
+    // `self.field isNil ifTrue: [^err]` should narrow `self.field`
+    // to non-Nil for subsequent statements, so passing it to a typed parameter
+    // does not warn.
+    (
+        "bt2049_self_field_narrows_after_return_guard",
+        r"
 typed Object subclass: Store
   class process: v :: Integer => v
 
@@ -51,26 +43,14 @@ typed Actor subclass: Engine
   run =>
     self.eventStore isNil ifTrue: [^nil]
     Store process: self.eventStore
-";
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "`self.eventStore` should be narrowed to Integer after `^nil` guard, got: {type_warnings:?}"
-    );
-}
-
-/// `self.field isNil ifTrue: [self error: "..."]` should narrow
-/// `self.field` to non-Nil via the diverging-call path (no `^`).
-#[test]
-fn bt2049_self_field_narrows_after_self_error_guard() {
-    let source = r#"
+",
+        "`self.eventStore` should be narrowed to Integer after `^nil` guard",
+    ),
+    // `self.field isNil ifTrue: [self error: "..."]` should narrow
+    // `self.field` to non-Nil via the diverging-call path (no `^`).
+    (
+        "bt2049_self_field_narrows_after_self_error_guard",
+        r#"
 typed Object subclass: Store
   class process: v :: Integer => v
 
@@ -79,19 +59,264 @@ typed Actor subclass: Engine
   run =>
     self.eventStore isNil ifTrue: [self error: "no event store"]
     Store process: self.eventStore
-"#;
-    let module = parse_ok(source);
+"#,
+        "`self.eventStore` should be narrowed to Integer after `self error:` guard",
+    ),
+    // Bare identifier `eventStore` (sugar for `self.eventStore`) should
+    // also be narrowed after a `self.eventStore isNil ifTrue: [^nil]` guard,
+    // because both spellings resolve through the same synthetic `self.field` key.
+    (
+        "bt2049_bare_field_narrows_after_guard",
+        r"
+typed Object subclass: Store
+  class process: v :: Integer => v
 
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "`self.eventStore` should be narrowed to Integer after `self error:` guard, got: {type_warnings:?}"
-    );
+typed Actor subclass: Engine
+  state: eventStore :: Integer | Nil = nil
+  run =>
+    self.eventStore isNil ifTrue: [^nil]
+    Store process: eventStore
+",
+        "Bare `eventStore` should be narrowed to Integer after guard",
+    ),
+    // `block_diverges` must treat a block as diverging when a
+    // `Never`-typed statement appears anywhere in the body, not only as the
+    // trailing statement. `[self error: "...". 42]` — the trailing `42` looks
+    // reachable but the block actually diverges at `self error:`.
+    (
+        "bt2049_guard_with_diverge_then_trailing_nondiverging",
+        r#"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: ms :: Integer | Nil =>
+    ms isNil ifTrue: [
+      self error: "missing"
+      42
+    ]
+    Receiver process: ms
+"#,
+        "ms should narrow: non-tail `self error:` still diverges",
+    ),
+    // `(x isKindOf: Integer) ifFalse: [^default]` should narrow
+    // a union-typed local to `Integer` for the rest of the method — the
+    // concrete guard-and-early-return shape from the issue
+    // (`(coll isKindOf: List) ifFalse: [^""]`), which `apply_early_return_narrowing`
+    // previously only handled for `isNil`, never for `isKindOf:`, and never for
+    // a solo `ifFalse:` at all.
+    (
+        "bt2825_union_narrows_after_is_kind_of_if_false_guard",
+        r"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: x :: Integer | String =>
+    (x isKindOf: Integer) ifFalse: [^nil]
+    Receiver process: x
+",
+        "`x` should narrow to Integer after `(x isKindOf: Integer) ifFalse: [^nil]`",
+    ),
+    // a Protocol-typed local narrowed by an `isKindOf:` guard
+    // against a concrete class must be assignable to that concrete class
+    // afterward without an `@expect type` escape hatch — the exact
+    // `prompt_renderer.bt` shape from the issue (`coll :: Printable | Nil`,
+    // `(coll isKindOf: List) ifFalse: [^""]`, `items :: List := coll`).
+    (
+        "bt2825_protocol_narrows_after_is_kind_of_if_false_guard_no_expect_needed",
+        r#"
+Protocol define: Printable
+  asString -> String
+
+typed Object subclass: MyList
+  asString => "a list"
+
+typed Object subclass: Caller
+  run: coll :: Printable | Nil -> String =>
+    coll isNil ifTrue: [^""]
+    (coll isKindOf: MyList) ifFalse: [^""]
+    items :: MyList := coll
+    items asString
+"#,
+        "`coll` narrowed to MyList should be assignable to `items :: MyList` \
+         without `@expect type`",
+    ),
+    // `(x isKindOf: Integer) ifTrue: [<diverge>]` should narrow `x` to
+    // the *complement* (`String`, via `difference`) for the rest of the
+    // method — the mirror image of the `ifFalse:` guard, extending the
+    // existing `ifTrue: [<diverge>]` machinery (previously `isNil`-only)
+    // to `isKindOf:`.
+    (
+        "bt2825_is_kind_of_if_true_diverge_narrows_to_complement",
+        r#"
+typed Object subclass: Receiver
+  class process: v :: String => v
+
+typed Object subclass: Caller
+  run: x :: Integer | String =>
+    (x isKindOf: Integer) ifTrue: [self error: "was integer"]
+    Receiver process: x
+"#,
+        "`x` should narrow to String (the complement of Integer) after the \
+         diverging `ifTrue:` guard",
+    ),
+    // the combined `ifTrue: [<diverge>] ifFalse:
+    // [...]` shape (`is_if_true_if_false` in `apply_early_return_narrowing`)
+    // shares its code path with the solo `ifTrue: [<diverge>]` case above, but
+    // had no dedicated `isKindOf:` test — only the solo-`ifTrue:` and
+    // solo-`ifFalse:` shapes were covered. Locks in that `x` still narrows to
+    // the complement after the combined form, matching the docs table row
+    // `x isKindOf: Foo ifTrue: [^...] ifFalse: [...]`.
+    (
+        "bt2825_is_kind_of_if_true_if_false_diverge_narrows_to_complement",
+        r#"
+typed Object subclass: Receiver
+  class process: v :: String => v
+
+typed Object subclass: Caller
+  run: x :: Integer | String =>
+    (x isKindOf: Integer) ifTrue: [self error: "was integer"] ifFalse: [Transcript show: "ok"]
+    Receiver process: x
+"#,
+        "`x` should narrow to String (the complement of Integer) after the \
+         combined `ifTrue: [<diverge>] ifFalse: [...]` guard",
+    ),
+    // `isKindOf:` used directly as an `ifTrue:`/`ifFalse:`
+    // branch condition (not a guard-and-return) already narrows within the
+    // branch — this locks that behaviour in as an
+    // end-to-end regression alongside the new post-guard cases above.
+    (
+        "bt2825_is_kind_of_narrows_inside_if_true_branch",
+        r"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: x :: Integer | String =>
+    (x isKindOf: Integer) ifTrue: [Receiver process: x]
+",
+        "`x` should narrow to Integer inside the `ifTrue:` branch",
+    ),
+    // `apply_early_return_narrowing`'s new
+    // `is_if_false` arm is gated on `info.is_nil_check || info.class_test.is_some()`,
+    // so it also fires for plain `isNil` guards, not just `isKindOf:` — `x isNil
+    // ifFalse: [^...]` is the mirror of the already-covered `isNil ifTrue:
+    // [^...]` case, and narrows `x` to `Nil` (only the nil case falls through)
+    // for the rest of the method. Locks in this implicit-but-correct behavior.
+    (
+        "bt2825_is_nil_if_false_diverge_narrows_to_nil",
+        r"
+typed Object subclass: Receiver
+  class process: v :: Nil => v
+
+typed Object subclass: Caller
+  run: x :: Integer | Nil =>
+    x isNil ifFalse: [^nil]
+    Receiver process: x
+",
+        "`x` should narrow to Nil after `x isNil ifFalse: [^nil]`",
+    ),
+    // the issue's exact repro shape — `pid == #undefined ifTrue:
+    // [^false]` (loose equality, `==`) should narrow `pid` to `Integer` for the
+    // rest of the method, closing the gap without requiring `@expect type`.
+    (
+        "bt3369_double_equal_narrows_after_if_true_return_guard",
+        r"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: pid :: Integer | #undefined =>
+    pid == #undefined ifTrue: [^false]
+    Receiver process: pid
+",
+        "`pid` should narrow to Integer after `pid == #undefined ifTrue: [^false]`",
+    ),
+    // `x =:= #undefined ifTrue: [^...]` (strict equality) also
+    // narrows post-guard — the post-guard gate was missing for *all*
+    // `singleton_eq` guards, independent of the `==` operator extension.
+    (
+        "bt3369_strict_equal_narrows_after_if_true_return_guard",
+        r"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: pid :: Integer | #undefined =>
+    pid =:= #undefined ifTrue: [^false]
+    Receiver process: pid
+",
+        "`pid` should narrow to Integer after `pid =:= #undefined ifTrue: [^false]`",
+    ),
+    // `x /= #undefined ifFalse: [^...]` (loose inequality, already
+    // accepted by the detector before this issue) also narrows post-guard —
+    // the mirror `ifFalse:` guard shape, not just `ifTrue:`.
+    (
+        "bt3369_loose_not_equal_narrows_after_if_false_return_guard",
+        r"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: pid :: Integer | #undefined =>
+    pid /= #undefined ifFalse: [^false]
+    Receiver process: pid
+",
+        "`pid` should narrow to Integer after `pid /= #undefined ifFalse: [^false]`",
+    ),
+    // narrowing only removes the specific literal member compared —
+    // a 3-member union `Integer | #south | #east` checked against `#south`
+    // narrows to `Integer | #east`, not just `Integer` (the other singleton
+    // member must survive).
+    (
+        "bt3369_multi_member_union_keeps_other_singleton_after_guard",
+        r"
+typed Object subclass: Receiver
+  class process: v :: Integer | #east -> Integer | #east => v
+
+typed Object subclass: Caller
+  run: d :: Integer | #south | #east =>
+    d == #south ifTrue: [^nil]
+    Receiver process: d
+    true
+",
+        "`d` should narrow to `Integer | #east` (not just `Integer`) after `d == #south ifTrue: [^nil]`",
+    ),
+    // chained guards narrow incrementally — checking `#south` then
+    // `#east` in sequence on a 3-member union narrows down to the single
+    // remaining member, `Integer`.
+    (
+        "bt3369_chained_guards_narrow_incrementally",
+        r"
+typed Object subclass: Receiver
+  class process: v :: Integer => v
+
+typed Object subclass: Caller
+  run: d :: Integer | #south | #east =>
+    d == #south ifTrue: [^nil]
+    d == #east ifTrue: [^nil]
+    Receiver process: d
+",
+        "`d` should narrow to Integer after two chained singleton guards",
+    ),
+];
+
+#[test]
+fn post_guard_narrowing_cases_are_clean() {
+    for &(case, source, why) in CLEAN_AFTER_GUARD {
+        let module = parse_ok(source);
+        let result = crate::semantic_analysis::analyse(&module);
+        let type_warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.category == Some(DiagnosticCategory::Type))
+            .collect();
+        assert!(
+            type_warnings.is_empty(),
+            "[{case}] {why}, got: {type_warnings:?}"
+        );
+    }
 }
 
 /// A non-diverging `ifTrue:` block (no `^`, last expression is not
@@ -151,67 +376,6 @@ typed Object subclass: Caller
     }
 }
 
-/// Bare identifier `eventStore` (sugar for `self.eventStore`) should
-/// also be narrowed after a `self.eventStore isNil ifTrue: [^nil]` guard,
-/// because both spellings resolve through the same synthetic `self.field` key.
-#[test]
-fn bt2049_bare_field_narrows_after_guard() {
-    let source = r"
-typed Object subclass: Store
-  class process: v :: Integer => v
-
-typed Actor subclass: Engine
-  state: eventStore :: Integer | Nil = nil
-  run =>
-    self.eventStore isNil ifTrue: [^nil]
-    Store process: eventStore
-";
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "Bare `eventStore` should be narrowed to Integer after guard, got: {type_warnings:?}"
-    );
-}
-
-/// `block_diverges` must treat a block as diverging when a
-/// `Never`-typed statement appears anywhere in the body, not only as the
-/// trailing statement. `[self error: "...". 42]` — the trailing `42` looks
-/// reachable but the block actually diverges at `self error:`.
-#[test]
-fn bt2049_guard_with_diverge_then_trailing_nondiverging() {
-    let source = r#"
-typed Object subclass: Receiver
-  class process: v :: Integer => v
-
-typed Object subclass: Caller
-  run: ms :: Integer | Nil =>
-    ms isNil ifTrue: [
-      self error: "missing"
-      42
-    ]
-    Receiver process: ms
-"#;
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "ms should narrow: non-tail `self error:` still diverges. got: {type_warnings:?}"
-    );
-}
-
 /// `ifTrue: [diverge] ifFalse: [reassign to nil]` must NOT narrow
 /// after the statement — execution reaches the next statement through the
 /// `ifFalse:` branch, and the reassignment makes the variable nil again.
@@ -266,165 +430,6 @@ typed Object subclass: Caller
 }
 
 // ── Post-guard narrowing for `isKindOf:` class-test guards ──
-
-/// `(x isKindOf: Integer) ifFalse: [^default]` should narrow
-/// a union-typed local to `Integer` for the rest of the method — the
-/// concrete guard-and-early-return shape from the issue
-/// (`(coll isKindOf: List) ifFalse: [^""]`), which `apply_early_return_narrowing`
-/// previously only handled for `isNil`, never for `isKindOf:`, and never for
-/// a solo `ifFalse:` at all.
-#[test]
-fn bt2825_union_narrows_after_is_kind_of_if_false_guard() {
-    let source = r"
-typed Object subclass: Receiver
-  class process: v :: Integer => v
-
-typed Object subclass: Caller
-  run: x :: Integer | String =>
-    (x isKindOf: Integer) ifFalse: [^nil]
-    Receiver process: x
-";
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "`x` should narrow to Integer after `(x isKindOf: Integer) ifFalse: [^nil]`, got: {type_warnings:?}"
-    );
-}
-
-/// a Protocol-typed local narrowed by an `isKindOf:` guard
-/// against a concrete class must be assignable to that concrete class
-/// afterward without an `@expect type` escape hatch — the exact
-/// `prompt_renderer.bt` shape from the issue (`coll :: Printable | Nil`,
-/// `(coll isKindOf: List) ifFalse: [^""]`, `items :: List := coll`).
-#[test]
-fn bt2825_protocol_narrows_after_is_kind_of_if_false_guard_no_expect_needed() {
-    let source = r#"
-Protocol define: Printable
-  asString -> String
-
-typed Object subclass: MyList
-  asString => "a list"
-
-typed Object subclass: Caller
-  run: coll :: Printable | Nil -> String =>
-    coll isNil ifTrue: [^""]
-    (coll isKindOf: MyList) ifFalse: [^""]
-    items :: MyList := coll
-    items asString
-"#;
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "`coll` narrowed to MyList should be assignable to `items :: MyList` \
-         without `@expect type`, got: {type_warnings:?}"
-    );
-}
-
-/// `(x isKindOf: Integer) ifTrue: [<diverge>]` should narrow `x` to
-/// the *complement* (`String`, via `difference`) for the rest of the
-/// method — the mirror image of the `ifFalse:` guard, extending the
-/// existing `ifTrue: [<diverge>]` machinery (previously `isNil`-only)
-/// to `isKindOf:`.
-#[test]
-fn bt2825_is_kind_of_if_true_diverge_narrows_to_complement() {
-    let source = r#"
-typed Object subclass: Receiver
-  class process: v :: String => v
-
-typed Object subclass: Caller
-  run: x :: Integer | String =>
-    (x isKindOf: Integer) ifTrue: [self error: "was integer"]
-    Receiver process: x
-"#;
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "`x` should narrow to String (the complement of Integer) after the \
-         diverging `ifTrue:` guard, got: {type_warnings:?}"
-    );
-}
-
-/// the combined `ifTrue: [<diverge>] ifFalse:
-/// [...]` shape (`is_if_true_if_false` in `apply_early_return_narrowing`)
-/// shares its code path with the solo `ifTrue: [<diverge>]` case above, but
-/// had no dedicated `isKindOf:` test — only the solo-`ifTrue:` and
-/// solo-`ifFalse:` shapes were covered. Locks in that `x` still narrows to
-/// the complement after the combined form, matching the docs table row
-/// `x isKindOf: Foo ifTrue: [^...] ifFalse: [...]`.
-#[test]
-fn bt2825_is_kind_of_if_true_if_false_diverge_narrows_to_complement() {
-    let source = r#"
-typed Object subclass: Receiver
-  class process: v :: String => v
-
-typed Object subclass: Caller
-  run: x :: Integer | String =>
-    (x isKindOf: Integer) ifTrue: [self error: "was integer"] ifFalse: [Transcript show: "ok"]
-    Receiver process: x
-"#;
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "`x` should narrow to String (the complement of Integer) after the \
-         combined `ifTrue: [<diverge>] ifFalse: [...]` guard, got: {type_warnings:?}"
-    );
-}
-
-/// `isKindOf:` used directly as an `ifTrue:`/`ifFalse:`
-/// branch condition (not a guard-and-return) already narrows within the
-/// branch — this locks that behaviour in as an
-/// end-to-end regression alongside the new post-guard cases above.
-#[test]
-fn bt2825_is_kind_of_narrows_inside_if_true_branch() {
-    let source = r"
-typed Object subclass: Receiver
-  class process: v :: Integer => v
-
-typed Object subclass: Caller
-  run: x :: Integer | String =>
-    (x isKindOf: Integer) ifTrue: [Receiver process: x]
-";
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "`x` should narrow to Integer inside the `ifTrue:` branch, got: {type_warnings:?}"
-    );
-}
 
 /// A non-diverging `ifFalse:` block (no `^`, last expression is not
 /// `Never`) must NOT narrow the variable — the binding may still fail the
@@ -501,181 +506,7 @@ typed Object subclass: Caller
     );
 }
 
-/// `apply_early_return_narrowing`'s new
-/// `is_if_false` arm is gated on `info.is_nil_check || info.class_test.is_some()`,
-/// so it also fires for plain `isNil` guards, not just `isKindOf:` — `x isNil
-/// ifFalse: [^...]` is the mirror of the already-covered `isNil ifTrue:
-/// [^...]` case, and narrows `x` to `Nil` (only the nil case falls through)
-/// for the rest of the method. Locks in this implicit-but-correct behavior.
-#[test]
-fn bt2825_is_nil_if_false_diverge_narrows_to_nil() {
-    let source = r"
-typed Object subclass: Receiver
-  class process: v :: Nil => v
-
-typed Object subclass: Caller
-  run: x :: Integer | Nil =>
-    x isNil ifFalse: [^nil]
-    Receiver process: x
-";
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "`x` should narrow to Nil after `x isNil ifFalse: [^nil]`, got: {type_warnings:?}"
-    );
-}
-
 // ── Post-guard narrowing for singleton-equality guards ──
-
-/// the issue's exact repro shape — `pid == #undefined ifTrue:
-/// [^false]` (loose equality, `==`) should narrow `pid` to `Integer` for the
-/// rest of the method, closing the gap without requiring `@expect type`.
-#[test]
-fn bt3369_double_equal_narrows_after_if_true_return_guard() {
-    let source = r"
-typed Object subclass: Receiver
-  class process: v :: Integer => v
-
-typed Object subclass: Caller
-  run: pid :: Integer | #undefined =>
-    pid == #undefined ifTrue: [^false]
-    Receiver process: pid
-";
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "`pid` should narrow to Integer after `pid == #undefined ifTrue: [^false]`, got: {type_warnings:?}"
-    );
-}
-
-/// `x =:= #undefined ifTrue: [^...]` (strict equality) also
-/// narrows post-guard — the post-guard gate was missing for *all*
-/// `singleton_eq` guards, independent of the `==` operator extension.
-#[test]
-fn bt3369_strict_equal_narrows_after_if_true_return_guard() {
-    let source = r"
-typed Object subclass: Receiver
-  class process: v :: Integer => v
-
-typed Object subclass: Caller
-  run: pid :: Integer | #undefined =>
-    pid =:= #undefined ifTrue: [^false]
-    Receiver process: pid
-";
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "`pid` should narrow to Integer after `pid =:= #undefined ifTrue: [^false]`, got: {type_warnings:?}"
-    );
-}
-
-/// `x /= #undefined ifFalse: [^...]` (loose inequality, already
-/// accepted by the detector before this issue) also narrows post-guard —
-/// the mirror `ifFalse:` guard shape, not just `ifTrue:`.
-#[test]
-fn bt3369_loose_not_equal_narrows_after_if_false_return_guard() {
-    let source = r"
-typed Object subclass: Receiver
-  class process: v :: Integer => v
-
-typed Object subclass: Caller
-  run: pid :: Integer | #undefined =>
-    pid /= #undefined ifFalse: [^false]
-    Receiver process: pid
-";
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "`pid` should narrow to Integer after `pid /= #undefined ifFalse: [^false]`, got: {type_warnings:?}"
-    );
-}
-
-/// narrowing only removes the specific literal member compared —
-/// a 3-member union `Integer | #south | #east` checked against `#south`
-/// narrows to `Integer | #east`, not just `Integer` (the other singleton
-/// member must survive).
-#[test]
-fn bt3369_multi_member_union_keeps_other_singleton_after_guard() {
-    let source = r"
-typed Object subclass: Receiver
-  class process: v :: Integer | #east -> Integer | #east => v
-
-typed Object subclass: Caller
-  run: d :: Integer | #south | #east =>
-    d == #south ifTrue: [^nil]
-    Receiver process: d
-    true
-";
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "`d` should narrow to `Integer | #east` (not just `Integer`) after `d == #south ifTrue: [^nil]`, got: {type_warnings:?}"
-    );
-}
-
-/// chained guards narrow incrementally — checking `#south` then
-/// `#east` in sequence on a 3-member union narrows down to the single
-/// remaining member, `Integer`.
-#[test]
-fn bt3369_chained_guards_narrow_incrementally() {
-    let source = r"
-typed Object subclass: Receiver
-  class process: v :: Integer => v
-
-typed Object subclass: Caller
-  run: d :: Integer | #south | #east =>
-    d == #south ifTrue: [^nil]
-    d == #east ifTrue: [^nil]
-    Receiver process: d
-";
-    let module = parse_ok(source);
-
-    let result = crate::semantic_analysis::analyse(&module);
-    let type_warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect();
-    assert!(
-        type_warnings.is_empty(),
-        "`d` should narrow to Integer after two chained singleton guards, got: {type_warnings:?}"
-    );
-}
 
 /// no narrowing attempted for an equality check against a
 /// non-literal `Symbol`-typed value — `pid == atomName` (both operands

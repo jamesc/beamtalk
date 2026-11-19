@@ -62,7 +62,7 @@ fn skip_initialize_flag() -> Document<'static> {
         "maps",
         "get",
         [
-            leaf::atom("__skip_initialize__"),
+            leaf::atom(sentinel_tags::SKIP_INITIALIZE),
             leaf::var("InitArgs"),
             leaf::atom("false"),
         ],
@@ -122,7 +122,7 @@ enum InternalStateKey {
 impl InternalStateKey {
     fn name(self) -> &'static str {
         match self {
-            Self::ClassMod => "__class_mod__",
+            Self::ClassMod => sentinel_tags::CLASS_MOD,
             Self::ShapeVersion => "__shape_version__",
         }
     }
@@ -476,7 +476,7 @@ impl CoreErlangGenerator {
                                     "maps",
                                     "put",
                                     [
-                                        leaf::atom("__skip_initialize__"),
+                                        leaf::atom(sentinel_tags::SKIP_INITIALIZE),
                                         leaf::atom("true"),
                                         leaf::var("InitArgs"),
                                     ],
@@ -853,7 +853,10 @@ impl CoreErlangGenerator {
                         form::call(
                             "maps",
                             "remove",
-                            [leaf::atom("__skip_initialize__"), leaf::var("FinalState")],
+                            [
+                                leaf::atom(sentinel_tags::SKIP_INITIALIZE),
+                                leaf::var("FinalState")
+                            ],
                         ),
                         form::tuple([leaf::atom("ok"), leaf::var("CleanState")]),
                     ),
@@ -910,7 +913,10 @@ impl CoreErlangGenerator {
                         form::call(
                             "maps",
                             "remove",
-                            [leaf::atom("__skip_initialize__"), leaf::var("FinalState")],
+                            [
+                                leaf::atom(sentinel_tags::SKIP_INITIALIZE),
+                                leaf::var("FinalState")
+                            ],
                         ),
                         form::tuple([leaf::atom("ok"), leaf::var("CleanState")]),
                     ),
@@ -923,7 +929,10 @@ impl CoreErlangGenerator {
                         form::call(
                             "maps",
                             "remove",
-                            [leaf::atom("__skip_initialize__"), leaf::var("FinalState")],
+                            [
+                                leaf::atom(sentinel_tags::SKIP_INITIALIZE),
+                                leaf::var("FinalState")
+                            ],
                         ),
                         // Emit lifecycle start telemetry before returning
                         Self::lifecycle_call_let(
@@ -1402,12 +1411,11 @@ impl CoreErlangGenerator {
     ///
     /// Grandparent runs first, its output state feeds Parent, whose output
     /// feeds Child, whose output is validated.
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     #[allow(clippy::too_many_lines)] // chain dispatch + error arms grow with hierarchy depth
     pub(in crate::core_erlang) fn generate_handle_continue(
         &self,
         module: &Module,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let module_name = self.module_name.clone();
 
         // Find typed-no-default fields (leaf + ancestors) for
@@ -1625,7 +1633,7 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        Ok(doc)
+        doc
     }
 
     /// BT-3967 / BT-3968: wraps a `gen_server` callback body so its return
@@ -1861,11 +1869,10 @@ impl CoreErlangGenerator {
     /// logged and dropped by the shared helper. There is no `async`-kind
     /// wire shape: remote async sends are unsupported and raise at the
     /// sender (ADR 0126 Amendment BT-4989).
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_handle_cast(
         &mut self,
         module: &Module,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let module_name = self.module_name.clone();
         let state_keys_owned = self.committed_state_keys(module);
         let state_keys = state_keys_owned.as_ref();
@@ -1945,7 +1952,7 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        Ok(doc)
+        doc
     }
 
     /// Generates the `handle_call/3` callback for sync message sends.
@@ -1968,11 +1975,10 @@ impl CoreErlangGenerator {
     /// it had arrived locally; a decode/version failure's ready-made reply
     /// is returned with `State` untouched, without ever reaching
     /// `safe_dispatch/3`.
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_handle_call(
         &mut self,
         module: &Module,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let module_name = self.module_name.clone();
         let dispatch_case =
             Self::mailbox_call_guard(&module_name, self.committed_state_keys(module).as_ref());
@@ -2059,7 +2065,7 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        Ok(doc)
+        doc
     }
 
     /// BT-4090: the success arm's reply. A deferred call (`self deferReply`)
@@ -2353,11 +2359,10 @@ impl CoreErlangGenerator {
     /// 'handle_info'/2 = fun (Msg, State) ->
     ///     call 'beamtalk_actor':'handle_info'(Msg, State)
     /// ```
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_handle_info(
         &self,
         module: &Module,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         if self.is_server_subclass {
             // BT-4052: baked flag - true when the class (or an ancestor other
             // than `Server`) defines `onLinkedExit:reason:`.
@@ -2400,7 +2405,7 @@ impl CoreErlangGenerator {
                 "\n",
                 "\n",
             ];
-            Ok(doc)
+            doc
         } else {
             let doc = docvec![
                 form::fun_def(
@@ -2416,7 +2421,7 @@ impl CoreErlangGenerator {
                 "\n",
                 "\n",
             ];
-            Ok(doc)
+            doc
         }
     }
 
@@ -2610,8 +2615,7 @@ impl CoreErlangGenerator {
     /// migrates fields: adds new fields with defaults, preserves existing values,
     /// and drops removed fields.
     #[allow(clippy::unused_self)] // method on impl for API consistency
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
-    pub(in crate::core_erlang) fn generate_code_change(&self) -> Result<Document<'static>> {
+    pub(in crate::core_erlang) fn generate_code_change(&self) -> Document<'static> {
         let doc = docvec![
             form::fun_def(
                 "code_change",
@@ -2626,7 +2630,7 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        Ok(doc)
+        doc
     }
 
     /// Generates the `terminate/2` callback for `gen_server` shutdown.
@@ -2645,11 +2649,10 @@ impl CoreErlangGenerator {
     ///         catch <_TermT, _TermE, _TermS> -> 'ok'
     ///     in 'ok'
     /// ```
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_terminate(
         &mut self,
         module: &Module,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let module_name = self.module_name.clone();
 
         // Use the clean Beamtalk class name for lifecycle telemetry
@@ -2715,7 +2718,7 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        Ok(doc)
+        doc
     }
 }
 
@@ -2850,6 +2853,7 @@ mod tests {
         Module, StateDeclaration, TypeAnnotation,
     };
     use beamtalk_core::source_analysis::Span;
+    use beamtalk_core::test_helpers::test_support::empty_module;
 
     fn s() -> Span {
         Span::new(0, 0)
@@ -2865,22 +2869,6 @@ mod tests {
 
     fn union_ta(types: Vec<TypeAnnotation>) -> TypeAnnotation {
         TypeAnnotation::Union { types, span: s() }
-    }
-
-    fn empty_module() -> Module {
-        Module {
-            pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
-            literal_comments: beamtalk_core::ast::LiteralComments::default(),
-            classes: Vec::new(),
-            method_definitions: Vec::new(),
-            protocols: Vec::new(),
-            type_aliases: Vec::new(),
-            native_declarations: Vec::new(),
-            expressions: Vec::new(),
-            span: s(),
-            file_leading_comments: Vec::new(),
-            file_trailing_comments: Vec::new(),
-        }
     }
 
     fn module_with_class(class: ClassDefinition) -> Module {

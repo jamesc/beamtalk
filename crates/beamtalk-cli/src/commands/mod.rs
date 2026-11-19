@@ -27,6 +27,62 @@ impl std::str::FromStr for OutputFormat {
     }
 }
 
+/// The warning-handling flags shared by every command that compiles source
+/// (`build`, `check`, `test`, `build-stdlib` and the hidden test commands).
+///
+/// One definition, flattened into each command, so the spelling, help text and
+/// the `--no-warnings` / `--warnings-as-errors` exclusion cannot drift
+/// (BT-5045). `lint` keeps its own `--warnings-as-errors`: it gates on a
+/// different diagnostic set.
+#[derive(Debug, Clone, Copy, Default, clap::Args)]
+pub struct WarningFlags {
+    /// Suppress warning diagnostics
+    #[arg(long, conflicts_with = "warnings_as_errors")]
+    pub no_warnings: bool,
+
+    /// Treat warnings and hints as errors: fail if any are emitted
+    #[arg(long)]
+    pub warnings_as_errors: bool,
+}
+
+/// The flags shared by the hidden `.btscript` / doctest / metamorphic test
+/// commands: the warning flags plus output control.
+#[derive(Debug, Clone, Copy, Default, clap::Args)]
+pub struct TestCommandFlags {
+    #[command(flatten)]
+    pub warnings: WarningFlags,
+
+    /// Suppress per-file output, show only summary
+    #[arg(long, short)]
+    pub quiet: bool,
+
+    /// Show detailed test output including `EUnit` verbose mode
+    #[arg(long = "show-output")]
+    pub show_output: bool,
+}
+
+impl From<TestCommandFlags> for test_stdlib::TestRunOptions {
+    fn from(flags: TestCommandFlags) -> Self {
+        Self {
+            no_warnings: flags.warnings.no_warnings,
+            warnings_as_errors: flags.warnings.warnings_as_errors,
+            quiet: flags.quiet,
+            verbose: flags.show_output,
+        }
+    }
+}
+
+impl WarningFlags {
+    /// `CompilerOptions` carrying these flags (everything else default).
+    pub fn compiler_options(self) -> beamtalk_core::CompilerOptions {
+        beamtalk_core::CompilerOptions {
+            suppress_warnings: self.no_warnings,
+            warnings_as_errors: self.warnings_as_errors,
+            ..Default::default()
+        }
+    }
+}
+
 pub mod app_file;
 pub mod attach;
 pub mod beam_environment;

@@ -19,7 +19,9 @@ pub(super) use crate::semantic_analysis::class_hierarchy::DeclaredType;
 pub(super) use crate::semantic_analysis::class_hierarchy::MethodInfo;
 pub(super) use crate::source_analysis::{DiagnosticCategory, Span};
 
-pub(super) use crate::test_helpers::test_support::{bare, unit_ident as ident, unit_span as span};
+pub(super) use crate::test_helpers::test_support::{
+    bare, empty_module, unit_ident as ident, unit_span as span,
+};
 
 pub(super) fn make_module(expressions: Vec<Expression>) -> Module {
     Module::new(
@@ -129,6 +131,40 @@ pub(super) fn diags(source: &str) -> Vec<Diagnostic> {
     let mut checker = TypeChecker::new();
     checker.check_module(&module, &hierarchy);
     checker.take_diagnostics()
+}
+
+/// [`diags_with_expect`] for source that must parse without any non-lint
+/// diagnostic (see [`parse_and_build`]): the strict-parse counterpart that the
+/// full pipeline's `@expect` suppression applies to.
+pub(super) fn diags_parse_ok_with_expect(source: &str) -> Vec<Diagnostic> {
+    let (module, hierarchy) = parse_and_build(source);
+    run_with_expect(&module, &hierarchy)
+}
+
+/// The hierarchy of a module holding only `class`. Panics if it cannot be built.
+pub(super) fn build_class_hierarchy(class: ClassDefinition) -> ClassHierarchy {
+    ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
+        .0
+        .unwrap()
+}
+
+/// Asserts `diags` is empty; `context` (the case name and/or source) names the
+/// case in the failure message.
+#[track_caller]
+pub(super) fn assert_clean_diags(diags: &[Diagnostic], context: &str) {
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for:\n{context}\ngot: {diags:#?}"
+    );
+}
+
+/// Asserts `diags` is not empty; `context` names the case in the failure message.
+#[track_caller]
+pub(super) fn assert_has_diags(diags: &[Diagnostic], context: &str) {
+    assert!(
+        !diags.is_empty(),
+        "expected a diagnostic for:\n{context}\ngot none"
+    );
 }
 
 /// Type checks an already-built `module` against `hierarchy` and hands back the

@@ -22,23 +22,10 @@ use miette::{IntoDiagnostic, Result, miette};
 use super::workspace;
 
 /// Output format for log display.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum LogFormat {
     Text,
     Json,
-}
-
-impl LogFormat {
-    /// Parse a log format from a CLI argument string.
-    pub fn from_str_arg(s: &str) -> Result<Self> {
-        match s.to_lowercase().as_str() {
-            "text" => Ok(Self::Text),
-            "json" => Ok(Self::Json),
-            _ => Err(miette!(
-                "Unknown log format '{s}'. Valid formats: text, json"
-            )),
-        }
-    }
 }
 
 /// Minimum severity levels for log filtering.
@@ -90,11 +77,10 @@ pub fn run(
     workspace_id: Option<&str>,
     follow: bool,
     level: Option<&str>,
-    format: Option<&str>,
+    log_format: Option<LogFormat>,
     path_only: bool,
 ) -> Result<()> {
     let min_level = level.map(LogLevel::from_str_arg).transpose()?;
-    let log_format = format.map(LogFormat::from_str_arg).transpose()?;
 
     let log_path = resolve_log_path(workspace_id)?;
 
@@ -134,7 +120,7 @@ fn resolve_log_path(workspace_id: Option<&str>) -> Result<PathBuf> {
             ),
             None => miette!(
                 "No workspace found for current directory. \
-                 Specify a workspace: `beamtalk workspace logs --workspace <id>`"
+                 Specify a workspace: `beamtalk workspace logs <id>`"
             ),
         });
     }
@@ -317,12 +303,6 @@ mod tests {
         assert!(err.to_string().contains("Unknown log level"), "{err}");
     }
 
-    #[test]
-    fn run_rejects_unknown_format_before_resolving_workspace() {
-        let err = run(None, false, None, Some("xml"), false).unwrap_err();
-        assert!(err.to_string().contains("Unknown log format"), "{err}");
-    }
-
     // --- resolve_log_path: workspace does not exist ---
 
     #[test]
@@ -439,22 +419,6 @@ mod tests {
     #[test]
     fn real_home_guard_is_available_for_direct_use() {
         let _guard = real_home_guard();
-    }
-
-    // --- LogFormat::from_str_arg ---
-
-    #[test]
-    fn log_format_parses_text_and_json_case_insensitively() {
-        assert_eq!(LogFormat::from_str_arg("text").unwrap(), LogFormat::Text);
-        assert_eq!(LogFormat::from_str_arg("TEXT").unwrap(), LogFormat::Text);
-        assert_eq!(LogFormat::from_str_arg("json").unwrap(), LogFormat::Json);
-        assert_eq!(LogFormat::from_str_arg("JSON").unwrap(), LogFormat::Json);
-    }
-
-    #[test]
-    fn log_format_rejects_unknown_value() {
-        let err = LogFormat::from_str_arg("xml").unwrap_err();
-        assert!(err.to_string().contains("Unknown log format"));
     }
 
     // --- LogLevel::from_str_arg ---

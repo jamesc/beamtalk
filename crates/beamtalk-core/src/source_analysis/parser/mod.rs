@@ -62,6 +62,7 @@ use ecow::EcoString;
 mod binary;
 mod declarations;
 mod expressions;
+mod literals;
 mod methods;
 mod patterns;
 mod protocols;

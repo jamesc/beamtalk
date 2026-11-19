@@ -39,14 +39,14 @@ use super::*;
 use crate::test_helpers::test_support::parse_bt;
 
 use crate::ast::{
-    Block, BlockParameter, ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword,
-    Expression, Identifier, Literal, MatchArm, MessageSelector, MethodDefinition, Pattern,
-    StateDeclaration, StringSegment, TypeAnnotation,
+    Block, BlockParameter, ClassDefinition, ClassKind, CommentAttachment, Expression, Identifier,
+    Literal, MatchArm, MessageSelector, MethodDefinition, Pattern, StateDeclaration, StringSegment,
+    TypeAnnotation,
 };
 
 use crate::source_analysis::{Severity, Span};
 
-use crate::test_helpers::test_support::bare;
+use crate::test_helpers::test_support::{bare, empty_module, module_with_classes};
 
 /// The classes `src` declares, as `package` exports them: the cross-file
 /// declarations a build hands `analyse_full` for a dependency (BT-4283).
@@ -62,6 +62,7 @@ mod adr0123_shape_version_and_migrations;
 mod analyser_core_and_block_context;
 mod bt4573_setup_cascade_single_diagnostic;
 mod bt5025_cascade_later_messages;
+mod bt5026_state_defaults_and_protocol_bodies;
 mod class_hierarchy_and_method_validators;
 mod class_state_abroad;
 mod cross_file_extension_checks;

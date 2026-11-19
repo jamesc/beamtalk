@@ -265,6 +265,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b25655df2c3cdd83c5e5b293b88acd880332b2ddadd7c30ac43144fdc0033da9"
 
 [[package]]
+name = "beamtalk-build"
+version = "0.5.0"
+dependencies = [
+ "beamtalk-cerl-doc",
+]
+
+[[package]]
+name = "beamtalk-cerl-doc"
+version = "0.5.0"
+
+[[package]]
 name = "beamtalk-desktop"
 version = "0.1.0"
 dependencies = [
@@ -288,6 +299,7 @@ name = "beamtalk-desktop-broker"
 version = "0.5.0"
 dependencies = [
  "base64 0.23.0",
+ "beamtalk-repl-protocol",
  "beamtalk-workspace",
  "dirs 7.0.0",
  "libc",
@@ -313,6 +325,15 @@ name = "beamtalk-env"
 version = "0.5.0"
 dependencies = [
  "dirs 7.0.0",
+]
+
+[[package]]
+name = "beamtalk-repl-protocol"
+version = "0.5.0"
+dependencies = [
+ "beamtalk-build",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

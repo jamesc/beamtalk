@@ -20,6 +20,11 @@ path = "src/lib.rs"
 
 [dependencies]
 beamtalk-workspace.workspace = true
+# why: BT-5033 — the broker refuses a workspace whose protocol version differs
+# from `handshake::PROTOCOL_VERSION`, the same constant the REPL, MCP and LSP
+# lock on (and that a test pins to the runtime's `?PROTOCOL_VERSION`), rather
+# than a second copy of the number.
+beamtalk-repl-protocol.workspace = true
 dirs.workspace = true
 miette.workspace = true
 serde.workspace = true
@@ -41,7 +46,8 @@ base64.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-# why: BT-4382 — shared `closed_port()` test helper (no async deps).
+# why: BT-4382 — shared `closed_port()` test helper (no async deps). The
+# dependency itself is a normal one (see above); this adds the test feature.
 beamtalk-repl-protocol = { workspace = true, features = ["test-ports"] }
 
 [lints]

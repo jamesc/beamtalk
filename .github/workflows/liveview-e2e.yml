@@ -31,6 +31,14 @@ name: LiveView IDE e2e (workspace + browser)
 # `do_revert/3` error-message rewording) can silently change what this suite
 # asserts on without ever re-running it, since it previously had no
 # runtime-side trigger at all.
+#
+# BT-5033: this lane is deliberately NOT triggered by every runtime, stdlib or
+# compiler path, although workspace.ex makes ~40 `:rpc` calls into them (a
+# 40-minute lane on every runtime PR is the cost). The cheap guard for that
+# coupling runs on every PR instead: the codegen crate's
+# `cross_language_contract_tests::every_liveview_rpc_target_is_exported` reads
+# workspace.ex and checks each `rpc(:module, :fun, [args])` against the
+# runtime's `-export` attributes (module, function and arity), in test-rust.
 on:
   push:
     branches: [main]

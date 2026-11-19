@@ -71,6 +71,7 @@ pub fn failure_reason_str(reason: &FailureReason) -> String {
         FailureReason::EpmdAbsent => "epmd_absent".to_string(),
         FailureReason::BadCookie => "bad_cookie".to_string(),
         FailureReason::DeadWorkspace => "dead_workspace".to_string(),
+        FailureReason::ProtocolMismatch { .. } => "protocol_mismatch".to_string(),
         FailureReason::Unknown(s) => s.clone(),
     }
 }

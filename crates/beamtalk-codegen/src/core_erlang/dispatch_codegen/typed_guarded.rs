@@ -13,6 +13,7 @@
 
 use crate::core_erlang::expr_shape::is_character_typed_receiver;
 use crate::core_erlang::routing;
+use crate::core_erlang::sentinel_tags;
 use crate::core_erlang::{CodeGenError, CoreErlangGenerator, Result};
 
 use super::{runtime_send_doc, send_arg_list_doc};
@@ -1196,7 +1197,9 @@ impl CoreErlangGenerator {
             "case call 'erlang':'is_map'(",
             leaf::var(receiver_var.to_string()),
             ") of <'true'> when 'true' -> ",
-            "case call 'maps':'get'('$beamtalk_class', ",
+            "case call 'maps':'get'(",
+            leaf::atom(sentinel_tags::CLASS_TAG),
+            ", ",
             leaf::var(receiver_var.to_string()),
             ", 'undefined') of <",
             leaf::atom(tagged.class_name.clone()),
@@ -1258,7 +1261,9 @@ impl CoreErlangGenerator {
             leaf::var(receiver_var.to_string()),
             ") of ",
             "<'true'> when 'true' -> ",
-            "case call 'maps':'get'('$beamtalk_class', ",
+            "case call 'maps':'get'(",
+            leaf::atom(sentinel_tags::CLASS_TAG),
+            ", ",
             leaf::var(receiver_var.to_string()),
             ", 'undefined') of ",
             Document::Vec(arm_docs),

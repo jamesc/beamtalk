@@ -367,7 +367,7 @@ refresh_app_classes(PkgName, AppAtom) ->
                 #{
                     name => Name,
                     module => Mod,
-                    parent => beamtalk_object_class:superclass_safe(Pid),
+                    parent => beamtalk_object_class_read:superclass_safe(Pid),
                     package => AppAtom,
                     kind => object,
                     type_params => []

@@ -24,13 +24,6 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 %% structured init-timeout reply reaches an instantiating caller first (ms).
 -define(BT_INSTANTIATION_CALL_MARGIN, 2000).
 
-%% Appended to the self-call hint when a class-object protocol method, reached
-%% through `class_self_protocol_fallthrough/4`, messaged the class (BT-4252).
--define(PROTOCOL_SELF_CALL_NOTE, <<
-    " The selector named is the class-object protocol message sent from the "
-    "class method; the call that messaged the class may be one it makes in turn."
->>).
-
 -export([
     class_send/3,
     class_send/4,
@@ -55,6 +48,25 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     class_method_body/2
 ]).
 
+%% BT-5047: what `beamtalk_class_dispatch_self` and `_recovery` (split out of this
+%% module) call back into. Exported for the split only; each is an existing
+%% private helper of this module, internal to the dispatch family and not a
+%% supported API for other runtime modules. (`find_class_method_from_class/2` is
+%% already exported above.)
+-export([
+    apply_class_extension_fun/5,
+    apply_class_method_in_context/6,
+    class_side_dispatch_found/5,
+    class_side_extension/2,
+    find_class_side_method_from_class/2,
+    handle_class_self_call/2,
+    try_class_chain_fallthrough/3
+]).
+
+%% BT-5047: used by the specs of the modules split out of this one.
+-export_type([
+    selector/0, class_name/0, call_timeout/0, verdict/0, class_side_found/0, class_method_outcome/0
+]).
 -type selector() :: atom().
 -type class_name() :: atom().
 %% The bound on a class-process `class_method_call`: `default` picks the
@@ -162,13 +174,13 @@ supervisor_start_target(ClassPid) ->
 %% gen_server:call(self(), ...) would deadlock. Instead, perform instantiation directly
 %% using class metadata from the process dictionary (set during init).
 class_send_plain(ClassPid, 'new', Args, _Timeout) when ClassPid =:= self() ->
-    handle_self_instantiation(new, 'new', Args);
+    beamtalk_class_dispatch_recovery:handle_self_instantiation(new, 'new', Args);
 class_send_plain(ClassPid, 'new:', Args, _Timeout) when ClassPid =:= self() ->
-    handle_self_instantiation(new, 'new:', Args);
+    beamtalk_class_dispatch_recovery:handle_self_instantiation(new, 'new:', Args);
 class_send_plain(ClassPid, spawn, Args, _Timeout) when ClassPid =:= self() ->
-    handle_self_instantiation(spawn, spawn, Args);
+    beamtalk_class_dispatch_recovery:handle_self_instantiation(spawn, spawn, Args);
 class_send_plain(ClassPid, 'spawnWith:', Args, _Timeout) when ClassPid =:= self() ->
-    handle_self_instantiation(spawn, 'spawnWith:', Args);
+    beamtalk_class_dispatch_recovery:handle_self_instantiation(spawn, 'spawnWith:', Args);
 class_send_plain(ClassPid, 'new', [], Timeout) ->
     %% an eligible Value builds in the caller via a direct
     %% `Module:new()` call — the same call `handle_new_compiled` would make,
@@ -692,7 +704,9 @@ class_send_from_own_process_lookup(Selector, Args) ->
             ClassSelf = #beamtalk_object{
                 class = receiver_tag(ClassName), class_mod = Module, pid = self()
             },
-            class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf);
+            beamtalk_class_dispatch_self:class_self_protocol_fallthrough(
+                ClassName, Selector, Args, ClassSelf
+            );
         error ->
             handle_class_self_call(Selector)
     end.
@@ -824,11 +838,15 @@ registered it), a class method through `class_self_dispatch_chain/5`, and
     class_name(), selector(), list(), class_side_found(), #beamtalk_object{}
 ) -> term() | no_return().
 class_side_dispatch_found(_ClassName, Selector, Args, {extension, Owner, Fun}, ClassSelf) ->
-    apply_class_self_extension(Owner, Fun, Selector, Args, ClassSelf);
+    beamtalk_class_dispatch_self:apply_class_self_extension(Owner, Fun, Selector, Args, ClassSelf);
 class_side_dispatch_found(ClassName, Selector, Args, {method, Owner, Module}, ClassSelf) ->
-    class_self_dispatch_chain(ClassName, Selector, Args, {ok, Owner, Module}, ClassSelf);
+    beamtalk_class_dispatch_self:class_self_dispatch_chain(
+        ClassName, Selector, Args, {ok, Owner, Module}, ClassSelf
+    );
 class_side_dispatch_found(ClassName, Selector, Args, not_found, ClassSelf) ->
-    class_self_dispatch_chain(ClassName, Selector, Args, not_found, ClassSelf).
+    beamtalk_class_dispatch_self:class_self_dispatch_chain(
+        ClassName, Selector, Args, not_found, ClassSelf
+    ).
 
 -doc """
 The ancestor a class-side `super Selector` from `ClassName` resolves to: the
@@ -1015,107 +1033,6 @@ class_self_direct_ok(_ReceiverTag, _ClassTag, _ClassName, _Selector) ->
     false.
 
 -doc """
-The class-method chain step shared by `class_self_dispatch_local/4`,
-`class_self_send/3` and `class_super_dispatch/4`: each does its own single
-extension check and its own chain lookup first, then applies the lookup
-result here, or falls through to the class-object protocol.
-""".
--spec class_self_dispatch_chain(
-    class_name(),
-    selector(),
-    list(),
-    {ok, class_name(), atom()} | not_found,
-    #beamtalk_object{}
-) -> term() | no_return().
-class_self_dispatch_chain(ClassName, Selector, Args, Found, ClassSelf) ->
-    case Found of
-        {ok, DefiningClass, DefiningModule} ->
-            %% Route through the same internal helper the gen_server path uses
-            %% (`invoke_class_method/7`), so both paths share error classification
-            %% and the TestCase `test_spawn` guard. Unwrap to the raw result and
-            %% raise structured errors on dispatch/body failures so callers see
-            %% proper `#beamtalk_error{}` instead of a bare `undef`.
-            unwrap_self_dispatch_outcome(
-                ClassName,
-                Selector,
-                apply_class_method_in_context(
-                    Selector,
-                    Args,
-                    ClassName,
-                    ClassSelf,
-                    DefiningClass,
-                    DefiningModule
-                )
-            );
-        not_found ->
-            class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf)
-    end.
-
--doc """
-The class-object protocol fallthrough for a class-side `self`/`super` send
-(BT-4252): no class method or class-side extension in the chain answers
-`Selector`, so dispatch it the way an external send to the receiving class
-object does after its class-method lookup misses
-(`class_send_dispatch/3`'s `{error, not_found}` branch) — through the
-`Class -> Behaviour -> Object -> ProtoObject` instance-method chain, via
-`try_class_chain_fallthrough/3`. So `self name`, `super name` and
-`super superclass` in a class method answer what `C name` /
-`C superclass` answer from outside, and the type checker's class-side check
-(which resolves an unknown class-side selector against `Class`) agrees with
-the runtime by construction — one lookup, no selector list.
-
-The receiver is the calling method's own `ClassSelf`, so a subclass receiver
-answers for itself: `super name` from a `Base` class method inherited by `C`
-answers `#C`. Its pid is the receiving class's registered pid, never
-`self()`-derived, so the same `ClassSelf` results whether the class method
-runs in the class's own process or in the caller (ADR 0142). The
-`Behaviour` primitives reach class state through the message-free
-`beamtalk_object_class:*_safe/1` readers, so running in the class's own
-process does not self-call its gen_server. `doc` reads the class doc's
-published copy, and a Beamtalk-bodied protocol method that sends to its
-receiver (`printString`) re-enters here through
-`class_send_from_own_process/2` (BT-4262). A protocol method that still
-messages the receiving class (the `doc:` and `setDocForMethod:to:` setters)
-cannot answer from inside that process: it raises the structured
-`dispatch_error` of `handle_class_self_call/2`, naming the outermost protocol
-send, which may not be the call that actually messaged the class (a
-Beamtalk-bodied protocol method can reach it through an Erlang call of its
-own). Raises the structured
-`does_not_understand` when `Class` does not understand `Selector` either.
-""".
--spec class_self_protocol_fallthrough(class_name(), selector(), list(), #beamtalk_object{}) ->
-    term() | no_return().
-class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf) ->
-    case ClassSelf of
-        #beamtalk_object{pid = ReceiverPid} when not is_pid(ReceiverPid) ->
-            raise_class_self_dnu(ClassName, Selector);
-        #beamtalk_object{pid = ReceiverPid} ->
-            try try_class_chain_fallthrough(ClassSelf, Selector, Args) of
-                {ok, Result} -> Result;
-                not_found -> raise_class_self_dnu(ClassName, Selector)
-            catch
-                %% A protocol method that messages the receiving class (`doc`'s
-                %% `gen_server:call(ClassPid, get_doc)`, or a Beamtalk body
-                %% whose send reaches a raw call) cannot answer from inside that
-                %% class's own process. The `calling_self` exit reaches here
-                %% either raw or already wrapped by the method dispatch (as a
-                %% `runtime_error` carrying it under `details.reason`); report
-                %% it as the structured `dispatch_error` every other send back
-                %% to the running class raises (`handle_class_self_call/2`).
-                %% `Selector` is the outermost protocol send, which is not
-                %% necessarily the one that messaged the class (a Beamtalk
-                %% body may reach it through further sends); the hint says so.
-                %% Anything else, and every throw (a `^` or a script exit),
-                %% propagates unchanged.
-                Class:Reason:Stack when ReceiverPid =:= self(), Class =/= throw ->
-                    case beamtalk_exception_handler:contains_calling_self(Reason) of
-                        true -> handle_class_self_call(Selector, ?PROTOCOL_SELF_CALL_NOTE);
-                        false -> erlang:raise(Class, Reason, Stack)
-                    end
-            end
-    end.
-
--doc """
 ADR 0084: Dispatch a class-method self-send that may resolve to the
 class's OWN runtime-installed class method.
 
@@ -1148,156 +1065,9 @@ extensions first, so it is not `super`: a class-side `super` uses
 class_self_dispatch_local(ClassName, Selector, Args, #beamtalk_object{} = ClassSelf) when
     is_list(Args)
 ->
-    class_self_dispatch_local(ClassName, receiver_tag(ClassName), Selector, Args, ClassSelf).
-
--spec class_self_dispatch_local(
-    class_name(), atom(), selector(), list(), #beamtalk_object{}
-) ->
-    term() | no_return().
-class_self_dispatch_local(ClassName, ClassTag, Selector, Args, ClassSelf) ->
-    case class_side_extension(ClassTag, Selector) of
-        {ok, Fun} ->
-            apply_class_self_extension(ClassName, Fun, Selector, Args, ClassSelf);
-        not_found ->
-            case beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) of
-                {ok, _Info} ->
-                    %% Own runtime class method: dispatch with DefiningClass = ClassName
-                    %% so apply_class_method_in_context resolves the fun from the store.
-                    DefiningModule = self_dispatch_module(ClassName),
-                    unwrap_self_dispatch_outcome(
-                        ClassName,
-                        Selector,
-                        apply_class_method_in_context(
-                            Selector,
-                            Args,
-                            ClassName,
-                            ClassSelf,
-                            ClassName,
-                            DefiningModule
-                        )
-                    );
-                error ->
-                    %% Not a local runtime method — walk the chain from the
-                    %% class itself: its own compiled method (an own-class
-                    %% reference's fallback, BT-4301), then inherited ones,
-                    %% each ancestor's class-side extension before its
-                    %% methods (BT-4307), which also resolves inherited
-                    %% runtime funs.
-                    class_side_dispatch_found(
-                        ClassName,
-                        Selector,
-                        Args,
-                        find_class_side_method_from_class(Selector, ClassName),
-                        ClassSelf
-                    )
-            end
-    end.
-
--doc """
-Run a class-side extension (`beamtalk_extensions`, ADR 0066) found by a
-class-side self-send, builder self-send or `super` send:
-`class_side_dispatch_found/5` (whose chain walk found it on `Owner`, the
-receiving class or an ancestor, BT-4307) and `class_self_dispatch_local/5`
-(the receiving class's own tag, probed first).
-
-Reuses `apply_class_extension_fun/5` for the same calling convention and
-crash-safety as the external-dispatch path (a bad extension body must not
-take down the class's own long-lived gen_server, which this self-send may
-also run inside), then adapts the outcome to the self-dispatch caller shape
-via `unwrap_self_dispatch_outcome/3` — raw value on success, structured
-raises on failure, named after `Owner`, the class that registered the
-extension.
-
-`ClassSelf` is the live receiver, so the extension body reads the receiver's
-class-variable key and `self` is the receiving class, which is a subclass of
-`Owner` when the extension is inherited.
-""".
--spec apply_class_self_extension(
-    class_name(), fun(), selector(), list(), #beamtalk_object{}
-) -> term() | no_return().
-apply_class_self_extension(Owner, Fun, Selector, Args, ClassSelf) ->
-    unwrap_self_dispatch_outcome(
-        Owner,
-        Selector,
-        apply_class_extension_fun(Fun, ClassSelf, Args, Owner, Selector)
+    beamtalk_class_dispatch_self:class_self_dispatch_local(
+        ClassName, receiver_tag(ClassName), Selector, Args, ClassSelf
     ).
-
--doc "The compiled module backing `ClassName`, for a `ClassSelf` built outside the gen_server state.".
--spec self_dispatch_module(class_name()) -> atom().
-self_dispatch_module(ClassName) ->
-    case beamtalk_class_metadata:lookup_module(ClassName) of
-        {ok, M} -> M;
-        not_found -> ClassName
-    end.
-
--doc """
-Adapt a `class_method_outcome()` from `apply_class_method_in_context/6` to the
-self-dispatch caller shape: raw value on success, structured raises on failure.
-Shared by `class_self_send/3`, `class_self_dispatch_local/4` and
-`class_super_dispatch/4`.
-""".
--spec unwrap_self_dispatch_outcome(class_name(), selector(), class_method_outcome()) ->
-    term() | no_return().
-unwrap_self_dispatch_outcome(ClassName, Selector, Outcome) ->
-    case Outcome of
-        {ok, Raw} ->
-            Raw;
-        {error, #beamtalk_error{} = Error} ->
-            beamtalk_error:raise(Error);
-        {error, undef_in_body} ->
-            %% Preserve the `error:undef` contract for callers that rely on
-            %% it (e.g. user code catching `error:undef` from a method body).
-            erlang:error(undef);
-        {error, {raised, ErrClass, Error, ST}} ->
-            erlang:raise(ErrClass, Error, ST);
-        {nlr_relay, Nlr, ST} ->
-            %% ADR 0110: self-dispatch runs in the caller's own
-            %% process, so resume the non-local return unwind directly —
-            %% identical behavior to when these throws were tagged
-            %% {error, {raised, throw, ...}}.
-            erlang:raise(throw, Nlr, ST);
-        test_spawn ->
-            %% `TestCase>>runAll` / `run:` self-sent from inside another
-            %% class method would run the test suite inline in the class
-            %% gen_server process — the exact deadlock the `test_spawn`
-            %% escape hatch exists to avoid. Surface a
-            %% structured error instead of blocking; callers should invoke
-            %% test runners from outside the class body.
-            raise_test_spawn_self_dispatch_unsupported(ClassName, Selector)
-    end.
-
--spec raise_test_spawn_self_dispatch_unsupported(class_name(), selector()) -> no_return().
-raise_test_spawn_self_dispatch_unsupported(ClassName, Selector) ->
-    %% Atom-safe formatting — see note on raise_class_self_dnu/2.
-    Hint = beamtalk_error:chars_to_binary(
-        io_lib:format(
-            "Inherited test-execution selector '~ts' cannot be self-sent from "
-            "inside a class method on '~ts' — it would deadlock the class "
-            "gen_server. Call `~ts ~ts` from outside the class body instead.",
-            [
-                atom_to_list(Selector),
-                atom_to_list(ClassName),
-                atom_to_list(ClassName),
-                atom_to_list(Selector)
-            ]
-        )
-    ),
-    Error = beamtalk_error:new(does_not_understand, ClassName, Selector, Hint),
-    beamtalk_error:raise(Error).
-
--spec raise_class_self_dnu(class_name(), selector()) -> no_return().
-raise_class_self_dnu(ClassName, Selector) ->
-    %% ClassName and Selector are atoms; use ~ts (unicode string) with
-    %% atom_to_list/1 rather than ~s, which expects an iolist and raises
-    %% badarg on atoms — that would mask the intended does_not_understand.
-    Hint = beamtalk_error:chars_to_binary(
-        io_lib:format(
-            "Class '~ts' has no class method '~ts' and no ancestor defines it",
-            [atom_to_list(ClassName), atom_to_list(Selector)]
-        )
-    ),
-    Error = beamtalk_error:new(does_not_understand, ClassName, Selector, Hint),
-    beamtalk_error:raise(Error).
 
 -doc """
 Dispatch a class method call (the main logic for the catch-all clause).
@@ -1518,7 +1288,7 @@ class_method_result(ClassPid, Selector, Args, Reply) ->
             %% process is serving and time out when it is busy.
             class_chain_send(
                 ClassPid,
-                beamtalk_object_class:class_name_safe(ClassPid),
+                beamtalk_object_class_read:class_name_safe(ClassPid),
                 beamtalk_object_class:module_name_safe(ClassPid),
                 Selector,
                 Args
@@ -1565,7 +1335,7 @@ Self carries `class='Metaclass'` so method dispatch receives the correct receive
 %% the spawn/new family via the process-dictionary-backed helpers used by
 %% `self new` / `self spawnAs:`, and raise a clear error for everything else.
 metaclass_send(Pid, Selector, Args, _Self) when Pid =:= self() ->
-    handle_metaclass_self_call(Selector, Args);
+    beamtalk_class_dispatch_recovery:handle_metaclass_self_call(Selector, Args);
 metaclass_send(Pid, Selector, Args, Self) ->
     %% Wrap in crash recovery, same as class_send.
     %% Update Self's pid on recovery so downstream dispatch uses the new process.
@@ -1594,7 +1364,7 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
                 {reply, Result, _NewState} ->
                     Result;
                 {error, #beamtalk_error{kind = does_not_understand}} ->
-                    ClassName = beamtalk_object_class:class_name_safe(Pid),
+                    ClassName = beamtalk_object_class_read:class_name_safe(Pid),
                     Error = beamtalk_error:new(
                         does_not_understand,
                         ClassName,
@@ -2509,205 +2279,11 @@ class_send_with_recovery(ClassPid, Selector, Action) ->
         Action(ClassPid)
     catch
         exit:{noproc, {gen_server, call, _}} ->
-            handle_class_crash_recovery(ClassPid, Selector, Action);
+            beamtalk_class_dispatch_recovery:handle_class_crash_recovery(
+                ClassPid, Selector, Action
+            );
         exit:{noproc, _} ->
-            handle_class_crash_recovery(ClassPid, Selector, Action)
-    end.
-
--doc "Attempt to recover from a crashed class process and retry the operation.".
--spec handle_class_crash_recovery(pid(), selector(), fun((pid()) -> term())) -> term().
-handle_class_crash_recovery(ClassPid, Selector, Action) ->
-    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
-        {ok, ClassName} ->
-            case beamtalk_class_registry:restart_class(ClassName) of
-                {ok, NewPid} ->
-                    %% Retry with the restarted class process. Wrap in try/catch
-                    %% so that if the restarted process crashes again immediately,
-                    %% the caller gets a clean error instead of a raw noproc exit.
-                    %% bt-catcher-audit: not-applicable-other-process - Action is a gen_server
-                    %% call to the class process
-                    try
-                        Action(NewPid)
-                    catch
-                        exit:{noproc, _} ->
-                            Error2 = beamtalk_error:new(
-                                class_not_found,
-                                ClassName,
-                                Selector,
-                                <<"Class process crashed again immediately after restart">>
-                            ),
-                            beamtalk_error:raise(Error2)
-                    end;
-                {error, _Reason} ->
-                    Error = beamtalk_error:new(
-                        class_not_found,
-                        ClassName,
-                        Selector,
-                        <<"Class process crashed and could not be restarted">>
-                    ),
-                    beamtalk_error:raise(Error)
-            end;
-        not_found ->
-            %% Cannot identify the class — raise a clear error.
-            Error = beamtalk_error:new(
-                class_not_found,
-                unknown,
-                Selector,
-                <<"Class process is not running (pid not found in registry)">>
-            ),
-            beamtalk_error:raise(Error)
-    end.
-
-%%% ============================================================================
-%%% Internal Functions — Self-Instantiation
-%%% ============================================================================
-
--doc """
-Perform instantiation directly when a class method self-sends new/spawn.
-
-Instead of raising an error when a class method sends new/spawn to itself,
-bypasses gen_server and calls beamtalk_class_instantiation directly. Class
-name and module are read from the process dictionary (set during
-beamtalk_object_class:init/1).
-
-`actor.bt` declares real `class sealed spawn`/`spawnWith:`
-bodies (`beamtalk_actor_ffi:doSpawn/1`, `doSpawnWith/2`), matching the treatment
-given to `new`/`new:`. This function — and `class_send/3`'s explicit
-`spawn`/`spawnWith:` clauses above, and `handle_metaclass_self_call/2` below
-— deliberately keep routing through `class_self_spawn`/`class_self_new`
-directly rather than falling through to generic inherited class-method
-dispatch: doing so would mean a self-send here reaches the lifted body via
-`gen_server:call(self(), ...)`, which deadlocks — the exact regression this
-routing exists to avoid. Same "keep the shim, the lifted body is
-the dynamic-dispatch definition, not the one every path actually calls"
-choice made for `new`/`new:` — see `beamtalk_actor_ffi:doSpawn/1`'s doc.
-""".
--spec handle_self_instantiation(new | spawn, atom(), list()) -> term().
-handle_self_instantiation(Type, Selector, Args) ->
-    ClassName = get(beamtalk_class_name),
-    Module = get(beamtalk_class_module),
-    IsAbstract0 = get(beamtalk_class_is_abstract),
-    case {ClassName, Module, IsAbstract0} of
-        {undefined, _, _} ->
-            %% Fallback: process dictionary not set — called from non-class process.
-            handle_self_instantiation_error(Selector);
-        {_, undefined, _} ->
-            handle_self_instantiation_error(Selector);
-        {_, _, undefined} ->
-            handle_self_instantiation_error(Selector);
-        {CN, Mod, IsAbstract} when is_boolean(IsAbstract) ->
-            case Type of
-                new ->
-                    beamtalk_class_instantiation:class_self_new(CN, Mod, Args);
-                spawn ->
-                    beamtalk_class_instantiation:class_self_spawn(CN, Mod, IsAbstract, Args)
-            end;
-        {_, _, _} ->
-            %% Corrupt/invalid is_abstract metadata — fail fast with structured error.
-            handle_self_instantiation_error(Selector)
-    end.
-
--doc """
-Handle `self class <selector>` self-calls from within a class method.
-
-The class gen_server cannot `gen_server:call(self(), ...)` — the metaclass
-dispatch path would deadlock. Short-circuit the spawn/new family to the same
-helpers used by `self new` and `self spawnAs:`, and raise a
-clear, structured error for any other selector so callers see a useful
-diagnostic rather than an opaque `calling_self` timeout.
-""".
--spec handle_metaclass_self_call(selector(), list()) -> term().
-handle_metaclass_self_call('new', []) ->
-    handle_self_instantiation(new, 'new', []);
-handle_metaclass_self_call('new:', [Map]) ->
-    handle_self_instantiation(new, 'new:', [Map]);
-handle_metaclass_self_call(spawn, []) ->
-    handle_self_instantiation(spawn, spawn, []);
-handle_metaclass_self_call('spawnWith:', [Map]) ->
-    handle_self_instantiation(spawn, 'spawnWith:', [Map]);
-handle_metaclass_self_call('spawnAs:', [Name]) ->
-    handle_metaclass_self_named_spawn('spawnAs:', #{}, Name);
-handle_metaclass_self_call('spawnWith:as:', [InitArgs, Name]) ->
-    handle_metaclass_self_named_spawn('spawnWith:as:', InitArgs, Name);
-handle_metaclass_self_call(Selector, _Args) ->
-    ClassName = self_class_name(),
-    Error0 = beamtalk_error:new(dispatch_error, ClassName, Selector),
-    Error1 = beamtalk_error:with_hint(
-        Error0,
-        beamtalk_error:chars_to_binary(
-            io_lib:format(
-                "'self class ~ts' inside a class method of '~ts' would deadlock "
-                "(gen_server:call to self). Only spawn/new selectors can be "
-                "short-circuited from the class process. Send this message "
-                "from outside the class, or use `self ~ts` directly if the "
-                "method is defined on the instance side.",
-                [Selector, ClassName, Selector]
-            )
-        )
-    ),
-    beamtalk_error:raise(Error1).
-
--doc """
-Perform a named spawn directly from within a class method.
-
-Mirrors `handle_self_instantiation/3` but routes to `class_self_spawn_as` /
-`class_self_spawn_with`, which return a Beamtalk `Result` rather than raising.
-""".
--spec handle_metaclass_self_named_spawn('spawnAs:' | 'spawnWith:as:', term(), term()) -> term().
-handle_metaclass_self_named_spawn(Selector, InitArgs, Name) ->
-    ClassName = get(beamtalk_class_name),
-    Module = get(beamtalk_class_module),
-    IsAbstract0 = get(beamtalk_class_is_abstract),
-    case {ClassName, Module, IsAbstract0} of
-        {CN, Mod, IsAbstract} when
-            is_atom(CN),
-            is_atom(Mod),
-            is_boolean(IsAbstract),
-            CN =/= undefined,
-            Mod =/= undefined
-        ->
-            case Selector of
-                'spawnAs:' ->
-                    beamtalk_class_instantiation:class_self_spawn_as(CN, Mod, IsAbstract, Name);
-                'spawnWith:as:' ->
-                    beamtalk_class_instantiation:class_self_spawn_with(
-                        CN, Mod, IsAbstract, InitArgs, Name
-                    )
-            end;
-        _ ->
-            handle_self_instantiation_error(Selector)
-    end.
-
--doc """
-Fallback error when process dictionary metadata is missing.
-
-Preserves the original selector and names the class from the process
-dictionary (`self_class_name/0`) for diagnostic purposes.
-""".
--spec handle_self_instantiation_error(atom()) -> no_return().
-handle_self_instantiation_error(Selector) ->
-    ClassName = self_class_name(),
-    Error0 = beamtalk_error:new(instantiation_error, ClassName, Selector),
-    Error1 = beamtalk_error:with_hint(
-        Error0,
-        <<
-            "Self-instantiation requires class metadata in the process dictionary "
-            "(set during class process init). This error indicates the call "
-            "originated from a non-class process or the class was not initialized correctly."
-        >>
-    ),
-    beamtalk_error:raise(Error1).
-
--doc """
-The class name for diagnostics raised from a class process: the one its
-`init/1` stored in the process dictionary, or `unknown` for a process that
-never initialised as a class.
-""".
--spec self_class_name() -> atom().
-self_class_name() ->
-    case get(beamtalk_class_name) of
-        undefined -> unknown;
-        ClassName -> ClassName
+            beamtalk_class_dispatch_recovery:handle_class_crash_recovery(ClassPid, Selector, Action)
     end.
 
 %%% ============================================================================

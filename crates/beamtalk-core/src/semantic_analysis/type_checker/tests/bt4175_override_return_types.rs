@@ -439,3 +439,34 @@ Derived >> value -> String => "x"
         hits[0].message
     );
 }
+
+/// BT-5026: the class-side counterpart. A class-side override that widens a
+/// class-side parent return which already satisfied the protocol requirement
+/// is reported once at the override, not again at the call site.
+#[test]
+fn class_side_override_widening_conforming_parent_warns_at_definition_only() {
+    let source = r#"
+Protocol define: Labelled
+  class label -> String
+
+Object subclass: Base
+  class label -> String => "b"
+
+Base subclass: Derived
+  class label -> Object => 1
+
+Object subclass: Caller
+  take: l :: Labelled => l
+  run => self take: Derived new
+"#;
+    let diags = analyse_type_diags(source);
+    assert_eq!(
+        override_return_warnings(&diags).len(),
+        1,
+        "expected the override warning: {diags:#?}"
+    );
+    assert!(
+        protocol_return_warnings(&diags).is_empty(),
+        "no duplicate call-site warning: {diags:#?}"
+    );
+}

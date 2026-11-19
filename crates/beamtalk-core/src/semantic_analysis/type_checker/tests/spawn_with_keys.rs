@@ -155,9 +155,7 @@ fn known_keys_produce_no_diagnostic() {
         key("count"),
         int_val(0, 100),
     )]))]);
-    let hierarchy = ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
-        .0
-        .unwrap();
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         key_diags(&checker).is_empty(),
@@ -174,9 +172,7 @@ fn unknown_key_warns_with_typo_suggestion() {
         key("cuont"),
         int_val(0, 100),
     )]))]);
-    let hierarchy = ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
-        .0
-        .unwrap();
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     let diags = key_diags(&checker);
     assert_eq!(
@@ -205,9 +201,7 @@ fn unknown_key_without_close_slot_warns_without_suggestion() {
         key("completelyUnrelated"),
         int_val(0, 100),
     )]))]);
-    let hierarchy = ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
-        .0
-        .unwrap();
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     let diags = key_diags(&checker);
     assert_eq!(
@@ -235,9 +229,7 @@ fn value_type_mismatch_simple_slot_warns() {
         key("count"),
         str_val("bad", 100),
     )]))]);
-    let hierarchy = ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
-        .0
-        .unwrap();
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     let diags: Vec<_> = checker
         .diagnostics()
@@ -260,9 +252,7 @@ fn value_type_matches_union_slot_no_warning() {
         key("timeoutMs"),
         int_val(30, 100),
     )]))]);
-    let hierarchy = ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
-        .0
-        .unwrap();
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         key_diags(&checker).is_empty(),
@@ -279,9 +269,7 @@ fn value_type_mismatch_union_slot_warns() {
         key("timeoutMs"),
         str_val("soon", 100),
     )]))]);
-    let hierarchy = ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
-        .0
-        .unwrap();
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     let diags: Vec<_> = checker
         .diagnostics()
@@ -313,9 +301,7 @@ fn non_literal_dictionary_argument_is_silent() {
             vec![var("d")],
         ),
     ]);
-    let hierarchy = ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
-        .0
-        .unwrap();
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         key_diags(&checker).is_empty(),
@@ -340,9 +326,7 @@ fn spawn_with_on_class_reference_infers_known_instance() {
             vec![],
         ),
     ]);
-    let hierarchy = ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
-        .0
-        .unwrap();
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     let dnu: Vec<_> = checker
         .diagnostics()
@@ -374,9 +358,7 @@ fn non_actor_class_with_state_slots_is_not_key_checked() {
         MessageSelector::Keyword(vec![KeywordPart::new("spawnWith:", span())]),
         vec![map_lit(vec![(key("cuont"), int_val(0, 100))])],
     )]);
-    let hierarchy = ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
-        .0
-        .unwrap();
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         key_diags(&checker).is_empty(),
@@ -398,9 +380,7 @@ fn spawn_with_via_meta_typed_variable_checks_keys() {
             vec![map_lit(vec![(key("cuont"), int_val(0, 100))])],
         ),
     ]);
-    let hierarchy = ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
-        .0
-        .unwrap();
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     let diags = key_diags(&checker);
     assert_eq!(

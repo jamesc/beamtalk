@@ -97,11 +97,10 @@ impl CoreErlangGenerator {
     ///     ~{'increment' => 0, 'value' => 0}~
     /// ```
     #[allow(clippy::unused_self)] // method on impl for API consistency
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_method_table(
         &self,
         module: &Module,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let methods = collect_primary_method_names_and_arities(module);
 
         // ADR 0006 Phase 1b: Reflection methods (class, respondsTo:, fieldNames,
@@ -127,7 +126,7 @@ impl CoreErlangGenerator {
             "\n\n",
         ];
 
-        Ok(doc)
+        doc
     }
 
     /// Generates `__beamtalk_method_lines/0`: the per-file `{StartLine, Selector}`
@@ -155,11 +154,10 @@ impl CoreErlangGenerator {
     /// '__beamtalk_method_lines'/0 = fun () ->
     ///     [{#{#63,#2e,#62,#74}#, {{3, 'increment'}, {7, 'at:put:'}}}]
     /// ```
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_method_lines(
         &self,
         module: &Module,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         // (file, rows) in first-seen order; own file first when it has rows.
         let mut files: Vec<(String, Vec<(u32, String)>)> = Vec::new();
         let mut push = |file: &str, line: u32, selector: String| {
@@ -223,11 +221,11 @@ impl CoreErlangGenerator {
             ]);
         }
 
-        Ok(docvec![
+        docvec![
             "'__beamtalk_method_lines'/0 = fun () ->",
             nest(INDENT, docvec![line(), "[", Document::Vec(file_docs), "]"]),
             "\n\n",
-        ])
+        ]
     }
 
     /// Generates the `has_method/1` function for runtime reflection.
@@ -269,11 +267,7 @@ impl CoreErlangGenerator {
     ///             end
     ///     end
     /// ```
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
-    pub(in crate::core_erlang) fn generate_has_method(
-        &self,
-        module: &Module,
-    ) -> Result<Document<'static>> {
+    pub(in crate::core_erlang) fn generate_has_method(&self, module: &Module) -> Document<'static> {
         let own_methods: Vec<String> = collect_primary_method_names_and_arities(module)
             .into_iter()
             .map(|(name, _)| name)
@@ -282,13 +276,13 @@ impl CoreErlangGenerator {
         let Some(class) = module.classes.first() else {
             // Script/workspace module: no class hierarchy, extensions, or DNU
             // handler to consult — keep the plain membership-check form.
-            return Ok(Self::generate_has_method_script(&own_methods));
+            return Self::generate_has_method_script(&own_methods);
         };
 
         let class_name = self.class_name();
 
         if dispatch_spec::class_has_catch_all_dnu(class) {
-            return Ok(dispatch_spec::generate_has_method_from_spec(
+            return dispatch_spec::generate_has_method_from_spec(
                 &[],
                 &DispatchSpec {
                     reflection: &[],
@@ -298,7 +292,7 @@ impl CoreErlangGenerator {
                     auto_slots: None,
                     emit_local_probe: true,
                 },
-            ));
+            );
         }
 
         // Delegate dynamically (by class name, through
@@ -311,7 +305,7 @@ impl CoreErlangGenerator {
             .then_some(SuperclassDelegation::Dynamic(superclass_name));
         let auto_methods = value_accessors::compute_auto_slot_methods(class);
 
-        Ok(dispatch_spec::generate_has_method_from_spec(
+        dispatch_spec::generate_has_method_from_spec(
             &own_methods,
             &DispatchSpec {
                 // ADR 0006 Phase 1b: an actor's reflection selectors (`class`,
@@ -324,14 +318,13 @@ impl CoreErlangGenerator {
                 auto_slots: auto_methods.as_ref(),
                 emit_local_probe: true,
             },
-        ))
+        )
     }
 
     /// The `has_method/1` shape for script/workspace modules —
     /// a plain selector-membership check, no extension/superclass/DNU
     /// awareness. Kept only for expression-based modules, which have no
     /// class definition to build a [`DispatchSpec`] from.
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface across call sites
     fn generate_has_method_script(methods: &[String]) -> Document<'static> {
         let mut method_list_docs: Vec<Document<'static>> = Vec::with_capacity(methods.len());
         for (i, name) in methods.iter().enumerate() {
@@ -368,17 +361,16 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'class_name'/0 = fun () -> 'Counter'
     /// ```
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_class_name_function(
         &self,
         _module: &Module,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let doc = docvec![
             "'class_name'/0 = fun () -> ",
             leaf::atom(self.class_name()),
             "\n\n",
         ];
-        Ok(doc)
+        doc
     }
 
     /// Generates the `safe_dispatch/4` (caller supplies `Self`) and `safe_dispatch/3`
@@ -456,8 +448,7 @@ impl CoreErlangGenerator {
     ///                 {'error', {Type, Error, Stacktrace}, State}
     ///         end
     /// ```
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
-    pub(in crate::core_erlang) fn generate_safe_dispatch(&mut self) -> Result<Document<'static>> {
+    pub(in crate::core_erlang) fn generate_safe_dispatch(&mut self) -> Document<'static> {
         let module_name = self.module_name.clone();
         let nlr_token_var = self.fresh_var("SDNlrTok");
         let nlr_value_var = self.fresh_var("SDNlrVal");
@@ -481,9 +472,13 @@ impl CoreErlangGenerator {
                         INDENT,
                         docvec![
                             line(),
-                            "<~{'__class_mod__' := ",
+                            "<~{",
+                            leaf::atom(sentinel_tags::CLASS_MOD),
+                            " := ",
                             leaf::atom(module_name.clone()),
-                            "}~> when call 'erlang':'not'(call 'erlang':'is_map_key'('$beamtalk_class', State)) ->",
+                            "}~> when call 'erlang':'not'(call 'erlang':'is_map_key'(",
+                            leaf::atom(sentinel_tags::CLASS_TAG),
+                            ", State)) ->",
                             nest(
                                 INDENT,
                                 docvec![
@@ -557,7 +552,7 @@ impl CoreErlangGenerator {
             ),
             "\n\n",
         ];
-        Ok(doc)
+        doc
     }
 
     /// Generates the dispatch/4 function for message routing.
@@ -1064,10 +1059,7 @@ mod tests {
         let class = make_actor_class("Counter");
         let module = Module::with_classes(vec![class], s());
         let generator = CoreErlangGenerator::new("counter");
-        let output = generator
-            .generate_method_table(&module)
-            .unwrap()
-            .to_pretty_string();
+        let output = generator.generate_method_table(&module).to_pretty_string();
         assert!(output.contains("'method_table'/0"), "got: {output}");
         assert!(
             output.contains("~{}~"),
@@ -1088,10 +1080,7 @@ mod tests {
         });
         let module = Module::new(vec![assignment], s());
         let generator = CoreErlangGenerator::new("script");
-        let output = generator
-            .generate_method_table(&module)
-            .unwrap()
-            .to_pretty_string();
+        let output = generator.generate_method_table(&module).to_pretty_string();
         assert!(output.contains("'method_table'/0"), "got: {output}");
         assert!(
             output.contains("'add'"),
@@ -1105,10 +1094,7 @@ mod tests {
         // with no class definition falls back to the plain lists:member form.
         let module = Module::new(vec![], s());
         let generator = CoreErlangGenerator::new("script");
-        let output = generator
-            .generate_has_method(&module)
-            .unwrap()
-            .to_pretty_string();
+        let output = generator.generate_has_method(&module).to_pretty_string();
         assert!(output.contains("'has_method'/1"), "got: {output}");
         assert!(
             output.contains("'lists':'member'"),
@@ -1125,10 +1111,7 @@ mod tests {
         let class = make_actor_class("Counter");
         let module = Module::with_classes(vec![class], s());
         let generator = CoreErlangGenerator::new("counter");
-        let output = generator
-            .generate_has_method(&module)
-            .unwrap()
-            .to_pretty_string();
+        let output = generator.generate_has_method(&module).to_pretty_string();
         assert!(output.contains("'has_method'/1"), "got: {output}");
         assert!(
             output.contains("'Counter'"),
@@ -1156,7 +1139,6 @@ mod tests {
         let generator = CoreErlangGenerator::new("my_counter");
         let output = generator
             .generate_class_name_function(&module)
-            .unwrap()
             .to_pretty_string();
         assert!(output.contains("'class_name'/0"), "got: {output}");
         assert!(
@@ -1171,10 +1153,7 @@ mod tests {
         // safe_dispatch/4 (caller supplies Self) with the NLR relay clause
         // (BT-3580/BT-3582) that returns '$bt_nlr' throws as bare error values.
         let mut generator = CoreErlangGenerator::new("counter");
-        let output = generator
-            .generate_safe_dispatch()
-            .unwrap()
-            .to_pretty_string();
+        let output = generator.generate_safe_dispatch().to_pretty_string();
         assert!(output.contains("'safe_dispatch'/3"), "got: {output}");
         assert!(output.contains("'safe_dispatch'/4"), "got: {output}");
         assert!(

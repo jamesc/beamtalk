@@ -182,147 +182,167 @@ mod tests {
     use crate::source_analysis::Severity;
     use crate::test_helpers::test_support::parse_bt;
 
-    #[test]
-    fn known_package_qualifier_no_error() {
-        let module = parse_bt("json@Parser parse: input");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        let errors: Vec<_> = diags
-            .iter()
-            .filter(|d| d.severity == Severity::Error)
-            .collect();
-        assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
+    /// What `check_package_qualifiers` must report for a case.
+    #[derive(Clone, Copy, Debug)]
+    enum Outcome {
+        /// A diagnostic whose message contains this text.
+        Message(&'static str),
+        /// No diagnostic at all.
+        Clean,
+        /// No `Error`-severity diagnostic.
+        NoErrors,
+        /// Exactly this many `Error`-severity diagnostics.
+        Errors(usize),
     }
 
-    #[test]
-    fn unknown_package_qualifier_produces_error() {
-        let module = parse_bt("xml@Parser parse: input");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
+    /// One row per case: `(case, source, known packages, outcome)`. The case
+    /// name is in the failure message.
+    const QUALIFIER_CASES: &[(&str, &str, &[&str], Outcome)] = &[
+        (
+            "known_package_qualifier_no_error",
+            "json@Parser parse: input",
+            &["json"],
+            Outcome::NoErrors,
+        ),
+        (
+            "unknown_package_qualifier_produces_error",
+            "xml@Parser parse: input",
+            &["json"],
+            Outcome::Message("Unknown package 'xml'"),
+        ),
+        (
+            "empty_known_packages_skips_validation",
+            "xml@Parser parse: input",
+            &[],
+            Outcome::Clean,
+        ),
+        (
+            "unqualified_class_reference_no_error",
+            "Counter spawn",
+            &["json"],
+            Outcome::Clean,
+        ),
+        (
+            "qualified_in_method_body_checked",
+            "Object subclass: Foo\n  bar => xml@Parser parse: \"test\"",
+            &["json"],
+            Outcome::Message("Unknown package 'xml'"),
+        ),
+        (
+            "qualified_in_standalone_method_target",
+            "xml@Parser >> lenient => 42",
+            &["json"],
+            Outcome::Message("Unknown package 'xml'"),
+        ),
+        (
+            "qualified_in_standalone_method_target_known",
+            "json@Parser >> lenient => 42",
+            &["json"],
+            Outcome::NoErrors,
+        ),
+        (
+            "multiple_unknown_packages_multiple_errors",
+            "a := xml@Parser parse: \"x\".\nb := yaml@Loader load: \"y\"",
+            &["json"],
+            Outcome::Errors(2),
+        ),
+        (
+            "qualified_in_block_body",
+            "[:x | xml@Parser parse: x]",
+            &["json"],
+            Outcome::Message("Unknown package 'xml'"),
+        ),
+        (
+            "qualified_superclass_known_package",
+            "json@Parser subclass: LenientParser\n  parse => 42",
+            &["json"],
+            Outcome::NoErrors,
+        ),
+        (
+            "qualified_in_state_default_value",
+            "Object subclass: Foo\n  state: x = xml@Parser default\n  bar => 42",
+            &["json"],
+            Outcome::Message("Unknown package 'xml'"),
+        ),
+        (
+            "qualified_in_parenthesized_expression",
+            "(xml@Parser parse: 1)",
+            &["json"],
+            Outcome::Message("Unknown package 'xml'"),
+        ),
+        (
+            "qualified_in_field_access_receiver",
+            "xml@Parser.field",
+            &["json"],
+            Outcome::Message("Unknown package 'xml'"),
+        ),
+        (
+            "qualified_in_map_literal_value",
+            "#{#a => xml@Parser parse: 1}",
+            &["json"],
+            Outcome::Message("Unknown package 'xml'"),
+        ),
+        (
+            "qualified_in_list_literal_element_and_tail",
+            "#(1, xml@Parser parse: 1 | rest)",
+            &["json"],
+            Outcome::Message("Unknown package 'xml'"),
+        ),
+        (
+            "qualified_in_array_literal_element",
+            "#[1, xml@Parser parse: 1]",
+            &["json"],
+            Outcome::Message("Unknown package 'xml'"),
+        ),
+        (
+            "qualified_in_string_interpolation",
+            "\"result: {xml@Parser parse: 1}\"",
+            &["json"],
+            Outcome::Message("Unknown package 'xml'"),
+        ),
+        (
+            "qualified_in_destructure_assignment_value",
+            "#(a, b) := xml@Parser parse: 1",
+            &["json"],
+            Outcome::Message("Unknown package 'xml'"),
+        ),
+    ];
 
-        assert!(
-            diags
+    #[test]
+    fn package_qualifier_cases() {
+        for &(case, src, known_packages, outcome) in QUALIFIER_CASES {
+            let module = parse_bt(src);
+            let known: HashSet<String> = known_packages.iter().map(ToString::to_string).collect();
+            let mut diags = Vec::new();
+            check_package_qualifiers(&module, &known, &mut diags);
+            let errors: Vec<_> = diags
                 .iter()
-                .any(|d| d.message.contains("Unknown package 'xml'")),
-            "Expected unknown package error, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn empty_known_packages_skips_validation() {
-        let module = parse_bt("xml@Parser parse: input");
-        let known = HashSet::new();
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        assert!(
-            diags.is_empty(),
-            "Expected no errors when known_packages is empty, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn unqualified_class_reference_no_error() {
-        let module = parse_bt("Counter spawn");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        assert!(
-            diags.is_empty(),
-            "Expected no errors for unqualified ref, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn qualified_in_method_body_checked() {
-        let module = parse_bt("Object subclass: Foo\n  bar => xml@Parser parse: \"test\"");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Unknown package 'xml'")),
-            "Expected unknown package error in method body, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn qualified_in_standalone_method_target() {
-        let module = parse_bt("xml@Parser >> lenient => 42");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Unknown package 'xml'")),
-            "Expected unknown package error in extension target, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn qualified_in_standalone_method_target_known() {
-        let module = parse_bt("json@Parser >> lenient => 42");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        let errors: Vec<_> = diags
-            .iter()
-            .filter(|d| d.severity == Severity::Error)
-            .collect();
-        assert!(
-            errors.is_empty(),
-            "Expected no errors for known package, got: {errors:?}"
-        );
-    }
-
-    #[test]
-    fn multiple_unknown_packages_multiple_errors() {
-        let module = parse_bt("a := xml@Parser parse: \"x\".\nb := yaml@Loader load: \"y\"");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        let errors: Vec<_> = diags
-            .iter()
-            .filter(|d| d.severity == Severity::Error)
-            .collect();
-        assert_eq!(
-            errors.len(),
-            2,
-            "Expected 2 errors for 2 unknown packages, got: {errors:?}"
-        );
-    }
-
-    #[test]
-    fn qualified_in_block_body() {
-        let module = parse_bt("[:x | xml@Parser parse: x]");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Unknown package 'xml'")),
-            "Expected unknown package error in block body, got: {diags:?}"
-        );
+                .filter(|d| d.severity == Severity::Error)
+                .collect();
+            match outcome {
+                Outcome::Message(text) => assert!(
+                    diags.iter().any(|d| d.message.contains(text)),
+                    "[{case}] expected a diagnostic containing {text:?}, got: {diags:?}"
+                ),
+                Outcome::Clean => {
+                    assert!(
+                        diags.is_empty(),
+                        "[{case}] expected no diagnostics, got: {diags:?}"
+                    );
+                }
+                Outcome::NoErrors => {
+                    assert!(
+                        errors.is_empty(),
+                        "[{case}] expected no errors, got: {errors:?}"
+                    );
+                }
+                Outcome::Errors(n) => assert_eq!(
+                    errors.len(),
+                    n,
+                    "[{case}] expected {n} errors, got: {errors:?}"
+                ),
+            }
+        }
     }
 
     #[test]
@@ -343,24 +363,6 @@ mod tests {
     }
 
     #[test]
-    fn qualified_superclass_known_package() {
-        let module = parse_bt("json@Parser subclass: LenientParser\n  parse => 42");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        let errors: Vec<_> = diags
-            .iter()
-            .filter(|d| d.severity == Severity::Error)
-            .collect();
-        assert!(
-            errors.is_empty(),
-            "Expected no errors for known superclass package, got: {errors:?}"
-        );
-    }
-
-    #[test]
     fn qualified_in_class_side_method_body() {
         let module =
             parse_bt("Object subclass: Foo\n  class bar => xml@Parser parse: 1\n  baz => 42");
@@ -374,22 +376,6 @@ mod tests {
                 .iter()
                 .any(|d| d.message.contains("Unknown package 'xml'")),
             "Expected unknown package error in class-side method body, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn qualified_in_state_default_value() {
-        let module = parse_bt("Object subclass: Foo\n  state: x = xml@Parser default\n  bar => 42");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Unknown package 'xml'")),
-            "Expected unknown package error in state default value, got: {diags:?}"
         );
     }
 
@@ -436,38 +422,6 @@ mod tests {
     }
 
     #[test]
-    fn qualified_in_parenthesized_expression() {
-        let module = parse_bt("(xml@Parser parse: 1)");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Unknown package 'xml'")),
-            "Expected unknown package error in parenthesized expression, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn qualified_in_field_access_receiver() {
-        let module = parse_bt("xml@Parser.field");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Unknown package 'xml'")),
-            "Expected unknown package error in field access receiver, got: {diags:?}"
-        );
-    }
-
-    #[test]
     fn qualified_in_cascade_receiver_and_argument() {
         let module = parse_bt("xml@Parser new; bar: (yaml@Loader load: 1)");
         let mut known = HashSet::new();
@@ -509,86 +463,6 @@ mod tests {
                 .iter()
                 .any(|d| d.message.contains("Unknown package 'yaml'")),
             "Expected unknown package error in match arm body, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn qualified_in_map_literal_value() {
-        let module = parse_bt("#{#a => xml@Parser parse: 1}");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Unknown package 'xml'")),
-            "Expected unknown package error in map literal value, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn qualified_in_list_literal_element_and_tail() {
-        let module = parse_bt("#(1, xml@Parser parse: 1 | rest)");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Unknown package 'xml'")),
-            "Expected unknown package error in list literal element, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn qualified_in_array_literal_element() {
-        let module = parse_bt("#[1, xml@Parser parse: 1]");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Unknown package 'xml'")),
-            "Expected unknown package error in array literal element, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn qualified_in_string_interpolation() {
-        let module = parse_bt("\"result: {xml@Parser parse: 1}\"");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Unknown package 'xml'")),
-            "Expected unknown package error in string interpolation, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn qualified_in_destructure_assignment_value() {
-        let module = parse_bt("#(a, b) := xml@Parser parse: 1");
-        let mut known = HashSet::new();
-        known.insert("json".to_string());
-        let mut diags = Vec::new();
-        check_package_qualifiers(&module, &known, &mut diags);
-
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Unknown package 'xml'")),
-            "Expected unknown package error in destructure assignment value, got: {diags:?}"
         );
     }
 

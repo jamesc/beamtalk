@@ -887,6 +887,14 @@ impl CoreErlangGenerator {
 
         for (i, expr) in body.iter().enumerate() {
             let is_last = i == body.len() - 1;
+            // BT-5031: INVARIANT - classification and emission see the same node.
+            // `classify_block_expr` and `generate_block_expr` key on the raw node
+            // (`is_local_var_assignment`, `is_field_assignment`), so a parenthesised
+            // `(x := x + 1)` was a `SideEffect` whose value (and rebind) was discarded
+            // as `let _Unit = ...`. A NON-last statement's value is discarded, so
+            // `(s)` is exactly `s`: unwrap it once here. The last statement is the
+            // block's value and `threaded_expression` unwraps it itself.
+            let expr = if is_last { *expr } else { expr.unwrap_parens() };
             let kind = Self::classify_block_expr(self, expr, is_last);
             let doc = self.generate_block_expr(expr, &kind)?;
             docs.push(doc);

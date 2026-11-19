@@ -196,7 +196,7 @@ fn test_class_in_module(
         .iter()
         .find(|c| inherits_from_test_case(c.superclass_name(), superclass_index))?;
     let class_name = class.name.name.to_string();
-    let stem = beamtalk_codegen::core_erlang::to_module_name(&class_name);
+    let stem = beamtalk_core::ast::to_module_name(&class_name);
     let module_name = format!("bt@{stem}");
 
     let test_methods: Vec<String> = class
@@ -578,7 +578,7 @@ fn discover_and_compile_doc_tests(
             continue;
         }
 
-        let class_slug = beamtalk_codegen::core_erlang::to_module_name(&class_doc.class_name);
+        let class_slug = beamtalk_core::ast::to_module_name(&class_doc.class_name);
         let eunit_module = format!("{class_slug}_doc_tests");
 
         // Compile each expression to a Core Erlang eval module
@@ -708,6 +708,8 @@ struct TestPipeline {
     snapshot_only: bool,
     /// Whether to treat warnings as errors.
     warnings_as_errors: bool,
+    /// Whether to suppress warning diagnostics (`--no-warnings`).
+    suppress_warnings: bool,
     /// Discovered packages: `(canonical_root, manifest)`.
     discovered_packages: Vec<(Utf8PathBuf, manifest::PackageManifest)>,
     /// Package root to package name mapping.
@@ -838,6 +840,7 @@ impl TestPipeline {
                 hierarchy,
                 current_package,
                 known_erlang_modules: &self.known_erlang_modules,
+                suppress_warnings: self.suppress_warnings,
             },
         }
     }
@@ -853,7 +856,7 @@ impl TestPipeline {
 #[instrument(skip_all)]
 pub fn run_tests(
     path: &str,
-    warnings_as_errors: bool,
+    warnings: super::WarningFlags,
     jobs: usize,
     quiet: bool,
     raw_mfa: bool,
@@ -884,7 +887,7 @@ pub fn run_tests(
         test_files,
         build_dir,
         core_output_dir_guard.snapshot_only(),
-        warnings_as_errors,
+        warnings,
         jobs,
     )?;
     pipeline.raw_mfa = raw_mfa;
@@ -1259,7 +1262,7 @@ fn initialize_pipeline(
     test_files: Vec<Utf8PathBuf>,
     build_dir: Utf8PathBuf,
     snapshot_only: bool,
-    warnings_as_errors: bool,
+    warnings: super::WarningFlags,
     jobs: usize,
 ) -> Result<TestPipeline> {
     let discovered_packages = discover_packages_with_manifests(&test_path, &test_files)?;
@@ -1310,7 +1313,8 @@ fn initialize_pipeline(
         snapshot_only,
         native_type_registry,
         known_erlang_modules,
-        warnings_as_errors,
+        warnings_as_errors: warnings.warnings_as_errors,
+        suppress_warnings: warnings.no_warnings,
         discovered_packages,
         pkg_root_to_name,
         pkg_class_indexes,
@@ -1852,6 +1856,7 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
             stdlib_mode: false,
             allow_primitives: false,
             warnings_as_errors: pipeline.warnings_as_errors,
+            suppress_warnings: pipeline.suppress_warnings,
             ..Default::default()
         };
         super::build::build(pkg_root.as_str(), &build_options, false).wrap_err_with(|| {
@@ -2495,14 +2500,6 @@ mod tests {
     #[test]
     #[serial_test::serial(cwd)]
     fn test_find_package_root_relative_path_does_not_return_empty() {
-        // RAII guard so CWD is restored even if an assertion panics.
-        struct CwdGuard(std::path::PathBuf);
-        impl Drop for CwdGuard {
-            fn drop(&mut self) {
-                std::env::set_current_dir(&self.0).unwrap();
-            }
-        }
-
         let temp = tempfile::TempDir::new().unwrap();
 
         // Write a beamtalk.toml at the temp dir root so that "".join("beamtalk.toml")
@@ -2513,8 +2510,7 @@ mod tests {
         )
         .unwrap();
 
-        let _cwd_guard = CwdGuard(std::env::current_dir().unwrap());
-        std::env::set_current_dir(temp.path()).unwrap();
+        let _cwd_guard = beamtalk_workspace::test_cwd::CwdGuard::enter(temp.path());
 
         // Single-component relative paths: parent is "" which would resolve
         // "beamtalk.toml" in the CWD without the guard. With the guard they
@@ -2665,7 +2661,7 @@ mod tests {
     ///
     /// This test verifies that the canonicalization in `discovered_packages` deduplicates
     /// the relative `"."` and the same path expressed as an absolute path.
-    /// This test uses a temp dir with an explicit `set_current_dir` instead of
+    /// This test enters a temp dir with `CwdGuard::enter` instead of
     /// relying on the cargo-provided CWD because another test in this file also
     /// mutates the process CWD. The `#[serial(cwd)]` annotation prevents the two
     /// from racing. On macOS, `/var` is a symlink to `/private/var`, so the temp
@@ -2674,17 +2670,8 @@ mod tests {
     #[test]
     #[serial_test::serial(cwd)]
     fn test_canonical_dedup_relative_and_absolute_same_path() {
-        // RAII guard so CWD is restored even if an assertion panics.
-        struct CwdGuard(std::path::PathBuf);
-        impl Drop for CwdGuard {
-            fn drop(&mut self) {
-                std::env::set_current_dir(&self.0).unwrap();
-            }
-        }
-
         let temp = tempfile::TempDir::new().unwrap();
-        let _cwd_guard = CwdGuard(std::env::current_dir().unwrap());
-        std::env::set_current_dir(temp.path()).unwrap();
+        let _cwd_guard = beamtalk_workspace::test_cwd::CwdGuard::enter(temp.path());
 
         // Get the absolute CWD — on macOS this may be `/var/folders/…` (not
         // symlink-resolved) while `canonicalize(".")` returns `/private/var/…`.

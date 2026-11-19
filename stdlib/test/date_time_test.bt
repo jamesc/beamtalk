@@ -628,3 +628,73 @@ TestCase subclass: DateTimeTest
     self assert: result unwrap day equals: 25
     // A string that replaces dots with a different character must not match.
     self deny: (DateTime parse: "2026X07X25" format: "yyyy.MM.dd") isOk
+
+  // BT-5030: strict ISO 8601 — `$` must not accept a trailing newline.
+  testFromStringRejectsTrailingNewline =>
+    self should: [
+      DateTime fromString: "2026-07-25T14:30:00Z\n"
+    ] raise: #type_error
+    self should: [
+      DateTime fromString: "2026-07-25T14:30:00\n"
+    ] raise: #type_error
+    self deny: (DateTime parse: "2026-07-25\n" format: "yyyy-MM-dd") isOk
+
+  // BT-5030: instants before year 0 raise a Beamtalk error, not function_clause.
+  testOutOfRangeInstantsRaiseStructuredError =>
+    self should: [DateTime fromTimestamp: -99999999999999] raise: #type_error
+    self
+      should: [
+        (DateTime
+          year: 2026
+          month: 1
+          day: 1) addSeconds: -99999999999999
+      ]
+      raise: #type_error
+    self
+      should: [
+        (DateTime
+          year: 2026
+          month: 1
+          day: 1) addDays: -99999999999
+      ]
+      raise: #type_error
+    // The first instant of year 0 is still representable.
+    self assert: (DateTime fromTimestamp: -62167219200) year equals: 0
+
+  // asTimestamp never raises for a valid DateTime, including year 0.
+  testAsTimestampYearZero =>
+    self
+      assert: (DateTime
+        year: 0
+        month: 1
+        day: 1) asTimestamp
+      equals: -62167219200
+
+  // BT-5030: absent year defaults to 1970 (not leap year 0), so Feb 29 is out of range.
+  testParseFormatDefaultYearIsNotLeap =>
+    self deny: (DateTime parse: "02-29" format: "MM-dd") isOk
+    self assert: (DateTime parse: "02-28" format: "MM-dd") unwrap year equals: 1970
+    self assert: (DateTime parse: "2024-02-29" format: "yyyy-MM-dd") isOk
+
+  // BT-5030: an over-long run is a Beamtalk error, not a raw re badarg.
+  testOverLongPatternRunRaises =>
+    longRun := "d" repeat: 70000
+    dt := DateTime
+      year: 2026
+      month: 7
+      day: 25
+    self should: [dt format: longRun] raise: #type_error
+    self should: [dt format: "yyyyyyyyyyyy"] raise: #type_error
+    self should: [DateTime parse: "1" format: longRun] raise: #type_error
+
+  // BT-5030: the out-of-range error names the selector the caller used.
+  testAddDurationOutOfRangeNamesSelector =>
+    dt := DateTime
+      year: 2026
+      month: 1
+      day: 1
+    self
+      assert: ([
+        dt addDuration: (Duration seconds: -99999999999999)
+      ] on: Error do: [:e | e selector])
+      equals: #addDuration:

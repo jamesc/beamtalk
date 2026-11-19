@@ -154,18 +154,15 @@ impl FrameId {
 /// have no prefix: they live in the class process (ADR 0130), so no class
 /// method threads them.
 ///
-/// `State`/`SelfVt` get their first production call
-/// site here — [`VersionCounter`] is the single implementation behind
+/// [`VersionCounter`] is the single implementation behind
 /// `CoreErlangGenerator`'s two (formerly independently implemented)
-/// counters (`StateThreading` and `ValueTypeContext::self_version`). `TupleAcc`/`Hybrid`/`StateAcc` and
-/// `Put`/`Unpack`/`NlrCatch`/`Return` remain unit-test-only until a
-/// control-flow generator migrates onto the full `ThreadedIr`/`verify()`
-/// pipeline (later issues — this issue is naming/identity unification only,
-/// not IR construction; `ValueRef::Version`'s own first production call site
-/// is ADR 0122's `append_family_slots`, a later addition). `Local` gets its
-/// own production call site via
-/// [`verify_tuple_acc_unpack_invariant`]. (Historical: every variant now
-/// has a production constructor; `BindOp::Unpack` is the one test-only op.)
+/// counters (`StateThreading` and `ValueTypeContext::self_version`).
+/// `Local` gets its own production call site via
+/// [`verify_tuple_acc_unpack_invariant`]. Every [`ThreadedStmt`] and
+/// [`ThreadingMode`] variant has a production constructor
+/// (`NlrCatch`/`Return` in the method, block and conditional-arm lowerers,
+/// `Put` in `inline_control_flow`), except [`BindOp::Unpack`], which only
+/// tests construct.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(in crate::core_erlang) enum VersionPrefix {
     /// Actor/instance state (`State`, `State1`, … — rendered as `StateAcc{N}`
@@ -426,8 +423,8 @@ impl VersionCounter {
 /// A loop or mutation-carrying conditional's already-resolved threading
 /// convention — the existing `ThreadingPlan`/`select_direct_params` etc.
 /// decision, recorded as durable IR data instead of re-derived at emission.
-/// See [`VersionPrefix`]'s doc comment for why several variants are
-/// test-only for now.
+/// Every variant is built in production by the loop and conditional
+/// planners (`control_flow/plan.rs`, `while_loops.rs`, `conditional_arms.rs`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum ThreadingMode {
     /// `fun (Var1, ..., VarN)` — no `StateAcc` map at all.
@@ -537,9 +534,8 @@ pub(in crate::core_erlang) enum ValueRef {
     Doc(Document<'static>),
 }
 
-/// The mutation an individual [`ThreadedStmt::Bind`] performs. See
-/// [`VersionPrefix`]'s doc comment for why `Put`/`Unpack` are test-only for
-/// now (the Phase A0 prototype only exercises `Direct`).
+/// The mutation an individual [`ThreadedStmt::Bind`] performs. `Put` is built
+/// in production (`inline_control_flow`); `Unpack` is built only by tests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum BindOp {
     /// A field mutation: `call 'maps':'put'(field, value, source)`.
@@ -593,9 +589,7 @@ pub(in crate::core_erlang) enum FoldCarry {
     Value,
 }
 
-/// One statement of the lowered IR. See [`VersionPrefix`]'s doc comment for
-/// why `NlrCatch`/`Return` are test-only for now (the Phase A0 prototype only
-/// exercises `Threaded`/`Bind`).
+/// One statement of the lowered IR. Every variant is built in production.
 // `ConditionalLoop` is far larger than every other node (it carries the whole
 // loop skeleton); boxing it would ripple through every lowering and test
 // fixture for an IR built once per loop statement.

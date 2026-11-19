@@ -47,79 +47,44 @@ ensure_wrapped_no_double_wrap_test() ->
 
 %%% Tests for kind_to_class/1 — pure, no class system needed
 
-kind_to_class_does_not_understand_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(does_not_understand)).
+%% One row per case: {Kind, ExpectedClass}. The kind is the EUnit test title,
+%% so a failure names the case.
+kind_to_class_cases() ->
+    [
+        {does_not_understand, 'RuntimeError'},
+        {arity_mismatch, 'RuntimeError'},
+        %% BT-4912: kinds emitted by codegen classify as RuntimeError, not bare Error.
+        {uninitialized_state_error, 'RuntimeError'},
+        {stateful_block_dispatch, 'RuntimeError'},
+        {pattern_mismatch, 'RuntimeError'},
+        {unknown_field, 'RuntimeError'},
+        {immutable_value, 'RuntimeError'},
+        {type_error, 'TypeError'},
+        {instantiation_error, 'InstantiationError'},
+        {runtime_error, 'RuntimeError'},
+        {index_out_of_bounds, 'RuntimeError'},
+        {class_not_found, 'RuntimeError'},
+        {no_superclass, 'RuntimeError'},
+        {class_already_exists, 'RuntimeError'},
+        {dispatch_error, 'RuntimeError'},
+        {callback_failed, 'RuntimeError'},
+        {actor_dead, 'RuntimeError'},
+        {future_expired, 'RuntimeError'},
+        {future_not_awaited, 'RuntimeError'},
+        {internal_error, 'RuntimeError'},
+        {user_error, 'Error'},
+        {signal, 'Error'},
+        {some_unknown_kind, 'Error'}
+    ].
 
-kind_to_class_arity_mismatch_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(arity_mismatch)).
-
-%% BT-4912: kinds emitted by codegen classify as RuntimeError, not bare Error.
-kind_to_class_uninitialized_state_error_test() ->
-    ?assertEqual(
-        'RuntimeError', beamtalk_exception_handler:kind_to_class(uninitialized_state_error)
-    ).
-
-kind_to_class_stateful_block_dispatch_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(stateful_block_dispatch)).
-
-kind_to_class_pattern_mismatch_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(pattern_mismatch)).
-
-kind_to_class_unknown_field_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(unknown_field)).
-
-kind_to_class_immutable_value_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(immutable_value)).
-
-kind_to_class_type_error_test() ->
-    ?assertEqual('TypeError', beamtalk_exception_handler:kind_to_class(type_error)).
-
-kind_to_class_instantiation_error_test() ->
-    ?assertEqual(
-        'InstantiationError', beamtalk_exception_handler:kind_to_class(instantiation_error)
-    ).
-
-kind_to_class_runtime_error_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(runtime_error)).
-
-kind_to_class_index_out_of_bounds_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(index_out_of_bounds)).
-
-kind_to_class_class_not_found_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(class_not_found)).
-
-kind_to_class_no_superclass_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(no_superclass)).
-
-kind_to_class_class_already_exists_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(class_already_exists)).
-
-kind_to_class_dispatch_error_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(dispatch_error)).
-
-kind_to_class_callback_failed_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(callback_failed)).
-
-kind_to_class_actor_dead_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(actor_dead)).
-
-kind_to_class_future_expired_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(future_expired)).
-
-kind_to_class_future_not_awaited_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(future_not_awaited)).
-
-kind_to_class_internal_error_test() ->
-    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(internal_error)).
-
-kind_to_class_user_error_falls_back_to_error_test() ->
-    ?assertEqual('Error', beamtalk_exception_handler:kind_to_class(user_error)).
-
-kind_to_class_signal_maps_to_error_test() ->
-    ?assertEqual('Error', beamtalk_exception_handler:kind_to_class(signal)).
-
-kind_to_class_unknown_falls_back_to_error_test() ->
-    ?assertEqual('Error', beamtalk_exception_handler:kind_to_class(some_unknown_kind)).
+kind_to_class_test_() ->
+    [
+        {
+            "kind_to_class: " ++ atom_to_list(Kind),
+            ?_assertEqual(Class, beamtalk_exception_handler:kind_to_class(Kind))
+        }
+     || {Kind, Class} <- kind_to_class_cases()
+    ].
 
 %%% Tests for wrap/1 class hierarchy — pure, no class system needed
 

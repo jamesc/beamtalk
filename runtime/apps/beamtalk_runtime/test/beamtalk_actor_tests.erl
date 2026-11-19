@@ -1352,7 +1352,7 @@ async_send_kill_isAlive_false_immediately_after_test() ->
 await_initialize_alive_process_test() ->
     %% await_initialize returns ok for a healthy gen_server
     {ok, Pid} = test_counter:start(0),
-    ?assertEqual(ok, beamtalk_actor:await_initialize(Pid)),
+    ?assertEqual(ok, beamtalk_actor_start:await_initialize(Pid)),
     gen_server:stop(Pid).
 
 await_initialize_dead_process_test() ->
@@ -1360,7 +1360,7 @@ await_initialize_dead_process_test() ->
     {ok, Pid} = test_counter:start(0),
     gen_server:stop(Pid),
     beamtalk_test_wait:dead(Pid),
-    ?assertMatch({error, _}, beamtalk_actor:await_initialize(Pid)).
+    ?assertMatch({error, _}, beamtalk_actor_start:await_initialize(Pid)).
 
 safe_spawn_success_test() ->
     %% safe_spawn returns {ok, Pid} for a healthy module
@@ -1442,7 +1442,7 @@ await_initialize_preserves_full_stop_reason_test() ->
     logger:set_primary_config(level, none),
     try
         {ok, {Pid, MonRef}} = gen_server:start_monitor(test_crashing_init_actor, #{}, []),
-        Result = beamtalk_actor:await_initialize(Pid, MonRef),
+        Result = beamtalk_actor_start:await_initialize(Pid, MonRef),
         ?assertMatch({error, {error, function_clause}}, Result)
     after
         logger:set_primary_config(level, all)
@@ -1461,10 +1461,10 @@ await_initialize_monitor_established_before_death_reports_real_reason_test() ->
         ?awaitMessage({'DOWN', Probe, process, Pid, _}),
         ?assertEqual(
             {error, {error, function_clause}},
-            beamtalk_actor:await_initialize(Pid, MonRef)
+            beamtalk_actor_start:await_initialize(Pid, MonRef)
         ),
         %% The hazard this guards against: monitoring a dead process loses the reason.
-        ?assertEqual({error, noproc}, beamtalk_actor:await_initialize(Pid))
+        ?assertEqual({error, noproc}, beamtalk_actor_start:await_initialize(Pid))
     after
         logger:set_primary_config(level, all)
     end.
@@ -1911,37 +1911,37 @@ safe_spawn_restores_trap_exit_test() ->
 
 set_and_get_trace_context_test() ->
     %% set_trace_context stores a map in the process dictionary
-    beamtalk_actor:clear_trace_context(),
-    beamtalk_actor:set_trace_context(#{workflowId => <<"wf-1">>}),
-    Ctx = beamtalk_actor:get_trace_context(),
+    beamtalk_actor_ctx:clear_trace_context(),
+    beamtalk_actor_ctx:set_trace_context(#{workflowId => <<"wf-1">>}),
+    Ctx = beamtalk_actor_ctx:get_trace_context(),
     ?assertEqual(#{workflowId => <<"wf-1">>}, Ctx),
-    beamtalk_actor:clear_trace_context().
+    beamtalk_actor_ctx:clear_trace_context().
 
 get_trace_context_empty_when_unset_test() ->
     %% get_trace_context returns #{} when no context is set
     erase('$beamtalk_trace_ctx'),
-    ?assertEqual(#{}, beamtalk_actor:get_trace_context()).
+    ?assertEqual(#{}, beamtalk_actor_ctx:get_trace_context()).
 
 get_trace_context_ignores_non_map_test() ->
     %% get_trace_context returns #{} when pdict has a non-map value
     put('$beamtalk_trace_ctx', not_a_map),
-    ?assertEqual(#{}, beamtalk_actor:get_trace_context()),
+    ?assertEqual(#{}, beamtalk_actor_ctx:get_trace_context()),
     erase('$beamtalk_trace_ctx').
 
 clear_trace_context_removes_keys_test() ->
     %% clear_trace_context removes the context and logger metadata keys
-    beamtalk_actor:set_trace_context(#{myKey => <<"val">>}),
-    ?assertEqual(#{myKey => <<"val">>}, beamtalk_actor:get_trace_context()),
-    beamtalk_actor:clear_trace_context(),
-    ?assertEqual(#{}, beamtalk_actor:get_trace_context()).
+    beamtalk_actor_ctx:set_trace_context(#{myKey => <<"val">>}),
+    ?assertEqual(#{myKey => <<"val">>}, beamtalk_actor_ctx:get_trace_context()),
+    beamtalk_actor_ctx:clear_trace_context(),
+    ?assertEqual(#{}, beamtalk_actor_ctx:get_trace_context()).
 
 set_trace_context_merges_test() ->
     %% set_trace_context merges with existing context
-    beamtalk_actor:clear_trace_context(),
-    beamtalk_actor:set_trace_context(#{a => 1}),
-    beamtalk_actor:set_trace_context(#{b => 2}),
-    ?assertEqual(#{a => 1, b => 2}, beamtalk_actor:get_trace_context()),
-    beamtalk_actor:clear_trace_context().
+    beamtalk_actor_ctx:clear_trace_context(),
+    beamtalk_actor_ctx:set_trace_context(#{a => 1}),
+    beamtalk_actor_ctx:set_trace_context(#{b => 2}),
+    ?assertEqual(#{a => 1, b => 2}, beamtalk_actor_ctx:get_trace_context()),
+    beamtalk_actor_ctx:clear_trace_context().
 
 %%% ============================================================================
 %%% Causal trace context tests
@@ -1951,13 +1951,13 @@ get_causal_ctx_empty_when_unset_test() ->
     erase('$beamtalk_trace_id'),
     erase('$beamtalk_span_id'),
     erase('$beamtalk_parent_span_id'),
-    ?assertEqual(#{}, beamtalk_actor:get_causal_ctx()).
+    ?assertEqual(#{}, beamtalk_actor_ctx:get_causal_ctx()).
 
 get_causal_ctx_with_trace_id_only_test() ->
     put('$beamtalk_trace_id', 42),
     erase('$beamtalk_span_id'),
     erase('$beamtalk_parent_span_id'),
-    ?assertEqual(#{trace_id => 42}, beamtalk_actor:get_causal_ctx()),
+    ?assertEqual(#{trace_id => 42}, beamtalk_actor_ctx:get_causal_ctx()),
     erase('$beamtalk_trace_id').
 
 get_causal_ctx_with_all_ids_test() ->
@@ -1965,7 +1965,7 @@ get_causal_ctx_with_all_ids_test() ->
     put('$beamtalk_span_id', 200),
     put('$beamtalk_parent_span_id', 50),
     Expected = #{trace_id => 100, span_id => 200, parent_span_id => 50},
-    ?assertEqual(Expected, beamtalk_actor:get_causal_ctx()),
+    ?assertEqual(Expected, beamtalk_actor_ctx:get_causal_ctx()),
     erase('$beamtalk_trace_id'),
     erase('$beamtalk_span_id'),
     erase('$beamtalk_parent_span_id').
@@ -1975,25 +1975,25 @@ get_causal_ctx_with_all_ids_test() ->
 %%% ============================================================================
 
 get_propagated_ctx_includes_trace_context_test() ->
-    beamtalk_actor:clear_trace_context(),
+    beamtalk_actor_ctx:clear_trace_context(),
     erase('$beamtalk_trace_id'),
-    beamtalk_actor:set_trace_context(#{reqId => <<"r-1">>}),
-    Ctx = beamtalk_actor:get_propagated_ctx(),
+    beamtalk_actor_ctx:set_trace_context(#{reqId => <<"r-1">>}),
+    Ctx = beamtalk_actor_send:get_propagated_ctx(),
     ?assertEqual(#{reqId => <<"r-1">>}, maps:get(trace_ctx, Ctx)),
-    beamtalk_actor:clear_trace_context().
+    beamtalk_actor_ctx:clear_trace_context().
 
 get_propagated_ctx_includes_causal_when_set_test() ->
-    beamtalk_actor:clear_trace_context(),
+    beamtalk_actor_ctx:clear_trace_context(),
     put('$beamtalk_trace_id', 42),
     put('$beamtalk_span_id', 99),
-    Ctx = beamtalk_actor:get_propagated_ctx(),
+    Ctx = beamtalk_actor_send:get_propagated_ctx(),
     ?assertEqual(#{trace_id => 42, span_id => 99}, maps:get(causal, Ctx)),
     erase('$beamtalk_trace_id'),
     erase('$beamtalk_span_id').
 
 get_propagated_ctx_no_causal_when_unset_test() ->
     erase('$beamtalk_trace_id'),
-    Ctx = beamtalk_actor:get_propagated_ctx(),
+    Ctx = beamtalk_actor_send:get_propagated_ctx(),
     ?assertEqual(false, maps:is_key(causal, Ctx)).
 
 %%% ============================================================================
@@ -2001,21 +2001,21 @@ get_propagated_ctx_no_causal_when_unset_test() ->
 %%% ============================================================================
 
 restore_propagated_ctx_restores_trace_context_test() ->
-    beamtalk_actor:clear_trace_context(),
+    beamtalk_actor_ctx:clear_trace_context(),
     PropCtx = #{
         otel => undefined,
         trace_ctx => #{workflowId => <<"wf-restore">>}
     },
     beamtalk_actor:restore_propagated_ctx(PropCtx),
-    ?assertEqual(#{workflowId => <<"wf-restore">>}, beamtalk_actor:get_trace_context()),
-    beamtalk_actor:clear_trace_context().
+    ?assertEqual(#{workflowId => <<"wf-restore">>}, beamtalk_actor_ctx:get_trace_context()),
+    beamtalk_actor_ctx:clear_trace_context().
 
 restore_propagated_ctx_clears_on_empty_trace_ctx_test() ->
     %% When trace_ctx is #{} in propagated context, existing context is cleared
-    beamtalk_actor:set_trace_context(#{stale => <<"should-be-cleared">>}),
+    beamtalk_actor_ctx:set_trace_context(#{stale => <<"should-be-cleared">>}),
     PropCtx = #{otel => undefined, trace_ctx => #{}},
     beamtalk_actor:restore_propagated_ctx(PropCtx),
-    ?assertEqual(#{}, beamtalk_actor:get_trace_context()).
+    ?assertEqual(#{}, beamtalk_actor_ctx:get_trace_context()).
 
 restore_propagated_ctx_restores_causal_context_test() ->
     PropCtx = #{
@@ -3025,7 +3025,7 @@ bt4525_unwrap_dispatch_result_rethrows_nlr_without_store_test() ->
     beamtalk_actor_state:install(Callee),
     try
         Caught =
-            try beamtalk_actor:unwrap_dispatch_result({error, Nlr, Entry}) of
+            try beamtalk_actor_send:unwrap_dispatch_result({error, Nlr, Entry}) of
                 Other -> {returned, Other}
             catch
                 Class:Reason -> {Class, Reason}
@@ -3044,7 +3044,7 @@ bt4525_unwrap_dispatch_result_error_still_stores_test() ->
     try
         ?assertError(
             _,
-            beamtalk_actor:unwrap_dispatch_result({error, {error, boom, []}, Entry})
+            beamtalk_actor_send:unwrap_dispatch_result({error, {error, boom, []}, Entry})
         ),
         ?assertEqual(Entry, beamtalk_actor_state:take())
     after

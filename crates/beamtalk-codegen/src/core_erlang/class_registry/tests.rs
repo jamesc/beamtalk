@@ -4,28 +4,7 @@
 //! `generate_register_class` coverage (ADR 0038 Phase 3).
 
 use super::*;
-use beamtalk_core::source_analysis::Span;
-use beamtalk_core::test_helpers::test_support::make_actor_class;
-
-fn s() -> Span {
-    Span::new(0, 0)
-}
-
-fn empty_module() -> Module {
-    Module {
-        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
-        literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        classes: vec![],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: s(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    }
-}
+use beamtalk_core::test_helpers::test_support::{empty_module, make_actor_class};
 
 #[test]
 fn test_generate_register_class_empty_module_renders_empty() {

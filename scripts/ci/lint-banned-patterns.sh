@@ -31,6 +31,7 @@ ALLOWLIST="scripts/ci/banned-patterns-allowlist.txt"
 # Fixture lines for --self-test live in scripts/ci/fixtures/banned-patterns/<id>.{rs,erl}.
 PATTERNS=(
   "send-literal|rust|crates/beamtalk-codegen/src/core_erlang|'beamtalk_message_dispatch':'send'\(|runtime_send_call (dispatch_codegen/mod.rs)"
+  "send-form-call|rust-join|crates/beamtalk-codegen/src/core_erlang|form::call\([[:space:]]*\"beamtalk_message_dispatch\",[[:space:]]*\"send\"|runtime_send_call (dispatch_codegen/mod.rs)"
   "raw-op-json|rust|crates/beamtalk-cli/src crates/beamtalk-mcp/src crates/beamtalk-lsp/src|\"op\"[[:space:]]*:|RequestBuilder (beamtalk-repl-protocol)"
   "catch-error-map|erl|runtime/apps|error:#\{error[[:space:]]*:=|?assertBtError macro family (beamtalk_test_assert.hrl)"
   "unique-integer|erl|runtime/apps|erlang:unique_integer\(|beamtalk_test_unique:id/0 / atom/1"
@@ -73,8 +74,28 @@ files_for() { # kind pathspecs...
   fi
 }
 
+# Rust kind `rust-join` (scanned like `rust`): each line is matched together with the two lines
+# after it, so a call split across lines is still seen. Reported at its first line.
+join_lines() { # $1 = regex; the match must start on the first of the joined lines
+  RE="$1" awk '
+    { n++; line[n] = $0; match($0, /^[^:]+:[0-9]+:/); pre[n] = substr($0, 1, RLENGTH); file[n] = substr(pre[n], 1, index(pre[n], ":") - 1) }
+    END {
+      re = ENVIRON["RE"]
+      for (i = 1; i <= n; i++) {
+        out = line[i]
+        for (j = i + 1; j <= i + 2 && j <= n && file[j] == file[i]; j++) {
+          t = substr(line[j], length(pre[j]) + 1); sub(/^[ \t]+/, "", t); out = out " " t
+        }
+        if (match(out, re) && RSTART > length(pre[i]) && RSTART <= length(line[i])) print line[i]
+      }
+    }'
+}
+
 # stdin: NUL file list; $1 = scan kind; $2 = regex. Prints matching file:line:text.
-match_lines() { scan_files "$1" | grep -E -- ":[0-9]+:.*($2)" || true; }
+match_lines() {
+  if [[ "$1" == rust-join ]]; then scan_files "$1" | join_lines "$2" || true
+  else scan_files "$1" | grep -E -- ":[0-9]+:.*($2)" || true; fi
+}
 
 self_test() {
   local fail=0 spec id kind specs re repl fx
@@ -131,7 +152,7 @@ report() { # id file:line:text replacement
 
 for spec in "${PATTERNS[@]}"; do
   IFS='|' read -r id kind specs re repl <<<"$spec"
-  fk="${kind%-any}"
+  fk="${kind%-any}"; fk="${fk%-join}"
   # shellcheck disable=SC2086
   hits="$(files_for "$fk" $specs | match_lines "$kind" "$re")"
   while IFS= read -r hit; do

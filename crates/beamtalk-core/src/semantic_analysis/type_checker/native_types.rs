@@ -523,10 +523,60 @@ mod tests {
     // map_type_name tests
     // -----------------------------------------------------------------------
 
+    /// One row per case: `(case, spec type name, expected type)`. The case name
+    /// is in the failure message.
+    fn map_type_name_cases() -> Vec<(&'static str, &'static str, InferredType)> {
+        vec![
+            ("integer", "Integer", InferredType::known("Integer")),
+            ("string", "String", InferredType::known("String")),
+            ("boolean", "Boolean", InferredType::known("Boolean")),
+            ("symbol", "Symbol", InferredType::known("Symbol")),
+            ("list", "List", InferredType::known("List")),
+            ("tuple", "Tuple", InferredType::known("Tuple")),
+            (
+                "dictionary",
+                "Dictionary",
+                InferredType::known("Dictionary"),
+            ),
+            ("pid", "Pid", InferredType::known("Pid")),
+            ("block", "Block", InferredType::known("Block")),
+            ("float", "Float", InferredType::known("Float")),
+            ("number", "Number", InferredType::known("Number")),
+            ("true", "True", InferredType::known("True")),
+            ("false", "False", InferredType::known("False")),
+            // `beamtalk_spec_reader.erl` emits `"Nil"` for the `nil`
+            // atom type. `map_type_name` must not return a bare
+            // `Known("Nil")` pseudo-class. Folding onto the canonical resolver's
+            // `resolve_type_keyword` normalisation resolves it to the real nil
+            // class, `UndefinedObject`, so `isNil`/`ifNil:` narrowing recognises
+            // FFI-typed `Nil` members exactly like a source-written `Integer |
+            // Nil` annotation.
+            ("nil", "Nil", InferredType::known("UndefinedObject")),
+            (
+                "union",
+                "Integer | String",
+                InferredType::simple_union(&["Integer", "String"]),
+            ),
+            // A narrow atom-union spec is emitted by the spec reader as a
+            // singleton union string (`#text | #json`). It must parse into a union
+            // of `Known("#text")` / `Known("#json")` — the same representation the
+            // source annotation `-> #text | #json` resolves to.
+            (
+                "singleton_union",
+                "#text | #json",
+                InferredType::simple_union(&["#text", "#json"]),
+            ),
+            // A lone singleton (no union) parses to a bare `Known("#text")`.
+            ("single_singleton", "#text", InferredType::known("#text")),
+            ("trimmed", "  Integer  ", InferredType::known("Integer")),
+        ]
+    }
+
     #[test]
-    fn map_type_name_integer() {
-        let ty = map_type_name("Integer");
-        assert_eq!(ty, InferredType::known("Integer"));
+    fn map_type_name_maps_plain_names() {
+        for (case, spec, expected) in map_type_name_cases() {
+            assert_eq!(map_type_name(spec), expected, "case `{case}`: {spec:?}");
+        }
     }
 
     #[test]
@@ -536,97 +586,6 @@ mod tests {
             InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::DynamicSpec),
             other => panic!("expected Dynamic(DynamicSpec), got {other:?}"),
         }
-    }
-
-    #[test]
-    fn map_type_name_string() {
-        let ty = map_type_name("String");
-        assert_eq!(ty, InferredType::known("String"));
-    }
-
-    #[test]
-    fn map_type_name_boolean() {
-        let ty = map_type_name("Boolean");
-        assert_eq!(ty, InferredType::known("Boolean"));
-    }
-
-    #[test]
-    fn map_type_name_symbol() {
-        let ty = map_type_name("Symbol");
-        assert_eq!(ty, InferredType::known("Symbol"));
-    }
-
-    #[test]
-    fn map_type_name_list() {
-        let ty = map_type_name("List");
-        assert_eq!(ty, InferredType::known("List"));
-    }
-
-    #[test]
-    fn map_type_name_tuple() {
-        let ty = map_type_name("Tuple");
-        assert_eq!(ty, InferredType::known("Tuple"));
-    }
-
-    #[test]
-    fn map_type_name_dictionary() {
-        let ty = map_type_name("Dictionary");
-        assert_eq!(ty, InferredType::known("Dictionary"));
-    }
-
-    #[test]
-    fn map_type_name_pid() {
-        let ty = map_type_name("Pid");
-        assert_eq!(ty, InferredType::known("Pid"));
-    }
-
-    #[test]
-    fn map_type_name_block() {
-        let ty = map_type_name("Block");
-        assert_eq!(ty, InferredType::known("Block"));
-    }
-
-    #[test]
-    fn map_type_name_float() {
-        let ty = map_type_name("Float");
-        assert_eq!(ty, InferredType::known("Float"));
-    }
-
-    #[test]
-    fn map_type_name_number() {
-        let ty = map_type_name("Number");
-        assert_eq!(ty, InferredType::known("Number"));
-    }
-
-    #[test]
-    fn map_type_name_true() {
-        let ty = map_type_name("True");
-        assert_eq!(ty, InferredType::known("True"));
-    }
-
-    #[test]
-    fn map_type_name_false() {
-        let ty = map_type_name("False");
-        assert_eq!(ty, InferredType::known("False"));
-    }
-
-    #[test]
-    fn map_type_name_nil() {
-        // `beamtalk_spec_reader.erl` emits `"Nil"` for the `nil`
-        // atom type. `map_type_name` must not return a bare
-        // `Known("Nil")` pseudo-class. Folding onto the canonical resolver's
-        // `resolve_type_keyword` normalisation resolves it to the real nil
-        // class, `UndefinedObject`, so `isNil`/`ifNil:` narrowing recognises
-        // FFI-typed `Nil` members exactly like a source-written `Integer |
-        // Nil` annotation.
-        let ty = map_type_name("Nil");
-        assert_eq!(ty, InferredType::known("UndefinedObject"));
-    }
-
-    #[test]
-    fn map_type_name_union() {
-        let ty = map_type_name("Integer | String");
-        assert_eq!(ty, InferredType::simple_union(&["Integer", "String"]));
     }
 
     // -----------------------------------------------------------------------
@@ -766,23 +725,6 @@ mod tests {
     }
 
     #[test]
-    fn map_type_name_singleton_union() {
-        // A narrow atom-union spec is emitted by the spec reader as a
-        // singleton union string (`#text | #json`). It must parse into a union
-        // of `Known("#text")` / `Known("#json")` — the same representation the
-        // source annotation `-> #text | #json` resolves to.
-        let ty = map_type_name("#text | #json");
-        assert_eq!(ty, InferredType::simple_union(&["#text", "#json"]));
-    }
-
-    #[test]
-    fn map_type_name_single_singleton() {
-        // A lone singleton (no union) parses to a bare `Known("#text")`.
-        let ty = map_type_name("#text");
-        assert_eq!(ty, InferredType::known("#text"));
-    }
-
-    #[test]
     fn parse_specs_line_singleton_union_return_type() {
         // End-to-end: a spec line whose return_type is a singleton union
         // registers a union of singleton members (not bare Symbol).
@@ -806,12 +748,6 @@ mod tests {
             InferredType::Dynamic(reason) => assert_eq!(reason, DynamicReason::DynamicSpec),
             other => panic!("expected Dynamic(DynamicSpec), got {other:?}"),
         }
-    }
-
-    #[test]
-    fn map_type_name_trimmed() {
-        let ty = map_type_name("  Integer  ");
-        assert_eq!(ty, InferredType::known("Integer"));
     }
 
     #[test]

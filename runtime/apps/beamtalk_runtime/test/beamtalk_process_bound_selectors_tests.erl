@@ -21,7 +21,11 @@ clauses' own abstract code, so a clause added in Erlang without the Rust list
 
 -include_lib("eunit/include/eunit.hrl").
 
--define(DISPATCH, beamtalk_class_dispatch).
+%% BT-5047: `handle_metaclass_self_call/2` moved to `_recovery`, and the class-self
+%% dispatch to `_self`; the hard-coded clauses are read from all three modules.
+-define(DISPATCH_MODULES, [
+    beamtalk_class_dispatch, beamtalk_class_dispatch_self, beamtalk_class_dispatch_recovery
+]).
 
 setup() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
@@ -37,9 +41,12 @@ generated(Module) ->
 generated() -> generated('bt@stdlib@test_case').
 
 forms() ->
+    lists:append([forms(Module) || Module <- ?DISPATCH_MODULES]).
+
+forms(Module) ->
     %% The object code on the code path, not `code:which/1` (which answers
     %% `cover_compiled` under cover).
-    {?DISPATCH, Beam, _File} = code:get_object_code(?DISPATCH),
+    {Module, Beam, _File} = code:get_object_code(Module),
     {ok, {_, [{abstract_code, {raw_abstract_v1, Forms}}]}} =
         beam_lib:chunks(Beam, [abstract_code]),
     Forms.

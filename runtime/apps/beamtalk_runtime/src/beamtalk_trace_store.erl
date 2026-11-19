@@ -532,10 +532,10 @@ record_dispatch_stop(#{pid := Pid, selector := Selector, mode := Mode} = Metadat
     %% per-dispatch overhead when trace capture is disabled.
     case is_enabled() of
         true ->
-            TraceCtx = beamtalk_actor:get_trace_context(),
+            TraceCtx = beamtalk_actor_ctx:get_trace_context(),
             %% Merge causal trace IDs (trace_id, span_id, parent_span_id)
             %% from process dictionary into trace event metadata.
-            CausalCtx = beamtalk_actor:get_causal_ctx(),
+            CausalCtx = beamtalk_actor_ctx:get_causal_ctx(),
             EventMeta = maps:merge(TraceCtx, CausalCtx),
             record_trace_event(Pid, Class, Selector, Mode, DurationNs, Outcome, EventMeta, stop);
         false ->
@@ -563,9 +563,9 @@ record_dispatch_exception(
     %% tracing is enabled to avoid per-dispatch overhead.
     case is_enabled() of
         true ->
-            TraceCtx = beamtalk_actor:get_trace_context(),
+            TraceCtx = beamtalk_actor_ctx:get_trace_context(),
             %% Merge causal trace IDs into exception metadata.
-            CausalCtx = beamtalk_actor:get_causal_ctx(),
+            CausalCtx = beamtalk_actor_ctx:get_causal_ctx(),
             BaseMeta = #{error => Reason, kind => Kind},
             EventMeta = maps:merge(maps:merge(TraceCtx, CausalCtx), BaseMeta),
             record_trace_event(Pid, Class, Selector, Mode, DurationNs, error, EventMeta, exception);

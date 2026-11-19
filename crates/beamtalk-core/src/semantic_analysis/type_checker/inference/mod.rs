@@ -136,7 +136,7 @@ impl TypeChecker {
                     false, // instance method
                     is_abstract,
                     is_typed,
-                    true, // only instance methods check override compatibility
+                    true, // check override compatibility against the instance-side parent
                     true,
                     value_type_body,
                     hierarchy,
@@ -149,7 +149,7 @@ impl TypeChecker {
                     true, // class method
                     is_abstract,
                     is_typed,
-                    false,
+                    true, // class-side overrides are checked against class-side parents (BT-5026)
                     true,
                     false, // class methods never lower through the value-type body path
                     hierarchy,
@@ -217,9 +217,12 @@ impl TypeChecker {
             // standalone definitions. `check_override_return_compatibility`
             // is: protocol conformance leaves inherited-widening mismatches to
             // it, so an extension override must be checked too (BT-4175).
-            if !standalone.is_class_method {
-                self.check_override_return_compatibility(&standalone.method, class_name, hierarchy);
-            }
+            self.check_override_return_compatibility(
+                &standalone.method,
+                class_name,
+                standalone.is_class_method,
+                hierarchy,
+            );
             // An instance-side extension lowers through the value-type body
             // path unless its target is an actor — codegen's rule (BT-4235).
             let value_type_body =
@@ -296,10 +299,10 @@ impl TypeChecker {
     /// `is_class_method` sets the method's `TypeEnv::in_class_method` flag
     /// and selects which half of the `(class, selector, is_class_method)`
     /// key the inferred return type is cached under.
-    /// `check_override` gates the override-compatibility check (instance
-    /// methods only — a class method has no override relationship to
-    /// validate; a standalone definition runs only the return-type half,
-    /// from its own call site). `check_typed_annotations`
+    /// `check_override` gates the override-compatibility check (a class-side
+    /// method is judged against the class-side method it overrides, BT-5026;
+    /// a standalone definition runs only the return-type half, from its own
+    /// call site). `check_typed_annotations`
     /// gates the typed-class annotation check independently of `is_typed`
     /// (standalone definitions never ran it, even when `is_typed` was true
     /// for `typed_class_context` purposes — preserved verbatim for
@@ -442,8 +445,13 @@ impl TypeChecker {
             self.resolve_self_delegate_return_type(method, body_type, class_name, hierarchy);
         self.check_return_type(method, &body_type, class_name, hierarchy);
         if check_override {
-            self.check_override_param_compatibility(method, class_name, hierarchy);
-            self.check_override_return_compatibility(method, class_name, hierarchy);
+            self.check_override_param_compatibility(method, class_name, is_class_method, hierarchy);
+            self.check_override_return_compatibility(
+                method,
+                class_name,
+                is_class_method,
+                hierarchy,
+            );
         }
         self.check_no_self_in_params(method, class_name);
         if is_typed && check_typed_annotations {

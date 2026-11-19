@@ -111,8 +111,7 @@ For Erlang distribution, node names can be configured:
 **Priority order** (highest to lowest):
 1. CLI flag: `beamtalk repl --node beamtalk_dev@localhost`
 2. Environment variable: `BEAMTALK_NODE_NAME`
-3. Application config: `application:get_env(beamtalk_runtime, node_name, 'beamtalk@localhost')`
-4. Default: `beamtalk@localhost`
+3. Default: `beamtalk@localhost`
 
 ### Parallel Worktrees
 

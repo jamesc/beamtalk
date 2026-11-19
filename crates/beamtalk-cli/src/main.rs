@@ -52,9 +52,8 @@ enum Command {
         #[arg(long)]
         stdlib_mode: bool,
 
-        /// Suppress warning diagnostics
-        #[arg(long)]
-        no_warnings: bool,
+        #[command(flatten)]
+        warnings: commands::WarningFlags,
 
         /// Force recompilation of all files, bypassing change detection
         #[arg(long)]
@@ -114,9 +113,8 @@ enum Command {
         #[arg(long, short)]
         quiet: bool,
 
-        /// Treat compiler warnings as errors (fail the build on any warning)
-        #[arg(long)]
-        warnings_as_errors: bool,
+        #[command(flatten)]
+        warnings: commands::WarningFlags,
     },
 
     /// Compile and run a Beamtalk program
@@ -200,8 +198,14 @@ enum Command {
         #[arg(long)]
         node: Option<String>,
 
-        /// Start node in foreground instead of detached workspace (for debugging)
-        #[arg(long)]
+        /// Start node in foreground instead of detached workspace (for debugging).
+        /// Auto-compiles the package like the workspace path, but has no
+        /// workspace to name, persist or time out, so it conflicts with
+        /// `--workspace`, `--persistent`, `--ephemeral` and `--idle-timeout`.
+        #[arg(
+            long,
+            conflicts_with_all = ["workspace", "persistent", "ephemeral", "idle_timeout"]
+        )]
         foreground: bool,
 
         /// Explicit workspace name (default: auto-detect from current directory)
@@ -209,7 +213,7 @@ enum Command {
         workspace: Option<String>,
 
         /// Disable auto-cleanup (workspace persists even when idle)
-        #[arg(long)]
+        #[arg(long, conflicts_with = "ephemeral")]
         persistent: bool,
 
         /// Request automatic cleanup of detached workspace on REPL exit (ephemeral mode).
@@ -220,7 +224,7 @@ enum Command {
         /// Maximum idle timeout in seconds before auto-cleanup (default: 14400 = 4 hours)
         /// Can also be set via `BEAMTALK_WORKSPACE_TIMEOUT` environment variable
         #[arg(long)]
-        timeout: Option<u64>,
+        idle_timeout: Option<u64>,
 
         /// Disable colored output (also respects `NO_COLOR` environment variable)
         #[arg(long)]
@@ -261,6 +265,9 @@ enum Command {
         /// Source file or directory to check
         #[arg(default_value = ".")]
         path: String,
+
+        #[command(flatten)]
+        warnings: commands::WarningFlags,
     },
 
     /// Format Beamtalk source files in-place
@@ -296,7 +303,9 @@ enum Command {
 
         /// Treat type/DNU warnings and hints as errors — fail on the same
         /// live-recheck diagnostics a REPL `load-project` rejects (BT-4334).
-        /// Without it, lint only fails on lint-severity diagnostics.
+        /// Without it, lint only fails on lint-severity diagnostics. Unlike
+        /// the compile commands' flag of the same name, this covers lint
+        /// findings and live-recheck diagnostics, not compiler warnings.
         #[arg(long)]
         warnings_as_errors: bool,
     },
@@ -314,21 +323,8 @@ enum Command {
         #[arg(default_value = "bootstrap-test")]
         path: String,
 
-        /// Suppress warning diagnostics when compiling test fixtures
-        #[arg(long)]
-        no_warnings: bool,
-
-        /// Treat warnings and hints as errors — fail if any are emitted
-        #[arg(long, conflicts_with = "no_warnings")]
-        warnings_as_errors: bool,
-
-        /// Suppress per-file output, show only summary
-        #[arg(long, short)]
-        quiet: bool,
-
-        /// Show detailed test output including `EUnit` verbose mode
-        #[arg(long = "show-output")]
-        show_output: bool,
+        #[command(flatten)]
+        flags: commands::TestCommandFlags,
     },
 
     /// Run the metamorphic testing harness: apply semantics-preserving AST
@@ -340,21 +336,8 @@ enum Command {
         #[arg(default_value = "bootstrap-test")]
         path: String,
 
-        /// Suppress warning diagnostics when compiling test fixtures
-        #[arg(long)]
-        no_warnings: bool,
-
-        /// Treat warnings and hints as errors — fail if any are emitted
-        #[arg(long, conflicts_with = "no_warnings")]
-        warnings_as_errors: bool,
-
-        /// Suppress per-file output, show only summary
-        #[arg(long, short)]
-        quiet: bool,
-
-        /// Show detailed test output including `EUnit` verbose mode
-        #[arg(long = "show-output")]
-        show_output: bool,
+        #[command(flatten)]
+        flags: commands::TestCommandFlags,
     },
 
     /// Run doctests extracted from Markdown files (` ```beamtalk ` blocks with `// =>` assertions)
@@ -364,21 +347,8 @@ enum Command {
         #[arg(default_value = ".")]
         path: String,
 
-        /// Suppress warning diagnostics when compiling test fixtures
-        #[arg(long)]
-        no_warnings: bool,
-
-        /// Treat warnings and hints as errors — fail if any are emitted
-        #[arg(long, conflicts_with = "no_warnings")]
-        warnings_as_errors: bool,
-
-        /// Suppress per-file output, show only summary
-        #[arg(long, short)]
-        quiet: bool,
-
-        /// Show detailed test output including `EUnit` verbose mode
-        #[arg(long = "show-output")]
-        show_output: bool,
+        #[command(flatten)]
+        flags: commands::TestCommandFlags,
     },
 
     /// Run `BUnit` tests — discover and run `TestCase` subclasses
@@ -387,9 +357,8 @@ enum Command {
         #[arg(default_value = "test")]
         path: String,
 
-        /// Treat warnings and hints as errors — fail if any are emitted
-        #[arg(long)]
-        warnings_as_errors: bool,
+        #[command(flatten)]
+        warnings: commands::WarningFlags,
 
         /// Max concurrent test classes. 0 = auto (scheduler count), 1 = sequential.
         #[arg(long, short = 'j', default_value = "0")]
@@ -466,7 +435,8 @@ enum Command {
         #[arg(default_value = "src")]
         path: String,
 
-        /// Output directory for generated HTML
+        /// Output directory for generated HTML (default: `docs/api`, for both
+        /// API-only mode and `--site`)
         #[arg(long, default_value = "docs/api")]
         output: String,
 
@@ -474,8 +444,9 @@ enum Command {
         #[arg(long)]
         site: bool,
 
-        /// Directory containing prose documentation markdown files
-        #[arg(long, default_value = "docs")]
+        /// Directory containing prose documentation markdown files (only
+        /// used with `--site`)
+        #[arg(long, default_value = "docs", requires = "site")]
         docs_path: String,
     },
 
@@ -666,7 +637,7 @@ fn dispatch_command(command: Command) -> Result<()> {
             path,
             allow_primitives,
             stdlib_mode,
-            no_warnings,
+            warnings,
             force,
             escript,
             entry,
@@ -675,8 +646,7 @@ fn dispatch_command(command: Command) -> Result<()> {
             let options = beamtalk_core::CompilerOptions {
                 stdlib_mode,
                 allow_primitives,
-                suppress_warnings: no_warnings,
-                ..Default::default()
+                ..warnings.compiler_options()
             };
             if escript {
                 let project_root = camino::Utf8PathBuf::from(&path);
@@ -719,10 +689,9 @@ fn dispatch_command(command: Command) -> Result<()> {
                 upgrade_from.as_deref(),
             )
         }
-        Command::BuildStdlib {
-            quiet,
-            warnings_as_errors,
-        } => commands::build_stdlib::build_stdlib(quiet, warnings_as_errors),
+        Command::BuildStdlib { quiet, warnings } => {
+            commands::build_stdlib::build_stdlib(quiet, warnings)
+        }
         Command::Run {
             class_or_dot,
             selector,
@@ -747,7 +716,7 @@ fn dispatch_command(command: Command) -> Result<()> {
             workspace,
             persistent,
             ephemeral,
-            timeout,
+            idle_timeout,
             no_color,
             bind,
             confirm_network,
@@ -759,13 +728,15 @@ fn dispatch_command(command: Command) -> Result<()> {
             workspace.as_deref(),
             persistent,
             ephemeral,
-            timeout,
+            idle_timeout,
             no_color,
             bind.as_deref(),
             confirm_network,
             &log_level,
         ),
-        Command::Check { path } => commands::check::run_check(&path),
+        Command::Check { path, warnings } => {
+            commands::check::run_check(&path, &warnings.compiler_options())
+        }
         Command::Fmt { paths, check } => {
             if check {
                 miette::bail!(
@@ -781,54 +752,16 @@ fn dispatch_command(command: Command) -> Result<()> {
             warnings_as_errors,
         } => commands::lint::run_lint(&path, format, warnings_as_errors),
         Command::Workspace { action } => commands::workspace::cli::run(action),
-        Command::TestScript {
-            path,
-            no_warnings,
-            warnings_as_errors,
-            quiet,
-            show_output,
-        } => {
-            let opts = commands::test_stdlib::TestRunOptions {
-                no_warnings,
-                warnings_as_errors,
-                quiet,
-                verbose: show_output,
-            };
-            commands::test_stdlib::run_tests(&path, &opts)
+        Command::TestScript { path, flags } => {
+            commands::test_stdlib::run_tests(&path, &flags.into())
         }
-        Command::TestDocs {
-            path,
-            no_warnings,
-            warnings_as_errors,
-            quiet,
-            show_output,
-        } => {
-            let opts = commands::test_stdlib::TestRunOptions {
-                no_warnings,
-                warnings_as_errors,
-                quiet,
-                verbose: show_output,
-            };
-            commands::test_docs::run_tests(&path, &opts)
-        }
-        Command::TestMetamorphic {
-            path,
-            no_warnings,
-            warnings_as_errors,
-            quiet,
-            show_output,
-        } => {
-            let opts = commands::test_stdlib::TestRunOptions {
-                no_warnings,
-                warnings_as_errors,
-                quiet,
-                verbose: show_output,
-            };
-            commands::test_metamorphic::run_tests(&path, &opts)
+        Command::TestDocs { path, flags } => commands::test_docs::run_tests(&path, &flags.into()),
+        Command::TestMetamorphic { path, flags } => {
+            commands::test_metamorphic::run_tests(&path, &flags.into())
         }
         Command::Test {
             path,
-            warnings_as_errors,
+            warnings,
             jobs,
             quiet,
             raw_mfa,
@@ -837,13 +770,7 @@ fn dispatch_command(command: Command) -> Result<()> {
             if full_traces {
                 eprintln!("warning: `--full-traces` is deprecated; use `--raw-mfa`");
             }
-            commands::test::run_tests(
-                &path,
-                warnings_as_errors,
-                jobs,
-                quiet,
-                raw_mfa || full_traces,
-            )
+            commands::test::run_tests(&path, warnings, jobs, quiet, raw_mfa || full_traces)
         }
         Command::Generate { action } => commands::generate::cli::run(action),
         Command::Deps { action } => commands::deps::cli::run(action),
@@ -954,7 +881,7 @@ mod tests {
             path: ".".to_string(),
             allow_primitives: false,
             stdlib_mode: false,
-            no_warnings: false,
+            warnings: commands::WarningFlags::default(),
             force: false,
             escript: false,
             entry: Some("Greeter main:".to_string()),
@@ -973,7 +900,7 @@ mod tests {
             path: ".".to_string(),
             allow_primitives: false,
             stdlib_mode: false,
-            no_warnings: false,
+            warnings: commands::WarningFlags::default(),
             force: false,
             escript: false,
             entry: None,
@@ -1002,6 +929,7 @@ mod tests {
         // during source discovery without touching anything else.
         let err = dispatch_command(Command::Check {
             path: "/nonexistent-beamtalk-check-path".to_string(),
+            warnings: commands::WarningFlags::default(),
         })
         .unwrap_err();
         assert!(err.to_string().contains("does not exist"), "got: {err}");

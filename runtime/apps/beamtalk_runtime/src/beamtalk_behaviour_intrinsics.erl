@@ -152,7 +152,7 @@ fixing the inconsistency where `Counter class` returned an object but
 `Counter superclass` returned an atom.
 
 Uses __beamtalk_meta/0 when available; falls back to the
-deadlock-safe metadata lookup (`beamtalk_object_class:superclass_safe/1`)
+deadlock-safe metadata lookup (`beamtalk_object_class_read:superclass_safe/1`)
 for dynamic classes created via beamtalk_class_builder — the same
 ETS source `beamtalk_class_dispatch` reads, instead of a separate
 `gen_server:call` that could disagree with it mid-reload.
@@ -166,7 +166,7 @@ classSuperclass(Self) ->
             {ok, Meta} ->
                 maps:get(superclass, Meta);
             not_available ->
-                case beamtalk_object_class:superclass_safe(ClassPid) of
+                case beamtalk_object_class_read:superclass_safe(ClassPid) of
                     none -> nil;
                     Name -> Name
                 end
@@ -184,7 +184,7 @@ Queries the ETS hierarchy table for O(1) lookup per level.
 -spec classSubclasses(#beamtalk_object{}) -> [#beamtalk_object{}].
 classSubclasses(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     Subclasses = beamtalk_class_registry:direct_subclasses(ClassName),
     lists:filtermap(
         fun(SC) ->
@@ -204,7 +204,7 @@ Queries the ETS hierarchy table recursively.
 -spec classAllSubclasses(#beamtalk_object{}) -> [#beamtalk_object{}].
 classAllSubclasses(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     AllSubclasses = beamtalk_class_registry:all_subclasses(ClassName),
     lists:filtermap(
         fun(SC) ->
@@ -231,7 +231,7 @@ user-defined class methods instead of instance methods.
 -spec classLocalMethods(#beamtalk_object{}) -> [atom()].
 classLocalMethods(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
     %% Metaclass receiver — return user-defined class methods.
-    beamtalk_object_class:local_class_method_selectors_safe(ClassPid);
+    beamtalk_object_class_read:local_class_method_selectors_safe(ClassPid);
 classLocalMethods(Self) ->
     ClassPid = erlang:element(4, Self),
     Module = beamtalk_object_class:module_name_safe(ClassPid),
@@ -239,7 +239,7 @@ classLocalMethods(Self) ->
         {ok, Meta} ->
             maps:keys(maps:get(method_info, Meta));
         not_available ->
-            beamtalk_object_class:instance_methods_safe(ClassPid)
+            beamtalk_object_class_read:instance_methods_safe(ClassPid)
     end.
 
 -doc """
@@ -258,7 +258,7 @@ the same Class/Behaviour/Object protocol).
 classAllSuperclasses(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
     %% walk the parallel metaclass hierarchy (returns metaclass objects).
     %% deadlock-safe metadata lookup, same source dispatch reads.
-    SuperName = beamtalk_object_class:superclass_safe(ClassPid),
+    SuperName = beamtalk_object_class_read:superclass_safe(ClassPid),
     MetaSupers = walk_hierarchy(
         SuperName,
         fun(_CN, CPid, Acc) ->
@@ -287,7 +287,7 @@ classAllSuperclasses(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
 classAllSuperclasses(Self) ->
     ClassPid = erlang:element(4, Self),
     %% deadlock-safe metadata lookup, same source dispatch reads.
-    SuperName = beamtalk_object_class:superclass_safe(ClassPid),
+    SuperName = beamtalk_object_class_read:superclass_safe(ClassPid),
     Supers = walk_hierarchy(
         SuperName,
         fun(CN, CPid, Acc) ->
@@ -313,11 +313,11 @@ of instance methods.
 -spec classMethods(#beamtalk_object{}) -> [atom()].
 classMethods(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
     %% Metaclass receiver — collect class methods up the hierarchy.
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     Acc = walk_hierarchy(
         ClassName,
         fun(_CN, CPid, A) ->
-            ClassMethods = beamtalk_object_class:local_class_method_selectors_safe(CPid),
+            ClassMethods = beamtalk_object_class_read:local_class_method_selectors_safe(CPid),
             {cont, ordsets:union(A, ordsets:from_list(ClassMethods))}
         end,
         ordsets:new()
@@ -325,7 +325,7 @@ classMethods(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
     ordsets:to_list(Acc);
 classMethods(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     Acc = walk_hierarchy(
         ClassName,
         fun(_CN, CPid, A) ->
@@ -335,7 +335,7 @@ classMethods(Self) ->
                     {ok, Meta} ->
                         maps:keys(maps:get(method_info, Meta));
                     not_available ->
-                        beamtalk_object_class:instance_methods_safe(CPid)
+                        beamtalk_object_class_read:instance_methods_safe(CPid)
                 end,
             {cont, ordsets:union(A, ordsets:from_list(Methods))}
         end,
@@ -537,7 +537,7 @@ falls back to the published class metadata for dynamic classes (BT-3826).
 -spec classAllFieldNames(#beamtalk_object{}) -> [atom()].
 classAllFieldNames(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     classAllFieldNamesByName(ClassName).
 
 -doc """
@@ -559,7 +559,7 @@ classAllFieldNamesByName(ClassName) ->
                     {ok, Meta} ->
                         maps:get(fields, Meta);
                     not_available ->
-                        beamtalk_object_class:instance_variables_safe(CPid)
+                        beamtalk_object_class_read:instance_variables_safe(CPid)
                 end,
             {cont, IVars ++ Acc}
         end,
@@ -644,7 +644,7 @@ selector rather than merging it into the instance-side one).
 Dynamic classes built via `beamtalk_class_builder` carry no static meta,
 so they answer `'eager'` for every field they report — ClassBuilder has no
 `late`-slot concept — via the same
-`beamtalk_object_class:instance_variables_safe/1` fallback `classFieldNames/1` uses.
+`beamtalk_object_class_read:instance_variables_safe/1` fallback `classFieldNames/1` uses.
 """.
 -spec classFieldKinds(#beamtalk_object{}) -> #{atom() => eager | late}.
 classFieldKinds(Self) ->
@@ -654,7 +654,7 @@ classFieldKinds(Self) ->
         {ok, Meta} ->
             maps:get(field_kinds, Meta, #{});
         not_available ->
-            Fields = beamtalk_object_class:instance_variables_safe(ClassPid),
+            Fields = beamtalk_object_class_read:instance_variables_safe(ClassPid),
             maps:from_list([{F, eager} || F <- Fields])
     end.
 
@@ -669,7 +669,7 @@ instance-side counterpart to `classAllFieldNames/1`. Delegates to
 -spec classAllFieldKinds(#beamtalk_object{}) -> #{atom() => eager | late}.
 classAllFieldKinds(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     classAllFieldKindsByName(ClassName).
 
 -doc """
@@ -686,7 +686,7 @@ class's entry wins.
 
 A dynamic level with no `__beamtalk_meta/0` (ClassBuilder-built) contributes
 `'eager'` for every field *it* reports, via that level's own
-`beamtalk_object_class:instance_variables_safe(ClassPid)` fallback — same degrade as
+`beamtalk_object_class_read:instance_variables_safe(ClassPid)` fallback — same degrade as
 `classFieldKinds/1`. Returns `#{}` for an unregistered class.
 """.
 -spec classAllFieldKindsByName(atom()) -> #{atom() => eager | late}.
@@ -700,7 +700,7 @@ classAllFieldKindsByName(ClassName) ->
                     {ok, Meta} ->
                         maps:get(field_kinds, Meta, #{});
                     not_available ->
-                        Fields = beamtalk_object_class:instance_variables_safe(CPid),
+                        Fields = beamtalk_object_class_read:instance_variables_safe(CPid),
                         maps:from_list([{F, eager} || F <- Fields])
                 end,
             {cont, maps:merge(FieldKinds, Acc)}
@@ -731,7 +731,7 @@ classIncludesSelector(#beamtalk_object{class = 'Metaclass', pid = ClassPid} = Se
     %% no method of that name.
     compiled_includes_selector(Self, Selector) orelse
         beamtalk_refactor_support:has_runtime_class_fun(
-            beamtalk_object_class:class_name_safe(ClassPid), Selector
+            beamtalk_object_class_read:class_name_safe(ClassPid), Selector
         );
 classIncludesSelector(Self, Selector) ->
     compiled_includes_selector(Self, Selector).
@@ -751,7 +751,7 @@ compiled_includes_selector(#beamtalk_object{class = 'Metaclass', pid = ClassPid}
         {ok, Meta} ->
             maps:is_key(Selector, maps:get(class_method_info, Meta, #{}));
         not_available ->
-            ClassMethods = beamtalk_object_class:local_class_method_selectors_safe(ClassPid),
+            ClassMethods = beamtalk_object_class_read:local_class_method_selectors_safe(ClassPid),
             lists:member(Selector, ClassMethods)
     end;
 compiled_includes_selector(Self, Selector) ->
@@ -761,7 +761,7 @@ compiled_includes_selector(Self, Selector) ->
         {ok, Meta} ->
             maps:is_key(Selector, maps:get(method_info, Meta));
         not_available ->
-            LocalMethods = beamtalk_object_class:instance_methods_safe(ClassPid),
+            LocalMethods = beamtalk_object_class_read:instance_methods_safe(ClassPid),
             lists:member(Selector, LocalMethods)
     end.
 
@@ -779,7 +779,7 @@ classFieldNames(Self) ->
         {ok, Meta} ->
             maps:get(fields, Meta);
         not_available ->
-            beamtalk_object_class:instance_variables_safe(ClassPid)
+            beamtalk_object_class_read:instance_variables_safe(ClassPid)
     end.
 
 -doc """
@@ -818,7 +818,7 @@ class-side slots precede subclass ones).
 -spec classAllClassVarNames(#beamtalk_object{}) -> [atom()].
 classAllClassVarNames(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     walk_hierarchy(
         ClassName,
         fun(_CN, CPid, Acc) ->
@@ -839,7 +839,7 @@ classAllClassVarNames(Self) ->
 -spec className(#beamtalk_object{}) -> atom().
 className(Self) ->
     ClassPid = erlang:element(4, Self),
-    beamtalk_object_class:class_name_safe(ClassPid).
+    beamtalk_object_class_read:class_name_safe(ClassPid).
 
 -doc """
 Return the metaclass object for the receiver.
@@ -1313,7 +1313,7 @@ classDoc(Self) ->
 class_doc(ClassPid) when node(ClassPid) =/= node() ->
     gen_server:call(ClassPid, get_doc);
 class_doc(ClassPid) ->
-    case beamtalk_object_class:class_name_safe(ClassPid) of
+    case beamtalk_object_class_read:class_name_safe(ClassPid) of
         undefined ->
             gen_server:call(ClassPid, get_doc);
         ClassName ->
@@ -1380,7 +1380,7 @@ Delegates to classRemoveFromSystemByName/1 after extracting the class name.
 classRemoveFromSystem(Self) ->
     ClassPid = erlang:element(4, Self),
     ok = beamtalk_refactor_support:refuse_in_own_class_process(ClassPid, removeFromSystem),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     classRemoveFromSystemByName(ClassName).
 
 -doc """
@@ -1602,7 +1602,7 @@ protocol_or_class_module(ClassName, ClassPid) ->
 classReload(Self) ->
     ClassPid = erlang:element(4, Self),
     ok = beamtalk_refactor_support:refuse_in_own_class_process(ClassPid, reload),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     ok = beamtalk_refactor_support:require_class_capability(reload, ClassName, <<"reload">>),
     ModuleName = protocol_or_class_module(ClassName, ClassPid),
     SourceFile = beamtalk_reflection:source_file_from_module(ModuleName),
@@ -1704,7 +1704,7 @@ classMigrateShapeFrom(Self, Fields, FromVersion) when
     is_map(Fields), is_integer(FromVersion), FromVersion > 0
 ->
     ClassPid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     case beamtalk_shape_migration:migrate(ClassName, FromVersion, Fields) of
         {ok, NewFields, _ToVersion} -> NewFields;
         {error, Err} -> beamtalk_error:raise(Err)
@@ -1726,7 +1726,7 @@ The protocol argument is expected to be a Symbol (atom) naming the protocol.
 -spec classConformsTo(#beamtalk_object{}, atom()) -> boolean().
 classConformsTo(Self, ProtocolName) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     beamtalk_protocol_registry:conforms_to(ClassName, ProtocolName).
 
 -doc """
@@ -1738,7 +1738,7 @@ Returns a list of protocol name atoms, sorted alphabetically.
 -spec classProtocols(#beamtalk_object{}) -> [atom()].
 classProtocols(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     beamtalk_protocol_registry:protocols_for_class(ClassName).
 
 -doc """
@@ -1754,7 +1754,7 @@ pure Beamtalk composed on top of this primitive plus `allSuperclasses`.
 -spec classUsedProtocols(#beamtalk_object{}) -> [atom()].
 classUsedProtocols(Self) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     beamtalk_protocol_registry:used_protocols(ClassName).
 
 %%% ============================================================================
@@ -1771,7 +1771,7 @@ the class object. Example: `Counter class class thisClass == Counter`.
 -spec metaclassThisClass(#beamtalk_object{}) -> #beamtalk_object{} | 'nil'.
 metaclassThisClass(Self) ->
     Pid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(Pid),
+    ClassName = beamtalk_object_class_read:class_name_safe(Pid),
     atom_to_class_object(ClassName).
 
 -doc """
@@ -1785,7 +1785,7 @@ Previously used gen_server:call(Pid, superclass) directly (a fix to
 apply_class_info/2 made it update the gen_server superclass from
 __beamtalk_meta/0, so the gen_server always held the correct superclass).
 
-Now uses `beamtalk_object_class:superclass_safe/1` — the same
+Now uses `beamtalk_object_class_read:superclass_safe/1` — the same
 unified-metadata ETS source `beamtalk_class_dispatch` reads — instead of a
 separate `gen_server:call`, so this and dispatch can never disagree mid-reload.
 
@@ -1800,7 +1800,7 @@ in that case, preserving the pre-grounding behaviour.
 -spec metaclassSuperclass(#beamtalk_object{}) -> #beamtalk_object{} | 'nil'.
 metaclassSuperclass(Self) ->
     Pid = erlang:element(4, Self),
-    case beamtalk_object_class:superclass_safe(Pid) of
+    case beamtalk_object_class_read:superclass_safe(Pid) of
         none ->
             atom_to_class_object('Class');
         SuperName ->
@@ -1837,7 +1837,7 @@ metaclassAllMethods(Self) ->
                     {ok, Meta} ->
                         maps:keys(maps:get(method_info, Meta));
                     not_available ->
-                        beamtalk_object_class:instance_methods_safe(CPid)
+                        beamtalk_object_class_read:instance_methods_safe(CPid)
                 end,
             {cont, ordsets:union(A, ordsets:from_list(Methods))}
         end,
@@ -1856,11 +1856,11 @@ Walks the superclass chain collecting all class-side selectors.
 -spec metaclassClassMethods(#beamtalk_object{}) -> [atom()].
 metaclassClassMethods(Self) ->
     Pid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(Pid),
+    ClassName = beamtalk_object_class_read:class_name_safe(Pid),
     Acc = walk_hierarchy(
         ClassName,
         fun(_CN, CPid, A) ->
-            Selectors = beamtalk_object_class:local_class_method_selectors_safe(CPid),
+            Selectors = beamtalk_object_class_read:local_class_method_selectors_safe(CPid),
             {cont, ordsets:union(A, ordsets:from_list(Selectors))}
         end,
         ordsets:new()
@@ -1876,7 +1876,7 @@ Returns only class methods defined directly on this class.
 -spec metaclassLocalClassMethods(#beamtalk_object{}) -> [atom()].
 metaclassLocalClassMethods(Self) ->
     Pid = erlang:element(4, Self),
-    beamtalk_object_class:local_class_method_selectors_safe(Pid).
+    beamtalk_object_class_read:local_class_method_selectors_safe(Pid).
 
 -doc """
 Test whether the selector is defined as a class-side method.
@@ -1887,7 +1887,7 @@ Does NOT check superclasses — local containment only.
 -spec metaclassIncludesSelector(#beamtalk_object{}, atom()) -> boolean().
 metaclassIncludesSelector(Self, Selector) ->
     Pid = erlang:element(4, Self),
-    lists:member(Selector, beamtalk_object_class:local_class_method_selectors_safe(Pid)).
+    lists:member(Selector, beamtalk_object_class_read:local_class_method_selectors_safe(Pid)).
 
 -doc """
 Guard for direct Metaclass instantiation — backs `class sealed new`.
@@ -1966,7 +1966,7 @@ walk_hierarchy(ClassName, Fun, Acc) ->
                     {cont, NewAcc} ->
                         %% deadlock-safe metadata lookup, same source
                         %% dispatch reads, instead of a separate gen_server:call.
-                        case beamtalk_object_class:superclass_safe(ClassPid) of
+                        case beamtalk_object_class_read:superclass_safe(ClassPid) of
                             none -> {found, {result, NewAcc}};
                             Super -> {next, {Super, NewAcc}}
                         end

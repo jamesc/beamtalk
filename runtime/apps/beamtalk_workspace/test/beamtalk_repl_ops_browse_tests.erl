@@ -1403,6 +1403,8 @@ browse_tests(#{class_name := Class}) ->
             ?assert(is_list(Value)),
             Row = find_class_row(Value, Class),
             ?assertNotEqual(undefined, Row),
+            %% The row has the keys and JSON types the shared wire fixture pins (BT-5049).
+            beamtalk_test_wire_payloads:assert_row_shape(<<"browse-classes">>, <<"value">>, Row),
             lists:foreach(
                 fun(Key) -> ?assert(maps:is_key(Key, Row)) end,
                 [

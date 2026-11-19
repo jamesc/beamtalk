@@ -196,8 +196,8 @@ super(Selector, Args, Self, State, CurrentClass) ->
             %% process (or a process it is synchronously blocked on) resolves
             %% via metadata instead of a `gen_server:call' that would
             %% deadlock and surface only as an opaque `{calling_self, ...}'
-            %% exit — see `beamtalk_object_class:superclass_safe/1's doc.
-            case beamtalk_object_class:superclass_safe(ClassPid) of
+            %% exit — see `beamtalk_object_class_read:superclass_safe/1's doc.
+            case beamtalk_object_class_read:superclass_safe(ClassPid) of
                 none ->
                     %% No superclass - method not found
                     Error = beamtalk_error:new(
@@ -528,11 +528,11 @@ compute_step(ClassName, Selector) ->
                                 )
                             of
                                 {ok, _} -> {found, miss};
-                                none -> {next, beamtalk_object_class:superclass_safe(ClassPid)}
+                                none -> {next, beamtalk_object_class_read:superclass_safe(ClassPid)}
                             end
                     end;
                 false ->
-                    case beamtalk_object_class:superclass_safe(ClassPid) of
+                    case beamtalk_object_class_read:superclass_safe(ClassPid) of
                         none -> {found, miss};
                         SuperclassName -> {next, SuperclassName}
                     end
@@ -614,7 +614,7 @@ class_chain_step(Selector, Args, Self, State, ClassName, _Depth) ->
                     invoke_step(ClassName, ClassPid, Selector, Args, Self, State);
                 false ->
                     %% Not found in this class - try superclass
-                    case beamtalk_object_class:superclass_safe(ClassPid) of
+                    case beamtalk_object_class_read:superclass_safe(ClassPid) of
                         none ->
                             %% Reached root without finding method
                             ?LOG_DEBUG("Method not found in hierarchy", #{
@@ -724,7 +724,7 @@ invoke_runtime_fun(MethodOwner, ClassPid, Selector, Args, Self, State) ->
                     )
             end;
         _ ->
-            {continue, beamtalk_object_class:superclass_safe(ClassPid)}
+            {continue, beamtalk_object_class_read:superclass_safe(ClassPid)}
     end.
 
 -doc """
@@ -745,7 +745,7 @@ dispatchable_module(ClassPid) ->
             %% BEAM lazy-loads modules, and function_exported/3 only checks
             %% loaded modules.
             _ = beamtalk_primitive:ensure_class_module_loaded(
-                fun() -> beamtalk_object_class:class_name_or_undefined(ClassPid) end,
+                fun() -> beamtalk_object_class_read:class_name_or_undefined(ClassPid) end,
                 ModuleName
             ),
             %% Verify the module exports dispatch/4 before calling it.

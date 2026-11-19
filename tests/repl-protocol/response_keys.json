@@ -2,7 +2,6 @@
   "comment": "BT-4901: the top-level keys of a REPL response. `rust_keys` are the keys beamtalk_repl_protocol::ReplResponse serialises (checked in response.rs). `erlang_only_keys` are emitted by beamtalk_repl_protocol's encoders but not modelled by that struct; clients read them from the raw JSON (checked in beamtalk_repl_protocol_tests). Add a key to the right list when a response gains one.",
   "rust_keys": [
     "actors",
-    "bindings",
     "class_list",
     "classes",
     "completions",
@@ -14,7 +13,6 @@
     "frames",
     "hint",
     "id",
-    "info",
     "line",
     "message",
     "ops",

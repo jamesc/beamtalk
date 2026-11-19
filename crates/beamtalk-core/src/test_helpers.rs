@@ -165,6 +165,22 @@ pub mod test_support {
         Span::new(0, 0)
     }
 
+    /// Returns an empty [`Module`] (no classes, methods or expressions) at the
+    /// zero-length [`test_span`]. The one `empty_module` for tests that start from
+    /// nothing and fill in the field they exercise with struct-update syntax.
+    #[must_use]
+    pub fn empty_module() -> crate::ast::Module {
+        crate::ast::Module::new(vec![], test_span())
+    }
+
+    /// Returns a [`Module`] holding just `classes` (nothing else) at the
+    /// zero-length [`test_span`]. Tests that need more than classes use
+    /// struct-update syntax over [`empty_module`] instead.
+    #[must_use]
+    pub fn module_with_classes(classes: Vec<ClassDefinition>) -> Module {
+        Module::with_classes(classes, test_span())
+    }
+
     /// Returns the one-byte [`Span`] `0..1`, for tests whose assertions need a
     /// non-empty span (a zero-length span can be mistaken for "no span").
     #[must_use]

@@ -510,6 +510,14 @@ impl CoreErlangGenerator {
                     return Ok(stmts);
                 }
 
+                // BT-5031: no unwrap here, unlike the actor and value-type
+                // walkers, because nothing in a class-method body is classified by a
+                // paren-sensitive predicate: class variables are written in place
+                // (ADR 0130), so a parenthesised `(self.count := ...)` loses nothing,
+                // and the only classification is the local-threading producer check
+                // below, which unwraps (`lower_root_statement_with_producer_in_place`).
+                // `paren_statement_walkers_test.bt` pins the four shapes here.
+                //
                 // ADR 0131 Phase 2: a local-threading producer in this
                 // statement rebinds its locals at the method root.
                 if let Some(result_var) =
@@ -759,12 +767,20 @@ impl CoreErlangGenerator {
             VtBodyExprKind::FoldlListOpWithLocalThreading => {
                 self.generate_vt_foldl_list_op_open(expr)
             }
-            VtBodyExprKind::ConditionalWithLocalThreading => {
-                self.generate_vt_conditional_open(expr)
-            }
-            VtBodyExprKind::ExceptionConstructWithThreading => {
-                self.generate_vt_exception_construct_open(expr)
-            }
+            // BT-5041: a class method has no `Self` family to thread, so a
+            // conditional or `on:do:`/`ensure:` that rebinds an outer local is a
+            // local-threading producer, which `lower_root_statement_with_producer`
+            // lowers before this walker runs. No input reached these two arms (the
+            // stdlib, BUnit and bootstrap corpora, every example and parity project,
+            // the codegen unit tests and 512 generated class-variable programs
+            // were probed), so they are an internal error rather than a copy of the
+            // value-type lowering that could silently drift.
+            VtBodyExprKind::ConditionalWithLocalThreading
+            | VtBodyExprKind::ExceptionConstructWithThreading => Err(CodeGenError::Internal(
+                "class method statement is a local-threading conditional or \
+                     exception construct that the producer gate did not lower"
+                    .to_string(),
+            )),
             VtBodyExprKind::EarlyReturn
             | VtBodyExprKind::FieldAssignment
             | VtBodyExprKind::ConditionalWithSelfFieldThreading

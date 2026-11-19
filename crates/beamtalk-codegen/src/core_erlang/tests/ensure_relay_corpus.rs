@@ -778,7 +778,7 @@ fn a_class_method_running_in_its_caller_stores_no_foreign_cleanup() {
 /// `ActorClosureCellTest`'s performed-`ensure:` cells.
 #[test]
 fn block_ensure_fallback_re_raises_a_foreign_throw_after_its_cleanup() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../stdlib/src/block.bt");
+    let path = beamtalk_workspace::cargo_workspace_root!().join("stdlib/src/block.bt");
     let src = std::fs::read_to_string(path).expect("stdlib/src/block.bt");
     let code = compile_catching_panics(&src).expect("Block compiles with the verifier on");
     for gone in [

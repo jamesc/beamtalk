@@ -24,4 +24,14 @@
 %% First element of the versioned distribution-wire request envelope.
 -define(BT_WIRE_TAG, '$beamtalk_wire').
 
+%% Class tag key of every value-type map and actor state map.
+-define(BT_CLASS_TAG_KEY, '$beamtalk_class').
+
+%% Actor state-map key carrying the instance's compiled class module.
+-define(BT_CLASS_MOD_KEY, '__class_mod__').
+
+%% `init/1` argument key a child sets when calling its parent's `init/1`
+%% as a state-building helper.
+-define(BT_SKIP_INITIALIZE_KEY, '__skip_initialize__').
+
 -endif.

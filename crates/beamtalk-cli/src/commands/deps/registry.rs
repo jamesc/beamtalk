@@ -1001,12 +1001,10 @@ pub(crate) mod test_support {
 mod tests {
     use super::test_support::IsolatedRegistryCache;
     use super::*;
+    use crate::commands::test_support::utf8;
     use crate::commands::util::to_forward_slash;
+    use beamtalk_workspace::test_cwd::with_cwd;
     use tempfile::TempDir;
-
-    fn utf8(dir: &TempDir) -> Utf8PathBuf {
-        Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap()
-    }
 
     /// Render an error as a single line — miette's `Debug` output hard-wraps
     /// to the terminal width, which would otherwise break phrase assertions.
@@ -1594,19 +1592,6 @@ git = "g"
         assert!(root_b.starts_with(utf8(&override_dir)));
     }
 
-    /// RAII guard restoring the process cwd on drop. The working directory is
-    /// process-global, so callers must serialize tests using this with
-    /// `#[serial(cwd)]` — including against each other, or a panic in one
-    /// could strand the process cwd inside a tempdir another test then
-    /// deletes out from under it.
-    struct CwdGuard(std::path::PathBuf);
-
-    impl Drop for CwdGuard {
-        fn drop(&mut self) {
-            let _ = std::env::set_current_dir(&self.0);
-        }
-    }
-
     #[test]
     #[serial_test::serial(env_var)]
     fn test_registry_cache_root_relative_env_var_override_resolves_against_project_root() {
@@ -1643,14 +1628,10 @@ git = "g"
         let _env_guard = unsafe { EnvVarGuard::set(REGISTRY_CACHE_DIR_ENV_VAR, "_build/registry") };
         let url = "https://example.test/registry";
 
-        let original_cwd = std::env::current_dir().unwrap();
-        let _cwd_guard = CwdGuard(original_cwd);
-
-        std::env::set_current_dir(project_root.as_std_path()).unwrap();
-        let from_project_root_cwd = registry_cache_root(url, &project_root);
-
-        std::env::set_current_dir(elsewhere.path()).unwrap();
-        let from_elsewhere_cwd = registry_cache_root(url, &project_root);
+        let from_project_root_cwd =
+            with_cwd(&project_root, || registry_cache_root(url, &project_root));
+        let from_elsewhere_cwd =
+            with_cwd(elsewhere.path(), || registry_cache_root(url, &project_root));
 
         assert_eq!(from_project_root_cwd, from_elsewhere_cwd);
     }

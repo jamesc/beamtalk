@@ -370,7 +370,9 @@ The Beamtalk REPL is an interactive development environment connected to a persi
 
 ```bash
 beamtalk repl                # Start or reconnect to workspace
-beamtalk repl --foreground   # Start node in foreground (debug mode)
+beamtalk repl --foreground   # Start node in foreground (debug mode; conflicts with --workspace,
+                             # --persistent, --ephemeral and --idle-timeout)
+beamtalk repl --idle-timeout 600  # Stop the workspace after 10 idle minutes
 beamtalk repl --port 9090    # Use a specific port
 beamtalk repl --node mynode  # Use a specific node name
 ```

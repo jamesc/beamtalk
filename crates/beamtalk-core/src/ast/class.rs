@@ -224,6 +224,18 @@ pub struct ClassDefinition {
 }
 
 impl ClassDefinition {
+    /// This class's state and class-variable default expressions (BT-5026) —
+    /// the one enumeration of them; [`Module::state_default_exprs`] and the
+    /// name resolver / analyser all go through it.
+    ///
+    /// [`Module::state_default_exprs`]: crate::ast::Module::state_default_exprs
+    pub fn state_default_exprs(&self) -> impl Iterator<Item = &Expression> {
+        self.state
+            .iter()
+            .chain(&self.class_variables)
+            .filter_map(|d| d.default_value.as_ref())
+    }
+
     /// Creates a new class definition.
     #[must_use]
     pub fn new(
@@ -343,6 +355,47 @@ impl ClassDefinition {
     #[must_use]
     pub fn effective_shape_version(&self) -> u32 {
         self.shape_version.as_ref().map_or(1, |sv| sv.version)
+    }
+}
+
+#[cfg(any(test, feature = "test"))]
+impl ClassDefinition {
+    /// Test fixture: a plain, non-abstract, non-sealed class named `name` that
+    /// extends `superclass` (`None` for a root class), with every other field at
+    /// its neutral value (no state, methods, comments or type parameters) and a
+    /// zero-length span.
+    ///
+    /// Tests override the fields they care about with struct-update syntax:
+    /// `ClassDefinition { is_abstract: true, ..ClassDefinition::test("Shape", Some("Actor"), ClassKind::Actor) }`.
+    /// [`ClassDefinition::test_subclass`] derives the kind from the superclass
+    /// name the way the parser does. Deliberately not a `Default` impl: no
+    /// production caller builds a nameless class. Compiled only for tests and
+    /// the `test` feature (dependent crates' dev-dependencies).
+    #[must_use]
+    pub fn test(name: &str, superclass: Option<&str>, kind: ClassKind) -> Self {
+        let span = Span::new(0, 0);
+        Self {
+            class_kind: kind,
+            ..Self::with_modifiers(
+                Identifier::new(name, span),
+                superclass.map(|s| Identifier::new(s, span)),
+                ClassModifiers::default(),
+                Vec::new(),
+                Vec::new(),
+                span,
+            )
+        }
+    }
+
+    /// [`ClassDefinition::test`] for `name` extending `superclass`, with the
+    /// kind the parser would assign ([`ClassKind::from_superclass_name`]).
+    #[must_use]
+    pub fn test_subclass(name: &str, superclass: &str) -> Self {
+        Self::test(
+            name,
+            Some(superclass),
+            ClassKind::from_superclass_name(superclass),
+        )
     }
 }
 
@@ -728,6 +781,18 @@ pub struct StateDeclaration {
     pub doc_comment: Option<String>,
     /// Source location.
     pub span: Span,
+}
+
+#[cfg(any(test, feature = "test"))]
+impl StateDeclaration {
+    /// Test fixture: an untyped `state:` slot named `name` with no default and a
+    /// zero-length span. Tests override the fields they care about with
+    /// struct-update syntax. Compiled only for tests and the `test` feature.
+    #[must_use]
+    pub fn test(name: &str) -> Self {
+        let span = Span::new(0, 0);
+        Self::new(Identifier::new(name, span), span)
+    }
 }
 
 impl StateDeclaration {

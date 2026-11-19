@@ -54,7 +54,7 @@ Regex objects are represented as tagged maps:
 -define(RECEIVER_ARG_HINT, <<"Receiver must be a String, argument a String or Regex">>).
 
 %% A pattern ready for `re:run/3` and friends: precompiled, or raw source.
--type matcher() :: {compiled, re:mp()} | {pattern, binary()}.
+-type matcher() :: {compiled, re:mp()} | {pattern, binary(), [unicode | ucp]}.
 
 %%% ============================================================================
 %%% Class Methods — Constructors
@@ -72,7 +72,7 @@ from(Source) ->
         Source, 'Regex', 'from:', <<"Pattern must be a String">>
     ),
     Tagged = {beamtalk_string, Pattern},
-    case re:compile(Pattern) of
+    case re:compile(Pattern, text_opts(Source)) of
         {ok, MP} ->
             beamtalk_result:from_tagged_tuple(
                 {ok, #{
@@ -103,7 +103,7 @@ from(Source, Options) ->
     Pattern = beamtalk_text:unwrap_or_raise(Source, 'Regex', 'from:options:', Hint),
     is_list(Options) orelse beamtalk_error:raise_type_error('Regex', 'from:options:', Hint),
     Tagged = {beamtalk_string, Pattern},
-    ErlOpts = translate_options(Options),
+    ErlOpts = translate_options(Options) ++ text_opts(Source),
     case re:compile(Pattern, ErlOpts) of
         {ok, MP} ->
             beamtalk_result:from_tagged_tuple(
@@ -146,7 +146,9 @@ source(#{source := Src}) -> Src.
     boolean().
 matches_regex(Str, Pattern) ->
     {Bin, Matcher} = text_and_matcher(Str, Pattern, 'matchesRegex:', ?RECEIVER_ARG_HINT),
-    run_matcher(Matcher, 'matchesRegex:', fun(M) -> re:run(Bin, M, [{capture, none}]) =:= match end).
+    run_matcher(Matcher, 'matchesRegex:', Bin, fun(M) ->
+        re:run(Bin, M, [{capture, none}]) =:= match
+    end).
 
 -doc "Test if string matches pattern with options (String only pattern).".
 -spec matches_regex_options(beamtalk_string:t() | binary(), beamtalk_string:t() | binary(), list()) ->
@@ -157,12 +159,13 @@ matches_regex_options(Str, Pattern, Options) ->
     PatternBin = beamtalk_text:unwrap_or_raise(Pattern, 'String', 'matchesRegex:options:', Hint),
     is_list(Options) orelse
         beamtalk_error:raise_type_error('String', 'matchesRegex:options:', Hint),
-    CompileOpts = translate_options(Options),
-    ErlOpts = [{capture, none} | CompileOpts],
-    try
-        re:run(Bin, PatternBin, ErlOpts) =:= match
-    catch
-        error:badarg ->
+    CompileOpts = translate_options(Options) ++ text_opts(Pattern),
+    case re:compile(PatternBin, CompileOpts) of
+        {ok, MP} ->
+            run_subject('matchesRegex:options:', Bin, fun() ->
+                re:run(Bin, MP, [{capture, none}]) =:= match
+            end);
+        {error, _} ->
             raise_bad_pattern('matchesRegex:options:', PatternBin, CompileOpts)
     end.
 
@@ -171,7 +174,7 @@ matches_regex_options(Str, Pattern, Options) ->
     beamtalk_string:t() | 'nil'.
 first_match(Str, Pattern) ->
     {Bin, Matcher} = text_and_matcher(Str, Pattern, 'firstMatch:', ?RECEIVER_ARG_HINT),
-    run_matcher(Matcher, 'firstMatch:', fun(M) ->
+    run_matcher(Matcher, 'firstMatch:', Bin, fun(M) ->
         case re:run(Bin, M, [{capture, first, binary}]) of
             {match, [Match]} -> validated_match('firstMatch:', Match);
             nomatch -> nil
@@ -182,7 +185,7 @@ first_match(Str, Pattern) ->
 -spec all_matches(beamtalk_string:t() | binary(), beamtalk_string:t() | binary() | map()) -> list().
 all_matches(Str, Pattern) ->
     {Bin, Matcher} = text_and_matcher(Str, Pattern, 'allMatches:', ?RECEIVER_ARG_HINT),
-    run_matcher(Matcher, 'allMatches:', fun(M) ->
+    run_matcher(Matcher, 'allMatches:', Bin, fun(M) ->
         case re:run(Bin, M, [global, {capture, first, binary}]) of
             {match, Matches} -> [validated_match('allMatches:', Hit) || [Hit] <- Matches];
             nomatch -> []
@@ -213,7 +216,7 @@ replace_all_regex(Str, Pattern, Replacement) ->
 -spec split_regex(beamtalk_string:t() | binary(), beamtalk_string:t() | binary() | map()) -> list().
 split_regex(Str, Pattern) ->
     {Bin, Matcher} = text_and_matcher(Str, Pattern, 'splitRegex:', ?RECEIVER_ARG_HINT),
-    run_matcher(Matcher, 'splitRegex:', fun(M) ->
+    run_matcher(Matcher, 'splitRegex:', Bin, fun(M) ->
         [validated_match('splitRegex:', Part) || Part <- re:split(Bin, M, [{return, binary}, trim])]
     end).
 
@@ -229,8 +232,10 @@ Shared body of `replace_regex/3` and `replace_all_regex/3`; `ReOpts` is
 replace_with(Str, Pattern, Replacement, Selector, ReOpts) ->
     Hint = <<"Arguments must be Strings or Regex">>,
     {Bin, Matcher} = text_and_matcher(Str, Pattern, Selector, Hint),
-    Repl = beamtalk_text:unwrap_or_raise(Replacement, 'String', Selector, Hint),
-    run_matcher(Matcher, Selector, fun(M) ->
+    Repl = valid_text(
+        Selector, beamtalk_text:unwrap_or_raise(Replacement, 'String', Selector, Hint)
+    ),
+    run_matcher(Matcher, Selector, Bin, fun(M) ->
         validated_match(Selector, re:replace(Bin, M, Repl, ReOpts ++ [{return, binary}]))
     end).
 
@@ -246,34 +251,86 @@ text_and_matcher(Str, Pattern, Selector, Hint) ->
         #{'$beamtalk_class' := 'Regex', compiled := MP} ->
             {Bin, {compiled, MP}};
         _ ->
-            {Bin, {pattern, beamtalk_text:unwrap_or_raise(Pattern, 'String', Selector, Hint)}}
+            PatternBin = beamtalk_text:unwrap_or_raise(Pattern, 'String', Selector, Hint),
+            {Bin, {pattern, PatternBin, text_opts(Pattern)}}
     end.
 
 -doc """
-Run `Fun` with the compiled regex, or with the raw pattern source — in which
-case `re` compiles it, and a `badarg` means the pattern is invalid and raises
-the structured `regex_error` for `Selector`.
+Run `Fun` with the compiled regex, or compile the raw pattern source first
+(with its `text_opts/1`); an invalid pattern raises the structured
+`regex_error` for `Selector`.
 """.
--spec run_matcher(matcher(), atom(), fun((re:mp() | binary()) -> T)) -> T.
-run_matcher({compiled, MP}, _Selector, Fun) ->
-    Fun(MP);
-run_matcher({pattern, Pattern}, Selector, Fun) ->
-    %% bt-catcher-audit: not-applicable-no-block - `Fun` is an internal re:* closure, never a Beamtalk block
-    try
-        Fun(Pattern)
-    catch
-        error:badarg -> raise_bad_pattern(Selector, Pattern)
+-spec run_matcher(matcher(), atom(), binary(), fun((re:mp()) -> T)) -> T.
+run_matcher({compiled, MP}, Selector, Bin, Fun) ->
+    run_subject(Selector, Bin, fun() -> Fun(MP) end);
+run_matcher({pattern, Pattern, Opts}, Selector, Bin, Fun) ->
+    case re:compile(Pattern, Opts) of
+        {ok, MP} -> run_subject(Selector, Bin, fun() -> Fun(MP) end);
+        {error, _} -> raise_bad_pattern(Selector, Pattern, Opts)
     end.
+
+-doc "Raise the `parse_error` for a binary that is not text, naming `Selector` and carrying `Hint`.".
+-spec raise_not_text(atom(), binary()) -> no_return().
+raise_not_text(Selector, Hint) ->
+    Error0 = beamtalk_error:new(parse_error, 'String'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    beamtalk_error:raise(beamtalk_error:with_hint(Error1, Hint)).
+
+-doc """
+A replacement is text: raise `parse_error` naming `Selector` when it is not
+valid UTF-8 (a bare-binary replacement from the FFI).
+""".
+-spec valid_text(atom(), binary()) -> binary().
+valid_text(Selector, Bin) ->
+    case beamtalk_binary:check_utf8(Bin) of
+        {ok, Valid} ->
+            Valid;
+        {error, _} ->
+            raise_not_text(Selector, <<"Replacement is not valid UTF-8 text">>)
+    end.
+
+-doc """
+Run `Run` against an already compiled pattern, with `Bin` as the subject. A
+`badarg` is reported as `parse_error` naming `Selector` only when `Bin` is not
+valid UTF-8 (a bare-binary receiver from the FFI under a Unicode-mode
+pattern); any other `badarg` is re-raised unchanged.
+""".
+-spec run_subject(atom(), binary(), fun(() -> T)) -> T.
+run_subject(Selector, Bin, Run) ->
+    %% bt-catcher-audit: not-applicable-no-block - `Run` is an internal re:* closure, never a Beamtalk block
+    try
+        Run()
+    catch
+        error:badarg:Stack ->
+            case unicode:characters_to_binary(Bin) of
+                Bin ->
+                    erlang:raise(error, badarg, Stack);
+                _ ->
+                    raise_not_text(Selector, <<"Receiver is not valid UTF-8 text">>)
+            end
+    end.
+
+-doc """
+Compile options for a pattern given as `Value` (BT-5030).
+
+A tagged `String` pattern compiles in Unicode mode (`unicode`, `ucp`): `.`
+matches one character, `\w`/`\b`/`\d` and caseless matching see non-ASCII
+letters. A bare binary (the FFI spelling) keeps `re`'s byte semantics.
+`Regex from:` records the pattern as a `String` either way, so `Regex from:`
+applied to the `source` of a regex built from a bare binary compiles in
+Unicode mode.
+""".
+-spec text_opts(term()) -> [unicode | ucp].
+text_opts({beamtalk_string, _}) -> [unicode, ucp];
+text_opts(_) -> [].
 
 -doc """
 Wrap a regex-produced binary as a `String` (BT-4170).
 
-`re` is byte-oriented here (patterns compile without the `unicode`
-option), so a match or substitution boundary can split a multi-byte
-character — the fragment is bytes, not text, and wrapping it unchecked
-would forge a corrupt `String`. Validate first; a fragment raises
-`parse_error` naming `Selector` (byte-oriented matching belongs on
-`Binary`).
+A byte-mode pattern (a bare-binary pattern, see `text_opts/1`) can split a
+multi-byte character at a match or substitution boundary — the fragment is
+bytes, not text, and wrapping it unchecked would forge a corrupt `String`.
+Validate first; a fragment raises `parse_error` naming `Selector`.
 """.
 -spec validated_match(atom(), binary()) -> beamtalk_string:t().
 validated_match(Selector, Bin) when is_binary(Bin) ->
@@ -281,22 +338,14 @@ validated_match(Selector, Bin) when is_binary(Bin) ->
         {ok, Valid} ->
             beamtalk_primitive:string_from_binary(Valid);
         {error, _} ->
-            Error0 = beamtalk_error:new(parse_error, 'String'),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
+            raise_not_text(
+                Selector,
                 <<"Match boundary splits a multi-byte character; match bytes on Binary instead">>
-            ),
-            beamtalk_error:raise(Error2)
+            )
     end.
 
--doc "Raise a structured regex_error for invalid patterns in String methods.".
--spec raise_bad_pattern(atom(), binary()) -> no_return().
-raise_bad_pattern(Selector, Pattern) ->
-    raise_bad_pattern(Selector, Pattern, []).
-
 -doc """
-`raise_bad_pattern/2` for a call that compiled with `CompileOpts`: recompiling
+Raise the structured error for a call that compiled with `CompileOpts`: recompiling
 with the same options reproduces `re:compile`'s error (and its `reason`) for a
 pattern that is only invalid under them, e.g. `(#)` with `extended`.
 """.
