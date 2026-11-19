@@ -189,12 +189,6 @@ fn definite_assignment_diags(checker: &TypeChecker) -> Vec<Diagnostic> {
         .collect()
 }
 
-fn build_hierarchy(class: ClassDefinition) -> ClassHierarchy {
-    ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
-        .0
-        .unwrap()
-}
-
 // --- Tests -------------------------------------------------------------
 
 #[test]
@@ -203,7 +197,7 @@ fn bare_spawn_on_unassigned_slot_warns() {
     // `initialize` in the (empty) chain assigns it.
     let class = counter_actor(vec![count_slot()], vec![], vec![]);
     let module = make_module(vec![bare_spawn()]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     let diags = definite_assignment_diags(&checker);
     assert_eq!(
@@ -242,7 +236,7 @@ fn spawn_with_map_supplying_slot_does_not_warn() {
     // Counter spawnWith: #{#count => 0} — the literal map supplies `count`.
     let class = counter_actor(vec![count_slot()], vec![], vec![]);
     let module = make_module(vec![spawn_with(map_lit(vec![(key("count"), int_lit(0))]))]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
@@ -255,7 +249,7 @@ fn spawn_with_map_supplying_slot_does_not_warn() {
 fn spawn_with_empty_map_missing_slot_warns() {
     let class = counter_actor(vec![count_slot()], vec![], vec![]);
     let module = make_module(vec![spawn_with(map_lit(vec![]))]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert_eq!(
         definite_assignment_diags(&checker).len(),
@@ -273,7 +267,7 @@ fn spawn_with_non_literal_map_is_silent() {
         assign("someMap", map_lit(vec![])),
         spawn_with(var("someMap")),
     ]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
@@ -292,7 +286,7 @@ fn initialize_straight_line_assignment_silences_the_warning() {
         vec![],
     );
     let module = make_module(vec![bare_spawn()]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
@@ -312,7 +306,7 @@ fn initialize_conditional_if_true_only_still_warns() {
         vec![],
     );
     let module = make_module(vec![bare_spawn()]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     let diags = definite_assignment_diags(&checker);
     assert_eq!(
@@ -388,7 +382,7 @@ fn ancestor_dynamic_field_writer_downgrades_severity_to_hint() {
 fn late_slot_does_not_warn() {
     let class = counter_actor(vec![late_proc_slot()], vec![], vec![]);
     let module = make_module(vec![bare_spawn()]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
@@ -401,7 +395,7 @@ fn late_slot_does_not_warn() {
 fn native_ancestor_downgrades_severity_to_hint() {
     let class = native_actor(vec![count_slot()]);
     let module = make_module(vec![bare_spawn()]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     let diags = definite_assignment_diags(&checker);
     assert_eq!(
@@ -429,7 +423,7 @@ fn dynamic_field_writer_downgrades_severity_to_hint() {
         vec![],
     );
     let module = make_module(vec![bare_spawn()]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     let diags = definite_assignment_diags(&checker);
     assert_eq!(
@@ -452,7 +446,7 @@ fn value_class_is_never_checked() {
     // BT-3552's own construction-site check covers `new`/`new:` on Values.
     let class = widget_value(vec![count_slot()]);
     let module = make_module(vec![bare_spawn_for("Widget")]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
@@ -477,7 +471,7 @@ fn untyped_slot_does_not_warn() {
         vec![],
     );
     let module = make_module(vec![bare_spawn()]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),
@@ -490,7 +484,7 @@ fn untyped_slot_does_not_warn() {
 fn no_state_slots_produces_no_diagnostic() {
     let class = counter_actor(vec![], vec![], vec![]);
     let module = make_module(vec![bare_spawn()]);
-    let hierarchy = build_hierarchy(class);
+    let hierarchy = build_class_hierarchy(class);
     let checker = check(&module, &hierarchy);
     assert!(
         definite_assignment_diags(&checker).is_empty(),

@@ -12,17 +12,9 @@
 
 use super::common::*;
 use crate::compilation::diagnostics_policy::{
-    apply_diagnostics_table, apply_expect_directives, parse_diagnostics_table_from_manifest_toml,
+    apply_diagnostics_table, parse_diagnostics_table_from_manifest_toml,
 };
 use crate::source_analysis::Severity;
-
-fn diagnostics(source: &str) -> Vec<Diagnostic> {
-    let (module, hierarchy) = parse_and_build(source);
-    let mut checker = check(&module, &hierarchy);
-    let mut diags = checker.take_diagnostics();
-    apply_expect_directives(&module, &mut diags);
-    diags
-}
 
 fn compare_hints(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
     diags
@@ -42,7 +34,7 @@ fn probe_with(param: &str, body: &str) -> String {
 }
 
 fn assert_one_hint(source: &str) {
-    let diags = diagnostics(source);
+    let diags = diags_parse_ok_with_expect(source);
     let hints = compare_hints(&diags);
     assert_eq!(
         hints.len(),
@@ -65,7 +57,7 @@ fn assert_one_hint(source: &str) {
 }
 
 fn assert_no_hint(source: &str) {
-    let diags = diagnostics(source);
+    let diags = diags_parse_ok_with_expect(source);
     assert!(
         compare_hints(&diags).is_empty(),
         "expected no binary-string-compare hint for {source:?}: {diags:#?}"
@@ -245,7 +237,7 @@ fn string_segment_construction_is_still_raw() {
 fn dictionary_key_hint_accompanies_the_argument_type_warning() {
     // The generic argument check already warns that the key is not a
     // String; the hint adds why the lookup can never succeed.
-    let diags = diagnostics(&probe_with(
+    let diags = diags_parse_ok_with_expect(&probe_with(
         "d :: Dictionary(String, Integer)",
         "d at: (Binary fromBytes: #(97))",
     ));
@@ -346,7 +338,7 @@ fn expect_binary_string_compare_suppresses_the_hint() {
     );
     assert!(crate::ast::ExpectCategory::valid_names().contains(&"binary_string_compare"));
 
-    let diags = diagnostics(&probe(
+    let diags = diags_parse_ok_with_expect(&probe(
         "@expect binary_string_compare\n    (Binary fromBytes: #(97)) == s",
     ));
     assert!(
@@ -357,7 +349,7 @@ fn expect_binary_string_compare_suppresses_the_hint() {
 
 #[test]
 fn diagnostics_table_off_drops_the_hint() {
-    let diags = diagnostics(&probe("(Binary fromBytes: #(97)) == s"));
+    let diags = diags_parse_ok_with_expect(&probe("(Binary fromBytes: #(97)) == s"));
     assert_eq!(compare_hints(&diags).len(), 1);
 
     let table = parse_diagnostics_table_from_manifest_toml(

@@ -18,11 +18,7 @@ typed Object subclass: Repro
 }
 
 fn assert_clean(body: &str) {
-    let diags = type_dnu_diags(&method(body));
-    assert!(
-        diags.is_empty(),
-        "expected no diagnostics for:\n{body}\ngot: {diags:#?}"
-    );
+    assert_clean_diags(&type_dnu_diags(&method(body)), body);
 }
 
 /// Asserts the body is rejected *because* `x` still (or only) includes nil:
