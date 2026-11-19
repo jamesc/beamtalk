@@ -142,7 +142,7 @@ fn class_method_local_threading_constructs_never_reach_the_internal_error_arm() 
         // Every shape compiles today (through the producer route). Require success, not just
         // "not `Internal`": a structured rejection would hide a regression in the producer route.
         assert!(
-            hits.iter().all(|h| !h.ends_with("_open")),
+            hits.is_empty(),
             "body {i} took an *_open lowering: {hits:?}\n{src}"
         );
         assert!(
