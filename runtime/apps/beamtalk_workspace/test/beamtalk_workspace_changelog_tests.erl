@@ -1138,15 +1138,19 @@ rotation_test_() ->
         {timeout, 60, fun rotation_archives_overflow/0},
         {timeout, 60, fun rotation_keeps_state_when_archive_fails/0},
         {timeout, 60, fun archive_filenames_unique_within_same_second/0},
-        {timeout, 60, fun load_enforces_ring_bound_when_disk_exceeds_max/0}
+        {timeout, 60, fun load_enforces_ring_bound_when_disk_exceeds_max/0},
+        {timeout, 60, fun rotation_never_archives_unflushed_entries/0},
+        {timeout, 60, fun rotation_edit_rotate_flush_sequence/0}
     ]}.
 
 rotation_archives_overflow() ->
     {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     try
         {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
-        %% Append MAX_ENTRIES + 3 entries; the 3 oldest must be archived.
-        Total = 1003,
+        %% Fill the ring (10 oldest flushed), then overflow by 3: the 3 oldest
+        %% flushed entries are archived.
+        Total = 3,
+        fill_ring_with_flushed_head(10),
         lists:foreach(
             fun(N) ->
                 Sel = list_to_binary("m" ++ integer_to_list(N)),
@@ -1178,7 +1182,8 @@ rotation_keeps_state_when_archive_fails() ->
     {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     try
         {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
-        Total = 1003,
+        Total = 3,
+        fill_ring_with_flushed_head(10),
         lists:foreach(
             fun(N) ->
                 Sel = list_to_binary("m" ++ integer_to_list(N)),
@@ -1220,14 +1225,15 @@ archive_filenames_unique_within_same_second() ->
     try
         {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
         %% Drive enough appends to force at least two separate rotations quickly.
+        fill_ring_with_flushed_head(10),
         lists:foreach(
             fun(N) ->
                 Sel = list_to_binary("m" ++ integer_to_list(N)),
                 {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, Sel))
             end,
-            lists:seq(1, 1002)
+            lists:seq(1, 2)
         ),
-        %% First rotation done. Append more to trigger a second rotation in the
+        %% First rotations done. Append more to trigger another in the
         %% (very likely) same second.
         lists:foreach(
             fun(N) ->
@@ -1276,6 +1282,97 @@ load_enforces_ring_bound_when_disk_exceeds_max() ->
         LogLines = binary:split(LogBin, <<"\n">>, [global, trim_all]),
         ?assertEqual(1000, Size),
         ?assertEqual(1000, length(LogLines)),
+        beamtalk_test_proc:shutdown(Pid)
+    after
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
+    end.
+
+%% Append MAX_ENTRIES entries, then mark the oldest `K` flushed so a later
+%% overflow has K archivable entries.
+fill_ring_with_flushed_head(K) ->
+    Seqs = [
+        begin
+            Sel = list_to_binary("f" ++ integer_to_list(N)),
+            {ok, Seq} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, Sel)),
+            Seq
+        end
+     || N <- lists:seq(1, 1000)
+    ],
+    ok = beamtalk_workspace_changelog:mark_flushed(lists:sublist(Seqs, K)),
+    Seqs.
+
+rotation_never_archives_unflushed_entries() ->
+    %% BT-5016: more than MAX_ENTRIES unflushed (active) entries must all stay
+    %% visible to flush/changes; nothing is archived or dropped.
+    {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
+    try
+        {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
+        Seqs = [
+            begin
+                Sel = list_to_binary("m" ++ integer_to_list(N)),
+                {ok, Seq} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, Sel)),
+                Seq
+            end
+         || N <- lists:seq(1, 1003)
+        ],
+        Oldest = hd(Seqs),
+        Pending = [
+            beamtalk_workspace_changelog:entry_seq(E)
+         || E <- beamtalk_workspace_changelog:flushable_pending()
+        ],
+        ?assertEqual(1003, length(Pending)),
+        ?assert(lists:member(Oldest, Pending)),
+        Dir = beamtalk_workspace_changelog_log:changes_dir(WsId),
+        ?assertNot(filelib:is_dir(filename:join(Dir, "archive"))),
+        {ok, LogBin} = file:read_file(filename:join(Dir, "changes.jsonl")),
+        ?assertEqual(1003, length(binary:split(LogBin, <<"\n">>, [global, trim_all]))),
+        beamtalk_test_proc:shutdown(Pid)
+    after
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
+    end.
+
+rotation_edit_rotate_flush_sequence() ->
+    %% BT-5016: edit (unflushed), overflow the ring with flushed entries so a
+    %% rotation runs, then flush: the early edit is still pending and flushable,
+    %% only flushed entries were archived.
+    {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
+    try
+        {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
+        {ok, Edit} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"edit">>)),
+        Rest = [
+            begin
+                Sel = list_to_binary("g" ++ integer_to_list(N)),
+                {ok, Seq} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, Sel)),
+                Seq
+            end
+         || N <- lists:seq(1, 999)
+        ],
+        ok = beamtalk_workspace_changelog:mark_flushed(lists:sublist(Rest, 5)),
+        %% Overflow by 5: rotation runs and archives exactly the flushed five.
+        [
+            {ok, _} = beamtalk_workspace_changelog:append(
+                durable_input(<<"Counter">>, <<"h", (integer_to_binary(N))/binary>>)
+            )
+         || N <- lists:seq(1, 5)
+        ],
+        Dir = beamtalk_workspace_changelog_log:changes_dir(WsId),
+        ?assert(filelib:is_dir(filename:join(Dir, "archive"))),
+        ?assertEqual(1000, beamtalk_workspace_changelog:size()),
+        PendingSeqs = [
+            beamtalk_workspace_changelog:entry_seq(E)
+         || E <- beamtalk_workspace_changelog:flushable_pending()
+        ],
+        ?assert(lists:member(Edit, PendingSeqs)),
+        ?assertEqual(1000, length(PendingSeqs)),
+        ok = beamtalk_workspace_changelog:mark_flushed([Edit]),
+        ?assertNot(
+            lists:member(Edit, [
+                beamtalk_workspace_changelog:entry_seq(E)
+             || E <- beamtalk_workspace_changelog:flushable_pending()
+            ])
+        ),
         beamtalk_test_proc:shutdown(Pid)
     after
         beamtalk_test_fs:restore_home(OldHome),

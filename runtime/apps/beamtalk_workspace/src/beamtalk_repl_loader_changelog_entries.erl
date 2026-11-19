@@ -1278,6 +1278,67 @@ reused verbatim: `side: null` for every kind but `"remove-method"`).
 """.
 -spec emit_remove_class_change_entry(binary(), map(), binary(), human | agent) -> ok.
 emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
+    case cancel_pending_new_class(ClassNameBin) of
+        cancelled ->
+            ok;
+        not_cancelled ->
+            append_remove_class_entry(ClassNameBin, Snapshot, Author, AuthorKind)
+    end.
+
+-doc """
+A class created in this session and never flushed has no file on disk, so
+removing it leaves nothing to record (BT-5016): retire its still-pending
+entries (the `'new-class'` and any later `'class-def'`/method patches for the
+same class) instead of appending a `'remove-class'` entry. Otherwise plain
+`flush` would write the removed class to disk and `flushIncludingDestructive`
+would put the `'new-class'` and `'remove-class'` entries in one file group and
+fail with `mixed_new_class_and_splice`.
+
+Returns `not_cancelled` when there is no pending `'new-class'` for the class
+(the normal removal path) or the entries could not be retired, in which case
+the removal is recorded as usual.
+""".
+-spec cancel_pending_new_class(binary()) -> cancelled | not_cancelled.
+cancel_pending_new_class(ClassNameBin) ->
+    try
+        Pending = [
+            E
+         || E <- beamtalk_workspace_changelog:active_entries(),
+            beamtalk_workspace_changelog:entry_class(E) =:= ClassNameBin,
+            not lists:member(
+                beamtalk_workspace_changelog:entry_kind(E), ['rename-class', 'rename-method']
+            )
+        ],
+        case
+            lists:any(
+                fun(E) -> beamtalk_workspace_changelog:entry_kind(E) =:= 'new-class' end, Pending
+            )
+        of
+            false ->
+                not_cancelled;
+            true ->
+                Seqs = [beamtalk_workspace_changelog:entry_seq(E) || E <- Pending],
+                case beamtalk_workspace_changelog:mark_flushed(Seqs) of
+                    ok ->
+                        cancelled;
+                    {error, Reason} ->
+                        ?LOG_ERROR(
+                            "Failed to retire pending entries of a removed new class",
+                            #{
+                                class => ClassNameBin,
+                                reason => Reason,
+                                domain => [beamtalk, runtime]
+                            }
+                        ),
+                        not_cancelled
+                end
+        end
+    catch
+        exit:_ -> not_cancelled
+    end.
+
+-spec append_remove_class_entry(binary(), map(), binary(), human | agent) -> ok.
+append_remove_class_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
     best_effort_changelog_append(
         "Failed to emit ChangeLog entry for class removal (removal still installed)",
         #{class => ClassNameBin},

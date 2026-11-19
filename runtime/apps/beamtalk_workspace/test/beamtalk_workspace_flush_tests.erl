@@ -170,6 +170,10 @@ unit_test_() ->
 new_class_directory_target_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun new_class_target_is_directory_is_conflict/1}.
 
+%% BT-5016: creating a class and removing it before any flush cancels out.
+new_class_then_remove_cancels_out_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun new_class_then_remove_cancels_out/1}.
+
 mark_flushed_failure_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun mark_flushed_failure_is_reported/1}.
 
@@ -862,6 +866,27 @@ filter_by_new_class_selector(#{proj_dir := ProjDir}) ->
 %% Fix #2: target path that already exists *as a directory* must surface as
 %% a `target_exists` conflict during Phase A, not as a `rename_failed` later
 %% on. Mirrors the equivalent fix in beamtalk_repl_loader_newclass:validate_target_path/1.
+new_class_then_remove_cancels_out(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "ghost.bt"]),
+    Source = <<"Object subclass: Ghost\n  hi => 'hi'\nend\n">>,
+    ok = beamtalk_repl_loader_changelog_entries:emit_new_class_entry(
+        <<"Ghost">>, Source, list_to_binary(File)
+    ),
+    ok = beamtalk_repl_loader_changelog_entries:emit_remove_class_change_entry(
+        <<"Ghost">>,
+        #{flushable => true, source_file => list_to_binary(File), prev_source => Source},
+        <<"repl">>,
+        human
+    ),
+    {ok, Plain} = beamtalk_workspace_flush:flush(),
+    {ok, Destructive} = beamtalk_workspace_flush:flush_including_destructive(),
+    [
+        ?_assertEqual([], beamtalk_workspace_changelog:active_entries()),
+        ?_assertEqual(0, maps:get(flushed, Plain)),
+        ?_assertEqual(0, maps:get(flushed, Destructive)),
+        ?_assertNot(filelib:is_file(File))
+    ].
+
 new_class_target_is_directory_is_conflict(#{proj_dir := ProjDir}) ->
     File = filename:join([ProjDir, "src", "greeter.bt"]),
     %% Create a directory *at the target path*. filelib:is_regular/1 would
