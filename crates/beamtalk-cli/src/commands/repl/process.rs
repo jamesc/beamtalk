@@ -74,9 +74,9 @@ pub(crate) fn start_beam_node(
         warn!("Stdlib not compiled — run `beamtalk build-stdlib` to enable stdlib classes in REPL");
     }
 
-    // Build the eval command using the shared builder
-    let eval_cmd = if let Some(name) = node_name {
-        // Validate node name to prevent injection into Erlang eval string
+    // Validate the node name, then build the eval command using the shared builder
+    if let Some(name) = node_name {
+        // Reject names that could break out of the `-name`/`-sname` argument.
         if !name
             .chars()
             .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '@' || c == '.')
@@ -85,25 +85,15 @@ pub(crate) fn start_beam_node(
                 "Invalid node name '{name}': must contain only alphanumeric characters, underscores, hyphens, dots, or @"
             ));
         }
-        repl_startup::build_eval_cmd_with_node(
-            config.port,
-            name,
-            config.bind_addr,
-            config.log_level,
-            config.otp_app_name,
-            config.root_package,
-            config.hex_dep_names,
-        )
-    } else {
-        repl_startup::build_eval_cmd(
-            config.port,
-            config.bind_addr,
-            config.log_level,
-            config.otp_app_name,
-            config.root_package,
-            config.hex_dep_names,
-        )
-    };
+    }
+    let eval_cmd = repl_startup::build_eval_cmd(
+        config.port,
+        config.bind_addr,
+        config.log_level,
+        config.otp_app_name,
+        config.root_package,
+        config.hex_dep_names,
+    );
 
     // Start erl with beamtalk_workspace running
     // The receive loop keeps the BEAM VM alive while REPL is running

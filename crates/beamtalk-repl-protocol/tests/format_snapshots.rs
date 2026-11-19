@@ -363,6 +363,10 @@ fn make_class(
         doc: doc.map(String::from),
         sealed,
         is_abstract,
+        internal: false,
+        source_file: None,
+        actor_count: None,
+        source_origin: None,
     }
 }
 

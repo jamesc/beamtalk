@@ -1241,6 +1241,35 @@ test-grammar:
 test-grammar:
     @echo "test-grammar: skipped on Windows (covered by Linux CI)"
 
+# BT-5049: the per-op wire payload fixture, checked from all three sides.
+# `runtime/apps/beamtalk_workspace/test/fixtures/repl_op_payloads.json` holds one
+# example reply per REPL op; each side below decodes or re-encodes it:
+#   Erlang      beamtalk_repl_op_table_tests (encoders vs the fixture, op coverage,
+#               handler param scan) plus the live-handler row-shape checks in
+#               beamtalk_repl_ops_dev_tests / beamtalk_repl_ops_browse_tests
+#   Rust        crates/beamtalk-repl-protocol/tests/op_payloads.rs
+#   TypeScript  editors/vscode/src/__tests__/opPayloads.test.ts
+# Each side also runs in its own suite (`just test-runtime`, `just test-rust`,
+# `npm test` in editors/vscode); this recipe runs just the three entry points.
+# Run the per-op wire payload fixture checks (Rust, Erlang and TypeScript)
+[unix]
+test-wire-payloads: build-stdlib
+    #!/usr/bin/env bash
+    set -eo pipefail
+    echo "🔍 Rust: op payloads decode into the client types..."
+    cargo test -p beamtalk-repl-protocol --test op_payloads
+    echo "🔍 Erlang: encoders and handlers match the payload fixture..."
+    (cd runtime && BEAMTALK_NO_FILE_LOG=1 BEAMTALK_NO_FOREGROUND_PRUNE=1 \
+        rebar3 eunit --cover=false \
+        --module=beamtalk_repl_op_table_tests,beamtalk_repl_ops_dev_tests,beamtalk_repl_ops_browse_tests)
+    echo "🔍 TypeScript: WorkspaceClient reads the payloads..."
+    (cd editors/vscode && npm ci --quiet && npx vitest run src/__tests__/opPayloads.test.ts)
+    echo "✅ Wire payload fixture checks passed"
+
+[windows]
+test-wire-payloads:
+    @echo "test-wire-payloads: skipped on Windows (covered by Linux CI)"
+
 # Build the "Beamtalk for GitHub" Chrome extension (load editors/github-chrome/dist unpacked)
 [working-directory: 'editors/github-chrome']
 build-github-extension:

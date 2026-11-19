@@ -1461,7 +1461,11 @@ inherited_methods_op_handle() ->
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
     Methods = maps:get(<<"methods">>, Decoded),
     Names = [maps:get(<<"name">>, M) || M <- Methods],
-    ?assertEqual([<<"baseClassOnly">>, <<"baseOnly">>], lists:sort(Names)).
+    ?assertEqual([<<"baseClassOnly">>, <<"baseOnly">>], lists:sort(Names)),
+    [
+        beamtalk_test_wire_payloads:assert_row_shape(<<"inherited-methods">>, <<"methods">>, M)
+     || M <- Methods
+    ].
 
 context_completion_expression_empty_prefix() ->
     %% "WidgetDev create " — resolved instance receiver with empty prefix returns
@@ -1788,7 +1792,9 @@ methods_op_returns_methods() ->
     ?assert(lists:member(<<"create">>, Names)),
     %% Side tags must distinguish instance from class methods.
     Sides = [maps:get(<<"side">>, M) || M <- Methods, maps:get(<<"name">>, M) =:= <<"create">>],
-    ?assertEqual([<<"class">>], Sides).
+    ?assertEqual([<<"class">>], Sides),
+    %% A live row has the keys and JSON types the shared wire fixture pins (BT-5049).
+    [beamtalk_test_wire_payloads:assert_row_shape(<<"methods">>, <<"methods">>, M) || M <- Methods].
 
 methods_op_tags_synthetic_source_status() ->
     %% The VS Code Workspace Explorer sidebar badges a compiler-
@@ -1847,7 +1853,11 @@ methods_op_returns_state_vars() ->
     Names = [maps:get(<<"name">>, V) || V <- StateVars],
     ?assertEqual([<<"height">>, <<"width">>], Names),
     Lines = [maps:get(<<"line">>, V) || V <- StateVars],
-    ?assertEqual([null, null], Lines).
+    ?assertEqual([null, null], Lines),
+    [
+        beamtalk_test_wire_payloads:assert_row_shape(<<"methods">>, <<"state_vars">>, V)
+     || V <- StateVars
+    ].
 
 methods_op_state_vars_carry_line_when_registered() ->
     %% Once beamtalk_xref has real rows for a class (as codegen bakes
@@ -1905,7 +1915,12 @@ list_classes_op_returns_class() ->
         lists:member(
             maps:get(<<"source_origin">>, Row), [<<"stdlib">>, <<"project">>, <<"dependency">>]
         )
-    ).
+    ),
+    %% Every row has the keys and JSON types the shared wire fixture pins (BT-5049).
+    [
+        beamtalk_test_wire_payloads:assert_row_shape(<<"list-classes">>, <<"class_list">>, C)
+     || C <- ClassList
+    ].
 
 list_classes_filter_stdlib() ->
     %% WidgetDev is registered with a non-stdlib module, so the stdlib filter

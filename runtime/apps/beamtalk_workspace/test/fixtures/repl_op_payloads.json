@@ -1,0 +1,705 @@
+{
+  "comment": "BT-5049: one example wire reply per REPL op, shared by the Erlang encoders, the Rust `beamtalk-repl-protocol` client types and the VS Code `WorkspaceClient`. `payloads` maps an example id (`<op>` or `<op>/<variant>`) to the op that produces it and the exact JSON reply, with `id` `msg-1` and `session` `sess-1`. `unpinned` names every other op in repl_op_table.json and why it has no payload of its own. Erlang: `beamtalk_repl_op_table_tests` encodes `beamtalk_repl_op_payload_examples` and compares (a change to an encoder or a handler row shows up there first). Rust: `crates/beamtalk-repl-protocol/tests/op_payloads.rs`. TypeScript: `editors/vscode/src/__tests__/opPayloads.test.ts`. To refresh after an intended wire change, take the new JSON from the failure message of `payload_examples_match_fixture_test`.",
+  "payloads": {
+    "actors": {
+      "op": "actors",
+      "response": {
+        "actors": [
+          {
+            "class": "Counter",
+            "module": "bt@counter",
+            "pid": "<0.123.0>",
+            "spawned_at": 1234567890
+          },
+          {
+            "class": "TranscriptStream",
+            "module": "beamtalk_transcript_stream",
+            "pid": "<0.5.0>",
+            "spawned_at": null,
+            "system": true
+          }
+        ],
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ]
+      }
+    },
+    "browse-alias-source": {
+      "op": "browse-alias-source",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "content": "type Count = Integer\n",
+          "editable": false,
+          "name": "Count",
+          "package": "proj",
+          "source_file": "src/types.bt",
+          "source_origin": "project"
+        }
+      }
+    },
+    "browse-classes": {
+      "op": "browse-classes",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": [
+          {
+            "abstract": false,
+            "category": "proj",
+            "comment": "A counter.",
+            "internal": false,
+            "is_protocol": false,
+            "is_test": false,
+            "name": "Counter",
+            "origin": "project",
+            "package": "proj",
+            "sealed": false,
+            "source_file": "/work/proj/src/counter.bt",
+            "source_origin": "project",
+            "superclass": "Actor",
+            "typed": true
+          }
+        ]
+      }
+    },
+    "browse-protocols": {
+      "op": "browse-protocols",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "class": "Counter",
+          "protocols": [
+            {
+              "name": "accessing",
+              "selectors": [
+                {
+                  "doc": null,
+                  "line": 12,
+                  "origin": "project",
+                  "package": "proj",
+                  "selector": "increment",
+                  "signature": null,
+                  "source_origin": "project",
+                  "source_status": "indexed"
+                }
+              ]
+            }
+          ],
+          "side": "instance"
+        }
+      }
+    },
+    "browse-type-aliases": {
+      "op": "browse-type-aliases",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": [
+          {
+            "doc": null,
+            "expansion": "Integer",
+            "internal": false,
+            "name": "Count",
+            "package": "proj",
+            "source_file": "src/types.bt",
+            "source_origin": "project"
+          }
+        ]
+      }
+    },
+    "close": {
+      "op": "close",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": "ok"
+      }
+    },
+    "complete": {
+      "op": "complete",
+      "response": {
+        "completions": [
+          "Counter",
+          "CounterTest"
+        ],
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ]
+      }
+    },
+    "describe": {
+      "op": "describe",
+      "response": {
+        "id": "msg-1",
+        "ops": {
+          "eval": {
+            "optional": [
+              "trace"
+            ],
+            "params": [
+              "code"
+            ]
+          },
+          "health": {
+            "params": []
+          }
+        },
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "versions": {
+          "beamtalk": "0.0.0",
+          "protocol": "2.0"
+        }
+      }
+    },
+    "diagnostics": {
+      "op": "diagnostics",
+      "response": {
+        "diagnostics": [
+          {
+            "end": 9,
+            "message": "Unexpected token",
+            "severity": "error",
+            "start": 4
+          }
+        ],
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ]
+      }
+    },
+    "erlang-help": {
+      "op": "erlang-help",
+      "response": {
+        "docs": "lists:map/2\n\nApply a function.",
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ]
+      }
+    },
+    "eval": {
+      "op": "eval",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": 3,
+        "value_type": "integer"
+      }
+    },
+    "eval/error": {
+      "op": "eval",
+      "response": {
+        "error": "Error: boom",
+        "frames": [
+          {
+            "arity": 2,
+            "display": "Counter>>increment (counter.bt:12)",
+            "file": "counter.bt",
+            "function": "increment",
+            "hidden": false,
+            "line": 12,
+            "module": "bt@counter"
+          },
+          {
+            "arity": 4,
+            "display": "gen_server:try_handle_call/4",
+            "file": null,
+            "function": "try_handle_call",
+            "hidden": true,
+            "line": null,
+            "module": "gen_server"
+          }
+        ],
+        "hint": "check the receiver",
+        "id": "msg-1",
+        "line": 3,
+        "output": "out\n",
+        "session": "sess-1",
+        "status": [
+          "done",
+          "error"
+        ],
+        "warning_details": [
+          {
+            "hint": "remove it or prefix with _",
+            "message": "Unused variable: x"
+          }
+        ],
+        "warnings": [
+          "Unused variable: x"
+        ]
+      }
+    },
+    "eval/output_and_warnings": {
+      "op": "eval",
+      "response": {
+        "id": "msg-1",
+        "output": "hi\n",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": "\"hi\"",
+        "value_type": "string",
+        "warning_details": [
+          {
+            "hint": "remove it or prefix with _",
+            "message": "Unused variable: x"
+          }
+        ],
+        "warnings": [
+          "Unused variable: x"
+        ]
+      }
+    },
+    "eval/script_exit": {
+      "op": "eval",
+      "response": {
+        "exit_code": 3,
+        "id": "msg-1",
+        "output": "bye\n",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": null
+      }
+    },
+    "eval/trace": {
+      "op": "eval",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "steps": [
+          {
+            "src": "1 + 2",
+            "value": 3
+          },
+          {
+            "src": "3 * 4",
+            "value": 12
+          }
+        ]
+      }
+    },
+    "get-traces/error": {
+      "op": "get-traces",
+      "response": {
+        "error": "Class not found: Missing",
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done",
+          "error"
+        ]
+      }
+    },
+    "health": {
+      "op": "health",
+      "response": {
+        "id": "msg-1",
+        "nonce": "nonce-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "workspace_id": "ws-1"
+      }
+    },
+    "inherited-methods": {
+      "op": "inherited-methods",
+      "response": {
+        "id": "msg-1",
+        "methods": [
+          {
+            "defining_class": "Object",
+            "doc": null,
+            "line": null,
+            "name": "printString",
+            "selector": "printString",
+            "side": "instance",
+            "signature": null,
+            "source_status": "indexed"
+          }
+        ],
+        "session": "sess-1",
+        "status": [
+          "done"
+        ]
+      }
+    },
+    "inspect": {
+      "op": "inspect",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "state": {
+          "count": 3,
+          "name": "\"c\""
+        },
+        "status": [
+          "done"
+        ]
+      }
+    },
+    "list-classes": {
+      "op": "list-classes",
+      "response": {
+        "class_list": [
+          {
+            "abstract": false,
+            "actor_count": 2,
+            "doc": "A counter.",
+            "internal": false,
+            "name": "Counter",
+            "sealed": false,
+            "source_file": "/work/proj/src/counter.bt",
+            "source_origin": "project",
+            "superclass": "Actor"
+          },
+          {
+            "abstract": true,
+            "actor_count": 0,
+            "doc": null,
+            "internal": false,
+            "name": "Object",
+            "sealed": false,
+            "source_file": null,
+            "source_origin": "stdlib",
+            "superclass": null
+          }
+        ],
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ]
+      }
+    },
+    "list-tests": {
+      "op": "list-tests",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "classes": [
+            {
+              "class": "CounterTest",
+              "selectors": [
+                "testIncrement"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "load-project": {
+      "op": "load-project",
+      "response": {
+        "classes": [
+          "Counter"
+        ],
+        "errors": [
+          {
+            "kind": "compile_error",
+            "message": "Unexpected token",
+            "path": "src/bad.bt"
+          }
+        ],
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "summary": "Loaded 1 class, 1 failed"
+      }
+    },
+    "load-source": {
+      "op": "load-source",
+      "response": {
+        "classes": [
+          "Counter"
+        ],
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "warning_details": [
+          {
+            "hint": "remove it or prefix with _",
+            "message": "Unused variable: x"
+          }
+        ],
+        "warnings": [
+          "Unused variable: x"
+        ]
+      }
+    },
+    "load-tests": {
+      "op": "load-tests",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "classes": [
+            "CounterTest"
+          ],
+          "errors": [],
+          "summary": "Loaded 1 class"
+        }
+      }
+    },
+    "methods": {
+      "op": "methods",
+      "response": {
+        "id": "msg-1",
+        "methods": [
+          {
+            "doc": null,
+            "line": 12,
+            "name": "increment",
+            "selector": "increment",
+            "side": "instance",
+            "signature": null,
+            "source_status": "indexed"
+          },
+          {
+            "doc": "Make one.",
+            "line": null,
+            "name": "new",
+            "selector": "new",
+            "side": "class",
+            "signature": "new -> Counter",
+            "source_status": "synthetic"
+          }
+        ],
+        "session": "sess-1",
+        "state_vars": [
+          {
+            "line": 5,
+            "name": "count"
+          },
+          {
+            "line": null,
+            "name": "step"
+          }
+        ],
+        "status": [
+          "done"
+        ]
+      }
+    },
+    "nav-query": {
+      "op": "nav-query",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "sites": [
+            {
+              "class": "Counter",
+              "class_side": false,
+              "line": 12,
+              "method": "increment",
+              "source_file": "/work/proj/src/counter.bt",
+              "source_origin": "project"
+            }
+          ]
+        }
+      }
+    },
+    "nav-symbols": {
+      "op": "nav-symbols",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "classes": [
+            {
+              "line": 3,
+              "methods": [
+                {
+                  "class_side": false,
+                  "line": 12,
+                  "selector": "increment"
+                }
+              ],
+              "name": "Counter",
+              "source_file": "/work/proj/src/counter.bt",
+              "source_origin": "project"
+            }
+          ]
+        }
+      }
+    },
+    "reload-findings": {
+      "op": "reload-findings",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "findings": [
+            {
+              "category": null,
+              "changedClass": "Counter",
+              "classification": "removal",
+              "end": 15,
+              "message": "Counter>>reset was removed",
+              "note": null,
+              "owner": "Caller",
+              "selector": "reset",
+              "severity": "warning",
+              "sites": [
+                {
+                  "line": 7,
+                  "method": "run"
+                }
+              ],
+              "start": 10
+            }
+          ]
+        }
+      }
+    },
+    "sessions": {
+      "op": "sessions",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "sessions": [
+          {
+            "id": "sess-1"
+          }
+        ],
+        "status": [
+          "done"
+        ]
+      }
+    },
+    "show-codegen": {
+      "op": "show-codegen",
+      "response": {
+        "core_erlang": "module 'bt@counter' []",
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "warnings": [
+          "a warning"
+        ]
+      }
+    },
+    "test": {
+      "op": "test",
+      "response": {
+        "id": "msg-1",
+        "results": {
+          "duration": 12,
+          "failed": 1,
+          "passed": 1,
+          "skipped": 1,
+          "tests": [
+            {
+              "class": "CounterTest",
+              "name": "testOk",
+              "status": "pass"
+            },
+            {
+              "error": "expected 1, got 2",
+              "name": "testBad",
+              "status": "fail"
+            },
+            {
+              "name": "testLater",
+              "reason": "not yet",
+              "status": "skip"
+            }
+          ],
+          "total": 3
+        },
+        "session": "sess-1",
+        "status": [
+          "done",
+          "test-error"
+        ]
+      }
+    }
+  },
+  "unpinned": {
+    "actor-stats": "Perf op: a `{value, Map}` of tracing counters, a flat scalar map with no nested row shape.",
+    "browse-categories": "`{value, CategoryView}`: nests the same selector rows `browse-protocols` pins.",
+    "browse-class-definition": "`{value, Map}` of scalars and one text field; no nested rows.",
+    "browse-method-source": "`{value, Map}` of scalars and one text field; no nested rows.",
+    "browse-native-modules": "`{value, [NativeModuleRow]}`, the same row convention as `browse-type-aliases`.",
+    "browse-native-source": "`{value, Map}` of scalars and one text field; no nested rows.",
+    "clone": "Reaches no wire client (the dist-attached surface calls it). Over the WebSocket the new session id would arrive as the quoted printString of a string, like every `ok` value.",
+    "disable-tracing": "Replies `{status, ok}` (`\"value\": \"ok\"`), the wire form pinned by the `close` payload.",
+    "enable-tracing": "Replies `{status, ok}` (`\"value\": \"ok\"`), the wire form pinned by the `close` payload.",
+    "erlang-complete": "Same `{completions, [binary()]}` encoder as `complete`.",
+    "export-traces": "`{value, Map}` carrying the written path and a count; no nested rows.",
+    "hover": "Same `{docs, binary()}` encoder as `erlang-help`.",
+    "interrupt": "Replies `{status, ok}` (`\"value\": \"ok\"`), the wire form pinned by the `close` payload.",
+    "kill": "Replies `{status, ok}` (`\"value\": \"ok\"`), the wire form pinned by the `close` payload.",
+    "pid-stats": "`{value, Map}` of process counters, a flat scalar map.",
+    "run-entry": "WebSocket transport op: streams `out` chunks and ends with the same `done` reply as an async `eval` (`eval`, `eval/script_exit`); `beamtalk_ws_handler` writes it, not `beamtalk_repl_ops:encode/2`.",
+    "save-native-source": "`{value, Map}` of scalars (the saved path).",
+    "save-section": "`{value, Map}` of scalars (the saved path and class).",
+    "shutdown": "Replies `{status, ok}` (`\"value\": \"ok\"`), the wire form pinned by the `close` payload.",
+    "stdin": "WebSocket transport op: a successful `stdin` has no reply of its own (the waiting `eval` continues); only an `invalid_stdin` / `no_pending_input` error is sent, in the `error` shape `eval/error` pins.",
+    "subscribe-logs": "WebSocket transport op, answered by `beamtalk_ws_handler` with the `encode_status` reply `close` pins (`\"value\": \"ok\"`); the log entries themselves arrive as `logs` push frames, which are not op replies.",
+    "test-all": "Same `{test_results, _}` encoder as `test`.",
+    "unload": "Same `{ok, Value, Output, Warnings}` encoder as `eval`.",
+    "unsubscribe-logs": "WebSocket transport op, answered by `beamtalk_ws_handler` with the `encode_status` reply `close` pins (`\"value\": \"ok\"`)."
+  }
+}

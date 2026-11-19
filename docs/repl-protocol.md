@@ -91,7 +91,7 @@ For standalone BEAM nodes (no workspace), the default `~/.erlang.cookie` is used
 | `id` | string | Echoed from request (if provided) |
 | `session` | string | Echoed from request (if provided) |
 | `status` | string[] | Status flags: `["done"]` for final message. Absent on intermediate streaming messages. |
-| `value` | any | Result value (for eval, clear, kill) |
+| `value` | any | Result value (for eval, and the `{value, _}` ops such as nav, browse and tracing) |
 | `value_type` | string | Optional type tag for `value` on `eval` results (BT-4912): one of `string`, `integer`, `float`, `boolean`, `nil`, `symbol`, `character`, `list`, `block`, `actor`, `future`, `class`, `error`, `object` (a tagged value object). Additive: the protocol version stays `2.0`, and servers, ops that do not classify the value, and shapes with no useful tag (a plain Dictionary, a tuple) omit it. It describes the value, not the rendered text, so a user `printString` answering `3.14` is `object`, not `float`. Only the top-level value is tagged; the elements of a `list` are not. Clients that colour or format `value` should prefer the tag and fall back to inspecting `value` when it is absent or unrecognised (the CLI REPL does). |
 | `output` | string | Captured stdout from evaluation (omitted if empty). Present in the final message for backward compatibility. Streaming clients should prefer `out` messages. |
 | `out` | string | Streaming stdout chunk (BT-696). Sent as intermediate messages during eval, before the final `done` message. No `status` field. |
@@ -892,6 +892,27 @@ this table drifts from the fixture. To refresh it after editing the op table:
 | `subscribe-logs` | — | `level` | `always` | `beamtalk_ws_handler` |
 | `unsubscribe-logs` | — | — | `always` | `beamtalk_ws_handler` |
 <!-- op-table:end -->
+
+### Example Payloads
+
+`runtime/apps/beamtalk_workspace/test/fixtures/repl_op_payloads.json` holds one
+example reply per op (more than one where the shape varies: `eval`, `test`,
+errors), including the nested rows (`class_list[]`, `actors[]`, `methods[]` /
+`state_vars[]`, nav `sites[]`, the `browse-*` values, test `results`). Ops
+without a payload of their own are listed under `unpinned` with the reason (for
+example "same encoder as `eval`"). Three suites read it, so a reply cannot
+change on one side alone:
+
+| Side | Test | What it checks |
+|------|------|----------------|
+| Erlang | `beamtalk_repl_op_table_tests` (and the row-shape checks in `beamtalk_repl_ops_dev_tests`, `beamtalk_repl_ops_browse_tests`) | The encoders produce exactly these replies; live `list-classes`, `methods`, `inherited-methods` and `browse-classes` rows have the fixture's keys and JSON types; every op is pinned or explained |
+| Rust | `crates/beamtalk-repl-protocol/tests/op_payloads.rs` | Each reply decodes into `ReplResponse`, `ClassInfo`, `ActorInfo`, `SessionInfo` and `StackFrameInfo`, and every key is declared in `tests/repl-protocol/response_keys.json` |
+| TypeScript | `editors/vscode/src/__tests__/opPayloads.test.ts` | `WorkspaceClient` turns each reply into its `ClassInfo`, `ActorInfo`, `MethodInfo`, … types |
+
+`just test-wire-payloads` runs all three. After an intended wire change, the
+failure message of `payload_examples_match_fixture_test` prints the new JSON to
+paste into the fixture. Push frames (the `push` channels below) are not op
+replies and are not in the fixture.
 
 ## Push Messages
 
