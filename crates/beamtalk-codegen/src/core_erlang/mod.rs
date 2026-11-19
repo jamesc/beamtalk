@@ -183,7 +183,6 @@ mod xref;
 
 // Re-export utility functions for IDE queries
 pub use beamtalk_cerl_doc::escape::{escape_atom_chars, escape_erlang_string};
-pub use util::to_module_name;
 
 // Re-exports preserving every `core_erlang::X` / `super::X` path these
 // items had before moving into sibling modules — used throughout this crate
