@@ -271,6 +271,8 @@ mod tests {
 
     #[test]
     fn history_path_ends_in_repl_history_file() {
+        // `history_path` creates `<BEAMTALK_HOME>/sessions/...`; keep it off the real home.
+        let _home = crate::commands::test_support::real_home_guard();
         let path = history_path().expect("history_path should succeed");
         assert_eq!(
             path.file_name().and_then(|n| n.to_str()),
