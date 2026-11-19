@@ -32,8 +32,9 @@ use std::os::windows::io::AsRawHandle;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 #[cfg(unix)]
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use beamtalk_etf::{
     self as etf, atom, binary as binary_term, int_term, map_get, term_to_bytes, term_to_string,

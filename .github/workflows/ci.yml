@@ -99,6 +99,9 @@ jobs:
       # Rust/Cargo sources, the recipes or workflows that build them changed:
       # check-release-build runs.
       rust: ${{ steps.filter.outputs.rust }}
+      # beamtalk-exec (or the manifests it builds from) changed:
+      # check-exec-windows cross-checks it for Windows (BT-5057).
+      exec: ${{ steps.filter.outputs.exec }}
       # The VS Code extension, or something its tests read from outside
       # editors/vscode (BT-5033): test-vscode runs.
       vscode: ${{ steps.filter.outputs.vscode }}
@@ -121,7 +124,7 @@ jobs:
             # desktop (ci-platforms.yml's).
             {
               echo "desktop=false"
-              for k in core_diff_modes learn runtime rust vscode fixture_readers; do echo "$k=true"; done
+              for k in core_diff_modes learn runtime rust exec vscode fixture_readers; do echo "$k=true"; done
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -169,6 +172,12 @@ jobs:
           rust=$(flag matches 'crates/*' Cargo.toml Cargo.lock rust-toolchain.toml \
               clippy.toml Justfile '.github/workflows/*' 'scripts/ci/*')
 
+          # BT-5057: beamtalk-exec has `#[cfg(unix)]` / `#[cfg(windows)]` halves,
+          # and the Windows one otherwise compiles only in ci-platforms.yml
+          # (opt-in) and nightly.
+          exec=$(flag matches 'crates/beamtalk-exec/*' Cargo.toml Cargo.lock \
+              rust-toolchain.toml '.github/workflows/ci.yml')
+
           # BT-5033: `npm test` and `tsc` for the extension. Besides the
           # extension itself, its tests read the runtime's `?PROTOCOL_VERSION`
           # (beamtalk.hrl, workspaceClient.test.ts), the shared cross-language
@@ -207,6 +216,7 @@ jobs:
             echo "learn=$learn"
             echo "runtime=$runtime"
             echo "rust=$rust"
+            echo "exec=$exec"
             echo "vscode=$vscode"
             echo "fixture_readers=$fixture_readers"
           } >> "$GITHUB_OUTPUT"
@@ -498,6 +508,39 @@ jobs:
 
       - name: Check release build (warnings denied, no test-only code)
         run: just check-release-build
+
+  # ─── beamtalk-exec compiles for Windows (BT-5057) ──────────────────────
+  # `cargo check` needs no linker, and beamtalk-exec's dependencies are pure
+  # Rust, so a Linux runner type-checks the Windows cfg half (lib and tests)
+  # in about a minute. A missing `#[cfg(unix)]`-gated import broke Windows
+  # on main once (#5530) because only the opt-in platform job built it.
+  check-exec-windows:
+    needs: changes
+    if: needs.changes.outputs.exec == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: linux-exec-windows-check
+          key: profile-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Check beamtalk-exec for Windows (warnings denied)
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --target x86_64-pc-windows-msvc -p beamtalk-exec --all-targets
 
   # ─── core-diff snapshot-only vs full equivalence (BT-3934) ────────────
   # `core-diff`'s snapshot-only mode (BT-3887) is only sound if it leaves
