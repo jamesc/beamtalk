@@ -367,15 +367,16 @@ pub(crate) fn find_project_root() -> Result<Utf8PathBuf> {
 }
 
 /// Write `contents` to `path` atomically: stage in a sibling temp file keyed
-/// by `tmp_prefix` and the current pid, then rename into place (atomic on the
-/// same filesystem). The pid suffix ensures concurrent builders don't clobber
-/// each other's staging file; the final rename is the accepted last-write-wins
-/// race (ADR 0098 §1).
+/// by `tmp_prefix`, then rename into place (atomic on the same filesystem).
+/// Creates the parent directory if it is missing. Not private: the file keeps
+/// the mode of the one it replaces. See [`write_atomic_file`].
 ///
 /// Shared by `commands/build_stamp` and `commands/deps/snapshot` — both use
 /// the same two-step stage-then-rename pattern and differ only in the prefix
 /// string they pass (`.beamtalk-stamp.` vs `.beamtalk-dep-graph.`), which
 /// keeps temp files identifiable by domain when debugging a partial build.
+/// Also the writer for source files and manifests (`beamtalk fmt`,
+/// `beamtalk.toml`, the lockfile).
 pub(crate) fn write_atomic(
     path: &Utf8Path,
     contents: &str,
@@ -384,9 +385,76 @@ pub(crate) fn write_atomic(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_file_name(format!("{}{}.tmp", tmp_prefix, std::process::id()));
-    fs::write(&tmp, contents)?;
-    fs::rename(&tmp, path)
+    write_atomic_file(path.as_std_path(), contents.as_bytes(), tmp_prefix, false)
+}
+
+/// The one atomic file write for the CLI (BT-5017): stage the bytes in a
+/// unique sibling temp file, `fsync` it, rename it over `path`, then
+/// best-effort `fsync` the directory so the rename itself survives a power
+/// loss. A crash or a concurrent reader therefore sees the whole old file or
+/// the whole new one, never a truncated or empty file, and the temp file is
+/// removed on any failure. A symlink at `path` is written through: its target
+/// is replaced and the link stays.
+///
+/// The temp name carries the pid and a per-process counter, so concurrent
+/// builders and two writers in one process never share a staging file. The
+/// final rename is the accepted last-write-wins race (ADR 0098 §1).
+///
+/// `private` creates the file owner-only (0600 on Unix, tightening a more
+/// permissive file it replaces) for workspace files that hold secrets or are
+/// read by sibling tools; otherwise the new file takes the mode of the one it
+/// replaces, so a script's executable bit survives a rewrite. The parent
+/// directory must exist: callers that want it created use [`write_atomic`].
+/// The fsyncs cost a few milliseconds, which is fine for these one-shot CLI
+/// writes (none is on a per-keystroke path).
+pub(crate) fn write_atomic_file(
+    path: &std::path::Path,
+    contents: &[u8],
+    tmp_prefix: &str,
+    private: bool,
+) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let target = if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        fs::canonicalize(path)?
+    } else {
+        path.to_path_buf()
+    };
+    let tmp = target.with_file_name(format!(
+        "{tmp_prefix}{}.{}.tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+
+    let staged = (|| {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        if private {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&tmp)?;
+        file.write_all(contents)?;
+        if !private && let Ok(existing) = fs::metadata(&target) {
+            file.set_permissions(existing.permissions())?;
+        }
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&tmp, &target)
+    })();
+    if let Err(e) = staged {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    #[cfg(unix)]
+    if let Some(dir) = target.parent() {
+        // Best effort: the data is already durable; this only persists the rename.
+        let _ = fs::File::open(dir).and_then(|d| d.sync_all());
+    }
+    Ok(())
 }
 
 /// Where a corpus-compiling command (`build-stdlib`, `test-stdlib`, `test`)
@@ -572,6 +640,105 @@ mod tests {
     use super::*;
     use std::ffi::OsStr;
     use std::fs;
+
+    // --- write_atomic_file (BT-5017) ---
+
+    #[test]
+    fn write_atomic_file_replaces_content_and_leaves_no_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.txt");
+        fs::write(&path, "old").unwrap();
+        write_atomic_file(&path, b"new", ".t.", false).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+        let names: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, [OsStr::new("out.txt")]);
+    }
+
+    /// The old in-place `fs::write` truncated the file first, so a crash
+    /// mid-write left it empty or short. A staged write swaps in a new inode
+    /// and never touches the old one until the rename.
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_file_swaps_inode_instead_of_truncating_in_place() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.txt");
+        fs::write(&path, "old").unwrap();
+        let before = fs::metadata(&path).unwrap().ino();
+        write_atomic_file(&path, b"new", ".t.", false).unwrap();
+        assert_ne!(fs::metadata(&path).unwrap().ino(), before);
+    }
+
+    #[test]
+    fn write_atomic_file_failure_keeps_old_file_and_cleans_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        // The target is a non-empty directory, so the final rename fails.
+        let path = dir.path().join("target");
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("child"), "x").unwrap();
+        assert!(write_atomic_file(&path, b"new", ".t.", false).is_err());
+        assert!(path.join("child").exists());
+        let leftovers: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| n != "target")
+            .collect();
+        assert!(leftovers.is_empty(), "temp file left behind: {leftovers:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_file_keeps_existing_mode_and_private_forces_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("script.sh");
+        fs::write(&path, "old").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        write_atomic_file(&path, b"new", ".t.", false).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+
+        // Private: tightens an over-permissive existing file.
+        let secret = dir.path().join("secret");
+        fs::write(&secret, "old").unwrap();
+        fs::set_permissions(&secret, fs::Permissions::from_mode(0o644)).unwrap();
+        write_atomic_file(&secret, b"new", ".t.", true).unwrap();
+        assert_eq!(
+            fs::metadata(&secret).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_file_writes_through_a_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real.bt");
+        let link = dir.path().join("link.bt");
+        fs::write(&real, "old").unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        write_atomic_file(&link, b"new", ".t.", false).unwrap();
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(fs::read_to_string(&real).unwrap(), "new");
+    }
+
+    #[test]
+    fn write_atomic_file_does_not_create_missing_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing").join("out.txt");
+        assert!(write_atomic_file(&path, b"x", ".t.", true).is_err());
+        assert!(!dir.path().join("missing").exists());
+    }
 
     #[test]
     fn snapshot_only_is_off_when_unset_empty_or_zero() {

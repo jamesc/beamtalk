@@ -474,7 +474,8 @@ impl Lockfile {
         }
 
         let content = self.serialize();
-        std::fs::write(&path, content)
+        // Atomic (BT-5017): a crash mid-write must not leave a truncated lockfile.
+        crate::commands::util::write_atomic(&path, &content, ".beamtalk-lock.")
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to write lockfile '{path}'"))?;
 
@@ -842,6 +843,26 @@ pub fn read_rebar_lock(rebar_base_dir: &Utf8Path) -> Result<Vec<NativePackageLoc
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// BT-5017: the lockfile is staged and renamed, never rewritten in place.
+    #[cfg(unix)]
+    #[test]
+    fn write_replaces_lockfile_by_rename() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(dir.path()).unwrap();
+        let lockfile = sample_lockfile();
+        lockfile.write(root).unwrap();
+        let path = root.join(LOCKFILE_NAME);
+        let before = std::fs::metadata(&path).unwrap().ino();
+        lockfile.write(root).unwrap();
+        assert_ne!(std::fs::metadata(&path).unwrap().ino(), before);
+        assert_eq!(
+            Lockfile::read(root).unwrap().unwrap().serialize(),
+            lockfile.serialize()
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
 
     fn sample_lockfile() -> Lockfile {
         let mut lockfile = Lockfile::new();

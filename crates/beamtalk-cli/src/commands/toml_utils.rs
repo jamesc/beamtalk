@@ -8,7 +8,8 @@ use std::fmt::Write as _;
 use camino::Utf8Path;
 use miette::{Context, IntoDiagnostic, Result};
 
-/// Check that `content` parses as TOML, then write it to `manifest_path`.
+/// Check that `content` parses as TOML, then write it to `manifest_path`
+/// atomically (stage, fsync, rename).
 ///
 /// Used for programmatic `beamtalk.toml` edits: a generated manifest that does
 /// not parse is a bug in the edit, so it is rejected before it can clobber the
@@ -18,7 +19,8 @@ pub(crate) fn write_validated_manifest(manifest_path: &Utf8Path, content: &str) 
         .into_diagnostic()
         .wrap_err("Generated beamtalk.toml is invalid TOML — this is a bug")?;
 
-    std::fs::write(manifest_path, content)
+    // Atomic (BT-5017): a crash mid-write must not leave a truncated manifest.
+    crate::commands::util::write_atomic(manifest_path, content, ".beamtalk-manifest.")
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to write '{manifest_path}'"))
 }
@@ -50,6 +52,37 @@ pub(crate) fn escape_toml_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BT-5017: a manifest edit is staged and renamed. An in-place write kept
+    /// the file's inode, so a crash mid-write left a truncated `beamtalk.toml`.
+    #[cfg(unix)]
+    #[test]
+    fn write_validated_manifest_replaces_by_rename() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = camino::Utf8PathBuf::from_path_buf(dir.path().join("beamtalk.toml")).unwrap();
+        std::fs::write(&path, "[package]\nname = \"old\"\n").unwrap();
+        let before = std::fs::metadata(&path).unwrap().ino();
+        write_validated_manifest(&path, "[package]\nname = \"new\"\n").unwrap();
+        assert_ne!(std::fs::metadata(&path).unwrap().ino(), before);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[package]\nname = \"new\"\n"
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn write_validated_manifest_rejects_invalid_toml_and_keeps_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = camino::Utf8PathBuf::from_path_buf(dir.path().join("beamtalk.toml")).unwrap();
+        std::fs::write(&path, "[package]\nname = \"old\"\n").unwrap();
+        assert!(write_validated_manifest(&path, "not = [valid").is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[package]\nname = \"old\"\n"
+        );
+    }
 
     #[test]
     fn test_escape_toml_string_escapes_quotes_and_backslashes() {

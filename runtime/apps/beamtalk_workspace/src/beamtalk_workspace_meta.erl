@@ -1157,14 +1157,27 @@ load_metadata_from_disk(State) ->
                         settings = Settings
                     }
             catch
-                % Failed to parse, use default
-                _:_ -> State
+                Class:Reason ->
+                    %% BT-5017: not silent. Falling back to defaults drops
+                    %% created_at, loaded modules, class sources and settings
+                    %% (e.g. autoflush), so say which file and why.
+                    ?LOG_WARNING(
+                        "Could not parse workspace metadata.json at ~ts (~p:~p); "
+                        "starting from defaults",
+                        [Path, Class, Reason],
+                        #{domain => [beamtalk, runtime]}
+                    ),
+                    State
             end;
         {error, enoent} ->
             % No metadata file yet
             State;
-        {error, _} ->
-            % Failed to read, use default
+        {error, ReadReason} ->
+            ?LOG_WARNING(
+                "Could not read workspace metadata.json at ~ts (~p); starting from defaults",
+                [Path, ReadReason],
+                #{domain => [beamtalk, runtime]}
+            ),
             State
     end.
 
@@ -1239,10 +1252,15 @@ persist_metadata_to_disk(State) ->
 
     %% Write to disk
     Json = beamtalk_json:prettify_term(Metadata),
-    case file:write_file(Path, Json) of
+    %% BT-5017: stage + fsync + rename (`beamtalk_workspace_file:atomic_write/3`),
+    %% so the broker, CLI and a restarting node always read a whole file. An
+    %% in-place `file:write_file/2` left a window where a crash or a concurrent
+    %% reader saw a truncated file, which `load_metadata_from_disk/1` then
+    %% treated as "use defaults".
+    case beamtalk_workspace_file:atomic_write(Path, Json, undefined) of
         ok ->
             ok;
-        {error, Reason} ->
+        {error, {_Step, Reason}} ->
             ?LOG_WARNING(
                 "Failed to persist workspace metadata to ~s: ~p",
                 [Path, Reason],

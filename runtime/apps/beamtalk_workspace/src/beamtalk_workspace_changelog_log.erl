@@ -18,6 +18,7 @@ ChangeLog persistence: the `changes.jsonl` append/load path, transactional rotat
     changes_dir/1,
     load_from_disk/1,
     log_path/1,
+    repair_tail/1,
     persist_append/4,
     rewrite_log/2,
     rotate_transactional/3,
@@ -73,8 +74,93 @@ write_optional_source(SourcesDir, Ref, Body) ->
 append_metadata_line(Entry, State) ->
     Line = [beamtalk_workspace_changelog_codec:entry_to_json(Entry), $\n],
     case file:write_file(State#state.log_path, Line, [append]) of
-        ok -> ok;
-        {error, Reason} -> {error, {write_log, Reason}}
+        ok ->
+            ok;
+        {error, Reason} ->
+            %% A failed append (disk full, I/O error) may have written part of
+            %% the line. Cut that fragment off now, or the next successful
+            %% append would be glued onto it and both lost at load.
+            _ = repair_tail(State#state.log_path),
+            {error, {write_log, Reason}}
+    end.
+
+%% BT-5017: bring `changes.jsonl` back to whole lines after a torn write.
+%%
+%% Every entry is written as `<json>\n`, so a file that does not end in a
+%% newline ends in a partial write. The reader's rule for that last line:
+%%   * it decodes as an entry (the crash fell between the JSON and its
+%%     newline): keep it and restore the newline;
+%%   * it does not decode (cut off mid-entry): drop it, truncating the file
+%%     back to the last newline.
+%% Earlier lines are never touched, and a file that already ends in a newline
+%% is not rewritten. The rewrite is atomic, so repair cannot itself tear the log.
+-spec repair_tail(string()) -> ok | {error, term()}.
+repair_tail(LogPath) ->
+    case file:read_file(LogPath) of
+        {ok, Bin} ->
+            _ = repair_tail_binary(LogPath, Bin),
+            ok;
+        {error, enoent} ->
+            ok;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% Returns the repaired contents (what `LogPath` holds afterwards, or would
+%% hold had the rewrite not failed), so the loader parses the repaired view.
+-spec repair_tail_binary(string(), binary()) -> binary().
+repair_tail_binary(_LogPath, <<>>) ->
+    <<>>;
+repair_tail_binary(LogPath, Bin) ->
+    case binary:last(Bin) of
+        $\n ->
+            Bin;
+        _ ->
+            {Whole, Tail} = split_last_line(Bin),
+            Repaired =
+                case is_entry_line(Tail) of
+                    true ->
+                        ?LOG_WARNING(
+                            "ChangeLog ~ts: last entry was missing its newline; restored",
+                            [LogPath]
+                        ),
+                        <<Whole/binary, Tail/binary, $\n>>;
+                    false ->
+                        ?LOG_WARNING(
+                            "ChangeLog ~ts: dropping a partial last entry (~b bytes) left "
+                            "by an interrupted write",
+                            [LogPath, byte_size(Tail)]
+                        ),
+                        Whole
+                end,
+            case write_file_atomic(LogPath, Repaired) of
+                ok ->
+                    ok;
+                {error, Reason} ->
+                    ?LOG_WARNING("ChangeLog ~ts: could not repair torn tail: ~p", [
+                        LogPath, Reason
+                    ])
+            end,
+            Repaired
+    end.
+
+%% `{Through the last newline, after it}`.
+-spec split_last_line(binary()) -> {binary(), binary()}.
+split_last_line(Bin) ->
+    case binary:matches(Bin, <<"\n">>) of
+        [] ->
+            {<<>>, Bin};
+        Matches ->
+            {Pos, 1} = lists:last(Matches),
+            {binary:part(Bin, 0, Pos + 1), binary:part(Bin, Pos + 1, byte_size(Bin) - Pos - 1)}
+    end.
+
+-spec is_entry_line(binary()) -> boolean().
+is_entry_line(Line) ->
+    try beamtalk_workspace_changelog_codec:entry_from_json(Line) of
+        _ -> true
+    catch
+        _:_ -> false
     end.
 
 %%% ----------------------------------------------------------------------------
@@ -90,7 +176,8 @@ load_from_disk(#state{changes_dir = undefined} = State) ->
 load_from_disk(State) ->
     LogPath = State#state.log_path,
     case file:read_file(LogPath) of
-        {ok, Bin} ->
+        {ok, Bin0} ->
+            Bin = repair_tail_binary(LogPath, Bin0),
             Entries = parse_log(Bin),
             PriorEpochMax = max_epoch(Entries),
             NextSeq = max_seq(Entries) + 1,
