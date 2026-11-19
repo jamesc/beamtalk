@@ -36,13 +36,13 @@ Callers outside the class process call this module directly.
 -doc """
 Get the class name, preferring a message-free metadata lookup.
 
-`class_name/1`'s `gen_server:call(ClassPid, class_name)` uses the default 5s
+`beamtalk_object_class:class_name/1`'s `gen_server:call(ClassPid, class_name)` uses the default 5s
 timeout and queues behind whatever `ClassPid` is currently running, so it
 fails with `{timeout, {gen_server, call, [ClassPid, class_name]}}` when the
 class process is busy serving a long class-side call (BT-3820). This resolves
 the name via `beamtalk_class_registry:class_name_for_pid/1` (a pure ETS reverse
-lookup, no message send), falling back to `class_name/1` only on a miss. The
-same caveat as `module_name_safe/1` applies to an untrappable `kill`.
+lookup, no message send), falling back to `beamtalk_object_class:class_name/1` only on a miss. The
+same caveat as `beamtalk_object_class:module_name_safe/1` applies to an untrappable `kill`.
 
 Stale-name behaviour: the reverse index is kept for a class process that
 crashed without running `terminate/2` (auto-restart recovery), so for such a
@@ -82,12 +82,12 @@ class_name_or_undefined(ClassPid) ->
 -doc """
 Get the superclass, preferring a deadlock-safe metadata lookup.
 
-Mirrors `module_name_safe/1`: resolves via
+Mirrors `beamtalk_object_class:module_name_safe/1`: resolves via
 `beamtalk_class_registry:class_name_for_pid/1` (a pure ETS reverse lookup, no
 message send) followed by `beamtalk_class_metadata:lookup_superclass/1` — the
 same ETS row `beamtalk_class_dispatch` reads on the dispatch hot path, kept in
 sync with the process dictionary by `sync_identity/6` at every `init/1` and
-`apply_class_info/2`. Falls back to `superclass/1`'s `gen_server:call` only if
+`beamtalk_object_class:apply_class_info/2`. Falls back to `beamtalk_object_class:superclass/1`'s `gen_server:call` only if
 either lookup misses.
 
 Without this, `beamtalk_behaviour_intrinsics` would read the superclass via
@@ -108,7 +108,7 @@ superclass_safe(ClassPid) ->
 -doc """
 Local (non-inherited) instance-method selectors, preferring a message-free read.
 
-`methods/1`'s `gen_server:call(ClassPid, methods)` queues behind whatever
+`beamtalk_object_class:methods/1`'s `gen_server:call(ClassPid, methods)` queues behind whatever
 `ClassPid` is running, so calling it from inside another class's handler
 (`Foo methods`, `allInstVarNames`, the protocol-conformance walk, ...) deadlocks
 two busy classes against each other until the 5s call timeout (BT-3826; the
@@ -116,7 +116,7 @@ invariant is "a class process never makes a blocking call into another class
 process while handling a call"). This reads the selectors the owning class
 published with `beamtalk_class_publish:publish_reflection/1`.
 
-Falls back to `methods/1` only when there is no row to read -- a remote pid
+Falls back to `beamtalk_object_class:methods/1` only when there is no row to read -- a remote pid
 (the node-local ETS cannot name it; the cross-node call path is unchanged), or
 a class that has not published yet.
 """.
@@ -147,8 +147,8 @@ Local (non-inherited) class-side method selectors, preferring a message-free rea
 
 The selectors are the `selectors` field of the unified metadata row that
 `sync_identity/6` keeps current (and `put_class_method` refreshes), the same
-source `beamtalk_class_dispatch` reads -- so unlike `local_class_methods/1` this
-never queues behind the owning class. Falls back to `local_class_methods/1`
+source `beamtalk_class_dispatch` reads -- so unlike `beamtalk_object_class:local_class_methods/1` this
+never queues behind the owning class. Falls back to `beamtalk_object_class:local_class_methods/1`
 under the same conditions as `instance_methods_safe/1`.
 """.
 -spec local_class_method_selectors_safe(pid()) -> [beamtalk_object_class:selector()].
