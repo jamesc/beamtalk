@@ -342,14 +342,33 @@ ensure_utf8_valid_multibyte_test() ->
 
 ensure_utf8_invalid_bytes_test() ->
     Result = beamtalk_transcript_stream:ensure_utf8(<<255, 254>>),
-    ?assert(is_binary(Result)),
-    ?assertNotEqual(<<255, 254>>, Result).
+    ?assertEqual(<<"<<FF FE>>">>, string:uppercase(Result)),
+    ?assertMatch(<<_/binary>>, unicode:characters_to_binary(Result)).
 
 ensure_utf8_incomplete_sequence_test() ->
     %% 2-byte sequence start but no continuation
     Result = beamtalk_transcript_stream:ensure_utf8(<<16#C0>>),
-    ?assert(is_binary(Result)),
+    ?assertMatch(<<_/binary>>, unicode:characters_to_binary(Result)),
     ?assertNotEqual(<<16#C0>>, Result).
+
+%% BT-5018: the result must itself be valid UTF-8 and survive `json:encode/1`;
+%% a `~p` rendering printed bytes >= 128 as latin1 characters, so it did not.
+ensure_utf8_result_is_always_valid_utf8_test() ->
+    Samples = [
+        <<"ok ", 255, 254, " tail">>,
+        <<128>>,
+        <<16#E2, 16#82>>,
+        crypto:hash(sha256, <<"x">>),
+        {beamtalk_string, <<"bad ", 200, 201>>}
+    ],
+    lists:foreach(
+        fun(Sample) ->
+            Result = beamtalk_transcript_stream:ensure_utf8(Sample),
+            ?assertEqual(Result, unicode:characters_to_binary(Result)),
+            ?assert(is_binary(iolist_to_binary(json:encode(Result))))
+        end,
+        Samples
+    ).
 
 ensure_utf8_empty_binary_test() ->
     ?assertEqual(<<>>, beamtalk_transcript_stream:ensure_utf8(<<>>)).
