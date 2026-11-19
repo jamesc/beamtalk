@@ -38,6 +38,10 @@ bindings while sharing access to actors and loaded modules.
     get_session_id/2,
     get_session_meta/1,
     get_session_meta/2,
+    attach/2,
+    lifecycle_state/1,
+    lifecycle_state/2,
+    session_idle_seconds/0,
     enqueue_mutation/2,
     load_file/2,
     load_file/3,
@@ -62,6 +66,15 @@ bindings while sharing access to actors and loaded modules.
     unload_module/2
 ]).
 -endif.
+
+%% Default time a detached session stays resumable (4 hours, the workspace idle timeout).
+-define(DEFAULT_SESSION_IDLE_SECONDS, 14400).
+%% Process-dictionary key for client-attachment bookkeeping. Kept out of the gen_server
+%% state tuple (every clause matches `{SessionId, State, Worker}`) and out of
+%% `beamtalk_repl_state` (an eval worker's returned snapshot overwrites it).
+-define(LIFECYCLE_KEY, beamtalk_session_lifecycle).
+%% How often a detached session with a running eval re-checks whether it may stop.
+-define(BUSY_RECHECK_MS, 5000).
 
 %%% Public API
 
@@ -216,6 +229,57 @@ get_session_meta(SessionPid) ->
 -spec get_session_meta(pid(), timeout()) -> {ok, binary(), map()} | {error, term()}.
 get_session_meta(SessionPid, Timeout) ->
     gen_server:call(SessionPid, get_session_meta, Timeout).
+
+-doc """
+Attach a client (the WebSocket handler process) to this session (BT-5012).
+
+The shell monitors `ClientPid`; while at least one client is attached the session
+never idles out. When the last client goes away (it exits, or the connection
+drops without a clean close) the session is *detached*: it stays resumable for
+`session_idle_seconds/0`, then stops itself and removes its `beamtalk_session_table`
+row. Re-attaching (a `resume`) within that period cancels the countdown.
+
+A cast, so a client that races a dying shell never crashes; ordering with a later
+`lifecycle_state/1` call from the same process is preserved.
+""".
+-spec attach(pid(), pid()) -> ok.
+attach(SessionPid, ClientPid) when is_pid(ClientPid) ->
+    gen_server:cast(SessionPid, {attach, ClientPid}).
+
+-doc """
+How the idle monitor should see this session (BT-5012):
+
+- `attached`   — a client is connected.
+- `unattached` — no client has ever attached (a dist-attached/`clone` session whose
+  owner stops it explicitly); treated as active, as before.
+- `busy`       — detached, but an eval is still running; treated as active.
+- `detached`   — a client was attached and has gone; only this state lets the
+  workspace be considered idle.
+
+Answered in any worker state, like `get_session_id/1`.
+""".
+-spec lifecycle_state(pid()) -> attached | unattached | busy | detached.
+lifecycle_state(SessionPid) ->
+    lifecycle_state(SessionPid, 5000).
+
+-spec lifecycle_state(pid(), timeout()) -> attached | unattached | busy | detached.
+lifecycle_state(SessionPid, Timeout) ->
+    gen_server:call(SessionPid, lifecycle_state, Timeout).
+
+-doc """
+How long a detached session stays resumable before it is stopped, in seconds.
+
+Application env `session_idle_seconds` of `beamtalk_workspace`; defaults to 4 hours
+(the same as the workspace idle timeout).
+""".
+-spec session_idle_seconds() -> non_neg_integer().
+session_idle_seconds() ->
+    case
+        application:get_env(beamtalk_workspace, session_idle_seconds, ?DEFAULT_SESSION_IDLE_SECONDS)
+    of
+        N when is_integer(N), N >= 0 -> N;
+        _ -> ?DEFAULT_SESSION_IDLE_SECONDS
+    end.
 
 -ifdef(TEST).
 -doc "Clear all variable bindings for this session.".
@@ -391,6 +455,8 @@ handle_call(get_session_meta, _From, {SessionId, State, Worker}) ->
     %% get_session_id) so enumeration never stalls on a mid-eval shell.
     Meta = beamtalk_repl_state:get_client_meta(State),
     {reply, {ok, SessionId, Meta}, {SessionId, State, Worker}};
+handle_call(lifecycle_state, _From, {SessionId, State, Worker}) ->
+    {reply, current_lifecycle_state(Worker), {SessionId, State, Worker}};
 handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
     %% ADR 0081 Phase 1: clear only the session locals. Workspace bindings
     %% (singletons + bind:as: names) are no longer copied into the session map, so
@@ -541,6 +607,9 @@ handle_cast(
     ),
     Subscriber ! {eval_error, Err, <<>>, []},
     {noreply, FullState};
+handle_cast({attach, ClientPid}, FullState) ->
+    attach_client(ClientPid),
+    {noreply, FullState};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -621,10 +690,32 @@ handle_info({class_removed, _ClassName, Module}, {SessionId, State, Worker}) ->
     %% overwrite our change when eval_result is processed.)
     NewState = beamtalk_repl_state:add_pending_module_removal(Module, State),
     {noreply, {SessionId, NewState, Worker}};
+%% An attached client went away — start the idle countdown if it was the last.
+handle_info({'DOWN', Ref, process, _Pid, _Reason}, FullState) ->
+    detach_client(Ref),
+    {noreply, FullState};
+%% Detached session idle period elapsed (BT-5012). A stale timer from an earlier
+%% detach, or one that fires after a re-attach, finds the deadline not reached /
+%% a client present and is ignored. A session still running an eval is kept.
+handle_info(session_idle_timeout, {SessionId, _State, Worker} = FullState) ->
+    case idle_expired() of
+        false ->
+            {noreply, FullState};
+        true when Worker =/= undefined ->
+            %% Mid-eval: never stop under a running evaluation; look again later.
+            arm_idle_timer(?BUSY_RECHECK_MS),
+            {noreply, FullState};
+        true ->
+            ?LOG_INFO("Detached REPL session idle, stopping", #{
+                session => SessionId, domain => [beamtalk, runtime]
+            }),
+            {stop, normal, FullState}
+    end;
 handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(Reason, {SessionId, _State, {WorkerPid, MonRef, _From}}) ->
+    forget_session(SessionId),
     %% Kill any running worker to avoid zombie evaluations
     erlang:demonitor(MonRef, [flush]),
     exit(WorkerPid, kill),
@@ -633,6 +724,7 @@ terminate(Reason, {SessionId, _State, {WorkerPid, MonRef, _From}}) ->
     }),
     ok;
 terminate(Reason, {SessionId, _State, _Worker}) ->
+    forget_session(SessionId),
     ?LOG_INFO("REPL session terminated", #{
         session => SessionId, reason => Reason, domain => [beamtalk, runtime]
     }),
@@ -645,6 +737,100 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%% Internal functions
+
+-doc """
+Remove this shell's `beamtalk_session_table` row on any exit (idle timeout, `close`,
+`Program exit:`), so a stopped session is never resumable and no row leaks. Only
+deletes a row that still points at this process.
+""".
+-spec forget_session(binary()) -> ok.
+forget_session(SessionId) ->
+    beamtalk_session_table:delete(SessionId, self()).
+
+-spec lifecycle() -> map().
+lifecycle() ->
+    case get(?LIFECYCLE_KEY) of
+        undefined ->
+            #{clients => #{}, ever_attached => false, deadline => undefined, timer => undefined};
+        L ->
+            L
+    end.
+
+-spec current_lifecycle_state(term()) -> attached | unattached | busy | detached.
+current_lifecycle_state(Worker) ->
+    #{clients := Clients, ever_attached := Ever} = lifecycle(),
+    case {map_size(Clients) > 0, Ever, Worker} of
+        {true, _, _} -> attached;
+        {false, false, _} -> unattached;
+        {false, true, undefined} -> detached;
+        {false, true, _} -> busy
+    end.
+
+-spec attach_client(pid()) -> ok.
+attach_client(ClientPid) ->
+    #{clients := Clients} = lifecycle(),
+    Ref = erlang:monitor(process, ClientPid),
+    cancel_idle_timer(),
+    put(?LIFECYCLE_KEY, (lifecycle())#{
+        clients => Clients#{Ref => ClientPid}, ever_attached => true, deadline => undefined
+    }),
+    ok.
+
+-spec detach_client(reference()) -> ok.
+detach_client(Ref) ->
+    #{clients := Clients} = L = lifecycle(),
+    case maps:take(Ref, Clients) of
+        error ->
+            ok;
+        {_Pid, Rest} ->
+            put(?LIFECYCLE_KEY, L#{clients => Rest}),
+            case map_size(Rest) of
+                0 ->
+                    Ms = session_idle_seconds() * 1000,
+                    Deadline = erlang:monotonic_time(millisecond) + Ms,
+                    put(?LIFECYCLE_KEY, (lifecycle())#{deadline => Deadline}),
+                    schedule_idle_timeout();
+                _ ->
+                    ok
+            end
+    end.
+
+-spec schedule_idle_timeout() -> ok.
+schedule_idle_timeout() ->
+    #{deadline := Deadline} = lifecycle(),
+    Delay = max(0, Deadline - erlang:monotonic_time(millisecond)),
+    arm_idle_timer(Delay).
+
+%% Arm the single idle timer, cancelling any earlier one so flapping
+%% attach/detach (or a busy recheck chain) never leaves duplicates alive.
+-spec arm_idle_timer(non_neg_integer()) -> ok.
+arm_idle_timer(Delay) ->
+    cancel_idle_timer(),
+    Ref = erlang:send_after(Delay, self(), session_idle_timeout),
+    put(?LIFECYCLE_KEY, (lifecycle())#{timer => Ref}),
+    ok.
+
+-spec cancel_idle_timer() -> ok.
+cancel_idle_timer() ->
+    case lifecycle() of
+        #{timer := Ref} when is_reference(Ref) ->
+            _ = erlang:cancel_timer(Ref),
+            put(?LIFECYCLE_KEY, (lifecycle())#{timer => undefined}),
+            ok;
+        _ ->
+            ok
+    end.
+
+-spec idle_expired() -> boolean().
+idle_expired() ->
+    case lifecycle() of
+        #{clients := Clients, deadline := Deadline} when
+            map_size(Clients) =:= 0, is_integer(Deadline)
+        ->
+            erlang:monotonic_time(millisecond) >= Deadline;
+        _ ->
+            false
+    end.
 
 -doc """
 ADR 0081: seed the eval-worker process dictionary with the session
