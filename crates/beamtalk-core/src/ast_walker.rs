@@ -740,6 +740,18 @@ where
             walk_expression(&stmt.expression, f);
         }
     });
+    // BT-5026: state / class-variable defaults and the provided-method bodies
+    // of protocols with no user in this module are not statement sequences of
+    // `for_each_expr_seq`, but the validators built on this walker must see
+    // them (`state: w = AbstractThing new`).
+    for default in module.state_default_exprs() {
+        walk_expression(default, f);
+    }
+    for method in module.unused_protocol_provided_methods() {
+        for stmt in &method.body {
+            walk_expression(&stmt.expression, f);
+        }
+    }
 }
 
 #[cfg(test)]

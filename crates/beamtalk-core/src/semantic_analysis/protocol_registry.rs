@@ -955,6 +955,7 @@ impl ProtocolRegistry {
                 &method.defined_in,
                 &req.selector,
                 actual,
+                false, // protocol requirements are instance-side
                 hierarchy,
             )
             .is_some_and(|w| {

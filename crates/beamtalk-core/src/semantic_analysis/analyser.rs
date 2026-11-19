@@ -78,11 +78,30 @@ impl Analyser {
             self.scope.pop();
         }
 
+        // BT-5026: provided methods of protocols no class here `uses:`,
+        // mirroring `NameResolver::resolve_module`.
+        for method in module.unused_protocol_provided_methods() {
+            self.scope.push();
+            self.analyse_method(method);
+            self.scope.pop();
+        }
+
         self.scope.restore_module_bindings(hidden_module_bindings);
     }
 
     fn analyse_class(&mut self, class: &crate::ast::ClassDefinition) {
         self.scope.push(); // Enter class scope (depth 1)
+
+        // BT-5026: state / class-variable defaults, before the state names are
+        // defined (same order as `NameResolver::resolve_class`).
+        for default in class
+            .state
+            .iter()
+            .chain(&class.class_variables)
+            .filter_map(|d| d.default_value.as_ref())
+        {
+            self.analyse_expression(default, None);
+        }
 
         // Define state variables in class scope
         for state in &class.state {

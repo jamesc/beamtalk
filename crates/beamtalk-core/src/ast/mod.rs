@@ -216,6 +216,38 @@ impl Module {
             .chain(self.method_definitions.iter().map(|s| &s.method))
     }
 
+    /// Every state and class-variable default expression in this module
+    /// (BT-5026). Defaults are not method bodies, so [`Self::all_methods`] and
+    /// the statement-sequence walkers never reach them; this is the one shared
+    /// enumeration of them.
+    pub fn state_default_exprs(&self) -> impl Iterator<Item = &Expression> {
+        self.classes
+            .iter()
+            .flat_map(|c| c.state.iter().chain(&c.class_variables))
+            .filter_map(|d| d.default_value.as_ref())
+    }
+
+    /// Provided-method bodies of protocols that no class in this module
+    /// `uses:` (BT-5026).
+    ///
+    /// A used protocol's provided methods reach analysis as copies the
+    /// flattener splices into each using class, so they are already covered by
+    /// [`Self::all_methods`] (once per user). A protocol with no user in the
+    /// module — typically a protocol-only file — has no such copy, so its own
+    /// bodies would otherwise never be analysed.
+    pub fn unused_protocol_provided_methods(&self) -> impl Iterator<Item = &MethodDefinition> {
+        self.protocols
+            .iter()
+            .filter(|p| {
+                !self
+                    .classes
+                    .iter()
+                    .flat_map(|c| &c.uses)
+                    .any(|u| u.protocol.name == p.name.name)
+            })
+            .flat_map(|p| p.provided_methods.iter())
+    }
+
     /// Iterate the methods written in class bodies (instance, then class side)
     /// with their owning class name and side. Excludes standalone definitions;
     /// [`Self::methods_with_owner`] adds them.

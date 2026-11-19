@@ -959,7 +959,9 @@ fn check_method_nil_return(
     let crate::ast::TypeAnnotation::Simple(id) = return_type else {
         return;
     };
-    if id.name.as_str() != "Nil" {
+    // `UndefinedObject` is the canonical nil class; `Nil` is its alias
+    // (BT-5026), so both spellings are `-> Nil`.
+    if !WellKnownClass::from_str(id.name.as_str()).is_some_and(WellKnownClass::is_nil_class) {
         return;
     }
     // Exempt abstract placeholder methods.

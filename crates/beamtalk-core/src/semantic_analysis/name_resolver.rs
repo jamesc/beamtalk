@@ -133,6 +133,15 @@ impl NameResolver {
             self.scope.pop();
         }
 
+        // BT-5026: provided methods of a protocol no class here `uses:` (a
+        // protocol-only file). A used protocol's bodies are resolved as the
+        // copies spliced into each user. Same shape as an extension method.
+        for method in module.unused_protocol_provided_methods() {
+            self.scope.push();
+            self.resolve_method(method);
+            self.scope.pop();
+        }
+
         self.scope.restore_module_bindings(hidden_module_bindings);
         self.hidden_module_names.clear();
 
@@ -154,6 +163,19 @@ impl NameResolver {
     /// Resolves a class definition, entering class scope and resolving methods.
     fn resolve_class(&mut self, class: &ClassDefinition) {
         self.scope.push(); // Enter class scope (depth 1)
+
+        // BT-5026: resolve state and class-variable defaults *before* the
+        // state names are defined. A default is evaluated at construction, so
+        // it sees neither `self` nor sibling fields — only built-ins and
+        // literals — and a name in it is undefined, not a field.
+        for default in class
+            .state
+            .iter()
+            .chain(&class.class_variables)
+            .filter_map(|d| d.default_value.as_ref())
+        {
+            self.resolve_expression(default);
+        }
 
         // Define state variables in class scope
         for state in &class.state {
