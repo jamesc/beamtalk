@@ -96,7 +96,9 @@ ffi_shim_lines_not_found_test() ->
     ?assertBtResultObjError(file_not_found, R).
 
 ffi_shim_open_not_found_test() ->
-    R = beamtalk_file:open(list_to_binary(bt_path("shim_no_such.txt")), fun(_) -> error(callback_should_not_run) end),
+    R = beamtalk_file:open(list_to_binary(bt_path("shim_no_such.txt")), fun(_) ->
+        error(callback_should_not_run)
+    end),
     ?assertBtResultObjError(file_not_found, R).
 
 ffi_shim_isDirectory_false_test() ->
@@ -964,7 +966,9 @@ rename_to_directory_test() ->
     end.
 
 rename_to_file_not_found_test() ->
-    R = beamtalk_file:rename(list_to_binary(bt_path("eunit_no_such_xyz.txt")), list_to_binary(bt_path("eunit_dst.txt"))),
+    R = beamtalk_file:rename(
+        list_to_binary(bt_path("eunit_no_such_xyz.txt")), list_to_binary(bt_path("eunit_dst.txt"))
+    ),
     ?assertBtResultObjError(file_not_found, 'File', 'rename:to:', R).
 
 rename_to_type_error_from_test() ->
