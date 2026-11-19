@@ -24,6 +24,11 @@ pub struct EvaluateParams {
         description = "If true, return per-statement trace steps instead of a single result value. Each step includes the source text and the evaluated value."
     )]
     pub trace: Option<bool>,
+    /// Per-call limit on how long to wait for the evaluation, in seconds.
+    #[schemars(
+        description = "Maximum seconds to wait for this evaluation (default 30, or BEAMTALK_MCP_EVAL_TIMEOUT). On expiry the connection is closed; use the interrupt tool to cancel a running evaluation instead of waiting."
+    )]
+    pub timeout_secs: Option<u64>,
 }
 
 /// Parameters for the `complete` MCP tool.

@@ -14,6 +14,7 @@ async fn evaluate_returns_value_and_output() {
         .evaluate(Parameters(EvaluateParams {
             code: "1 + 2".to_string(),
             trace: None,
+            timeout_secs: None,
         }))
         .await
         .expect("evaluate should not raise a protocol error");
@@ -41,6 +42,7 @@ async fn evaluate_renders_warning_with_its_hint() {
         .evaluate(Parameters(EvaluateParams {
             code: "Value subclass: Client".to_string(),
             trace: None,
+            timeout_secs: None,
         }))
         .await
         .unwrap();
@@ -68,6 +70,7 @@ async fn evaluate_error_still_renders_warnings_with_hints() {
         .evaluate(Parameters(EvaluateParams {
             code: "x".to_string(),
             trace: None,
+            timeout_secs: None,
         }))
         .await
         .unwrap();
@@ -87,6 +90,7 @@ async fn evaluate_trace_renders_steps() {
         .evaluate(Parameters(EvaluateParams {
             code: "1 + 2".to_string(),
             trace: Some(true),
+            timeout_secs: None,
         }))
         .await
         .unwrap();
@@ -107,6 +111,7 @@ async fn evaluate_error_includes_line_and_hint() {
         .evaluate(Parameters(EvaluateParams {
             code: "bogus".to_string(),
             trace: None,
+            timeout_secs: None,
         }))
         .await
         .unwrap();
@@ -165,6 +170,7 @@ async fn evaluate_error_passes_frames_through_as_structured_content() {
         .evaluate(Parameters(EvaluateParams {
             code: "Counter new increment".to_string(),
             trace: None,
+            timeout_secs: None,
         }))
         .await
         .unwrap();
@@ -192,6 +198,7 @@ async fn evaluate_error_without_frames_has_no_structured_content() {
         .evaluate(Parameters(EvaluateParams {
             code: "x".to_string(),
             trace: None,
+            timeout_secs: None,
         }))
         .await
         .unwrap();
@@ -636,14 +643,15 @@ async fn unload_error() {
 
 #[tokio::test]
 async fn interrupt_success() {
-    let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+    let (_fake, mcp) = fake_mcp_with_interrupt_connection(|| respond(serde_json::json!({}))).await;
     let result = mcp.interrupt().await.unwrap();
     assert_eq!(call_text(&result), "Interrupt sent");
 }
 
 #[tokio::test]
 async fn interrupt_error() {
-    let (_fake, mcp) = fake_mcp(respond_error("nothing running")).await;
+    let (_fake, mcp) =
+        fake_mcp_with_interrupt_connection(|| respond_error("nothing running")).await;
     let result = mcp.interrupt().await.unwrap();
     assert_eq!(result.is_error, Some(true));
 }
