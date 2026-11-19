@@ -16,6 +16,7 @@ Split out of `beamtalk_workspace_project_sync` (BT-5048). Sits above `beamtalk_w
 
 -export([
     compile_native_erl_files/2,
+    compile_native_erl_files/3,
     regenerate_native_class_header/2,
     build_source_class_module_index/2,
     find_project_root/1,
@@ -39,9 +40,20 @@ Returns {Errors, CompiledCount} where Errors is a list of structured error maps.
 Include paths are set to native/include/ if present.
 """.
 -spec compile_native_erl_files([string()], string()) -> {[map()], non_neg_integer()}.
-compile_native_erl_files([], _ProjectRoot) ->
-    {[], 0};
 compile_native_erl_files(ErlFiles, ProjectRoot) ->
+    compile_native_erl_files(ErlFiles, ProjectRoot, []).
+
+-doc """
+`compile_native_erl_files/2` with extra include directories searched after the
+generated and `native/include/` ones. `save-native-source` stages the edited
+buffer in a scratch directory and passes the real source's directory here so a
+sibling `-include("x.hrl")` still resolves as it would from the real file.
+""".
+-spec compile_native_erl_files([string()], string(), [string()]) ->
+    {[map()], non_neg_integer()}.
+compile_native_erl_files([], _ProjectRoot, _ExtraIncludeDirs) ->
+    {[], 0};
+compile_native_erl_files(ErlFiles, ProjectRoot, ExtraIncludeDirs) ->
     NativeDir = filename:join(ProjectRoot, "native"),
     IncludeDir = filename:join(NativeDir, "include"),
     %% Native modules may `-include("beamtalk_classes.hrl")`, the
@@ -63,11 +75,12 @@ compile_native_erl_files(ErlFiles, ProjectRoot) ->
             true -> [{i, IncludeDir} | BaseOpts];
             false -> BaseOpts
         end,
-    IncludeOpts =
+    IncludeOpts1 =
         case filelib:is_dir(GeneratedIncludeDir) of
             true -> [{i, GeneratedIncludeDir} | IncludeOpts0];
             false -> IncludeOpts0
         end,
+    IncludeOpts = IncludeOpts1 ++ [{i, D} || D <- ExtraIncludeDirs],
     lists:foldl(
         fun(ErlPath, {ErrsAcc, CountAcc}) ->
             ?LOG_INFO(

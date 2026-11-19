@@ -117,7 +117,7 @@ spec_to_otp(BtSpec, Mode) ->
     ClassObj = lists:nth(1, StartElems),
     ChildModule = element(3, ClassObj),
     ChildClassPid = element(4, ClassObj),
-    ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
+    ChildClass = beamtalk_object_class_read:class_name_safe(ChildClassPid),
     OtpStart =
         case beamtalk_supervisor:is_supervisor(ChildClass) of
             true ->

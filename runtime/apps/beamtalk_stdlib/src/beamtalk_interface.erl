@@ -199,7 +199,7 @@ liveClassName(#beamtalk_object{pid = Pid}) when is_pid(Pid), node(Pid) =:= node(
     end;
 liveClassName(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->
     try
-        beamtalk_object_class:class_name_safe(Pid)
+        beamtalk_object_class_read:class_name_safe(Pid)
     catch
         exit:_ -> nil
     end;

@@ -102,6 +102,12 @@ sealed typed Object subclass: File native: beamtalk_file
   /// Cross-process constraint: file-backed Streams must be consumed
   /// by the same process that created them.
   ///
+  /// An I/O error part-way through ends the Stream as if the file were
+  /// exhausted and logs a warning; it is not raised (a line that is not
+  /// valid UTF-8 does raise `parse_error`). Intended: a lazy `Stream` has no channel for
+  /// a late error. Use `File readAll:` when a failure must be seen
+  /// (BT-5030).
+  ///
   /// ## Examples
   /// ```beamtalk
   /// (File lines: "data.csv") unwrap take: 5

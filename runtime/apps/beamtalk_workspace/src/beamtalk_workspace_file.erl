@@ -26,6 +26,14 @@ checks (BT-4683).
     swept: nothing reads it back, so it is harmless, and without the marker
     it cannot be told apart from another tool's file.
 
+Durability (BT-5017): `write_temp/2` `fsync`s the staged bytes before
+`atomic_write/3` renames them, so a power loss cannot leave the target
+renamed over an empty file. The containing directory is not fsynced: OTP has
+no portable directory sync, and the worst outcome of skipping it is that the
+rename is lost and the previous, whole file is still there. This helper is
+the one place the workspace syncs; its callers (flush, ChangeLog bodies,
+`metadata.json`, native saves) add no sync of their own.
+
 A leaf module: it calls only OTP.
 """.
 
@@ -35,6 +43,8 @@ A leaf module: it calls only OTP.
     path_inside/2,
     relative_parts/2,
     write_temp/2,
+    staging_dir/1,
+    is_staging_dir_name/1,
     atomic_write/3,
     sweep_stale_temps/1, sweep_stale_temps/2,
     sweep_stale_temps_in/1, sweep_stale_temps_in/2
@@ -85,6 +95,25 @@ temp_path(Path) ->
     Path ++ ?TEMP_MARKER ++ integer_to_list(erlang:unique_integer([positive])) ++ ".tmp".
 
 -doc """
+A fresh scratch directory path next to `Path`: `<dirname>/.bt-staging.<unique>`.
+For a caller that must hand a tool a file with the real name (`erlc` wants the
+module's own `<module>.erl`) without ever putting a second copy where the
+build looks for sources. It is not created. `is_staging_dir_name/1` recognises
+the name so source scanners can skip a leftover one.
+""".
+-spec staging_dir(string()) -> string().
+staging_dir(Path) ->
+    filename:join(
+        filename:dirname(Path),
+        ?TEMP_MARKER ++ integer_to_list(erlang:unique_integer([positive]))
+    ).
+
+-doc "True for a directory name `staging_dir/1` produced.".
+-spec is_staging_dir_name(file:filename()) -> boolean().
+is_staging_dir_name(Name) ->
+    lists:prefix(?TEMP_MARKER, Name).
+
+-doc """
 Write `Data` to a fresh `temp_path/1` next to `Path` and return the temp
 path, for a caller that renames it into place later (a staged two-phase
 commit such as `beamtalk_workspace_flush`). On a write failure the partial
@@ -93,12 +122,35 @@ temp file is deleted.
 -spec write_temp(string(), iodata()) -> {ok, string()} | {error, {write, term()}}.
 write_temp(Path, Data) ->
     Tmp = temp_path(Path),
-    case file:write_file(Tmp, Data) of
+    case write_synced(Tmp, Data) of
         ok ->
             {ok, Tmp};
         {error, Reason} ->
             _ = file:delete(Tmp),
             {error, {write, Reason}}
+    end.
+
+%% Write `Data` to `Tmp` and `fsync` it before closing (BT-5017). A rename is
+%% atomic with respect to other processes, but not durable on its own: after a
+%% power loss the new name can point at a file whose data never reached disk,
+%% i.e. an empty `metadata.json` or source body. Syncing the temp file first
+%% closes that. The directory entry itself is not synced; see the moduledoc.
+-spec write_synced(string(), iodata()) -> ok | {error, term()}.
+write_synced(Tmp, Data) ->
+    case file:open(Tmp, [write, binary, raw]) of
+        {ok, Fd} ->
+            Result =
+                case file:write(Fd, Data) of
+                    ok -> file:sync(Fd);
+                    {error, _} = Err -> Err
+                end,
+            case {Result, file:close(Fd)} of
+                {ok, ok} -> ok;
+                {ok, {error, _} = CloseErr} -> CloseErr;
+                {{error, _} = WriteErr, _} -> WriteErr
+            end;
+        {error, _} = OpenErr ->
+            OpenErr
     end.
 
 -doc """

@@ -9,8 +9,7 @@ use super::common::*;
 
 fn diagnostics_for(body: &str) -> Vec<Diagnostic> {
     let source = format!("Object subclass: Probe\n{body}");
-    let (module, hierarchy) = parse_and_build(&source);
-    run_with_expect(&module, &hierarchy)
+    diags_parse_ok_with_expect(&source)
 }
 
 fn dnu(diags: &[Diagnostic]) -> Vec<&Diagnostic> {

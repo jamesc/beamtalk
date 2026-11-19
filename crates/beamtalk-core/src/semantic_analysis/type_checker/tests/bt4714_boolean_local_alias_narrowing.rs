@@ -25,13 +25,11 @@ typed Object subclass: Repro
 }
 
 fn assert_clean(body: &str) {
-    let diags = type_dnu_diags(&method(body));
-    assert!(diags.is_empty(), "expected clean:\n{body}\ngot: {diags:#?}");
+    assert_clean_diags(&type_dnu_diags(&method(body)), body);
 }
 
 fn assert_rejected(body: &str) {
-    let diags = type_dnu_diags(&method(body));
-    assert!(!diags.is_empty(), "expected a diagnostic:\n{body}");
+    assert_has_diags(&type_dnu_diags(&method(body)), body);
 }
 
 #[test]

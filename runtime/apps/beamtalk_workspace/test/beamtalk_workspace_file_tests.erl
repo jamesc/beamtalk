@@ -48,6 +48,32 @@ relative_parts_test_() ->
 %% write_temp/2, atomic_write/3
 %%====================================================================
 
+%% BT-5017: the staged bytes are fsynced before the caller renames them into
+%% place. Without it a power loss can leave the renamed file empty. Observed by
+%% call-tracing `file:sync/1` and `file:rename/2` (beamtalk_test_trace), so the
+%% test needs no timing.
+write_temp_syncs_before_returning_test() ->
+    with_dir(fun(Dir) ->
+        Path = filename:join(Dir, "target.bt"),
+        {{ok, Tmp}, Calls} = beamtalk_test_trace:calls_during(
+            fun() -> beamtalk_workspace_file:write_temp(Path, <<"body">>) end,
+            [{file, sync, 1}]
+        ),
+        ?assertEqual({ok, <<"body">>}, file:read_file(Tmp)),
+        ?assertMatch([{file, sync, _}], Calls)
+    end).
+
+atomic_write_syncs_before_rename_test() ->
+    with_dir(fun(Dir) ->
+        Path = filename:join(Dir, "target.bt"),
+        {ok, Calls} = beamtalk_test_trace:calls_during(
+            fun() -> beamtalk_workspace_file:atomic_write(Path, <<"body">>, undefined) end,
+            [{file, sync, 1}, {file, rename, 2}]
+        ),
+        ?assertEqual([sync, rename], [F || {file, F, _} <- Calls]),
+        ?assertEqual({ok, <<"body">>}, file:read_file(Path))
+    end).
+
 write_temp_uses_a_fresh_name_per_call_test() ->
     with_dir(fun(Dir) ->
         Path = filename:join(Dir, "target.bt"),

@@ -17,7 +17,7 @@ documentation — literally byte-identical apart from which lookup mechanism
 reach the same class-registry/gen_server state.
 
 Every per-level read here is a message-free read of the state each class
-publishes to ETS (`beamtalk_object_class:instance_methods_safe/1`,
+publishes to ETS (`beamtalk_object_class_read:instance_methods_safe/1`,
 `superclass_safe/1`, ...), never a `gen_server:call` into the class process
 (BT-3832): these run inside a class handler whenever user code calls
 `Beamtalk help:` from a class method, and a blocking call into another class
@@ -66,7 +66,7 @@ and — in the cycle case only — logs a `?LOG_WARNING`.
 -spec find_defining_class(pid(), atom()) -> atom().
 find_defining_class(ClassPid, Selector) ->
     find_defining(ClassPid, Selector, find_defining_class, fun(Pid) ->
-        beamtalk_object_class:instance_methods_safe(Pid)
+        beamtalk_object_class_read:instance_methods_safe(Pid)
     end).
 
 -doc """
@@ -78,7 +78,7 @@ class-method selectors at each level instead of the instance method table.
 -spec find_defining_class_method(pid(), atom()) -> atom().
 find_defining_class_method(ClassPid, Selector) ->
     find_defining(ClassPid, Selector, find_defining_class_method, fun(Pid) ->
-        beamtalk_object_class:local_class_method_selectors_safe(Pid)
+        beamtalk_object_class_read:local_class_method_selectors_safe(Pid)
     end).
 
 %% The one "which ancestor defines `Selector`?" walk behind both public
@@ -89,9 +89,9 @@ find_defining_class_method(ClassPid, Selector) ->
 %% answers the last level reached. A cycle answers the receiver's own class.
 -spec find_defining(pid(), atom(), atom(), fun((pid()) -> [atom()])) -> atom().
 find_defining(ClassPid, Selector, Label, SelectorsFun) ->
-    ReceiverName = beamtalk_object_class:class_name_safe(ClassPid),
+    ReceiverName = beamtalk_object_class_read:class_name_safe(ClassPid),
     StepFun = fun(CurrentPid, _Depth) ->
-        CurrentName = beamtalk_object_class:class_name_safe(CurrentPid),
+        CurrentName = beamtalk_object_class_read:class_name_safe(CurrentPid),
         case lists:member(Selector, SelectorsFun(CurrentPid)) of
             true ->
                 {found, CurrentName};
@@ -105,7 +105,7 @@ find_defining(ClassPid, Selector, Label, SelectorsFun) ->
     Ctx = #{
         start => ReceiverName,
         selector => Selector,
-        node_name => fun beamtalk_object_class:class_name_safe/1
+        node_name => fun beamtalk_object_class_read:class_name_safe/1
     },
     case beamtalk_hierarchy:walk_or_warn(ClassPid, StepFun, Label, Ctx) of
         {found, DefiningClass} ->
@@ -123,7 +123,7 @@ find_defining(ClassPid, Selector, Label, SelectorsFun) ->
 %% superclass or the superclass is not registered (the chain ends there).
 -spec superclass_level(pid()) -> {pid(), atom()} | none.
 superclass_level(ClassPid) ->
-    case beamtalk_object_class:superclass_safe(ClassPid) of
+    case beamtalk_object_class_read:superclass_safe(ClassPid) of
         none ->
             none;
         SuperName ->
@@ -148,7 +148,7 @@ naming the ancestor where the cycle was detected.
 -spec collect_flattened_methods(atom(), pid()) -> map().
 collect_flattened_methods(ClassName, ClassPid) ->
     flatten_walk(ClassName, ClassPid, collect_flattened_methods, fun(Name, Pid) ->
-        Local = beamtalk_object_class:local_instance_method_infos_safe(Pid),
+        Local = beamtalk_object_class_read:local_instance_method_infos_safe(Pid),
         maps:map(fun(_Sel, Info) -> {Name, Info} end, Local)
     end).
 
@@ -171,7 +171,7 @@ collect_flattened_class_methods(ClassName, ClassPid) ->
     flatten_walk(ClassName, ClassPid, collect_flattened_class_methods, fun(Name, Pid) ->
         maps:from_list([
             {Sel, Name}
-         || Sel <- beamtalk_object_class:local_class_method_selectors_safe(Pid)
+         || Sel <- beamtalk_object_class_read:local_class_method_selectors_safe(Pid)
         ])
     end).
 

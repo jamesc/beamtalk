@@ -604,7 +604,7 @@ mod tests {
             eprintln!("skipping: installed OTP {installed_major} differs from the fixture's");
             return;
         }
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = beamtalk_workspace::cargo_workspace_root!();
         let mut mods: Vec<&str> = CURATED_MODULES.iter().map(|m| m.name).collect();
         mods.sort_unstable();
         let output = std::process::Command::new("escript")

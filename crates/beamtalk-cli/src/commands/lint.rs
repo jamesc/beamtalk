@@ -1435,19 +1435,16 @@ mod tests {
         std::fs::create_dir_all(&test).unwrap();
         std::fs::write(test.join("foo.bt"), "Object subclass: Foo\n").unwrap();
 
-        let prev_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(root).unwrap();
-
         // Walked form is absolute (under canonical package_root); user-typed
         // target is relative. Both refer to the same file.
         let relative_target = camino::Utf8PathBuf::from("test/foo.bt");
-        let out = lint_pipeline::parse_package_sources(
-            &camino::Utf8PathBuf::from("test"),
-            std::slice::from_ref(&relative_target),
-            |f, _, e| panic!("unreadable {f}: {e}"),
-        );
-
-        std::env::set_current_dir(prev_cwd).unwrap();
+        let out = beamtalk_workspace::test_cwd::with_cwd(root, || {
+            lint_pipeline::parse_package_sources(
+                &camino::Utf8PathBuf::from("test"),
+                std::slice::from_ref(&relative_target),
+                |f, _, e| panic!("unreadable {f}: {e}"),
+            )
+        });
 
         assert_eq!(
             (out.targets.len(), out.class_infos.len()),

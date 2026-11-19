@@ -172,198 +172,6 @@ version = "0.1.0"
 }
 
 #[test]
-fn test_reject_native_dep_non_string_value() {
-    let temp = TempDir::new().unwrap();
-    let path = write_manifest(
-        &temp,
-        r#"
-[package]
-name = "my_app"
-version = "0.1.0"
-
-[native.dependencies]
-gun = 42
-"#,
-    );
-
-    let result = parse_manifest_full(&path.join("beamtalk.toml"));
-    assert!(result.is_err());
-    let err = format!("{:?}", result.unwrap_err());
-    assert!(
-        err.contains("version constraint string or a git"),
-        "should mention string type: {err}"
-    );
-}
-
-#[test]
-fn test_reject_native_dep_empty_constraint() {
-    let temp = TempDir::new().unwrap();
-    let path = write_manifest(
-        &temp,
-        r#"
-[package]
-name = "my_app"
-version = "0.1.0"
-
-[native.dependencies]
-gun = ""
-"#,
-    );
-
-    let result = parse_manifest_full(&path.join("beamtalk.toml"));
-    assert!(result.is_err());
-    let err = format!("{:?}", result.unwrap_err());
-    assert!(
-        err.contains("must not be empty"),
-        "should mention empty constraint: {err}"
-    );
-}
-
-#[test]
-fn test_reject_native_dep_invalid_version() {
-    let temp = TempDir::new().unwrap();
-    let path = write_manifest(
-        &temp,
-        r#"
-[package]
-name = "my_app"
-version = "0.1.0"
-
-[native.dependencies]
-gun = "abc"
-"#,
-    );
-
-    let result = parse_manifest_full(&path.join("beamtalk.toml"));
-    assert!(result.is_err());
-    let err = format!("{:?}", result.unwrap_err());
-    assert!(
-        err.contains("non-numeric"),
-        "should mention non-numeric segment: {err}"
-    );
-}
-
-#[test]
-fn test_reject_native_dep_too_many_segments() {
-    let temp = TempDir::new().unwrap();
-    let path = write_manifest(
-        &temp,
-        r#"
-[package]
-name = "my_app"
-version = "0.1.0"
-
-[native.dependencies]
-gun = "1.2.3.4"
-"#,
-    );
-
-    let result = parse_manifest_full(&path.join("beamtalk.toml"));
-    assert!(result.is_err());
-    let err = format!("{:?}", result.unwrap_err());
-    assert!(
-        err.contains("too many segments"),
-        "should mention too many segments: {err}"
-    );
-}
-
-#[test]
-fn test_reject_native_dep_tilde_without_minor() {
-    let temp = TempDir::new().unwrap();
-    let path = write_manifest(
-        &temp,
-        r#"
-[package]
-name = "my_app"
-version = "0.1.0"
-
-[native.dependencies]
-gun = "~> 2"
-"#,
-    );
-
-    let result = parse_manifest_full(&path.join("beamtalk.toml"));
-    assert!(result.is_err());
-    let err = format!("{:?}", result.unwrap_err());
-    assert!(
-        err.contains("major.minor"),
-        "should mention ~> needs minor: {err}"
-    );
-}
-
-#[test]
-fn test_reject_native_dep_invalid_name_uppercase() {
-    let temp = TempDir::new().unwrap();
-    let path = write_manifest(
-        &temp,
-        r#"
-[package]
-name = "my_app"
-version = "0.1.0"
-
-[native.dependencies]
-Gun = "~> 2.1"
-"#,
-    );
-
-    let result = parse_manifest_full(&path.join("beamtalk.toml"));
-    assert!(result.is_err());
-    let err = format!("{:?}", result.unwrap_err());
-    assert!(
-        err.contains("lowercase"),
-        "should mention lowercase requirement: {err}"
-    );
-}
-
-#[test]
-fn test_reject_native_dep_invalid_name_dash() {
-    let temp = TempDir::new().unwrap();
-    let path = write_manifest(
-        &temp,
-        r#"
-[package]
-name = "my_app"
-version = "0.1.0"
-
-[native.dependencies]
-my-dep = "~> 1.0"
-"#,
-    );
-
-    let result = parse_manifest_full(&path.join("beamtalk.toml"));
-    assert!(result.is_err());
-    let err = format!("{:?}", result.unwrap_err());
-    assert!(
-        err.contains("invalid character"),
-        "should mention invalid character: {err}"
-    );
-}
-
-#[test]
-fn test_reject_native_dep_tilde_in_compound() {
-    let temp = TempDir::new().unwrap();
-    let path = write_manifest(
-        &temp,
-        r#"
-[package]
-name = "my_app"
-version = "0.1.0"
-
-[native.dependencies]
-gun = "~> 2.1 and < 3.0"
-"#,
-    );
-
-    let result = parse_manifest_full(&path.join("beamtalk.toml"));
-    assert!(result.is_err());
-    let err = format!("{:?}", result.unwrap_err());
-    assert!(
-        err.contains("pessimistic"),
-        "should mention ~> in compound not allowed: {err}"
-    );
-}
-
-#[test]
 fn test_native_deps_do_not_affect_regular_deps() {
     let temp = TempDir::new().unwrap();
     let path = write_manifest(
@@ -401,6 +209,113 @@ fn parse_native_toml(native: &str) -> Result<ParsedManifest> {
 
 fn native_err(native: &str) -> String {
     format!("{:?}", parse_native_toml(native).unwrap_err())
+}
+
+/// Native-dependency manifests that must be rejected: one row per case,
+/// `(case, native TOML, expected error substring)`. The case name is in the
+/// failure message.
+const NATIVE_REJECTIONS: &[(&str, &str, &str)] = &[
+    (
+        "non_string_value",
+        "[native.dependencies]\ngun = 42\n",
+        "version constraint string or a git",
+    ),
+    (
+        "empty_constraint",
+        "[native.dependencies]\ngun = \"\"\n",
+        "must not be empty",
+    ),
+    (
+        "invalid_version",
+        "[native.dependencies]\ngun = \"abc\"\n",
+        "non-numeric",
+    ),
+    (
+        "too_many_segments",
+        "[native.dependencies]\ngun = \"1.2.3.4\"\n",
+        "too many segments",
+    ),
+    (
+        "tilde_without_minor",
+        "[native.dependencies]\ngun = \"~> 2\"\n",
+        "major.minor",
+    ),
+    (
+        "invalid_name_uppercase",
+        "[native.dependencies]\nGun = \"~> 2.1\"\n",
+        "lowercase",
+    ),
+    (
+        "invalid_name_dash",
+        "[native.dependencies]\nmy-dep = \"~> 1.0\"\n",
+        "invalid character",
+    ),
+    (
+        "tilde_in_compound",
+        "[native.dependencies]\ngun = \"~> 2.1 and < 3.0\"\n",
+        "pessimistic",
+    ),
+    (
+        "git_dep_without_ref",
+        "[native.dependencies]\noidcc = { git = \"https://github.com/jamesc/oidcc\" }\n",
+        "Native dependency 'oidcc' is a git dependency but has no ref",
+    ),
+    (
+        "git_dep_multiple_refs",
+        "[native.dependencies]\noidcc = { git = \"https://x/oidcc\", branch = \"main\", tag = \"v1\" }\n",
+        "specifies multiple git references",
+    ),
+    (
+        "git_dep_ref_key_points_at_rev",
+        "[native.dependencies]\noidcc = { git = \"https://x/oidcc\", ref = \"abc\" }\n",
+        "pin a commit with 'rev' instead",
+    ),
+    (
+        "table_without_git",
+        "[native.dependencies]\noidcc = { version = \"3.0.0\" }\n",
+        "has no 'git' URL",
+    ),
+    (
+        "git_dep_unknown_key",
+        "[native.dependencies]\noidcc = { git = \"https://x/oidcc\", branch = \"main\", path = \"../x\" }\n",
+        "invalid git source",
+    ),
+    (
+        "git_dep_empty_url",
+        "[native.dependencies]\noidcc = { git = \" \", branch = \"main\" }\n",
+        "empty 'git' URL",
+    ),
+    (
+        "override_non_atom_erl_opt",
+        "[native.overrides]\njose = { erl_opts = [\"{d, 'X'}\"] }\n",
+        "invalid erl_opts entry",
+    ),
+    (
+        "override_unknown_key",
+        "[native.overrides]\njose = { deps = [] }\n",
+        "Native override 'jose' has an invalid format",
+    ),
+    (
+        "override_without_erl_opts",
+        "[native.overrides]\njose = {}\n",
+        "Native override 'jose' has an invalid format",
+    ),
+    (
+        "override_invalid_name",
+        "[native.overrides]\nJose = { erl_opts = [] }\n",
+        "must start with a lowercase letter",
+    ),
+];
+
+#[test]
+fn test_reject_native_manifests() {
+    for &(case, native, expected) in NATIVE_REJECTIONS {
+        let err = native_err(native);
+        assert!(
+            err.contains(expected),
+            "case `{case}`: expected the error to contain {expected:?}, got: {err}"
+        );
+    }
 }
 
 #[test]
@@ -443,52 +358,6 @@ gun = "~> 2.1"
 }
 
 #[test]
-fn test_reject_native_git_dep_without_ref() {
-    let err = native_err(
-        "[native.dependencies]\noidcc = { git = \"https://github.com/jamesc/oidcc\" }\n",
-    );
-    assert!(
-        err.contains("Native dependency 'oidcc' is a git dependency but has no ref"),
-        "{err}"
-    );
-}
-
-#[test]
-fn test_reject_native_git_dep_multiple_refs() {
-    let err = native_err(
-        "[native.dependencies]\noidcc = { git = \"https://x/oidcc\", branch = \"main\", tag = \"v1\" }\n",
-    );
-    assert!(err.contains("specifies multiple git references"), "{err}");
-}
-
-#[test]
-fn test_reject_native_git_dep_ref_key_points_at_rev() {
-    let err =
-        native_err("[native.dependencies]\noidcc = { git = \"https://x/oidcc\", ref = \"abc\" }\n");
-    assert!(err.contains("pin a commit with 'rev' instead"), "{err}");
-}
-
-#[test]
-fn test_reject_native_table_without_git() {
-    let err = native_err("[native.dependencies]\noidcc = { version = \"3.0.0\" }\n");
-    assert!(err.contains("has no 'git' URL"), "{err}");
-}
-
-#[test]
-fn test_reject_native_git_dep_unknown_key() {
-    let err = native_err(
-        "[native.dependencies]\noidcc = { git = \"https://x/oidcc\", branch = \"main\", path = \"../x\" }\n",
-    );
-    assert!(err.contains("invalid git source"), "{err}");
-}
-
-#[test]
-fn test_reject_native_git_dep_empty_url() {
-    let err = native_err("[native.dependencies]\noidcc = { git = \" \", branch = \"main\" }\n");
-    assert!(err.contains("empty 'git' URL"), "{err}");
-}
-
-#[test]
 fn test_parse_native_overrides() {
     let manifest = parse_native_toml(
         r#"
@@ -520,30 +389,6 @@ fn test_no_native_overrides_section() {
 }
 
 #[test]
-fn test_reject_native_override_non_atom_erl_opt() {
-    let err = native_err("[native.overrides]\njose = { erl_opts = [\"{d, 'X'}\"] }\n");
-    assert!(err.contains("invalid erl_opts entry"), "{err}");
-}
-
-#[test]
-fn test_reject_native_override_unknown_key() {
-    let err = native_err("[native.overrides]\njose = { deps = [] }\n");
-    assert!(
-        err.contains("Native override 'jose' has an invalid format"),
-        "{err}"
-    );
-}
-
-#[test]
-fn test_reject_native_override_without_erl_opts() {
-    let err = native_err("[native.overrides]\njose = {}\n");
-    assert!(
-        err.contains("Native override 'jose' has an invalid format"),
-        "{err}"
-    );
-}
-
-#[test]
 fn test_parse_native_git_dep_trims_url() {
     let manifest = parse_native_toml(
         "[native.dependencies]\noidcc = { git = \" https://x/oidcc \", branch = \"main\" }\n",
@@ -556,12 +401,6 @@ fn test_parse_native_git_dep_trims_url() {
             reference: GitReference::Branch("main".to_string()),
         }
     );
-}
-
-#[test]
-fn test_reject_native_override_invalid_name() {
-    let err = native_err("[native.overrides]\nJose = { erl_opts = [] }\n");
-    assert!(err.contains("must start with a lowercase letter"), "{err}");
 }
 
 #[test]

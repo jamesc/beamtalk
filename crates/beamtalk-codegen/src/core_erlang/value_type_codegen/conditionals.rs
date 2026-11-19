@@ -696,7 +696,10 @@ impl CoreErlangGenerator {
                 continue;
             };
             for stmt in super::super::util::collect_body_exprs(&block.body) {
-                self.reject_unthreadable_value_self_field_write_in_arm(stmt)?;
+                // BT-5031: `(s)` is `s`: the helper's root skip is by pointer identity
+                // and `is_field_assignment` does not look through parentheses, so hand it
+                // the same unwrapped node the arm builder lowers.
+                self.reject_unthreadable_value_self_field_write_in_arm(stmt.unwrap_parens())?;
             }
         }
         Ok(())
@@ -1033,6 +1036,13 @@ impl CoreErlangGenerator {
         let last_index = body.len().checked_sub(1);
         for (i, body_expr) in body.iter().enumerate() {
             let is_value_stmt = capture_value && Some(i) == last_index;
+            // BT-5031: INVARIANT - classification and emission see the same node, and
+            // `(s)` is exactly `s` in every statement position of an arm, last included
+            // (the value-type body walker's rule, BT-3830/BT-4092). The predicates below
+            // do not look through parentheses, so a parenthesised `(x := x + 1)` or
+            // `(self.n := v)` fell to the generic arm and lost its rebind (or, for the
+            // field write, failed to compile).
+            let body_expr = body_expr.unwrap_parens();
             if self.is_vt_self_field_assignment(body_expr) {
                 // a value-type `self.field:=...` write. Emitted as
                 // an OPEN let-chain (`let _Val = … in let Self{N} =

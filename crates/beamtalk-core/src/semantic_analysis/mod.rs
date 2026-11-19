@@ -1238,13 +1238,81 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     result.block_info = analyser_result.block_info;
     result.type_map = analyser_type_map;
 
+    run_validators(
+        module,
+        &mut result,
+        &ValidatorContext {
+            written_module,
+            known_vars,
+            stdlib_mode,
+            skip_module_expression_lint,
+            known_erlang_modules: &known_erlang_modules,
+            is_stub_file,
+            known_packages: known_packages.as_ref(),
+            current_package,
+            provision_packages: &provision_packages,
+        },
+        has_cross_file_classes,
+    );
+
+    stdlib_protocols::stamp_provision_packages(
+        &mut result.diagnostics,
+        &result.protocol_use_packages,
+    );
+
+    result
+}
+
+/// Inputs the post-analysis validator run needs beyond `module` and the
+/// [`AnalysisResult`] under construction.
+///
+/// Gathers what `analyse_full` previously kept as locals, so the validator
+/// phases can live in their own functions (BT-5042) without a long
+/// parameter list.
+struct ValidatorContext<'a> {
+    /// The module as the user wrote it, before trait flattening.
+    written_module: &'a Module,
+    known_vars: &'a [&'a str],
+    stdlib_mode: bool,
+    skip_module_expression_lint: bool,
+    known_erlang_modules: &'a crate::ffi_type_specs::KnownErlangModules,
+    is_stub_file: bool,
+    known_packages: Option<&'a std::collections::HashSet<String>>,
+    current_package: Option<&'a str>,
+    provision_packages: &'a HashMap<EcoString, EcoString>,
+}
+
+/// Runs every `validators::check_*` pass over `module` in phase order
+/// (Phases 4–8 of [`analyse_full`]), appending to `result.diagnostics`.
+/// `has_cross_file_classes` says whether cross-file class metadata was
+/// loaded — the open-world gate for the unresolved-name checks.
+///
+/// Order is observable in the emitted diagnostics, so the phases below run
+/// in exactly the order they did inline.
+fn run_validators(
+    module: &Module,
+    result: &mut AnalysisResult,
+    cx: &ValidatorContext<'_>,
+    has_cross_file_classes: bool,
+) {
     // Phase 4: Abstract instantiation check
     validators::check_abstract_instantiation(
         module,
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+    run_class_aware_validators(module, result, cx);
+    run_native_and_match_validators(module, result, cx);
+    run_structural_validators(module, result, cx, has_cross_file_classes);
+    run_visibility_validators(module, result, cx);
+}
 
+/// Phase 5: class-aware diagnostics.
+fn run_class_aware_validators(
+    module: &Module,
+    result: &mut AnalysisResult,
+    cx: &ValidatorContext<'_>,
+) {
     // Phase 5: Class-aware diagnostics
     validators::check_actor_new_usage(module, &result.class_hierarchy, &mut result.diagnostics);
     validators::check_object_new_usage(module, &result.class_hierarchy, &mut result.diagnostics);
@@ -1279,7 +1347,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         module,
         &result.class_hierarchy,
         Some(&result.type_map),
-        known_vars,
+        cx.known_vars,
         &mut result.diagnostics,
     );
     validators::check_value_slot_assignment(
@@ -1311,7 +1379,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     );
     // ADR 0103: nudge undeclared FFI-wrapping handle classes. Suppressed for
     // stdlib compilation — the builtin tier table already covers the stdlib.
-    if !stdlib_mode {
+    if !cx.stdlib_mode {
         validators::check_undeclared_handle_class(
             module,
             &result.class_hierarchy,
@@ -1351,7 +1419,14 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+}
 
+/// Phase 5 (continued): native-actor, slot, `late`, `match:` and effect-free-statement validation.
+fn run_native_and_match_validators(
+    module: &Module,
+    result: &mut AnalysisResult,
+    cx: &ValidatorContext<'_>,
+) {
     // Native actor validation (ADR 0056)
     validators::check_native_state_fields(module, &result.class_hierarchy, &mut result.diagnostics);
     // BT-4577: a native actor's instance methods must be `self delegate`
@@ -1375,7 +1450,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     validators::check_native_subclass_declares_native(
         module,
         &result.class_hierarchy,
-        stdlib_mode,
+        cx.stdlib_mode,
         &mut result.diagnostics,
     );
     // Reserved-word backing-function check for native Objects (ADR 0101)
@@ -1449,9 +1524,17 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     validators::check_effect_free_statements(
         module,
         &mut result.diagnostics,
-        skip_module_expression_lint,
+        cx.skip_module_expression_lint,
     );
+}
 
+/// Phases 5b–7: structural validation, module-level validation and package-qualifier validation.
+fn run_structural_validators(
+    module: &Module,
+    result: &mut AnalysisResult,
+    cx: &ValidatorContext<'_>,
+    has_cross_file_classes: bool,
+) {
     // Phase 5b: Structural validation
     // Only check unresolved classes when cross-file metadata has been loaded
     // (pre_loaded_classes non-empty). Without it, any class reference might
@@ -1496,26 +1579,33 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // carries the installed OTP, the runtime's apps and the package's own
     // dependency/native modules (BT-4022, BT-4724); a disabled set skips
     // the check.
-    result.unresolved_ffi_checked = known_erlang_modules.check_enabled();
+    result.unresolved_ffi_checked = cx.known_erlang_modules.check_enabled();
     validators::check_unresolved_ffi_modules(
         module,
-        &known_erlang_modules,
+        cx.known_erlang_modules,
         &mut result.diagnostics,
     );
     // Warn on Erlang FFI calls with wrong arity for known functions.
     validators::check_ffi_arity(module, &mut result.diagnostics);
     // `declare native:` is only valid in stubs/.
-    validators::check_native_declaration_location(module, is_stub_file, &mut result.diagnostics);
+    validators::check_native_declaration_location(module, cx.is_stub_file, &mut result.diagnostics);
 
     // Phase 6: Module-level validation
     let module_diags = module_validator::validate_single_definition(module);
     result.diagnostics.extend(module_diags);
 
     // Phase 7: Package qualifier validation (ADR 0070 Phase 2)
-    if let Some(packages) = known_packages {
-        validators::check_package_qualifiers(written_module, &packages, &mut result.diagnostics);
+    if let Some(packages) = cx.known_packages {
+        validators::check_package_qualifiers(cx.written_module, packages, &mut result.diagnostics);
     }
+}
 
+/// Phase 8: visibility enforcement (ADR 0071).
+fn run_visibility_validators(
+    module: &Module,
+    result: &mut AnalysisResult,
+    cx: &ValidatorContext<'_>,
+) {
     // Phase 8: Visibility enforcement (ADR 0071)
     // E0401: cross-package internal class references
     // E0402: leaked visibility — internal class/alias in public signature
@@ -1523,8 +1613,8 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         module,
         &result.class_hierarchy,
         &result.alias_registry,
-        current_package,
-        &provision_packages,
+        cx.current_package,
+        cx.provision_packages,
         &mut result.diagnostics,
     );
     // ADR 0127 §3 "Name resolution": flattened provisions are checked
@@ -1532,8 +1622,8 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     validators::check_provision_visibility(
         module,
         &result.class_hierarchy,
-        current_package,
-        &provision_packages,
+        cx.current_package,
+        cx.provision_packages,
         &mut result.diagnostics,
     );
     // E0402: internal method satisfying a public protocol requirement
@@ -1541,7 +1631,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         module,
         &result.class_hierarchy,
         &result.protocol_registry,
-        current_package,
+        cx.current_package,
         &mut result.diagnostics,
     );
     // E0402 (ADR 0108 Semantics): a public alias whose expansion
@@ -1551,25 +1641,18 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         module,
         &result.class_hierarchy,
         &result.alias_registry,
-        current_package,
+        cx.current_package,
         &mut result.diagnostics,
     );
     // W0401: subclass method shadowing an internal superclass method
     // Only meaningful in a package context — skip for REPL/scripts
-    if current_package.is_some() {
+    if cx.current_package.is_some() {
         validators::check_internal_method_shadow(
             module,
             &result.class_hierarchy,
             &mut result.diagnostics,
         );
     }
-
-    stdlib_protocols::stamp_provision_packages(
-        &mut result.diagnostics,
-        &result.protocol_use_packages,
-    );
-
-    result
 }
 
 mod analyser;

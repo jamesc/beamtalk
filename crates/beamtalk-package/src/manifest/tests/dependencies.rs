@@ -117,52 +117,59 @@ json = { git = "https://example.test/json", tag = "v1.0.0" }
     ));
 }
 
-#[test]
-fn test_registry_dependency_rejects_partial_version() {
-    let temp = TempDir::new().unwrap();
-    let err = parse_single_dep(&temp, r#"yaml = "0.2""#).unwrap_err();
-    let msg = flat_err(&err);
-    assert!(msg.contains("expected exactly three segments"), "{msg}");
-}
+/// Registry dependencies that must be rejected: one row per case,
+/// `(case, dependency line, expected error substring)`. The case name is in
+/// the failure message.
+const REGISTRY_REJECTIONS: &[(&str, &str, &str)] = &[
+    (
+        "rejects_partial_version",
+        r#"yaml = "0.2""#,
+        "expected exactly three segments",
+    ),
+    (
+        "rejects_range",
+        r#"yaml = "~> 1.0""#,
+        "version ranges are not supported",
+    ),
+    ("rejects_empty_version", r#"yaml = """#, "empty"),
+    (
+        "rejects_non_numeric_version",
+        r#"yaml = "1.2.beta""#,
+        "not a non-negative integer",
+    ),
+    (
+        "rejects_too_many_segments",
+        r#"yaml = "1.2.3.4""#,
+        "expected exactly three segments",
+    ),
+    (
+        "rejects_leading_zero_version",
+        r#"yaml = "01.0.0""#,
+        "leading zero",
+    ),
+    (
+        "rejects_invalid_package_name",
+        r#"BadName = "1.2.3""#,
+        "Invalid dependency name",
+    ),
+    (
+        "error_suggests_git_alternative",
+        r#"yaml = "~> 1.0""#,
+        "git =",
+    ),
+];
 
 #[test]
-fn test_registry_dependency_rejects_range() {
-    let temp = TempDir::new().unwrap();
-    let err = parse_single_dep(&temp, r#"yaml = "~> 1.0""#).unwrap_err();
-    let msg = flat_err(&err);
-    assert!(msg.contains("version ranges are not supported"), "{msg}");
-}
-
-#[test]
-fn test_registry_dependency_rejects_empty_version() {
-    let temp = TempDir::new().unwrap();
-    let err = parse_single_dep(&temp, r#"yaml = """#).unwrap_err();
-    let msg = flat_err(&err);
-    assert!(msg.contains("empty"), "{msg}");
-}
-
-#[test]
-fn test_registry_dependency_rejects_non_numeric_version() {
-    let temp = TempDir::new().unwrap();
-    let err = parse_single_dep(&temp, r#"yaml = "1.2.beta""#).unwrap_err();
-    let msg = flat_err(&err);
-    assert!(msg.contains("not a non-negative integer"), "{msg}");
-}
-
-#[test]
-fn test_registry_dependency_rejects_too_many_segments() {
-    let temp = TempDir::new().unwrap();
-    let err = parse_single_dep(&temp, r#"yaml = "1.2.3.4""#).unwrap_err();
-    let msg = flat_err(&err);
-    assert!(msg.contains("expected exactly three segments"), "{msg}");
-}
-
-#[test]
-fn test_registry_dependency_rejects_leading_zero_version() {
-    let temp = TempDir::new().unwrap();
-    let err = parse_single_dep(&temp, r#"yaml = "01.0.0""#).unwrap_err();
-    let msg = flat_err(&err);
-    assert!(msg.contains("leading zero"), "{msg}");
+fn test_registry_dependency_rejections() {
+    for &(case, line, expected) in REGISTRY_REJECTIONS {
+        let temp = TempDir::new().unwrap();
+        let err = parse_single_dep(&temp, line).unwrap_err();
+        let msg = flat_err(&err);
+        assert!(
+            msg.contains(expected),
+            "case `{case}`: expected the error to contain {expected:?}, got: {msg}"
+        );
+    }
 }
 
 #[test]
@@ -174,22 +181,6 @@ fn test_registry_dependency_accepts_zero_segments() {
         manifest.dependencies["yaml"].source,
         DependencySource::Registry { .. }
     ));
-}
-
-#[test]
-fn test_registry_dependency_rejects_invalid_package_name() {
-    let temp = TempDir::new().unwrap();
-    let err = parse_single_dep(&temp, r#"BadName = "1.2.3""#).unwrap_err();
-    let msg = flat_err(&err);
-    assert!(msg.contains("Invalid dependency name"), "{msg}");
-}
-
-#[test]
-fn test_registry_dependency_error_suggests_git_alternative() {
-    let temp = TempDir::new().unwrap();
-    let err = parse_single_dep(&temp, r#"yaml = "~> 1.0""#).unwrap_err();
-    let msg = flat_err(&err);
-    assert!(msg.contains("git ="), "should suggest a git dep: {msg}");
 }
 
 // --- [registry] section ---

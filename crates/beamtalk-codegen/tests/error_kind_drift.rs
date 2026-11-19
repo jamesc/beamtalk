@@ -36,10 +36,7 @@ const INTENTIONALLY_ERROR: &[&str] = &[
 ];
 
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .expect("repo root")
+    beamtalk_workspace::cargo_workspace_root!()
 }
 
 fn read(rel: &str) -> String {

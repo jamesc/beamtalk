@@ -1884,13 +1884,6 @@ mod tests {
     #[test]
     #[serial_test::serial(cwd)]
     fn find_runtime_dir_with_layout_absolutizes_the_cwd_candidate() {
-        struct CwdGuard(PathBuf);
-        impl Drop for CwdGuard {
-            fn drop(&mut self) {
-                std::env::set_current_dir(&self.0).unwrap();
-            }
-        }
-
         let saved_manifest_dir = std::env::var("CARGO_MANIFEST_DIR").ok();
         // SAFETY: serialized against other `cwd`-group tests by `#[serial]`;
         // no other test in this binary reads/writes this env var.
@@ -1904,8 +1897,7 @@ mod tests {
         fs::create_dir_all(&runtime_dir).unwrap();
         fs::write(runtime_dir.join("rebar.config"), "{deps, []}.").unwrap();
 
-        let _cwd_guard = CwdGuard(std::env::current_dir().unwrap());
-        std::env::set_current_dir(temp.path()).unwrap();
+        let _cwd_guard = beamtalk_workspace::test_cwd::CwdGuard::enter(temp.path());
         // Read back via the OS rather than reusing `temp.path()` verbatim —
         // the two can differ when the platform's temp directory is itself a
         // symlink (e.g. macOS's `/tmp` -> `/private/tmp`).

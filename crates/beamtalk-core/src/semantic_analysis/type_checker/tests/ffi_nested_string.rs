@@ -15,19 +15,9 @@
 
 use super::common::*;
 use crate::compilation::diagnostics_policy::{
-    apply_diagnostics_table, apply_expect_directives, parse_diagnostics_table_from_manifest_toml,
+    apply_diagnostics_table, parse_diagnostics_table_from_manifest_toml,
 };
 use crate::source_analysis::Severity;
-
-/// Type-checks `source` and applies `@expect` suppression, like the real
-/// pipeline (the type checker itself never suppresses).
-fn diagnostics(source: &str) -> Vec<Diagnostic> {
-    let (module, hierarchy) = parse_and_build(source);
-    let mut checker = check(&module, &hierarchy);
-    let mut diags = checker.take_diagnostics();
-    apply_expect_directives(&module, &mut diags);
-    diags
-}
 
 fn nested_string_hints(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
     diags
@@ -43,7 +33,7 @@ fn probe(param_type: &str, body: &str) -> String {
 }
 
 fn assert_one_hint(source: &str, call: &str) {
-    let diags = diagnostics(source);
+    let diags = diags_parse_ok_with_expect(source);
     let hints = nested_string_hints(&diags);
     assert_eq!(
         hints.len(),
@@ -69,7 +59,7 @@ fn assert_one_hint(source: &str, call: &str) {
 }
 
 fn assert_no_hint(source: &str) {
-    let diags = diagnostics(source);
+    let diags = diags_parse_ok_with_expect(source);
     assert!(
         nested_string_hints(&diags).is_empty(),
         "expected no ffi-nested-string hint for {source:?}: {diags:#?}"
@@ -175,7 +165,7 @@ fn union_members_count_as_evidence() {
 #[test]
 fn hint_spans_the_offending_argument() {
     let src = "Object subclass: Probe\n  run =>\n    Erlang lists member: \"a\" with: #(\"a\")\n";
-    let diags = diagnostics(src);
+    let diags = diags_parse_ok_with_expect(src);
     let hints = nested_string_hints(&diags);
     assert_eq!(hints.len(), 1, "{diags:#?}");
     let span = hints[0].span;
@@ -278,7 +268,7 @@ fn native_object_self_delegate_param_hints() {
     let src = "Object subclass: Names native: my_names\n  \
                has: names :: List(String) => self delegate\n  \
                class fromKeys: keys :: Dictionary(String, Integer) => self delegate\n";
-    let diags = diagnostics(src);
+    let diags = diags_parse_ok_with_expect(src);
     let hints = nested_string_hints(&diags);
     assert_eq!(hints.len(), 2, "{diags:#?}");
     // Instance method: `self` is prepended, so the Erlang arity is 2.
@@ -331,7 +321,7 @@ fn expect_ffi_nested_string_suppresses_the_hint() {
     );
     assert!(crate::ast::ExpectCategory::valid_names().contains(&"ffi_nested_string"));
 
-    let diags = diagnostics(
+    let diags = diags_parse_ok_with_expect(
         "Object subclass: Probe\n  run =>\n    \
          @expect ffi_nested_string\n    \
          Erlang lists member: \"a\" with: #(\"a\")\n",
@@ -344,7 +334,7 @@ fn expect_ffi_nested_string_suppresses_the_hint() {
 
 #[test]
 fn expect_ffi_nested_string_suppresses_the_native_delegate_hint() {
-    let diags = diagnostics(
+    let diags = diags_parse_ok_with_expect(
         "Object subclass: Names native: my_names\n  \
          @expect ffi_nested_string\n  \
          has: names :: List(String) => self delegate\n",
@@ -354,7 +344,7 @@ fn expect_ffi_nested_string_suppresses_the_native_delegate_hint() {
 
 #[test]
 fn diagnostics_table_off_drops_the_hint() {
-    let diags = diagnostics(
+    let diags = diags_parse_ok_with_expect(
         "Object subclass: Probe\n  run =>\n    Erlang lists member: \"a\" with: #(\"a\")\n",
     );
     assert_eq!(nested_string_hints(&diags).len(), 1);
@@ -373,7 +363,7 @@ fn diagnostics_table_off_drops_the_hint() {
 
 #[test]
 fn diagnostics_table_can_escalate_the_hint() {
-    let diags = diagnostics(
+    let diags = diags_parse_ok_with_expect(
         "Object subclass: Probe\n  run =>\n    Erlang lists member: \"a\" with: #(\"a\")\n",
     );
     let table =

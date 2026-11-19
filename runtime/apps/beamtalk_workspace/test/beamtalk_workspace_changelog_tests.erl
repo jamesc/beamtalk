@@ -1042,7 +1042,10 @@ restart_test_() ->
     {setup, fun() -> ok end, fun(_) -> ok end, [
         fun restart_bumps_epoch_and_tags_prior/0,
         fun restart_tags_orphan_when_disk_advanced/0,
-        fun restart_keeps_prior_when_disk_matches/0
+        fun restart_keeps_prior_when_disk_matches/0,
+        fun torn_tail_is_truncated_and_next_append_intact/0,
+        fun unterminated_but_complete_last_entry_is_kept/0,
+        fun clean_log_is_not_rewritten_at_load/0
     ]}.
 
 restart_bumps_epoch_and_tags_prior() ->
@@ -1068,6 +1071,89 @@ restart_bumps_epoch_and_tags_prior() ->
         beamtalk_test_fs:restore_home(OldHome),
         beamtalk_test_fs:rm_rf(TmpHome)
     end.
+
+%% BT-5017: a crash or full disk can leave changes.jsonl ending in a partial
+%% entry with no newline. The reader drops the partial last line and truncates
+%% the file back to the last complete line, so the next append starts on a line
+%% of its own instead of being glued onto the fragment (which would lose it too).
+torn_tail_is_truncated_and_next_append_intact() ->
+    {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
+    try
+        LogPath = seed_log(WsId, [
+            terminated(line_json(0)), terminated(line_json(1)), <<"{\"seq\":2,\"ts\":2,\"cla">>
+        ]),
+        {ok, P1} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
+        ?assertEqual(2, beamtalk_workspace_changelog:size()),
+        {ok, Seq} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"dec">>)),
+        ?assertEqual(2, Seq),
+        beamtalk_test_proc:shutdown(P1),
+        {ok, Bin} = file:read_file(LogPath),
+        ?assertEqual($\n, binary:last(Bin)),
+        Lines = binary:split(Bin, <<"\n">>, [global, trim_all]),
+        ?assertEqual(3, length(Lines)),
+        %% Every line decodes; nothing was glued together.
+        ?assertEqual(
+            [0, 1, 2],
+            [
+                beamtalk_workspace_changelog:entry_seq(
+                    beamtalk_workspace_changelog_codec:entry_from_json(L)
+                )
+             || L <- Lines
+            ]
+        ),
+        %% And a restart sees all three.
+        {ok, P2} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
+        ?assertEqual(3, beamtalk_workspace_changelog:size()),
+        beamtalk_test_proc:shutdown(P2)
+    after
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
+    end.
+
+%% The crash can also land after the JSON but before the newline. That entry is
+%% whole, so it is kept and the newline is restored.
+unterminated_but_complete_last_entry_is_kept() ->
+    {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
+    try
+        LogPath = seed_log(WsId, [terminated(line_json(N)) || N <- [0, 1, 2]]),
+        {ok, Bin0} = file:read_file(LogPath),
+        ?assertEqual($\n, binary:last(Bin0)),
+        ok = file:write_file(LogPath, binary:part(Bin0, 0, byte_size(Bin0) - 1)),
+        {ok, P1} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
+        ?assertEqual(3, beamtalk_workspace_changelog:size()),
+        {ok, Seq} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"dec">>)),
+        ?assertEqual(3, Seq),
+        beamtalk_test_proc:shutdown(P1),
+        {ok, Bin} = file:read_file(LogPath),
+        ?assertEqual(4, length(binary:split(Bin, <<"\n">>, [global, trim_all])))
+    after
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
+    end.
+
+%% A log that already ends on a newline is left byte-for-byte as it was.
+clean_log_is_not_rewritten_at_load() ->
+    {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
+    try
+        LogPath = seed_log(WsId, [terminated(line_json(N)) || N <- [0, 1]]),
+        {ok, Before} = file:read_file(LogPath),
+        {ok, P1} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
+        beamtalk_test_proc:shutdown(P1),
+        ?assertEqual({ok, Before}, file:read_file(LogPath))
+    after
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
+    end.
+
+terminated(Line) -> [Line, $\n].
+
+%% Write `Content` as the workspace's changes.jsonl and return its path.
+seed_log(WsId, Content) ->
+    Dir = beamtalk_workspace_changelog_log:changes_dir(WsId),
+    ok = filelib:ensure_path(Dir),
+    LogPath = filename:join(Dir, "changes.jsonl"),
+    ok = file:write_file(LogPath, Content),
+    LogPath.
 
 restart_tags_orphan_when_disk_advanced() ->
     {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),

@@ -18,38 +18,76 @@
 //! that exercises `codegen`'s internals directly.
 
 use beamtalk_core::ast::*;
-use beamtalk_core::source_analysis::Span;
-use beamtalk_core::test_helpers::test_support::{bare, parse_ok, parse_source};
+use beamtalk_core::test_helpers::test_support::parse_ok;
 use beamtalk_repl::codegen::{
     generate_repl_expression, generate_repl_expressions, generate_repl_expressions_with_index,
     generate_test_expression,
 };
+
+/// Asserts the generated Core Erlang contains `needle`; a failure prints both.
+#[track_caller]
+fn assert_has(code: &str, needle: &str) {
+    assert!(
+        code.contains(needle),
+        "expected generated code to contain {needle:?}; got:\n{code}"
+    );
+}
+
+/// Asserts the generated Core Erlang does not contain `needle`.
+#[track_caller]
+fn assert_lacks(code: &str, needle: &str) {
+    assert!(
+        !code.contains(needle),
+        "expected generated code not to contain {needle:?}; got:\n{code}"
+    );
+}
+
+/// REPL Core Erlang for a single-expression `src` (parsed with `parse_ok`).
+fn repl_expression_code(src: &str, module_name: &str) -> String {
+    let module = parse_ok(src);
+    let [statement] = module.expressions.as_slice() else {
+        panic!("expected exactly one expression in {src:?}");
+    };
+    generate_repl_expression(&statement.expression, module_name).expect("codegen should work")
+}
+
+/// Core Erlang from `generate_test_expression` for a single-expression `src`.
+fn repl_test_expression_code(src: &str, module_name: &str) -> String {
+    let module = parse_ok(src);
+    let [statement] = module.expressions.as_slice() else {
+        panic!("expected exactly one expression in {src:?}");
+    };
+    generate_test_expression(&statement.expression, module_name).expect("codegen should work")
+}
+
+/// REPL Core Erlang for every statement of `src` (parsed with `parse_ok`).
+fn repl_expressions_code(src: &str, module_name: &str) -> String {
+    let expressions: Vec<Expression> = parse_ok(src)
+        .expressions
+        .iter()
+        .map(|statement| statement.expression.clone())
+        .collect();
+    generate_repl_expressions(&expressions, module_name).expect("codegen should work")
+}
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:72-97 ----
 
 #[test]
 fn test_generate_repl_module_aliases_state_to_bindings() {
     // REPL modules must alias State to Bindings for identifier lookups
-    let expression = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
-    let code = generate_repl_expression(&expression, "repl_test").expect("codegen should work");
+    let code = repl_expression_code("x", "repl_test");
 
     // Check that the module aliases State to Bindings
-    assert!(
-        code.contains("let State = Bindings in"),
-        "REPL module should alias State to Bindings. Got:\n{code}"
-    );
+    assert_has(&code, "let State = Bindings in");
 
     // ADR 0081 Phase 1: a free REPL identifier now resolves via a
     // locals maps:find against State with a runtime resolve_name fallthrough,
     // instead of a bare maps:get (which would throw {badkey,_} once workspace
     // globals are no longer eagerly injected into State).
-    assert!(
-        code.contains("call 'maps':'find'('x', State)"),
-        "Identifier lookup should check locals (State, aliased to Bindings). Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'beamtalk_workspace':'resolve_name'(State, 'x')"),
-        "Identifier lookup should fall through to resolve_name. Got:\n{code}"
+    assert_has(&code, "call 'maps':'find'('x', State)");
+    assert_has(
+        &code,
+        "call 'beamtalk_workspace':'resolve_name'(State, 'x')",
     );
 }
 
@@ -59,38 +97,11 @@ fn test_generate_repl_module_aliases_state_to_bindings() {
 fn test_generate_repl_module_block_value_call() {
     // Test full REPL module generation for block value call
     // Expression: [:x | x + 1] value: 5
-    let block = Block::new(
-        vec![BlockParameter::new("x", Span::new(1, 2))],
-        vec![bare(Expression::MessageSend {
-            receiver: Box::new(Expression::Identifier(Identifier::new(
-                "x",
-                Span::new(5, 6),
-            ))),
-            selector: MessageSelector::Binary("+".into()),
-            arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(9, 10))],
-            is_cast: false,
-            span: Span::new(5, 10),
-        })],
-        Span::new(0, 12),
-    );
-
-    let expression = Expression::MessageSend {
-        receiver: Box::new(Expression::Block(block)),
-        selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", Span::new(13, 19))]),
-        arguments: vec![Expression::Literal(Literal::Integer(5), Span::new(20, 21))],
-        is_cast: false,
-        span: Span::new(0, 22),
-    };
-
-    let code =
-        generate_repl_expression(&expression, "test_block_repl").expect("codegen should work");
+    let code = repl_expression_code("[:x | x + 1] value: 5", "test_block_repl");
 
     // Check basic structure
-    assert!(
-        code.contains("let State = Bindings in"),
-        "Should alias State to Bindings"
-    );
-    assert!(code.contains("apply"), "Should use apply for block call");
+    assert_has(&code, "let State = Bindings in");
+    assert_has(&code, "apply");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:136-156 ----
@@ -98,22 +109,11 @@ fn test_generate_repl_module_block_value_call() {
 #[test]
 fn test_generate_repl_module_returns_tuple_with_state() {
     // REPL eval/1 should return {Result, UpdatedBindings}
-    let expression = Expression::Literal(Literal::Integer(42), Span::new(0, 2));
-    let code =
-        generate_repl_expression(&expression, "repl_tuple_test").expect("codegen should work");
-
-    eprintln!("Generated code for literal 42:");
-    eprintln!("{code}");
+    let code = repl_expression_code("42", "repl_tuple_test");
 
     // Check that the result is wrapped in a tuple with State
-    assert!(
-        code.contains("let Result ="),
-        "Should bind the result to Result variable. Got:\n{code}"
-    );
-    assert!(
-        code.contains("{Result, State}"),
-        "Should return tuple {{Result, State}}. Got:\n{code}"
-    );
+    assert_has(&code, "let Result =");
+    assert_has(&code, "{Result, State}");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:157-226 ----
@@ -124,141 +124,38 @@ fn test_generate_repl_module_with_times_repeat_mutation() {
     // Expression: 5 timesRepeat: [count := count + 1]
 
     // Build the block: [count := count + 1]
-    let count_id = Expression::Identifier(Identifier::new("count", Span::new(0, 5)));
-    let one = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
-    let add = Expression::MessageSend {
-        receiver: Box::new(count_id.clone()),
-        selector: MessageSelector::Binary("+".into()),
-        arguments: vec![one],
-        is_cast: false,
-        span: Span::new(0, 15),
-    };
-    let assignment = Expression::Assignment {
-        target: Box::new(count_id),
-        value: Box::new(add),
-        type_annotation: None,
-        span: Span::new(0, 20),
-    };
-    let body = Expression::Block(Block::new(vec![], vec![bare(assignment)], Span::new(0, 25)));
-
-    // Build: 5 timesRepeat: [...]
-    let five = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
-    let times_repeat = Expression::MessageSend {
-        receiver: Box::new(five),
-        selector: MessageSelector::Keyword(vec![KeywordPart {
-            keyword: "timesRepeat:".into(),
-            span: Span::new(2, 14),
-        }]),
-        arguments: vec![body],
-        is_cast: false,
-        span: Span::new(0, 40),
-    };
-
-    let code =
-        generate_repl_expression(&times_repeat, "repl_times_test").expect("codegen should work");
-
-    eprintln!("Generated code for 5 timesRepeat: [count := count + 1]:");
-    eprintln!("{code}");
+    let code = repl_expression_code("5 timesRepeat: [count := count + 1]", "repl_times_test");
 
     // For mutation-threaded loops, return {Result, State} tuple.
     // REPL extracts via element/2: let _LoopResult = element(1, Result) ...
-    assert!(
-        code.contains("'element'(1, Result)") && code.contains("'element'(2, Result)"),
-        "Should extract Result tuple elements via element/2 for mutation loop. Got:\n{code}"
-    );
+    assert_has(&code, "'element'(1, Result)");
+    assert_has(&code, "'element'(2, Result)");
 
     // Loop termination should return {nil, StateAcc}
-    assert!(
-        code.contains("{'nil', StateAcc}"),
-        "Loop should return {{'nil', StateAcc}} on termination. Got:\n{code}"
-    );
+    assert_has(&code, "{'nil', StateAcc}");
 
     // Verify mutation threading details
-    assert!(
-        code.contains("letrec 'repeat'/2"),
-        "Should use arity-2 repeat function (I, StateAcc). Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'put'('count'"),
-        "Should update 'count' in StateAcc (plain key in REPL mode, BT-790). Got:\n{code}"
-    );
+    assert_has(&code, "letrec 'repeat'/2");
+    assert_has(&code, "maps':'put'('count'");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:227-300 ----
 
 #[test]
 fn test_generate_repl_module_with_to_do_mutation() {
-    use beamtalk_core::ast::BlockParameter;
-
     // REPL with to:do: mutation should return updated state
     // Expression: 1 to: 5 do: [:n | total := total + n]
 
     // Build the block: [:n | total := total + n]
-    let total_id = Expression::Identifier(Identifier::new("total", Span::new(0, 5)));
-    let n_id = Expression::Identifier(Identifier::new("n", Span::new(0, 1)));
-    let add = Expression::MessageSend {
-        receiver: Box::new(total_id.clone()),
-        selector: MessageSelector::Binary("+".into()),
-        arguments: vec![n_id],
-        is_cast: false,
-        span: Span::new(0, 15),
-    };
-    let assignment = Expression::Assignment {
-        target: Box::new(total_id),
-        value: Box::new(add),
-        type_annotation: None,
-        span: Span::new(0, 20),
-    };
-    let body = Expression::Block(Block::new(
-        vec![BlockParameter {
-            name: "n".into(),
-            type_annotation: None,
-            span: Span::new(0, 1),
-        }],
-        vec![bare(assignment)],
-        Span::new(0, 25),
-    ));
-
-    // Build: 1 to: 5 do: [...]
-    let one = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
-    let five = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
-    let to_do = Expression::MessageSend {
-        receiver: Box::new(one),
-        selector: MessageSelector::Keyword(vec![
-            KeywordPart {
-                keyword: "to:".into(),
-                span: Span::new(2, 5),
-            },
-            KeywordPart {
-                keyword: "do:".into(),
-                span: Span::new(8, 11),
-            },
-        ]),
-        arguments: vec![five, body],
-        is_cast: false,
-        span: Span::new(0, 40),
-    };
-
-    let code = generate_repl_expression(&to_do, "repl_to_do_test").expect("codegen should work");
-
-    eprintln!("Generated code for 1 to: 5 do: [:n | total := total + n]:");
-    eprintln!("{code}");
+    let code = repl_expression_code("1 to: 5 do: [:n | total := total + n]", "repl_to_do_test");
 
     // For mutation-threaded loops, return {Result, State} tuple.
-    assert!(
-        code.contains("'element'(1, Result)") && code.contains("'element'(2, Result)"),
-        "Should extract Result tuple elements via element/2 for mutation loop. Got:\n{code}"
-    );
+    assert_has(&code, "'element'(1, Result)");
+    assert_has(&code, "'element'(2, Result)");
 
     // Verify to:do: mutation threading
-    assert!(
-        code.contains("letrec 'loop'/2"),
-        "Should use arity-2 loop function (I, StateAcc). Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'put'('total'"),
-        "Should update 'total' in StateAcc (plain key in REPL mode, BT-790). Got:\n{code}"
-    );
+    assert_has(&code, "letrec 'loop'/2");
+    assert_has(&code, "maps':'put'('total'");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:301-384 ----
@@ -269,74 +166,22 @@ fn test_generate_repl_module_with_while_true_mutation() {
     // Expression: [x < 5] whileTrue: [x := x + 1]
 
     // Build the condition: [x < 5]
-    let x_id = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
-    let five = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
-    let compare = Expression::MessageSend {
-        receiver: Box::new(x_id.clone()),
-        selector: MessageSelector::Binary("<".into()),
-        arguments: vec![five],
-        is_cast: false,
-        span: Span::new(0, 10),
-    };
-    let condition = Expression::Block(Block::new(vec![], vec![bare(compare)], Span::new(0, 12)));
-
-    // Build the body: [x := x + 1]
-    let one = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
-    let add = Expression::MessageSend {
-        receiver: Box::new(x_id.clone()),
-        selector: MessageSelector::Binary("+".into()),
-        arguments: vec![one],
-        is_cast: false,
-        span: Span::new(0, 10),
-    };
-    let assignment = Expression::Assignment {
-        target: Box::new(x_id),
-        value: Box::new(add),
-        type_annotation: None,
-        span: Span::new(0, 15),
-    };
-    let body = Expression::Block(Block::new(vec![], vec![bare(assignment)], Span::new(0, 17)));
-
-    // Build: [x < 5] whileTrue: [x := x + 1]
-    let while_true = Expression::MessageSend {
-        receiver: Box::new(condition),
-        selector: MessageSelector::Keyword(vec![KeywordPart {
-            keyword: "whileTrue:".into(),
-            span: Span::new(10, 20),
-        }]),
-        arguments: vec![body],
-        is_cast: false,
-        span: Span::new(0, 40),
-    };
-
-    let code =
-        generate_repl_expression(&while_true, "repl_while_test").expect("codegen should work");
-
-    eprintln!("Generated code for [x < 5] whileTrue: [x := x + 1]:");
-    eprintln!("{code}");
+    let code = repl_expression_code("[x < 5] whileTrue: [x := x + 1]", "repl_while_test");
 
     // Condition lambda should take StateAcc parameter
-    assert!(
-        code.contains("fun (StateAcc) ->"),
-        "Condition lambda should accept StateAcc parameter. Got:\n{code}"
-    );
+    assert_has(&code, "fun (StateAcc) ->");
     // Condition should read x from StateAcc, not outer scope.
     // Lazy resolution (ADR 0081 Phase 1) now applies inside loop bodies too, so
     // the read is a `maps:find` against StateAcc with a `resolve_name`
     // fallthrough rather than a bare `maps:get` (which would `badkey` on a miss).
-    assert!(
-        code.contains("maps':'find'('x', StateAcc)"),
-        "Condition should look up x in StateAcc via maps:find. Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'beamtalk_workspace':'resolve_name'(StateAcc, 'x')"),
-        "Condition should fall through to resolve_name on a StateAcc miss. Got:\n{code}"
+    assert_has(&code, "maps':'find'('x', StateAcc)");
+    assert_has(
+        &code,
+        "call 'beamtalk_workspace':'resolve_name'(StateAcc, 'x')",
     );
     // Condition should be applied with StateAcc argument
-    assert!(
-        code.contains("apply") && code.contains("(StateAcc)"),
-        "Condition should be applied with StateAcc argument. Got:\n{code}"
-    );
+    assert_has(&code, "apply");
+    assert_has(&code, "(StateAcc)");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:385-431 ----
@@ -347,7 +192,7 @@ fn test_repl_multi_stmt_times_repeat_intermediate() {
     // The loop is in intermediate (non-last) position — its StateAcc must be threaded
     // to the final `x` lookup, not discarded.
     let src = "x := 1. 5 timesRepeat: [x := x + 1]. x";
-    let module = parse_source(src);
+    let module = parse_ok(src);
     let code = generate_repl_expressions(
         &module
             .expressions
@@ -358,33 +203,18 @@ fn test_repl_multi_stmt_times_repeat_intermediate() {
     )
     .expect("codegen should work");
 
-    eprintln!("Generated code for `x := 1. 5 timesRepeat: [x := x + 1]. x`:");
-    eprintln!("{code}");
-
     // The loop StateAcc must be extracted and threaded: element(2, _R@2) → StateN
-    assert!(
-        code.contains("'element'(2, _R@2)"),
-        "Loop StateAcc must be extracted via element(2, _R@2). Got:\n{code}"
-    );
+    assert_has(&code, "'element'(2, _R@2)");
 
     // The final `x` lookup must use the updated state (StateN), not a stale State1
     // StateN is whatever state comes after threading the loop result
-    assert!(
-        !code.contains("maps':'get'('x', State1)"),
-        "Final x lookup must not use stale State1. Got:\n{code}"
-    );
+    assert_lacks(&code, "maps':'get'('x', State1)");
 
     // The return tuple must NOT use element/2 unwrapping for the last (plain identifier) expr
-    assert!(
-        !code.contains("'element'(1, Result)"),
-        "Final expr is a plain identifier — must not apply element/2 to Result. Got:\n{code}"
-    );
+    assert_lacks(&code, "'element'(1, Result)");
 
     // The return tuple should be plain {Result, StateN}
-    assert!(
-        code.contains("{Result, State"),
-        "Return tuple should be {{Result, StateN}}. Got:\n{code}"
-    );
+    assert_has(&code, "{Result, State");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:432-470 ----
@@ -394,7 +224,7 @@ fn test_repl_multi_stmt_while_true_intermediate() {
     // `x := 0. [x < 3] whileTrue: [x := x + 1]. x` — whileTrue: in intermediate
     // position must thread its StateAcc so the final `x` lookup sees the updated value.
     let src = "x := 0. [x < 3] whileTrue: [x := x + 1]. x";
-    let module = parse_source(src);
+    let module = parse_ok(src);
     let code = generate_repl_expressions(
         &module
             .expressions
@@ -405,26 +235,14 @@ fn test_repl_multi_stmt_while_true_intermediate() {
     )
     .expect("codegen should work");
 
-    eprintln!("Generated code for `x := 0. [x < 3] whileTrue: [x := x + 1]. x`:");
-    eprintln!("{code}");
-
     // The loop StateAcc must be extracted from the intermediate result
-    assert!(
-        code.contains("'element'(2, _R@2)"),
-        "Loop StateAcc must be extracted via element(2, _R@2). Got:\n{code}"
-    );
+    assert_has(&code, "'element'(2, _R@2)");
 
     // The final x lookup must NOT read from State1 (which has x=0 from init only)
-    assert!(
-        !code.contains("maps':'get'('x', State1)"),
-        "Final x lookup must not use stale State1. Got:\n{code}"
-    );
+    assert_lacks(&code, "maps':'get'('x', State1)");
 
     // Return tuple must be plain {Result, StateN}, not element/2 wrapped
-    assert!(
-        !code.contains("'element'(1, Result)"),
-        "Final expr is a plain identifier — must not apply element/2 to Result. Got:\n{code}"
-    );
+    assert_lacks(&code, "'element'(1, Result)");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:471-516 ----
@@ -435,7 +253,7 @@ fn test_repl_multi_stmt_assignment_then_loop_then_plain() {
     // `count := 0. 3 timesRepeat: [count := count + 1]. count` generates state chain:
     //   State → State1 (from assignment) → State2 (from loop StateAcc) → {Result, State2}
     let src = "count := 0. 3 timesRepeat: [count := count + 1]. count";
-    let module = parse_source(src);
+    let module = parse_ok(src);
     let code = generate_repl_expressions(
         &module
             .expressions
@@ -446,32 +264,17 @@ fn test_repl_multi_stmt_assignment_then_loop_then_plain() {
     )
     .expect("codegen should work");
 
-    eprintln!("Generated code for `count := 0. 3 timesRepeat: [count := count + 1]. count`:");
-    eprintln!("{code}");
-
     // Assignment creates State1
-    assert!(
-        code.contains("State1 = call 'maps':'put'('count'"),
-        "Assignment should create State1. Got:\n{code}"
-    );
+    assert_has(&code, "State1 = call 'maps':'put'('count'");
 
     // Loop in intermediate position: StateAcc extracted as State2
-    assert!(
-        code.contains("'element'(2, _R@2)"),
-        "Loop StateAcc must be extracted via element(2, _R@2). Got:\n{code}"
-    );
+    assert_has(&code, "'element'(2, _R@2)");
 
     // Final count lookup must not use stale State1
-    assert!(
-        !code.contains("maps':'get'('count', State1)"),
-        "Final count lookup must not use stale State1. Got:\n{code}"
-    );
+    assert_lacks(&code, "maps':'get'('count', State1)");
 
     // No element/2 unwrapping on the final return
-    assert!(
-        !code.contains("'element'(1, Result)"),
-        "Final plain identifier expr must not use element/2. Got:\n{code}"
-    );
+    assert_lacks(&code, "'element'(1, Result)");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:517-557 ----
@@ -480,41 +283,22 @@ fn test_repl_multi_stmt_assignment_then_loop_then_plain() {
 fn test_generate_repl_module_with_arithmetic() {
     // Verify complex expressions with variable references work
     // Expression: x + 1
-    let x_ref = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
-    let one = Expression::Literal(Literal::Integer(1), Span::new(4, 5));
-    let expression = Expression::MessageSend {
-        receiver: Box::new(x_ref),
-        selector: MessageSelector::Binary("+".into()),
-        arguments: vec![one],
-        is_cast: false,
-        span: Span::new(0, 5),
-    };
-
-    let code = generate_repl_expression(&expression, "repl_arith").expect("codegen should work");
+    let code = repl_expression_code("x + 1", "repl_arith");
 
     // Check State aliasing
-    assert!(
-        code.contains("let State = Bindings in"),
-        "REPL module should alias State to Bindings. Got:\n{code}"
-    );
+    assert_has(&code, "let State = Bindings in");
 
     // Check that x lookup works through State. ADR 0081 Phase 1: a free
     // REPL identifier resolves via a locals maps:find with a resolve_name
     // fallthrough rather than a bare maps:get.
-    assert!(
-        code.contains("call 'maps':'find'('x', State)"),
-        "Variable x should be looked up from State (locals). Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'beamtalk_workspace':'resolve_name'(State, 'x')"),
-        "Variable x lookup should fall through to resolve_name. Got:\n{code}"
+    assert_has(&code, "call 'maps':'find'('x', State)");
+    assert_has(
+        &code,
+        "call 'beamtalk_workspace':'resolve_name'(State, 'x')",
     );
 
     // Check the arithmetic operation
-    assert!(
-        code.contains("call 'erlang':'+'("),
-        "Should have addition operation. Got:\n{code}"
-    );
+    assert_has(&code, "call 'erlang':'+'(");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:558-641 ----
@@ -524,79 +308,21 @@ fn test_generate_repl_multi_stmt_times_repeat_then_read() {
     // x := 1. 5 timesRepeat: [x := x + 1]. x
     // The loop in intermediate position must thread its updated state to the final `x` read.
 
-    let span = Span::new(0, 1);
-
-    // x := 1
-    let x_id = Expression::Identifier(Identifier::new("x", span));
-    let one = Expression::Literal(Literal::Integer(1), span);
-    let assign_x = Expression::Assignment {
-        target: Box::new(x_id.clone()),
-        value: Box::new(one),
-        type_annotation: None,
-        span,
-    };
-
-    // 5 timesRepeat: [x := x + 1]
-    let x_id2 = Expression::Identifier(Identifier::new("x", span));
-    let one2 = Expression::Literal(Literal::Integer(1), span);
-    let add = Expression::MessageSend {
-        receiver: Box::new(x_id2.clone()),
-        selector: MessageSelector::Binary("+".into()),
-        arguments: vec![one2],
-        is_cast: false,
-        span,
-    };
-    let loop_assign = Expression::Assignment {
-        target: Box::new(x_id2),
-        value: Box::new(add),
-        type_annotation: None,
-        span,
-    };
-    let loop_body = Expression::Block(Block::new(vec![], vec![bare(loop_assign)], span));
-    let five = Expression::Literal(Literal::Integer(5), span);
-    let times_repeat = Expression::MessageSend {
-        receiver: Box::new(five),
-        selector: MessageSelector::Keyword(vec![KeywordPart {
-            keyword: "timesRepeat:".into(),
-            span,
-        }]),
-        arguments: vec![loop_body],
-        is_cast: false,
-        span,
-    };
-
-    // x (final read)
-    let x_read = Expression::Identifier(Identifier::new("x", span));
-
-    let expressions = vec![assign_x, times_repeat, x_read];
-    let code = generate_repl_expressions(&expressions, "repl_multi_loop_test")
-        .expect("codegen should work");
-
-    eprintln!("Generated code for x := 1. 5 timesRepeat: [x := x + 1]. x:");
-    eprintln!("{code}");
+    let code = repl_expressions_code(
+        "x := 1. 5 timesRepeat: [x := x + 1]. x",
+        "repl_multi_loop_test",
+    );
 
     // The loop in intermediate position must have its StateAcc extracted
-    assert!(
-        code.contains("call 'erlang':'element'(2,"),
-        "Should extract StateAcc from loop result in intermediate position. Got:\n{code}"
-    );
+    assert_has(&code, "call 'erlang':'element'(2,");
 
     // The final x read must use a state that was updated by the loop
     // (not the original State or State1 from the x := 1 assignment)
-    assert!(
-        code.contains("let Result ="),
-        "Should bind final result. Got:\n{code}"
-    );
+    assert_has(&code, "let Result =");
 
     // The overall structure: should have State1 from assignment, then state extraction from loop
-    assert!(
-        code.contains("maps':'put'('x'"),
-        "Should have maps:put for x assignment. Got:\n{code}"
-    );
-    assert!(
-        code.contains("letrec 'repeat'/2"),
-        "Should use arity-2 repeat function for mutation loop. Got:\n{code}"
-    );
+    assert_has(&code, "maps':'put'('x'");
+    assert_has(&code, "letrec 'repeat'/2");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:642-733 ----
@@ -606,83 +332,19 @@ fn test_generate_repl_multi_stmt_while_true_then_read() {
     // x := 0. [x < 5] whileTrue: [x := x + 1]. x
     // whileTrue: in intermediate position must thread state to the final x read.
 
-    let span = Span::new(0, 1);
-
-    // x := 0
-    let x_id = Expression::Identifier(Identifier::new("x", span));
-    let zero = Expression::Literal(Literal::Integer(0), span);
-    let assign_x = Expression::Assignment {
-        target: Box::new(x_id),
-        value: Box::new(zero),
-        type_annotation: None,
-        span,
-    };
-
-    // [x < 5] whileTrue: [x := x + 1]
-    let x_cond = Expression::Identifier(Identifier::new("x", span));
-    let five = Expression::Literal(Literal::Integer(5), span);
-    let cmp = Expression::MessageSend {
-        receiver: Box::new(x_cond),
-        selector: MessageSelector::Binary("<".into()),
-        arguments: vec![five],
-        is_cast: false,
-        span,
-    };
-    let condition = Expression::Block(Block::new(vec![], vec![bare(cmp)], span));
-    let x_body = Expression::Identifier(Identifier::new("x", span));
-    let one = Expression::Literal(Literal::Integer(1), span);
-    let add = Expression::MessageSend {
-        receiver: Box::new(x_body.clone()),
-        selector: MessageSelector::Binary("+".into()),
-        arguments: vec![one],
-        is_cast: false,
-        span,
-    };
-    let loop_assign = Expression::Assignment {
-        target: Box::new(Expression::Identifier(Identifier::new("x", span))),
-        value: Box::new(add),
-        type_annotation: None,
-        span,
-    };
-    let loop_body = Expression::Block(Block::new(vec![], vec![bare(loop_assign)], span));
-    let while_true = Expression::MessageSend {
-        receiver: Box::new(condition),
-        selector: MessageSelector::Keyword(vec![KeywordPart {
-            keyword: "whileTrue:".into(),
-            span,
-        }]),
-        arguments: vec![loop_body],
-        is_cast: false,
-        span,
-    };
-
-    // x (final read)
-    let x_read = Expression::Identifier(Identifier::new("x", span));
-
-    let expressions = vec![assign_x, while_true, x_read];
-    let code = generate_repl_expressions(&expressions, "repl_multi_while_test")
-        .expect("codegen should work");
-
-    eprintln!("Generated code for x := 0. [x < 5] whileTrue: [x := x + 1]. x:");
-    eprintln!("{code}");
+    let code = repl_expressions_code(
+        "x := 0. [x < 5] whileTrue: [x := x + 1]. x",
+        "repl_multi_while_test",
+    );
 
     // The loop in intermediate position must have its StateAcc extracted
-    assert!(
-        code.contains("call 'erlang':'element'(2,"),
-        "Should extract StateAcc from whileTrue: loop result in intermediate position. Got:\n{code}"
-    );
+    assert_has(&code, "call 'erlang':'element'(2,");
 
     // Should bind the final result
-    assert!(
-        code.contains("let Result ="),
-        "Should bind final result. Got:\n{code}"
-    );
+    assert_has(&code, "let Result =");
 
     // Should use whileTrue: mutation-threaded structure
-    assert!(
-        code.contains("letrec 'while'/1"),
-        "Should use whileTrue: loop function. Got:\n{code}"
-    );
+    assert_has(&code, "letrec 'while'/1");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:734-812 ----
@@ -693,73 +355,18 @@ fn test_generate_repl_multi_stmt_loop_does_not_corrupt_final_expr() {
     // x := 1. 5 timesRepeat: [x := x + 1]. 42
     // The final expression `42` is not a loop, so it must NOT use element/2 unwrapping.
 
-    let span = Span::new(0, 1);
-
-    // x := 1
-    let x_id = Expression::Identifier(Identifier::new("x", span));
-    let one = Expression::Literal(Literal::Integer(1), span);
-    let assign_x = Expression::Assignment {
-        target: Box::new(x_id),
-        value: Box::new(one),
-        type_annotation: None,
-        span,
-    };
-
-    // 5 timesRepeat: [x := x + 1]
-    let x_id2 = Expression::Identifier(Identifier::new("x", span));
-    let one2 = Expression::Literal(Literal::Integer(1), span);
-    let add = Expression::MessageSend {
-        receiver: Box::new(x_id2.clone()),
-        selector: MessageSelector::Binary("+".into()),
-        arguments: vec![one2],
-        is_cast: false,
-        span,
-    };
-    let loop_assign = Expression::Assignment {
-        target: Box::new(x_id2),
-        value: Box::new(add),
-        type_annotation: None,
-        span,
-    };
-    let loop_body = Expression::Block(Block::new(vec![], vec![bare(loop_assign)], span));
-    let five = Expression::Literal(Literal::Integer(5), span);
-    let times_repeat = Expression::MessageSend {
-        receiver: Box::new(five),
-        selector: MessageSelector::Keyword(vec![KeywordPart {
-            keyword: "timesRepeat:".into(),
-            span,
-        }]),
-        arguments: vec![loop_body],
-        is_cast: false,
-        span,
-    };
-
-    // 42 (final literal - not a loop)
-    let forty_two = Expression::Literal(Literal::Integer(42), span);
-
-    let expressions = vec![assign_x, times_repeat, forty_two];
-    let code = generate_repl_expressions(&expressions, "repl_multi_loop_no_corrupt_test")
-        .expect("codegen should work");
-
-    eprintln!("Generated code for x := 1. 5 timesRepeat: [x := x + 1]. 42:");
-    eprintln!("{code}");
+    let code = repl_expressions_code(
+        "x := 1. 5 timesRepeat: [x := x + 1]. 42",
+        "repl_multi_loop_no_corrupt_test",
+    );
 
     // Final expression is a literal — must NOT apply element/2 unwrapping on Result
     // The return tuple must be {Result, StateN} where Result = 42 (not extracted from a tuple)
-    assert!(
-        !code.contains("'element'(1, Result)"),
-        "Final non-loop expression must NOT apply element(1, Result) unwrapping. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'element'(2, Result)"),
-        "Final non-loop expression must NOT apply element(2, Result) unwrapping. Got:\n{code}"
-    );
+    assert_lacks(&code, "'element'(1, Result)");
+    assert_lacks(&code, "'element'(2, Result)");
 
     // The intermediate loop SHOULD still extract state (element(2, _R2))
-    assert!(
-        code.contains("call 'erlang':'element'(2,"),
-        "Intermediate loop must extract StateAcc. Got:\n{code}"
-    );
+    assert_has(&code, "call 'erlang':'element'(2,");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:813-893 ----
@@ -771,74 +378,26 @@ fn test_repl_loop_mutations_accumulate_plain_key() {
     // Write path must use 'x' not '__local__x' so that each iteration reads the
     // value written by the previous iteration from StateAcc.
 
-    let span = Span::new(0, 1);
-
-    let x_id = Expression::Identifier(Identifier::new("x", span));
-    let one = Expression::Literal(Literal::Integer(1), span);
-    let add = Expression::MessageSend {
-        receiver: Box::new(x_id.clone()),
-        selector: MessageSelector::Binary("+".into()),
-        arguments: vec![one],
-        is_cast: false,
-        span,
-    };
-    let assignment = Expression::Assignment {
-        target: Box::new(x_id),
-        value: Box::new(add),
-        type_annotation: None,
-        span,
-    };
-    let body = Expression::Block(Block::new(vec![], vec![bare(assignment)], span));
-    let five = Expression::Literal(Literal::Integer(5), span);
-    let times_repeat = Expression::MessageSend {
-        receiver: Box::new(five),
-        selector: MessageSelector::Keyword(vec![KeywordPart {
-            keyword: "timesRepeat:".into(),
-            span,
-        }]),
-        arguments: vec![body],
-        is_cast: false,
-        span,
-    };
-
-    let code = generate_repl_expression(&times_repeat, "bt800_test").expect("codegen should work");
-
-    eprintln!("BT-800: Generated code for 5 timesRepeat: [x := x + 1]:");
-    eprintln!("{code}");
+    let code = repl_expression_code("5 timesRepeat: [x := x + 1]", "bt800_test");
 
     // REPL mode must use plain key 'x' (not '__local__x') so reads match writes.
-    assert!(
-        code.contains("maps':'put'('x'"),
-        "BT-800: REPL write must use plain key 'x', not '__local__x'. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("__local__x"),
-        "BT-800: REPL mode must never use __local__ prefix for x. Got:\n{code}"
-    );
+    assert_has(&code, "maps':'put'('x'");
+    assert_lacks(&code, "__local__x");
 
     // Reads inside loop body must use StateAcc (not State) so
     // they get the accumulated value from the previous iteration. Lazy
     // resolution (ADR 0081 Phase 1) now applies inside loop bodies too, so the
     // read is a `maps:find` against StateAcc with a `resolve_name` fallthrough
     // rather than a bare `maps:get` (which would `badkey` on a miss).
-    assert!(
-        code.contains("maps':'find'('x', StateAcc)"),
-        "BT-800: Read inside loop must look up x in StateAcc via maps:find. Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'beamtalk_workspace':'resolve_name'(StateAcc, 'x')"),
-        "BT-800: Read inside loop must fall through to resolve_name on a StateAcc miss. Got:\n{code}"
+    assert_has(&code, "maps':'find'('x', StateAcc)");
+    assert_has(
+        &code,
+        "call 'beamtalk_workspace':'resolve_name'(StateAcc, 'x')",
     );
 
     // Loop must thread state correctly (arity-2 letrec, returns {nil, StateAcc}).
-    assert!(
-        code.contains("letrec 'repeat'/2"),
-        "BT-800: Must use arity-2 repeat for state threading. Got:\n{code}"
-    );
-    assert!(
-        code.contains("{'nil', StateAcc}"),
-        "BT-800: Loop must return {{nil, StateAcc}} so caller can extract updated state. Got:\n{code}"
-    );
+    assert_has(&code, "letrec 'repeat'/2");
+    assert_has(&code, "{'nil', StateAcc}");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:894-985 ----
@@ -849,85 +408,24 @@ fn test_repl_multi_stmt_loop_accumulates_from_zero() {
     // Acceptance criteria: starting from zero, result must be 5.
     // Validates that the multi-statement path threads state correctly through the loop.
 
-    let span = Span::new(0, 1);
-
-    // x := 0
-    let x_id = Expression::Identifier(Identifier::new("x", span));
-    let zero = Expression::Literal(Literal::Integer(0), span);
-    let assign_x = Expression::Assignment {
-        target: Box::new(x_id),
-        value: Box::new(zero),
-        type_annotation: None,
-        span,
-    };
-
-    // 5 timesRepeat: [x := x + 1]
-    let x_id2 = Expression::Identifier(Identifier::new("x", span));
-    let one = Expression::Literal(Literal::Integer(1), span);
-    let add = Expression::MessageSend {
-        receiver: Box::new(x_id2.clone()),
-        selector: MessageSelector::Binary("+".into()),
-        arguments: vec![one],
-        is_cast: false,
-        span,
-    };
-    let loop_assign = Expression::Assignment {
-        target: Box::new(x_id2),
-        value: Box::new(add),
-        type_annotation: None,
-        span,
-    };
-    let loop_body = Expression::Block(Block::new(vec![], vec![bare(loop_assign)], span));
-    let five = Expression::Literal(Literal::Integer(5), span);
-    let times_repeat = Expression::MessageSend {
-        receiver: Box::new(five),
-        selector: MessageSelector::Keyword(vec![KeywordPart {
-            keyword: "timesRepeat:".into(),
-            span,
-        }]),
-        arguments: vec![loop_body],
-        is_cast: false,
-        span,
-    };
-
-    // x (final read)
-    let x_read = Expression::Identifier(Identifier::new("x", span));
-
-    let expressions = vec![assign_x, times_repeat, x_read];
-    let code =
-        generate_repl_expressions(&expressions, "bt800_zero_test").expect("codegen should work");
-
-    eprintln!("BT-800: Generated code for x := 0. 5 timesRepeat: [x := x + 1]. x:");
-    eprintln!("{code}");
+    let code = repl_expressions_code("x := 0. 5 timesRepeat: [x := x + 1]. x", "bt800_zero_test");
 
     // Loop write must use plain key (no __local__ prefix in REPL mode)
-    assert!(
-        !code.contains("__local__"),
-        "BT-800: REPL mode must never use __local__ prefix. Got:\n{code}"
-    );
+    assert_lacks(&code, "__local__");
 
     // The loop must be applied with the state containing x=0
-    assert!(
-        code.contains("apply 'repeat'/2 (1, State1)"),
-        "BT-800: Loop must start with State1 (after x := 0 binding). Got:\n{code}"
-    );
+    assert_has(&code, "apply 'repeat'/2 (1, State1)");
 
     // The intermediate loop result must be unpacked to thread state forward
-    assert!(
-        code.contains("call 'erlang':'element'(2,"),
-        "BT-800: Must extract updated StateAcc from loop result. Got:\n{code}"
-    );
+    assert_has(&code, "call 'erlang':'element'(2,");
 
     // Final read of x must use the state produced by the loop (State2+).
     // ADR 0081 Phase 1: the post-loop free-identifier read resolves via
     // a locals maps:find (with a resolve_name fallthrough) against State2.
-    assert!(
-        code.contains("maps':'find'('x', State2)"),
-        "BT-800: Final x read must use loop-updated state (State2). Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'beamtalk_workspace':'resolve_name'(State2, 'x')"),
-        "BT-2365: Final x read must fall through to resolve_name. Got:\n{code}"
+    assert_has(&code, "maps':'find'('x', State2)");
+    assert_has(
+        &code,
+        "call 'beamtalk_workspace':'resolve_name'(State2, 'x')",
     );
 }
 
@@ -938,91 +436,32 @@ fn test_class_method_call_generation() {
     // Test that ClassReference message sends generate appropriate code
     // ADR 0019: All classes (including Transcript, Beamtalk, Workspace)
     //         use standard class dispatch via class_send
-    use beamtalk_core::ast::{Expression, Identifier, MessageSelector};
-    use beamtalk_core::source_analysis::Span;
 
     // Test 1: Beamtalk class uses standard class_send dispatch (no special case)
-    let expr = Expression::MessageSend {
-        receiver: Box::new(Expression::ClassReference {
-            name: Identifier::new("Beamtalk", Span::new(0, 8)),
-            span: Span::new(0, 8),
-            package: None,
-        }),
-        selector: MessageSelector::Unary("allClasses".into()),
-        arguments: vec![],
-        is_cast: false,
-        span: Span::new(0, 20),
-    };
-
-    let code = generate_repl_expression(&expr, "repl_eval").expect("codegen should succeed");
+    let code = repl_expression_code("Beamtalk allClasses", "repl_eval");
 
     // ADR 0129 §7: REPL sends check session bindings, then the class registry
     // via class_send. There is no singleton step any more.
-    assert!(
-        code.contains("maps':'find") && code.contains("class_send"),
-        "Beamtalk should check bindings then class_send. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("resolve_singleton_instance"),
-        "Beamtalk send should not consult the singleton registry. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("persistent_term"),
-        "Beamtalk should NOT use persistent_term. Got:\n{code}"
-    );
+    assert_has(&code, "maps':'find");
+    assert_has(&code, "class_send");
+    assert_lacks(&code, "resolve_singleton_instance");
+    assert_lacks(&code, "persistent_term");
 
     // Test 2: Non-binding class (Point) dispatches via class_send in REPL
-    let expr2 = Expression::MessageSend {
-        receiver: Box::new(Expression::ClassReference {
-            name: Identifier::new("Point", Span::new(0, 5)),
-            span: Span::new(0, 5),
-            package: None,
-        }),
-        selector: MessageSelector::Unary("new".into()),
-        arguments: vec![],
-        is_cast: false,
-        span: Span::new(0, 10),
-    };
-
-    let code2 = generate_repl_expression(&expr2, "repl_eval2")
-        .expect("codegen should succeed for non-binding class");
+    let code2 = repl_expression_code("Point new", "repl_eval2");
 
     // ADR 0129 §7: REPL class sends check session bindings, then class_send.
-    assert!(
-        code2.contains("maps':'find") && code2.contains("class_send"),
-        "Class send should check bindings then class_send. Got:\n{code2}"
-    );
-    assert!(
-        !code2.contains("persistent_term"),
-        "Non-binding class should NOT use persistent_term. Got:\n{code2}"
-    );
+    assert_has(&code2, "maps':'find");
+    assert_has(&code2, "class_send");
+    assert_lacks(&code2, "persistent_term");
 
     // Test 3: ClassReference spawn in REPL uses generate_actor_spawn with registry
-    let expr3 = Expression::MessageSend {
-        receiver: Box::new(Expression::ClassReference {
-            name: Identifier::new("InitCounter", Span::new(0, 11)),
-            span: Span::new(0, 11),
-            package: None,
-        }),
-        selector: MessageSelector::Unary("spawn".into()),
-        arguments: vec![],
-        is_cast: false,
-        span: Span::new(0, 17),
-    };
-
-    let code3 =
-        generate_repl_expression(&expr3, "repl_eval3").expect("codegen should succeed for spawn");
+    let code3 = repl_expression_code("InitCounter spawn", "repl_eval3");
 
     // Spawn on ClassReference calls Module:spawn() directly; the REPL no
     // longer registers the pid anywhere (ADR 0150, BT-4951).
-    assert!(
-        code3.contains("call 'bt@init_counter':'spawn'()"),
-        "REPL spawn should use direct module spawn. Got:\n{code3}"
-    );
-    assert!(
-        !code3.contains("register_spawned"),
-        "REPL spawn must not register the actor. Got:\n{code3}"
-    );
+    assert_has(&code3, "call 'bt@init_counter':'spawn'()");
+    assert_lacks(&code3, "register_spawned");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:2107-2134 ----
@@ -1033,25 +472,16 @@ fn test_generate_repl_list_reject() {
     // The wrapper fun must be bound via `let` — not inlined in the call args,
     // because Core Erlang lambdas don't use `end` and can't be inlined in calls.
     let src = "#(1, 2, 3, 4, 5) reject: [:x | x > 2]";
-    let module = parse_source(src);
+    let module = parse_ok(src);
     let expr = &module.expressions[0].expression;
     let code = generate_repl_expression(expr, "test_reject_repl").expect("codegen should work");
 
     // Wrapper fun must be bound to a variable, not inlined in filter call
-    assert!(
-        code.contains("call 'lists':'filter'("),
-        "Should use lists:filter. Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'erlang':'not'("),
-        "Should negate predicate. Got:\n{code}"
-    );
+    assert_has(&code, "call 'lists':'filter'(");
+    assert_has(&code, "call 'erlang':'not'(");
     // Verify the fun is let-bound (not inlined) — the filter call arg must be a temp var
     // e.g. "call 'lists':'filter'(_temp4," not "call 'lists':'filter'(fun (X)"
-    assert!(
-        !code.contains("'filter'(fun"),
-        "Wrapper fun must be let-bound, not inlined in filter call. Got:\n{code}"
-    );
+    assert_lacks(&code, "'filter'(fun");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:4662-4806 ----
@@ -1079,126 +509,24 @@ fn test_repl_destructure_mutation_threaded_rhs_unwraps_element() {
     //   let State2 = maps:put('a', A1, State1)
     //   let State3 = maps:put('b', B1, State2)
 
-    let span = Span::new(0, 1);
-
-    // Build: x := x + 1. #(item, x)  (block body with mutation + list return value)
-    let x_mut = {
-        let x_id = Expression::Identifier(Identifier::new("x", span));
-        let one = Expression::Literal(Literal::Integer(1), span);
-        let add = Expression::MessageSend {
-            receiver: Box::new(x_id.clone()),
-            selector: MessageSelector::Binary("+".into()),
-            arguments: vec![one],
-            is_cast: false,
-            span,
-        };
-        Expression::Assignment {
-            target: Box::new(x_id),
-            value: Box::new(add),
-            type_annotation: None,
-            span,
-        }
-    };
-    let item_id = Expression::Identifier(Identifier::new("item", span));
-    let x_id2 = Expression::Identifier(Identifier::new("x", span));
-    let list_result = Expression::ListLiteral {
-        elements: vec![item_id, x_id2],
-        tail: None,
-        span,
-    };
-    let inject_block = Expression::Block(Block::new(
-        vec![
-            BlockParameter::new("acc", span),
-            BlockParameter::new("item", span),
-        ],
-        vec![bare(x_mut), bare(list_result)],
-        span,
-    ));
-
-    // Build: #(10, 20) inject: #(0, 0) into: <inject_block>
-    let receiver = Expression::ListLiteral {
-        elements: vec![
-            Expression::Literal(Literal::Integer(10), span),
-            Expression::Literal(Literal::Integer(20), span),
-        ],
-        tail: None,
-        span,
-    };
-    let initial_acc = Expression::ListLiteral {
-        elements: vec![
-            Expression::Literal(Literal::Integer(0), span),
-            Expression::Literal(Literal::Integer(0), span),
-        ],
-        tail: None,
-        span,
-    };
-    let inject_into = Expression::MessageSend {
-        receiver: Box::new(receiver),
-        selector: MessageSelector::Keyword(vec![
-            KeywordPart {
-                keyword: "inject:".into(),
-                span,
-            },
-            KeywordPart {
-                keyword: "into:".into(),
-                span,
-            },
-        ]),
-        arguments: vec![initial_acc, inject_block],
-        is_cast: false,
-        span,
-    };
-
-    // Build: #(a, b) := <inject_into>
-    let pattern = Pattern::Array {
-        elements: vec![
-            Pattern::Variable(Identifier::new("a", span)),
-            Pattern::Variable(Identifier::new("b", span)),
-        ],
-        list_syntax: true,
-        rest: None,
-        span,
-    };
-    let destructure = Expression::DestructureAssignment {
-        pattern,
-        value: Box::new(inject_into),
-        span,
-    };
-
-    let code = generate_repl_expression(&destructure, "bt1283_mutation_threaded_test")
-        .expect("codegen should succeed");
-
-    eprintln!("BT-1283: Generated code for #(a, b) := #(10,20) inject: #(0,0) into: [...]:");
-    eprintln!("{code}");
+    let code = repl_expression_code(
+        "#(a, b) := #(10, 20) inject: #(0, 0) into: [:acc :item | x := x + 1. #(item, x)]",
+        "bt1283_mutation_threaded_test",
+    );
 
     // The RHS is mutation-threaded, so it returns {FinalAcc, StateAcc}.
     // element(1, Rhs) extracts FinalAcc; element(2, Rhs) advances REPL state.
-    assert!(
-        code.contains("call 'erlang':'element'(1,"),
-        "Must unwrap element(1,) from mutation-threaded RHS. Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'erlang':'element'(2,"),
-        "Must extract StateAcc via element(2,) from mutation-threaded RHS. Got:\n{code}"
-    );
+    assert_has(&code, "call 'erlang':'element'(1,");
+    assert_has(&code, "call 'erlang':'element'(2,");
 
     // Pattern extraction must use the unwrapped _RhsVal (not the raw {Acc,State} _Rhs).
     // The 'at:' dispatch must receive the _RhsVal variable (fresh_temp_var("RhsVal") prefix),
     // not _Rhs (the raw mutation-threaded result holding {FinalAcc, StateAcc}).
-    assert!(
-        code.contains("'send'(_RhsVal"),
-        "Pattern extraction must use the unwrapped _RhsVal, not the raw _Rhs tuple. Got:\n{code}"
-    );
+    assert_has(&code, "'send'(_RhsVal");
 
     // The pattern variables must be persisted to the REPL state map.
-    assert!(
-        code.contains("call 'maps':'put'('a'"),
-        "Must persist 'a' to REPL state map. Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'maps':'put'('b'"),
-        "Must persist 'b' to REPL state map. Got:\n{code}"
-    );
+    assert_has(&code, "call 'maps':'put'('a'");
+    assert_has(&code, "call 'maps':'put'('b'");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/dispatch.rs:1025-1078 ----
@@ -1207,54 +535,29 @@ fn test_repl_destructure_mutation_threaded_rhs_unwraps_element() {
 fn test_cascade_repl_expression() {
     // Test cascade in a full REPL module context
     // x negated; abs
-    let x_ident = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
-    let first_msg = Expression::MessageSend {
-        receiver: Box::new(x_ident),
-        selector: MessageSelector::Unary("negated".into()),
-        arguments: vec![],
-        is_cast: false,
-        span: Span::new(0, 9),
-    };
-
-    let cascade = Expression::Cascade {
-        receiver: Box::new(first_msg),
-        messages: vec![CascadeMessage::new(
-            MessageSelector::Unary("abs".into()),
-            vec![],
-            Span::new(11, 14),
-        )],
-        span: Span::new(0, 14),
-    };
-
-    let code = generate_repl_expression(&cascade, "test_cascade").expect("codegen should work");
+    let code = repl_expression_code("x negated; abs", "test_cascade");
 
     // Should have module structure
-    assert!(
-        code.contains("module 'test_cascade' ['eval'/1, 'module_info'/0, 'module_info'/1]"),
-        "Should have module header. Got:\n{code}"
+    assert_has(
+        &code,
+        "module 'test_cascade' ['eval'/1, 'module_info'/0, 'module_info'/1]",
     );
 
     // Should bind the underlying receiver once. ADR 0081 Phase 1: a
     // free REPL identifier now resolves via a locals maps:find with a runtime
     // resolve_name fallthrough rather than a bare maps:get.
-    assert!(
-        code.contains("let _Receiver@1 = case call 'maps':'find'('x', State) of"),
-        "Should bind receiver x via locals find. Got:\n{code}"
+    assert_has(
+        &code,
+        "let _Receiver@1 = case call 'maps':'find'('x', State) of",
     );
-    assert!(
-        code.contains("call 'beamtalk_workspace':'resolve_name'(State, 'x')"),
-        "Should fall through to resolve_name for free identifier x. Got:\n{code}"
+    assert_has(
+        &code,
+        "call 'beamtalk_workspace':'resolve_name'(State, 'x')",
     );
 
     // Should send both messages
-    assert!(
-        code.contains("'negated'"),
-        "Should have first message negated. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'abs'"),
-        "Should have second message abs. Got:\n{code}"
-    );
+    assert_has(&code, "'negated'");
+    assert_has(&code, "'abs'");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/dispatch.rs:1232-1283 ----
@@ -1263,52 +566,15 @@ fn test_cascade_repl_expression() {
 fn test_standalone_class_reference_uses_dynamic_module_name() {
     // Test that standalone ClassReference uses module_name/1 dynamically
     // Review comment: Should match generate_beamtalk_class_named pattern (lines 915-922)
-    use beamtalk_core::ast::{Expression, Identifier, Module};
-    use beamtalk_core::source_analysis::Span;
-
-    // Create expression: Point (standalone class reference)
-    let expr = Expression::ClassReference {
-        name: Identifier::new("Point", Span::new(0, 5)),
-        span: Span::new(0, 5),
-        package: None,
-    };
-
-    let module = Module {
-        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
-        literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![bare(expr)],
-        classes: vec![],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        span: Span::new(0, 5),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-
-    let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
-        .expect("codegen should succeed");
+    let code = repl_expression_code("Point", "repl_eval");
 
     // ADR 0129 §7: a REPL class reference checks the session map first (a
     // binding shadows the class), then the class registry inline — no runtime
     // resolver.
-    assert!(
-        code.contains("call 'maps':'find'('Point', "),
-        "Should check locals map for the class name first. Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'erlang':'whereis'('beamtalk_class_Point')"),
-        "Should look the class up in the class registry. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("resolve_class_reference"),
-        "Should not delegate to the runtime resolver. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'Point class'"),
-        "Should build the class object with the display name. Got:\n{code}"
-    );
+    assert_has(&code, "call 'maps':'find'('Point', ");
+    assert_has(&code, "call 'erlang':'whereis'('beamtalk_class_Point')");
+    assert_lacks(&code, "resolve_class_reference");
+    assert_has(&code, "'Point class'");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/dispatch.rs:1284-1330 ----
@@ -1316,51 +582,17 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
 #[test]
 fn test_standalone_class_reference_validates_undefined_classes() {
     // Test that standalone ClassReference raises class_not_found error for undefined classes
-    use beamtalk_core::ast::{Expression, Identifier, Module};
-    use beamtalk_core::source_analysis::Span;
-
-    // Create expression: NonExistentClass (standalone class reference)
-    let expr = Expression::ClassReference {
-        name: Identifier::new("NonExistentClass", Span::new(0, 16)),
-        span: Span::new(0, 16),
-        package: None,
-    };
-
-    let module = Module {
-        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
-        literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![bare(expr)],
-        classes: vec![],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        span: Span::new(0, 16),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-
-    let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
-        .expect("codegen should succeed");
+    let code = repl_expression_code("NonExistentClass", "repl_eval");
 
     // ADR 0129 §10: an undefined class raises class_not_found from the
     // registry lookup itself, identically to batch-compiled code.
-    assert!(
-        code.contains("call 'maps':'find'('NonExistentClass', "),
-        "Should check locals map for the class name first. Got:\n{code}"
+    assert_has(&code, "call 'maps':'find'('NonExistentClass', ");
+    assert_has(
+        &code,
+        "call 'erlang':'whereis'('beamtalk_class_NonExistentClass')",
     );
-    assert!(
-        code.contains("call 'erlang':'whereis'('beamtalk_class_NonExistentClass')"),
-        "Should look the class up in the class registry. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'class_not_found', 'NonExistentClass'"),
-        "Should raise class_not_found for an undefined class. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("resolve_class_reference"),
-        "Should not delegate to the runtime resolver. Got:\n{code}"
-    );
+    assert_has(&code, "'class_not_found', 'NonExistentClass'");
+    assert_lacks(&code, "resolve_class_reference");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/dispatch.rs:2453-2486 ----
@@ -1372,7 +604,7 @@ fn test_repl_expression_spawn_uses_class_module_index() {
     // so the generated code calls 'bt@getting_started@counter':'spawn'()
     // instead of the heuristic fallback 'bt@counter':'spawn'().
     let src = "Counter spawn";
-    let module = parse_source(src);
+    let module = parse_ok(src);
     let expressions: Vec<_> = module
         .expressions
         .iter()
@@ -1388,14 +620,8 @@ fn test_repl_expression_spawn_uses_class_module_index() {
     let code = generate_repl_expressions_with_index(&expressions, "repl_test_mod", index)
         .expect("codegen should work");
 
-    assert!(
-        code.contains("'bt@getting_started@counter':'spawn'"),
-        "spawn must use package-qualified module from class_module_index. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'bt@counter':'spawn'"),
-        "Heuristic module name must NOT appear when class_module_index is provided. Got:\n{code}"
-    );
+    assert_has(&code, "'bt@getting_started@counter':'spawn'");
+    assert_lacks(&code, "'bt@counter':'spawn'");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/dispatch.rs:2487-2507 ----
@@ -1404,7 +630,7 @@ fn test_repl_expression_spawn_uses_class_module_index() {
 fn test_repl_expression_spawn_without_index_uses_heuristic() {
     // Without class_module_index, spawn falls back to the heuristic bt@ prefix.
     let src = "Counter spawn";
-    let module = parse_source(src);
+    let module = parse_ok(src);
     let expressions: Vec<_> = module
         .expressions
         .iter()
@@ -1414,19 +640,16 @@ fn test_repl_expression_spawn_without_index_uses_heuristic() {
     let code =
         generate_repl_expressions(&expressions, "repl_test_mod").expect("codegen should work");
 
-    assert!(
-        code.contains("'bt@counter':'spawn'"),
-        "Without class_module_index, spawn should use heuristic bt@ prefix. Got:\n{code}"
-    );
+    assert_has(&code, "'bt@counter':'spawn'");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/dispatch.rs:2508-2538 ----
 
 #[test]
 fn test_repl_expression_spawn_with_args_uses_class_module_index() {
-    // `Counter spawnWith: #{ value: 10 }` must also use class_module_index.
-    let src = "Counter spawnWith: #{ value: 10 }";
-    let module = parse_source(src);
+    // `Counter spawnWith: #{#value => 10}` must also use class_module_index.
+    let src = "Counter spawnWith: #{#value => 10}";
+    let module = parse_ok(src);
     let expressions: Vec<_> = module
         .expressions
         .iter()
@@ -1442,14 +665,8 @@ fn test_repl_expression_spawn_with_args_uses_class_module_index() {
     let code = generate_repl_expressions_with_index(&expressions, "repl_test_mod", index)
         .expect("codegen should work");
 
-    assert!(
-        code.contains("'bt@getting_started@counter':'spawn'"),
-        "spawnWith: must use package-qualified module from class_module_index. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'bt@counter':'spawn'"),
-        "Heuristic module name must NOT appear when class_module_index is provided. Got:\n{code}"
-    );
+    assert_has(&code, "'bt@getting_started@counter':'spawn'");
+    assert_lacks(&code, "'bt@counter':'spawn'");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/dispatch.rs:3124-3164 ----
@@ -1459,47 +676,14 @@ fn test_qualified_class_reference_standalone() {
     // ADR 0070 Phase 2: `json@Parser` as a standalone expression should use
     // the class registry with the short name 'Parser' and produce the
     // canonical tag 'Parser class' in the class object tuple (BT-4074).
-    use beamtalk_core::ast::{Expression, Identifier, Module};
-    use beamtalk_core::source_analysis::Span;
-
-    let expr = Expression::ClassReference {
-        name: Identifier::new("Parser", Span::new(5, 11)),
-        package: Some(Identifier::new("json", Span::new(0, 4))),
-        span: Span::new(0, 11),
-    };
-
-    let module = Module {
-        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
-        literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![bare(expr)],
-        classes: vec![],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        span: Span::new(0, 11),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-
-    let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
-        .expect("codegen should succeed");
+    let code = repl_expression_code("json@Parser", "repl_eval");
 
     // Registry lookup uses the short class name
-    assert!(
-        code.contains("call 'erlang':'whereis'('beamtalk_class_Parser')"),
-        "Should look up 'Parser' (short name) in class registry. Got:\n{code}"
-    );
+    assert_has(&code, "call 'erlang':'whereis'('beamtalk_class_Parser')");
 
     // BT-4074: the class object carries the canonical tag, not a qualified one
-    assert!(
-        code.contains("{'beamtalk_object', 'Parser class', "),
-        "Class object tuple should use the canonical 'Parser class' tag. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("json@Parser class"),
-        "No package-qualified tag may be emitted. Got:\n{code}"
-    );
+    assert_has(&code, "{'beamtalk_object', 'Parser class', ");
+    assert_lacks(&code, "json@Parser class");
 }
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/expressions.rs (4 string-interpolation tests) ----
@@ -1507,60 +691,19 @@ fn test_qualified_class_reference_standalone() {
 #[test]
 fn test_string_interpolation_simple_variable() {
     // "Hello, {name}!" — variable interpolation
-    let segments = vec![
-        StringSegment::Literal("Hello, ".into()),
-        StringSegment::Interpolation(Expression::Identifier(Identifier::new(
-            "name",
-            Span::new(8, 12),
-        ))),
-        StringSegment::Literal("!".into()),
-    ];
-    let expression = Expression::StringInterpolation {
-        segments,
-        span: Span::new(0, 15),
-    };
-    let code = generate_test_expression(&expression, "test_interp").expect("codegen should work");
+    let code = repl_test_expression_code("\"Hello, {name}!\"", "test_interp");
     // Should dispatch displayString via beamtalk_message_dispatch
-    assert!(
-        code.contains("'displayString'"),
-        "Should dispatch displayString. Got:\n{code}"
-    );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'"),
-        "Should use beamtalk_message_dispatch for dispatch. Got:\n{code}"
-    );
+    assert_has(&code, "'displayString'");
+    assert_has(&code, "beamtalk_message_dispatch':'send'");
     // Binary construction with byte segments and binary variable
-    assert!(
-        code.contains("#<"),
-        "Should contain byte segments for literal parts. Got:\n{code}"
-    );
-    assert!(
-        code.contains("('all',8,'binary',['unsigned'|['big']])"),
-        "Should contain binary variable segment. Got:\n{code}"
-    );
+    assert_has(&code, "#<");
+    assert_has(&code, "('all',8,'binary',['unsigned'|['big']])");
 }
 
 #[test]
 fn test_string_interpolation_multiple_expressions() {
     // "a{x}b{y}c" — multiple expression segments
-    let segments = vec![
-        StringSegment::Literal("a".into()),
-        StringSegment::Interpolation(Expression::Identifier(Identifier::new(
-            "x",
-            Span::new(2, 3),
-        ))),
-        StringSegment::Literal("b".into()),
-        StringSegment::Interpolation(Expression::Identifier(Identifier::new(
-            "y",
-            Span::new(5, 6),
-        ))),
-        StringSegment::Literal("c".into()),
-    ];
-    let expression = Expression::StringInterpolation {
-        segments,
-        span: Span::new(0, 8),
-    };
-    let code = generate_test_expression(&expression, "test_multi").expect("codegen should work");
+    let code = repl_test_expression_code("\"a{x}b{y}c\"", "test_multi");
     // Should have two displayString dispatches
     let dispatch_count = code.matches("'displayString'").count();
     assert_eq!(
@@ -1572,42 +715,18 @@ fn test_string_interpolation_multiple_expressions() {
 #[test]
 fn test_string_interpolation_only_expression() {
     // "{name}" — only an interpolation, no literal segments
-    let segments = vec![StringSegment::Interpolation(Expression::Identifier(
-        Identifier::new("name", Span::new(1, 5)),
-    ))];
-    let expression = Expression::StringInterpolation {
-        segments,
-        span: Span::new(0, 6),
-    };
-    let code = generate_test_expression(&expression, "test_bare").expect("codegen should work");
-    assert!(
-        code.contains("'displayString'"),
-        "Should dispatch displayString even for bare expression. Got:\n{code}"
-    );
+    let code = repl_test_expression_code("\"{name}\"", "test_bare");
+    assert_has(&code, "'displayString'");
     // Binary should contain only the variable segment
-    assert!(
-        code.contains("('all',8,'binary',['unsigned'|['big']])"),
-        "Should contain binary variable segment. Got:\n{code}"
-    );
+    assert_has(&code, "('all',8,'binary',['unsigned'|['big']])");
 }
 
 #[test]
 fn test_string_interpolation_integer_expression() {
     // "{42}" — integer literal in interpolation
-    let segments = vec![StringSegment::Interpolation(Expression::Literal(
-        Literal::Integer(42),
-        Span::new(1, 3),
-    ))];
-    let expression = Expression::StringInterpolation {
-        segments,
-        span: Span::new(0, 4),
-    };
-    let code = generate_test_expression(&expression, "test_int").expect("codegen should work");
+    let code = repl_test_expression_code("\"{42}\"", "test_int");
     // Should dispatch displayString on the integer
-    assert!(
-        code.contains("'displayString'"),
-        "Should dispatch displayString on integer. Got:\n{code}"
-    );
+    assert_has(&code, "'displayString'");
 }
 
 // ---- extracted from crates/beamtalk-core/src/source_analysis/parser/tests/literal_tests.rs:921-931 ----
@@ -1619,8 +738,7 @@ fn codegen_simple_match() {
     let result = beamtalk_repl::codegen::generate_test_expression(expr, "test_match");
     assert!(result.is_ok(), "Codegen failed: {:?}", result.err());
     let code = result.unwrap();
-    eprintln!("Generated code:\n{code}");
-    assert!(code.contains("case"), "Expected case expression in: {code}");
+    assert_has(&code, "case");
 }
 
 // ---- extracted from crates/beamtalk-core/src/source_analysis/parser/tests/literal_tests.rs:932-942 ----
@@ -1632,8 +750,7 @@ fn codegen_match_with_arms() {
     let result = beamtalk_repl::codegen::generate_test_expression(expr, "test_match");
     assert!(result.is_ok(), "Codegen failed: {:?}", result.err());
     let code = result.unwrap();
-    eprintln!("Generated code:\n{code}");
-    assert!(code.contains("case"), "Expected case expression in: {code}");
+    assert_has(&code, "case");
 }
 
 // ---- extracted from crates/beamtalk-core/src/source_analysis/parser/tests/literal_tests.rs:943-950 ----
@@ -1686,16 +803,13 @@ fn repl_code_with_facade_hierarchy(expr_source: &str) -> String {
 #[test]
 fn repl_sealed_stateless_class_method_emits_direct_call() {
     let code = repl_code_with_facade_hierarchy("Facade osName");
-    assert!(
-        code.contains("call 'bt@facade':"),
-        "Expected a direct call into the class module in: {code}"
-    );
+    assert_has(&code, "call 'bt@facade':");
     // BT-4301 (ADR 0142 §2): guarded, with `class_send` as the fallback.
-    assert!(
-        (code.contains("call 'beamtalk_class_shadow_flags':'static_call_target'({")
-            && code.contains(", 'Facade class'}, 'Facade', ")),
-        "Eligible send must be guarded in: {code}"
+    assert_has(
+        &code,
+        "call 'beamtalk_class_shadow_flags':'static_call_target'({",
     );
+    assert_has(&code, ", 'Facade class'}, 'Facade', ");
 }
 
 /// BT-4301 (ADR 0142 §1): sealing plays no part; REPL codegen shares module
@@ -1704,25 +818,19 @@ fn repl_sealed_stateless_class_method_emits_direct_call() {
 #[test]
 fn repl_non_sealed_class_method_emits_guarded_direct_call() {
     let code = repl_code_with_facade_hierarchy("Facade plain");
-    assert!(
-        code.contains("call 'bt@facade':'class_plain'(")
-            && (code.contains("call 'beamtalk_class_shadow_flags':'static_call_target'({")
-                && code.contains(", 'Facade class'}, 'Facade', ")),
-        "A class method of a stateless class is a guarded direct call in: {code}"
+    assert_has(&code, "call 'bt@facade':'class_plain'(");
+    assert_has(
+        &code,
+        "call 'beamtalk_class_shadow_flags':'static_call_target'({",
     );
+    assert_has(&code, ", 'Facade class'}, 'Facade', ");
 }
 
 #[test]
 fn repl_class_with_class_state_still_emits_class_send() {
     let code = repl_code_with_facade_hierarchy("Stateful peek");
-    assert!(
-        code.contains("'class_send'"),
-        "Class with classState: must keep class_send in: {code}"
-    );
-    assert!(
-        !code.contains("call 'bt@stateful':"),
-        "Class with classState: must not be called directly in: {code}"
-    );
+    assert_has(&code, "'class_send'");
+    assert_lacks(&code, "call 'bt@stateful':");
 }
 
 #[test]
@@ -1739,10 +847,7 @@ fn repl_without_hierarchy_keeps_class_send() {
         std::collections::HashMap::new(),
     )
     .expect("codegen should work");
-    assert!(
-        code.contains("'class_send'"),
-        "Expected class_send in: {code}"
-    );
+    assert_has(&code, "'class_send'");
 }
 
 // ---- BT-3640 (ADR 0129 Phase 1): `Beamtalk` is a class-side facade ----
@@ -1767,15 +872,12 @@ fn repl_beamtalk_class_named_emits_direct_call() {
         &hierarchy,
     )
     .expect("codegen should work");
-    assert!(
-        code.contains("call 'bt@stdlib@beamtalk':"),
-        "Expected a direct call into bt@stdlib@beamtalk in: {code}"
+    assert_has(&code, "call 'bt@stdlib@beamtalk':");
+    assert_has(
+        &code,
+        "call 'beamtalk_class_shadow_flags':'static_call_target'({",
     );
-    assert!(
-        (code.contains("call 'beamtalk_class_shadow_flags':'static_call_target'({")
-            && code.contains(", 'Beamtalk class'}, 'Beamtalk', ")),
-        "Beamtalk classNamed: must be guarded in: {code}"
-    );
+    assert_has(&code, ", 'Beamtalk class'}, 'Beamtalk', ");
 }
 
 // ---- BT-3778 (ADR 0111 Addendum 17): verifier diagnostics surface from REPL codegen ----
@@ -1790,7 +892,7 @@ fn test_repl_surfacing_verifier_reports_only_internal_findings() {
     };
 
     let src = "x := 1. x + 2";
-    let module = parse_source(src);
+    let module = parse_ok(src);
     let exprs: Vec<_> = module
         .expressions
         .iter()
@@ -1825,7 +927,7 @@ fn test_repl_surfacing_verifier_reports_only_internal_findings() {
         true,
     )
     .expect("a verifier finding must not fail generation");
-    assert!(code.contains("eval"), "output is still produced");
+    assert_has(&code, "eval");
     assert_eq!(diags.len(), 1, "{diags:?}");
     assert_eq!(
         diags[0].category,
@@ -1869,7 +971,7 @@ fn test_repl_class_builder_block_method_reflects_pipeline_as_written() {
 
     let src = "Object classBuilder name: #Made; \
                methods: #{#m => [:self | self foo |> bar baz |> qux: 1]}; register";
-    let module = parse_source(src);
+    let module = parse_ok(src);
     let exprs: Vec<_> = module
         .expressions
         .iter()
@@ -1890,7 +992,7 @@ fn test_repl_class_builder_block_method_reflects_pipeline_as_written() {
         false,
     )
     .expect("codegen should work");
-    assert!(code.contains(&entry), "Got:\n{code}");
+    assert_has(&code, &entry);
 
     let (code, _) = generate_repl_expressions_traced_surfacing_verifier(
         &exprs,
@@ -1903,7 +1005,7 @@ fn test_repl_class_builder_block_method_reflects_pipeline_as_written() {
         false,
     )
     .expect("trace codegen should work");
-    assert!(code.contains(&entry), "Got:\n{code}");
+    assert_has(&code, &entry);
 }
 
 /// BT-4708: a `ClassBuilder` block method typed at the REPL reflects the
@@ -1919,7 +1021,7 @@ fn test_repl_class_builder_block_method_reflects_literal_comments() {
 
     let src = "Object classBuilder name: #Made; \
                methods: #{#m => [:self |\n  {\n    1, // first\n    2\n  }\n]}; register";
-    let module = parse_source(src);
+    let module = parse_ok(src);
     let exprs: Vec<_> = module
         .expressions
         .iter()
@@ -1940,7 +1042,7 @@ fn test_repl_class_builder_block_method_reflects_literal_comments() {
         false,
     )
     .expect("codegen should work");
-    assert!(code.contains(&entry), "Got:\n{code}");
+    assert_has(&code, &entry);
 
     let (code, _) = generate_repl_expressions_traced_surfacing_verifier(
         &exprs,
@@ -1953,5 +1055,5 @@ fn test_repl_class_builder_block_method_reflects_literal_comments() {
         false,
     )
     .expect("trace codegen should work");
-    assert!(code.contains(&entry), "Got:\n{code}");
+    assert_has(&code, &entry);
 }
