@@ -2,6 +2,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%% Relative to this script (epp resolves it from the script's directory, not the cwd):
+%% an escript has no `-include_lib` path to the runtime app unless ERL_LIBS is set.
+-include("../apps/beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 %% ADR 0137 Phase 0 (BT-4007): gates 1-3 of the live-state model, measured in
 %% one VM, interleaved, so the gen_server round trip (about 6 us, and the
 %% dominant noise source) is out of the measurement.
@@ -64,7 +68,7 @@ main([PkgDir, BatchesS, RepsS]) ->
         {sealed_b, load(SealedLowered, Sealed, "bt4007_sealed_b")}
     ],
     Mod = fun(K) -> proplists:get_value(K, Mods) end,
-    St = fun(M) -> #{a => 1, b => 2, c => 3, n => 0, '$beamtalk_class' => 'Probe', '__class_mod__' => M} end,
+    St = fun(M) -> #{a => 1, b => 2, c => 3, n => 0, ?BT_CLASS_TAG_KEY => 'Probe', ?BT_CLASS_MOD_KEY => M} end,
     Self = {beamtalk_object, 'Probe', undefined, self()},
     Cases = [
         {"gate 1: field_body A/A (noise floor)", field_a, field_a2, 'body', [], 1, Reps},
@@ -177,15 +181,16 @@ os_tmp() ->
 %% the cell on entry and stores its last version on exit. Every edit asserts its
 %% match count.
 hand_lower_open(Core) ->
+    ClassModKey = atom_to_list(?BT_CLASS_MOD_KEY),
     S0 = binary_to_list(Core),
     {Pre, FooOn} = split_at(S0, "<'foo'> when 'true' ->"),
     {Foo0, Rest} = split_at(FooOn, "<'top:'> when 'true' ->"),
     {Foo, FooEdits} = lower_callee(Foo0),
     {Callers0, N1} = sub(Rest,
         "let (_SD[0-9]+) = case let (_SDArgs[0-9]+) = \\[\\] in let (_ClassMod[0-9]+) = "
-        "call 'maps':'get'\\('__class_mod__', ([A-Za-z0-9_]+),",
+        "call 'maps':'get'\\('" ++ ClassModKey ++ "', ([A-Za-z0-9_]+),",
         "let _CellStore\\1 = call 'erlang':'put'('$bt_actor_state', \\4) in "
-        "let \\1 = case let \\2 = [] in let \\3 = call 'maps':'get'('__class_mod__', \\4,", 2),
+        "let \\1 = case let \\2 = [] in let \\3 = call 'maps':'get'('" ++ ClassModKey ++ "', \\4,", 2),
     {Callers1, N2} = sub(Callers0,
         "let ([A-Za-z0-9_]+) = call 'erlang':'element'\\(2, (_SD[0-9]+)\\) in",
         "let \\1 = call 'erlang':'get'('$bt_actor_state') in", 2),

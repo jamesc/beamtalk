@@ -165,7 +165,7 @@ all_benchmarks() ->
 
 bench_dispatch_lookup() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
-    State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
+    State = #{?BT_CLASS_TAG_KEY => 'Counter', 'value' => 0},
     Self = make_ref(),
     %% 'class' is defined in Object, so Counter -> Actor -> Object (depth 3).
     Timings = run_benchmark(fun() ->

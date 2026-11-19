@@ -639,6 +639,31 @@ impl CoreErlangGenerator {
         Ok(seq.close(self, call_doc, &[tag, "Res"].concat()))
     }
 
+    /// The sequenced runtime `send`: [`Self::sequenced_runtime_call`] whose call
+    /// is built by `runtime_send_doc`, the one construction of the
+    /// `beamtalk_message_dispatch:send` call. `layout` maps the threaded operand
+    /// documents to `[receiver, selector, args]`, plus an optional trailing
+    /// timeout (the `send/4` shape) — the same argument layout as the call it
+    /// replaces, so the emitted Core Erlang is unchanged.
+    pub(super) fn sequenced_runtime_send(
+        &mut self,
+        operands: &[&Expression],
+        tag: &str,
+        layout: impl FnOnce(Vec<Document<'static>>) -> Vec<Document<'static>>,
+    ) -> Result<Document<'static>> {
+        let mut seq = self.sequence_call(operands, tag)?;
+        let mut docs = layout(seq.rest()).into_iter();
+        let (receiver, selector, args) = (
+            docs.next().expect("send receiver"),
+            docs.next().expect("send selector"),
+            docs.next().expect("send argument list"),
+        );
+        let timeout = docs.next();
+        debug_assert!(docs.next().is_none(), "send takes at most 4 arguments");
+        let call_doc = super::dispatch_codegen::runtime_send_doc(receiver, selector, args, timeout);
+        Ok(seq.close(self, call_doc, &[tag, "Res"].concat()))
+    }
+
     /// The one temp-binding step behind every "hoist an earlier
     /// sub-expression so a later one's effects can run ahead of it" rule:
     /// mints a fresh `<prefix>N` temp and returns the `let <temp> = <doc>
