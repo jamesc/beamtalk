@@ -29,10 +29,10 @@ pub(crate) fn html_escape(s: &str) -> String {
 /// Build the BEAM module name for a user-code file stem (`bt@<normalised-stem>`).
 ///
 /// ADR 0016: all user-code modules use the `bt@` prefix. The stem is normalised
-/// via [`beamtalk_codegen::core_erlang::to_module_name`] so that e.g.
+/// via [`beamtalk_core::ast::to_module_name`] so that e.g.
 /// `my-class.bt` → `bt@my_class`.
 pub(crate) fn bt_module_name_from_stem(stem: &str) -> String {
-    format!("bt@{}", beamtalk_codegen::core_erlang::to_module_name(stem))
+    format!("bt@{}", beamtalk_core::ast::to_module_name(stem))
 }
 
 /// Format a sorted, single-quoted Erlang atom list (`'a', 'b', …`).

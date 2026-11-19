@@ -691,7 +691,7 @@ pub(super) fn module_name_from_path(path: &Utf8Path) -> Result<String> {
         );
     }
 
-    let snake = beamtalk_codegen::core_erlang::to_module_name(stem);
+    let snake = beamtalk_core::ast::to_module_name(stem);
 
     // ADR 0016: All stdlib modules use bt@stdlib@ prefix
     Ok(format!("bt@stdlib@{snake}"))

@@ -77,7 +77,7 @@ pub(crate) fn compute_relative_module(
     }
     // Fallback: use file stem
     let stem = file.file_stem().unwrap_or("unknown");
-    Ok(beamtalk_codegen::core_erlang::to_module_name(stem))
+    Ok(beamtalk_core::ast::to_module_name(stem))
 }
 
 /// The Erlang module name of `file` in package `pkg_name`

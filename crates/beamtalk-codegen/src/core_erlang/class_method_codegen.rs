@@ -767,12 +767,20 @@ impl CoreErlangGenerator {
             VtBodyExprKind::FoldlListOpWithLocalThreading => {
                 self.generate_vt_foldl_list_op_open(expr)
             }
-            VtBodyExprKind::ConditionalWithLocalThreading => {
-                self.generate_vt_conditional_open(expr)
-            }
-            VtBodyExprKind::ExceptionConstructWithThreading => {
-                self.generate_vt_exception_construct_open(expr)
-            }
+            // BT-5041: a class method has no `Self` family to thread, so a
+            // conditional or `on:do:`/`ensure:` that rebinds an outer local is a
+            // local-threading producer, which `lower_root_statement_with_producer`
+            // lowers before this walker runs. No input reached these two arms (the
+            // stdlib, BUnit and bootstrap corpora, every example and parity project,
+            // the codegen unit tests and 512 generated class-variable programs
+            // were probed), so they are an internal error rather than a copy of the
+            // value-type lowering that could silently drift.
+            VtBodyExprKind::ConditionalWithLocalThreading
+            | VtBodyExprKind::ExceptionConstructWithThreading => Err(CodeGenError::Internal(
+                "class method statement is a local-threading conditional or \
+                     exception construct that the producer gate did not lower"
+                    .to_string(),
+            )),
             VtBodyExprKind::EarlyReturn
             | VtBodyExprKind::FieldAssignment
             | VtBodyExprKind::ConditionalWithSelfFieldThreading

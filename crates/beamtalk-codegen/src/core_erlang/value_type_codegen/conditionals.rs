@@ -274,6 +274,7 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        crate::core_erlang::reach::hit("generate_vt_conditional_open");
         // Always the method root. This statement form is only reachable there: the producer's
         // gate (`is_vt_field_conditional_producer`) declines a conditional in a loop / branch /
         // exception frame, and every such shape is rejected before it gets here
@@ -927,14 +928,17 @@ impl CoreErlangGenerator {
     /// method silently sees the pre-`try` snapshot.
     ///
     /// # Reached by
-    /// BT-5009: reached only by codegen unit tests that bypass semantic analysis, with an
-    /// `on:do:`/`ensure:` body holding a field-writing-arm conditional that writes a local
-    /// (`core_erlang/tests/control_flow/`); the CLI rejects that source earlier. No stdlib,
-    /// example, test-package-compiler or fuzz-corpus input hits it (BT-4889 measurement).
+    /// BT-5041: reached by a value-type method whose non-last `on:do:`/`ensure:` body holds a
+    /// field-writing-arm conditional that also writes a local. Codegen then rejects the
+    /// source with `FieldAssignmentInUnsupportedBlock`, so the function is live on user code
+    /// but only on the way to that error (the CLI does not reject it earlier). No stdlib,
+    /// `BUnit`, bootstrap, example or parity input hits it; `core_erlang/tests/open_reach.rs` pins an
+    /// inline source.
     pub(in crate::core_erlang) fn generate_vt_exception_construct_open(
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        crate::core_erlang::reach::hit("generate_vt_exception_construct_open");
         let families = self.exception_construct_threaded_families(expr);
         let span = expr.span();
         let tuple_var = self.fresh_temp_var("ExTuple");
