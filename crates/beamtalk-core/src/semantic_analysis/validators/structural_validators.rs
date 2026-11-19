@@ -1325,7 +1325,7 @@ mod tests {
     fn make_method(body_expr: Expression) -> MethodDefinition {
         MethodDefinition {
             body: vec![ExpressionStatement::bare(body_expr)],
-            ..MethodDefinition::test("test")
+            ..MethodDefinition::test_at("test", test_span())
         }
     }
 
