@@ -95,12 +95,7 @@ impl Analyser {
 
         // BT-5026: state / class-variable defaults, before the state names are
         // defined (same order as `NameResolver::resolve_class`).
-        for default in class
-            .state
-            .iter()
-            .chain(&class.class_variables)
-            .filter_map(|d| d.default_value.as_ref())
-        {
+        for default in class.state_default_exprs() {
             self.analyse_expression(default, None);
         }
 

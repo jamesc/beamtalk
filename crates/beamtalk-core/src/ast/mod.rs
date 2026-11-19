@@ -223,8 +223,7 @@ impl Module {
     pub fn state_default_exprs(&self) -> impl Iterator<Item = &Expression> {
         self.classes
             .iter()
-            .flat_map(|c| c.state.iter().chain(&c.class_variables))
-            .filter_map(|d| d.default_value.as_ref())
+            .flat_map(ClassDefinition::state_default_exprs)
     }
 
     /// Protocol provided-method bodies that no class in this module carries a

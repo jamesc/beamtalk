@@ -169,12 +169,7 @@ impl NameResolver {
         // state names are defined. A default is evaluated at construction, so
         // it sees neither `self` nor sibling fields — only built-ins and
         // literals — and a name in it is undefined, not a field.
-        for default in class
-            .state
-            .iter()
-            .chain(&class.class_variables)
-            .filter_map(|d| d.default_value.as_ref())
-        {
+        for default in class.state_default_exprs() {
             self.resolve_expression(default);
         }
 
