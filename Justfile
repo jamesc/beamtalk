@@ -60,14 +60,15 @@ doctor:
 corpus_tests := "package(/^beamtalk-(core|codegen|repl)$/) & (test(/agreement|_corpus|^repl_local_producer::/))"
 
 # The cheap part of the corpus tier (BT-5033): the tests that read the runtime's
-# shared cross-language fixtures (`runtime/apps/*/test/fixtures/*.json`), found by
-# the naming convention the `*_matches_shared_corpus` / `*_match_the_corpus` tests
-# already follow (`_conformance` also selects a reader, but only one that is
-# corpus-tier already; fast-tier `*_conformance` readers run in test-rust). A few seconds once the test binaries are
-# built, against ~33 runner-minutes for the whole tier, so ci.yml's `test-rust`
-# job runs it on a PR that touches a fixture or the Rust crates that read them,
-# with no `ci:corpus` label needed. `test-corpus` still runs these (they are a
-# subset of `corpus_tests`).
+# shared cross-language fixtures (`runtime/apps/*/test/fixtures/*.json`), found
+# by the naming convention the `*_matches_shared_corpus` and
+# `*_match_the_corpus` tests follow. (`_conformance` also selects a reader, but
+# only one that is corpus-tier already; fast-tier `*_conformance` readers run
+# in test-rust anyway.) A few seconds once the test binaries are built, against
+# ~33 runner-minutes for the whole tier, so ci.yml's `test-rust` job runs it on
+# a PR that touches a fixture or the Rust crates that read them, with no
+# `ci:corpus` label needed. `test-corpus` still runs these (they are a subset
+# of `corpus_tests`).
 fixture_reader_tests := "(" + corpus_tests + ") & test(/shared_corpus|match_the_corpus|_conformance/)"
 
 # Run local CI checks (combination of GitHub Actions check + test jobs)
@@ -1825,7 +1826,7 @@ test-hermetic-home:
     trap 'rm -rf "$fake_home"' EXIT
     HOME="$fake_home" PATH="$erl_bin:$PATH" CARGO_HOME="$cargo_home" RUSTUP_HOME="$rustup_home" \
         cargo test --locked -p beamtalk-cli --lib --bins
-    leftover="$(find "$fake_home" -mindepth 1 -maxdepth 1 -name '.beamtalk' -o -mindepth 1 -maxdepth 1 -name '.config')"
+    leftover="$(find "$fake_home" -mindepth 1 -maxdepth 1 \( -name '.beamtalk' -o -name '.config' \))"
     if [ -n "$leftover" ]; then
         echo "❌ tests wrote under the fake HOME:" >&2
         find "$fake_home" -mindepth 1 | head -20 >&2
