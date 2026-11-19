@@ -471,10 +471,9 @@ fn configure_process_group(cmd: &mut Command) {
 }
 
 /// Grace period between SIGTERM and SIGKILL.
-#[cfg(unix)]
 const KILL_GRACE: Duration = Duration::from_secs(2);
 /// Poll interval while waiting for a child to be reaped.
-#[cfg(unix)]
+#[cfg_attr(windows, allow(dead_code))]
 const KILL_POLL: Duration = Duration::from_millis(50);
 
 /// Whether `child_id` is still registered with process group `pgid`.
@@ -486,6 +485,21 @@ fn still_running(children: &ChildMap, child_id: u32, pgid: libc::pid_t) -> bool 
 }
 
 fn handle_kill(request: &Map, children: &ChildMap) -> Result<(), String> {
+    handle_kill_with(request, children, KILL_GRACE, thread::sleep)
+}
+
+/// Unix kill: SIGTERM now, SIGKILL after `grace` on a helper thread. `wait`
+/// is how the helper sleeps between polls (injected so tests can prove that
+/// nothing waits on the command thread). Windows terminates the Job Object at
+/// once and ignores both.
+fn handle_kill_with(
+    request: &Map,
+    children: &ChildMap,
+    grace: Duration,
+    wait: fn(Duration),
+) -> Result<(), String> {
+    #[cfg(windows)]
+    let _ = (grace, wait);
     let child_id = map_get(request, "child_id")
         .and_then(term_to_child_id)
         .ok_or("missing or invalid child_id")?;
@@ -520,12 +534,12 @@ fn handle_kill(request: &Map, children: &ChildMap) -> Result<(), String> {
         // spawn / write_stdin / close_stdin for every other child.
         let children = Arc::clone(children);
         thread::spawn(move || {
-            let deadline = Instant::now() + KILL_GRACE;
+            let deadline = Instant::now() + grace;
             while Instant::now() < deadline {
                 if !still_running(&children, child_id, pgid) {
                     return; // Reaper thread already cleaned it up.
                 }
-                thread::sleep(KILL_POLL);
+                wait(KILL_POLL);
             }
             // Re-check so a reused child_id (a new child) is never signalled.
             if still_running(&children, child_id, pgid) {
@@ -659,7 +673,7 @@ fn failed_spawn_child_id(term: &Term, children: &ChildMap) -> Option<u32> {
 /// Send SIGTERM to all running process groups, wait up to 2 s, then SIGKILL.
 fn kill_all_children(children: &ChildMap) {
     #[cfg(unix)]
-    kill_all_children_within(children, KILL_GRACE);
+    kill_all_children_within(children, KILL_GRACE, thread::sleep);
 
     #[cfg(windows)]
     kill_all_children_windows(children);
@@ -667,7 +681,7 @@ fn kill_all_children(children: &ChildMap) {
 
 /// Unix: SIGTERM every group, wait up to `grace` for the reapers, then SIGKILL.
 #[cfg(unix)]
-fn kill_all_children_within(children: &ChildMap, grace: Duration) {
+fn kill_all_children_within(children: &ChildMap, grace: Duration, wait: fn(Duration)) {
     {
         let pgids: Vec<libc::pid_t> = children
             .lock()
@@ -688,7 +702,7 @@ fn kill_all_children_within(children: &ChildMap, grace: Duration) {
             if children.lock().is_ok_and(|m| m.is_empty()) {
                 return;
             }
-            thread::sleep(KILL_POLL);
+            wait(KILL_POLL);
         }
 
         // Send SIGKILL to any survivors.
@@ -815,6 +829,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     // NOTE: Packet framing tests are now in beamtalk-etf.
 
@@ -921,6 +936,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    #[serial]
     fn spawn_true_succeeds_and_exits() {
         use eetf::List;
         let writer: SharedWriter = Arc::new(Mutex::new(io::stdout()));
@@ -984,6 +1000,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    #[serial]
     fn spawn_with_stdout_covers_reader_thread() {
         // `echo hello` writes to stdout — exercises the Ok(n) arm of the
         // stdout reader thread (lines 416, 420, 422 in spawn_reader_thread).
@@ -1031,6 +1048,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    #[serial]
     fn spawn_with_stderr_covers_stderr_reader_thread() {
         // `sh -c 'echo err >&2'` writes to stderr — exercises the stderr_event
         // branch of the reader thread (lines 417–418 in spawn_reader_thread).
@@ -1076,6 +1094,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    #[serial]
     fn spawn_with_working_dir_succeeds() {
         // The `dir` field in the spawn command sets the working directory via
         // `cmd.current_dir(d)` (line 290). The existing tests never pass `dir`.
@@ -1115,6 +1134,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    #[serial]
     fn spawn_duplicate_child_id_is_rejected() {
         // The duplicate-child-id guard (lines 343–346) kills and rejects a
         // second spawn when the requested child_id is already occupied.
@@ -1185,6 +1205,7 @@ mod tests {
 
     #[test]
     #[cfg(windows)]
+    #[serial]
     fn spawn_cmd_exit_zero_succeeds_on_windows() {
         use eetf::List;
         use std::time::{Duration, Instant};
@@ -1229,7 +1250,9 @@ mod tests {
         // An hour-long grace would hang the test (not just slow it) if the
         // empty case waited, so no wall-clock assertion is needed.
         let children: ChildMap = Arc::new(Mutex::new(HashMap::new()));
-        kill_all_children_within(&children, Duration::from_hours(1));
+        kill_all_children_within(&children, Duration::from_hours(1), |_| {
+            panic!("an empty child map must not wait");
+        });
     }
 
     #[test]
@@ -1261,6 +1284,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    #[serial]
     fn kill_of_term_ignoring_child_returns_without_blocking_the_loop() {
         let writer: SharedWriter = Arc::new(Mutex::new(io::stdout()));
         let children: ChildMap = Arc::new(Mutex::new(HashMap::new()));
@@ -1279,29 +1303,37 @@ mod tests {
             ),
         ]));
         // SIG_IGN survives exec, so the child starts with SIGTERM ignored and
-        // there is no window in which a `trap` is not yet installed.
+        // there is no window in which a `trap` is not yet installed. `#[serial]`
+        // keeps other spawning tests from inheriting the ignored disposition.
         // SAFETY: signal(2) with SIG_IGN/SIG_DFL is async-signal-safe.
         unsafe { libc::signal(libc::SIGTERM, libc::SIG_IGN) };
         let spawned = handle_command(&spawn, &writer, &children);
         // SAFETY: as above, restoring the default disposition.
         unsafe { libc::signal(libc::SIGTERM, libc::SIG_DFL) };
         spawned.expect("spawn must succeed");
+        let pgid = children.lock().unwrap().get(&30).expect("registered").pgid;
 
+        // Test threads are named; the escalation helper is not. Waiting on the
+        // command thread (the old behaviour) therefore panics here.
         let kill = Map::from([(atom("child_id"), int_term(30))]);
-        handle_kill(&kill, &children).expect("kill must succeed");
-        // SIGTERM is ignored, so the child is only escalated to SIGKILL by the
-        // helper thread after the grace period; the command loop got control
-        // back with the child still registered.
-        assert!(
-            children.lock().unwrap().contains_key(&30),
-            "handle_kill must not wait for the child to exit"
-        );
+        handle_kill_with(&kill, &children, Duration::from_hours(1), |d| {
+            assert!(
+                thread::current().name().is_none(),
+                "handle_kill must not wait on the command thread"
+            );
+            thread::sleep(d);
+        })
+        .expect("kill must succeed");
+        assert!(children.lock().unwrap().contains_key(&30));
 
-        // Cleanup: the helper escalates to SIGKILL; wait for the reaper.
+        // Cleanup: SIGKILL the group ourselves; the reaper then drains the map,
+        // which also ends the helper thread's poll loop.
+        // SAFETY: SIGKILL to the process group of a child we spawned.
+        unsafe { libc::kill(-pgid, libc::SIGKILL) };
         let deadline = Instant::now() + Duration::from_secs(30);
         while children.lock().unwrap().contains_key(&30) {
             assert!(Instant::now() < deadline, "child 30 not reaped");
-            thread::sleep(Duration::from_millis(50));
+            thread::sleep(Duration::from_millis(50)); // sleep: poll for the reaper thread
         }
     }
 }

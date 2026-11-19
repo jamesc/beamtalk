@@ -446,22 +446,15 @@ mod tests {
         force_kill_process(pid, None).expect("killing an already-exited pid should be Ok");
     }
 
-    #[cfg(any(target_os = "linux", windows))]
+    #[cfg(target_os = "linux")]
     #[test]
     fn force_kill_process_skips_a_pid_whose_start_time_changed() {
-        let mut child = std::process::Command::new(if cfg!(windows) { "ping" } else { "sleep" })
-            .args(
-                if cfg!(windows) {
-                    ["-n", "30", "127.0.0.1"]
-                } else {
-                    ["30", "", ""]
-                }
-                .iter()
-                .filter(|a| !a.is_empty()),
-            )
-            .stdout(std::process::Stdio::null())
+        // `cat` exits 0 when its stdin closes, so "was it killed?" is read from
+        // its exit status rather than raced against signal delivery.
+        let mut child = std::process::Command::new("cat")
+            .stdin(std::process::Stdio::piped())
             .spawn()
-            .expect("spawn long-running child");
+            .expect("spawn cat");
         let pid = child.id();
         let real = beamtalk_workspace::pid_liveness::proc_start_time(pid)
             .expect("start time readable for a live child");
@@ -469,15 +462,28 @@ mod tests {
         // A recorded start time that differs means the PID was recycled: the
         // process now holding it is not the recorded node and must survive.
         force_kill_process(pid, Some(real + 1)).expect("a mismatch is a skip, not an error");
+        drop(child.stdin.take()); // EOF: a surviving `cat` exits cleanly
+        let status = child.wait().expect("wait for cat");
         assert!(
-            child.try_wait().expect("try_wait").is_none(),
-            "mismatched start time must not kill the process"
+            status.success(),
+            "mismatched start time must not kill the process, got {status:?}"
         );
+    }
 
-        // The matching start time kills it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn force_kill_process_kills_when_the_start_time_matches() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+        let real = beamtalk_workspace::pid_liveness::proc_start_time(pid)
+            .expect("start time readable for a live child");
+
         force_kill_process(pid, Some(real)).expect("matching start time kills");
-        child.wait().expect("reap killed child");
-        assert!(!beamtalk_workspace::pid_liveness::is_process_alive(pid));
+        let status = child.wait().expect("reap killed child");
+        assert!(!status.success(), "matching start time must kill");
     }
 
     // -- force_kill_and_wait ------------------------------------------------
