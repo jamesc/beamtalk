@@ -2500,14 +2500,6 @@ mod tests {
     #[test]
     #[serial_test::serial(cwd)]
     fn test_find_package_root_relative_path_does_not_return_empty() {
-        // RAII guard so CWD is restored even if an assertion panics.
-        struct CwdGuard(std::path::PathBuf);
-        impl Drop for CwdGuard {
-            fn drop(&mut self) {
-                std::env::set_current_dir(&self.0).unwrap();
-            }
-        }
-
         let temp = tempfile::TempDir::new().unwrap();
 
         // Write a beamtalk.toml at the temp dir root so that "".join("beamtalk.toml")
@@ -2518,8 +2510,7 @@ mod tests {
         )
         .unwrap();
 
-        let _cwd_guard = CwdGuard(std::env::current_dir().unwrap());
-        std::env::set_current_dir(temp.path()).unwrap();
+        let _cwd_guard = beamtalk_workspace::test_cwd::CwdGuard::enter(temp.path());
 
         // Single-component relative paths: parent is "" which would resolve
         // "beamtalk.toml" in the CWD without the guard. With the guard they
@@ -2670,7 +2661,7 @@ mod tests {
     ///
     /// This test verifies that the canonicalization in `discovered_packages` deduplicates
     /// the relative `"."` and the same path expressed as an absolute path.
-    /// This test uses a temp dir with an explicit `set_current_dir` instead of
+    /// This test enters a temp dir with `CwdGuard::enter` instead of
     /// relying on the cargo-provided CWD because another test in this file also
     /// mutates the process CWD. The `#[serial(cwd)]` annotation prevents the two
     /// from racing. On macOS, `/var` is a symlink to `/private/var`, so the temp
@@ -2679,17 +2670,8 @@ mod tests {
     #[test]
     #[serial_test::serial(cwd)]
     fn test_canonical_dedup_relative_and_absolute_same_path() {
-        // RAII guard so CWD is restored even if an assertion panics.
-        struct CwdGuard(std::path::PathBuf);
-        impl Drop for CwdGuard {
-            fn drop(&mut self) {
-                std::env::set_current_dir(&self.0).unwrap();
-            }
-        }
-
         let temp = tempfile::TempDir::new().unwrap();
-        let _cwd_guard = CwdGuard(std::env::current_dir().unwrap());
-        std::env::set_current_dir(temp.path()).unwrap();
+        let _cwd_guard = beamtalk_workspace::test_cwd::CwdGuard::enter(temp.path());
 
         // Get the absolute CWD — on macOS this may be `/var/folders/…` (not
         // symlink-resolved) while `canonicalize(".")` returns `/private/var/…`.

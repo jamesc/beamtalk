@@ -1072,11 +1072,8 @@ pub(super) fn write_site_landing_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::utf8;
     use tempfile::TempDir;
-
-    fn utf8(dir: &TempDir) -> Utf8PathBuf {
-        Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap()
-    }
 
     // -----------------------------------------------------------------
     // Prose docs

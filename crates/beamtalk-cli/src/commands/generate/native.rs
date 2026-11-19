@@ -584,16 +584,16 @@ Actor subclass: MyActor native: my_actor
     #[serial_test::serial(cwd)]
     fn test_find_bt_file_snake_case_then_class_name() {
         let temp = tempfile::TempDir::new().unwrap();
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
-        std::fs::create_dir("src").unwrap();
-        std::fs::write("src/database_pool.bt", "").unwrap();
-        std::fs::write("src/LegacyName.bt", "").unwrap();
-
-        let snake = find_bt_file("DatabasePool");
-        let camel = find_bt_file("LegacyName");
-        let missing = find_bt_file("Nowhere");
-        std::env::set_current_dir(&original_dir).unwrap();
+        let (snake, camel, missing) = beamtalk_workspace::test_cwd::with_cwd(temp.path(), || {
+            std::fs::create_dir("src").unwrap();
+            std::fs::write("src/database_pool.bt", "").unwrap();
+            std::fs::write("src/LegacyName.bt", "").unwrap();
+            (
+                find_bt_file("DatabasePool"),
+                find_bt_file("LegacyName"),
+                find_bt_file("Nowhere"),
+            )
+        });
 
         assert_eq!(snake.unwrap(), Utf8PathBuf::from("src/database_pool.bt"));
         assert_eq!(camel.unwrap(), Utf8PathBuf::from("src/LegacyName.bt"));

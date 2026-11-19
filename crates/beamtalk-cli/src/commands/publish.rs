@@ -629,7 +629,9 @@ fn commit_and_push_index(
 mod tests {
     use super::*;
     use crate::commands::deps::registry::test_support::IsolatedRegistryCache;
+    use crate::commands::test_support::utf8;
     use crate::commands::util::to_forward_slash;
+    use beamtalk_workspace::test_cwd::with_cwd;
     use camino::Utf8PathBuf;
     use serial_test::serial;
     use tempfile::TempDir;
@@ -665,31 +667,6 @@ mod tests {
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ")
-    }
-
-    fn utf8(dir: &TempDir) -> Utf8PathBuf {
-        Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap()
-    }
-
-    /// Restores the process cwd to the directory captured at construction
-    /// when dropped — including on an unwinding panic, so one failing test
-    /// can't strand the process cwd inside a tempdir that a later
-    /// `#[serial(cwd)]` test then deletes out from under it.
-    struct CwdGuard(std::path::PathBuf);
-
-    impl Drop for CwdGuard {
-        fn drop(&mut self) {
-            let _ = std::env::set_current_dir(&self.0);
-        }
-    }
-
-    /// Run `f` with the process cwd set to `dir`, always restoring the
-    /// original cwd afterward, even if `f` panics. Callers must serialize
-    /// with `#[serial(cwd)]`.
-    fn with_cwd<T>(dir: &Utf8Path, f: impl FnOnce() -> T) -> T {
-        let _guard = CwdGuard(std::env::current_dir().unwrap());
-        std::env::set_current_dir(dir).unwrap();
-        f()
     }
 
     /// Set up a "publishable" library: a bare repo standing in for `origin`,
@@ -1092,7 +1069,7 @@ mod tests {
     fn test_publish_pushes_tag_and_index_entry() {
         let fixture = setup("yaml", "0.1.0", Some("YAML parsing for Beamtalk"));
 
-        let result = with_cwd(&utf8(&fixture.library), || run(false));
+        let result = with_cwd(utf8(&fixture.library), || run(false));
         assert!(result.is_ok(), "{:?}", result.err());
 
         // The tag was pushed to origin.
@@ -1129,7 +1106,7 @@ mod tests {
     #[serial(cwd)]
     fn test_republish_same_version_errors() {
         let fixture = setup("yaml", "0.1.0", None);
-        with_cwd(&utf8(&fixture.library), || run(false)).unwrap();
+        with_cwd(utf8(&fixture.library), || run(false)).unwrap();
 
         // Re-running against the same (already-tagged, already-published)
         // version must fail — a real republish attempt, so the original
@@ -1138,7 +1115,7 @@ mod tests {
         // remote-tag check reports in preference to the local one — it's
         // the stronger signal that this version really was published, not
         // just tagged locally and abandoned mid-publish.
-        let result = with_cwd(&utf8(&fixture.library), || run(false));
+        let result = with_cwd(utf8(&fixture.library), || run(false));
         assert!(result.is_err());
         let msg = flat_err(&result.unwrap_err());
         assert!(
@@ -1158,7 +1135,7 @@ mod tests {
         let fixture = setup("yaml", "0.1.0", None);
         run_git(fixture.library.path(), &["config", "user.name", ""]);
 
-        let result = with_cwd(&utf8(&fixture.library), || run(false));
+        let result = with_cwd(utf8(&fixture.library), || run(false));
         assert!(result.is_err());
         assert!(flat_err(&result.unwrap_err()).contains("configured but empty"));
 
@@ -1183,7 +1160,7 @@ mod tests {
         let fixture = setup("yaml", "0.1.0", None);
         std::fs::write(fixture.library.path().join("dirty.txt"), "oops").unwrap();
 
-        let result = with_cwd(&utf8(&fixture.library), || run(false));
+        let result = with_cwd(utf8(&fixture.library), || run(false));
         assert!(result.is_err());
         assert!(flat_err(&result.unwrap_err()).contains("uncommitted changes"));
     }
@@ -1193,7 +1170,7 @@ mod tests {
     fn test_publish_dry_run_changes_nothing() {
         let fixture = setup("yaml", "0.1.0", None);
 
-        let result = with_cwd(&utf8(&fixture.library), || run(true));
+        let result = with_cwd(utf8(&fixture.library), || run(true));
         assert!(result.is_ok(), "{:?}", result.err());
 
         // No local tag was created.
@@ -1214,7 +1191,7 @@ mod tests {
     #[serial(cwd)]
     fn test_publish_second_release_appends_to_existing_entry() {
         let fixture = setup("yaml", "0.1.0", Some("YAML parsing"));
-        with_cwd(&utf8(&fixture.library), || run(false)).unwrap();
+        with_cwd(utf8(&fixture.library), || run(false)).unwrap();
 
         // Bump and republish.
         let manifest_path = fixture.library.path().join("beamtalk.toml");
@@ -1223,7 +1200,7 @@ mod tests {
         std::fs::write(&manifest_path, bumped).unwrap();
         run_git(fixture.library.path(), &["commit", "-am", "release 0.2.0"]);
 
-        let result = with_cwd(&utf8(&fixture.library), || run(false));
+        let result = with_cwd(utf8(&fixture.library), || run(false));
         assert!(result.is_ok(), "{:?}", result.err());
 
         let index_dir = fixture.index_dir();
@@ -1259,7 +1236,7 @@ mod tests {
         // A retry (`beamtalk publish` run again) must recognize the version
         // is not actually published yet and report the partial-failure
         // recovery, not the "already published" message.
-        let result = with_cwd(&utf8(&fixture.library), || run(false));
+        let result = with_cwd(utf8(&fixture.library), || run(false));
         assert!(result.is_err());
         let msg = flat_err(&result.unwrap_err());
 
@@ -1302,7 +1279,7 @@ mod tests {
         run_git(temp.path(), &["add", "."]);
         run_git(temp.path(), &["commit", "-m", "initial"]);
 
-        let result = with_cwd(&utf8(&temp), || run(false));
+        let result = with_cwd(utf8(&temp), || run(false));
         assert!(result.is_err());
         assert!(flat_err(&result.unwrap_err()).contains("No 'origin' remote"));
     }
@@ -1348,7 +1325,7 @@ mod tests {
         .unwrap();
         run_git(index_dir.as_std_path(), &["add", "."]);
 
-        let result = with_cwd(&utf8(&fixture.library), || run(false));
+        let result = with_cwd(utf8(&fixture.library), || run(false));
         assert!(result.is_err());
         let msg = flat_err(&result.unwrap_err());
 
@@ -1389,7 +1366,7 @@ mod tests {
         .unwrap();
         // Deliberately no `git add` — the file is fully untracked.
 
-        let result = with_cwd(&utf8(&fixture.library), || run(false));
+        let result = with_cwd(utf8(&fixture.library), || run(false));
         assert!(result.is_err());
         let msg = flat_err(&result.unwrap_err());
 
@@ -1428,7 +1405,7 @@ mod tests {
             &["commit", "-am", "add description"],
         );
 
-        let result = with_cwd(&utf8(&fixture.library), || run(false));
+        let result = with_cwd(utf8(&fixture.library), || run(false));
         assert!(result.is_ok(), "{:?}", result.err());
 
         let index_dir = fixture.index_dir();

@@ -660,11 +660,7 @@ fn verifier_report(src: &str) -> String {
 }
 
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("repo root")
-        .to_path_buf()
+    beamtalk_workspace::cargo_workspace_root!()
 }
 
 /// The `ebin` directory of every application the runtime build produced,

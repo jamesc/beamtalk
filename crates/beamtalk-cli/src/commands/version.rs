@@ -252,6 +252,7 @@ fn replace_version_value(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use beamtalk_workspace::test_cwd::with_cwd;
     use camino::Utf8PathBuf;
     use serial_test::serial;
     use tempfile::TempDir;
@@ -267,27 +268,6 @@ mod tests {
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ")
-    }
-
-    /// Restores the process cwd to the directory captured at construction
-    /// when dropped — including on an unwinding panic, so one failing test
-    /// can't strand the process cwd inside a tempdir that a later
-    /// `#[serial(cwd)]` test then deletes out from under it.
-    struct CwdGuard(std::path::PathBuf);
-
-    impl Drop for CwdGuard {
-        fn drop(&mut self) {
-            let _ = std::env::set_current_dir(&self.0);
-        }
-    }
-
-    /// Run `f` with the process cwd set to `dir`, always restoring the
-    /// original cwd afterward, even if `f` panics. Callers must serialize
-    /// with `#[serial(cwd)]` since the working directory is process-global.
-    fn with_cwd<T>(dir: &std::path::Path, f: impl FnOnce() -> T) -> T {
-        let _guard = CwdGuard(std::env::current_dir().unwrap());
-        std::env::set_current_dir(dir).unwrap();
-        f()
     }
 
     // -----------------------------------------------------------------------

@@ -181,10 +181,7 @@ pub(crate) use beamtalk_core::test_helpers::test_support::{erlang_available, erl
 /// rather than the test process's current directory (which `cargo test`
 /// does not guarantee is the workspace root).
 pub(crate) fn repo_root() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .expect("beamtalk-codegen must be two directories below the repo root")
+    beamtalk_workspace::cargo_workspace_root!()
 }
 
 /// Collects every `.bt` / `.btscript` file under each of `dirs` (relative to

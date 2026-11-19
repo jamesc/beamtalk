@@ -402,18 +402,15 @@ mod tests {
     /// Helper: create a project in a temp dir and return the temp dir.
     ///
     /// `new_project` creates the project relative to the process cwd, so this
-    /// (and the inline `set_current_dir` calls below) mutate process-global
+    /// (and the `CwdGuard::enter` calls below) mutate process-global
     /// state: every caller must be `#[serial(cwd)]`. That only orders them
     /// against each other — code exercised by unannotated parallel tests must
     /// not depend on the process cwd (BT-4016).
     fn create_test_project(project_name: &str, app: bool) -> (TempDir, std::path::PathBuf) {
         let temp = TempDir::new().unwrap();
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
-
-        new_project(project_name, app).unwrap();
-
-        std::env::set_current_dir(&original_dir).unwrap();
+        beamtalk_workspace::test_cwd::with_cwd(temp.path(), || {
+            new_project(project_name, app).unwrap();
+        });
 
         let project_path = temp.path().join(project_name);
         (temp, project_path)
@@ -662,16 +659,13 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let project_name = "test_exists";
 
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
+        let _cwd = beamtalk_workspace::test_cwd::CwdGuard::enter(temp.path());
 
         new_project(project_name, false).unwrap();
 
         // Try to create again - should fail
         let result = new_project(project_name, false);
         assert!(result.is_err());
-
-        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[test]
@@ -693,8 +687,7 @@ mod tests {
     fn test_new_project_rejects_invalid_name() {
         let temp = TempDir::new().unwrap();
 
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
+        let _cwd = beamtalk_workspace::test_cwd::CwdGuard::enter(temp.path());
 
         // Dashes are invalid
         let result = new_project("my-cool-app", false);
@@ -719,8 +712,6 @@ mod tests {
             err.contains("reserved"),
             "error should mention reserved: {err}"
         );
-
-        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[test]
