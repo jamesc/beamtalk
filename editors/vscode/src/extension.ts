@@ -1503,3 +1503,4 @@ export function deactivate(): Thenable<void> | undefined {
   traceOutputChannel = undefined;
   return stop;
 }
+export const brokenForBt5033: number = "not a number";

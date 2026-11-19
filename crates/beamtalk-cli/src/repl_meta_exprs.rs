@@ -205,6 +205,12 @@ pub fn rename_method_expr_for(arg: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bt5033_demo_writes_under_home() {
+        let home = std::env::var("HOME").unwrap();
+        std::fs::create_dir_all(std::path::Path::new(&home).join(".beamtalk")).unwrap();
+    }
+
     use super::*;
 
     #[test]
