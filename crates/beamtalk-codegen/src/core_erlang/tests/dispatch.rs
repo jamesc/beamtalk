@@ -5048,7 +5048,7 @@ fn test_explicit_forwarding_class_new1_is_not_process_bound() {
 #[test]
 fn test_runs_class_method_in_caller_new1_agrees_with_published_list_over_stdlib() {
     use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/src");
+    let dir = beamtalk_workspace::cargo_workspace_root!().join("stdlib/src");
     let hierarchy = ClassHierarchy::with_builtins();
     let mut in_caller = Vec::new();
     let mut checked = 0;
