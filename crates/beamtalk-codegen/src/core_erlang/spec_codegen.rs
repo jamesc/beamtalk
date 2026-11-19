@@ -706,147 +706,119 @@ mod tests {
         doc.to_pretty_string()
     }
 
+    /// Plain type names and the `-spec` form each maps to: `(case, type name,
+    /// expected form)`. The case name is in the failure message.
+    const SIMPLE_SPEC_CASES: &[(&str, &str, &str)] = &[
+        (
+            "integer_type_maps_correctly",
+            "Integer",
+            "{'type', 0, 'integer', []}",
+        ),
+        (
+            "string_type_maps_to_binary",
+            "String",
+            "{'type', 0, 'binary', []}",
+        ),
+        (
+            "float_type_maps_correctly",
+            "Float",
+            "{'type', 0, 'float', []}",
+        ),
+        (
+            "boolean_type_maps_correctly",
+            "Boolean",
+            "{'type', 0, 'boolean', []}",
+        ),
+        (
+            "symbol_type_maps_to_atom",
+            "Symbol",
+            "{'type', 0, 'atom', []}",
+        ),
+        ("nil_maps_to_atom_nil", "Nil", "{'atom', 0, 'nil'}"),
+        ("true_maps_to_atom_true", "True", "{'atom', 0, 'true'}"),
+        ("false_maps_to_atom_false", "False", "{'atom', 0, 'false'}"),
+        (
+            "list_type_maps_correctly",
+            "List",
+            "{'type', 0, 'list', []}",
+        ),
+        (
+            "dictionary_maps_to_map",
+            "Dictionary",
+            "{'type', 0, 'map', 'any'}",
+        ),
+        (
+            "tuple_maps_correctly",
+            "Tuple",
+            "{'type', 0, 'tuple', 'any'}",
+        ),
+        (
+            "custom_class_maps_to_any",
+            "Counter",
+            "{'type', 0, 'any', []}",
+        ),
+        ("block_type_maps_to_fun", "Block", "{'type', 0, 'fun', []}"),
+        (
+            "number_type_maps_correctly",
+            "Number",
+            "{'type', 0, 'number', []}",
+        ),
+        (
+            "character_maps_to_integer",
+            "Character",
+            "{'type', 0, 'integer', []}",
+        ),
+        ("set_maps_to_map", "Set", "{'type', 0, 'map', 'any'}"),
+    ];
+
     #[test]
-    fn integer_type_maps_correctly() {
-        let ann = TypeAnnotation::simple("Integer", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'type', 0, 'integer', []}"
-        );
+    fn simple_type_annotations_map_to_spec_forms() {
+        for &(case, type_name, expected) in SIMPLE_SPEC_CASES {
+            let ann = TypeAnnotation::simple(type_name, span());
+            assert_eq!(
+                render(&type_annotation_to_spec(&ann, None, None)),
+                expected,
+                "case `{case}`"
+            );
+        }
+    }
+
+    /// Composite annotations: `(case, type annotation, expected form)`.
+    fn composite_spec_cases() -> Vec<(&'static str, TypeAnnotation, &'static str)> {
+        vec![
+            (
+                "union_type_maps_correctly",
+                TypeAnnotation::union(
+                    vec![
+                        TypeAnnotation::simple("Integer", span()),
+                        TypeAnnotation::simple("Nil", span()),
+                    ],
+                    span(),
+                ),
+                "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'atom', 0, 'nil'}]}",
+            ),
+            (
+                "singleton_type_maps_to_atom",
+                TypeAnnotation::singleton("north", span()),
+                "{'atom', 0, 'north'}",
+            ),
+            (
+                "false_or_type_maps_correctly",
+                TypeAnnotation::false_or(TypeAnnotation::simple("Integer", span()), span()),
+                "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'atom', 0, 'false'}]}",
+            ),
+        ]
     }
 
     #[test]
-    fn string_type_maps_to_binary() {
-        let ann = TypeAnnotation::simple("String", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'type', 0, 'binary', []}"
-        );
-    }
-
-    #[test]
-    fn float_type_maps_correctly() {
-        let ann = TypeAnnotation::simple("Float", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'type', 0, 'float', []}"
-        );
-    }
-
-    #[test]
-    fn boolean_type_maps_correctly() {
-        let ann = TypeAnnotation::simple("Boolean", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'type', 0, 'boolean', []}"
-        );
-    }
-
-    #[test]
-    fn symbol_type_maps_to_atom() {
-        let ann = TypeAnnotation::simple("Symbol", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'type', 0, 'atom', []}"
-        );
-    }
-
-    #[test]
-    fn nil_maps_to_atom_nil() {
-        let ann = TypeAnnotation::simple("Nil", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'atom', 0, 'nil'}"
-        );
-    }
-
-    #[test]
-    fn true_maps_to_atom_true() {
-        let ann = TypeAnnotation::simple("True", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'atom', 0, 'true'}"
-        );
-    }
-
-    #[test]
-    fn false_maps_to_atom_false() {
-        let ann = TypeAnnotation::simple("False", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'atom', 0, 'false'}"
-        );
-    }
-
-    #[test]
-    fn list_type_maps_correctly() {
-        let ann = TypeAnnotation::simple("List", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'type', 0, 'list', []}"
-        );
-    }
-
-    #[test]
-    fn dictionary_maps_to_map() {
-        let ann = TypeAnnotation::simple("Dictionary", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'type', 0, 'map', 'any'}"
-        );
-    }
-
-    #[test]
-    fn tuple_maps_correctly() {
-        let ann = TypeAnnotation::simple("Tuple", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'type', 0, 'tuple', 'any'}"
-        );
-    }
-
-    #[test]
-    fn custom_class_maps_to_any() {
-        let ann = TypeAnnotation::simple("Counter", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'type', 0, 'any', []}"
-        );
-    }
-
-    #[test]
-    fn union_type_maps_correctly() {
-        let ann = TypeAnnotation::union(
-            vec![
-                TypeAnnotation::simple("Integer", span()),
-                TypeAnnotation::simple("Nil", span()),
-            ],
-            span(),
-        );
-        let result = render(&type_annotation_to_spec(&ann, None, None));
-        assert_eq!(
-            result,
-            "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'atom', 0, 'nil'}]}"
-        );
-    }
-
-    #[test]
-    fn singleton_type_maps_to_atom() {
-        let ann = TypeAnnotation::singleton("north", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'atom', 0, 'north'}"
-        );
-    }
-
-    #[test]
-    fn false_or_type_maps_correctly() {
-        let ann = TypeAnnotation::false_or(TypeAnnotation::simple("Integer", span()), span());
-        let result = render(&type_annotation_to_spec(&ann, None, None));
-        assert_eq!(
-            result,
-            "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'atom', 0, 'false'}]}"
-        );
+    fn composite_type_annotations_map_to_spec_forms() {
+        for (case, ann, expected) in composite_spec_cases() {
+            assert_eq!(
+                render(&type_annotation_to_spec(&ann, None, None)),
+                expected,
+                "case `{case}`"
+            );
+        }
     }
 
     #[test]
@@ -980,42 +952,6 @@ mod tests {
         assert!(spec.contains("'union'"));
         assert!(spec.contains("'integer'"));
         assert!(spec.contains("'nil'"));
-    }
-
-    #[test]
-    fn block_type_maps_to_fun() {
-        let ann = TypeAnnotation::simple("Block", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'type', 0, 'fun', []}"
-        );
-    }
-
-    #[test]
-    fn number_type_maps_correctly() {
-        let ann = TypeAnnotation::simple("Number", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'type', 0, 'number', []}"
-        );
-    }
-
-    #[test]
-    fn character_maps_to_integer() {
-        let ann = TypeAnnotation::simple("Character", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'type', 0, 'integer', []}"
-        );
-    }
-
-    #[test]
-    fn set_maps_to_map() {
-        let ann = TypeAnnotation::simple("Set", span());
-        assert_eq!(
-            render(&type_annotation_to_spec(&ann, None, None)),
-            "{'type', 0, 'map', 'any'}"
-        );
     }
 
     #[test]

@@ -138,78 +138,289 @@ fn assert_unary_cell(cell: &str, arg_ty: InferredType) {
     );
 }
 
-#[test]
-fn matrix_unary_known_compatible() {
-    assert_unary_cell("unary/known-compatible", InferredType::known("String"));
+/// The unary row: `(cell, argument shape)`.
+fn unary_cells() -> Vec<(&'static str, InferredType)> {
+    vec![
+        ("unary/known-compatible", InferredType::known("String")),
+        ("unary/known-incompatible", InferredType::known("Integer")),
+        (
+            "unary/union-all-compatible",
+            InferredType::simple_union(&["String", "Symbol"]),
+        ),
+        (
+            "unary/union-incompatible-member",
+            InferredType::simple_union(&["String", "Nil"]),
+        ),
+        (
+            "unary/dynamic",
+            InferredType::Dynamic(DynamicReason::Unknown),
+        ),
+    ]
 }
 
 #[test]
-fn matrix_unary_known_incompatible() {
-    assert_unary_cell("unary/known-incompatible", InferredType::known("Integer"));
-}
-
-#[test]
-fn matrix_unary_union_all_compatible() {
-    assert_unary_cell(
-        "unary/union-all-compatible",
-        InferredType::simple_union(&["String", "Symbol"]),
-    );
-}
-
-#[test]
-fn matrix_unary_union_incompatible_member() {
-    assert_unary_cell(
-        "unary/union-incompatible-member",
-        InferredType::simple_union(&["String", "Nil"]),
-    );
-}
-
-#[test]
-fn matrix_unary_dynamic() {
-    assert_unary_cell(
-        "unary/dynamic",
-        InferredType::Dynamic(DynamicReason::Unknown),
-    );
+fn matrix_unary_cells() {
+    for (cell, arg_ty) in unary_cells() {
+        assert_unary_cell(cell, arg_ty);
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Binary — `c ++ <arg>` / `c + <arg>` (non-cascade).
 // ---------------------------------------------------------------------------
 
-#[test]
-fn matrix_binary_known_compatible() {
-    let src = fixture("  class run -> Nil =>\n    c := self new\n    c ++ \"ok\"\n    nil");
-    assert_compatible(&diags_with_expect(&src), "binary/known-compatible");
+/// How an argument-type check must come out for a cell.
+#[derive(Clone, Copy, Debug)]
+enum Expect {
+    /// No argument-type diagnostic.
+    Compatible,
+    /// Exactly one argument-type diagnostic.
+    Incompatible,
 }
 
-#[test]
-fn matrix_binary_known_incompatible() {
-    let src = fixture("  class run -> Nil =>\n    c := self new\n    c ++ 42\n    nil");
-    assert_incompatible(&diags_with_expect(&src), "binary/known-incompatible");
+fn assert_expect(diags: &[Diagnostic], cell: &str, expect: Expect) {
+    match expect {
+        Expect::Compatible => assert_compatible(diags, cell),
+        Expect::Incompatible => assert_incompatible(diags, cell),
+    }
 }
 
-#[test]
-fn matrix_binary_union_all_compatible() {
-    let src = fixture(
+/// The source-based cells: `(cell, class-side method for the fixture, outcome)`.
+/// Each row's failure names the cell (`<send shape>/<argument shape>`).
+const SOURCE_CELLS: &[(&str, &str, Expect)] = &[
+    (
+        "binary/known-compatible",
+        "  class run -> Nil =>\n    c := self new\n    c ++ \"ok\"\n    nil",
+        Expect::Compatible,
+    ),
+    (
+        "binary/known-incompatible",
+        "  class run -> Nil =>\n    c := self new\n    c ++ 42\n    nil",
+        Expect::Incompatible,
+    ),
+    (
+        "binary/union-all-compatible",
         "  class run: y :: String | Symbol -> Nil =>\n    c := self new\n    c + y\n    nil",
-    );
-    assert_compatible(&diags_with_expect(&src), "binary/union-all-compatible");
-}
+        Expect::Compatible,
+    ),
+    (
+        "binary/union-incompatible-member",
+        "  class run: y :: String | Nil -> Nil =>\n    c := self new\n    c ++ y\n    nil",
+        Expect::Incompatible,
+    ),
+    (
+        "binary/dynamic",
+        "  class run -> Nil =>\n    c := self new\n    c ++ undeclaredVar\n    nil",
+        Expect::Compatible,
+    ),
+    // ---------------------------------------------------------------------------
+    // Keyword — `c takeStr: <arg>` / `c takeObj: <arg>` (non-cascade). This is the
+    // original coverage (the baseline every other shape is measured against).
+    // ---------------------------------------------------------------------------
+    (
+        "keyword/known-compatible",
+        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"ok\"\n    nil",
+        Expect::Compatible,
+    ),
+    (
+        "keyword/known-incompatible",
+        "  class run -> Nil =>\n    c := self new\n    c takeStr: 42\n    nil",
+        Expect::Incompatible,
+    ),
+    (
+        "keyword/union-all-compatible",
+        "  class run: y :: String | Symbol -> Nil =>\n    c := self new\n    c takeObj: y\n    nil",
+        Expect::Compatible,
+    ),
+    (
+        "keyword/union-incompatible-member",
+        "  class run: y :: String | Nil -> Nil =>\n    c := self new\n    c takeStr: y\n    nil",
+        Expect::Incompatible,
+    ),
+    (
+        "keyword/dynamic",
+        "  class run -> Nil =>\n    c := self new\n    c takeStr: undeclaredVar\n    nil",
+        Expect::Compatible,
+    ),
+    // ---------------------------------------------------------------------------
+    // Cascade-first — the first message of a cascade goes through the exact same
+    // `infer_message_send_with_receiver_ty` path as a non-cascade send, just
+    // reached via cascade syntax. A harmless `second: "y"` continuation keeps the
+    // cascade well-formed without affecting the cell under test.
+    // ---------------------------------------------------------------------------
+    (
+        "cascade-first/known-compatible",
+        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"ok\"; second: \"y\"\n    nil",
+        Expect::Compatible,
+    ),
+    (
+        "cascade-first/known-incompatible",
+        "  class run -> Nil =>\n    c := self new\n    c takeStr: 42; second: \"y\"\n    nil",
+        Expect::Incompatible,
+    ),
+    (
+        "cascade-first/union-all-compatible",
+        "  class run: y :: String | Symbol -> Nil =>\n    c := self new\n    c takeObj: y; secondObj: \"y\"\n    nil",
+        Expect::Compatible,
+    ),
+    (
+        "cascade-first/union-incompatible-member",
+        "  class run: y :: String | Nil -> Nil =>\n    c := self new\n    c takeStr: y; second: \"y\"\n    nil",
+        Expect::Incompatible,
+    ),
+    (
+        "cascade-first/dynamic",
+        "  class run -> Nil =>\n    c := self new\n    c takeStr: undeclaredVar; second: \"y\"\n    nil",
+        Expect::Compatible,
+    ),
+    // ---------------------------------------------------------------------------
+    // Cascade-continuation (keyword) — a well-typed first message (`takeStr:
+    // "seed"`) followed by the `second:` continuation under test — the cascade
+    // loop's `for msg in messages` runs `check_argument_types` for continuation
+    // messages too, not just the first message.
+    // ---------------------------------------------------------------------------
+    (
+        "cascade-continuation-keyword/known-compatible",
+        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; second: \"ok\"\n    nil",
+        Expect::Compatible,
+    ),
+    (
+        "cascade-continuation-keyword/known-incompatible",
+        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; second: 42\n    nil",
+        Expect::Incompatible,
+    ),
+    (
+        "cascade-continuation-keyword/union-all-compatible",
+        "  class run: y :: String | Symbol -> Nil =>\n    c := self new\n    c takeObj: \"seed\"; secondObj: y\n    nil",
+        Expect::Compatible,
+    ),
+    (
+        "cascade-continuation-keyword/union-incompatible-member",
+        "  class run: y :: String | Nil -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; second: y\n    nil",
+        Expect::Incompatible,
+    ),
+    (
+        "cascade-continuation-keyword/dynamic",
+        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; second: undeclaredVar\n    nil",
+        Expect::Compatible,
+    ),
+    // ---------------------------------------------------------------------------
+    // Cascade-continuation (binary) — same shape as above, but the continuation
+    // message is a *binary* selector (`++` / `+`). `check_binary_operand_types` is
+    // only ever invoked from `infer_message_send_with_receiver_ty` (the
+    // first-message path), never from the cascade continuation loop, so a binary
+    // continuation's argument needs its own fallback coverage distinct from the
+    // keyword-continuation coverage above.
+    // ---------------------------------------------------------------------------
+    (
+        "cascade-continuation-binary/known-compatible",
+        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; ++ \"ok\"\n    nil",
+        Expect::Compatible,
+    ),
+    (
+        "cascade-continuation-binary/known-incompatible",
+        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; ++ 42\n    nil",
+        Expect::Incompatible,
+    ),
+    (
+        "cascade-continuation-binary/union-all-compatible",
+        "  class run: y :: String | Symbol -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; + y\n    nil",
+        Expect::Compatible,
+    ),
+    (
+        "cascade-continuation-binary/union-incompatible-member",
+        "  class run: y :: String | Nil -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; ++ y\n    nil",
+        Expect::Incompatible,
+    ),
+    (
+        "cascade-continuation-binary/dynamic",
+        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; ++ undeclaredVar\n    nil",
+        Expect::Compatible,
+    ),
+    // ---------------------------------------------------------------------------
+    // Cascade-continuation (class-ref) — `Thing classTakeStr: ...;
+    // classSecond: ...`, where the cascade *target* itself parses as an
+    // `Expression::ClassReference` (any capitalized identifier — see
+    // `parse_identifier_or_field_access`). This exercises the `is_class_ref`
+    // branch of the continuation loop (`inference.rs` ~lines 735-754), which
+    // resolves `class_name` straight from the `ClassReference` AST node rather
+    // than from `dispatch_ty`, and is reached *before* the `InferredType::Known`
+    // match arm the instance-receiver cells above go through — a distinct branch
+    // the matrix previously left uncovered.
+    // ---------------------------------------------------------------------------
+    (
+        "cascade-continuation-class-ref/known-compatible",
+        "  class run -> Nil =>\n    Thing classTakeStr: \"seed\"; classSecond: \"ok\"\n    nil",
+        Expect::Compatible,
+    ),
+    (
+        "cascade-continuation-class-ref/known-incompatible",
+        "  class run -> Nil =>\n    Thing classTakeStr: \"seed\"; classSecond: 42\n    nil",
+        Expect::Incompatible,
+    ),
+    (
+        "cascade-continuation-class-ref/union-all-compatible",
+        "  class run: y :: String | Symbol -> Nil =>\n    Thing classTakeObj: \"seed\"; classSecondObj: y\n    nil",
+        Expect::Compatible,
+    ),
+    (
+        "cascade-continuation-class-ref/union-incompatible-member",
+        "  class run: y :: String | Nil -> Nil =>\n    Thing classTakeStr: \"seed\"; classSecond: y\n    nil",
+        Expect::Incompatible,
+    ),
+    (
+        "cascade-continuation-class-ref/dynamic",
+        "  class run -> Nil =>\n    Thing classTakeStr: \"seed\"; classSecond: undeclaredVar\n    nil",
+        Expect::Compatible,
+    ),
+    // ---------------------------------------------------------------------------
+    // Cascade-continuation (self-in-class-method) — `self classTakeStr:
+    // ...; classSecond: ...`, sent from inside `Thing`'s own `class run` method.
+    // `self` there is bound to `InferredType::Known { class_name: "Thing", .. }`
+    // (see `receiver_type_for_class`, set for `class.class_methods` bodies)
+    // *and* `env.in_class_method` is `true`, so this exercises the
+    // `env.in_class_method && ....is_self()` branch of the
+    // continuation loop (`inference.rs` ~lines 755-775) — the one other branch
+    // besides the class-ref branch above and the instance/binary "else" branch
+    // the earlier cells cover. Unlike the class-ref branch, this one additionally
+    // gates the check on `!in_abstract_method`.
+    // ---------------------------------------------------------------------------
+    (
+        "cascade-continuation-self-class-method/known-compatible",
+        "  class run -> Nil =>\n    self classTakeStr: \"seed\"; classSecond: \"ok\"\n    nil",
+        Expect::Compatible,
+    ),
+    (
+        "cascade-continuation-self-class-method/known-incompatible",
+        "  class run -> Nil =>\n    self classTakeStr: \"seed\"; classSecond: 42\n    nil",
+        Expect::Incompatible,
+    ),
+    (
+        "cascade-continuation-self-class-method/union-all-compatible",
+        "  class run: y :: String | Symbol -> Nil =>\n    self classTakeObj: \"seed\"; classSecondObj: y\n    nil",
+        Expect::Compatible,
+    ),
+    (
+        "cascade-continuation-self-class-method/union-incompatible-member",
+        "  class run: y :: String | Nil -> Nil =>\n    self classTakeStr: \"seed\"; classSecond: y\n    nil",
+        Expect::Incompatible,
+    ),
+    (
+        "cascade-continuation-self-class-method/dynamic",
+        "  class run -> Nil =>\n    self classTakeStr: \"seed\"; classSecond: undeclaredVar\n    nil",
+        Expect::Compatible,
+    ),
+];
 
 #[test]
-fn matrix_binary_union_incompatible_member() {
-    let src =
-        fixture("  class run: y :: String | Nil -> Nil =>\n    c := self new\n    c ++ y\n    nil");
-    assert_incompatible(&diags_with_expect(&src), "binary/union-incompatible-member");
+fn matrix_source_cells() {
+    for &(cell, extra_class_method, expect) in SOURCE_CELLS {
+        let src = fixture(extra_class_method);
+        assert_expect(&diags_with_expect(&src), cell, expect);
+    }
 }
 
-#[test]
-fn matrix_binary_dynamic() {
-    let src = fixture("  class run -> Nil =>\n    c := self new\n    c ++ undeclaredVar\n    nil");
-    assert_compatible(&diags_with_expect(&src), "binary/dynamic");
-}
-
-/// Supplementary to the five `matrix_binary_*` cells above: those route
+/// Supplementary to the five `binary/*` cells of `SOURCE_CELLS`: those route
 /// through a custom `Thing`-defined `++`/`+`, so `check_binary_operand_types`
 /// never has bespoke logic for them (`binary_operand_check_ran` stays
 /// `false`) and every cell exercises only the generic `check_argument_types`
@@ -230,362 +441,6 @@ fn matrix_binary_builtin_receiver_known_incompatible_no_duplicate() {
     assert_incompatible(
         checker.diagnostics(),
         "binary/builtin-receiver-known-incompatible-no-duplicate",
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Keyword — `c takeStr: <arg>` / `c takeObj: <arg>` (non-cascade). This is the
-// original coverage (the baseline every other shape is measured against).
-// ---------------------------------------------------------------------------
-
-#[test]
-fn matrix_keyword_known_compatible() {
-    let src = fixture("  class run -> Nil =>\n    c := self new\n    c takeStr: \"ok\"\n    nil");
-    assert_compatible(&diags_with_expect(&src), "keyword/known-compatible");
-}
-
-#[test]
-fn matrix_keyword_known_incompatible() {
-    let src = fixture("  class run -> Nil =>\n    c := self new\n    c takeStr: 42\n    nil");
-    assert_incompatible(&diags_with_expect(&src), "keyword/known-incompatible");
-}
-
-#[test]
-fn matrix_keyword_union_all_compatible() {
-    let src = fixture(
-        "  class run: y :: String | Symbol -> Nil =>\n    c := self new\n    c takeObj: y\n    nil",
-    );
-    assert_compatible(&diags_with_expect(&src), "keyword/union-all-compatible");
-}
-
-#[test]
-fn matrix_keyword_union_incompatible_member() {
-    let src = fixture(
-        "  class run: y :: String | Nil -> Nil =>\n    c := self new\n    c takeStr: y\n    nil",
-    );
-    assert_incompatible(
-        &diags_with_expect(&src),
-        "keyword/union-incompatible-member",
-    );
-}
-
-#[test]
-fn matrix_keyword_dynamic() {
-    let src =
-        fixture("  class run -> Nil =>\n    c := self new\n    c takeStr: undeclaredVar\n    nil");
-    assert_compatible(&diags_with_expect(&src), "keyword/dynamic");
-}
-
-// ---------------------------------------------------------------------------
-// Cascade-first — the first message of a cascade goes through the exact same
-// `infer_message_send_with_receiver_ty` path as a non-cascade send, just
-// reached via cascade syntax. A harmless `second: "y"` continuation keeps the
-// cascade well-formed without affecting the cell under test.
-// ---------------------------------------------------------------------------
-
-#[test]
-fn matrix_cascade_first_known_compatible() {
-    let src = fixture(
-        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"ok\"; second: \"y\"\n    nil",
-    );
-    assert_compatible(&diags_with_expect(&src), "cascade-first/known-compatible");
-}
-
-#[test]
-fn matrix_cascade_first_known_incompatible() {
-    let src = fixture(
-        "  class run -> Nil =>\n    c := self new\n    c takeStr: 42; second: \"y\"\n    nil",
-    );
-    assert_incompatible(&diags_with_expect(&src), "cascade-first/known-incompatible");
-}
-
-#[test]
-fn matrix_cascade_first_union_all_compatible() {
-    let src = fixture(
-        "  class run: y :: String | Symbol -> Nil =>\n    c := self new\n    c takeObj: y; secondObj: \"y\"\n    nil",
-    );
-    assert_compatible(
-        &diags_with_expect(&src),
-        "cascade-first/union-all-compatible",
-    );
-}
-
-#[test]
-fn matrix_cascade_first_union_incompatible_member() {
-    let src = fixture(
-        "  class run: y :: String | Nil -> Nil =>\n    c := self new\n    c takeStr: y; second: \"y\"\n    nil",
-    );
-    assert_incompatible(
-        &diags_with_expect(&src),
-        "cascade-first/union-incompatible-member",
-    );
-}
-
-#[test]
-fn matrix_cascade_first_dynamic() {
-    let src = fixture(
-        "  class run -> Nil =>\n    c := self new\n    c takeStr: undeclaredVar; second: \"y\"\n    nil",
-    );
-    assert_compatible(&diags_with_expect(&src), "cascade-first/dynamic");
-}
-
-// ---------------------------------------------------------------------------
-// Cascade-continuation (keyword) — a well-typed first message (`takeStr:
-// "seed"`) followed by the `second:` continuation under test — the cascade
-// loop's `for msg in messages` runs `check_argument_types` for continuation
-// messages too, not just the first message.
-// ---------------------------------------------------------------------------
-
-#[test]
-fn matrix_cascade_continuation_keyword_known_compatible() {
-    let src = fixture(
-        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; second: \"ok\"\n    nil",
-    );
-    assert_compatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-keyword/known-compatible",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_keyword_known_incompatible() {
-    let src = fixture(
-        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; second: 42\n    nil",
-    );
-    assert_incompatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-keyword/known-incompatible",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_keyword_union_all_compatible() {
-    let src = fixture(
-        "  class run: y :: String | Symbol -> Nil =>\n    c := self new\n    c takeObj: \"seed\"; secondObj: y\n    nil",
-    );
-    assert_compatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-keyword/union-all-compatible",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_keyword_union_incompatible_member() {
-    let src = fixture(
-        "  class run: y :: String | Nil -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; second: y\n    nil",
-    );
-    assert_incompatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-keyword/union-incompatible-member",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_keyword_dynamic() {
-    let src = fixture(
-        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; second: undeclaredVar\n    nil",
-    );
-    assert_compatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-keyword/dynamic",
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Cascade-continuation (binary) — same shape as above, but the continuation
-// message is a *binary* selector (`++` / `+`). `check_binary_operand_types` is
-// only ever invoked from `infer_message_send_with_receiver_ty` (the
-// first-message path), never from the cascade continuation loop, so a binary
-// continuation's argument needs its own fallback coverage distinct from the
-// keyword-continuation coverage above.
-// ---------------------------------------------------------------------------
-
-#[test]
-fn matrix_cascade_continuation_binary_known_compatible() {
-    let src = fixture(
-        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; ++ \"ok\"\n    nil",
-    );
-    assert_compatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-binary/known-compatible",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_binary_known_incompatible() {
-    let src = fixture(
-        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; ++ 42\n    nil",
-    );
-    assert_incompatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-binary/known-incompatible",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_binary_union_all_compatible() {
-    let src = fixture(
-        "  class run: y :: String | Symbol -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; + y\n    nil",
-    );
-    assert_compatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-binary/union-all-compatible",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_binary_union_incompatible_member() {
-    let src = fixture(
-        "  class run: y :: String | Nil -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; ++ y\n    nil",
-    );
-    assert_incompatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-binary/union-incompatible-member",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_binary_dynamic() {
-    let src = fixture(
-        "  class run -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; ++ undeclaredVar\n    nil",
-    );
-    assert_compatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-binary/dynamic",
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Cascade-continuation (class-ref) — `Thing classTakeStr: ...;
-// classSecond: ...`, where the cascade *target* itself parses as an
-// `Expression::ClassReference` (any capitalized identifier — see
-// `parse_identifier_or_field_access`). This exercises the `is_class_ref`
-// branch of the continuation loop (`inference.rs` ~lines 735-754), which
-// resolves `class_name` straight from the `ClassReference` AST node rather
-// than from `dispatch_ty`, and is reached *before* the `InferredType::Known`
-// match arm the instance-receiver cells above go through — a distinct branch
-// the matrix previously left uncovered.
-// ---------------------------------------------------------------------------
-
-#[test]
-fn matrix_cascade_continuation_class_ref_known_compatible() {
-    let src = fixture(
-        "  class run -> Nil =>\n    Thing classTakeStr: \"seed\"; classSecond: \"ok\"\n    nil",
-    );
-    assert_compatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-class-ref/known-compatible",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_class_ref_known_incompatible() {
-    let src = fixture(
-        "  class run -> Nil =>\n    Thing classTakeStr: \"seed\"; classSecond: 42\n    nil",
-    );
-    assert_incompatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-class-ref/known-incompatible",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_class_ref_union_all_compatible() {
-    let src = fixture(
-        "  class run: y :: String | Symbol -> Nil =>\n    Thing classTakeObj: \"seed\"; classSecondObj: y\n    nil",
-    );
-    assert_compatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-class-ref/union-all-compatible",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_class_ref_union_incompatible_member() {
-    let src = fixture(
-        "  class run: y :: String | Nil -> Nil =>\n    Thing classTakeStr: \"seed\"; classSecond: y\n    nil",
-    );
-    assert_incompatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-class-ref/union-incompatible-member",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_class_ref_dynamic() {
-    let src = fixture(
-        "  class run -> Nil =>\n    Thing classTakeStr: \"seed\"; classSecond: undeclaredVar\n    nil",
-    );
-    assert_compatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-class-ref/dynamic",
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Cascade-continuation (self-in-class-method) — `self classTakeStr:
-// ...; classSecond: ...`, sent from inside `Thing`'s own `class run` method.
-// `self` there is bound to `InferredType::Known { class_name: "Thing", .. }`
-// (see `receiver_type_for_class`, set for `class.class_methods` bodies)
-// *and* `env.in_class_method` is `true`, so this exercises the
-// `env.in_class_method && ....is_self()` branch of the
-// continuation loop (`inference.rs` ~lines 755-775) — the one other branch
-// besides the class-ref branch above and the instance/binary "else" branch
-// the earlier cells cover. Unlike the class-ref branch, this one additionally
-// gates the check on `!in_abstract_method`.
-// ---------------------------------------------------------------------------
-
-#[test]
-fn matrix_cascade_continuation_self_class_method_known_compatible() {
-    let src = fixture(
-        "  class run -> Nil =>\n    self classTakeStr: \"seed\"; classSecond: \"ok\"\n    nil",
-    );
-    assert_compatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-self-class-method/known-compatible",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_self_class_method_known_incompatible() {
-    let src =
-        fixture("  class run -> Nil =>\n    self classTakeStr: \"seed\"; classSecond: 42\n    nil");
-    assert_incompatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-self-class-method/known-incompatible",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_self_class_method_union_all_compatible() {
-    let src = fixture(
-        "  class run: y :: String | Symbol -> Nil =>\n    self classTakeObj: \"seed\"; classSecondObj: y\n    nil",
-    );
-    assert_compatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-self-class-method/union-all-compatible",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_self_class_method_union_incompatible_member() {
-    let src = fixture(
-        "  class run: y :: String | Nil -> Nil =>\n    self classTakeStr: \"seed\"; classSecond: y\n    nil",
-    );
-    assert_incompatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-self-class-method/union-incompatible-member",
-    );
-}
-
-#[test]
-fn matrix_cascade_continuation_self_class_method_dynamic() {
-    let src = fixture(
-        "  class run -> Nil =>\n    self classTakeStr: \"seed\"; classSecond: undeclaredVar\n    nil",
-    );
-    assert_compatible(
-        &diags_with_expect(&src),
-        "cascade-continuation-self-class-method/dynamic",
     );
 }
 
@@ -628,44 +483,45 @@ fn run_ffi(param_type: InferredType, arg_type: InferredType) -> Vec<Diagnostic> 
     checker.diagnostics().to_vec()
 }
 
-#[test]
-fn matrix_ffi_known_compatible() {
-    let diags = run_ffi(InferredType::known("String"), InferredType::known("String"));
-    assert_compatible(&diags, "ffi/known-compatible");
+/// The FFI row: `(cell, declared parameter type, argument type, outcome)`.
+fn ffi_cells() -> Vec<(&'static str, InferredType, InferredType, Expect)> {
+    vec![
+        (
+            "ffi/known-compatible",
+            InferredType::known("String"),
+            InferredType::known("String"),
+            Expect::Compatible,
+        ),
+        (
+            "ffi/known-incompatible",
+            InferredType::known("String"),
+            InferredType::known("Integer"),
+            Expect::Incompatible,
+        ),
+        (
+            "ffi/union-all-compatible",
+            InferredType::known("Number"),
+            InferredType::simple_union(&["Integer", "Float"]),
+            Expect::Compatible,
+        ),
+        (
+            "ffi/union-incompatible-member",
+            InferredType::known("String"),
+            InferredType::simple_union(&["String", "Integer"]),
+            Expect::Incompatible,
+        ),
+        (
+            "ffi/dynamic",
+            InferredType::known("String"),
+            InferredType::Dynamic(DynamicReason::Unknown),
+            Expect::Compatible,
+        ),
+    ]
 }
 
 #[test]
-fn matrix_ffi_known_incompatible() {
-    let diags = run_ffi(
-        InferredType::known("String"),
-        InferredType::known("Integer"),
-    );
-    assert_incompatible(&diags, "ffi/known-incompatible");
-}
-
-#[test]
-fn matrix_ffi_union_all_compatible() {
-    let diags = run_ffi(
-        InferredType::known("Number"),
-        InferredType::simple_union(&["Integer", "Float"]),
-    );
-    assert_compatible(&diags, "ffi/union-all-compatible");
-}
-
-#[test]
-fn matrix_ffi_union_incompatible_member() {
-    let diags = run_ffi(
-        InferredType::known("String"),
-        InferredType::simple_union(&["String", "Integer"]),
-    );
-    assert_incompatible(&diags, "ffi/union-incompatible-member");
-}
-
-#[test]
-fn matrix_ffi_dynamic() {
-    let diags = run_ffi(
-        InferredType::known("String"),
-        InferredType::Dynamic(DynamicReason::Unknown),
-    );
-    assert_compatible(&diags, "ffi/dynamic");
+fn matrix_ffi_cells() {
+    for (cell, param_type, arg_type, expect) in ffi_cells() {
+        assert_expect(&run_ffi(param_type, arg_type), cell, expect);
+    }
 }
