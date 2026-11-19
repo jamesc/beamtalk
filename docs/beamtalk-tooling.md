@@ -71,6 +71,8 @@ Every generated project includes a `Justfile` with these targets:
 
 **`beamtalk run` output routing:** Status and progress lines (`Building...`, `Running ClassName>>selector...`, `Connecting to workspace...`, and service mode's `Started <app> v<version> / Supervisor / REPL port` banner) are written to **stderr** in all three run modes — script, connected, and service (`beamtalk run .`). Stdout carries only the dispatched program's own output, keeping it clean for piped/programmatic consumers (`beamtalk run MyApp run | head`). `beamtalk build --escript` follows the same convention for its `Building...` line.
 
+**`beamtalk run` exit codes (Unix):** 0 on clean exit or SIGINT (Ctrl+C). `128 + signal` when the BEAM process is killed by a signal (e.g. 137 for SIGKILL, 139 for SIGSEGV). Windows always exits 1 on abnormal termination.
+
 ## Build System
 
 `beamtalk build` compiles a project (or a single `.bt` file) to BEAM bytecode. The build pipeline is incremental — unchanged files are skipped, and the compiler caches class metadata across builds.
@@ -361,6 +363,8 @@ Use this as a CI deploy gate to catch missing migration methods before productio
 ## REPL
 
 The Beamtalk REPL is an interactive development environment connected to a persistent workspace — a detached BEAM node that survives disconnections ([ADR 0004](ADR/0004-persistent-workspace-management.md)). Actors keep running between sessions; REPL variable bindings are session-local.
+
+**`BEAMTALK_HOME`.** The CLI, VS Code extension and runtime resolve workspace state under `~/.beamtalk` by default. Set `BEAMTALK_HOME` to override this root (e.g. `export BEAMTALK_HOME=/data/beamtalk`). The detached BEAM node, `beamtalk workspace`, and the VS Code extension all honour the same variable, so they agree on where workspaces live.
 
 ### Starting the REPL
 
@@ -978,7 +982,7 @@ Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding ag
 
 | MCP Tool | Description |
 |----------|-------------|
-| `evaluate` | Run any Beamtalk expression in the workspace |
+| `evaluate` | Run any Beamtalk expression in the workspace (optional `timeout_secs` overrides the default 30 s; `BEAMTALK_MCP_EVAL_TIMEOUT` env var sets the server-wide default) |
 | `load_file` | Compile and hot-reload a `.bt` file |
 | `load_project` | Load all project files in dependency order |
 | `list_modules` | List loaded BEAM modules |
