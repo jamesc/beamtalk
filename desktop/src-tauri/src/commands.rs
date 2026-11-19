@@ -203,6 +203,9 @@ fn attach_and_open_window(
         ATTACH_POLL_INTERVAL,
         probe,
     );
+    // BT-5033: the version lock the REPL, MCP, LSP and VS Code enforce — a
+    // reachable workspace on a different protocol is refused, not attached.
+    let final_state = readiness::require_matching_protocol(final_state);
     tracing::info!(workspace_id, ?final_state, "readiness wait finished");
 
     match final_state {
@@ -245,9 +248,15 @@ fn attach_and_open_window(
         ReadinessState::Failed(reason) => {
             tracing::error!(workspace_id, ?reason, "readiness failed");
             kill_and_untrack(state, workspace_id, port);
-            return Err(format!(
-                "workspace '{workspace_id}' is unreachable: {reason:?}"
-            ));
+            return Err(match &reason {
+                readiness::FailureReason::ProtocolMismatch { .. } => {
+                    format!(
+                        "workspace '{workspace_id}' was refused: {}",
+                        reason.describe()
+                    )
+                }
+                _ => format!("workspace '{workspace_id}' is unreachable: {reason:?}"),
+            });
         }
         ReadinessState::TimedOut(stage) => {
             tracing::error!(workspace_id, ?stage, "readiness timed out");

@@ -127,6 +127,8 @@ mod class_registry;
 mod class_var_access;
 pub mod class_var_keys;
 mod control_flow;
+#[cfg(test)]
+mod cross_language_contract_tests;
 mod dispatch_codegen;
 mod dispatch_spec;
 mod driver;
