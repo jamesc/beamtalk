@@ -45,207 +45,100 @@ fn responds_to(var_name: &str, selector_name: &str) -> Expression {
     )
 }
 
-/// Helper: build a block with a non-local return `[^value]`
-fn block_with_return(value: Expression) -> Expression {
-    Expression::Block(Block::new(
-        vec![],
-        vec![ExpressionStatement::bare(Expression::Return {
-            value: Box::new(value),
-            span: span(),
-        })],
-        span(),
-    ))
-}
-
-#[test]
-fn test_narrowing_class_eq_in_true_block() {
-    // Build a class with a method:
-    //   process: x :: Object =>
-    //     (x class =:= Integer) ifTrue: [x + 1]
-    //     x + 1    // should warn — x is Object outside the block
-    let hierarchy = ClassHierarchy::with_builtins();
-    let class = {
-        let process_method = make_keyword_method(
-            &["process:"],
-            vec![("x", Some("Object"))],
-            vec![
-                // (x class =:= Integer) ifTrue: [x + 1]
-                if_true(
-                    class_eq("x", "Integer"),
-                    block_expr(vec![msg_send(
-                        var("x"),
-                        MessageSelector::Binary("+".into()),
-                        vec![int_lit(1)],
-                    )]),
-                ),
-                // x + 1  — should warn (Object doesn't have +)
-                msg_send(
-                    var("x"),
-                    MessageSelector::Binary("+".into()),
-                    vec![int_lit(1)],
-                ),
-            ],
-        );
-        ClassDefinition::new(
-            ident("TestClass"),
-            ident("Object"),
-            vec![],
-            vec![process_method],
-            span(),
-        )
-    };
-    let module = make_module_with_classes(vec![], vec![class]);
-    let checker = check(&module, &hierarchy);
-
-    // Inside the block: `x + 1` should NOT warn because x is narrowed to Integer
-    // Outside the block: `x + 1` SHOULD warn because x is still Object
-    let warnings: Vec<_> = checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.message.contains("does not understand"))
-        .collect();
-    // The outside `x + 1` should produce a warning
-    assert_eq!(
-        warnings.len(),
+/// End-to-end class-test narrowing through a method body: `(case, type of the
+/// `x` parameter, method body, expected "does not understand" warnings)`. The
+/// method is `TestClass >> process: x :: <type> =>`. The case name is in the
+/// failure message. (These were hand-built ASTs; the tests below that call
+/// `detect_narrowing` / `refine_narrowing` or inspect `InferSession` state
+/// directly still build their input by hand.)
+const NARROWING_DNU_CASES: &[(&str, &str, &str, usize)] = &[
+    (
+        "class_eq_in_true_block",
+        "Object",
+        "    (x class =:= Integer) ifTrue: [x + 1]\n    x + 1",
         1,
-        "Expected 1 warning for x + 1 outside the narrowed block, got {}:\n{:?}",
-        warnings.len(),
-        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
-    );
-}
+    ),
+    (
+        "class_eqeq_in_true_block",
+        "Object",
+        "    (x class =:= Integer) ifTrue: [x + 1]",
+        0,
+    ),
+    (
+        "is_kind_of_in_true_block",
+        "Object",
+        "    (x isKindOf: Integer) ifTrue: [x + 1]",
+        0,
+    ),
+    // ADR 0102 §2 group 2: `x :: Number; x isKindOf: Integer` narrows
+    // the true branch precisely to `Integer` — not `Number` — via
+    // `intersect(Number, Integer, Some(hierarchy)) = Integer` (subclass wins).
+    // `isEven` is an Integer-only selector (not on `Number`), so it resolving
+    // without a DNU inside the true block confirms the tighter narrowing fired.
+    (
+        "bt2741_is_kind_of_subclass_narrows_true_branch",
+        "Number",
+        "    (x isKindOf: Integer) ifTrue: [x isEven]",
+        0,
+    ),
+    (
+        "class_eq_narrowing_does_not_leak",
+        "Object",
+        "    (x class =:= String) ifTrue: [x size]\n    x unknownThing",
+        1,
+    ),
+    (
+        "responds_to_in_true_block",
+        "Object",
+        "    (x respondsTo: #customMethod) ifTrue: [x customMethod]\n    x customMethod",
+        1,
+    ),
+    (
+        "responds_to_does_not_leak",
+        "Object",
+        "    (x respondsTo: #asString) ifTrue: [x asString]\n    x unknownSelector",
+        1,
+    ),
+    (
+        "responds_to_if_true_if_false",
+        "Object",
+        "    (x respondsTo: #customMethod) ifTrue: [x customMethod] ifFalse: [x customMethod]",
+        1,
+    ),
+    // After an early return on nil, `x` is non-nil but still `Object`, which
+    // responds to `printString`: no warning (previously this only checked for a
+    // crash, and its comment wrongly said `Object` responds to `size`).
+    (
+        "is_nil_early_return",
+        "Object",
+        "    x isNil ifTrue: [^nil]\n    x printString",
+        0,
+    ),
+    // In the false branch of `isNil`, `x` is non-nil; `Object` responds to `printString`.
+    (
+        "is_nil_if_true_if_false",
+        "Object",
+        "    x isNil ifTrue: [42] ifFalse: [x printString]",
+        0,
+    ),
+];
 
 #[test]
-fn test_narrowing_class_eqeq_in_true_block() {
-    // Isolated variant of the test above: only the guarded block, no
-    // outside-the-block statement (that scoping case is covered by
-    // `test_narrowing_class_eq_in_true_block`).
-    let hierarchy = ClassHierarchy::with_builtins();
-    let class = {
-        let process_method = make_keyword_method(
-            &["process:"],
-            vec![("x", Some("Object"))],
-            vec![
-                // (x class =:= Integer) ifTrue: [x + 1]
-                if_true(
-                    class_eq("x", "Integer"),
-                    block_expr(vec![msg_send(
-                        var("x"),
-                        MessageSelector::Binary("+".into()),
-                        vec![int_lit(1)],
-                    )]),
-                ),
-            ],
+fn narrowing_control_flow_dnu_counts() {
+    for &(case, param_type, body, expected) in NARROWING_DNU_CASES {
+        let source =
+            format!("Object subclass: TestClass\n  process: x :: {param_type} =>\n{body}\n");
+        let warnings: Vec<_> = diags_parse_ok(&source)
+            .into_iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            expected,
+            "[{case}] expected {expected} `does not understand` warning(s) for:\n{source}\ngot: {:?}",
+            warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
-        ClassDefinition::new(
-            ident("TestClass"),
-            ident("Object"),
-            vec![],
-            vec![process_method],
-            span(),
-        )
-    };
-    let module = make_module_with_classes(vec![], vec![class]);
-    let checker = check(&module, &hierarchy);
-
-    // Inside the block: `x + 1` should NOT warn because x is narrowed to Integer
-    let warnings: Vec<_> = checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.message.contains("does not understand"))
-        .collect();
-    assert!(
-        warnings.is_empty(),
-        "Expected no warnings for x + 1 inside narrowed block, got: {:?}",
-        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
-    );
-}
-
-#[test]
-fn test_narrowing_is_kind_of_in_true_block() {
-    // process: x :: Object =>
-    //   (x isKindOf: Integer) ifTrue: [x + 1]
-    let hierarchy = ClassHierarchy::with_builtins();
-    let class = {
-        let process_method = make_keyword_method(
-            &["process:"],
-            vec![("x", Some("Object"))],
-            vec![if_true(
-                is_kind_of("x", "Integer"),
-                block_expr(vec![msg_send(
-                    var("x"),
-                    MessageSelector::Binary("+".into()),
-                    vec![int_lit(1)],
-                )]),
-            )],
-        );
-        ClassDefinition::new(
-            ident("TestClass"),
-            ident("Object"),
-            vec![],
-            vec![process_method],
-            span(),
-        )
-    };
-    let module = make_module_with_classes(vec![], vec![class]);
-    let checker = check(&module, &hierarchy);
-
-    let warnings: Vec<_> = checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.message.contains("does not understand"))
-        .collect();
-    assert!(
-        warnings.is_empty(),
-        "Expected no warnings inside isKindOf: narrowed block, got: {:?}",
-        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
-    );
-}
-
-/// ADR 0102 §2 group 2: `x :: Number; x isKindOf: Integer` narrows
-/// the true branch precisely to `Integer` — not `Number` — via
-/// `intersect(Number, Integer, Some(hierarchy)) = Integer` (subclass wins).
-/// `isEven` is an Integer-only selector (not on `Number`), so it resolving
-/// without a DNU inside the true block confirms the tighter narrowing fired.
-#[test]
-fn bt2741_is_kind_of_subclass_narrows_true_branch_to_subclass() {
-    let hierarchy = ClassHierarchy::with_builtins();
-    let class = {
-        // process: x :: Number =>
-        //   (x isKindOf: Integer) ifTrue: [x isEven]
-        let process_method = make_keyword_method(
-            &["process:"],
-            vec![("x", Some("Number"))],
-            vec![if_true(
-                is_kind_of("x", "Integer"),
-                block_expr(vec![msg_send(
-                    var("x"),
-                    MessageSelector::Unary("isEven".into()),
-                    vec![],
-                )]),
-            )],
-        );
-        ClassDefinition::new(
-            ident("TestClass"),
-            ident("Object"),
-            vec![],
-            vec![process_method],
-            span(),
-        )
-    };
-    let module = make_module_with_classes(vec![], vec![class]);
-    let checker = check(&module, &hierarchy);
-
-    let dnu: Vec<_> = checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.message.contains("does not understand"))
-        .collect();
-    assert!(
-        dnu.is_empty(),
-        "x isEven inside `x isKindOf: Integer` ifTrue: should not DNU — x should \
-         narrow to Integer, got: {:?}",
-        dnu.iter().map(|d| &d.message).collect::<Vec<_>>()
-    );
+    }
 }
 
 /// ADR 0102 §2 group 2: `x class =:= Bar` against a hierarchy-unrelated
@@ -695,76 +588,6 @@ fn bt2744_negation_receiver_inherits_dnu_override_from_base() {
         "a Negation whose base has a DNU override must not DNU, got: {:?}",
         dnu.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
-}
-
-#[test]
-fn test_narrowing_is_nil_early_return() {
-    // validate: x :: Object =>
-    //   x isNil ifTrue: [^nil]
-    //   x size   // x should be non-nil, but still Object
-    let hierarchy = ClassHierarchy::with_builtins();
-
-    let class = {
-        let validate_method = make_keyword_method(
-            &["validate:"],
-            vec![("x", Some("Object"))],
-            vec![
-                // x isNil ifTrue: [^nil]
-                if_true(is_nil("x"), block_with_return(var("nil"))),
-                // x size  — after early return, x is non-nil
-                msg_send(var("x"), MessageSelector::Unary("size".into()), vec![]),
-            ],
-        );
-        ClassDefinition::new(
-            ident("TestClass"),
-            ident("Object"),
-            vec![],
-            vec![validate_method],
-            span(),
-        )
-    };
-    let module = make_module_with_classes(vec![], vec![class]);
-    let _checker = check(&module, &hierarchy);
-
-    // After early return narrowing, x is still Object (non-nil) but Object
-    // does respond to `size` (it's a built-in), so no warning expected.
-    // This test just verifies the narrowing doesn't crash.
-}
-
-#[test]
-fn test_narrowing_is_nil_if_true_if_false() {
-    // process: x :: Object =>
-    //   x isNil ifTrue: [42] ifFalse: [x size]
-    // In the false block, x should be non-nil.
-    let hierarchy = ClassHierarchy::with_builtins();
-
-    let class = {
-        let process_method = make_keyword_method(
-            &["process:"],
-            vec![("x", Some("Object"))],
-            vec![if_true_if_false(
-                is_nil("x"),
-                block_expr(vec![int_lit(42)]),
-                block_expr(vec![msg_send(
-                    var("x"),
-                    MessageSelector::Unary("size".into()),
-                    vec![],
-                )]),
-            )],
-        );
-        ClassDefinition::new(
-            ident("TestClass"),
-            ident("Object"),
-            vec![],
-            vec![process_method],
-            span(),
-        )
-    };
-    let module = make_module_with_classes(vec![], vec![class]);
-    let _checker = check(&module, &hierarchy);
-
-    // This just verifies the narrowing path executes without crash.
-    // Object responds to `size`, so no warning expected.
 }
 
 #[test]
@@ -1485,58 +1308,6 @@ fn bt2764_refine_singleton_eq_symbol_supertype_true_branch_is_singleton() {
     assert_eq!(refined.false_type, Some(InferredType::known("ProtoObject")));
 }
 
-#[test]
-fn test_narrowing_does_not_leak_outside_block() {
-    // Verify narrowing is scoped to block only:
-    //   process: x :: Object =>
-    //     (x class =:= String) ifTrue: [x size]
-    //     x unknownThing   // Object doesn't have unknownThing → warning
-    let hierarchy = ClassHierarchy::with_builtins();
-    let class = {
-        let process_method = make_keyword_method(
-            &["process:"],
-            vec![("x", Some("Object"))],
-            vec![
-                if_true(
-                    class_eq("x", "String"),
-                    block_expr(vec![msg_send(
-                        var("x"),
-                        MessageSelector::Unary("size".into()),
-                        vec![],
-                    )]),
-                ),
-                msg_send(
-                    var("x"),
-                    MessageSelector::Unary("unknownThing".into()),
-                    vec![],
-                ),
-            ],
-        );
-        ClassDefinition::new(
-            ident("TestClass"),
-            ident("Object"),
-            vec![],
-            vec![process_method],
-            span(),
-        )
-    };
-    let module = make_module_with_classes(vec![], vec![class]);
-    let checker = check(&module, &hierarchy);
-
-    let warnings: Vec<_> = checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.message.contains("does not understand"))
-        .collect();
-    // 'unknownThing' on Object should warn (narrowing doesn't leak)
-    assert_eq!(
-        warnings.len(),
-        1,
-        "Expected 1 warning for unknownThing outside narrowed block, got {}",
-        warnings.len(),
-    );
-}
-
 // ---- respondsTo: narrowing tests (ADR 0068 Phase 2e) ----
 
 #[test]
@@ -1570,166 +1341,6 @@ fn test_detect_narrowing_responds_to_non_symbol_arg() {
     assert!(
         TypeChecker::detect_narrowing(&expr).is_none(),
         "respondsTo: with non-symbol argument should not be detected as narrowing"
-    );
-}
-
-#[test]
-fn test_narrowing_responds_to_in_true_block() {
-    // Build a class with a method:
-    //   process: x :: Object =>
-    //     (x respondsTo: #customMethod) ifTrue: [x customMethod]
-    //     x customMethod    // should warn — x is Object outside the block
-    let hierarchy = ClassHierarchy::with_builtins();
-    let class = {
-        let process_method = make_keyword_method(
-            &["process:"],
-            vec![("x", Some("Object"))],
-            vec![
-                // (x respondsTo: #customMethod) ifTrue: [x customMethod]
-                if_true(
-                    responds_to("x", "customMethod"),
-                    block_expr(vec![msg_send(
-                        var("x"),
-                        MessageSelector::Unary("customMethod".into()),
-                        vec![],
-                    )]),
-                ),
-                // x customMethod — should warn (Object doesn't have customMethod)
-                msg_send(
-                    var("x"),
-                    MessageSelector::Unary("customMethod".into()),
-                    vec![],
-                ),
-            ],
-        );
-        ClassDefinition::new(
-            ident("TestClass"),
-            ident("Object"),
-            vec![],
-            vec![process_method],
-            span(),
-        )
-    };
-    let module = make_module_with_classes(vec![], vec![class]);
-    let checker = check(&module, &hierarchy);
-
-    // Inside the block: `x customMethod` should NOT warn because x is Dynamic
-    // (respondsTo: narrowing sets the variable to Dynamic in the true block)
-    // Outside the block: `x customMethod` SHOULD warn because x is still Object
-    let warnings: Vec<_> = checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.message.contains("does not understand"))
-        .collect();
-    assert_eq!(
-        warnings.len(),
-        1,
-        "Expected 1 warning for customMethod outside the narrowed block, got {}:\n{:?}",
-        warnings.len(),
-        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
-    );
-}
-
-#[test]
-fn test_narrowing_responds_to_does_not_leak() {
-    // Verify narrowing from respondsTo: is scoped to block only:
-    //   process: x :: Object =>
-    //     (x respondsTo: #asString) ifTrue: [x asString]
-    //     x unknownSelector   // Object doesn't have this → warning
-    let hierarchy = ClassHierarchy::with_builtins();
-    let class = {
-        let process_method = make_keyword_method(
-            &["process:"],
-            vec![("x", Some("Object"))],
-            vec![
-                if_true(
-                    responds_to("x", "asString"),
-                    block_expr(vec![msg_send(
-                        var("x"),
-                        MessageSelector::Unary("asString".into()),
-                        vec![],
-                    )]),
-                ),
-                msg_send(
-                    var("x"),
-                    MessageSelector::Unary("unknownSelector".into()),
-                    vec![],
-                ),
-            ],
-        );
-        ClassDefinition::new(
-            ident("TestClass"),
-            ident("Object"),
-            vec![],
-            vec![process_method],
-            span(),
-        )
-    };
-    let module = make_module_with_classes(vec![], vec![class]);
-    let checker = check(&module, &hierarchy);
-
-    let warnings: Vec<_> = checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.message.contains("does not understand"))
-        .collect();
-    // 'unknownSelector' on Object should warn (narrowing doesn't leak)
-    assert_eq!(
-        warnings.len(),
-        1,
-        "Expected 1 warning for unknownSelector outside narrowed block, got {}",
-        warnings.len(),
-    );
-}
-
-#[test]
-fn test_narrowing_responds_to_if_true_if_false() {
-    // Build: (x respondsTo: #customMethod) ifTrue: [x customMethod] ifFalse: [x customMethod]
-    // True block: no warning (narrowed to Dynamic)
-    // False block: should warn (x is still Object, no respondsTo: narrowing in false branch)
-    let hierarchy = ClassHierarchy::with_builtins();
-    let class = {
-        let process_method = make_keyword_method(
-            &["process:"],
-            vec![("x", Some("Object"))],
-            vec![if_true_if_false(
-                responds_to("x", "customMethod"),
-                block_expr(vec![msg_send(
-                    var("x"),
-                    MessageSelector::Unary("customMethod".into()),
-                    vec![],
-                )]),
-                block_expr(vec![msg_send(
-                    var("x"),
-                    MessageSelector::Unary("customMethod".into()),
-                    vec![],
-                )]),
-            )],
-        );
-        ClassDefinition::new(
-            ident("TestClass"),
-            ident("Object"),
-            vec![],
-            vec![process_method],
-            span(),
-        )
-    };
-    let module = make_module_with_classes(vec![], vec![class]);
-    let checker = check(&module, &hierarchy);
-
-    // True block: no warning (Dynamic narrowing)
-    // False block: should warn (Object doesn't have customMethod)
-    let warnings: Vec<_> = checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.message.contains("does not understand"))
-        .collect();
-    assert_eq!(
-        warnings.len(),
-        1,
-        "Expected 1 warning in false block (no respondsTo: narrowing there), got {}:\n{:?}",
-        warnings.len(),
-        warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
 
