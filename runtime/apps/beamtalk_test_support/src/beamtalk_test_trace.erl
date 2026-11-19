@@ -33,6 +33,8 @@ calls_during(Fun, Watched) ->
             go -> ok
         end,
         Result =
+            %% bt-catcher-audit: not-applicable-reraises - the raise is captured here and
+            %% re-raised in the caller by calls_during/2.
             try
                 {ok, Fun()}
             catch
