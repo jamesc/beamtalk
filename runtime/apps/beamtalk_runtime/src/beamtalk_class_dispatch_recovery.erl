@@ -8,8 +8,8 @@
 -moduledoc """
 Crash recovery and self-instantiation for class sends, split out of `beamtalk_class_dispatch` (BT-5047).
 
-What runs when a class-method call crashes in the class process
-(`handle_class_crash_recovery/3`) and the metaclass self-instantiation paths
+What runs when a class send finds its class process dead (`noproc`) and
+restarts it to retry (`handle_class_crash_recovery/3`) and the metaclass self-instantiation paths
 (`handle_self_instantiation/3`, `handle_metaclass_self_call/2`). These are
 cold paths; `class_send_with_recovery/3` stays in `beamtalk_class_dispatch`.
 """.
@@ -80,8 +80,8 @@ beamtalk_object_class:init/1).
 
 `actor.bt` declares real `class sealed spawn`/`spawnWith:`
 bodies (`beamtalk_actor_ffi:doSpawn/1`, `doSpawnWith/2`), matching the treatment
-given to `new`/`new:`. This function — and `class_send/3`'s explicit
-`spawn`/`spawnWith:` clauses above, and `handle_metaclass_self_call/2` below
+given to `new`/`new:`. This function — and the explicit `spawn`/`spawnWith:`
+clauses of `beamtalk_class_dispatch:class_send_plain/4`, and `handle_metaclass_self_call/2` below
 — deliberately keep routing through `class_self_spawn`/`class_self_new`
 directly rather than falling through to generic inherited class-method
 dispatch: doing so would mean a self-send here reaches the lifted body via

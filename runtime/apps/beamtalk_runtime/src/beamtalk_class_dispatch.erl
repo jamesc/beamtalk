@@ -50,8 +50,9 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 
 %% BT-5047: what `beamtalk_class_dispatch_self` and `_recovery` (split out of this
 %% module) call back into. Exported for the split only; each is an existing
-%% private helper of this module. (`find_class_method_from_class/2` is already
-%% exported above.)
+%% private helper of this module, internal to the dispatch family and not a
+%% supported API for other runtime modules. (`find_class_method_from_class/2` is
+%% already exported above.)
 -export([
     apply_class_extension_fun/5,
     apply_class_method_in_context/6,
