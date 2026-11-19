@@ -249,13 +249,14 @@ fn attach_and_open_window(
             tracing::error!(workspace_id, ?reason, "readiness failed");
             kill_and_untrack(state, workspace_id, port);
             return Err(match &reason {
-                readiness::FailureReason::ProtocolMismatch { .. } => {
-                    format!(
-                        "workspace '{workspace_id}' was refused: {}",
-                        reason.describe()
-                    )
-                }
-                _ => format!("workspace '{workspace_id}' is unreachable: {reason:?}"),
+                readiness::FailureReason::ProtocolMismatch { .. } => format!(
+                    "workspace '{workspace_id}' was refused: {}",
+                    reason.describe()
+                ),
+                _ => format!(
+                    "workspace '{workspace_id}' is unreachable: {}",
+                    reason.describe()
+                ),
             });
         }
         ReadinessState::TimedOut(stage) => {
