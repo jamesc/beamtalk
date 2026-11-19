@@ -4,7 +4,7 @@
   {"char": "\"", "binary": false},
   {"char": "#", "binary": false},
   {"char": "$", "binary": false},
-  {"char": "%", "binary": false},
+  {"char": "%", "binary": true},
   {"char": "&", "binary": true},
   {"char": "'", "binary": false},
   {"char": "(", "binary": false},
