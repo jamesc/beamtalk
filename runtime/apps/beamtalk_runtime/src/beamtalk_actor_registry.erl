@@ -349,7 +349,7 @@ spawn_named_scoped(Scope, Link, Name, Module, Args) ->
                     [Name]
                 )};
         false ->
-            try beamtalk_actor:safe_spawn_named(Scope, Link, Name, Module, Args) of
+            try beamtalk_actor_start:safe_spawn_named(Scope, Link, Name, Module, Args) of
                 {ok, Pid} ->
                     {ok, Pid};
                 {error, {already_started, _Other}} ->

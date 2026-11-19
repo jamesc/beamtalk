@@ -121,7 +121,7 @@ FFI: (Erlang beamtalk_tracing) setContext: ctx
 """.
 -spec setContext(map()) -> nil.
 setContext(Ctx) when is_map(Ctx) ->
-    beamtalk_actor:set_trace_context(Ctx),
+    beamtalk_actor_ctx:set_trace_context(Ctx),
     nil;
 setContext(Other) ->
     error(#beamtalk_error{
@@ -145,7 +145,7 @@ Returns #{} when no context has been set.
 """.
 -spec context() -> map().
 context() ->
-    beamtalk_actor:get_trace_context().
+    beamtalk_actor_ctx:get_trace_context().
 
 -doc """
 Clear the application-level trace context.
@@ -153,7 +153,7 @@ Removes all trace context keys from the process and logger metadata.
 """.
 -spec clearContext() -> nil.
 clearContext() ->
-    beamtalk_actor:clear_trace_context(),
+    beamtalk_actor_ctx:clear_trace_context(),
     nil.
 
 %%====================================================================

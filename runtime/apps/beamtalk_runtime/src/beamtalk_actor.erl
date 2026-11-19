@@ -45,6 +45,20 @@ liveness guard's "let the send fail with its real reason" policy, not
 a liveness probe. Use a monitor's `'DOWN'` message to detect a dead
 remote actor.
 
+## Where the code lives (BT-5047)
+
+The entry points generated code calls stay here and call into three modules
+split out of this one, so a send or a start makes the same number of calls
+as before the split:
+
+- `beamtalk_actor_send`: what sits behind `async_send/4`, `sync_send/3,4`,
+  `cast_send/3` and the `*_known` variants (lifecycle selectors, the
+  `gen_server:call` wrapper, proxy refs, remote-node errors, the propagated
+  context a send carries);
+- `beamtalk_actor_start`: the awaited start behind `safe_spawn/2` and friends,
+  the initialize ack wait and the `native:` start/stop observer;
+- `beamtalk_actor_ctx`: the application-level trace context API.
+
 ## Actor State Structure
 
 Each actor maintains state in a map:
@@ -167,9 +181,6 @@ decode/encode helpers and the pending-action helpers.
 %% BT-4090: the `ReplyTo` handle (runtime-minted, `'$beamtalk_class'`-tagged).
 -type reply_to() :: #{'$beamtalk_class' := 'ReplyTo', from := term()}.
 
-%% Default `gen_server:stop/3` timeout for `stop` / `stopWith:` (ms).
--define(STOP_TIMEOUT, 5000).
-
 %% BT-3967: process-dictionary key holding a deferred self-stop request
 %% (`self stopWith: Reason` from inside a method), consumed by
 %% apply_pending_actions/1 once the current gen_server callback returns.
@@ -215,23 +226,10 @@ decode/encode helpers and the pending-action helpers.
     (?IS_CONTINUATION_SELECTOR(S) orelse S =:= deferReply orelse ?IS_PERFORM_SELECTOR(S))
 ).
 
-%% BT-4265: the helpers an actor send (caller side) and a received message
-%% (actor side) run every time are inlined, so a send pays for the work, not
-%% for a chain of local calls to reach it.
--compile(
-    {inline, [
-        self_send_kind/1,
-        sync_send_remote/4,
-        resolve_class/2,
-        get_sync_propagated_ctx/0,
-        get_propagated_ctx/0,
-        get_otel_ctx/0,
-        check_call_stack/2,
-        wire_sync_call/5,
-        local_call/3,
-        clear_trace_context_if_set/0
-    ]}
-).
+%% BT-4265: the helper a received message (actor side) runs every time is
+%% inlined, so it pays for the work, not for a local call to reach it. The
+%% caller-side send helpers are inlined in `beamtalk_actor_send`.
+-compile({inline, [clear_trace_context_if_set/0]}).
 
 %% ADR 0126 §3: timeout for the `erpc:call/5` a remote spawn/lookup/list
 %% makes to the target node — matches `gen_server:call/2`'s own 5000ms
@@ -243,16 +241,12 @@ decode/encode helpers and the pending-action helpers.
 
 %% Public API
 -export([start_link/2, start_link/3, start_link_supervised/3]).
--export([await_initialize/1, await_initialize/2, await_initialize/3, safe_spawn/2]).
+-export([safe_spawn/2]).
 %% BT-4033: the awaited linked start of an anonymous supervised actor child.
 -export([safe_spawn_linked/2]).
-%% BT-4577: the backing module of a `native:` actor's facade, or `none`.
--export([native_backing_module/1]).
 %% BT-4970: announce a `native:` actor's start and, when it goes down, its stop.
 %% Called by the facade's generated `spawn/1` and by `safe_start_native/4`.
 -export([native_started/1]).
-%% BT-4970: the observer's wait loop, exported so it can hibernate into it.
--export([native_stop_observer_wait/3]).
 %% BT-4104: an anonymous start that leaves the caller monitoring the actor,
 %% with the monitor created atomically with the process.
 -export([safe_spawn_monitored/2]).
@@ -261,10 +255,6 @@ decode/encode helpers and the pending-action helpers.
 -export([safe_spawn_monitored_async/2]).
 
 -type link_mode() :: linked | unlinked.
-%% What a successful initialize wait does with the start monitor: `release`
-%% removes it (every plain spawn), `keep` hands it to the caller
-%% (safe_spawn_monitored/2, BT-4104).
--type monitor_mode() :: release | keep.
 
 %% BT-3992: initialize acknowledgement, called from generated init/1 and
 %% handle_continue/2.
@@ -279,13 +269,7 @@ decode/encode helpers and the pending-action helpers.
 -export([sync_send_known/4, sync_send_known/5, cast_send_known/4, async_send_known/5]).
 
 %% Propagated context (ADR 0069 Phase 2b)
--export([get_propagated_ctx/0, restore_propagated_ctx/1]).
-
-%% Application-level trace context
--export([set_trace_context/1, get_trace_context/0, clear_trace_context/0]).
-
-%% Causal trace context
--export([get_causal_ctx/0]).
+-export([restore_propagated_ctx/1]).
 
 %% The one gen_server callback generated actors delegate to.
 -export([handle_info/2]).
@@ -303,9 +287,7 @@ decode/encode helpers and the pending-action helpers.
 %% send site — i.e. a self-send from inside one of the actor's own methods.
 -export([dispatch/3]).
 -ifdef(TEST).
--export([intrinsic_selector/1, request_continuation/4]).
-%% BT-4525: the self-dispatch unwrap, driven directly on a `$bt_nlr` result.
--export([unwrap_dispatch_result/1]).
+-export([intrinsic_selector/1]).
 -endif.
 
 %% BT-3967 / BT-3968: deferred pending actions. Every gen_server callback
@@ -362,15 +344,19 @@ decode/encode helpers and the pending-action helpers.
     maybe_reclassify_compiled_dispatch_error/2
 ]).
 
-%% BT-4701: the pieces of `beamtalk_actor_registry` / `_remote` / `_ffi` (split out of
-%% this module) that still call back into it. Exported for the split only; they
-%% were private helpers shared with the send paths. (`no_such_process_error_record/2`
-%% and `resolve_remote_registered/2` have no caller outside this module, so they
-%% are private again.)
+%% BT-5047: what `beamtalk_actor_start`, `beamtalk_actor_send` and
+%% `beamtalk_actor_ctx` (split out of this module) call back into. Exported for
+%% the split only; every one is an existing private helper of this module.
 -export([
-    safe_spawn_named/5,
-    node_down_error_record/2,
-    resolve_proxy_or_error/2
+    async_request_continuation/5,
+    async_stop/5,
+    delegate_error/1,
+    do_announce_actor_lifecycle/2,
+    is_stop_timeout/1,
+    normalize_stop_reason/1,
+    request_continuation/4,
+    stop_timeout_type_error/1,
+    sync_stop/4
 ]).
 
 %% BT-4701: delegates kept under the old module name for at least one release —
@@ -436,193 +422,6 @@ Module:Function should spawn the actor and return {ok, Pid}.
 -spec start_link_supervised(module(), atom(), list()) -> {ok, pid()} | {error, term()}.
 start_link_supervised(Module, Function, Args) ->
     erlang:apply(Module, Function, Args).
-
--doc """
-Wait for a started actor's `initialize` to finish — **sys-based fallback**.
-
-BT-3992: Beamtalk's own spawn paths no longer use this: they pass an ack
-target in the start args (with_init_ack/1) and wait with
-await_initialize/3, which returns as soon as `initialize` has returned —
-without waiting for any `continueWith:` continuations it requested (OTP
-`handle_continue` semantics). This form is kept for a pid that was started
-without an ack target, such as a hand-written gen_server, and for external
-callers.
-
-It synchronizes by sending a system message (`sys:get_state/2`), which OTP
-handles only between callbacks and never while a `{continue, _}` action is
-pending — so it returns only after `initialize` *and every continuation
-chained from it* have run (5 s timeout over the whole chain).
-
-Returns `ok` if the process is still alive after initialization,
-or `{error, Reason}` if it crashed during handle_continue.
-""".
--spec await_initialize(pid()) -> ok | {error, term()}.
-await_initialize(Pid) ->
-    await_initialize(Pid, erlang:monitor(process, Pid)).
-
--doc """
-Like `await_initialize/1` (the sys-based fallback), but with a monitor the
-caller established *atomically with the spawn* (`gen_server:start_monitor/3`).
-
-BT-3677: `await_initialize/1` monitors AFTER `gen_server:start/3` returned.
-`handle_continue` runs concurrently with the caller, so under scheduler load
-an actor whose `initialize` fails (e.g. the post-initialize
-uninitialized-state check) can already be dead before the caller reaches
-`erlang:monitor/2`. A monitor on an already-dead process reports the
-reason `noproc`, NOT the real stop reason, so the structured
-`UninitializedStateError` (with its field/type hint) was intermittently
-replaced by a bare `noproc` hint. A monitor created together with the
-process always reports the true exit reason.
-
-`MonRef` is consumed (demonitored or received) by this function.
-""".
--spec await_initialize(pid(), reference()) -> ok | {error, term()}.
-await_initialize(Pid, MonRef) ->
-    await_initialize_sys(
-        Pid, MonRef, fun(P) -> sys:get_state(P, ?BT_INITIALIZE_TIMEOUT) end, release
-    ).
-
-%% The sys-based wait behind await_initialize/2: `SysCall` is a `sys` call
-%% (handled only between callbacks) whose exit shapes are sys:get_state/2's.
-%% `Mode` says what success does with `MonRef` (settle_monitor/2); every
-%% failure consumes it.
--spec await_initialize_sys(pid(), reference(), fun((pid()) -> term()), monitor_mode()) ->
-    ok | {error, term()}.
-await_initialize_sys(Pid, MonRef, SysCall, Mode) ->
-    %% bt-catcher-audit: not-applicable-no-block - SysCall is a local fun
-    %% wrapping a sys:get_state/replace_state call, never a Beamtalk block
-    try SysCall(Pid) of
-        _State ->
-            settle_monitor(Mode, MonRef)
-    catch
-        exit:{noproc, _} ->
-            %% Process already dead — wait for the DOWN message unconditionally.
-            %% The monitor was set before sys:get_state, so DOWN is guaranteed.
-            receive
-                {'DOWN', MonRef, process, Pid, Reason} -> {error, Reason}
-            end;
-        exit:{Reason, _} ->
-            %% gen_server stop reason wrapped by sys: {StopReason, {sys, get_state, ...}}
-            %% Reason is the full stop reason (e.g. {error, function_clause}).
-            erlang:demonitor(MonRef, [flush]),
-            {error, Reason}
-    end.
-
--doc """
-BT-3992: wait until a just-started actor's `initialize` has returned,
-using the ack target `with_init_ack/1` put in its start args.
-
-Startup ends when `initialize` returns (OTP semantics: `init/1` returning
-`{ok, State, {continue, _}}` lets `start_link` return before
-`handle_continue` runs). Continuations `initialize` requested with
-`continueWith:` (and any they chain) run *after* this returns — still
-before any message sent to the actor after it — so a slow first step never
-blocks the starter or a supervisor, and never counts against the timeout.
-
-Must be called after the `gen_server` start call returned `{ok, Pid}`. The
-actor's `init/1` (take_init_ack/2) has then already sent, before
-`proc_lib`'s start reply and so already in this mailbox:
-
-- `{AckRef, initialized}` — no `initialize` step is pending; done.
-- `{AckRef, initializing}` — `initialize` is pending in `handle_continue/2`;
-  wait for `{AckRef, initialized}` (sent by ack_initialized/2 after it
-  succeeded and passed the post-initialize uninitialized-state check) or
-  the `'DOWN'` for `MonRef` (`{error, Reason}`), at most 5 s
-  (`{error, timeout}`; the caller kills the actor).
-- neither — the process never consumed the ack target (a hand-written
-  gen_server, or an actor module compiled before BT-3992): fall back to the
-  sys-based wait, which also strips the target from a map state.
-
-`MonRef` is consumed (demonitored or received) by this function. A late
-`{AckRef, _}` left after a timeout is the caller's to flush
-(flush_init_ack/1) once the actor is dead.
-""".
--spec await_initialize(pid(), reference(), reference() | none) -> ok | {error, term()}.
-await_initialize(Pid, MonRef, AckRef) ->
-    await_initialize(Pid, MonRef, AckRef, release).
-
-%% await_initialize/3 with the success-side handling of `MonRef` chosen by
-%% `Mode` (BT-4104): `release` demonitors it, `keep` leaves it live for the
-%% caller, whose later `'DOWN'` then carries the actor's real exit reason.
-%% Every failure consumes `MonRef` in both modes.
--spec await_initialize(pid(), reference(), reference() | none, monitor_mode()) ->
-    ok | {error, term()}.
-await_initialize(Pid, MonRef, none, Mode) ->
-    await_initialize_sys(
-        Pid, MonRef, fun(P) -> sys:get_state(P, ?BT_INITIALIZE_TIMEOUT) end, Mode
-    );
-await_initialize(Pid, MonRef, AckRef, Mode) ->
-    receive
-        {AckRef, initialized} ->
-            settle_monitor(Mode, MonRef);
-        {AckRef, initializing} ->
-            receive
-                {AckRef, initialized} ->
-                    settle_monitor(Mode, MonRef);
-                {'DOWN', MonRef, process, Pid, Reason} ->
-                    {error, Reason}
-            after ?BT_INITIALIZE_TIMEOUT ->
-                erlang:demonitor(MonRef, [flush]),
-                {error, timeout}
-            end
-    after 0 ->
-        %% The actor never consumed the target: a hand-written gen_server, or
-        %% an actor module compiled before BT-3992 whose init/1 merges its
-        %% start args into its state. Wait the sys way, and strip the target
-        %% from a map state so it does not stay there for good.
-        await_initialize_sys(
-            Pid,
-            MonRef,
-            fun(P) ->
-                sys:replace_state(P, fun strip_init_ack_key/1, ?BT_INITIALIZE_TIMEOUT)
-            end,
-            Mode
-        )
-    end.
-
-%% The success side of an initialize wait: `release` drops the start monitor,
-%% `keep` leaves it for the caller (BT-4104).
--spec settle_monitor(monitor_mode(), reference()) -> ok.
-settle_monitor(release, MonRef) ->
-    erlang:demonitor(MonRef, [flush]),
-    ok;
-settle_monitor(keep, _MonRef) ->
-    ok.
-
--spec strip_init_ack_key(term()) -> term().
-strip_init_ack_key(State) when is_map(State) ->
-    maps:remove(?BT_INIT_ACK_KEY, State);
-strip_init_ack_key(State) ->
-    State.
-
--doc """
-BT-3992: add the initialize-ack target `{self(), AckRef}` to a spawn's start
-args. Every Beamtalk start path (`safe_spawn/2`, `safe_spawn_linked/2`,
-`safe_spawn_named/5`) goes through this and then await_initialize/3; the
-actor strips the key from its state in `init/1` (take_init_ack/2). Start
-args that are not a map (a hand-written gen_server's own shape) carry no
-target (`none`); await_initialize/3 then takes the sys-based fallback.
-""".
--spec with_init_ack(Args) -> {Args, reference() | none} when Args :: term().
-with_init_ack(InitArgs) when is_map(InitArgs) ->
-    AckRef = make_ref(),
-    {InitArgs#{?BT_INIT_ACK_KEY => {self(), AckRef}}, AckRef};
-with_init_ack(InitArgs) ->
-    {InitArgs, none}.
-
--doc """
-BT-3992: drop any initialize ack still in the mailbox for `AckRef` — after a
-failed or timed-out start, once the actor is known dead (so nothing more
-can arrive).
-""".
--spec flush_init_ack(reference() | none) -> ok.
-flush_init_ack(none) ->
-    ok;
-flush_init_ack(AckRef) ->
-    receive
-        {AckRef, _} -> flush_init_ack(AckRef)
-    after 0 -> ok
-    end.
 
 -doc """
 BT-3992: called by an actor's `init/1` on its initial state (generated
@@ -735,7 +534,7 @@ safe_spawn(Module, InitArgs) ->
             %% start_monitor (not start + monitor): the monitor must exist before
             %% the actor can possibly die, or a fast-failing initialize reports
             %% `noproc` instead of its real stop reason (BT-3677).
-            case start_monitor_and_await(Module, InitArgs, release) of
+            case beamtalk_actor_start:start_monitor_and_await(Module, InitArgs, release) of
                 {ok, {Pid, _ReleasedRef}} -> {ok, Pid};
                 {error, Reason} -> {error, Reason}
             end
@@ -766,7 +565,7 @@ actor's exit itself, which is not what a supervisor child needs.
 -spec safe_spawn_monitored(module(), map()) ->
     {ok, {pid(), reference()}} | {error, term()}.
 safe_spawn_monitored(Module, InitArgs) ->
-    start_monitor_and_await(Module, InitArgs, keep).
+    beamtalk_actor_start:start_monitor_and_await(Module, InitArgs, keep).
 
 -doc """
 BT-4477: spawn an anonymous actor **monitored by the caller** without waiting
@@ -799,58 +598,10 @@ with `Reason`) and `ignore` (exit `normal`).
 -spec safe_spawn_monitored_async(module(), map()) -> {ok, {pid(), reference()}}.
 safe_spawn_monitored_async(Module, InitArgs) ->
     {Pid, MonRef} = proc_lib:spawn_opt(
-        fun() -> async_init_and_loop(Module, InitArgs) end,
+        fun() -> beamtalk_actor_start:async_init_and_loop(Module, InitArgs) end,
         [monitor | spawn_options()]
     ),
     {ok, {Pid, MonRef}}.
-
-%% Body of the process started by safe_spawn_monitored_async/2: run the
-%% module's `init/1` here (not in the caller), then become its gen_server.
-%% `gen_server:enter_loop/5` must be called from the process that ran `init/1`.
--spec async_init_and_loop(module(), term()) -> no_return().
-async_init_and_loop(Module, InitArgs) ->
-    %% `proc_lib:spawn_opt/2` with a fun records the fun's own MFA as the
-    %% initial call. Set the one `gen_server:start*` sets, because the
-    %% crash-report secret redaction (BT-4666, `beamtalk_actor_redaction`),
-    %% observer and `proc_lib:initial_call/1` identify the actor by
-    %% `{Module, init, _}`.
-    put('$initial_call', {Module, init, 1}),
-    %% An unlinked `gen_server:start*` actor is its own OTP parent
-    %% (`gen:do_spawn` passes `self`), whereas `enter_loop/5` takes the head of
-    %% `$ancestors` — here the spawner. Make the actor its own parent so an
-    %% exit-trapping actor linked to its spawner later treats that exit as a
-    %% normal link exit (BT-3596), not parent shutdown, exactly as a
-    %% `spawnMonitored` actor does. The side effect is a duplicate self entry
-    %% in `$ancestors` (crash reports, and inherited by `proc_lib` children);
-    %% `enter_loop` has no public way to pass the parent, so this is deliberate.
-    put('$ancestors', [self() | get('$ancestors')]),
-    case Module:init(InitArgs) of
-        {ok, State} ->
-            gen_server:enter_loop(Module, [], State, self(), infinity);
-        {ok, State, Action} ->
-            gen_server:enter_loop(Module, [], State, self(), Action);
-        {stop, Reason} ->
-            exit(Reason);
-        ignore ->
-            exit(normal);
-        Other ->
-            exit({bad_return_value, Other})
-    end.
-
-%% Shared unlinked start for safe_spawn/2 and safe_spawn_monitored/2:
-%% start_monitor (not start + monitor), so the monitor exists before the
-%% actor can possibly die, or a fast-failing initialize reports `noproc`
-%% instead of its real stop reason (BT-3677). `Mode` decides whether that
-%% monitor survives a successful start (BT-4104).
--spec start_monitor_and_await(module(), term(), monitor_mode()) ->
-    {ok, {pid(), reference()}} | {error, term()}.
-start_monitor_and_await(Module, InitArgs, Mode) ->
-    {AckArgs, AckRef} = with_init_ack(InitArgs),
-    case gen_server:start_monitor(Module, AckArgs, gen_start_options()) of
-        {ok, {Pid, MonRef}} -> await_initialize_or_kill_unlinked(Pid, MonRef, AckRef, Mode);
-        {error, Reason} -> {error, Reason};
-        ignore -> {error, ignore}
-    end.
 
 -doc """
 Spawn an actor **linked** to the caller, with trap_exit + initialize
@@ -872,486 +623,15 @@ sys-based wait (`await_initialize/3`).
 """.
 -spec safe_spawn_linked(module(), term()) -> {ok, pid()} | {error, term()}.
 safe_spawn_linked(Module, InitArgs) ->
-    case native_backing_module(Module) of
+    case beamtalk_actor_start:native_backing_module(Module) of
         none ->
-            start_link_and_await(
+            beamtalk_actor_start:start_link_and_await(
                 fun(Args) -> gen_server:start_link(Module, Args, gen_start_options()) end,
                 InitArgs,
                 linked
             );
         Backing ->
-            safe_start_native(Backing, InitArgs, none, linked)
-    end.
-
--doc """
-Spawn a named actor with trap_exit + initialize synchronization, per
-`Scope` (`local`/ADR 0079, or `global`/ADR 0126 §4, Phase 5, BT-3603).
-
-Handles the full spawn sequence:
-1. Trap exits so a failed start_link or handle_continue doesn't kill caller
-2. Start the actor, registered per `Scope` (see below)
-3. If the start succeeds, wait until `initialize` has returned (await_initialize/3 — not for
-   the continuations it requested, BT-3992)
-4. Restore trap_exit and return {ok, Pid} or {error, Reason}
-
-Unlike `safe_spawn/2` (unnamed) in its common case, this stays
-**linked** — it is the shared implementation behind both
-`spawnAs:`/`spawnWith:as:`/`spawnAs:scope:`/`spawnWith:as:scope:` *and*
-the start `beamtalk_supervisor:start_actor_child/3` makes for
-`SupervisionSpec withName:`/`withName:scope:` children (ADR 0079; a child spec
-recorded by a release before BT-4701 names `{beamtalk_actor, spawnAs, ...}` /
-`{beamtalk_actor, spawnAsGlobal, ...}` instead, which the compatibility
-delegates at the end of this module still forward to
-`beamtalk_actor_registry` — either way this function is the start callback).
-That link is not a
-bug — it is exactly the OTP contract a real supervisor relies on to
-detect the child's exit and restart it; removing it would silently break
-supervised named-actor restart (see `beamtalk_supervisor_tests:supervisor_restart_re_registers_name_test/0`).
-
-The risk this shares — a class method's `self spawnAs:` /
-`self spawnWith:as:` running inside the class gen_server and linking the
-new actor to it — is fixed at that specific call site instead: see
-`beamtalk_class_instantiation:do_class_self_named_spawn/6`, which unlinks
-immediately after a successful spawn *unless* it detects the
-`withClassMethod:`-supervisor context via
-`?BT_SUPERVISOR_SPAWN_CONTEXT_KEY`, in which case it stays linked for the
-same reason `safe_spawn_linked/2` above does.
-
-`local` keeps the original `{local, Name}` registration — a single atomic
-`gen_server:start_link({local, Name}, ...)`.
-
-`global` cannot reuse the same atomic form — OTP's `{global, Name}` start
-always binds the *default* resolver (`global:random_exit_name/3`, the
-force-kill behaviour ADR 0126 §4 replaces), and there is no variant that
-takes a custom one. Instead this starts the gen_server **anonymously but
-still linked** (`gen_server:start_link/3` — same link as the `local`
-clause, since this also doubles as a `SupervisionSpec
-withName:scope:#global` child's start MFA, ADR 0126 §4), then explicitly
-`global:register_name/3`s the resulting pid with `resolve_global_conflict/3`
-as the resolver. A losing race (`no` — another process already holds
-`Name`) stops the just-started actor (`terminate/2` runs — this is an
-ordinary, not a conflict, teardown) and reports `{already_started,
-ExistingPid}`, the exact shape `spawn_named_scoped/4` already translates to
-`name_registered` for the `local` path, so no separate error-mapping arm is
-needed for `global`.
-
-`Link` is `linked` for every caller above. `unlinked` (BT-3992,
-spawn_named_for_caller/4) drops the link to the caller inside
-start_link_and_await/3, before `trap_exit` is restored — see that
-function's doc for why the caller cannot do it after.
-""".
--spec safe_spawn_named(local | global, link_mode(), atom(), module(), map()) ->
-    {ok, pid()} | {error, term()}.
-safe_spawn_named(Scope, Link, Name, Module, InitArgs) ->
-    case native_backing_module(Module) of
-        none -> safe_spawn_gen_named(Scope, Link, Name, Module, InitArgs);
-        Backing -> safe_start_native(Backing, InitArgs, {Scope, Name}, Link)
-    end.
-
-%% `safe_spawn_named/5` for a compiled (non-`native:`) actor module.
--spec safe_spawn_gen_named(local | global, link_mode(), atom(), module(), map()) ->
-    {ok, pid()} | {error, term()}.
-safe_spawn_gen_named(local, Link, Name, Module, InitArgs) ->
-    start_link_and_await(
-        fun(Args) -> gen_server:start_link({local, Name}, Module, Args, gen_start_options()) end,
-        InitArgs,
-        Link
-    );
-safe_spawn_gen_named(global, Link, Name, Module, InitArgs) ->
-    case
-        start_link_and_await(
-            fun(Args) -> gen_server:start_link(Module, Args, gen_start_options()) end,
-            InitArgs,
-            Link
-        )
-    of
-        {ok, Pid} ->
-            case global:register_name(Name, Pid, fun ?MODULE:resolve_global_conflict/3) of
-                yes ->
-                    {ok, Pid};
-                no ->
-                    gen_server:stop(Pid, normal, 5000),
-                    {error, {already_started, global:whereis_name(Name)}}
-            end;
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
--doc """
-BT-4577: the backing module of a `native:` actor class's facade module
-(ADR 0056), or `none` for any other module (a compiled actor, a hand-written
-gen_server).
-
-A `native:` actor compiles to a facade with no `init/1`; its process is the
-backing module's, started by `BackingModule:start_link(Config)` — what the
-facade's own generated `spawn/1` calls. The facade publishes that module as
-`backing_module` in `__beamtalk_meta/0`, read here through
-`beamtalk_class_registry:meta_backing_module/1`, so every start path that
-is handed the class's module (`safe_spawn_linked/2`, `safe_spawn_named/5`,
-and through them a supervisor's actor child, `beamtalk_supervisor:
-start_actor_child/2,3`) starts the backing module instead of calling
-`gen_server:start_link` on the facade (`undef` `init/1`).
-""".
--spec native_backing_module(module()) -> module() | none.
-native_backing_module(Module) ->
-    _ = code:ensure_loaded(Module),
-    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
-        true -> beamtalk_class_registry:meta_backing_module(Module:'__beamtalk_meta'());
-        false -> none
-    end.
-
--doc """
-BT-4577: start a `native:` actor's backing module, linked, as
-`safe_spawn_linked/2` (`Registration = none`) and `safe_spawn_named/5`
-(`{local | global, Name}`) do for a compiled actor.
-
-The start is `BackingModule:start_link(Config)`, the same call the facade's
-`spawn/1` makes, on the same map `Config` (anything else is a `#type_error`,
-as the facade raises). There is no Beamtalk `initialize` to await and no
-init-ack target to add: the backing module's own `init/1` has run when
-`start_link` returns. Exits are trapped around the start so a backing
-`init/1` that fails is answered as `{error, Reason}` instead of killing the
-caller.
-
-The backing `start_link/1` takes no name, so a named start registers the
-pid after it started — `register/2` for `local`, `global:register_name/3`
-with `resolve_global_conflict/3` for `global` (as the compiled-actor `global`
-path already does). A name already held is refused before the start, so the
-backing `init/1` and its side effects (a port, an OS process) do not run for
-nothing; a start that loses the race to another holder is stopped
-(`stop_unregistered_native/1`). Either way the answer is `{error,
-{already_started, Holder}}`, which `spawn_named_scoped/5` turns into
-`#name_registered`. A registration that fails with no holder (the backing
-process registered itself under another name, or already died) is
-`{error, {register_failed, Name}}`. `Link = unlinked` drops the start link
-before exits stop being trapped (`maybe_unlink_started/2`).
-
-The backing `start_link/1` must link the new process to its caller, as
-`gen_server:start_link/3` does (ADR 0056): that link is what a supervisor
-restarts on.
-""".
--spec safe_start_native(module(), term(), none | {local | global, atom()}, link_mode()) ->
-    {ok, pid()} | {error, term()}.
-safe_start_native(_Backing, Config, _Registration, _Link) when not is_map(Config) ->
-    {error,
-        beamtalk_error:with_hint(
-            beamtalk_error:new(type_error, 'Actor', 'spawnWith:'),
-            <<"spawnWith: expects a Dictionary argument">>
-        )};
-safe_start_native(Backing, Config, Registration, Link) ->
-    case name_holder(Registration) of
-        undefined -> start_native_trapped(Backing, Config, Registration, Link);
-        Holder -> {error, {already_started, Holder}}
-    end.
-
-%% The pid already holding a named start's name, or `undefined`.
-%%
-%% A local name is released atomically when its process exits. A global name
-%% is not: `global:whereis_name/1` reads global's table, whose row for a dead
-%% process goes only once the global name server has handled its `'DOWN'`,
-%% so a supervisor restarting a crashed `#global` child can still see the dead
-%% pid. A dead holder on this node counts as none, so the restart is not
-%% refused; a name that really is taken is still refused after the start by
-%% `register_native_started/2`.
--spec name_holder(none | {local | global, atom()}) -> pid() | port() | undefined.
-name_holder(none) ->
-    undefined;
-name_holder({local, Name}) ->
-    whereis(Name);
-name_holder({global, Name}) ->
-    case global:whereis_name(Name) of
-        Pid when is_pid(Pid), node(Pid) =:= node() ->
-            case is_process_alive(Pid) of
-                true -> Pid;
-                false -> undefined
-            end;
-        Other ->
-            Other
-    end.
-
--spec start_native_trapped(module(), map(), none | {local | global, atom()}, link_mode()) ->
-    {ok, pid()} | {error, term()}.
-start_native_trapped(Backing, Config, Registration, Link) ->
-    OldTrap = erlang:process_flag(trap_exit, true),
-    Result =
-        %% bt-catcher-audit: not-applicable-no-block - Backing:start_link/1
-        %% is a hand-written Erlang start function, never a Beamtalk block
-        try Backing:start_link(Config) of
-            {ok, Pid} when is_pid(Pid) -> register_native_started(Registration, Pid);
-            {error, Reason} -> {error, Reason};
-            ignore -> {error, ignore};
-            Other -> {error, {bad_start_link_return, Other}}
-        catch
-            _:CrashReason -> {error, CrashReason}
-        end,
-    case Result of
-        {ok, Started} ->
-            ok = maybe_unlink_started(Link, Started),
-            ok = native_started(Started);
-        {error, _} ->
-            ok
-    end,
-    erlang:process_flag(trap_exit, OldTrap),
-    Result.
-
--doc """
-BT-4970: announce a started `native:` actor as `ActorSpawned`, and arrange for
-its `ActorStopped`.
-
-A compiled actor announces both from the lifecycle telemetry in its generated
-`init/1` and `terminate/2`. A `native:` backing gen_server (`beamtalk_subprocess`,
-a user module) runs neither and is not ours to change, so the start path
-announces for it, and an observer process monitors the pid and announces
-`ActorStopped` when it goes down. The observer lives as long as the actor and
-ends after that one message; it is unregistered, unlinked, unsupervised and owns
-no table (ADR 0150: no registry). After setting its monitor it hibernates into
-`native_stop_observer_wait/3`, so it holds no reference into this module's code
-(a code purge cannot kill it) and keeps a minimal heap for the actor's whole
-life. Nothing is done when the announcement bus is not running, as for a
-compiled actor. A non-pid argument (a backing `start_link/1` that answered
-`{ok, NotAPid}`) is ignored: announcing never fails a start that succeeded.
-
-The class is the one the process scan reports for the pid
-(`beamtalk_actor_scan:one_per_pid/1`, the rule every actor list uses), or
-`unknown`, the same default a compiled actor's announcement falls back to.
-""".
--spec native_started(term()) -> ok.
-native_started(Pid) when is_pid(Pid) ->
-    case erlang:whereis(beamtalk_announcements) of
-        undefined ->
-            ok;
-        _Bus ->
-            %% Best-effort, like the announcement: the backing process has
-            %% already started, so a failing lookup must not fail the start.
-            Class =
-                try beamtalk_actor_scan:one_per_pid(beamtalk_actor_scan:info(Pid)) of
-                    [{Pid, Found, _StartedAt} | _] -> Found;
-                    [] -> unknown
-                catch
-                    _:_ -> unknown
-                end,
-            ok = do_announce_actor_lifecycle('ActorSpawned', #{actorClass => Class, pid => Pid}),
-            _Observer = erlang:spawn(fun() -> native_stop_observer(Pid, Class) end),
-            ok
-    end;
-native_started(_NotAPid) ->
-    ok.
-
-%% The observer sets its monitor when it is first scheduled, which can be after
-%% `native_started/1` has returned and after the starter has handed the actor
-%% back (a named start is also reachable by its name before that). An actor that
-%% stops in that window gives `'DOWN'` with reason `noproc`, and its real exit
-%% reason is not observable without making the start wait for the observer. It
-%% is announced as `crashed` (what `normalize_stop_reason/1` makes of a reason it
-%% does not know). That can report a prompt clean `stop` as a crash; it was
-%% chosen over `normal` because a false alarm is cheaper than a crash reported
-%% as clean.
-%%
-%% The announced reason is always in `normalize_stop_reason/1`'s range (`normal`,
-%% `shutdown`, `crashed`, `'globalNameConflict'`).
--spec native_stop_observer(pid(), atom()) -> no_return().
-native_stop_observer(Pid, Class) ->
-    MonRef = erlang:monitor(process, Pid),
-    erlang:hibernate(?MODULE, native_stop_observer_wait, [MonRef, Pid, Class]).
-
--doc false.
--spec native_stop_observer_wait(reference(), pid(), atom()) -> ok.
-native_stop_observer_wait(MonRef, Pid, Class) ->
-    receive
-        {'DOWN', MonRef, process, Pid, Reason} ->
-            do_announce_actor_lifecycle('ActorStopped', #{
-                actorClass => Class, pid => Pid, reason => normalize_stop_reason(Reason)
-            });
-        _Stray ->
-            %% Nothing sends this process anything; if something does, drop it and
-            %% hibernate again so no stack stays in this module's code.
-            erlang:hibernate(?MODULE, native_stop_observer_wait, [MonRef, Pid, Class])
-    end.
-
-%% BT-4577: register a just-started native actor under its name, or stop it
-%% when the name cannot be registered.
--spec register_native_started(none | {local | global, atom()}, pid()) ->
-    {ok, pid()} | {error, {already_started, pid() | port()} | {register_failed, atom()}}.
-register_native_started(none, Pid) ->
-    {ok, Pid};
-register_native_started({local, Name} = Registration, Pid) ->
-    try register(Name, Pid) of
-        true -> {ok, Pid}
-    catch
-        error:badarg -> refuse_unregistered_native(Registration, Pid)
-    end;
-register_native_started({global, Name} = Registration, Pid) ->
-    ok = record_native_start_time(Pid),
-    case global:register_name(Name, Pid, fun ?MODULE:resolve_global_conflict/3) of
-        yes -> {ok, Pid};
-        no -> refuse_unregistered_native(Registration, Pid)
-    end.
-
-%% BT-4956: give a `native:` actor the `'$beamtalk_actor_started_at'` key that a
-%% compiled actor's generated `init/1` writes (BT-4937), so
-%% `resolve_global_conflict/3` can keep the older of two registrants. The backing
-%% module's process has no generated `init/1`, and a process-dictionary key can
-%% only be written from inside the process, so the write runs there through
-%% `sys:replace_state/3` (the backing module is a `gen_server`, ADR 0056) with
-%% the state returned unchanged. It happens here, before `global:register_name/3`,
-%% so the key exists before the name can conflict; and only for `global`, the
-%% one scope the resolver reads, so anonymous and local starts pay nothing. A key
-%% the backing module already wrote is left alone. A backing process that does
-%% not answer the system message within a second stays untimed until it drains
-%% its queue, and meanwhile behaves as before BT-4956: the other side wins, or
-%% `random_exit_name/3` if neither has one. The stamp it then writes still
-%% carries the registration time, taken before the request.
--spec record_native_start_time(pid()) -> ok.
-record_native_start_time(Pid) ->
-    StartedAt = erlang:system_time(microsecond),
-    Stamp = fun(State) ->
-        case erlang:get('$beamtalk_actor_started_at') of
-            undefined -> erlang:put('$beamtalk_actor_started_at', StartedAt);
-            _Existing -> ok
-        end,
-        State
-    end,
-    try
-        _ = sys:replace_state(Pid, Stamp, 1000),
-        ok
-    catch
-        _:_ -> ok
-    end.
-
-%% A registration failed: stop the new process, and name the holder when the
-%% name really is taken.
--spec refuse_unregistered_native({local | global, atom()}, pid()) ->
-    {error, {already_started, pid() | port()} | {register_failed, atom()}}.
-refuse_unregistered_native({_Scope, Name} = Registration, Pid) ->
-    ok = stop_unregistered_native(Pid),
-    case name_holder(Registration) of
-        undefined -> {error, {register_failed, Name}};
-        Holder -> {error, {already_started, Holder}}
-    end.
-
-%% Stop a native actor whose name could not be registered. Called with exits
-%% trapped: the start link is removed and any `'EXIT'` it already delivered is
-%% dropped, then the process is asked to shut down (running `terminate/2` if
-%% it traps exits, so it can release what its `init/1` opened) and killed if
-%% it is still alive after 5 s. It is awaited through a monitor, since the
-%% backing `start_link` is not guaranteed to link.
--spec stop_unregistered_native(pid()) -> ok.
-stop_unregistered_native(Pid) ->
-    ok = maybe_unlink_started(unlinked, Pid),
-    MonRef = erlang:monitor(process, Pid),
-    exit(Pid, shutdown),
-    receive
-        {'DOWN', MonRef, process, Pid, _} -> ok
-    after 5000 ->
-        exit(Pid, kill),
-        receive
-            {'DOWN', MonRef, process, Pid, _} -> ok
-        end
-    end.
-
--doc """
-Shared linked-start + trap_exit + await_initialize dance for
-`safe_spawn_named/5` and `safe_spawn_linked/2`. `StartFun` performs the
-actual `gen_server:start_link/3,4` call (parametrized so the two callers can
-each pass their own registration shape) on `InitArgs` plus the
-initialize-ack target (with_init_ack/1, BT-3992), and is invoked exactly
-once, with `trap_exit` already set, so a crash during `initialize` delivers
-an `'EXIT'` message here instead of taking this process down.
-
-`Link = unlinked` (BT-3992) removes the start link before `trap_exit` is
-restored, and drops any `'EXIT'` the actor already sent over it. A caller
-that wants the actor unlinked (a class method's `self spawnAs:`, a remote
-spawn's erpc worker) must not unlink afterwards: `spawn` now returns as soon
-as `initialize` has returned, so continuations it requested run
-concurrently with the caller, and one that stops the actor
-(`self stopWith:`) in the window between the restore and the caller's
-`unlink/1` would kill a caller that does not trap exits.
-""".
--spec start_link_and_await(
-    fun((term()) -> {ok, pid()} | {error, term()} | ignore), term(), link_mode()
-) ->
-    {ok, pid()} | {error, term()}.
-start_link_and_await(StartFun, InitArgs, Link) ->
-    OldTrap = erlang:process_flag(trap_exit, true),
-    {AckArgs, AckRef} = with_init_ack(InitArgs),
-    Result = StartFun(AckArgs),
-    case Result of
-        {ok, Pid} ->
-            case await_initialize(Pid, erlang:monitor(process, Pid), AckRef) of
-                ok ->
-                    ok = maybe_unlink_started(Link, Pid),
-                    erlang:process_flag(trap_exit, OldTrap),
-                    {ok, Pid};
-                {error, Reason} ->
-                    %% Kill process if still alive (timeout case: initialize
-                    %% still running but we gave up waiting). Then flush EXIT
-                    %% BEFORE restoring trap_exit to avoid a fatal signal.
-                    exit(Pid, kill),
-                    %% Wait unconditionally — EXIT is guaranteed after kill
-                    receive
-                        {'EXIT', Pid, ExitReason} ->
-                            ok = flush_init_ack(AckRef),
-                            %% BT-3677: `noproc` means the actor died before
-                            %% await_initialize could monitor it, so the monitor
-                            %% lost the real reason. The link (established
-                            %% atomically by start_link) delivered it in the EXIT
-                            %% signal; prefer that. Any other Reason is already
-                            %% the genuine stop reason / timeout, keep it.
-                            erlang:process_flag(trap_exit, OldTrap),
-                            {error, prefer_exit_reason(Reason, ExitReason)}
-                    end
-            end;
-        {error, Reason} ->
-            erlang:process_flag(trap_exit, OldTrap),
-            {error, Reason};
-        ignore ->
-            erlang:process_flag(trap_exit, OldTrap),
-            {error, ignore}
-    end.
-
-%% Unlink a just-started actor (BT-3992) while the caller still traps exits,
-%% then drop an `'EXIT'` that arrived over the link before it was removed —
-%% `unlink/1` guarantees no further link signal once it returns.
--spec maybe_unlink_started(link_mode(), pid()) -> ok.
-maybe_unlink_started(linked, _Pid) ->
-    ok;
-maybe_unlink_started(unlinked, Pid) ->
-    true = unlink(Pid),
-    receive
-        {'EXIT', Pid, _} -> ok
-    after 0 -> ok
-    end.
-
--spec prefer_exit_reason(term(), term()) -> term().
-prefer_exit_reason(noproc, ExitReason) -> ExitReason;
-prefer_exit_reason(Reason, _ExitReason) -> Reason.
-
--doc """
-Shared await_initialize + force-kill-on-timeout tail for the unlinked
-`safe_spawn/2` and `safe_spawn_monitored/2` paths. No link exists to fall
-back on for an 'EXIT' message on the force-kill path, so this monitors
-explicitly to deterministically observe termination before returning.
-
-On success `MonRef` is demonitored (`release`) or left live for the caller
-(`keep`); either way it is answered with the pid. Every failure has consumed
-it (await_initialize/4).
-""".
--spec await_initialize_or_kill_unlinked(
-    pid(), reference(), reference() | none, monitor_mode()
-) ->
-    {ok, {pid(), reference()}} | {error, term()}.
-await_initialize_or_kill_unlinked(Pid, MonRef, AckRef, Mode) ->
-    case await_initialize(Pid, MonRef, AckRef, Mode) of
-        ok ->
-            {ok, {Pid, MonRef}};
-        {error, Reason} ->
-            KillRef = erlang:monitor(process, Pid),
-            exit(Pid, kill),
-            receive
-                {'DOWN', KillRef, process, Pid, _} -> ok
-            end,
-            ok = flush_init_ack(AckRef),
-            {error, Reason}
+            beamtalk_actor_start:safe_start_native(Backing, InitArgs, none, linked)
     end.
 
 %%% Message Send Helpers
@@ -1391,7 +671,7 @@ before anything is sent.
 ) ->
     ok.
 async_send(Ref, Selector, Args, FuturePid) ->
-    async_send_impl(Ref, Selector, Args, FuturePid, undefined).
+    beamtalk_actor_send:async_send_impl(Ref, Selector, Args, FuturePid, undefined).
 
 -doc """
 `async_send/4` for a caller that already holds the actor's class (BT-4949):
@@ -1407,211 +687,7 @@ pid raises as there.
     pid()
 ) -> ok.
 async_send_known(Ref, Class, Selector, Args, FuturePid) ->
-    async_send_impl(Ref, Selector, Args, FuturePid, Class).
-
-%% Lifecycle selectors answered locally with a plain value or error, shared by
-%% async_send_impl/5 and sync_send_pid/4. Each selector is matched with its
-%% exact arity so a wrong-arity send falls through to normal dispatch.
--define(IS_LOCAL_LIFECYCLE(S, A),
-    ((A =:= [] andalso
-        (S =:= isAlive orelse S =:= kill orelse S =:= delegate orelse S =:= pid orelse
-            S =:= monitor)) orelse
-        (S =:= 'onExit:' andalso length(A) =:= 1))
-).
-
--spec local_lifecycle(pid(), atom(), list()) -> {value, term()} | {error, #beamtalk_error{}}.
-local_lifecycle(ActorPid, isAlive, []) ->
-    {value, beamtalk_pid:is_alive(ActorPid)};
-local_lifecycle(ActorPid, kill, []) ->
-    %% Telemetry, monitor-before-kill, and DOWN-wait are in kill_and_wait/1.
-    %% If no DOWN is observed within 5 s we cannot claim success.
-    case kill_and_wait(ActorPid) of
-        ok -> {value, ok};
-        {error, _} = Err -> Err
-    end;
-local_lifecycle(_ActorPid, delegate, []) ->
-    %% Non-native Actors do not have a backing Erlang module.
-    {error, delegate_error(unknown)};
-local_lifecycle(ActorPid, pid, []) ->
-    {value, ActorPid};
-local_lifecycle(ActorPid, monitor, []) ->
-    {value, erlang:monitor(process, ActorPid)};
-local_lifecycle(ActorPid, 'onExit:', [Block]) ->
-    case start_exit_watcher(ActorPid, Block) of
-        ok ->
-            {value, ok};
-        timeout ->
-            {error,
-                beamtalk_error:new(
-                    timeout,
-                    unknown,
-                    'onExit:',
-                    <<"onExit: watcher did not start within 5000ms">>
-                )}
-    end.
-
-%% Spawn a watcher that monitors ActorPid and runs Block(Reason) on exit.
-%% Waits (max 5 s) for the watcher's monitor to be installed before returning,
-%% correlated by a unique token so stale/parallel watchers cannot confuse it.
--spec start_exit_watcher(pid(), fun((term()) -> term())) -> ok | timeout.
-start_exit_watcher(ActorPid, Block) ->
-    Caller = self(),
-    Token = make_ref(),
-    WatcherPid = spawn(fun() ->
-        logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
-        Ref = erlang:monitor(process, ActorPid),
-        Caller ! {onExit_ready, Token},
-        receive
-            {'DOWN', Ref, process, ActorPid, Reason} ->
-                %% bt-catcher-audit: not-applicable-other-process - onExit block runs in the
-                %% spawned watcher, no home entry
-                try
-                    Block(Reason)
-                catch
-                    Class:Err:Stack ->
-                        ?LOG_WARNING("Error in onExit: callback", #{
-                            domain => [beamtalk, runtime],
-                            actor_pid => ActorPid,
-                            exit_reason => Reason,
-                            error_class => Class,
-                            error => Err,
-                            stacktrace => Stack
-                        })
-                end
-        end
-    end),
-    receive
-        {onExit_ready, Token} -> ok
-    after 5000 ->
-        %% Kill the watcher to prevent ghost callbacks and flush stale token.
-        exit(WatcherPid, kill),
-        receive
-            {onExit_ready, Token} -> ok
-        after 0 -> ok
-        end,
-        timeout
-    end.
-
--spec async_send_impl(
-    pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()},
-    atom(),
-    list(),
-    pid(),
-    atom() | undefined
-) -> ok.
-%% ADR 0079 / ADR 0126: name-resolving proxy fan-out. Name-only selectors
-%% answer from the proxy itself; other selectors resolve the name to the
-%% currently-registered pid and re-enter the pid-based clauses below.
-async_send_impl(Ref, Selector, Args, FuturePid, ClassHint) when ?IS_PROXY_REF(Ref) ->
-    case proxy_route(Ref, Selector, Args) of
-        {answer, Value} ->
-            beamtalk_future:resolve(FuturePid, Value),
-            ok;
-        {pid, Pid} ->
-            async_send_impl(Pid, Selector, Args, FuturePid, ClassHint);
-        {error, Error} ->
-            beamtalk_future:reject(FuturePid, Error),
-            ok
-    end;
-async_send_impl(ActorPid, Selector, Args, FuturePid, _ClassHint) when
-    ?IS_LOCAL_LIFECYCLE(Selector, Args)
-->
-    %% Local lifecycle selectors share one table with sync_send_pid/4.
-    case local_lifecycle(ActorPid, Selector, Args) of
-        {value, Value} -> beamtalk_future:resolve(FuturePid, Value);
-        {error, Error} -> beamtalk_future:reject(FuturePid, Error)
-    end,
-    ok;
-async_send_impl(ActorPid, isRemote, [], FuturePid, _ClassHint) ->
-    %% isRemote must compare against the *caller's* node, so it cannot run
-    %% in the actor — see is_remote/2.
-    try sync_send(ActorPid, isRemote, []) of
-        Result -> beamtalk_future:resolve(FuturePid, Result)
-    catch
-        error:#beamtalk_error{} = Error ->
-            beamtalk_future:reject(FuturePid, Error);
-        error:#{error := #beamtalk_error{} = Error} ->
-            beamtalk_future:reject(FuturePid, Error);
-        Class:Reason ->
-            Error = beamtalk_error:with_details(
-                beamtalk_error:new(runtime_error, unknown, isRemote),
-                #{original_class => Class, original_reason => Reason}
-            ),
-            beamtalk_future:reject(FuturePid, Error)
-    end,
-    ok;
-async_send_impl(ActorPid, stop, [], FuturePid, _ClassHint) ->
-    %% stop is handled locally - gracefully stops the actor process
-    %% No send-site telemetry for stop — terminate/2 handles it
-    %% to avoid double-counting (request + termination).
-    async_stop(ActorPid, normal, ?STOP_TIMEOUT, stop, FuturePid);
-async_send_impl(ActorPid, 'stopWith:', [Reason], FuturePid, _ClassHint) ->
-    %% BT-3967: stop with a caller-chosen exit reason.
-    async_stop(ActorPid, Reason, ?STOP_TIMEOUT, 'stopWith:', FuturePid);
-async_send_impl(ActorPid, 'stopWith:timeout:', [Reason, Timeout], FuturePid, _ClassHint) ->
-    case is_stop_timeout(Timeout) of
-        true ->
-            async_stop(ActorPid, Reason, Timeout, 'stopWith:timeout:', FuturePid);
-        false ->
-            beamtalk_future:reject(FuturePid, stop_timeout_type_error('stopWith:timeout:')),
-            ok
-    end;
-async_send_impl(ActorPid, 'continueWith:' = Selector, [ContSelector], FuturePid, _ClassHint) ->
-    %% BT-3968: only meaningful on `self`; raises in the caller otherwise.
-    async_request_continuation(ActorPid, Selector, ContSelector, none, FuturePid);
-async_send_impl(
-    ActorPid,
-    'continueWith:withArguments:' = Selector,
-    [ContSelector, ContArgs],
-    FuturePid,
-    _ClassHint
-) ->
-    async_request_continuation(ActorPid, Selector, ContSelector, {args, ContArgs}, FuturePid);
-async_send_impl(ActorPid, Selector, _Args, FuturePid, ClassHint) when
-    node(ActorPid) =/= node()
-->
-    %% ADR 0126 (Amendment BT-4989): a remote async send is not supported. No
-    %% compiled actor decodes an async wire envelope, so the future would
-    %% never resolve. Settle the future and fail at once, before anything is
-    %% sent, so no process is left waiting on it.
-    Error = remote_async_unsupported_error(Selector, ClassHint),
-    beamtalk_future:reject(FuturePid, Error),
-    beamtalk_error:raise(Error);
-async_send_impl(ActorPid, Selector, Args, FuturePid, ClassHint) ->
-    %% Instrumented dispatch span (ADR 0069 Phase 2a; BT-4113: events opt-in).
-    %% Measures dispatch-to-mailbox time for async sends.
-    Class = resolve_class(ActorPid, ClassHint),
-    %% Check liveness before sending, and spawn a watcher to detect
-    %% actor death during message processing. The watcher monitors both the
-    %% actor and future processes: if the actor dies before the future is
-    %% resolved, the watcher rejects the future with a structured error.
-    beamtalk_telemetry:dispatch_span(ActorPid, Class, Selector, async, fun() ->
-        case beamtalk_pid:is_alive(ActorPid) of
-            true ->
-                PropCtx = get_propagated_ctx(),
-                gen_server:cast(ActorPid, {Selector, Args, FuturePid, PropCtx}),
-                spawn_future_watcher(ActorPid, FuturePid, Selector),
-                {ok, ok};
-            false ->
-                beamtalk_future:reject(FuturePid, actor_dead_error_record(Selector)),
-                {ok, error}
-        end
-    end),
-    ok.
-
--spec remote_async_unsupported_error(atom(), atom() | undefined) -> #beamtalk_error{}.
-remote_async_unsupported_error(Selector, ClassHint) ->
-    Class =
-        case ClassHint of
-            undefined -> unknown;
-            _ -> ClassHint
-        end,
-    beamtalk_error:new(
-        unsupported_operation,
-        Class,
-        Selector,
-        <<"Async sends to an actor on another node are not supported (ADR 0126); use a sync send (.) or a cast (!)">>
-    ).
+    beamtalk_actor_send:async_send_impl(Ref, Selector, Args, FuturePid, Class).
 
 -doc """
 Send a fire-and-forget message to an actor (no future, no return value).
@@ -1630,13 +706,13 @@ there is no liveness pre-check (BT-4113).
 %% `registeredName`) are NOT answered locally — a cast has no reply to carry
 %% an answer, so they are forwarded like any other selector.
 cast_send(Ref, Selector, Args) when ?IS_PROXY_REF(Ref) ->
-    case resolve_proxy(Ref) of
+    case beamtalk_actor_send:resolve_proxy(Ref) of
         {ok, Pid} -> cast_send(Pid, Selector, Args);
         undefined -> ok;
         {node_down, _Node} -> ok
     end;
 cast_send(ActorPid, Selector, Args) ->
-    cast_send_pid(ActorPid, Selector, Args, undefined).
+    beamtalk_actor_send:cast_send_pid(ActorPid, Selector, Args, undefined).
 
 -doc """
 `cast_send/3` for a caller that already holds the actor's class (BT-4113):
@@ -1651,62 +727,9 @@ in `cast_send/3`.
     list()
 ) -> ok.
 cast_send_known(ActorPid, Class, Selector, Args) when is_pid(ActorPid) ->
-    cast_send_pid(ActorPid, Selector, Args, Class);
+    beamtalk_actor_send:cast_send_pid(ActorPid, Selector, Args, Class);
 cast_send_known(Ref, _Class, Selector, Args) ->
     cast_send(Ref, Selector, Args).
-
--spec cast_send_pid(pid(), atom(), list(), atom() | undefined) -> ok.
-cast_send_pid(ActorPid, 'continueWith:' = Selector, [ContSelector], _Class) ->
-    %% BT-3968: `actor continueWith: #x!` from another process is caller
-    %% misuse, not a remote request — raise in the caller rather than cast.
-    request_continuation(ActorPid, Selector, ContSelector, none);
-cast_send_pid(ActorPid, 'continueWith:withArguments:' = Selector, [ContSelector, ContArgs], _Class) ->
-    request_continuation(ActorPid, Selector, ContSelector, {args, ContArgs});
-cast_send_pid(ActorPid, Selector, Args, ClassHint) ->
-    %% Instrumented dispatch span (ADR 0069 Phase 2a; BT-4113: events opt-in).
-    %% Measures dispatch-to-mailbox time for cast sends. No liveness
-    %% pre-check: `gen_server:cast/2` to a dead pid is already a silent no-op,
-    %% which is exactly the fire-and-forget contract.
-    Class = resolve_class(ActorPid, ClassHint),
-    beamtalk_telemetry:dispatch_span(ActorPid, Class, Selector, cast, fun() ->
-        PropCtx = get_propagated_ctx(),
-        case node(ActorPid) =/= node() of
-            true ->
-                case beamtalk_wire:encode(Args) of
-                    {ok, WireArgs} ->
-                        gen_server:cast(
-                            ActorPid,
-                            {?BT_WIRE_TAG, ?BT_WIRE_VERSION, cast, Selector, WireArgs, PropCtx}
-                        ),
-                        {ok, cast};
-                    {error, Error} ->
-                        %% Fire-and-forget: no caller to tell (mirrors
-                        %% the receiver-side cast-skew handling, ADR
-                        %% 0126 §5.2) — log and drop, matching Erlang's
-                        %% fire-and-forget semantics.
-                        ?LOG_WARNING("Cast argument not serialisable for remote send", #{
-                            selector => Selector,
-                            pid => ActorPid,
-                            error => Error,
-                            domain => [beamtalk, runtime, dist]
-                        }),
-                        {ok, cast}
-                end;
-            false ->
-                gen_server:cast(ActorPid, {cast, Selector, Args, PropCtx}),
-                {ok, cast}
-        end
-    end),
-    ok.
-
--doc """
-The class to report for a send to `Pid`: the caller's `ClassHint` when it
-has one (BT-4113, from the `#beamtalk_object{}` record — also the only way a
-remote pid's class is known, ADR 0126 §7.3), else `lookup_class/1`.
-""".
--spec resolve_class(pid(), atom() | undefined) -> atom().
-resolve_class(Pid, undefined) -> lookup_class(Pid);
-resolve_class(_Pid, Class) -> Class.
 
 -doc """
 Send a synchronous message to an actor, with lifecycle handling.
@@ -1734,9 +757,11 @@ All other messages go via gen_server:call and the result is unwrapped:
 %% proxy itself; other methods resolve to the currently-registered pid,
 %% raising `no_such_process` if the name has vanished.
 sync_send(Ref, Selector, Args) when ?IS_PROXY_REF(Ref) ->
-    sync_send_proxy(Ref, Selector, Args, fun(Pid) -> sync_send(Pid, Selector, Args) end);
+    beamtalk_actor_send:sync_send_proxy(Ref, Selector, Args, fun(Pid) ->
+        sync_send(Pid, Selector, Args)
+    end);
 sync_send(ActorPid, Selector, Args) ->
-    sync_send_pid(ActorPid, Selector, Args, undefined).
+    beamtalk_actor_send:sync_send_pid(ActorPid, Selector, Args, undefined).
 
 -doc """
 `sync_send/3` for a caller that already holds the actor's class (BT-4113):
@@ -1751,7 +776,7 @@ in `sync_send/3`.
     list()
 ) -> term().
 sync_send_known(ActorPid, Class, Selector, Args) when is_pid(ActorPid) ->
-    sync_send_pid(ActorPid, Selector, Args, Class);
+    beamtalk_actor_send:sync_send_pid(ActorPid, Selector, Args, Class);
 sync_send_known(Ref, _Class, Selector, Args) ->
     sync_send(Ref, Selector, Args).
 
@@ -1767,225 +792,9 @@ actor's class — see `sync_send_known/4`.
     timeout()
 ) -> term().
 sync_send_known(ActorPid, Class, Selector, Args, Timeout) when is_pid(ActorPid) ->
-    sync_send_pid(ActorPid, Selector, Args, Timeout, Class);
+    beamtalk_actor_send:sync_send_pid(ActorPid, Selector, Args, Timeout, Class);
 sync_send_known(Ref, _Class, Selector, Args, Timeout) ->
     sync_send(Ref, Selector, Args, Timeout).
-
--doc """
-The pid clauses of `sync_send/3`: lifecycle selectors answered locally, and
-every other message through the Layer 1 self-send check. `ClassHint` is the
-caller's class, or `undefined` to look it up (see `resolve_class/2`).
-""".
--spec sync_send_pid(pid(), atom(), list(), atom() | undefined) -> term().
-sync_send_pid(ActorPid, Selector, Args, _Class) when ?IS_LOCAL_LIFECYCLE(Selector, Args) ->
-    case local_lifecycle(ActorPid, Selector, Args) of
-        {value, Value} -> Value;
-        {error, Error} -> beamtalk_exception_handler:reraise(Error)
-    end;
-sync_send_pid(ActorPid, isRemote, [], _Class) ->
-    is_remote(ActorPid, fun() -> sync_send(ActorPid, node, []) end);
-sync_send_pid(ActorPid, stop, [], _Class) ->
-    %% stop is handled locally - gracefully stops the actor process
-    %% No send-site telemetry for stop — terminate/2 handles it
-    %% to avoid double-counting (request + termination).
-    sync_stop(ActorPid, normal, ?STOP_TIMEOUT, stop);
-sync_send_pid(ActorPid, 'stopWith:', [Reason], _Class) ->
-    %% BT-3967: stop with a caller-chosen exit reason.
-    sync_stop(ActorPid, Reason, ?STOP_TIMEOUT, 'stopWith:');
-sync_send_pid(ActorPid, 'stopWith:timeout:', [Reason, Timeout], _Class) ->
-    case is_stop_timeout(Timeout) of
-        true ->
-            sync_stop(ActorPid, Reason, Timeout, 'stopWith:timeout:');
-        false ->
-            beamtalk_exception_handler:reraise(stop_timeout_type_error('stopWith:timeout:'))
-    end;
-sync_send_pid(ActorPid, 'continueWith:' = Selector, [ContSelector], _Class) ->
-    %% BT-3968: record a follow-up step for the current callback (self only).
-    request_continuation(ActorPid, Selector, ContSelector, none);
-sync_send_pid(ActorPid, 'continueWith:withArguments:' = Selector, [ContSelector, ContArgs], _Class) ->
-    request_continuation(ActorPid, Selector, ContSelector, {args, ContArgs});
-sync_send_pid(ActorPid, Selector, Args, ClassHint) ->
-    %% Layer 1: Fast-path for self-sends.
-    %% If ActorPid is our own process AND the installed cell holds our own
-    %% state (meaning we're inside a handle_call/handle_cast dispatch),
-    %% dispatch directly to avoid gen_server:call deadlock. This catches
-    %% aliased self-sends like:
-    %%   other := self. other fieldNames
-    case self_send_kind(ActorPid) of
-        self ->
-            self_dispatch(Selector, Args);
-        remote ->
-            sync_send_remote(ActorPid, Selector, Args, ClassHint);
-        foreign ->
-            raise_self_send_during_away_super(ActorPid, Selector)
-    end.
-
--doc """
-Remote sync-send via gen_server:call (the normal path).
-Factored out of sync_send/3 for Layer 1 self-send fast-path.
-
-TimeoutProxy manages its own timeout on the inner (proxy→target) hop, so
-the outer (caller→proxy) hop uses `infinity` so it doesn't time out before
-the proxy's configured timeout expires. Every other actor uses
-`gen_server:call/2`'s 5000ms default.
-""".
--spec sync_send_remote(pid(), atom(), list(), atom() | undefined) -> term().
-sync_send_remote(ActorPid, Selector, Args, ClassHint) ->
-    Class = resolve_class(ActorPid, ClassHint),
-    CallTimeout =
-        case Class of
-            'TimeoutProxy' -> infinity;
-            _ -> default
-        end,
-    sync_call(ActorPid, Selector, Args, CallTimeout, Class).
-
--doc """
-The instrumented `gen_server:call` shared by `sync_send/3` (via
-`sync_send_remote/4`) and `sync_send/4`.
-
-The dispatch span (ADR 0069 Phase 2a) measures caller-perspective round-trip
-time and records the always-on aggregate; it emits telemetry events only
-when dispatch events are enabled (BT-4113). A raise inside the span is
-re-raised with its original class and reason, so the outer try/catch can
-convert exits into structured errors.
-
-No liveness pre-check (BT-4113): `gen_server:call` to a dead actor exits
-`noproc` (or `normal`/`shutdown` if it dies mid-call), which the catch
-clauses below already map to `actor_dead` — without the snapshot race a
-pre-check had.
-
-Generated handle_call/3 wraps replies as {ok, Result} or {error, Error}, and
-the reply is unwrapped here so callers receive the value directly. The
-{error, Error} case has three sub-forms due to the safe_dispatch layer:
-  1. Error = {ErlType, Value, Stacktrace} — with captured stacktrace
-  2. Error = {ErlType, Value} — backward compat: without stacktrace
-  3. Error = other term — e.g. #beamtalk_error{} from dispatch_user_method
-All forms are re-raised as Erlang exceptions so the caller sees them.
-""".
--spec sync_call(pid(), atom(), list(), default | timeout(), atom()) -> term().
-sync_call(ActorPid, Selector, Args, CallTimeout, Class) ->
-    try
-        beamtalk_telemetry:dispatch_span(ActorPid, Class, Selector, sync, fun() ->
-            PropCtx = get_sync_propagated_ctx(),
-            %% Layer 2: Check for transitive cycles before gen_server:call.
-            %% If ActorPid is already in the call stack, this send would deadlock.
-            check_call_stack(ActorPid, Selector),
-            case wire_sync_call(ActorPid, Selector, Args, PropCtx, CallTimeout) of
-                {ok, Result} ->
-                    {Result, ok};
-                {error, {ErlType, ErrorValue, Stacktrace}} ->
-                    %% safe_dispatch caught an Erlang exception with stacktrace;
-                    %% re-raise with full type/stacktrace context, attaching the
-                    %% active selector/class breadcrumb so a raw error escaping
-                    %% the method is classified *and* located.
-                    beamtalk_exception_handler:reraise(ErlType, ErrorValue, Stacktrace, #{
-                        selector => Selector, class => Class
-                    });
-                {error, {ErlType, ErrorValue}} ->
-                    %% Backward compat: safe_dispatch without stacktrace —
-                    %% still pass exception class to preserve error kind
-                    beamtalk_exception_handler:reraise(ErlType, ErrorValue, []);
-                {error, Nlr} when ?IS_NLR(Nlr) ->
-                    %% A `^` inside a block invoked on ActorPid on our
-                    %% behalf (BT-3582). The matching catch frame is in
-                    %% *our* process — ActorPid had no frame holding
-                    %% that token, so its reply is the only way the
-                    %% signal gets back here. Re-throw so the enclosing
-                    %% method unwinds as it would have without the
-                    %% process hop — same relay shape as
-                    %% beamtalk_class_dispatch.erl's class-method hops.
-                    %% The block was away from home in ActorPid, which
-                    %% `rethrow_from_away/1` tells the test-build commit
-                    %% check (BT-4536).
-                    beamtalk_actor_state:rethrow_from_away(Nlr);
-                {error, Error} ->
-                    beamtalk_exception_handler:reraise(Error);
-                DirectValue ->
-                    %% Backward compat: a hand-written gen_server that answers with an
-                    %% unwrapped value.
-                    {DirectValue, ok}
-            end
-        end)
-    catch
-        exit:Reason:Stack ->
-            %% BT-4676: classification lives in beamtalk_call_failure. ADR 0126
-            %% §7.1: a partitioned or never-connected node is `node_down` (the
-            %% actor may be alive on the far side), not `actor_dead`.
-            case beamtalk_call_failure:classify(exit, Reason) of
-                dead ->
-                    raise_actor_dead(Selector);
-                timeout ->
-                    raise_timeout(Selector);
-                {unreachable, _Why} ->
-                    raise_node_down(
-                        beamtalk_call_failure:unreachable_node(Reason, node(ActorPid)), Selector
-                    );
-                other when is_tuple(Reason), tuple_size(Reason) =:= 2 ->
-                    %% `{normal, _}`, `{shutdown, _}`, `{killed, _}`, custom stop
-                    %% reasons: the actor died mid-call, so it is unavailable.
-                    raise_actor_dead(Selector);
-                other ->
-                    erlang:raise(exit, Reason, Stack)
-            end
-    end.
-
--doc """
-Sync `gen_server:call` for both the local and remote (ADR 0126 §5.1) paths,
-called from `sync_call/5` (shared by `sync_send/3` and `sync_send/4`). `CallTimeout` is `default`
-(use `gen_server:call/2`'s own 5000ms default), `infinity`, or a
-non-negative integer millisecond timeout — mirroring the two call shapes the
-two callers already had before this helper existed.
-
-Remote is decided by `node(ActorPid) =/= node()` — one comparison, the only
-added cost for a local call (ADR 0126 §5.1 constraint 2). A remote call
-wire-encodes `Args` and tags the message so the receiver's `handle_call`
-prelude recognises it, then decodes the raw reply that comes back through
-the ordinary `gen_server:call` reply path — `decode_call_result/2` reraises
-on a reply-direction decode failure (§5.2) rather than returning a
-half-decoded term. An encode failure on `Args` is a request-direction
-failure (§5.2): it never reaches the network, and is raised here in the
-caller, exactly as `beamtalk_wire:encode/1`'s own doc promises.
-""".
--spec wire_sync_call(pid(), atom(), list(), map(), default | timeout()) -> term().
-wire_sync_call(ActorPid, Selector, Args, PropCtx, CallTimeout) ->
-    case node(ActorPid) =/= node() of
-        true ->
-            case beamtalk_wire:encode(Args) of
-                {ok, WireArgs} ->
-                    Msg = {?BT_WIRE_TAG, ?BT_WIRE_VERSION, call, Selector, WireArgs, PropCtx},
-                    RawResult = local_call(ActorPid, Msg, CallTimeout),
-                    decode_call_result(RawResult, Selector);
-                {error, EncErr} ->
-                    beamtalk_exception_handler:reraise(EncErr#beamtalk_error{selector = Selector})
-            end;
-        false ->
-            local_call(ActorPid, {Selector, Args, PropCtx}, CallTimeout)
-    end.
-
--spec local_call(pid(), term(), default | timeout()) -> term().
-local_call(ActorPid, Msg, default) ->
-    gen_server:call(ActorPid, Msg);
-local_call(ActorPid, Msg, Timeout) ->
-    gen_server:call(ActorPid, Msg, Timeout).
-
--doc """
-Decode a raw reply that came back from a remote `gen_server:call` (ADR 0126
-§5.1's "Result path" table). A decode failure here is reply-direction skew
-(§5.2): the method has already run on the callee and its state has changed,
-so this raises — `direction => reply` is merged into the error's `details`
-so it reads distinctly from the identically-kinded request-direction
-failure, which never reaches a method body at all.
-""".
--spec decode_call_result(term(), atom()) -> term().
-decode_call_result(RawResult, Selector) ->
-    case beamtalk_wire:decode(RawResult) of
-        {ok, Decoded} ->
-            Decoded;
-        {error, #beamtalk_error{details = Details} = Err} ->
-            beamtalk_exception_handler:reraise(Err#beamtalk_error{
-                selector = Selector, details = Details#{direction => reply}
-            })
-    end.
 
 -doc """
 Sync-send with explicit timeout.
@@ -2004,143 +813,11 @@ Used by TimeoutProxy to forward messages with a custom timeout.
 %% ADR 0079: name-resolving proxy fan-out for the explicit-timeout path;
 %% shares one body with sync_send/3 (BT-4676).
 sync_send(Ref, Selector, Args, Timeout) when ?IS_PROXY_REF(Ref) ->
-    sync_send_proxy(Ref, Selector, Args, fun(Pid) -> sync_send(Pid, Selector, Args, Timeout) end);
+    beamtalk_actor_send:sync_send_proxy(Ref, Selector, Args, fun(Pid) ->
+        sync_send(Pid, Selector, Args, Timeout)
+    end);
 sync_send(ActorPid, Selector, Args, Timeout) ->
-    sync_send_pid(ActorPid, Selector, Args, Timeout, undefined).
-
--doc """
-The pid clauses of `sync_send/4`; `ClassHint` as in `sync_send_pid/4`.
-""".
--spec sync_send_pid(pid(), atom(), list(), timeout(), atom() | undefined) -> term().
-sync_send_pid(ActorPid, isRemote, [], Timeout, _ClassHint) ->
-    is_remote(ActorPid, fun() -> sync_send(ActorPid, node, [], Timeout) end);
-sync_send_pid(ActorPid, Selector, Args, _Timeout, _ClassHint) when
-    Selector =:= 'continueWith:'; Selector =:= 'continueWith:withArguments:'
-->
-    %% BT-3968: never forwarded to the actor — a continuation can only be
-    %% requested by the actor's own callback (see sync_send/3).
-    sync_send(ActorPid, Selector, Args);
-sync_send_pid(ActorPid, Selector, Args, Timeout, ClassHint) when
-    is_integer(Timeout), Timeout >= 0;
-    Timeout =:= infinity
-->
-    %% Layer 1: Fast-path for self-sends (same as sync_send/3).
-    case self_send_kind(ActorPid) of
-        self ->
-            self_dispatch(Selector, Args);
-        remote ->
-            sync_call(ActorPid, Selector, Args, Timeout, resolve_class(ActorPid, ClassHint));
-        foreign ->
-            raise_self_send_during_away_super(ActorPid, Selector)
-    end;
-sync_send_pid(_ActorPid, Selector, _Args, _InvalidTimeout, _ClassHint) ->
-    Error = beamtalk_error:new(
-        type_error,
-        unknown,
-        Selector,
-        <<"Timeout must be a non-negative integer (milliseconds) or #infinity">>
-    ),
-    beamtalk_exception_handler:reraise(Error).
-
--doc """
-How a sync send to `ActorPid` from this process should go (Layer 1).
-
-`self` (our own pid with our own state installed) dispatches directly.
-`remote` is the normal `gen_server:call` path — including our own pid with
-no cell installed, exactly as before. `foreign` is our own pid while the
-cell holds another actor's state (stored by a nested away `super_send/5`):
-the remote path could never serve our own pid (`gen_server:call` to self
-exits `calling_self`, which the catch-all would misreport as `actor_dead`),
-so the send sites raise `deadlock_detected` instead.
-""".
--spec self_send_kind(pid() | tuple()) -> self | remote | foreign.
-self_send_kind(ActorPid) ->
-    case ActorPid =:= self() of
-        true ->
-            case beamtalk_actor_state:cell_owner() of
-                ActorPid -> self;
-                undefined -> remote;
-                _Foreign -> foreign
-            end;
-        false ->
-            remote
-    end.
-
--doc """
-Raise a structured `deadlock_detected` error for a self-send issued while
-another actor's state is installed in this process's cell (a nested away
-`super_send/5`): our own callback is blocked in that call, so the send could
-never be served.
-""".
--spec raise_self_send_during_away_super(pid(), atom()) -> no_return().
-raise_self_send_during_away_super(ActorPid, Selector) ->
-    Class = lookup_class(ActorPid),
-    Error = beamtalk_error:new(
-        deadlock_detected,
-        Class,
-        Selector,
-        <<
-            "Sync send to own actor while another actor's state is installed: ",
-            "the actor is blocked in the call that carried the block away"
-        >>
-    ),
-    Error1 = beamtalk_error:with_details(Error, #{
-        target_pid => ActorPid,
-        cell_owner => beamtalk_actor_state:cell_owner()
-    }),
-    beamtalk_exception_handler:reraise(Error1).
-
--doc """
-Direct self-dispatch for re-entrant self-sends (Layer 1).
-
-When sync_send detects ActorPid == self(), we dispatch directly using
-the State stashed in the process dictionary by handle_call/handle_cast.
-This avoids the gen_server:call deadlock for aliased self-sends like
-`other := self. other fieldNames`.
-
-Returns the unwrapped result (same as sync_send would return), or
-raises an error exception on dispatch failure.
-""".
--spec self_dispatch(atom(), list()) -> term().
-self_dispatch(Selector, Args) ->
-    State = beamtalk_actor_state:take(),
-    %% Compiled actors have their own safe_dispatch/3 in the generated module;
-    %% `'__class_mod__'` names it.
-    ClassMod = maps:get('__class_mod__', State),
-    DispatchResult = ClassMod:safe_dispatch(Selector, Args, State),
-    unwrap_dispatch_result(DispatchResult).
-
--doc """
-Unwrap a dispatch result, update pdict state, and return the value.
-Used by self_dispatch/2 to avoid repeating the put/error pattern.
-
-A `^` that unwound the callee (`safe_dispatch` answers `{error, Nlr,
-EntryState}`) is re-thrown unchanged, with no store to the cell (ADR 0146 R3,
-BT-4525): the cell already holds the callee's writes (every compiled method
-stores before a call that may run the block), and storing `EntryState` would
-rewind it; turning the throw into an error would stop the owner's method
-boundary from catching it.
-""".
--spec unwrap_dispatch_result(
-    {reply, term(), map()} | {noreply, map()} | {error, term(), map()}
-) -> term().
-unwrap_dispatch_result({error, Nlr, _EntryState}) when ?IS_NLR(Nlr) ->
-    throw(Nlr);
-unwrap_dispatch_result(DispatchResult) ->
-    case beamtalk_actor_state:adapt(DispatchResult) of
-        {reply, Result} ->
-            Result;
-        noreply ->
-            nil;
-        {error, {ErlType, ErrorValue, Stacktrace}} ->
-            %% safe_dispatch with stacktrace
-            beamtalk_exception_handler:reraise(ErlType, ErrorValue, Stacktrace);
-        {error, {ErlType, ErrorValue}} ->
-            %% Backward compat: preserve exception class without stacktrace
-            beamtalk_exception_handler:reraise(ErlType, ErrorValue, []);
-        {error, Reason} ->
-            beamtalk_exception_handler:reraise(Reason)
-    end.
+    beamtalk_actor_send:sync_send_pid(ActorPid, Selector, Args, Timeout, undefined).
 
 -doc """
 Restore pdict entries after a dispatch completes.
@@ -2153,281 +830,6 @@ restore_dispatch_pdict(OldState) ->
     _ = erase(?CALL_FROM_KEY),
     erase(?BT_CALL_STACK_KEY),
     ok.
-
--doc """
-Check call stack for transitive cycles (Layer 2).
-
-Before gen_server:call, verify that the target ActorPid is not already
-in the call chain. If it is, a sync send would deadlock (A->B->C->A).
-Raises a structured deadlock_detected error with the cycle path.
-""".
--spec check_call_stack(pid(), atom()) -> ok.
-check_call_stack(ActorPid, Selector) ->
-    case get(?BT_CALL_STACK_KEY) of
-        undefined ->
-            ok;
-        CallStack ->
-            case lists:member(ActorPid, CallStack) of
-                false ->
-                    ok;
-                true ->
-                    raise_call_cycle(ActorPid, Selector, CallStack)
-            end
-    end.
-
--spec raise_call_cycle(pid(), atom(), [pid()]) -> no_return().
-raise_call_cycle(ActorPid, Selector, CallStack) ->
-    Class = lookup_class(ActorPid),
-    Error = beamtalk_error:new(
-        deadlock_detected,
-        Class,
-        Selector,
-        <<"Sync send would deadlock: target actor is already in the call chain">>
-    ),
-    Error1 = beamtalk_error:with_details(Error, #{
-        call_stack => CallStack,
-        target_pid => ActorPid
-    }),
-    beamtalk_exception_handler:reraise(Error1).
-
--doc """
-Raise a structured actor_dead error as an Erlang exception.
-
-Used by sync_send/3 to signal that the actor process is not available.
-The caller will see a beamtalk_error{kind = actor_dead} exception.
-""".
--spec raise_actor_dead(atom()) -> no_return().
-raise_actor_dead(Selector) ->
-    beamtalk_exception_handler:reraise(actor_dead_error_record(Selector)).
-
--doc """
-Raise a structured timeout error as an Erlang exception.
-
-Used by sync_send/3 when gen_server:call exceeds the timeout (default 5000ms).
-A timeout means the actor didn't respond in time, NOT that it's dead —
-it may be slow, overloaded, or deadlocked.
-""".
--spec raise_timeout(atom()) -> no_return().
-raise_timeout(Selector) ->
-    Error = beamtalk_error:actor_timeout(Selector),
-    beamtalk_exception_handler:reraise(Error).
-
--doc "Construct a structured actor_dead error record for the given selector.".
--spec actor_dead_error_record(atom()) -> #beamtalk_error{}.
-actor_dead_error_record(Selector) ->
-    beamtalk_error:actor_dead(unknown, Selector).
-
--doc """
-Raise a structured node_down error as an Erlang exception (ADR 0126 §7.1).
-
-Used by sync_call/5 (sync_send/3,4) when gen_server:call exits with
-`{nodedown, Node}` (partitioned or never-connected node), and by
-spawn_future_watcher/3 for the equivalent monitor DOWN reason. Distinct
-from actor_dead: the node is unreachable, but the actor may be alive and
-well on the far side once the partition heals — retry logic needs to be
-able to tell the two apart.
-""".
--spec raise_node_down(node(), atom()) -> no_return().
-raise_node_down(Node, Selector) ->
-    beamtalk_exception_handler:reraise(node_down_error_record(Node, Selector)).
-
--doc """
-Answer an actor's `isRemote` (ADR 0126 §2) from the `Node` its `node` send
-returned: `true` iff that node is not the *caller's*. This is why `isRemote`
-is intercepted in `sync_send/3,4` / `async_send/4` rather than dispatched to
-the actor — inside the actor, `node()` is always the actor's own node. Going
-through the `node` send (not `node(ActorPid)`) lets a `TimeoutProxy` report
-its target's node (§6).
-
-Falls back to the pid's own node when the actor cannot answer `node` with a
-`Node` — a user class that overrides `node` for its own meaning (a graph
-walker's current node, say), or a `native:` actor whose backing module does
-not implement it — so `isRemote` never crashes on a well-formed actor.
-""".
--spec is_remote(pid(), fun(() -> term())) -> boolean().
-is_remote(ActorPid, AskNode) ->
-    NodeName =
-        %% bt-catcher-audit: not-applicable-other-process - AskNode is a gen_server:call to the
-        %% actor
-        try AskNode() of
-            #{'$beamtalk_class' := 'Node', name := Name} when is_atom(Name) -> Name;
-            _NotANode -> node(ActorPid)
-        catch
-            error:#beamtalk_error{kind = does_not_understand} ->
-                node(ActorPid);
-            error:#{error := #beamtalk_error{kind = does_not_understand}} ->
-                node(ActorPid)
-        end,
-    NodeName =/= node().
-
--doc "Construct a structured node_down error record for the given node and selector.".
--spec node_down_error_record(node(), atom()) -> #beamtalk_error{}.
-node_down_error_record(Node, Selector) ->
-    beamtalk_error:node_down(unknown, Selector, Node).
-
--doc """
-ADR 0126 §3: resolve a `{registered, Name, Node}` proxy's live pid.
-
-`Node =:= node()` degrades to the ordinary local `erlang:whereis/1` the
-two-tuple `{registered, Name}` clauses already use — a node-qualified ref
-that happens to name the caller's own node (e.g. `named:on:` targeting the
-caller's node) needs no network hop. Otherwise resolves via `erpc:call/5`,
-which also surfaces a genuinely unreachable `Node` as `node_down` rather
-than letting the caller misreport it as `no_such_process` (the name may well
-be registered there — the node just cannot be asked).
-""".
--spec resolve_remote_registered(atom(), node()) -> pid() | undefined | node_down.
-resolve_remote_registered(Name, Node) when Node =:= node() ->
-    erlang:whereis(Name);
-resolve_remote_registered(Name, Node) ->
-    %% Every erpc-level failure (an unusual reason, or the remote
-    %% erlang:whereis/1 itself somehow raising) collapses to the same
-    %% node_down sentinel: this is a best-effort existence check, so "could
-    %% not determine" and "node unreachable" are the same actionable fact.
-    case beamtalk_call_failure:erpc(Node, erlang, whereis, [Name], ?BT_REMOTE_CALL_TIMEOUT) of
-        {ok, Pid} when is_pid(Pid) -> Pid;
-        {ok, undefined} -> undefined;
-        {error, _} -> node_down
-    end.
-
--doc """
-BT-4676: the one resolver for name-resolving proxy refs (ADR 0079, 0126).
-Answers the live pid, `undefined` when the name is not registered, or
-`{node_down, Node}` when a node-qualified ref cannot be resolved because
-`Node` is unreachable. Used by every send path (`async_send/4`, `cast_send/3`,
-`sync_send/3,4`) so the three ref shapes are handled in exactly one place.
-""".
--spec resolve_proxy(proxy_ref()) -> {ok, pid()} | undefined | {node_down, node()}.
-resolve_proxy({registered, Name}) ->
-    wrap_resolved(erlang:whereis(Name), undefined);
-resolve_proxy({registered, Name, Node}) ->
-    wrap_resolved(resolve_remote_registered(Name, Node), Node);
-resolve_proxy({global, Name}) ->
-    wrap_resolved(global:whereis_name(Name), undefined).
-
--spec wrap_resolved(pid() | undefined | node_down, node() | undefined) ->
-    {ok, pid()} | undefined | {node_down, node()}.
-wrap_resolved(Pid, _Node) when is_pid(Pid) -> {ok, Pid};
-wrap_resolved(undefined, _Node) -> undefined;
-wrap_resolved(node_down, Node) -> {node_down, Node}.
-
--doc """
-BT-4676: route a send through a proxy ref. Name-only selectors (`isAlive`,
-`isRegistered`, `registeredName`) are answered by the proxy itself; every
-other selector resolves to a pid or a structured error. The caller decides
-how to deliver the outcome (resolve/reject a future, or raise).
-""".
--spec proxy_route(proxy_ref(), atom(), list()) ->
-    {answer, term()} | {pid, pid()} | {error, #beamtalk_error{}}.
-proxy_route(Ref, isAlive, []) ->
-    {answer, is_pid_result(resolve_proxy(Ref))};
-proxy_route(_Ref, isRegistered, []) ->
-    {answer, true};
-proxy_route({_Kind, Name}, registeredName, []) ->
-    {answer, Name};
-proxy_route({registered, Name, _Node}, registeredName, []) ->
-    {answer, Name};
-proxy_route(Ref, Selector, _Args) ->
-    case resolve_or_error(Ref, Selector) of
-        {ok, Pid} -> {pid, Pid};
-        {error, _} = Error -> Error
-    end.
-
--doc "The pid a proxy ref currently resolves to, or the structured error (for the FFI's `proxy_pid/2`).".
--spec resolve_proxy_or_error(proxy_ref(), atom()) -> {ok, pid()} | {error, #beamtalk_error{}}.
-resolve_proxy_or_error(Ref, Selector) ->
-    resolve_or_error(Ref, Selector).
-
-%% The one resolve -> structured-error mapping; selector-independent.
--spec resolve_or_error(proxy_ref(), atom()) -> {ok, pid()} | {error, #beamtalk_error{}}.
-resolve_or_error(Ref, Selector) ->
-    case resolve_proxy(Ref) of
-        {ok, Pid} -> {ok, Pid};
-        undefined -> {error, no_such_process_error(Ref, Selector)};
-        {node_down, Node} -> {error, node_down_error_record(Node, Selector)}
-    end.
-
--spec is_pid_result({ok, pid()} | undefined | {node_down, node()}) -> boolean().
-is_pid_result({ok, _Pid}) -> true;
-is_pid_result(_) -> false.
-
--doc "Sync half of `proxy_route/3`: answer, raise, or continue with the resolved pid.".
--spec sync_send_proxy(proxy_ref(), atom(), list(), fun((pid()) -> term())) -> term().
-sync_send_proxy(Ref, Selector, Args, WithPid) ->
-    case proxy_route(Ref, Selector, Args) of
-        {answer, Value} -> Value;
-        {pid, Pid} -> WithPid(Pid);
-        {error, Error} -> beamtalk_exception_handler:reraise(Error)
-    end.
-
--doc "Construct a structured `no_such_process` error for the given proxy ref.".
--spec no_such_process_error(
-    {registered, atom()} | {registered, atom(), node()} | {global, atom()}, atom()
-) -> #beamtalk_error{}.
-no_such_process_error({registered, Name}, Selector) ->
-    no_such_process_error_record(Name, Selector);
-no_such_process_error({registered, Name, _Node}, Selector) ->
-    no_such_process_error_record(Name, Selector);
-no_such_process_error({global, Name}, Selector) ->
-    no_such_process_error_record(Name, Selector).
-
--spec no_such_process_error_record(atom(), atom()) -> #beamtalk_error{}.
-no_such_process_error_record(Name, Selector) ->
-    Error = beamtalk_error:new(
-        no_such_process,
-        unknown,
-        Selector,
-        beamtalk_error:chars_to_binary(
-            io_lib:format(
-                "No process is currently registered under name '~tp'", [Name]
-            )
-        )
-    ),
-    beamtalk_error:with_details(Error, #{name => Name}).
-
--doc """
-Emit lifecycle telemetry, monitor `ActorPid`, send `exit(kill)`, then wait
-for the `'DOWN'` message with a 5 s timeout.
-
-Monitoring before sending the kill signal closes the TOCTOU window: if we
-returned immediately after `exit/2` (which is asynchronous), a racing
-`isAlive` check could still return `true` because the BEAM scheduler had
-not yet processed the signal.  Waiting for `'DOWN'` guarantees the process
-is gone before this function returns.  If the process is already dead, the
-`'DOWN'` message arrives instantly.
-
-Returns `ok` on success, or `{error, Error}` if the `'DOWN'` message is not
-received within 5 000 ms.  The error is a structured `#beamtalk_error{}` with
-kind `timeout` and the message `"Actor kill timed out: did not receive DOWN
-within 5000ms"`.  Building it here keeps the message in one place: callers
-pass the error directly to `beamtalk_future:reject/2` (async path) or wrap it
-with `beamtalk_exception_handler:ensure_wrapped/1` before raising (sync path).
-
-Called by both `async_send/4` and `sync_send/3` for the `kill` selector.
-""".
--spec kill_and_wait(pid()) -> ok | {error, #beamtalk_error{}}.
-kill_and_wait(ActorPid) ->
-    %% Emit lifecycle telemetry event for kill request.
-    Class = lookup_class(ActorPid),
-    beamtalk_telemetry:emit(
-        [beamtalk, actor, lifecycle, kill],
-        #{},
-        #{pid => ActorPid, class => Class}
-    ),
-    Ref = erlang:monitor(process, ActorPid),
-    exit(ActorPid, kill),
-    receive
-        {'DOWN', Ref, process, ActorPid, _Reason} -> ok
-    after 5000 ->
-        erlang:demonitor(Ref, [flush]),
-        {error,
-            beamtalk_error:new(
-                timeout,
-                unknown,
-                kill,
-                <<"Actor kill timed out: did not receive DOWN within 5000ms">>
-            )}
-    end.
 
 -doc """
 BT-3967: stop `ActorPid` with `Reason`, shared by `stop`, `stopWith:` and
@@ -2491,7 +893,7 @@ sync_stop(ActorPid, Reason, Timeout, Selector) ->
             %% Preserve sync_send/3 contract: translate exits to structured errors
             beamtalk_exception_handler:reraise(
                 beamtalk_error:with_details(
-                    actor_dead_error_record(Selector), #{exit_reason => Other}
+                    beamtalk_actor_send:actor_dead_error_record(Selector), #{exit_reason => Other}
                 )
             )
     end.
@@ -3135,147 +1537,6 @@ lookup_class(_RemotePid) ->
     unknown.
 
 -doc """
-Set application-level trace context key-value pairs.
-
-Stores the provided map in the process dictionary under '$beamtalk_trace_ctx'.
-Also merges the keys into OTP logger process metadata so that ?LOG_ERROR,
-?LOG_INFO etc. automatically include fields like workflowId without extra work.
-
-Example: set_trace_context(#{workflowId => <<"wf-123">>, activityId => <<"a-1">>})
-
-Cost: ~20-30ns (one put/2 + one logger:update_process_metadata/1).
-""".
--spec set_trace_context(map()) -> ok.
-set_trace_context(Ctx) when is_map(Ctx) ->
-    OldCtx = get_trace_context(),
-    Merged = maps:merge(OldCtx, Ctx),
-    put('$beamtalk_trace_ctx', Merged),
-    logger:update_process_metadata(Merged),
-    ok.
-
--doc """
-Get the current application-level trace context.
-
-Returns the map stored by set_trace_context/1, or #{} if none set.
-Cost: ~10ns (one get/1).
-""".
--spec get_trace_context() -> map().
-get_trace_context() ->
-    case get('$beamtalk_trace_ctx') of
-        undefined -> #{};
-        Ctx when is_map(Ctx) -> Ctx;
-        _Other -> #{}
-    end.
-
--doc """
-Clear the application-level trace context and remove its keys from logger metadata.
-
-Used when restoring an empty propagated trace context to prevent stale metadata
-from leaking across unrelated messages in the same actor process.
-""".
--spec clear_trace_context() -> ok.
-clear_trace_context() ->
-    OldCtx = get_trace_context(),
-    erase('$beamtalk_trace_ctx'),
-    %% Remove the trace context keys from logger metadata
-    case logger:get_process_metadata() of
-        undefined ->
-            ok;
-        LogMeta ->
-            Cleaned = maps:without(maps:keys(OldCtx), LogMeta),
-            logger:set_process_metadata(Cleaned)
-    end,
-    ok.
-
--doc """
-Get the current causal trace context from the process dictionary.
-
-Returns a map with trace_id, span_id, and parent_span_id keys when
-causal tracing is active. Returns #{} when no causal context exists.
-Called by beamtalk_trace_store:record_dispatch_stop/2 to merge causal IDs into trace event metadata.
-""".
--spec get_causal_ctx() -> map().
-get_causal_ctx() ->
-    case get('$beamtalk_trace_id') of
-        undefined ->
-            #{};
-        TraceId ->
-            Base = #{trace_id => TraceId},
-            WithSpan =
-                case get('$beamtalk_span_id') of
-                    undefined -> Base;
-                    SpanId -> Base#{span_id => SpanId}
-                end,
-            case get('$beamtalk_parent_span_id') of
-                undefined -> WithSpan;
-                ParentSpanId -> WithSpan#{parent_span_id => ParentSpanId}
-            end
-    end.
-
--doc """
-Build a propagated context map for cross-actor message sends (ADR 0069 Phase 2b).
-
-Returns an extensible map holding only the context that is actually present
-(BT-4113), so a send from a process with no context carries `#{}`:
-- `otel`: the OTel trace context, when `otel_ctx` is loaded and the current
-  context is non-empty
-- `trace_ctx`: the application-level trace context (set via
-  set_trace_context/1), when non-empty
-- `causal`: causal trace IDs, when tracing has set them
-The receiver (restore_propagated_ctx/1) treats a missing key as "none" and
-clears what it has, so omitting an empty key loses nothing.
-""".
--spec get_propagated_ctx() -> map().
-get_propagated_ctx() ->
-    WithOtel =
-        case get_otel_ctx() of
-            undefined -> #{};
-            Otel when Otel =:= #{} -> #{};
-            Otel -> #{otel => Otel}
-        end,
-    WithTrace =
-        case get('$beamtalk_trace_ctx') of
-            TraceCtx when is_map(TraceCtx), map_size(TraceCtx) > 0 ->
-                WithOtel#{trace_ctx => TraceCtx};
-            _ ->
-                WithOtel
-        end,
-    %% Include causal trace IDs for cross-actor linking.
-    %% Only present when tracing is enabled and dispatch_span has run.
-    case get('$beamtalk_trace_id') of
-        undefined ->
-            WithTrace;
-        TraceId ->
-            SpanId = get('$beamtalk_span_id'),
-            WithTrace#{causal => #{trace_id => TraceId, span_id => SpanId}}
-    end.
-
--doc """
-Like get_propagated_ctx/0 but includes call_stack for cycle detection.
-Only used by sync_send/3,4 — async/cast sends must NOT carry call_stack
-because the sender is not blocked, so B calling A back is not a deadlock.
-""".
--spec get_sync_propagated_ctx() -> map().
-get_sync_propagated_ctx() ->
-    ExistingStack =
-        case get(?BT_CALL_STACK_KEY) of
-            undefined -> [];
-            CS -> CS
-        end,
-    (get_propagated_ctx())#{call_stack => [self() | ExistingStack]}.
-
--doc """
-Get current OTel trace context if otel_ctx module is available.
-Returns 'undefined' when OpenTelemetry is not loaded — no compile-time dependency.
-""".
--spec get_otel_ctx() -> term().
-get_otel_ctx() ->
-    case erlang:function_exported(otel_ctx, get_current, 0) of
-        true -> erlang:apply(otel_ctx, get_current, []);
-        false -> undefined
-    end.
-
--doc """
 Restore propagated context on the receiving actor side (ADR 0069 Phase 2b).
 
 Called by generated handle_call/handle_cast to restore context from the
@@ -3300,7 +1561,7 @@ restore_propagated_ctx(PropCtx) when is_map(PropCtx) ->
             %% The common case (OpenTelemetry not loaded) costs one BIF.
             case erlang:function_exported(otel_ctx, get_current, 0) of
                 false -> ok;
-                true -> clear_stale_otel_ctx()
+                true -> beamtalk_actor_ctx:clear_stale_otel_ctx()
             end;
         OtelCtx ->
             case erlang:function_exported(otel_ctx, attach, 1) of
@@ -3317,7 +1578,7 @@ restore_propagated_ctx(PropCtx) when is_map(PropCtx) ->
     case maps:get(trace_ctx, PropCtx, undefined) of
         TraceCtx when is_map(TraceCtx), map_size(TraceCtx) > 0 ->
             clear_trace_context_if_set(),
-            set_trace_context(TraceCtx);
+            beamtalk_actor_ctx:set_trace_context(TraceCtx);
         _ ->
             clear_trace_context_if_set()
     end,
@@ -3363,72 +1624,8 @@ restore_propagated_ctx(_) ->
 clear_trace_context_if_set() ->
     case get('$beamtalk_trace_ctx') of
         undefined -> ok;
-        _ -> clear_trace_context()
+        _ -> beamtalk_actor_ctx:clear_trace_context()
     end.
-
--doc """
-Detach a non-empty OTel context left by a previous message when the
-incoming one carries none. Older senders always sent `otel => #{}` (which
-attached the empty context); BT-4113 senders omit an empty context, so the
-receiver clears instead. A no-op when OpenTelemetry is not loaded.
-""".
--spec clear_stale_otel_ctx() -> ok.
-clear_stale_otel_ctx() ->
-    case get_otel_ctx() of
-        undefined ->
-            ok;
-        Ctx when Ctx =:= #{} ->
-            ok;
-        _Stale ->
-            erlang:apply(otel_ctx, attach, [#{}]),
-            ok
-    end.
-
--doc """
-Spawn a lightweight watcher that monitors both the actor and future.
-Closes the TOCTOU race in async_send — if the actor dies during
-message processing (after the cast but before the future is resolved),
-the watcher rejects the future with a structured error. ADR 0126 §7.1:
-a `noconnection` DOWN reason (the actor's node partitioned or was never
-connected — verified empirically, see erlang:monitor/2 docs) rejects with
-`node_down` instead of `actor_dead`, matching the sync/timeout paths'
-exit mapping. The watcher also monitors the future process so it can
-clean up promptly when the future completes normally. There is no time
-cutoff (BT-5020): the watcher ends when either process dies or the future tells it
-it settled, and a pending
-future with no producer is itself capped by beamtalk_future (?PENDING_CAP_MS),
-unless a watcher registers as its producer. This watcher does so, lifting
-that cap while it lives. Every cast handler must settle its `FuturePid`:
-an actor that stays alive without doing so leaves the watcher and the
-future pending.
-""".
--spec spawn_future_watcher(pid(), pid(), atom()) -> pid().
-spawn_future_watcher(ActorPid, FuturePid, Selector) ->
-    spawn(fun() ->
-        ActorRef = erlang:monitor(process, ActorPid),
-        FutureRef = erlang:monitor(process, FuturePid),
-        %% Tell the future a live producer exists: lifts its orphan cap.
-        FuturePid ! {producer, self()},
-        receive
-            {'DOWN', ActorRef, process, ActorPid, Reason} ->
-                %% Actor died (or its node went away) — reject future
-                %% (no-op if already resolved).
-                Error =
-                    case Reason of
-                        noconnection -> node_down_error_record(node(ActorPid), Selector);
-                        _ -> actor_dead_error_record(Selector)
-                    end,
-                beamtalk_future:reject(FuturePid, Error),
-                erlang:demonitor(FutureRef, [flush]);
-            {'DOWN', FutureRef, process, FuturePid, _Reason} ->
-                %% Future completed and its process ended — clean up
-                erlang:demonitor(ActorRef, [flush]);
-            {future_settled, FuturePid} ->
-                %% Future settled (resolved/rejected): nothing left to watch
-                erlang:demonitor(ActorRef, [flush]),
-                erlang:demonitor(FutureRef, [flush])
-        end
-    end).
 
 %%% gen_server callbacks
 
@@ -3940,3 +2137,7 @@ replyErrorToDeferred(#{'$beamtalk_class' := 'ReplyTo', from := From}, Error) ->
         end,
     gen_server:reply(From, Reply),
     ok.
+
+%% BT-5047: `native_started/1` is called by the generated `native:` facade, so
+%% it keeps this module's name; the body is in `beamtalk_actor_start`.
+native_started(A1) -> beamtalk_actor_start:native_started(A1).

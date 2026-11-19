@@ -183,7 +183,9 @@ spawn_paths() ->
         end},
         {safe_spawn_named_global, fun() ->
             Name = beamtalk_test_unique:atom("bt4997_heap_global"),
-            {ok, Pid} = beamtalk_actor:safe_spawn_named(global, unlinked, Name, ?CLASS_MOD, #{}),
+            {ok, Pid} = beamtalk_actor_start:safe_spawn_named(
+                global, unlinked, Name, ?CLASS_MOD, #{}
+            ),
             {Pid, fun() ->
                 global:unregister_name(Name),
                 stop_linked(Pid)
@@ -191,7 +193,9 @@ spawn_paths() ->
         end},
         {safe_spawn_named_local, fun() ->
             Name = beamtalk_test_unique:atom("bt4997_heap"),
-            {ok, Pid} = beamtalk_actor:safe_spawn_named(local, unlinked, Name, ?CLASS_MOD, #{}),
+            {ok, Pid} = beamtalk_actor_start:safe_spawn_named(
+                local, unlinked, Name, ?CLASS_MOD, #{}
+            ),
             {Pid, fun() -> stop_linked(Pid) end}
         end}
     ].

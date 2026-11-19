@@ -779,15 +779,15 @@ sync_send_emits_stop_event_test_() ->
         %%====================================================================
         ?_test(begin
             %% Initially empty
-            ?assertEqual(#{}, beamtalk_actor:get_trace_context()),
+            ?assertEqual(#{}, beamtalk_actor_ctx:get_trace_context()),
 
             %% Set context
-            beamtalk_actor:set_trace_context(#{workflowId => <<"wf-123">>}),
-            ?assertEqual(#{workflowId => <<"wf-123">>}, beamtalk_actor:get_trace_context()),
+            beamtalk_actor_ctx:set_trace_context(#{workflowId => <<"wf-123">>}),
+            ?assertEqual(#{workflowId => <<"wf-123">>}, beamtalk_actor_ctx:get_trace_context()),
 
             %% Merge additional keys
-            beamtalk_actor:set_trace_context(#{activityId => <<"a-1">>}),
-            Ctx = beamtalk_actor:get_trace_context(),
+            beamtalk_actor_ctx:set_trace_context(#{activityId => <<"a-1">>}),
+            Ctx = beamtalk_actor_ctx:get_trace_context(),
             ?assertEqual(<<"wf-123">>, maps:get(workflowId, Ctx)),
             ?assertEqual(<<"a-1">>, maps:get(activityId, Ctx)),
 
@@ -800,7 +800,7 @@ sync_send_emits_stop_event_test_() ->
         %%====================================================================
         ?_test(begin
             %% Set trace context
-            beamtalk_actor:set_trace_context(#{workflowId => <<"wf-456">>}),
+            beamtalk_actor_ctx:set_trace_context(#{workflowId => <<"wf-456">>}),
 
             %% Verify logger process metadata includes workflowId
             LoggerMeta = logger:get_process_metadata(),
@@ -818,7 +818,7 @@ sync_send_emits_stop_event_test_() ->
             beamtalk_trace_store:enable(),
 
             %% Set trace context in THIS process (caller side)
-            beamtalk_actor:set_trace_context(#{workflowId => <<"wf-trace-1">>}),
+            beamtalk_actor_ctx:set_trace_context(#{workflowId => <<"wf-trace-1">>}),
 
             Pid = start_counter(0),
             try
@@ -880,10 +880,10 @@ sync_send_emits_stop_event_test_() ->
         %%====================================================================
         ?_test(begin
             %% Set trace context in the caller process
-            beamtalk_actor:set_trace_context(#{workflowId => <<"wf-prop-1">>}),
+            beamtalk_actor_ctx:set_trace_context(#{workflowId => <<"wf-prop-1">>}),
 
             %% Build a propagated context
-            PropCtx = beamtalk_actor:get_propagated_ctx(),
+            PropCtx = beamtalk_actor_send:get_propagated_ctx(),
 
             %% Verify trace_ctx is in propagated context
             ?assertMatch(#{trace_ctx := #{workflowId := <<"wf-prop-1">>}}, PropCtx),
@@ -898,7 +898,7 @@ sync_send_emits_stop_event_test_() ->
             %% Trace context should be restored
             ?assertEqual(
                 #{workflowId => <<"wf-prop-1">>},
-                beamtalk_actor:get_trace_context()
+                beamtalk_actor_ctx:get_trace_context()
             ),
 
             %% Logger metadata should also be updated
@@ -918,12 +918,12 @@ sync_send_emits_stop_event_test_() ->
 
             %% Build propagated context (no trace context): BT-4113
             %% omits the empty key instead of sending `trace_ctx => #{}`.
-            PropCtx = beamtalk_actor:get_propagated_ctx(),
+            PropCtx = beamtalk_actor_send:get_propagated_ctx(),
             ?assertEqual(error, maps:find(trace_ctx, PropCtx)),
 
             %% Restore should be a no-op
             beamtalk_actor:restore_propagated_ctx(PropCtx),
-            ?assertEqual(#{}, beamtalk_actor:get_trace_context())
+            ?assertEqual(#{}, beamtalk_actor_ctx:get_trace_context())
         end),
         %%====================================================================
         %% Test: Root span generates trace_id = span_id.
@@ -989,7 +989,7 @@ sync_send_emits_stop_event_test_() ->
                 ?assert(is_integer(RootTraceId)),
 
                 %% Build propagated context (as if sending to another actor)
-                PropCtx = beamtalk_actor:get_propagated_ctx(),
+                PropCtx = beamtalk_actor_send:get_propagated_ctx(),
                 ?assertMatch(#{causal := #{trace_id := _, span_id := _}}, PropCtx),
                 #{causal := #{trace_id := PropTraceId, span_id := PropSpanId}} = PropCtx,
                 ?assertEqual(RootTraceId, PropTraceId),
@@ -1086,7 +1086,7 @@ sync_send_emits_stop_event_test_() ->
                 ?assertEqual(TraceId, SpanA),
 
                 %% Actor A sends to Actor B: propagate context
-                PropCtxAB = beamtalk_actor:get_propagated_ctx(),
+                PropCtxAB = beamtalk_actor_send:get_propagated_ctx(),
 
                 %% Hop 2: Actor B receives and dispatches
                 beamtalk_actor:restore_propagated_ctx(PropCtxAB),
@@ -1101,7 +1101,7 @@ sync_send_emits_stop_event_test_() ->
                 ?assertEqual(TraceId, get('$beamtalk_trace_id')),
 
                 %% Actor B sends to Actor C: propagate context
-                PropCtxBC = beamtalk_actor:get_propagated_ctx(),
+                PropCtxBC = beamtalk_actor_send:get_propagated_ctx(),
                 #{causal := #{trace_id := BCTraceId, span_id := BCSpanId}} = PropCtxBC,
                 ?assertEqual(TraceId, BCTraceId),
                 ?assertEqual(SpanB, BCSpanId),
@@ -1161,7 +1161,7 @@ sync_send_emits_stop_event_test_() ->
                 ?assertEqual(undefined, get('$beamtalk_parent_span_id')),
 
                 %% Propagated context should not have causal key
-                PropCtx = beamtalk_actor:get_propagated_ctx(),
+                PropCtx = beamtalk_actor_send:get_propagated_ctx(),
                 ?assertEqual(error, maps:find(causal, PropCtx))
             after
                 gen_server:stop(Pid)
@@ -1186,7 +1186,7 @@ sync_send_emits_stop_event_test_() ->
             erase('$beamtalk_trace_id'),
             erase('$beamtalk_span_id'),
             erase('$beamtalk_parent_span_id'),
-            ?assertEqual(#{}, beamtalk_actor:get_causal_ctx())
+            ?assertEqual(#{}, beamtalk_actor_ctx:get_causal_ctx())
         end)
     ]}.
 
