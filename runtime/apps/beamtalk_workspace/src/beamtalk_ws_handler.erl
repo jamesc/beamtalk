@@ -305,16 +305,18 @@ websocket_info(
 websocket_info({log_event, _EventData}, State) ->
     %% Not subscribed or not authenticated — drop silently
     {ok, State};
-%% Session process died — clean up ETS entry and close WebSocket
+%% Session process ended — clean up ETS entry and close WebSocket. A `normal`
+%% exit is a deliberate stop (the client's `close` op, idle shutdown): close
+%% with 1000. Anything else is an unexpected session death: 1011.
 websocket_info(
-    {'DOWN', MonRef, process, _Pid, _Reason},
+    {'DOWN', MonRef, process, _Pid, Reason},
     State = #ws_state{session_mon = MonRef, session_id = SessionId}
 ) ->
     ?LOG_INFO("Session process terminated, closing WebSocket", #{
         session => SessionId, domain => [beamtalk, runtime]
     }),
     beamtalk_session_table:delete(SessionId),
-    {[{close, 1011, <<"Session terminated">>}], State#ws_state{
+    {[{close, session_close_code(Reason), <<"Session terminated">>}], State#ws_state{
         authenticated = false,
         session_id = undefined,
         session_pid = undefined,
@@ -322,6 +324,11 @@ websocket_info(
     }};
 websocket_info(_Info, State) ->
     {ok, State}.
+
+-doc "WebSocket close code for a session process exit: 1000 if deliberate, else 1011.".
+-spec session_close_code(term()) -> 1000 | 1011.
+session_close_code(normal) -> 1000;
+session_close_code(_Unexpected) -> 1011.
 
 -doc "Connection terminated — clean up or keep session for resume.".
 terminate(_Reason, _Req, #ws_state{session_id = undefined}) ->

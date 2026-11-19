@@ -1199,6 +1199,28 @@ session_down_closes_and_clears_test() ->
     ?assertEqual(undefined, State1#ws_state.session_id),
     ?assert(lists:keymember(close, 1, Frames)).
 
+%% A client-requested `close` (and idle shutdown) stops the session with
+%% `normal`: the connection closes with 1000. A crash or kill keeps 1011.
+session_down_close_code_test_() ->
+    [
+        {iolist_to_binary(io_lib:format("~p", [Reason])), fun() ->
+            beamtalk_session_table:new(),
+            beamtalk_session_table:insert(<<"sess-1">>, self()),
+            MonRef = make_ref(),
+            State = (authed_state())#ws_state{session_mon = MonRef},
+            {Frames, _} = beamtalk_ws_handler:websocket_info(
+                {'DOWN', MonRef, process, self(), Reason}, State
+            ),
+            ?assertMatch([{close, Code, <<"Session terminated">>}], Frames)
+        end}
+     || {Reason, Code} <- [
+            {normal, 1000},
+            {killed, 1011},
+            {shutdown, 1011},
+            {{badmatch, oops}, 1011}
+        ]
+    ].
+
 %%% ===========================================================================
 %%% terminate/3
 %%% ===========================================================================
