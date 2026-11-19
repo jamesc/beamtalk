@@ -727,6 +727,8 @@ mod tests {
 
     #[test]
     fn test_stop_workspace_fails_for_nonexistent() {
+        // Takes a lockfile under the workspaces dir: keep it off the real home.
+        let _home = crate::commands::test_support::real_home_guard();
         let result = stop_workspace(Some("nonexistent_stop_test_ws"), false);
         assert!(result.is_err());
     }
@@ -827,7 +829,8 @@ mod tests {
         let ws = TestWorkspace::new("find_by_path");
         // Use a unique project path so this test doesn't collide with other
         // tests that also save metadata pointing at current_dir().
-        let project_path = crate::commands::test_support::stable_project_dir().join("find_by_path_unique");
+        let project_path =
+            crate::commands::test_support::stable_project_dir().join("find_by_path_unique");
         let metadata = WorkspaceMetadata {
             project_fingerprint: None,
             workspace_id: ws.id.clone(),

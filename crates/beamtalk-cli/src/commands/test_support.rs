@@ -172,10 +172,11 @@ impl Drop for SharedHomeGuard {
         let mut shared = SHARED_HOME.lock().unwrap_or_else(PoisonError::into_inner);
         shared.holders -= 1;
         if shared.holders == 0 {
-            // SAFETY: still holding the read lock (`_lock` drops after this
-            // method returns), so no `BeamtalkHomeOverride` is active.
             match shared.prev.take() {
+                // SAFETY: still holding the read lock (`_lock` drops after
+                // this method returns), so no `BeamtalkHomeOverride` is active.
                 Some(v) => unsafe { std::env::set_var("BEAMTALK_HOME", v) },
+                // SAFETY: as above.
                 None => unsafe { std::env::remove_var("BEAMTALK_HOME") },
             }
             shared.dir = None;

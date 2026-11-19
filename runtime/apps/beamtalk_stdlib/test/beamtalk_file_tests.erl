@@ -1855,11 +1855,12 @@ text_detail_tags_valid_utf8_test() ->
 
 %% BT-3970: classifying a posix failure never drops the term.
 open_mode_read_missing_file_keeps_reason_test() ->
+    Path = list_to_binary(bt_path("test_open_mode_absent.txt")),
     #{'errReason' := #{error := #beamtalk_error{details = Details}}} =
-        beamtalk_file:'open:mode:'(list_to_binary(bt_path("test_open_mode_absent.txt")), read),
+        beamtalk_file:'open:mode:'(Path, read),
     %% BT-4229: the path detail is the caller's text, as a String.
     ?assertMatch(
-        #{reason := enoent, path := {beamtalk_string, list_to_binary(bt_path("test_open_mode_absent.txt"))}},
+        #{reason := enoent, path := {beamtalk_string, Path}},
         Details
     ).
 
