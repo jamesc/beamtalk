@@ -139,7 +139,7 @@ typed Object subclass: Caller
     items :: MyList := coll
     items asString
 "#,
-        "`coll` narrowed to MyList should be assignable to `items :: MyList` \\
+        "`coll` narrowed to MyList should be assignable to `items :: MyList` \
          without `@expect type`",
     ),
     // `(x isKindOf: Integer) ifTrue: [<diverge>]` should narrow `x` to
@@ -158,7 +158,7 @@ typed Object subclass: Caller
     (x isKindOf: Integer) ifTrue: [self error: "was integer"]
     Receiver process: x
 "#,
-        "`x` should narrow to String (the complement of Integer) after the \\
+        "`x` should narrow to String (the complement of Integer) after the \
          diverging `ifTrue:` guard",
     ),
     // the combined `ifTrue: [<diverge>] ifFalse:
@@ -179,7 +179,7 @@ typed Object subclass: Caller
     (x isKindOf: Integer) ifTrue: [self error: "was integer"] ifFalse: [Transcript show: "ok"]
     Receiver process: x
 "#,
-        "`x` should narrow to String (the complement of Integer) after the \\
+        "`x` should narrow to String (the complement of Integer) after the \
          combined `ifTrue: [<diverge>] ifFalse: [...]` guard",
     ),
     // `isKindOf:` used directly as an `ifTrue:`/`ifFalse:`

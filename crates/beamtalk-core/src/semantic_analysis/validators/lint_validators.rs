@@ -1877,8 +1877,7 @@ mod tests {
                    \n  setUp =>\n    self.dashboard := 1.\n    self with: 2",
             1,
             "Expected 1 warning: trailing `self with: 2` isn't a with<Field>: \
-             send, so it doesn't carry the earlier self.dashboard := forward, \
-            ",
+             send, so it doesn't carry the earlier self.dashboard := forward",
         ),
         // A chained `with*:` send — `(self withA: x) withB: y` — where the
         // outer send's receiver is itself a `with<Field>:` send rather than

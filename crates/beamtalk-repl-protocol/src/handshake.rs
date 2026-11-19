@@ -487,8 +487,8 @@ mod tests {
         // from the header so bumping only one side fails here. The VS Code
         // extension's `WORKSPACE_PROTOCOL_VERSION` is pinned to the same
         // header by `editors/vscode/src/__tests__/workspaceClient.test.ts`.
-        let hrl_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../runtime/apps/beamtalk_runtime/include/beamtalk.hrl");
+        let hrl_path = beamtalk_workspace::cargo_workspace_root!()
+            .join("runtime/apps/beamtalk_runtime/include/beamtalk.hrl");
         let hrl = std::fs::read_to_string(&hrl_path)
             .unwrap_or_else(|e| panic!("read {}: {e}", hrl_path.display()));
         let erlang_value = hrl
