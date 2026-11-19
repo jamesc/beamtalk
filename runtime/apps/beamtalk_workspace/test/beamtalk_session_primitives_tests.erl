@@ -563,8 +563,12 @@ print_string_on_non_session_raises_type_error_test() ->
 %% at/3 with an integer key: to_name_atom catch-all raises a name type_error
 %% before enqueue_session_mutation is called.
 at_write_integer_key_raises_name_type_error_test() ->
-    FakeView = #{'$beamtalk_class' => 'BindingsView', scope => session,
-                 id => <<"fake">>, pid => self()},
+    FakeView = #{
+        '$beamtalk_class' => 'BindingsView',
+        scope => session,
+        id => <<"fake">>,
+        pid => self()
+    },
     ?assertBtError(type_error, beamtalk_session_primitives:at(FakeView, 42, value)).
 
 %% removeKey workspace-scope with a never-interned binary key: to_existing_name_atom
