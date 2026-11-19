@@ -309,6 +309,18 @@ try_change_code(Pid, Module, Extra) ->
         exit:{noproc, _} ->
             {error, noproc};
         exit:{timeout, _} ->
+            %% BT-5021: `sys:suspend/1` succeeded (or timed out) and
+            %% `sys:change_code/4` did not answer in time. The migration may
+            %% still finish later inside the actor, so resuming here could run
+            %% new code on old-shaped state — the pid is left suspended, as for
+            %% any failed `code_change`, but never silently: the next
+            %% `reload` re-suspends and retries.
+            ?LOG_ERROR(
+                "Code change for ~p timed out; actor ~p may be left suspended "
+                "until the next reload retries the migration",
+                [Module, Pid],
+                #{domain => [beamtalk, runtime]}
+            ),
             {error, timeout};
         Class:Error:Stacktrace ->
             ?LOG_DEBUG(

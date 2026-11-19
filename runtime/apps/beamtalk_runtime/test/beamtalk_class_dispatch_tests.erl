@@ -567,6 +567,31 @@ test_class_send_new() ->
         end
     end.
 
+%% BT-5021: an actor whose `initialize` outlasts the 5 s init timeout. The class
+%% process answers with its structured `timeout` error just after 5 s; the
+%% caller's `gen_server:call` used to give up at the same 5 s mark first and
+%% exit raw. Both spawn selectors must reach the structured error.
+class_send_spawn_slow_initialize_is_structured_timeout_test_() ->
+    {setup, fun setup_runtime/0, fun teardown_runtime/1, [
+        {timeout, 30, fun() ->
+            ClassName = 'Bt5021SlowActor',
+            {ok, Pid} = beamtalk_object_class:start_link(ClassName, #{
+                superclass => 'Actor',
+                module => beamtalk_slow_spawn_test_helper,
+                class_methods => #{},
+                class_state => #{}
+            }),
+            beamtalk_test_class:with_class(Pid, fun() ->
+                ?assertBtError(
+                    timeout_error, beamtalk_class_dispatch:class_send(Pid, spawn, [])
+                ),
+                ?assertBtError(
+                    timeout_error, beamtalk_class_dispatch:class_send(Pid, 'spawnWith:', [#{}])
+                )
+            end)
+        end}
+    ]}.
+
 %% class_send for a selector not defined anywhere raises does_not_understand.
 test_class_send_dnu() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),

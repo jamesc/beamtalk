@@ -20,6 +20,10 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
+%% BT-5021: slack added to `?BT_INITIALIZE_TIMEOUT` so the class process's own
+%% structured init-timeout reply reaches an instantiating caller first (ms).
+-define(BT_INSTANTIATION_CALL_MARGIN, 2000).
+
 %% Appended to the self-call hint when a class-object protocol method, reached
 %% through `class_self_protocol_fallthrough/4`, messaged the class (BT-4252).
 -define(PROTOCOL_SELF_CALL_NOTE, <<
@@ -165,7 +169,7 @@ class_send_plain(ClassPid, spawn, Args, _Timeout) when ClassPid =:= self() ->
     handle_self_instantiation(spawn, spawn, Args);
 class_send_plain(ClassPid, 'spawnWith:', Args, _Timeout) when ClassPid =:= self() ->
     handle_self_instantiation(spawn, 'spawnWith:', Args);
-class_send_plain(ClassPid, 'new', [], _Timeout) ->
+class_send_plain(ClassPid, 'new', [], Timeout) ->
     %% an eligible Value builds in the caller via a direct
     %% `Module:new()` call — the same call `handle_new_compiled` would make,
     %% minus the gen_server hop (and its `IsConstructible` cache write, which
@@ -176,10 +180,10 @@ class_send_plain(ClassPid, 'new', [], _Timeout) ->
             erlang:apply(Module, new, []);
         error ->
             class_send_with_recovery(ClassPid, 'new', fun(P) ->
-                unwrap_class_call(gen_server:call(P, {new, []}))
+                unwrap_class_call(instantiation_call(P, {new, []}, 'new', Timeout))
             end)
     end;
-class_send_plain(ClassPid, 'new:', [Arg], _Timeout) ->
+class_send_plain(ClassPid, 'new:', [Arg], Timeout) ->
     %% same for `new:` with a map argument, via `Module:new/1`. A non-map
     %% argument never builds directly (see `lookup_direct_constructor/3`).
     %% BT-4475: either way, a class whose own explicit class-side `new:` needs
@@ -195,17 +199,17 @@ class_send_plain(ClassPid, 'new:', [Arg], _Timeout) ->
         error ->
             send_in_caller_or(ClassPid, 'new:', [Arg], fun() ->
                 class_send_with_recovery(ClassPid, 'new:', fun(P) ->
-                    unwrap_class_call(gen_server:call(P, {new, [Arg]}))
+                    unwrap_class_call(instantiation_call(P, {new, [Arg]}, 'new:', Timeout))
                 end)
             end)
     end;
-class_send_plain(ClassPid, spawn, [], _Timeout) ->
+class_send_plain(ClassPid, spawn, [], Timeout) ->
     class_send_with_recovery(ClassPid, spawn, fun(P) ->
-        unwrap_class_call(gen_server:call(P, {spawn, []}))
+        unwrap_class_call(instantiation_call(P, {spawn, []}, spawn, Timeout))
     end);
-class_send_plain(ClassPid, 'spawnWith:', [Map], _Timeout) ->
+class_send_plain(ClassPid, 'spawnWith:', [Map], Timeout) ->
     class_send_with_recovery(ClassPid, 'spawnWith:', fun(P) ->
-        unwrap_class_call(gen_server:call(P, {spawn, [Map]}))
+        unwrap_class_call(instantiation_call(P, {spawn, [Map]}, 'spawnWith:', Timeout))
     end);
 %% ADR 0032 Phase 2: 8 of the originally planned 12 hardcoded selector
 %% clauses were removed here (methods, superclass, class_name, module_name,
@@ -1426,6 +1430,32 @@ class_method_call(ClassPid, Selector, Args, Timeout) ->
         _ ->
             class_method_result(ClassPid, Selector, Args, Reply)
     end.
+
+-doc """
+BT-5021: the `gen_server:call` behind `new`, `new:`, `spawn` and `spawnWith:`.
+
+The class process runs the instantiation, and an actor's `initialize` may
+take up to `?BT_INITIALIZE_TIMEOUT`. The caller's timer starts before the
+class process's, so under the default 5000 ms call timeout a slow
+`initialize` reached the caller as a raw `gen_server:call` exit before the
+class process could reply with its structured timeout error. With no
+caller timeout the call therefore waits the init timeout plus a margin;
+an explicit one is honoured. A call timeout is translated as
+`class_method_call/4` does (`raise_class_timeout/3`).
+""".
+-spec instantiation_call(pid(), term(), selector(), call_timeout()) -> term().
+instantiation_call(ClassPid, Request, Selector, Timeout0) ->
+    Timeout = instantiation_call_timeout(Timeout0),
+    try
+        gen_server:call(ClassPid, Request, Timeout)
+    catch
+        exit:{timeout, {gen_server, call, [ClassPid | _]}} ->
+            raise_class_timeout(ClassPid, Selector, Timeout)
+    end.
+
+-spec instantiation_call_timeout(call_timeout()) -> timeout().
+instantiation_call_timeout(default) -> ?BT_INITIALIZE_TIMEOUT + ?BT_INSTANTIATION_CALL_MARGIN;
+instantiation_call_timeout(Timeout) -> Timeout.
 
 -doc """
 Raise the structured `timeout` error for a class method the class process did

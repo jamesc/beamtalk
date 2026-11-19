@@ -1267,6 +1267,18 @@ handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
         domain => [beamtalk, runtime], status => Status
     }),
     {stop, {port_exit_status, Status}, State};
+handle_info({'EXIT', Port, normal}, #state{port = Port} = State) ->
+    %% BT-5021: a port that closed normally is the one `port_roundtrip/6`
+    %% closes after a request timeout (a late reply must not poison the next
+    %% request), or one that finished after `exit_status` was consumed there.
+    %% Stopping here discarded the `aliases`/`protocols` caches and every class
+    %% not backed by a loaded module, which a restart cannot rebuild. Open a
+    %% fresh port and keep the state. A crash (`exit_status` message above, or
+    %% an abnormal EXIT below) still stops the server for its supervisor.
+    ?LOG_ERROR("Compiler port closed; opening a new port", #{
+        domain => [beamtalk, runtime], reason => normal
+    }),
+    {noreply, State#state{port = open_port()}};
 handle_info({'EXIT', Port, Reason}, #state{port = Port} = State) ->
     ?LOG_ERROR("Compiler port EXIT", #{domain => [beamtalk, runtime], reason => Reason}),
     {stop, {port_exit, Reason}, State};

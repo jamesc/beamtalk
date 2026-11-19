@@ -920,6 +920,72 @@ exit_fault_recovers_after_restart() ->
     ?assertMatch({ok, _}, beamtalk_compiler_server:diagnostics(<<"1 + 2">>)).
 
 %%% ---------------------------------------------------------------
+%%% BT-5021: a closed compiler port does not drop the ambient caches
+%%%
+%%% `beamtalk_compiler_port:port_roundtrip/6` closes the port on a request
+%%% timeout. The server used to stop on the resulting `{'EXIT', Port, normal}`,
+%%% and its supervisor's restart rebuilt only `classes` from loaded modules —
+%%% `aliases`, `protocols` and classes with no loaded module were lost.
+%%% Closing the port from the test process leaves the server in the same
+%%% state the timeout path does, without waiting out the 30 s port timeout.
+%%% ---------------------------------------------------------------
+
+port_close_keeps_ambient_caches_test_() ->
+    {timeout, 30,
+        {setup, fun start_compiler/0, fun stop_compiler/1, fun(_) ->
+            [?_test(port_close_keeps_ambient_caches())]
+        end}}.
+
+port_close_keeps_ambient_caches() ->
+    beamtalk_compiler_server:clear_classes(),
+    ok = beamtalk_compiler_server:register_aliases([<<"type BT5021Alias = Integer">>]),
+    beamtalk_compiler_server:register_protocol('BT5021Proto', #{
+        name => 'BT5021Proto',
+        required_methods => [#{selector => foo, arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    beamtalk_compiler_server:register_class('BT5021NoModule', #{
+        class => 'BT5021NoModule', superclass => 'Object'
+    }),
+    Aliases = beamtalk_compiler_server:get_aliases(),
+    Protocols = beamtalk_compiler_server:get_protocols(),
+    Classes = beamtalk_compiler_server:get_classes(),
+    ?assertMatch([_], Aliases),
+    ?assert(maps:is_key('BT5021Proto', Protocols)),
+    ?assert(maps:is_key('BT5021NoModule', Classes)),
+    Server = whereis(beamtalk_compiler_server),
+    [OldPort] = [
+        P
+     || P <- erlang:ports(), erlang:port_info(P, connected) =:= {connected, Server}
+    ],
+    true = port_close(OldPort),
+    %% Until the server has handled the EXIT, requests meet the closed port;
+    %% poll until one succeeds on the replacement port.
+    ok = wait_until(fun() ->
+        erlang:port_info(OldPort) =:= undefined andalso
+            element(1, beamtalk_compiler_server:compile_expression(<<"1 + 2">>, <<"t">>, [])) =:=
+                ok
+    end),
+    ?assertEqual(Server, whereis(beamtalk_compiler_server)),
+    ?assertEqual(Aliases, beamtalk_compiler_server:get_aliases()),
+    ?assertEqual(Protocols, beamtalk_compiler_server:get_protocols()),
+    ?assert(maps:is_key('BT5021NoModule', beamtalk_compiler_server:get_classes())).
+
+wait_until(Fun) -> wait_until(Fun, 50).
+wait_until(_Fun, 0) ->
+    {error, not_reached};
+wait_until(Fun, N) ->
+    case Fun() of
+        true ->
+            ok;
+        _ ->
+            %% sleep: poll for the server to open its replacement port
+            timer:sleep(100),
+            wait_until(Fun, N - 1)
+    end.
+
+%%% ---------------------------------------------------------------
 %%% Helpers
 %%% ---------------------------------------------------------------
 
