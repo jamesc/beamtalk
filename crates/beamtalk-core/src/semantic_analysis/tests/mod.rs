@@ -39,9 +39,9 @@ use super::*;
 use crate::test_helpers::test_support::parse_bt;
 
 use crate::ast::{
-    Block, BlockParameter, ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword,
-    Expression, Identifier, Literal, MatchArm, MessageSelector, MethodDefinition, Pattern,
-    StateDeclaration, StringSegment, TypeAnnotation,
+    Block, BlockParameter, ClassDefinition, ClassKind, CommentAttachment, Expression, Identifier,
+    Literal, MatchArm, MessageSelector, MethodDefinition, Pattern, StateDeclaration, StringSegment,
+    TypeAnnotation,
 };
 
 use crate::source_analysis::{Severity, Span};

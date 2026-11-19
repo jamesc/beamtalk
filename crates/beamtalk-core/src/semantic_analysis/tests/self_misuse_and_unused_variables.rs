@@ -35,72 +35,19 @@ fn test_self_outside_method_gives_specialized_error() {
 fn test_self_inside_method_no_error() {
     // self inside a method body should work fine
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![StateDeclaration {
-            name: Identifier::new("value", test_span()),
-            type_annotation: None,
-            default_value: None,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            declared_keyword: DeclaredKeyword::default(),
-            slot_kind: crate::ast::SlotKind::default(),
-            span: test_span(),
-        }],
+        state: vec![StateDeclaration::test("value")],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("getValue".into()),
-            parameters: vec![],
             body: vec![bare(Expression::FieldAccess {
                 receiver: Box::new(Expression::Identifier(Identifier::new("self", test_span()))),
                 field: Identifier::new("value", test_span()),
                 span: test_span(),
             })],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("getValue")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let self_errors: Vec<_> = result
@@ -117,31 +64,8 @@ fn test_self_inside_method_no_error() {
 fn test_unused_variable_in_method_warns() {
     // Method with unused local: getValue => x := 42. self.value
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![StateDeclaration {
-            name: Identifier::new("value", test_span()),
-            type_annotation: None,
-            default_value: None,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            declared_keyword: DeclaredKeyword::default(),
-            slot_kind: crate::ast::SlotKind::default(),
-            span: test_span(),
-        }],
+        state: vec![StateDeclaration::test("value")],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("getValue".into()),
-            parameters: vec![],
             body: vec![
                 bare(Expression::Assignment {
                     target: Box::new(Expression::Identifier(Identifier::new(
@@ -161,42 +85,12 @@ fn test_unused_variable_in_method_warns() {
                     span: test_span(),
                 }),
             ],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("getValue")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let warnings: Vec<_> = result
@@ -215,21 +109,7 @@ fn test_unused_variable_in_method_warns() {
 fn test_used_variable_no_warning() {
     // Method where variable is used: getValue => x := 42. x
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("getValue".into()),
-            parameters: vec![],
             body: vec![
                 bare(Expression::Assignment {
                     target: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
@@ -239,42 +119,12 @@ fn test_used_variable_no_warning() {
                 }),
                 bare(Expression::Identifier(Identifier::new("x", test_span()))),
             ],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("getValue")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let warnings: Vec<_> = result
@@ -289,63 +139,19 @@ fn test_used_variable_no_warning() {
 fn test_underscore_prefixed_variable_no_warning() {
     // Method with _x := 42 should not warn
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("doSomething".into()),
-            parameters: vec![],
             body: vec![bare(Expression::Assignment {
                 target: Box::new(Expression::Identifier(Identifier::new("_x", test_span()))),
                 value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
                 type_annotation: None,
                 span: test_span(),
             })],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("doSomething")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let warnings: Vec<_> = result
@@ -361,16 +167,6 @@ fn test_unused_parameter_emits_warning() {
     // Unused method parameter should warn
     // process: newValue => 0  // Warning: parameter newValue unused
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
             pipeline_sends: crate::ast::PipelineSends::default(),
             literal_comments: crate::ast::LiteralComments::default(),
@@ -393,32 +189,10 @@ fn test_unused_parameter_emits_warning() {
             doc_comment: None,
             span: test_span(),
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let warnings: Vec<_> = result
@@ -436,16 +210,6 @@ fn test_unused_parameter_underscore_suppresses_warning() {
     // Parameter prefixed with _ should not warn
     // process: _newValue => 0  // No warning
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: crate::ast::ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
             pipeline_sends: crate::ast::PipelineSends::default(),
             literal_comments: crate::ast::LiteralComments::default(),
@@ -468,32 +232,10 @@ fn test_unused_parameter_underscore_suppresses_warning() {
             doc_comment: None,
             span: test_span(),
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), crate::ast::ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let warnings: Vec<_> = result
@@ -509,16 +251,6 @@ fn test_used_parameter_no_warning() {
     // Used method parameter should not warn
     // process: x => x  // No warning
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        is_abstract: false,
-        class_kind: crate::ast::ClassKind::Actor,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
             pipeline_sends: crate::ast::PipelineSends::default(),
             literal_comments: crate::ast::LiteralComments::default(),
@@ -544,32 +276,10 @@ fn test_used_parameter_no_warning() {
             doc_comment: None,
             span: test_span(),
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), crate::ast::ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let warnings: Vec<_> = result
@@ -586,16 +296,6 @@ fn test_unused_parameter_primitive_body_no_warning() {
     // no unused-parameter warning should fire.
     // at: index => @primitive "at:"
     let class = ClassDefinition {
-        name: Identifier::new("Array", test_span()),
-        superclass: Some(Identifier::new("Object", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
             pipeline_sends: crate::ast::PipelineSends::default(),
             literal_comments: crate::ast::LiteralComments::default(),
@@ -625,31 +325,9 @@ fn test_unused_parameter_primitive_body_no_warning() {
             doc_comment: None,
             span: test_span(),
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Array", Some("Object"), ClassKind::Object)
     };
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
     let warnings: Vec<_> = result
         .diagnostics
@@ -668,16 +346,6 @@ fn test_unused_parameter_intrinsic_body_no_warning() {
     // no unused-parameter warning should fire.
     // spawnWith: initArgs => @intrinsic actorSpawnWith
     let class = ClassDefinition {
-        name: Identifier::new("Actor", test_span()),
-        superclass: Some(Identifier::new("Object", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
             pipeline_sends: crate::ast::PipelineSends::default(),
             literal_comments: crate::ast::LiteralComments::default(),
@@ -707,31 +375,9 @@ fn test_unused_parameter_intrinsic_body_no_warning() {
             doc_comment: None,
             span: test_span(),
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Actor", Some("Object"), ClassKind::Object)
     };
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
     let warnings: Vec<_> = result
         .diagnostics
@@ -748,22 +394,7 @@ fn test_unused_parameter_intrinsic_body_no_warning() {
 fn test_unused_variable_in_class_method_warns() {
     // Class method with unused local: class create => x := 42. nil
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
         class_methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("create".into()),
-            parameters: vec![],
             body: vec![
                 bare(Expression::Assignment {
                     target: Box::new(Expression::Identifier(Identifier::new(
@@ -776,41 +407,13 @@ fn test_unused_variable_in_class_method_warns() {
                 }),
                 bare(Expression::Identifier(Identifier::new("nil", test_span()))),
             ],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
             is_class_method: true,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("create")
         }],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let warnings: Vec<_> = result
@@ -826,21 +429,7 @@ fn test_unused_variable_in_class_method_warns() {
 fn test_block_parameter_no_unused_warning() {
     // Block parameters should not warn: getValue => [:x | x]
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("getValue".into()),
-            parameters: vec![],
             body: vec![bare(Expression::Block(Block::new(
                 vec![BlockParameter::new("x", test_span())],
                 vec![bare(Expression::Identifier(Identifier::new(
@@ -849,42 +438,12 @@ fn test_block_parameter_no_unused_warning() {
                 )))],
                 test_span(),
             )))],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("getValue")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let warnings: Vec<_> = result
@@ -900,21 +459,7 @@ fn test_pattern_variable_no_unused_warning() {
     // Pattern variables in match arms should not warn:
     // getValue => x match: { 1 -> #one }
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("getValue".into()),
-            parameters: vec![],
             body: vec![bare(Expression::Match {
                 exhaustive: false,
                 value: Box::new(Expression::Literal(Literal::Integer(1), test_span())),
@@ -925,42 +470,12 @@ fn test_pattern_variable_no_unused_warning() {
                 )],
                 span: test_span(),
             })],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("getValue")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let warnings: Vec<_> = result
@@ -976,21 +491,7 @@ fn test_unused_variable_in_nested_block_warns() {
     // Unused variable declared inside a nested block should warn:
     // getValue => [unused := 42]
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("getValue".into()),
-            parameters: vec![],
             body: vec![bare(Expression::Block(Block::new(
                 vec![],
                 vec![bare(Expression::Assignment {
@@ -1004,42 +505,12 @@ fn test_unused_variable_in_nested_block_warns() {
                 })],
                 test_span(),
             )))],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("getValue")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let warnings: Vec<_> = result
@@ -1057,21 +528,7 @@ fn test_variable_used_via_closure_no_warning() {
     // getValue => x := 1. [x]
     // The block reads x, so no unused warning.
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("getValue".into()),
-            parameters: vec![],
             body: vec![
                 bare(Expression::Assignment {
                     target: Box::new(Expression::Identifier(Identifier::new(
@@ -1091,42 +548,12 @@ fn test_variable_used_via_closure_no_warning() {
                     test_span(),
                 ))),
             ],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("getValue")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let warnings: Vec<_> = result
