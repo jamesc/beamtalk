@@ -220,7 +220,10 @@ mod tests {
 
     #[test]
     fn scan_classes_picks_up_subclasses_and_protocols() {
-        let dir = std::env::temp_dir().join("beamtalk-parity-cli-scan-test");
+        let dir = std::env::temp_dir().join(format!(
+            "beamtalk-parity-cli-scan-test-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(

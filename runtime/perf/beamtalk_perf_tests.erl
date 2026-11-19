@@ -158,7 +158,23 @@ all_benchmarks() ->
     bench_method_threading(),
     bench_self_send_override(),
     bench_class_self_dispatch(),
-    bench_ffi_direct_call().
+    bench_ffi_direct_call(),
+    bench_dispatch_lookup().
+
+%% --- 0. Dispatch chain walk (moved from beamtalk_dispatch_tests, BT-283/BT-5035) ---
+
+bench_dispatch_lookup() ->
+    ok = beamtalk_test_class:ensure_counter_loaded(),
+    State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
+    Self = make_ref(),
+    %% 'class' is defined in Object, so Counter -> Actor -> Object (depth 3).
+    Timings = run_benchmark(fun() ->
+        _ = beamtalk_dispatch:lookup(class, [], Self, State, 'Counter')
+    end, ?ITERATIONS, ?WARMUP),
+    S = stats(Timings),
+    report("dispatch_lookup_chain_walk", S, ?ITERATIONS),
+    %% Sanity: an inherited-method chain walk at depth 3 is far under 500us.
+    ?assert(maps:get(median, S) < 500).
 
 %% --- 1. Raw message send/receive (baseline) ---
 

@@ -815,7 +815,7 @@ mod tests {
     /// constructs one of these as its first step.
     struct CleanupWorkspaceDirs<'a> {
         ids: &'a [String],
-        _guard: std::sync::RwLockReadGuard<'static, ()>,
+        _guard: crate::commands::test_support::SharedHomeGuard,
     }
 
     impl<'a> CleanupWorkspaceDirs<'a> {
@@ -837,7 +837,10 @@ mod tests {
         }
     }
 
+    // Reads the process cwd (the query `resolve_workspace_id_or_cwd(None)`
+    // makes), so it is ordered against the `#[serial(cwd)]` tests that change it.
     #[test]
+    #[serial_test::serial(cwd)]
     fn test_find_workspace_by_project_path_rejects_relative_stored_path() {
         let pid = std::process::id();
         let ws_id_a = format!("test_bt3332_relpath_a_{pid}");
@@ -1065,7 +1068,7 @@ mod tests {
         // The id a (pre- or post-fix) `generate_workspace_id` call has always
         // produced for this test's own crate directory — standing in for
         // "the project directory", since it's real, absolute, and stable.
-        let project_dir = std::env::current_dir().unwrap();
+        let project_dir = crate::commands::test_support::stable_project_dir();
         let ws_id = beamtalk_workspace::generate_workspace_id(&project_dir).unwrap();
         let _cleanup = CleanupWorkspaceDirs::new(std::slice::from_ref(&ws_id));
 

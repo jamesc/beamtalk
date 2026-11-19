@@ -49,12 +49,16 @@ fn eval_io_timeout() -> Duration {
 fn test_io_timeout() -> Duration {
     static CACHED: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
     *CACHED.get_or_init(|| {
-        std::env::var("BEAMTALK_MCP_TEST_TIMEOUT")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .filter(|&secs| secs > 0)
-            .map_or(Duration::from_mins(2), Duration::from_secs)
+        parse_test_io_timeout(std::env::var("BEAMTALK_MCP_TEST_TIMEOUT").ok().as_deref())
     })
+}
+
+/// Pure parse of the `BEAMTALK_MCP_TEST_TIMEOUT` value (seconds); unset,
+/// unparsable and zero all fall back to the 120 s default.
+fn parse_test_io_timeout(raw: Option<&str>) -> Duration {
+    raw.and_then(|s| s.parse::<u64>().ok())
+        .filter(|&secs| secs > 0)
+        .map_or(Duration::from_mins(2), Duration::from_secs)
 }
 
 /// Timeout for establishing a WebSocket connection.
@@ -2387,10 +2391,16 @@ mod tests {
 
     #[test]
     fn test_io_timeout_default_is_120s() {
-        // When BEAMTALK_MCP_TEST_TIMEOUT is not set, default is 120s.
-        // Note: OnceLock makes this a one-shot test per process, so we only
-        // verify the default (env var is not set in the test environment).
-        let timeout = test_io_timeout();
-        assert_eq!(timeout, Duration::from_mins(2));
+        // Tests the pure parser, not the env var / `OnceLock`, so the result
+        // does not depend on the caller's environment (BT-5035).
+        assert_eq!(parse_test_io_timeout(None), Duration::from_mins(2));
+        assert_eq!(parse_test_io_timeout(Some("")), Duration::from_mins(2));
+        assert_eq!(parse_test_io_timeout(Some("abc")), Duration::from_mins(2));
+        assert_eq!(parse_test_io_timeout(Some("0")), Duration::from_mins(2));
+    }
+
+    #[test]
+    fn test_io_timeout_honours_override_seconds() {
+        assert_eq!(parse_test_io_timeout(Some("30")), Duration::from_secs(30));
     }
 }

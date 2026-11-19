@@ -1728,6 +1728,28 @@ test-bunit *ARGS: build-stdlib
     @cargo run --bin beamtalk --quiet -- test --warnings-as-errors --quiet {{ ARGS }}
     @echo "✅ BUnit tests complete"
 
+# Hermeticity check (BT-5035): run the beamtalk-cli unit tests with HOME pointing
+# at an empty directory and fail if anything was written under it. A CLI test that
+# touches the real `~/.beamtalk` instead of a `BeamtalkHomeOverride` /
+# `real_home_guard()` temp home leaves a `.beamtalk` behind and fails here.
+test-hermetic-home:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    erl_bin="$(dirname "$(mise which erl 2>/dev/null || command -v erl)")"
+    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
+    fake_home="$(mktemp -d)"
+    trap 'rm -rf "$fake_home"' EXIT
+    HOME="$fake_home" PATH="$erl_bin:$PATH" CARGO_HOME="$cargo_home" RUSTUP_HOME="$rustup_home" \
+        cargo test --locked -p beamtalk-cli --bins
+    leftover="$(find "$fake_home" -mindepth 1 -maxdepth 1 -name '.beamtalk' -o -mindepth 1 -maxdepth 1 -name '.config')"
+    if [ -n "$leftover" ]; then
+        echo "❌ tests wrote under the fake HOME:" >&2
+        find "$fake_home" -mindepth 1 | head -20 >&2
+        exit 1
+    fi
+    echo "✅ no test touched HOME"
+
 # Verify ThreadedIr::verify() (ADR 0111) invariants hold across the full
 # stdlib/test/*.bt + stdlib/bootstrap-test/*.btscript corpus (BT-3136
 # close-out; BT-3424/ADR 0118 close-out corrected this comment's corpus

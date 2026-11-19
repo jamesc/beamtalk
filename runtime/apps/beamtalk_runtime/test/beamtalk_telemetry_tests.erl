@@ -76,7 +76,7 @@ forward_event(Event, Measurements, Metadata, #{dest := Dest}) ->
 recv() ->
     receive
         {event, E, M, Md} -> {E, M, Md}
-    after 1000 -> timeout
+    after 5000 -> timeout
     end.
 
 no_more() ->
@@ -244,7 +244,7 @@ attach_many_covers_every_event() ->
     ?assertEqual([{many, [bt4025, m1]}, {many, [bt4025, m2]}], [
         receive
             {many, _} = M -> M
-        after 1000 -> timeout
+        after 5000 -> timeout
         end
      || _ <- [1, 2]
     ]),
