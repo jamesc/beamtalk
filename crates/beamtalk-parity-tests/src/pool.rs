@@ -25,7 +25,7 @@ pub struct SharedRepl {
 
 /// Get-or-start the shared workspace.
 ///
-/// On first call this spawns `beamtalk repl --port 0 --timeout 300`, parses
+/// On first call this spawns `beamtalk repl --port 0 --idle-timeout 300`, parses
 /// the port and workspace ID from stdout, reads the cookie from workspace
 /// storage, and waits for the TCP port to accept connections. Subsequent
 /// calls return the cached handle.
@@ -56,7 +56,7 @@ fn start_workspace() -> Result<SharedRepl, String> {
         .map_err(|e| format!("create workspace cwd {}: {e}", workspace_cwd.display()))?;
 
     let mut child = Command::new(&bin)
-        .args(["repl", "--port", "0", "--timeout", "300"])
+        .args(["repl", "--port", "0", "--idle-timeout", "300"])
         .current_dir(&workspace_cwd)
         .stdin(Stdio::null())
         .stdout(stdout)

@@ -26,6 +26,7 @@ use super::{MAX_CONNECT_RETRIES, RETRY_DELAY_MS, ReplClient};
 pub(crate) fn start_beam_node(
     node_name: Option<&String>,
     project_root: &Path,
+    extra_code_paths: &[std::path::PathBuf],
     config: &crate::commands::workspace::WorkspaceConfig<'_>,
 ) -> Result<Child> {
     // ADR 0125 §3.1: the foreground REPL node loads the toolchain's `.beam`
@@ -107,6 +108,8 @@ pub(crate) fn start_beam_node(
     // Start erl with beamtalk_workspace running
     // The receive loop keeps the BEAM VM alive while REPL is running
     let mut args = repl_startup::beam_pa_args(&paths);
+    // Package ebin from auto-compile, as the detached-workspace path adds.
+    args.extend(repl_startup::pa_args(extra_code_paths));
 
     // Add node name if specified
     if let Some(name) = node_name {

@@ -33,6 +33,8 @@ pub(crate) enum FixtureScope<'a> {
         hierarchy: &'a ClassHierarchyContext,
         current_package: Option<&'a str>,
         known_erlang_modules: &'a beamtalk_core::ffi_type_specs::KnownErlangModules,
+        /// `--no-warnings`.
+        suppress_warnings: bool,
     },
     /// `test-stdlib` / `test-docs` / the metamorphic harness: bootstrap fixtures
     /// with no manifest, no package and no dependencies. Module-expression lint
@@ -118,6 +120,7 @@ impl FixtureCompiler<'_> {
                 hierarchy,
                 current_package,
                 known_erlang_modules,
+                suppress_warnings,
             } => {
                 // BT-4334: declare the checker scope `build` does. Without
                 // `ProjectComplete`, cross-file receivers stay `Open` and their
@@ -132,6 +135,7 @@ impl FixtureCompiler<'_> {
                     stdlib_mode: false,
                     allow_primitives: false,
                     warnings_as_errors: self.warnings_as_errors,
+                    suppress_warnings: *suppress_warnings,
                     current_package: current_package.map(str::to_string),
                     knowledge_scope: scope.knowledge_scope,
                     dependency_extensions_unknown: scope.has_package_dependencies,

@@ -320,7 +320,7 @@ beamtalk workspace logs --level debug
 beamtalk workspace logs --level error
 
 # Show logs for a specific workspace
-beamtalk workspace logs --workspace <id>
+beamtalk workspace logs <id>
 
 # Show log file path
 beamtalk workspace logs --path

@@ -26,6 +26,7 @@ mod cli_build;
 mod cli_class_var_agreement;
 mod cli_doc;
 mod cli_doctor;
+mod cli_flags;
 mod cli_fmt;
 mod cli_lint;
 mod cli_logs;

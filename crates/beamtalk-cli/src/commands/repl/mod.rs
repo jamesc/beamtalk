@@ -237,7 +237,7 @@ pub fn run(
     workspace_name: Option<&str>,
     persistent: bool,
     ephemeral: bool,
-    timeout: Option<u64>,
+    idle_timeout: Option<u64>,
     no_color: bool,
     bind: Option<&str>,
     confirm_network: bool,
@@ -330,21 +330,34 @@ pub fn run(
         // Foreground mode: start node directly (original behavior)
         println!("Starting BEAM node in foreground mode (--foreground)...");
 
-        // ADR 0072: Collect hex dep names from lockfile (includes transitive deps)
+        // BT-5045: auto-compile the package like the workspace path, so
+        // foreground starts with the package's classes loadable too.
+        let extra_code_paths = auto_compile_package(&project_root);
+
+        // ADR 0072: Collect hex dep names from lockfile (includes transitive
+        // deps), after auto-compile which may update beamtalk.lock.
         let hex_dep_names = collect_hex_dep_names_for_project(&project_root)?;
 
         let fg_config = workspace::WorkspaceConfig {
             port,
             bind_addr: Some(bind_addr),
-            auto_cleanup: false,    // not applicable in foreground mode
-            max_idle_seconds: None, // not applicable in foreground mode
+            // Foreground has no detached workspace to clean up or time out;
+            // clap rejects `--persistent`/`--ephemeral`/`--idle-timeout`
+            // with `--foreground`, so nothing is silently ignored.
+            auto_cleanup: false,
+            max_idle_seconds: None,
             log_level,
             otp_app_name: otp_app_name.as_deref(),
             root_package: root_package.as_deref(),
             hex_dep_names: &hex_dep_names,
         };
 
-        let mut child = start_beam_node(node_name.as_ref(), &project_root, &fg_config)?;
+        let mut child = start_beam_node(
+            node_name.as_ref(),
+            &project_root,
+            &extra_code_paths,
+            &fg_config,
+        )?;
 
         // Discover the actual port from the BEAM node's stdout.
         // The BEAM prints "BEAMTALK_PORT:<port>" after binding.
@@ -401,7 +414,7 @@ pub fn run(
             port,
             bind_addr: Some(bind_addr),
             auto_cleanup: !persistent, // auto_cleanup is opposite of persistent flag
-            max_idle_seconds: timeout,
+            max_idle_seconds: idle_timeout,
             log_level,
             otp_app_name: otp_app_name.as_deref(),
             root_package: root_package.as_deref(),
@@ -432,10 +445,10 @@ pub fn run(
             std::thread::sleep(Duration::from_secs(2));
         } else {
             println!("✓ Connected to existing workspace: {}", node_info.node_name);
-            if timeout.is_some() {
+            if idle_timeout.is_some() {
                 eprintln!(
-                    "  ⚠️  Workspace already running (timeout unchanged). \
-                     Use `beamtalk workspace stop` to restart with a new timeout."
+                    "  ⚠️  Workspace already running (idle timeout unchanged). \
+                     Use `beamtalk workspace stop` to restart with a new idle timeout."
                 );
             }
             if workspace_name.is_some() {
