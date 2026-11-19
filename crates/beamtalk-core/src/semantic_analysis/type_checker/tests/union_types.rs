@@ -783,17 +783,9 @@ fn false_or_param_resolves_to_union() {
     };
 
     let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: vec![],
-        protocols: vec![],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
         span: span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: vec![],
+        ..empty_module()
     };
 
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
@@ -859,8 +851,6 @@ fn bt3076_union_member_class_of_unregistered_class_still_contributes() {
     };
 
     let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
         classes: vec![
             make_class("UnionA", TypeAnnotation::Simple(ident("Integer"))),
             make_class(
@@ -871,14 +861,8 @@ fn bt3076_union_member_class_of_unregistered_class_still_contributes() {
                 },
             ),
         ],
-        method_definitions: vec![],
-        protocols: vec![],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
         span: span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: vec![],
+        ..empty_module()
     };
 
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();

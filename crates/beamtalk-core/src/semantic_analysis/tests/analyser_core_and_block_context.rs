@@ -366,82 +366,29 @@ fn test_self_available_in_method_bodies() {
     // Simple method that uses self:
     //   getValue => self.value
 
-    use crate::ast::{
-        ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword, MessageSelector,
-        MethodDefinition, MethodKind, StateDeclaration,
-    };
+    use crate::ast::{ClassDefinition, ClassKind, MethodDefinition, StateDeclaration};
 
     let get_value_method = MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("getValue".into()),
-        parameters: vec![],
         body: vec![bare(Expression::FieldAccess {
             receiver: Box::new(Expression::Identifier(Identifier::new("self", test_span()))),
             field: Identifier::new("value", test_span()),
             span: test_span(),
         })],
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        kind: MethodKind::Primary,
-        expect: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        span: test_span(),
+        ..MethodDefinition::test("getValue")
     };
 
     let state_decl = StateDeclaration {
-        name: Identifier::new("value", test_span()),
-        type_annotation: None,
         default_value: Some(Expression::Literal(Literal::Integer(0), test_span())),
-        expect: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        declared_keyword: DeclaredKeyword::default(),
-        slot_kind: crate::ast::SlotKind::default(),
-        span: test_span(),
+        ..StateDeclaration::test("value")
     };
 
     let class_def = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
         state: vec![state_decl],
         methods: vec![get_value_method],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class_def],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-        span: test_span(),
-    };
+    let module = module_with_classes(vec![class_def]);
     let result = analyse(&module);
 
     // Should have NO diagnostics - 'self' should be recognized

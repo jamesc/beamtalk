@@ -19,7 +19,9 @@ pub(super) use crate::semantic_analysis::class_hierarchy::DeclaredType;
 pub(super) use crate::semantic_analysis::class_hierarchy::MethodInfo;
 pub(super) use crate::source_analysis::{DiagnosticCategory, Span};
 
-pub(super) use crate::test_helpers::test_support::{bare, unit_ident as ident, unit_span as span};
+pub(super) use crate::test_helpers::test_support::{
+    bare, empty_module, unit_ident as ident, unit_span as span,
+};
 
 pub(super) fn make_module(expressions: Vec<Expression>) -> Module {
     Module::new(
