@@ -16,7 +16,7 @@ Tests hot code reloading, actor migration, and module replacement.
 %% gen_server callbacks for a minimal test actor used to exercise
 %% trigger_code_change/2,3 success paths via sys:change_code/4.
 -behaviour(gen_server).
--export([init/1, handle_call/3, handle_cast/2, code_change/3]).
+-export([init/1, handle_call/3, handle_cast/2, code_change/3, log/2]).
 
 %%====================================================================
 %% Tests for beamtalk_hot_reload domain service
@@ -624,9 +624,16 @@ init(State) -> {ok, State}.
 handle_call(_Msg, _From, State) -> {reply, ok, State}.
 handle_cast({set, New}, _State) -> {noreply, New};
 handle_cast(_, State) -> {noreply, State}.
-code_change(_OldVsn, _State, {crash, Reason}) -> exit(Reason);
-code_change(_OldVsn, _State, {fail, Reason}) -> {error, Reason};
-code_change(_OldVsn, State, _Extra) -> {ok, State}.
+code_change(_OldVsn, _State, {crash, Reason}) ->
+    exit(Reason);
+code_change(_OldVsn, _State, {fail, Reason}) ->
+    {error, Reason};
+code_change(_OldVsn, State, {slow, Ms}) ->
+    %% sleep: simulates a migration slower than sys:change_code's 5 s timeout
+    timer:sleep(Ms),
+    {ok, State};
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
 
 trigger_code_change_live_actor_success_test() ->
     %% trigger_code_change/2 reports Upgraded = 1 on a live actor
@@ -672,6 +679,37 @@ trigger_code_change_mixed_success_and_failure_test() ->
         unlink(LivePid),
         gen_server:stop(LivePid)
     end.
+
+%% BT-5021: a `sys:change_code/4` timeout is reported at ERROR (the actor stays
+%% suspended, as for any failed migration, so the next reload retries) rather
+%% than returning `{error, timeout}` silently.
+try_change_code_timeout_logs_error_and_stays_suspended_test_() ->
+    {timeout, 30, fun() ->
+        OldLevel = maps:get(level, logger:get_primary_config()),
+        ok = logger:set_primary_config(level, all),
+        HandlerId = beamtalk_test_unique:atom("bt5021_hot_reload"),
+        ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{parent => self()}, level => all}),
+        {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+        try
+            {ok, 0, Failures} =
+                beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {slow, 6500}),
+            ?assertEqual([{Pid, timeout}], Failures),
+            ?awaitMessage({hot_reload_log_event, #{level := error}}, 1000),
+            ?assertEqual(
+                suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
+            )
+        after
+            logger:remove_handler(HandlerId),
+            logger:set_primary_config(level, OldLevel),
+            unlink(Pid),
+            beamtalk_test_proc:stop(Pid)
+        end
+    end}.
+
+%% logger handler callback: forward events to the test process.
+log(LogEvent, #{config := #{parent := Parent}}) ->
+    Parent ! {hot_reload_log_event, LogEvent},
+    ok.
 
 try_change_code_crash_produces_exception_failure_test() ->
     %% code_change that exits is caught by try_change_code and

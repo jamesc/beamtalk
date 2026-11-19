@@ -219,6 +219,7 @@ call 'erlang':'error'(Error1)
 | `arity_mismatch` | Wrong argument count | Any class |
 | `instantiation_error` | Wrong instantiation method | `'Actor'` |
 | `future_not_awaited` | Message sent to Future | `'Future'` |
+| `future_expired` | Future process exited or orphaned | `'Future'` |
 | `timeout` | Operation timeout | Any class |
 
 ### Helper for Binary Strings in Core Erlang

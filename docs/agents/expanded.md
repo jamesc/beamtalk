@@ -266,6 +266,7 @@ call 'erlang':'error'(Error1)
 | `arity_mismatch` | Wrong argument count | Missing/extra args |
 | `instantiation_error` | Wrong instantiation | `Actor new` (use `spawn`) |
 | `future_not_awaited` | Message to Future | `(future) size` |
+| `future_expired` | Future process exited or orphaned | `await` on a settled-and-discarded future |
 | `timeout` | Operation timeout | Await exceeds deadline |
 
 ### Benefits of Structured Errors
