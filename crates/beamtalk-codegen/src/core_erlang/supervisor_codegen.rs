@@ -162,9 +162,9 @@ impl CoreErlangGenerator {
         }
 
         // superclass/0, __beamtalk_meta/0, register_class/0
-        docs.push(self.generate_superclass_function(module)?);
+        docs.push(self.generate_superclass_function(module));
         docs.push(Document::Str("\n"));
-        docs.push(self.generate_meta_function(module, false)?);
+        docs.push(self.generate_meta_function(module, false));
         docs.push(self.generate_register_class(module, false)?);
 
         Ok(super::module_shell::core_module(

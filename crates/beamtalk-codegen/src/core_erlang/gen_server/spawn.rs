@@ -8,7 +8,7 @@
 //! Generates `spawn/0`, `spawn/1` class methods and `new/0`, `new/1` error
 //! methods that prevent incorrect actor instantiation.
 
-use super::super::{CoreErlangGenerator, Result};
+use super::super::CoreErlangGenerator;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::Module;
@@ -249,12 +249,11 @@ impl CoreErlangGenerator {
     /// `SpawnVariant::Monitored` generates `spawn_monitored/0` (BT-4104)
     /// the same way over `beamtalk_actor:safe_spawn_monitored/2`, answering
     /// `{ActorObject, MonRef}`.
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_spawn_function(
         &mut self,
         _module: &Module,
         variant: SpawnVariant,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         // initialize is now called inside init/1, not here.
         // This ensures all spawn paths (direct, supervised, named) run initialize.
         let class_name = self.class_name();
@@ -294,7 +293,7 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        Ok(doc)
+        doc
     }
 
     /// Generates the `spawn/1` class method for creating actor instances with init args.
@@ -326,12 +325,11 @@ impl CoreErlangGenerator {
     /// `SpawnVariant::Monitored` generates `spawn_monitored/1` (BT-4104)
     /// the same way over `beamtalk_actor:safe_spawn_monitored/2`, answering
     /// `{ActorObject, MonRef}`.
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_spawn_with_args_function(
         &mut self,
         _module: &Module,
         variant: SpawnVariant,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         // initialize is now called inside init/1, not here.
         let class_name = self.class_name();
         let module_name = self.module_name.clone();
@@ -419,73 +417,67 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        Ok(doc)
+        doc
     }
 
     /// Generates the `new/0` error method for actors.
     ///
     /// Actors cannot be instantiated with `new` - they must use `spawn`.
     #[allow(clippy::unused_self)] // method on impl for API consistency
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
-    pub(in crate::core_erlang) fn generate_actor_new_error_method(
-        &self,
-    ) -> Result<Document<'static>> {
-        Ok(Self::instantiation_error_stub(
+    pub(in crate::core_erlang) fn generate_actor_new_error_method(&self) -> Document<'static> {
+        Self::instantiation_error_stub(
             Document::Str("'new'/0 = fun () ->"),
             "Actor",
             "new",
             "Use spawn instead",
-        ))
+        )
     }
 
     /// Generates the `new/1` error method for actors.
     ///
     /// Actors cannot be instantiated with `new:` - they must use `spawnWith:`.
     #[allow(clippy::unused_self)] // method on impl for API consistency
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_actor_new_with_args_error_method(
         &self,
-    ) -> Result<Document<'static>> {
-        Ok(Self::instantiation_error_stub(
+    ) -> Document<'static> {
+        Self::instantiation_error_stub(
             Document::Str("'new'/1 = fun (_InitArgs) ->"),
             "Actor",
             "new:",
             "Use spawnWith: instead",
-        ))
+        )
     }
 
     /// Generates the `spawn/0` (or, `Monitored`, `spawn_monitored/0`) error
     /// method for abstract classes.
     ///
     /// Abstract classes cannot be instantiated — they must be subclassed first.
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_abstract_spawn_error_method(
         &mut self,
         variant: SpawnVariant,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let (fun_decl, selector) = variant.stub_head(false);
-        Ok(Self::instantiation_error_stub(
+        Self::instantiation_error_stub(
             fun_decl,
             self.class_name(),
             selector,
             "Abstract classes cannot be instantiated. Subclass it first.",
-        ))
+        )
     }
 
     /// Generates the `spawn/1` (or, `Monitored`, `spawn_monitored/1`) error
     /// method for abstract classes.
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_abstract_spawn_with_args_error_method(
         &mut self,
         variant: SpawnVariant,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let (fun_decl, selector) = variant.stub_head(true);
-        Ok(Self::instantiation_error_stub(
+        Self::instantiation_error_stub(
             fun_decl,
             self.class_name(),
             selector,
             "Abstract classes cannot be instantiated. Subclass it first.",
-        ))
+        )
     }
 
     /// Generates `spawn_monitored/0` or `spawn_monitored_async/0` (`with_args`
@@ -596,11 +588,10 @@ impl CoreErlangGenerator {
     /// 'superclass'/0 = fun () -> 'Actor'
     /// ```
     #[allow(clippy::unused_self)] // method on impl for API consistency
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_superclass_function(
         &self,
         module: &Module,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let superclass_atom = module
             .classes
             .first()
@@ -615,7 +606,7 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        Ok(doc)
+        doc
     }
 }
 
@@ -692,7 +683,6 @@ mod tests {
         let m = empty_module();
         let out = g
             .generate_spawn_function(&m, SpawnVariant::Plain)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("'spawn'/0 = fun ()"),
@@ -706,7 +696,6 @@ mod tests {
         let m = empty_module();
         let out = g
             .generate_spawn_function(&m, SpawnVariant::Plain)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("beamtalk_actor"),
@@ -721,7 +710,6 @@ mod tests {
         let m = empty_module();
         let out = g
             .generate_spawn_function(&m, SpawnVariant::Plain)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("beamtalk_object"),
@@ -738,7 +726,6 @@ mod tests {
         let m = empty_module();
         let out = g
             .generate_spawn_function(&m, SpawnVariant::Plain)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("instantiation_error"),
@@ -753,7 +740,6 @@ mod tests {
         let m = empty_module();
         let out = g
             .generate_spawn_function(&m, SpawnVariant::Plain)
-            .unwrap()
             .to_pretty_string();
         assert!(
             !out.contains("beamtalk_object_instances"),
@@ -767,7 +753,6 @@ mod tests {
         let m = empty_module();
         let out = g
             .generate_spawn_with_args_function(&m, SpawnVariant::Plain)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("'spawn'/1 = fun (InitArgs)"),
@@ -785,7 +770,6 @@ mod tests {
         let m = empty_module();
         let out = g
             .generate_spawn_with_args_function(&m, SpawnVariant::Plain)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4)"),
@@ -813,7 +797,6 @@ mod tests {
         let m = empty_module();
         let out = g
             .generate_spawn_function(&m, SpawnVariant::Plain)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4)"),
@@ -835,7 +818,6 @@ mod tests {
         let m = empty_module();
         let out = g
             .generate_spawn_with_args_function(&m, SpawnVariant::Plain)
-            .unwrap()
             .to_pretty_string();
         assert!(out.contains("type_error"), "expected type_error: {out}");
         assert!(out.contains("spawnWith:"), "expected selector: {out}");
@@ -847,7 +829,6 @@ mod tests {
         let m = empty_module();
         let out = g
             .generate_spawn_with_args_function(&m, SpawnVariant::Plain)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("beamtalk_object"),
@@ -862,10 +843,7 @@ mod tests {
     #[test]
     fn generate_actor_new_error_method_raises_instantiation_error() {
         let g = generator();
-        let out = g
-            .generate_actor_new_error_method()
-            .unwrap()
-            .to_pretty_string();
+        let out = g.generate_actor_new_error_method().to_pretty_string();
         assert!(
             out.contains("'new'/0 = fun ()"),
             "expected new/0 decl: {out}"
@@ -882,7 +860,6 @@ mod tests {
         let g = generator();
         let out = g
             .generate_actor_new_with_args_error_method()
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("'new'/1 = fun (_InitArgs)"),
@@ -899,7 +876,6 @@ mod tests {
         let mut g = generator();
         let out = g
             .generate_abstract_spawn_error_method(SpawnVariant::Plain)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("'spawn'/0 = fun ()"),
@@ -917,7 +893,6 @@ mod tests {
         let mut g = generator();
         let out = g
             .generate_abstract_spawn_with_args_error_method(SpawnVariant::Plain)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("'spawn'/1 = fun (_InitArgs)"),
@@ -937,7 +912,6 @@ mod tests {
         let m = empty_module();
         let out = g
             .generate_spawn_function(&m, SpawnVariant::Monitored)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("'spawn_monitored'/0 = fun ()"),
@@ -975,7 +949,6 @@ mod tests {
         let m = empty_module();
         let out = g
             .generate_spawn_with_args_function(&m, SpawnVariant::Monitored)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("'spawn_monitored'/1 = fun (InitArgs)"),
@@ -1010,7 +983,6 @@ mod tests {
         let m = empty_module();
         let out = g
             .generate_spawn_function(&m, SpawnVariant::MonitoredAsync)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("'spawn_monitored_async'/0 = fun ()"),
@@ -1036,7 +1008,6 @@ mod tests {
         let m = empty_module();
         let out = g
             .generate_spawn_with_args_function(&m, SpawnVariant::MonitoredAsync)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out.contains("'spawn_monitored_async'/1 = fun (InitArgs)"),
@@ -1060,7 +1031,6 @@ mod tests {
         let mut g = generator();
         let out0 = g
             .generate_abstract_spawn_error_method(SpawnVariant::MonitoredAsync)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out0.contains("'spawn_monitored_async'/0 = fun ()"),
@@ -1069,7 +1039,6 @@ mod tests {
         assert!(out0.contains("'spawnMonitoredAsync'"), "{out0}");
         let out1 = g
             .generate_abstract_spawn_with_args_error_method(SpawnVariant::MonitoredAsync)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out1.contains("'spawn_monitored_async'/1 = fun (_InitArgs)"),
@@ -1104,7 +1073,6 @@ mod tests {
         let mut g = generator();
         let out0 = g
             .generate_abstract_spawn_error_method(SpawnVariant::Monitored)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out0.contains("'spawn_monitored'/0 = fun ()"),
@@ -1119,7 +1087,6 @@ mod tests {
         );
         let out1 = g
             .generate_abstract_spawn_with_args_error_method(SpawnVariant::Monitored)
-            .unwrap()
             .to_pretty_string();
         assert!(
             out1.contains("'spawn_monitored'/1 = fun (_InitArgs)"),
@@ -1171,10 +1138,7 @@ mod tests {
     fn generate_superclass_function_no_classes_returns_nil() {
         let g = generator();
         let m = empty_module();
-        let out = g
-            .generate_superclass_function(&m)
-            .unwrap()
-            .to_pretty_string();
+        let out = g.generate_superclass_function(&m).to_pretty_string();
         assert!(
             out.contains("'superclass'/0 = fun ()"),
             "expected superclass/0: {out}"
@@ -1186,10 +1150,7 @@ mod tests {
     fn generate_superclass_function_returns_superclass_atom() {
         let g = generator();
         let m = module_with_superclass("Actor");
-        let out = g
-            .generate_superclass_function(&m)
-            .unwrap()
-            .to_pretty_string();
+        let out = g.generate_superclass_function(&m).to_pretty_string();
         assert!(out.contains("'Actor'"), "expected Actor atom: {out}");
     }
 }

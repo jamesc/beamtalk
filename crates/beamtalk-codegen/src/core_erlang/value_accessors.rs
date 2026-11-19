@@ -16,6 +16,7 @@
 //! `value_type_codegen.rs` import cycle.
 
 use super::{CoreErlangGenerator, selector_mangler::MAX_ATOM_BYTES};
+use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, concat, join, leaf};
 use beamtalk_core::ast::{ClassDefinition, ClassKind, StateDeclaration};
@@ -286,7 +287,8 @@ impl CoreErlangGenerator {
 
         // Direct Value subclass: build a flat map with all own fields.
         let mut map_field_docs: Vec<Document<'static>> = vec![
-            Document::Str("'$beamtalk_class' => "),
+            leaf::atom(sentinel_tags::CLASS_TAG),
+            Document::Str(" => "),
             leaf::atom(class_name.to_string()),
         ];
         for (i, slot_name) in slots.iter().enumerate() {

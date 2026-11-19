@@ -11,7 +11,7 @@ use super::{DISPATCH_PREFIX_SELECTORS, OwnDispatchArm};
 use super::super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::super::errors::{BeamtalkErrorChain, ErrorBinding};
 use super::super::value_accessors::{AutoSlotMethods, compute_auto_slot_methods};
-use super::super::{CoreErlangGenerator, Result};
+use super::super::CoreErlangGenerator;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form::{self, Layout, case_of, clause, let_in, try_of_catch};
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
@@ -93,7 +93,7 @@ impl CoreErlangGenerator {
         &mut self,
         class: &ClassDefinition,
         auto_methods: Option<&AutoSlotMethods>,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
         let superclass_mod = self.superclass_module_name(class.superclass_name());
@@ -227,7 +227,7 @@ impl CoreErlangGenerator {
             "\n",
         ];
 
-        Ok(doc)
+        doc
     }
 
     /// [`dispatch_spec::value_core_reflection_arms`] split around the field
@@ -534,11 +534,7 @@ impl CoreErlangGenerator {
     /// for reflection primitives (fieldAt:, printString, etc.) that need
     /// access to the actor's state map. For all other value types, this is
     /// a simple wrapper that delegates to dispatch/3.
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
-    pub(super) fn generate_dispatch_4(
-        &mut self,
-        _class: &ClassDefinition,
-    ) -> Result<Document<'static>> {
+    pub(super) fn generate_dispatch_4(&mut self, _class: &ClassDefinition) -> Document<'static> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
 
@@ -551,7 +547,7 @@ impl CoreErlangGenerator {
             Self::generate_dispatch_4_wrapper(mod_name.as_str())
         };
 
-        Ok(docvec![header, body, "\n\n"])
+        docvec![header, body, "\n\n"]
     }
 
     /// Generates Object's dispatch/4 with state-aware reflection primitives.
@@ -982,7 +978,7 @@ impl CoreErlangGenerator {
         &mut self,
         class: &ClassDefinition,
         auto_methods: Option<&AutoSlotMethods>,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let class_name = self.class_name().clone();
         let superclass_mod = self.superclass_module_name(class.superclass_name());
 
@@ -990,7 +986,7 @@ impl CoreErlangGenerator {
         // selector — return true unconditionally.
         let has_catch_all_dnu = dispatch_spec::class_has_catch_all_dnu(class);
         if has_catch_all_dnu {
-            return Ok(dispatch_spec::generate_has_method_from_spec(
+            return dispatch_spec::generate_has_method_from_spec(
                 &[],
                 &DispatchSpec {
                     reflection: &[],
@@ -1004,7 +1000,7 @@ impl CoreErlangGenerator {
                     // DNU class handles every selector itself).
                     emit_local_probe: true,
                 },
-            ));
+            );
         }
 
         // Class-methods-only classes delegate directly to superclass —
@@ -1021,7 +1017,7 @@ impl CoreErlangGenerator {
             .map(|m| m.selector.name().to_string())
             .collect();
 
-        Ok(dispatch_spec::generate_has_method_from_spec(
+        dispatch_spec::generate_has_method_from_spec(
             &own_methods,
             &DispatchSpec {
                 reflection: PRIMITIVE_HAS_METHOD_REFLECTION,
@@ -1032,7 +1028,7 @@ impl CoreErlangGenerator {
                 // BT-4260: see the catch-all-DNU spec above.
                 emit_local_probe: true,
             },
-        ))
+        )
     }
 
     /// Generates a minimal `dispatch/3` for classes with no instance methods.
@@ -1042,11 +1038,10 @@ impl CoreErlangGenerator {
     /// superclass. `perform:` must re-dispatch through this module to preserve
     /// extension lookup and correct error attribution. Skips fieldNames,
     /// fieldAt:, fieldAt:put: since the superclass already handles them.
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(super) fn generate_minimal_dispatch(
         &mut self,
         class: &ClassDefinition,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
         let super_mod = self
@@ -1070,24 +1065,23 @@ impl CoreErlangGenerator {
             "\n",
         ];
 
-        Ok(doc)
+        doc
     }
 
     /// Generates a minimal `has_method/1` for classes with no instance methods.
     ///
     /// Checks `class`, `respondsTo:`, `perform:`, `perform:withArguments:`,
     /// then extensions, then delegates to superclass.
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(super) fn generate_minimal_has_method(
         &mut self,
         class: &ClassDefinition,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let class_name = self.class_name().clone();
         let super_mod = self
             .superclass_module_name(class.superclass_name())
             .expect("minimal has_method requires superclass");
 
-        Ok(dispatch_spec::generate_has_method_from_spec(
+        dispatch_spec::generate_has_method_from_spec(
             &[],
             &DispatchSpec {
                 reflection: &dispatch_spec::value_core_reflection_selectors(),
@@ -1098,7 +1092,7 @@ impl CoreErlangGenerator {
                 // BT-4260: see `generate_primitive_has_method`.
                 emit_local_probe: true,
             },
-        ))
+        )
     }
 }
 

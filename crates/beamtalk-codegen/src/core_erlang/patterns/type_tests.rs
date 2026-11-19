@@ -13,6 +13,7 @@
 use super::super::routing::{self, Guard, SendGuard};
 use super::super::{CoreErlangGenerator, Result};
 use super::match_lowering::MatchThreading;
+use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -550,7 +551,9 @@ impl CoreErlangGenerator {
             leaf::var(match_var.to_string()),
             ") of ",
             "<'true'> when 'true' -> ",
-            "case call 'maps':'get'('$beamtalk_class', ",
+            "case call 'maps':'get'(",
+            leaf::atom(sentinel_tags::CLASS_TAG),
+            ", ",
             leaf::var(match_var.to_string()),
             ", 'undefined') of ",
             "<",
@@ -835,11 +838,15 @@ impl CoreErlangGenerator {
             v.clone(),
             ") of ",
             "<'true'> when 'true' -> ",
-            "case call 'maps':'get'('$beamtalk_class', ",
+            "case call 'maps':'get'(",
+            leaf::atom(sentinel_tags::CLASS_TAG),
+            ", ",
             v.clone(),
             ", 'undefined') of ",
             "<'undefined'> when 'true' -> ",
-            "call 'erlang':'not'(call 'erlang':'is_map_key'('__class_mod__', ",
+            "call 'erlang':'not'(call 'erlang':'is_map_key'(",
+            leaf::atom(sentinel_tags::CLASS_MOD),
+            ", ",
             v,
             ")) ",
             "<",

@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Field-assignment opens.
+//! Field-assignment open.
 //!
-//! Open-document lowerings for `self.field := value`, `fieldAt:put:` and
-//! `clearField:`, which thread the actor or value state through the rest of the
-//! enclosing statement sequence.
+//! The open-document lowering for `self.field := value`, which threads the
+//! actor or value state through the rest of the enclosing statement sequence.
+//! (`fieldAt:put:` and `clearField:` are lowered elsewhere.)
 //!
 //! **DDD Context:** Compilation — Code Generation
 

@@ -16,6 +16,7 @@ use super::{
     validate_block_arity_exact,
 };
 
+use crate::core_erlang::dispatch_codegen::runtime_send_doc;
 use beamtalk_cerl_doc::form::{self, Layout, let_in};
 
 /// Which clause spelling a call site historically emitted: `<'true'> when 'true' -> …`
@@ -236,14 +237,11 @@ impl CoreErlangGenerator {
             // deliberately.
             let badarity_apply_doc = apply_doc.clone();
             let send_doc = self.annotate_call_node_with_line(
-                form::call(
-                    "beamtalk_message_dispatch",
-                    "send",
-                    [
-                        leaf::var(recv_var.clone()),
-                        leaf::atom("value"),
-                        Document::Str("[]"),
-                    ],
+                runtime_send_doc(
+                    leaf::var(recv_var.clone()),
+                    leaf::atom("value"),
+                    Document::Str("[]"),
+                    None,
                 ),
                 at,
             );
@@ -987,14 +985,11 @@ impl CoreErlangGenerator {
             at,
         );
         let send_doc = self.annotate_call_node_with_line(
-            form::call(
-                "beamtalk_message_dispatch",
-                "send",
-                [
-                    leaf::var(recv_var.clone()),
-                    leaf::atom(selector_name.to_string()),
-                    send_list,
-                ],
+            runtime_send_doc(
+                leaf::var(recv_var.clone()),
+                leaf::atom(selector_name.to_string()),
+                send_list,
+                None,
             ),
             at,
         );
@@ -1367,14 +1362,11 @@ impl CoreErlangGenerator {
             at,
         );
         let send_doc = self.annotate_call_node_with_line(
-            form::call(
-                "beamtalk_message_dispatch",
-                "send",
-                [
-                    leaf::var(recv_var.clone()),
-                    leaf::atom("valueWithArguments:"),
-                    docvec!["[", leaf::var(args_var), "]"],
-                ],
+            runtime_send_doc(
+                leaf::var(recv_var.clone()),
+                leaf::atom("valueWithArguments:"),
+                docvec!["[", leaf::var(args_var), "]"],
+                None,
             ),
             at,
         );
@@ -1473,14 +1465,11 @@ impl CoreErlangGenerator {
             at,
         );
         let send_doc = self.annotate_call_node_with_line(
-            form::call(
-                "beamtalk_message_dispatch",
-                "send",
-                [
-                    leaf::var(fun_var.clone()),
-                    leaf::atom("valueWithArguments:"),
-                    docvec!["[", leaf::var(args_var), "]"],
-                ],
+            runtime_send_doc(
+                leaf::var(fun_var.clone()),
+                leaf::atom("valueWithArguments:"),
+                docvec!["[", leaf::var(args_var), "]"],
+                None,
             ),
             at,
         );

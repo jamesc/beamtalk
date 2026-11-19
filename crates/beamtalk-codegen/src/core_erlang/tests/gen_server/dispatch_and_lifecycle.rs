@@ -137,7 +137,7 @@ fn test_generate_class_name_function_derives_from_module_name() {
     let generator = CoreErlangGenerator::new("my_counter");
     let module = Module::new(vec![], Span::new(0, 0));
     // _module arg is unused by production code; only self.module_name matters
-    let doc = generator.generate_class_name_function(&module).unwrap();
+    let doc = generator.generate_class_name_function(&module);
     let output = doc.to_pretty_string();
     assert!(
         output.contains("'class_name'/0 = fun () -> 'MyCounter'"),
@@ -151,7 +151,7 @@ fn test_generate_class_name_function_single_word_module() {
     let generator = CoreErlangGenerator::new("counter");
     let module = Module::new(vec![], Span::new(0, 0));
     // _module arg is unused by production code; only self.module_name matters
-    let doc = generator.generate_class_name_function(&module).unwrap();
+    let doc = generator.generate_class_name_function(&module);
     let output = doc.to_pretty_string();
     assert!(
         output.contains("'class_name'/0 = fun () -> 'Counter'"),
@@ -165,7 +165,7 @@ fn test_generate_has_method_empty_module_produces_empty_member_list() {
     // (member of an empty list is always false).
     let generator = CoreErlangGenerator::new("counter");
     let module = Module::new(vec![], Span::new(0, 0));
-    let doc = generator.generate_has_method(&module).unwrap();
+    let doc = generator.generate_has_method(&module);
     let output = doc.to_pretty_string();
     assert!(
         output.contains("'has_method'/1 = fun (Selector) ->"),
@@ -266,7 +266,7 @@ fn test_generate_has_method_lists_primary_class_methods() {
     };
 
     let generator = CoreErlangGenerator::new("counter");
-    let doc = generator.generate_has_method(&module).unwrap();
+    let doc = generator.generate_has_method(&module);
     let output = doc.to_pretty_string();
     assert!(
         output.contains("'increment'"),
@@ -291,7 +291,7 @@ fn test_generate_has_method_from_expression_based_module() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
 
     let generator = CoreErlangGenerator::new("counter");
-    let doc = generator.generate_has_method(&module).unwrap();
+    let doc = generator.generate_has_method(&module);
     let output = doc.to_pretty_string();
     assert!(
         output.contains("'increment'"),
@@ -445,7 +445,7 @@ fn test_generate_has_method_actor_checks_extension_registry() {
     let class = actor_class_def("Counter", "Actor", vec![unary_method("increment")]);
     let module = module_with_class(class);
     let generator = CoreErlangGenerator::new("counter");
-    let doc = generator.generate_has_method(&module).unwrap();
+    let doc = generator.generate_has_method(&module);
     let output = doc.to_pretty_string();
     assert!(
         output.contains("call 'beamtalk_extensions':'has'('Counter', Selector)"),
@@ -469,7 +469,7 @@ fn test_generate_has_method_actor_delegates_to_superclass() {
     let class = actor_class_def("Counter", "Actor", vec![unary_method("increment")]);
     let module = module_with_class(class);
     let generator = CoreErlangGenerator::new("counter");
-    let doc = generator.generate_has_method(&module).unwrap();
+    let doc = generator.generate_has_method(&module);
     let output = doc.to_pretty_string();
     assert!(
         output.contains("call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')"),
@@ -493,7 +493,7 @@ fn test_generate_has_method_actor_honors_catch_all_dnu() {
     let class = actor_class_def("Proxy", "Actor", vec![catch_all_dnu_method()]);
     let module = module_with_class(class);
     let generator = CoreErlangGenerator::new("proxy");
-    let doc = generator.generate_has_method(&module).unwrap();
+    let doc = generator.generate_has_method(&module);
     let output = doc.to_pretty_string();
     assert_eq!(
         output,
@@ -510,7 +510,7 @@ fn test_generate_safe_dispatch_structure() {
     // stacktrace on failure and calls beamtalk_actor:make_self/1 first.
     // The generated call must reference the module's own dispatch fn.
     let mut generator = CoreErlangGenerator::new("my_counter");
-    let doc = generator.generate_safe_dispatch().unwrap();
+    let doc = generator.generate_safe_dispatch();
     let output = doc.to_pretty_string();
 
     assert!(
