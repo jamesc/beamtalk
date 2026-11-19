@@ -41,6 +41,8 @@ Result rather than crashing on a stale file descriptor.
 See also: beamtalk_file for File class-side methods (`open:mode:`, `readAll:`, etc.)
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -export([dispatch/3, has_method/1]).
 
 %% FFI shims for (Erlang beamtalk_file_handle) dispatch
@@ -67,7 +69,7 @@ See also: beamtalk_file for File class-side methods (`open:mode:`, `readAll:`, e
 
 -type mode() :: read | write | append | readWrite.
 -type t() :: #{
-    '$beamtalk_class' := 'FileHandle',
+    ?BT_CLASS_TAG_KEY := 'FileHandle',
     fd := file:io_device(),
     mode := mode(),
     path := binary(),
@@ -96,7 +98,7 @@ new(Fd, Mode, Path) when is_atom(Mode), is_binary(Path) ->
     Ref = atomics:new(1, [{signed, false}]),
     atomics:put(Ref, 1, 1),
     #{
-        '$beamtalk_class' => 'FileHandle',
+        ?BT_CLASS_TAG_KEY => 'FileHandle',
         fd => Fd,
         mode => Mode,
         path => Path,
@@ -135,7 +137,7 @@ map missing one is malformed and reports closed: callers then produce a
 closed-handle error instead of reaching for an `fd` key that may not be there.
 """.
 -spec is_open(term()) -> boolean().
-is_open(#{'$beamtalk_class' := 'FileHandle', state := Ref, fd := Fd}) ->
+is_open(#{?BT_CLASS_TAG_KEY := 'FileHandle', state := Ref, fd := Fd}) ->
     atomics:get(Ref, 1) =:= 1 andalso descriptor_alive(Fd);
 is_open(_) ->
     false.
@@ -159,7 +161,7 @@ end-of-file was reached and an empty binary means the handle was already there.
 the position, so an empty result only implies end-of-file when `Count > 0`.
 """.
 -spec read(t(), integer()) -> beamtalk_result:t().
-read(#{'$beamtalk_class' := 'FileHandle'} = Handle, Count) when
+read(#{?BT_CLASS_TAG_KEY := 'FileHandle'} = Handle, Count) when
     is_integer(Count), Count >= 0
 ->
     with_readable(Handle, 'read:', fun(Fd) ->
@@ -168,7 +170,7 @@ read(#{'$beamtalk_class' := 'FileHandle'} = Handle, Count) when
             Other -> Other
         end
     end);
-read(#{'$beamtalk_class' := 'FileHandle'}, _) ->
+read(#{?BT_CLASS_TAG_KEY := 'FileHandle'}, _) ->
     beamtalk_error:raise_type_error(
         'FileHandle', 'read:', <<"Byte count must be a non-negative Integer">>
     );
@@ -187,7 +189,7 @@ refuses non-regular paths (`beamtalk_file:check_regular/3`), so a descriptor
 that never reports end-of-file cannot reach this loop through that door.
 """.
 -spec readAll(t()) -> beamtalk_result:t().
-readAll(#{'$beamtalk_class' := 'FileHandle'} = Handle) ->
+readAll(#{?BT_CLASS_TAG_KEY := 'FileHandle'} = Handle) ->
     with_readable(Handle, 'readAll', fun(Fd) -> read_to_eof(Fd, []) end);
 readAll(_) ->
     beamtalk_error:raise_type_error('FileHandle', 'readAll', <<"Expected a FileHandle">>).
@@ -199,26 +201,26 @@ On a handle opened `#append`, writes always land at end-of-file regardless of
 the current position. Returns `Result ok: nil`.
 """.
 -spec write(t(), beamtalk_binary:binary_or_string()) -> beamtalk_result:t().
-write(#{'$beamtalk_class' := 'FileHandle'} = Handle, {beamtalk_string, Data}) when
+write(#{?BT_CLASS_TAG_KEY := 'FileHandle'} = Handle, {beamtalk_string, Data}) when
     is_binary(Data)
 ->
     write(Handle, Data);
-write(#{'$beamtalk_class' := 'FileHandle'} = Handle, Data) when is_binary(Data) ->
+write(#{?BT_CLASS_TAG_KEY := 'FileHandle'} = Handle, Data) when is_binary(Data) ->
     with_writable(Handle, 'write:', fun(Fd) -> file:write(Fd, Data) end);
-write(#{'$beamtalk_class' := 'FileHandle'}, _) ->
+write(#{?BT_CLASS_TAG_KEY := 'FileHandle'}, _) ->
     beamtalk_error:raise_type_error('FileHandle', 'write:', <<"Data must be a String or Binary">>);
 write(_, _) ->
     beamtalk_error:raise_type_error('FileHandle', 'write:', <<"Expected a FileHandle">>).
 
 -doc "Write a String or Binary followed by a newline. Returns `Result ok: nil`.".
 -spec writeLine(t(), beamtalk_binary:binary_or_string()) -> beamtalk_result:t().
-writeLine(#{'$beamtalk_class' := 'FileHandle'} = Handle, {beamtalk_string, Data}) when
+writeLine(#{?BT_CLASS_TAG_KEY := 'FileHandle'} = Handle, {beamtalk_string, Data}) when
     is_binary(Data)
 ->
     writeLine(Handle, Data);
-writeLine(#{'$beamtalk_class' := 'FileHandle'} = Handle, Data) when is_binary(Data) ->
+writeLine(#{?BT_CLASS_TAG_KEY := 'FileHandle'} = Handle, Data) when is_binary(Data) ->
     with_writable(Handle, 'writeLine:', fun(Fd) -> file:write(Fd, [Data, $\n]) end);
-writeLine(#{'$beamtalk_class' := 'FileHandle'}, _) ->
+writeLine(#{?BT_CLASS_TAG_KEY := 'FileHandle'}, _) ->
     beamtalk_error:raise_type_error(
         'FileHandle', 'writeLine:', <<"Data must be a String or Binary">>
     );
@@ -227,7 +229,7 @@ writeLine(_, _) ->
 
 -doc "Current byte offset from the start of the file. Returns `Result ok: integer`.".
 -spec position(t()) -> beamtalk_result:t().
-position(#{'$beamtalk_class' := 'FileHandle'} = Handle) ->
+position(#{?BT_CLASS_TAG_KEY := 'FileHandle'} = Handle) ->
     with_open(Handle, 'position', fun(Fd) -> file:position(Fd, cur) end);
 position(_) ->
     beamtalk_error:raise_type_error('FileHandle', 'position', <<"Expected a FileHandle">>).
@@ -239,11 +241,11 @@ Returns `Result ok: newPosition`. Seeking past end-of-file is allowed — writin
 there leaves a hole, reading there returns an empty binary.
 """.
 -spec seek(t(), integer()) -> beamtalk_result:t().
-seek(#{'$beamtalk_class' := 'FileHandle'} = Handle, Offset) when
+seek(#{?BT_CLASS_TAG_KEY := 'FileHandle'} = Handle, Offset) when
     is_integer(Offset), Offset >= 0
 ->
     with_open(Handle, 'seek:', fun(Fd) -> file:position(Fd, {bof, Offset}) end);
-seek(#{'$beamtalk_class' := 'FileHandle'}, _) ->
+seek(#{?BT_CLASS_TAG_KEY := 'FileHandle'}, _) ->
     beamtalk_error:raise_type_error(
         'FileHandle', 'seek:', <<"Offset must be a non-negative Integer">>
     );
@@ -257,7 +259,7 @@ Beamtalk file handles are unbuffered, so there is never anything to push and
 this succeeds immediately on an open handle. Use `sync` for durability.
 """.
 -spec flush(t()) -> beamtalk_result:t().
-flush(#{'$beamtalk_class' := 'FileHandle'} = Handle) ->
+flush(#{?BT_CLASS_TAG_KEY := 'FileHandle'} = Handle) ->
     with_open(Handle, 'flush', fun(_Fd) -> ok end);
 flush(_) ->
     beamtalk_error:raise_type_error('FileHandle', 'flush', <<"Expected a FileHandle">>).
@@ -269,7 +271,7 @@ Returns `Result ok: nil` once the OS reports the data durable. This is the
 operation a crash-safe append-only log needs after each record.
 """.
 -spec sync(t()) -> beamtalk_result:t().
-sync(#{'$beamtalk_class' := 'FileHandle'} = Handle) ->
+sync(#{?BT_CLASS_TAG_KEY := 'FileHandle'} = Handle) ->
     with_open(Handle, 'sync', fun(Fd) -> file:sync(Fd) end);
 sync(_) ->
     beamtalk_error:raise_type_error('FileHandle', 'sync', <<"Expected a FileHandle">>).
@@ -285,7 +287,7 @@ never tracked (from `open:do:` / `open:mode:do:`, or opened before the
 registry was running).
 """.
 -spec close(t()) -> beamtalk_result:t().
-close(#{'$beamtalk_class' := 'FileHandle'} = Handle) ->
+close(#{?BT_CLASS_TAG_KEY := 'FileHandle'} = Handle) ->
     Result =
         case close_handle(Handle) of
             ok -> beamtalk_result:from_tagged_tuple({ok, nil});
@@ -323,7 +325,7 @@ ensure_readable(Handle, Selector) ->
 
 -doc "Whether the handle is still open.".
 -spec isOpen(t()) -> boolean().
-isOpen(#{'$beamtalk_class' := 'FileHandle'} = Handle) ->
+isOpen(#{?BT_CLASS_TAG_KEY := 'FileHandle'} = Handle) ->
     is_open(Handle);
 isOpen(_) ->
     beamtalk_error:raise_type_error('FileHandle', 'isOpen', <<"Expected a FileHandle">>).

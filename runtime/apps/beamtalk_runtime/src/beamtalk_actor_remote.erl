@@ -361,7 +361,7 @@ remote_timeout_error_record(ClassName, Selector, true) ->
 
 -doc "Resolve a `node :: Node` FFI argument to its underlying node atom.".
 -spec node_arg_to_atom(term()) -> {ok, node()} | {error, #beamtalk_error{}}.
-node_arg_to_atom(#{'$beamtalk_class' := 'Node', name := Name}) when is_atom(Name) ->
+node_arg_to_atom(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) when is_atom(Name) ->
     {ok, Name};
 node_arg_to_atom(Other) ->
     {error,

@@ -1618,7 +1618,7 @@ conflict_summary(Conflicts, Skipped) ->
 ) -> map().
 base_summary(Flushed, Files, NewClasses, RemovedClasses, Skipped, Conflicts) ->
     #{
-        '$beamtalk_class' => 'FlushResult',
+        ?BT_CLASS_TAG_KEY => 'FlushResult',
         flushed => Flushed,
         files => Files,
         newClasses => NewClasses,

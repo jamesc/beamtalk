@@ -64,6 +64,8 @@ A use the table's protection forbids raises `access_denied`, never a raw
 - ADR 0055: Erlang-Backed Class Protocol
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 %% Class methods
 -define(RECEIVER_HINT, <<"Receiver must be an Ets instance">>).
 
@@ -92,7 +94,7 @@ A use the table's protection forbids raises `access_denied`, never a raw
 %% Opt-out of the FFI proxy's ok/error -> Result coercion: Ets returns user data.
 -export([beamtalk_ffi_raw_results/0]).
 
--type t() :: #{'$beamtalk_class' := 'Ets', atom() => term()}.
+-type t() :: #{?BT_CLASS_TAG_KEY := 'Ets', atom() => term()}.
 -export_type([t/0]).
 
 %% A named table's atom, or an unnamed (`private:`/`protected:`) table's tid.
@@ -259,7 +261,7 @@ For bag/duplicate_bag tables with multiple values for a key, returns
 the first stored value. The wrapper exposes only one value per key.
 """.
 -spec lookup(t(), Key :: term()) -> term().
-lookup(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
+lookup(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}, Key) ->
     try
         case ets:lookup(TableName, Key) of
             [{_K, Value} | _] -> Value;
@@ -284,7 +286,7 @@ the same key on a bag table are not serialized — interleaved calls may
 result in multiple entries for the same key.
 """.
 -spec insert(t(), Key :: term(), Value :: term()) -> nil.
-insert(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Value) ->
+insert(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}, Key, Value) ->
     try
         case ets:info(TableName, type) of
             T when T =:= bag; T =:= duplicate_bag ->
@@ -302,21 +304,21 @@ insert(_Self, _Key, _Value) ->
 
 -doc "Look up a key; if absent, evaluate the block and return its result.".
 -spec lookupIfAbsent(t(), Key :: term(), Block :: function()) -> term().
-lookupIfAbsent(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
+lookupIfAbsent(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}, Key, Block) when
     is_function(Block, 0)
 ->
     case guarded(TableName, 'at:ifAbsent:', fun() -> ets:lookup(TableName, Key) end) of
         [{_K, Value} | _] -> Value;
         [] -> call_block(Block, [], 'at:ifAbsent:')
     end;
-lookupIfAbsent(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
+lookupIfAbsent(#{?BT_CLASS_TAG_KEY := 'Ets'}, _Key, _Block) ->
     beamtalk_error:raise_type_error('Ets', 'at:ifAbsent:', <<"Third argument must be a Block">>);
 lookupIfAbsent(_Self, _Key, _Block) ->
     beamtalk_error:raise_type_error('Ets', 'at:ifAbsent:', ?RECEIVER_HINT).
 
 -doc "Test whether a key exists in the table.".
 -spec includesKey(t(), Key :: term()) -> boolean().
-includesKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
+includesKey(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}, Key) ->
     try
         ets:member(TableName, Key)
     catch
@@ -327,7 +329,7 @@ includesKey(_Self, _Key) ->
 
 -doc "Remove the entry for key. Returns nil.".
 -spec removeKey(t(), Key :: term()) -> nil.
-removeKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
+removeKey(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}, Key) ->
     try
         ets:delete(TableName, Key),
         nil
@@ -346,14 +348,14 @@ For bag/duplicate_bag tables every entry for Key is removed and the first
 stored value is answered.
 """.
 -spec removeKey(t(), Key :: term(), Block :: function()) -> term().
-removeKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
+removeKey(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}, Key, Block) when
     is_function(Block, 0)
 ->
     case guarded(TableName, 'removeKey:ifAbsent:', fun() -> ets:take(TableName, Key) end) of
         [{_K, Value} | _] -> Value;
         [] -> call_block(Block, [], 'removeKey:ifAbsent:')
     end;
-removeKey(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
+removeKey(#{?BT_CLASS_TAG_KEY := 'Ets'}, _Key, _Block) ->
     beamtalk_error:raise_type_error(
         'Ets', 'removeKey:ifAbsent:', <<"Second argument must be a Block">>
     );
@@ -369,7 +371,7 @@ For bag/duplicate_bag tables, duplicate keys are collapsed so each key
 appears only once. Order is unspecified for set/bag tables; sorted for orderedSet.
 """.
 -spec keys(t()) -> list().
-keys(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
+keys(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}) ->
     try
         lists:usort(ets:select(TableName, [{{'$1', '_'}, [], ['$1']}]))
     catch
@@ -384,7 +386,7 @@ Return the number of entries in the table.
 Named `tableSize` to avoid shadowing the deprecated `erlang:size/1` BIF.
 """.
 -spec tableSize(t()) -> non_neg_integer().
-tableSize(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
+tableSize(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}) ->
     %% `ets:info/2` answers even across a `private` boundary, so check access
     %% explicitly rather than relying on a `badarg`.
     case table_fault(TableName, read) of
@@ -408,7 +410,7 @@ Destroy the ETS table. Returns nil.
 Named `deleteTable` to avoid shadowing `ets:delete/1` in call sites.
 """.
 -spec deleteTable(t()) -> nil.
-deleteTable(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
+deleteTable(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}) ->
     try
         ets:delete(TableName),
         nil
@@ -443,7 +445,7 @@ beamtalk_ffi_raw_results() -> true.
 
 -doc "Remove every entry, keeping the table. Returns nil.".
 -spec removeAll(t()) -> nil.
-removeAll(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
+removeAll(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}) ->
     try
         ets:delete_all_objects(TableName),
         nil
@@ -459,7 +461,7 @@ unspecified for set/bag tables and key order for orderedSet. Bag tables yield
 one value per stored entry.
 """.
 -spec values(t()) -> list().
-values(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
+values(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}) ->
     [V || {_K, V} <- entries(TableName, 'values')];
 values(_Self) ->
     beamtalk_error:raise_type_error('Ets', 'values', ?RECEIVER_HINT).
@@ -469,7 +471,7 @@ Evaluate Block(Key, Value) for every entry of a snapshot taken up front, so
 the block may freely modify the table. Returns nil.
 """.
 -spec keysAndValuesDo(t(), function()) -> nil.
-keysAndValuesDo(#{'$beamtalk_class' := 'Ets', table := TableName}, Block) when
+keysAndValuesDo(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}, Block) when
     is_function(Block, 2)
 ->
     lists:foreach(
@@ -477,7 +479,7 @@ keysAndValuesDo(#{'$beamtalk_class' := 'Ets', table := TableName}, Block) when
         entries(TableName, 'keysAndValuesDo:')
     ),
     nil;
-keysAndValuesDo(#{'$beamtalk_class' := 'Ets'}, _Block) ->
+keysAndValuesDo(#{?BT_CLASS_TAG_KEY := 'Ets'}, _Block) ->
     beamtalk_error:raise_type_error(
         'Ets', 'keysAndValuesDo:', <<"Argument must be a two-argument Block">>
     );
@@ -491,7 +493,7 @@ Snapshot the table into an immutable Dictionary (an Erlang map). For bag
 tables, the last entry read for a key wins.
 """.
 -spec asDictionary(t()) -> map().
-asDictionary(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
+asDictionary(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}) ->
     maps:from_list(entries(TableName, 'asDictionary'));
 asDictionary(_Self) ->
     beamtalk_error:raise_type_error(
@@ -500,14 +502,14 @@ asDictionary(_Self) ->
 
 -doc "If Key is present evaluate Block(Value) and answer its result, else nil.".
 -spec ifPresent(t(), Key :: term(), function()) -> term().
-ifPresent(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
+ifPresent(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}, Key, Block) when
     is_function(Block, 1)
 ->
     case guarded(TableName, 'at:ifPresent:', fun() -> ets:lookup(TableName, Key) end) of
         [{_K, Value} | _] -> call_block(Block, [Value], 'at:ifPresent:');
         [] -> nil
     end;
-ifPresent(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
+ifPresent(#{?BT_CLASS_TAG_KEY := 'Ets'}, _Key, _Block) ->
     beamtalk_error:raise_type_error(
         'Ets', 'at:ifPresent:', <<"Third argument must be a one-argument Block">>
     );
@@ -521,7 +523,7 @@ Atomically add N to the integer stored at Key (missing key starts at 0) via
 `ets:update_counter/4`. Answers the new value. set/orderedSet only.
 """.
 -spec incrementAt(t(), Key :: term(), integer()) -> integer().
-incrementAt(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, N) when is_integer(N) ->
+incrementAt(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}, Key, N) when is_integer(N) ->
     require_unique_keys(TableName, 'at:increment:'),
     guarded(
         TableName,
@@ -529,7 +531,7 @@ incrementAt(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, N) when is_i
         fun() -> ets:update_counter(TableName, Key, {2, N}, {Key, 0}) end,
         <<"Stored value must be an Integer">>
     );
-incrementAt(#{'$beamtalk_class' := 'Ets'}, _Key, _N) ->
+incrementAt(#{?BT_CLASS_TAG_KEY := 'Ets'}, _Key, _N) ->
     beamtalk_error:raise_type_error(
         'Ets', 'at:increment:', <<"Increment must be an Integer">>
     );
@@ -546,13 +548,13 @@ of side effects. A raising Block propagates and writes nothing. Retries are
 bounded; exhaustion raises `update_contention`. set/orderedSet only.
 """.
 -spec updateAt(t(), Key :: term(), function()) -> term().
-updateAt(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
+updateAt(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}, Key, Block) when
     is_function(Block, 1)
 ->
     require_unique_keys(TableName, 'at:update:'),
     require_plain_key(Key, 'at:update:'),
     update_loop(TableName, Key, Block, ?MAX_UPDATE_RETRIES);
-updateAt(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
+updateAt(#{?BT_CLASS_TAG_KEY := 'Ets'}, _Key, _Block) ->
     beamtalk_error:raise_type_error(
         'Ets', 'at:update:', <<"Second argument must be a one-argument Block">>
     );
@@ -837,7 +839,7 @@ table_label(_Tid) -> <<"(unnamed table)">>.
 -doc "Build an Ets tagged map for the given table name or (unnamed) tid.".
 -spec make_ets(table()) -> t().
 make_ets(Name) ->
-    #{'$beamtalk_class' => 'Ets', table => Name}.
+    #{?BT_CLASS_TAG_KEY => 'Ets', table => Name}.
 
 -doc """
 Map Beamtalk table type symbols to OTP ets type atoms.

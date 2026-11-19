@@ -181,7 +181,7 @@ existing_selector_atom(SelectorBin) ->
 %% Beamtalk-side callers can synthesise the input from a different shape.
 -spec extract_revert_target(term()) ->
     {ok, binary(), atom(), instance | class | undefined} | {error, #beamtalk_error{}}.
-extract_revert_target(#{'$beamtalk_class' := 'ChangeEntry'} = M) ->
+extract_revert_target(#{?BT_CLASS_TAG_KEY := 'ChangeEntry'} = M) ->
     extract_revert_target_from_map(M);
 extract_revert_target(#{className := _} = M) ->
     extract_revert_target_from_map(M);

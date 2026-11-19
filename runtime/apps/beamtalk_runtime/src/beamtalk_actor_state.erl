@@ -516,7 +516,7 @@ reflect_state(Entry, Answered) ->
 
 -spec raise_conflict(map()) -> no_return().
 raise_conflict(Entry) ->
-    Class = maps:get('$beamtalk_class', Entry, unknown),
+    Class = maps:get(?BT_CLASS_TAG_KEY, Entry, unknown),
     Error0 = beamtalk_error:new(actor_state_conflict, Class),
     Error1 = beamtalk_error:with_message(
         Error0,

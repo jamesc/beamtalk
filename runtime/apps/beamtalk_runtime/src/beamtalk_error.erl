@@ -62,7 +62,7 @@ visible to Beamtalk code and returned inside Result error values).
 ```
 """.
 -type t() :: #{
-    '$beamtalk_class' := atom(),
+    ?BT_CLASS_TAG_KEY := atom(),
     error := #beamtalk_error{}
 }.
 -export_type([error/0, t/0]).
@@ -242,7 +242,7 @@ when the Erlang-level reason is a raw function_clause or case_clause.
 -spec format_safe(term(), term()) -> binary().
 format_safe(#beamtalk_error{} = Error, _Stacktrace) ->
     format_safe(Error);
-format_safe(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Error}, _Stacktrace) ->
+format_safe(#{?BT_CLASS_TAG_KEY := _, error := #beamtalk_error{} = Error}, _Stacktrace) ->
     format_safe(Error);
 format_safe(Reason, Stacktrace) ->
     %% Try to extract a beamtalk_error from the stacktrace args
@@ -343,7 +343,7 @@ reason_doc(_Term, Depth, Budget) when Depth =< 0; Budget =< 0 ->
 reason_doc({beamtalk_string, Bin}, _Depth, B) when is_binary(Bin) ->
     {Cut, Marker} = cut_binary(Bin),
     {[beamtalk_primitive:print_string({beamtalk_string, Cut}), Marker], B - 1};
-reason_doc(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}, _Depth, B) ->
+reason_doc(#{?BT_CLASS_TAG_KEY := _, error := #beamtalk_error{} = Err}, _Depth, B) ->
     {format(Err), B - 1};
 reason_doc(#beamtalk_error{} = Err, _Depth, B) ->
     {format(Err), B - 1};
@@ -722,7 +722,7 @@ format_reason(_ErrClass, #beamtalk_error{kind = Kind, class = Class, message = M
     %% BT-4170: the message field is a tagged `String` (or raw bytes in a
     %% hand-built record) — render it before `~s`-formatting.
     chars_to_binary(io_lib:format("~ts (~ts:~ts)", [render_text(Msg), Class, Kind]));
-format_reason(_ErrClass, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}) ->
+format_reason(_ErrClass, #{?BT_CLASS_TAG_KEY := _, error := #beamtalk_error{} = Err}) ->
     format_reason(error, Err);
 format_reason(ErrClass, Reason) ->
     chars_to_binary(io_lib:format("~tp:~tp", [ErrClass, Reason])).

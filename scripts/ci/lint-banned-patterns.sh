@@ -15,7 +15,9 @@
 # `#[cfg(test)] mod … {` block (it ends at the closing `}` in column 0, where
 # rustfmt puts a top-level module's brace). `rust-any` scans inline test modules
 # too but still skips test files. The `erl` kind scans only */test/*.erl and
-# skips `%` comment lines.
+# skips `%` comment lines. The `erl-src` kind (BT-5054) is the opposite: every non-test
+# runtime .erl/.hrl except the generated sentinel header, skipping `%` comment lines and
+# `"""` doc-string blocks.
 #
 # Usage:
 #   scripts/ci/lint-banned-patterns.sh               # check the repo
@@ -27,7 +29,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 ALLOWLIST="scripts/ci/banned-patterns-allowlist.txt"
 
-# id | kind | pathspecs (space separated) | ERE | replacement
+# id | kind | pathspecs (space separated) | ERE | replacement  (write `%OR%` for an ERE `|`: `|` splits fields)
 # Fixture lines for --self-test live in scripts/ci/fixtures/banned-patterns/<id>.{rs,erl}.
 PATTERNS=(
   "send-literal|rust|crates/beamtalk-codegen/src/core_erlang|'beamtalk_message_dispatch':'send'\(|runtime_send_call (dispatch_codegen/mod.rs)"
@@ -40,6 +42,7 @@ PATTERNS=(
   "boot-compiler|erl|runtime/apps|ensure_all_started\(compiler\)|beamtalk_test_boot:compiler/0"
   "self-name|rust|crates/beamtalk-core/src|\.name == \"self\"|Expression::is_self()"
   "chain-any|rust-any|crates/beamtalk-core/src|superclass_chain\(.*\)\.any\(|is_subclass_of"
+  "sentinel-key-literal|erl-src|runtime/apps|'(\\\$beamtalk_class%OR%__class_mod__%OR%__skip_initialize__)'|?BT_CLASS_TAG_KEY / ?BT_CLASS_MOD_KEY / ?BT_SKIP_INITIALIZE_KEY (beamtalk_sentinel_tags.hrl, generated from sentinel_tags.rs)"
   "try-stop|erl|runtime/apps|try[[:space:]]+gen_server:stop|beamtalk_test_proc:stop/1 or beamtalk_test_class:stop/1"
 )
 
@@ -47,7 +50,7 @@ PATTERNS=(
 # on stdin). $1 = rust|erl|rust-any (rust-any keeps inline test modules in scope; test files are still skipped).
 scan_files() {
   xargs -0 awk -v kind="$1" '
-    FNR == 1 { intest = 0; pend = 0 }
+    FNR == 1 { intest = 0; pend = 0; indoc = 0 }
     {
       t = $0; sub(/^[ \t]+/, "", t)
       if (kind != "erl" && kind != "rust-any") {
@@ -56,7 +59,12 @@ scan_files() {
         if (intest && t == "}" && $0 ~ /^}/) { intest = 0; next }
         if (intest) next
       }
-      if (kind == "erl") { if (t ~ /^%/) next } else if (t ~ /^\/\//) next
+      if (kind == "erl-src") {
+        n = gsub(/"""/, "&", t)
+        if (indoc) { if (n % 2 == 1) indoc = 0; next }
+        if (n % 2 == 1) { indoc = 1; next }
+      }
+      if (kind == "erl" || kind == "erl-src") { if (t ~ /^%/) next } else if (t ~ /^\/\//) next
       print FILENAME ":" FNR ":" $0
     }'
 }
@@ -65,8 +73,12 @@ scan_files() {
 files_for() { # kind pathspecs...
   local kind="$1"; shift
   local ext='\.rs$'; [[ "$kind" == erl ]] && ext='/test/[^/]*\.erl$'
+  [[ "$kind" == erl-src ]] && ext='\.(erl|hrl)$'
   local specs=("$@")
-  if [[ "$kind" == rust ]]; then
+  if [[ "$kind" == erl-src ]]; then
+    git ls-files -z -- "${specs[@]}" | { grep -z -E "$ext" || true; } |
+      { grep -z -v -E '(/test/|/beamtalk_sentinel_tags\.hrl$)' || true; }
+  elif [[ "$kind" == rust ]]; then
     git ls-files -z -- "${specs[@]}" | { grep -z -E "$ext" || true; } |
       { grep -z -v -E '(/tests/|/tests\.rs$|/test_support\.rs$)' || true; }
   else
@@ -100,10 +112,10 @@ match_lines() {
 self_test() {
   local fail=0 spec id kind specs re repl fx
   for spec in "${PATTERNS[@]}"; do
-    IFS='|' read -r id kind specs re repl <<<"$spec"
+    IFS='|' read -r id kind specs re repl <<<"$spec"; re="${re//%OR%/|}"
     fx=$(ls scripts/ci/fixtures/banned-patterns/"$id".* 2>/dev/null | head -1 || true)
     if [[ -z "$fx" ]]; then echo "❌ no fixture for pattern '$id'"; fail=1; continue; fi
-    local skind="$kind"; [[ "$fx" == *.erl ]] && skind=erl
+    local skind="$kind"; [[ "$fx" == *.erl && "$kind" != erl-src ]] && skind=erl
     if [[ -z "$(printf '%s\0' "$fx" | match_lines "$skind" "$re")" ]]; then
       echo "❌ pattern '$id' did not fire on $fx"; fail=1
     fi
@@ -111,8 +123,11 @@ self_test() {
   # Sleep rule: the annotated fixture passes, the bare one is reported.
   [[ -z "$(sleep_hits scripts/ci/fixtures/banned-patterns/sleep-annotated.erl)" ]] || { echo "❌ annotated sleep flagged"; fail=1; }
   [[ -n "$(sleep_hits scripts/ci/fixtures/banned-patterns/sleep-bare.erl)" ]] || { echo "❌ bare sleep not flagged"; fail=1; }
-  # Test-region and comment filtering for Rust scopes.
   local out
+  # erl-src: the doc-string and comment lines in the fixture are skipped, the code line is the one hit.
+  out="$(printf '%s\0' scripts/ci/fixtures/banned-patterns/sentinel-key-literal.erl | match_lines erl-src "'(\\\$beamtalk_class|__class_mod__|__skip_initialize__)'")"
+  [[ "$(grep -c . <<<"$out")" -eq 1 ]] || { echo "❌ sentinel-key-literal must flag only the code line (want exactly 1 hit):"; echo "$out"; fail=1; }
+  # Test-region and comment filtering for Rust scopes.
   out="$(printf '%s\0' scripts/ci/fixtures/banned-patterns/send-literal-in-test-mod.rs scripts/ci/fixtures/banned-patterns/send-literal-in-test-mod-attrs.rs | match_lines rust "'beamtalk_message_dispatch':'send'\\(")"
   [[ -z "$out" ]] || { echo "❌ test-module / comment lines were not skipped:"; echo "$out"; fail=1; }
   out="$(printf '%s\0' scripts/ci/fixtures/banned-patterns/send-literal-after-test-mod.rs | match_lines rust "'beamtalk_message_dispatch':'send'\\(")"
@@ -151,7 +166,7 @@ report() { # id file:line:text replacement
 }
 
 for spec in "${PATTERNS[@]}"; do
-  IFS='|' read -r id kind specs re repl <<<"$spec"
+  IFS='|' read -r id kind specs re repl <<<"$spec"; re="${re//%OR%/|}"
   fk="${kind%-any}"; fk="${fk%-join}"
   # shellcheck disable=SC2086
   hits="$(files_for "$fk" $specs | match_lines "$kind" "$re")"

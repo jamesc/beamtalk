@@ -99,7 +99,7 @@ just as it does for a dead one. Tagged value-type maps and
 """.
 -spec is_object(term()) -> boolean().
 is_object(X) when is_map(X) ->
-    is_map_key('$beamtalk_class', X);
+    is_map_key(?BT_CLASS_TAG_KEY, X);
 is_object(#beamtalk_object{}) ->
     true;
 is_object(X) when is_pid(X) ->
@@ -479,7 +479,7 @@ print_string_map(X) ->
         'ErlangModule' ->
             beamtalk_text:to_binary(beamtalk_erlang_proxy:dispatch('printString', [], X));
         undefined ->
-            PlainMap = maps:remove('$beamtalk_class', X),
+            PlainMap = maps:remove(?BT_CLASS_TAG_KEY, X),
             Pairs = maps:fold(
                 fun(K, V, Acc) ->
                     KeyStr = print_string(K),
@@ -714,7 +714,7 @@ send(X, Selector, Args) when is_tuple(X) ->
         false ->
             dispatch_via_module(X, Selector, Args)
     end;
-send(#{'$beamtalk_class' := Class} = X, Selector, Args) when
+send(#{?BT_CLASS_TAG_KEY := Class} = X, Selector, Args) when
     is_atom(Class), Selector =/= ?IMMUTABLE_SLOT_SELECTOR, not is_map_key(Class, ?PROXY_ROUTES)
 ->
     send_value_memoised(X, Class, Selector, Args);
@@ -825,7 +825,7 @@ send_pid(X, await, _Args) ->
     beamtalk_future:await(X);
 send_pid(X, awaitForever, _Args) ->
     beamtalk_future:await_forever(X);
-send_pid(X, 'await:', [#{'$beamtalk_class' := 'Duration', millis := Ms}]) ->
+send_pid(X, 'await:', [#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}]) ->
     %% `Future await:` accepts a Duration as well as Integer ms.
     %% Matched structurally — beamtalk_runtime cannot call into
     %% beamtalk_stdlib (beamtalk_duration), dependencies flow down only.

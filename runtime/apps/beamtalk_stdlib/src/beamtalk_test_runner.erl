@@ -50,7 +50,7 @@ TestResult is a tagged map:
     result_to_json/1
 ]).
 
--type test_result() :: #{'$beamtalk_class' := 'TestResult', atom() => term()}.
+-type test_result() :: #{?BT_CLASS_TAG_KEY := 'TestResult', atom() => term()}.
 -export_type([test_result/0]).
 
 %% FFI shims for (Erlang beamtalk_test_runner) dispatch
@@ -287,27 +287,27 @@ run_method(Invalid, _TestName) ->
 
 -doc "Number of passing tests.".
 -spec result_passed(map()) -> non_neg_integer().
-result_passed(#{'$beamtalk_class' := 'TestResult', passed := Passed}) ->
+result_passed(#{?BT_CLASS_TAG_KEY := 'TestResult', passed := Passed}) ->
     Passed.
 
 -doc "Number of failing tests.".
 -spec result_failed(map()) -> non_neg_integer().
-result_failed(#{'$beamtalk_class' := 'TestResult', failed := Failed}) ->
+result_failed(#{?BT_CLASS_TAG_KEY := 'TestResult', failed := Failed}) ->
     Failed.
 
 -doc "Number of skipped tests.".
 -spec result_skipped(map()) -> non_neg_integer().
-result_skipped(#{'$beamtalk_class' := 'TestResult', skipped := Skipped}) ->
+result_skipped(#{?BT_CLASS_TAG_KEY := 'TestResult', skipped := Skipped}) ->
     Skipped.
 
 -doc "Total test count.".
 -spec result_total(map()) -> non_neg_integer().
-result_total(#{'$beamtalk_class' := 'TestResult', total := Total}) ->
+result_total(#{?BT_CLASS_TAG_KEY := 'TestResult', total := Total}) ->
     Total.
 
 -doc "Elapsed time in seconds.".
 -spec result_duration(map()) -> float().
-result_duration(#{'$beamtalk_class' := 'TestResult', duration := Duration}) ->
+result_duration(#{?BT_CLASS_TAG_KEY := 'TestResult', duration := Duration}) ->
     Duration.
 
 -doc """
@@ -316,7 +316,7 @@ Collection of failure details.
 Returns a list of maps with name and error keys.
 """.
 -spec result_failures(map()) -> [map()].
-result_failures(#{'$beamtalk_class' := 'TestResult', tests := Tests}) ->
+result_failures(#{?BT_CLASS_TAG_KEY := 'TestResult', tests := Tests}) ->
     %% BT-4173: failure messages answer Strings (the stored records stay
     %% binary for `format_failure_details` splicing).
     [
@@ -326,15 +326,15 @@ result_failures(#{'$beamtalk_class' := 'TestResult', tests := Tests}) ->
 
 -doc "True if all tests passed.".
 -spec result_has_passed(map()) -> boolean().
-result_has_passed(#{'$beamtalk_class' := 'TestResult', failed := 0}) ->
+result_has_passed(#{?BT_CLASS_TAG_KEY := 'TestResult', failed := 0}) ->
     true;
-result_has_passed(#{'$beamtalk_class' := 'TestResult'}) ->
+result_has_passed(#{?BT_CLASS_TAG_KEY := 'TestResult'}) ->
     false.
 
 -doc "Formatted summary string.".
 -spec result_summary(map()) -> binary().
 result_summary(#{
-    '$beamtalk_class' := 'TestResult',
+    ?BT_CLASS_TAG_KEY := 'TestResult',
     total := Total,
     passed := Passed,
     failed := Failed,
@@ -379,7 +379,7 @@ message, and source location before the summary line. This matches the
 output format of `beamtalk test` (CLI).
 """.
 -spec result_print_string(map()) -> binary().
-result_print_string(#{'$beamtalk_class' := 'TestResult', tests := Tests} = Result) ->
+result_print_string(#{?BT_CLASS_TAG_KEY := 'TestResult', tests := Tests} = Result) ->
     Summary = result_summary(Result),
     SummaryLine = <<"TestResult(", Summary/binary, ")">>,
     FailureLines = format_failure_details(Tests),
@@ -457,7 +457,7 @@ can't destroy the run.
 -spec result_to_json(map()) -> binary().
 result_to_json(
     #{
-        '$beamtalk_class' := 'TestResult',
+        ?BT_CLASS_TAG_KEY := 'TestResult',
         total := Total,
         passed := Passed,
         failed := Failed,
@@ -836,7 +836,7 @@ raise_invalid_class_ref(ClassRef) ->
 ) -> test_result().
 make_test_result(Total, Passed, Failed, Skipped, Duration, Tests) ->
     #{
-        '$beamtalk_class' => 'TestResult',
+        ?BT_CLASS_TAG_KEY => 'TestResult',
         total => Total,
         passed => Passed,
         failed => Failed,

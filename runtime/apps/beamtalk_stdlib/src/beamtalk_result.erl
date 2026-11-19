@@ -60,7 +60,7 @@ ok-value and error-reason types are known:
 """.
 -type t() :: t(term(), term()).
 -type t(OkType, ErrType) :: #{
-    '$beamtalk_class' := 'Result',
+    ?BT_CLASS_TAG_KEY := 'Result',
     'isOk' := boolean(),
     'okValue' := OkType | nil,
     'errReason' := ErrType | nil
@@ -94,13 +94,13 @@ beamtalk_result:from_tagged_tuple({error, enoent})
 """.
 -spec from_tagged_tuple({ok, term()} | {error, term()}) -> t().
 from_tagged_tuple({ok, Value}) ->
-    #{'$beamtalk_class' => 'Result', 'isOk' => true, 'okValue' => Value, 'errReason' => nil};
+    #{?BT_CLASS_TAG_KEY => 'Result', 'isOk' => true, 'okValue' => Value, 'errReason' => nil};
 from_tagged_tuple({error, Reason}) ->
     %% Promote error reasons to Beamtalk Exception objects so that
     %% errReason is always re-raiseable. ensure_wrapped/1 is idempotent:
     %% already-wrapped Exception maps pass through unchanged.
     ExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
-    #{'$beamtalk_class' => 'Result', 'isOk' => false, 'okValue' => nil, 'errReason' => ExObj}.
+    #{?BT_CLASS_TAG_KEY => 'Result', 'isOk' => false, 'okValue' => nil, 'errReason' => ExObj}.
 
 -doc """
 Convert a `Result` tagged map to an Erlang `{ok, V} | {error, R}` tuple, the
@@ -119,9 +119,9 @@ beamtalk_result:to_tagged_tuple(beamtalk_result:from_tagged_tuple({ok, 42}))
 ```
 """.
 -spec to_tagged_tuple(t()) -> {ok, term()} | {error, term()}.
-to_tagged_tuple(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := Value}) ->
+to_tagged_tuple(#{?BT_CLASS_TAG_KEY := 'Result', 'isOk' := true, 'okValue' := Value}) ->
     {ok, Value};
-to_tagged_tuple(#{'$beamtalk_class' := 'Result', 'isOk' := false, 'errReason' := Reason}) ->
+to_tagged_tuple(#{?BT_CLASS_TAG_KEY := 'Result', 'isOk' := false, 'errReason' := Reason}) ->
     {error, Reason};
 to_tagged_tuple(_) ->
     beamtalk_error:raise_type_error('Result', to_tagged_tuple, <<"Expected a Result">>).
@@ -162,7 +162,7 @@ error(Reason) ->
     %% Store reason as-is — the public API does NOT call ensure_wrapped here.
     %% from_tagged_tuple/1 wraps for FFI callers; direct Beamtalk callers supply
     %% structured errors (or bare symbols, their responsibility).
-    #{'$beamtalk_class' => 'Result', 'isOk' => false, 'okValue' => nil, 'errReason' => Reason}.
+    #{?BT_CLASS_TAG_KEY => 'Result', 'isOk' => false, 'okValue' => nil, 'errReason' => Reason}.
 
 -doc """
 Implements `Result fromTuple: tuple` — converts an Erlang ok/error tuple to a Result.
@@ -329,7 +329,7 @@ beamtalk_result:unwrapError(file_not_found)
 ```
 """.
 -spec unwrapError(term()) -> no_return().
-unwrapError(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Error}) ->
+unwrapError(#{?BT_CLASS_TAG_KEY := _, error := #beamtalk_error{} = Error}) ->
     %% Already-wrapped Exception — re-raise preserving class, message, and hints.
     %% Pattern requires error field to be a #beamtalk_error{} to avoid crashing on
     %% malformed maps that happen to have an 'error' key with a non-record value.

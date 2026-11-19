@@ -307,7 +307,7 @@ local_compiled_method(ClassName, Side, Selector) ->
 ) -> map().
 compiled_method_map(ClassName, Side, Selector, Info, Source, Sig, Doc) ->
     #{
-        '$beamtalk_class' => 'CompiledMethod',
+        ?BT_CLASS_TAG_KEY => 'CompiledMethod',
         '__selector__' => Selector,
         '__source__' => Source,
         '__signature__' => Sig,

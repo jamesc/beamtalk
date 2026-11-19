@@ -307,7 +307,7 @@ value_type(#beamtalk_object{class = Class}) ->
     end;
 value_type({beamtalk_supervisor, _, _, _}) ->
     <<"actor">>;
-value_type(#{'$beamtalk_class' := _, error := #beamtalk_error{}}) ->
+value_type(#{?BT_CLASS_TAG_KEY := _, error := #beamtalk_error{}}) ->
     %% A caught exception: `ensure_wrapped/1` wraps the record in a tagged map,
     %% which the generic clause below would call an `object`.
     <<"error">>;
@@ -435,10 +435,10 @@ display concern `ensure_structured_error/1` deliberately doesn't apply, since
 its callers want the bare `#beamtalk_error{}` for programmatic use.
 """.
 -spec format_error_message(term()) -> binary().
-format_error_message(#{'$beamtalk_class' := Class, error := Error}) ->
+format_error_message(#{?BT_CLASS_TAG_KEY := Class, error := Error}) ->
     ClassName = atom_to_binary(Class, utf8),
     iolist_to_binary([ClassName, <<": ">>, beamtalk_error:format(Error)]);
-format_error_message({eval_error, _Class, #{'$beamtalk_class' := ExClass, error := Error}}) ->
+format_error_message({eval_error, _Class, #{?BT_CLASS_TAG_KEY := ExClass, error := Error}}) ->
     ClassName = atom_to_binary(ExClass, utf8),
     iolist_to_binary([ClassName, <<": ">>, beamtalk_error:format(Error)]);
 format_error_message(Reason) ->

@@ -24,6 +24,8 @@ Collection. They fold over `to_list/1`; `max`/`min`/`average` raise
 `empty_collection` on an empty collection.
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -export([
     average/1,
     from_list_like/2,
@@ -221,9 +223,9 @@ from_list_like(Recv, List) when is_binary(Recv) ->
     %% block answering text); unwrap the tags, then assemble bytes —
     %% mirroring the pure path (`Binary withAll:`).
     erlang:iolist_to_binary(beamtalk_primitive:deep_unwrap_strings(List));
-from_list_like(#{'$beamtalk_class' := 'Array'}, List) ->
+from_list_like(#{?BT_CLASS_TAG_KEY := 'Array'}, List) ->
     beamtalk_array:from_list(List);
-from_list_like(#{'$beamtalk_class' := 'Set'}, List) ->
+from_list_like(#{?BT_CLASS_TAG_KEY := 'Set'}, List) ->
     beamtalk_set:from_list(List);
 from_list_like(_Recv, List) ->
     List.

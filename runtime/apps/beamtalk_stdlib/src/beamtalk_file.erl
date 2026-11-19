@@ -90,6 +90,7 @@ enforced — Beamtalk is a trusted developer tool (ADR 0058, 0063).
 -export([open/2, handleLines/1]).
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
 
 -define(PATH_HINT, <<"Path must be a String">>).
 
@@ -1256,7 +1257,7 @@ that handle's lifetime — the enclosing block for `open:do:` / `open:mode:do:`,
 or the caller's `close` for a handle from `open:mode:`.
 """.
 -spec handle_lines(file_handle()) -> beamtalk_stream:t().
-handle_lines(#{'$beamtalk_class' := 'FileHandle', fd := Fd} = Handle) ->
+handle_lines(#{?BT_CLASS_TAG_KEY := 'FileHandle', fd := Fd} = Handle) ->
     %% `lines` returns a Stream, not a Result, so a closed or
     %% write-only handle has to raise. Reading a write-only descriptor crashes
     %% the file_io_server, silently breaking every later write on the handle —

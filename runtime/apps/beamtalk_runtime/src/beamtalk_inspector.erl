@@ -91,7 +91,7 @@ compile-time dependency); actor evaluate-in-context is a deferred follow-up
 %% The `Inspector` cursor handle. The `'$beamtalk_class'` tag lets the spec
 %% reader map FFI returns of this shape to the Beamtalk `Inspector` type.
 -type inspector() :: #{
-    '$beamtalk_class' := 'Inspector',
+    ?BT_CLASS_TAG_KEY := 'Inspector',
     kind := value | actor | collection | foreign,
     pid := pid() | nil,
     available := boolean(),
@@ -122,7 +122,7 @@ compile-time dependency); actor evaluate-in-context is a deferred follow-up
 %% An `InspectorField` Value record. The `'$beamtalk_class'` tag maps it to the
 %% Beamtalk `InspectorField` type for `fieldsOf/1`'s `List(InspectorField)`.
 -type field_map() :: #{
-    '$beamtalk_class' := 'InspectorField',
+    ?BT_CLASS_TAG_KEY := 'InspectorField',
     name := term(),
     label := {beamtalk_string, binary()},
     value := term(),
@@ -189,7 +189,7 @@ on(Subject, _KnownState) ->
 -spec actor_cursor_from_state(pid(), map(), inspector() | nil, [term()]) -> inspector().
 actor_cursor_from_state(Pid, State, Parent, Path) ->
     #{
-        '$beamtalk_class' => 'Inspector',
+        ?BT_CLASS_TAG_KEY => 'Inspector',
         kind => actor,
         pid => Pid,
         available => true,
@@ -314,7 +314,7 @@ process_cursor(Pid, Parent, Path) ->
 -spec remote_cursor(pid(), inspector() | nil, [term()]) -> inspector().
 remote_cursor(Pid, Parent, Path) ->
     #{
-        '$beamtalk_class' => 'Inspector',
+        ?BT_CLASS_TAG_KEY => 'Inspector',
         kind => foreign,
         pid => Pid,
         available => false,
@@ -338,7 +338,7 @@ actor_cursor(Pid, Parent, Path) ->
             unavailable -> {false, nil}
         end,
     #{
-        '$beamtalk_class' => 'Inspector',
+        ?BT_CLASS_TAG_KEY => 'Inspector',
         kind => actor,
         pid => Pid,
         available => Available,
@@ -366,7 +366,7 @@ actor_cursor(Pid, Parent, Path) ->
 -spec foreign_cursor(pid(), inspector() | nil, [term()]) -> inspector().
 foreign_cursor(Pid, Parent, Path) ->
     #{
-        '$beamtalk_class' => 'Inspector',
+        ?BT_CLASS_TAG_KEY => 'Inspector',
         kind => foreign,
         pid => Pid,
         available => process_alive(Pid),
@@ -386,7 +386,7 @@ foreign_cursor(Pid, Parent, Path) ->
     inspector().
 collection_cursor(Subject, Page, Parent, Path, Prov) ->
     #{
-        '$beamtalk_class' => 'Inspector',
+        ?BT_CLASS_TAG_KEY => 'Inspector',
         kind => collection,
         pid => nil,
         available => true,
@@ -402,7 +402,7 @@ collection_cursor(Subject, Page, Parent, Path, Prov) ->
 -spec value_cursor(term(), inspector() | nil, [term()], provenance()) -> inspector().
 value_cursor(Subject, Parent, Path, Prov) ->
     #{
-        '$beamtalk_class' => 'Inspector',
+        ?BT_CLASS_TAG_KEY => 'Inspector',
         kind => value,
         pid => nil,
         available => true,
@@ -516,7 +516,7 @@ unavailable_field() ->
 -spec inspector_field(term(), binary(), term(), atom(), boolean()) -> field_map().
 inspector_field(Name, Label, Value, Kind, Drillable) ->
     #{
-        '$beamtalk_class' => 'InspectorField',
+        ?BT_CLASS_TAG_KEY => 'InspectorField',
         name => Name,
         label => beamtalk_primitive:string_from_binary(Label),
         value => Value,
@@ -653,7 +653,7 @@ collection_size(Subject) when is_map(Subject) ->
 %% so it must stay cheap even for a large Dictionary.
 -spec dictionary_size(map()) -> non_neg_integer().
 dictionary_size(Map) ->
-    case maps:is_key('$beamtalk_class', Map) of
+    case maps:is_key(?BT_CLASS_TAG_KEY, Map) of
         true -> maps:size(Map) - 1;
         false -> maps:size(Map)
     end.
@@ -765,7 +765,7 @@ bag_counts_pairs(Subject) ->
 %% is excluded.
 -spec dictionary_pairs(map()) -> [{term(), term()}].
 dictionary_pairs(Map) when is_map(Map) ->
-    lists:sort(maps:to_list(maps:remove('$beamtalk_class', Map))).
+    lists:sort(maps:to_list(maps:remove(?BT_CLASS_TAG_KEY, Map))).
 
 %% The page-`Page` window (a `?PAGE_SIZE`-element slice) of `Items` — empty past
 %% the end. `Page` is 0-based; `lists:sublist/3` is 1-based.
@@ -938,7 +938,7 @@ collection_value_at(Subject, Key) ->
 %% O(log n) exact-key lookup in a keyed collection's backing map. Never resolves
 %% the `'$beamtalk_class'` tag (it is not a user association key).
 -spec keyed_value_at(term(), map()) -> {ok, term()} | error.
-keyed_value_at('$beamtalk_class', _Map) ->
+keyed_value_at(?BT_CLASS_TAG_KEY, _Map) ->
     error;
 keyed_value_at(Key, Map) ->
     maps:find(Key, Map).

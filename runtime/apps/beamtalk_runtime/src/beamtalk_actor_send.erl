@@ -638,7 +638,7 @@ self_dispatch(Selector, Args) ->
     State = beamtalk_actor_state:take(),
     %% Compiled actors have their own safe_dispatch/3 in the generated module;
     %% `'__class_mod__'` names it.
-    ClassMod = maps:get('__class_mod__', State),
+    ClassMod = maps:get(?BT_CLASS_MOD_KEY, State),
     DispatchResult = ClassMod:safe_dispatch(Selector, Args, State),
     unwrap_dispatch_result(DispatchResult).
 
@@ -772,7 +772,7 @@ is_remote(ActorPid, AskNode) ->
         %% bt-catcher-audit: not-applicable-other-process - AskNode is a gen_server:call to the
         %% actor
         try AskNode() of
-            #{'$beamtalk_class' := 'Node', name := Name} when is_atom(Name) -> Name;
+            #{?BT_CLASS_TAG_KEY := 'Node', name := Name} when is_atom(Name) -> Name;
             _NotANode -> node(ActorPid)
         catch
             error:#beamtalk_error{kind = does_not_understand} ->

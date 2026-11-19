@@ -39,6 +39,7 @@ to subscribers via `{transcript_output, Text}' messages.
 """.
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
 
 %% API
 -export([start_link/0, start_link/1, start_link/2, spawn/0, spawn/1]).
@@ -182,7 +183,7 @@ handle_call({Selector, Args}, From, State) when is_atom(Selector), is_list(Args)
                 Selector,
                 Args,
                 SelfRef,
-                #{'$beamtalk_class' => 'TranscriptStream'},
+                #{?BT_CLASS_TAG_KEY => 'TranscriptStream'},
                 'TranscriptStream'
             )
         of
@@ -272,7 +273,7 @@ handle_cast({Selector, Args, FuturePid}, State) when
                 Selector,
                 Args,
                 SelfRef,
-                #{'$beamtalk_class' => 'TranscriptStream'},
+                #{?BT_CLASS_TAG_KEY => 'TranscriptStream'},
                 'TranscriptStream'
             )
         of

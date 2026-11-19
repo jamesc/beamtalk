@@ -149,7 +149,7 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
 %% (the same mechanism `beamtalk_workspace_changelog_views:changeLog/0` uses for
 %% `ChangeLog`), so `Node processes` types as `List(SupervisionNode)`.
 -type node_map() :: #{
-    '$beamtalk_class' := 'SupervisionNode',
+    ?BT_CLASS_TAG_KEY := 'SupervisionNode',
     pid := pid() | nil,
     registeredName := atom() | nil,
     kind := atom(),
@@ -296,7 +296,7 @@ on(Node) ->
 
 -doc "Like `on/1`, with an explicit per-supervisor child cap `Limit`. See `default_snapshot/1`.".
 -spec on(beamtalk_node:t(), non_neg_integer()) -> {ok, [node_map()]} | {error, #beamtalk_error{}}.
-on(#{'$beamtalk_class' := 'Node', name := Name}, Limit) ->
+on(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}, Limit) ->
     case Name =:= node() of
         true ->
             {ok, default_snapshot(Limit)};
@@ -1251,7 +1251,7 @@ to_text(Str) when is_list(Str) -> list_to_binary(Str).
 -spec leaf_node(pid(), pid() | nil, atom(), beamtalk_object() | nil) -> node_map().
 leaf_node(Pid, ParentPid, Kind, BClass) ->
     #{
-        '$beamtalk_class' => 'SupervisionNode',
+        ?BT_CLASS_TAG_KEY => 'SupervisionNode',
         pid => Pid,
         registeredName => registered_name(Pid),
         kind => Kind,
@@ -1280,7 +1280,7 @@ leaf_node(Pid, ParentPid, Kind, BClass) ->
     node_map().
 supervisor_node(Pid, ParentPid, Kind, BClass, ChildCount, Strategy, RestartIntensity, Truncated) ->
     #{
-        '$beamtalk_class' => 'SupervisionNode',
+        ?BT_CLASS_TAG_KEY => 'SupervisionNode',
         pid => Pid,
         registeredName => registered_name(Pid),
         kind => Kind,
@@ -1303,7 +1303,7 @@ build_restarting_node(Id, ParentPid) ->
             false -> nil
         end,
     #{
-        '$beamtalk_class' => 'SupervisionNode',
+        ?BT_CLASS_TAG_KEY => 'SupervisionNode',
         pid => nil,
         registeredName => nil,
         kind => restarting,

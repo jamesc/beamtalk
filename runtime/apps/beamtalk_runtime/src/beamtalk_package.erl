@@ -35,6 +35,8 @@ files).
 See also: docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -export([
     all/0,
     named/1,
@@ -89,7 +91,7 @@ is not loaded. A manifest fact, distinct from `Program rootSupervisor` (the live
 supervisor process).
 """.
 -spec supervisorClass(map()) -> term().
-supervisorClass(#{'$beamtalk_class' := 'Package', name := PkgName}) ->
+supervisorClass(#{?BT_CLASS_TAG_KEY := 'Package', name := PkgName}) ->
     case find_app_for_package(PkgName) of
         {ok, AppName} ->
             case application:get_env(AppName, supervisor) of
@@ -523,7 +525,7 @@ build_package_info(AppName, PkgName) ->
     %% dependencies/1); class names stay symbols.
     S = fun beamtalk_primitive:string_from_binary/1,
     #{
-        '$beamtalk_class' => 'Package',
+        ?BT_CLASS_TAG_KEY => 'Package',
         name => S(PkgName),
         version => S(Version),
         classes => ClassNames,

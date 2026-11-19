@@ -76,7 +76,7 @@ that would block to timeout against a dead PID.
 ]).
 
 -type session() :: #{
-    '$beamtalk_class' := 'Session',
+    ?BT_CLASS_TAG_KEY := 'Session',
     id := binary(),
     pid := pid(),
     %% Origin/debug metadata carried from the shell (always includes `kind`).
@@ -86,8 +86,8 @@ that would block to timeout against a dead PID.
 }.
 
 -type bindings_view() ::
-    #{'$beamtalk_class' := 'BindingsView', scope := session, id := binary(), pid := pid()}
-    | #{'$beamtalk_class' := 'BindingsView', scope := workspace}.
+    #{?BT_CLASS_TAG_KEY := 'BindingsView', scope := session, id := binary(), pid := pid()}
+    | #{?BT_CLASS_TAG_KEY := 'BindingsView', scope := workspace}.
 
 -export_type([session/0, bindings_view/0]).
 
@@ -193,7 +193,7 @@ target shell's `get_bindings` (its locals-only map after resolution).
 bindings(Session) ->
     {Id, Pid} = session_id_pid(Session, 'bindings'),
     ensure_alive(Pid, Id),
-    #{'$beamtalk_class' => 'BindingsView', scope => session, id => Id, pid => Pid}.
+    #{?BT_CLASS_TAG_KEY => 'BindingsView', scope => session, id => Id, pid => Pid}.
 
 -doc """
 Resolve a name in the named session, delegating to the shared resolver.
@@ -277,7 +277,7 @@ through `bind/2` / `unbind/1` (synchronous, protected-name conflict checks).
 """.
 -spec bindingsView() -> bindings_view().
 bindingsView() ->
-    #{'$beamtalk_class' => 'BindingsView', scope => workspace}.
+    #{?BT_CLASS_TAG_KEY => 'BindingsView', scope => workspace}.
 
 %%% ============================================================================
 %%% BindingsView read/write primitives
@@ -331,12 +331,12 @@ protected-name conflict checks).
 """.
 -spec at(bindings_view() | term(), atom() | binary() | string() | term(), term()) ->
     term().
-at(#{'$beamtalk_class' := 'BindingsView', scope := workspace}, Key, Value) ->
+at(#{?BT_CLASS_TAG_KEY := 'BindingsView', scope := workspace}, Key, Value) ->
     KeyAtom = to_name_atom(Key),
     _ = beamtalk_workspace_interface_primitives:bind(Value, KeyAtom),
     Value;
 at(
-    #{'$beamtalk_class' := 'BindingsView', scope := session, id := Id, pid := Pid}, Key, Value
+    #{?BT_CLASS_TAG_KEY := 'BindingsView', scope := session, id := Id, pid := Pid}, Key, Value
 ) ->
     KeyAtom = to_name_atom(Key),
     enqueue_session_mutation(Pid, Id, {put, KeyAtom, Value}, 'at:put:'),
@@ -351,7 +351,7 @@ removals are enqueued, so the removed value is not read back synchronously).
 Dispatch by scope mirrors `at/3`.
 """.
 -spec removeKey(bindings_view() | term(), atom() | binary() | string() | term()) -> nil.
-removeKey(#{'$beamtalk_class' := 'BindingsView', scope := workspace}, Key) ->
+removeKey(#{?BT_CLASS_TAG_KEY := 'BindingsView', scope := workspace}, Key) ->
     case to_existing_name_atom(Key) of
         %% unbind/1 raises name_not_found for unknown names; a never-interned
         %% atom is necessarily unknown, so treat it as already-absent (idempotent
@@ -360,7 +360,7 @@ removeKey(#{'$beamtalk_class' := 'BindingsView', scope := workspace}, Key) ->
         error -> nil
     end,
     nil;
-removeKey(#{'$beamtalk_class' := 'BindingsView', scope := session, id := Id, pid := Pid}, Key) ->
+removeKey(#{?BT_CLASS_TAG_KEY := 'BindingsView', scope := session, id := Id, pid := Pid}, Key) ->
     case to_existing_name_atom(Key) of
         {ok, KeyAtom} ->
             enqueue_session_mutation(Pid, Id, {remove, KeyAtom, undefined}, 'removeKey:');
@@ -410,11 +410,11 @@ fetch_meta(Pid) ->
 %% liveness check (display data must survive the session's death). Selector
 %% names the Session method for the type-error message.
 -spec session_meta(session() | term(), atom()) -> {binary(), map()}.
-session_meta(#{'$beamtalk_class' := 'Session', id := Id, meta := Meta}, _Selector) when
+session_meta(#{?BT_CLASS_TAG_KEY := 'Session', id := Id, meta := Meta}, _Selector) when
     is_binary(Id), is_map(Meta)
 ->
     {Id, Meta};
-session_meta(#{'$beamtalk_class' := 'Session', id := Id}, _Selector) when is_binary(Id) ->
+session_meta(#{?BT_CLASS_TAG_KEY := 'Session', id := Id}, _Selector) when is_binary(Id) ->
     %% Older Session value minted before metadata existed — id but no meta.
     {Id, #{kind => <<"unknown">>}};
 session_meta(Other, Selector) ->
@@ -431,7 +431,7 @@ make_session(Id, Pid, Meta) when is_map(Meta) ->
     %% Always carry a `kind` so display primitives never have to special-case a
     %% missing key (older shells / races default to `unknown`).
     NormMeta = maps:merge(#{kind => <<"unknown">>}, Meta),
-    #{'$beamtalk_class' => 'Session', id => Id, pid => Pid, meta => NormMeta}.
+    #{?BT_CLASS_TAG_KEY => 'Session', id => Id, pid => Pid, meta => NormMeta}.
 
 %% Mint a Session value for one live shell child of beamtalk_session_sup.
 %% `{false}` (filtermap drop) for non-pid children and for shells that have died
@@ -459,7 +459,7 @@ mint_live_session(_Other) ->
 %% Extract {Id, Pid} from a Session value, raising a type error if the shape is
 %% wrong.  Selector names the Session method for the error message.
 -spec session_id_pid(session() | term(), atom()) -> {binary(), pid()}.
-session_id_pid(#{'$beamtalk_class' := 'Session', id := Id, pid := Pid}, _Selector) when
+session_id_pid(#{?BT_CLASS_TAG_KEY := 'Session', id := Id, pid := Pid}, _Selector) when
     is_binary(Id), is_pid(Pid)
 ->
     {Id, Pid};
@@ -484,10 +484,10 @@ session_bindings(Pid, Id) ->
 %% Resolve the read map for a BindingsView by scope.  Workspace reads come from
 %% the live singleton + bind:as: snapshot; session reads from the target shell.
 -spec view_read_map(bindings_view() | term(), atom()) -> map().
-view_read_map(#{'$beamtalk_class' := 'BindingsView', scope := workspace}, _Selector) ->
+view_read_map(#{?BT_CLASS_TAG_KEY := 'BindingsView', scope := workspace}, _Selector) ->
     beamtalk_workspace_interface_primitives:get_session_bindings();
 view_read_map(
-    #{'$beamtalk_class' := 'BindingsView', scope := session, id := Id, pid := Pid}, _Selector
+    #{?BT_CLASS_TAG_KEY := 'BindingsView', scope := session, id := Id, pid := Pid}, _Selector
 ) ->
     session_bindings(Pid, Id);
 view_read_map(Other, Selector) ->

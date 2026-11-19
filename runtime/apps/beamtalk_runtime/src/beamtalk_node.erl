@@ -73,7 +73,7 @@ selectors (ADR 0126 Phase 2) apply the same rule rather than re-deriving it.
     remote_shape_manifest/1
 ]).
 
--type t() :: #{'$beamtalk_class' := 'Node', name := node()}.
+-type t() :: #{?BT_CLASS_TAG_KEY := 'Node', name := node()}.
 -export_type([t/0]).
 
 -define(INVALID_NAME_HINT, <<"expected name@host">>).
@@ -131,7 +131,7 @@ unreachable node (or a local node that is not itself distributed) answers
 `kind = node_down`. Connecting to the current node is a no-op success.
 """.
 -spec connect(t()) -> beamtalk_result:t().
-connect(#{'$beamtalk_class' := 'Node', name := Name} = Self) ->
+connect(#{?BT_CLASS_TAG_KEY := 'Node', name := Name} = Self) ->
     Result =
         case Name =:= node() of
             true ->
@@ -150,7 +150,7 @@ Close the connection to this node (`erlang:disconnect_node/1`). Answers
 node is not distributed, or for the current node).
 """.
 -spec disconnect(t()) -> boolean().
-disconnect(#{'$beamtalk_class' := 'Node', name := Name}) ->
+disconnect(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) ->
     case Name =:= node() of
         true -> false;
         false -> erlang:disconnect_node(Name) =:= true
@@ -161,12 +161,12 @@ Whether this node currently has a connection to `self` (visible or hidden).
 The current node is trivially connected to itself.
 """.
 -spec isConnected(t()) -> boolean().
-isConnected(#{'$beamtalk_class' := 'Node', name := Name}) ->
+isConnected(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) ->
     Name =:= node() orelse lists:member(Name, nodes(connected)).
 
 -doc "Whether `self` is the node this code is running on.".
 -spec isCurrent(t()) -> boolean().
-isCurrent(#{'$beamtalk_class' := 'Node', name := Name}) ->
+isCurrent(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) ->
     Name =:= node().
 
 -doc """
@@ -176,7 +176,7 @@ same §9 host policy as `connect`: an off-host node without TLS distribution
 answers `false` without touching the network.
 """.
 -spec ping(t()) -> boolean().
-ping(#{'$beamtalk_class' := 'Node', name := Name}) ->
+ping(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) ->
     case Name =:= node() of
         true ->
             true;
@@ -189,7 +189,7 @@ ping(#{'$beamtalk_class' := 'Node', name := Name}) ->
 
 -doc "Human-readable representation: `Node(name@host)` (ADR 0126 §2).".
 -spec printString(t()) -> beamtalk_string:t().
-printString(#{'$beamtalk_class' := 'Node', name := Name}) ->
+printString(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) ->
     %% BT-4173: printString answers a String.
     beamtalk_primitive:string_from_binary(
         iolist_to_binary([<<"Node(">>, atom_to_binary(Name, utf8), <<")">>])
@@ -214,7 +214,7 @@ reached, or `kind = timeout` if it does not answer within the bounded
 `?BT_REMOTE_CALL_TIMEOUT`.
 """.
 -spec shapeManifest(t()) -> beamtalk_result:t().
-shapeManifest(#{'$beamtalk_class' := 'Node', name := Name}) ->
+shapeManifest(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) ->
     Result =
         case Name =:= node() of
             true ->
@@ -261,7 +261,7 @@ current node; `Result error:` with `kind = node_down` for a peer this VM is not
 connected to.
 """.
 -spec shapeSkew(t()) -> beamtalk_result:t().
-shapeSkew(#{'$beamtalk_class' := 'Node', name := Name}) ->
+shapeSkew(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) ->
     Result =
         case Name =:= node() of
             true ->
@@ -373,7 +373,7 @@ is a direct local call (as in `shapeManifest/1`); a peer is reached via
 versions) — `remote_code_mismatch` (ADR 0126 §7); nothing is raised.
 """.
 -spec introspect(t(), atom(), atom(), list()) -> beamtalk_result:t().
-introspect(#{'$beamtalk_class' := 'Node', name := Name}, Selector, Fun, Args) ->
+introspect(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}, Selector, Fun, Args) ->
     Result =
         case Name =:= node() of
             true ->
@@ -427,7 +427,7 @@ introspection_error(Kind, Selector, Name, Hint) ->
 -doc "Build a `Node` value for a node atom (no validation — the atom came from the VM).".
 -spec from_atom(node()) -> t().
 from_atom(Name) when is_atom(Name) ->
-    #{'$beamtalk_class' => 'Node', name => Name}.
+    #{?BT_CLASS_TAG_KEY => 'Node', name => Name}.
 
 -doc "The `Node` a pid lives on (`erlang:node/1`) — backs `Pid>>node`.".
 -spec ofPid(pid()) -> t().
@@ -436,7 +436,7 @@ ofPid(Pid) when is_pid(Pid) ->
 
 -doc "The node atom a `Node` value wraps.".
 -spec name(t()) -> node().
-name(#{'$beamtalk_class' := 'Node', name := Name}) ->
+name(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) ->
     Name.
 
 -doc """

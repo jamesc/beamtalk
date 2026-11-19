@@ -485,7 +485,7 @@ changeLogFlushKinds(KindsSet, ConfirmDestructive) ->
 %% loudly. An empty list flows through to `flush_kinds/1`, which rejects it
 %% with the "use Workspace flush to flush everything" message.
 -spec kinds_to_list(term()) -> {ok, [atom()]} | {error, #beamtalk_error{}}.
-kinds_to_list(#{'$beamtalk_class' := 'Set', elements := Elements}) when is_list(Elements) ->
+kinds_to_list(#{?BT_CLASS_TAG_KEY := 'Set', elements := Elements}) when is_list(Elements) ->
     {ok, Elements};
 kinds_to_list(List) when is_list(List) ->
     {ok, List};

@@ -93,7 +93,7 @@ supervisor_child_entry({Id, PidOrStatus, Type, Mods}, ModClasses) ->
                 {stopped, nil}
         end,
     #{
-        '$beamtalk_class' => 'SupervisorChild',
+        ?BT_CLASS_TAG_KEY => 'SupervisorChild',
         id => Id,
         child => Child,
         status => Status,

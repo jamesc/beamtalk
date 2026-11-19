@@ -175,10 +175,10 @@ render correctly there. Otherwise wraps the raw term in an internal_error.
 -spec ensure_structured_error(term()) -> #beamtalk_error{}.
 ensure_structured_error(#beamtalk_error{} = Err) ->
     Err;
-ensure_structured_error(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}) ->
+ensure_structured_error(#{?BT_CLASS_TAG_KEY := _, error := #beamtalk_error{} = Err}) ->
     Err;
 ensure_structured_error(
-    {eval_error, _Class, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}}
+    {eval_error, _Class, #{?BT_CLASS_TAG_KEY := _, error := #beamtalk_error{} = Err}}
 ) ->
     Err;
 ensure_structured_error({eval_error, _Class, #beamtalk_error{} = Err}) ->
@@ -431,7 +431,7 @@ falling back to the generic `Class: ~p` wrapper for unknown terms.
 -spec ensure_structured_error(term(), atom()) -> #beamtalk_error{}.
 ensure_structured_error(#beamtalk_error{} = Err, _Class) ->
     Err;
-ensure_structured_error(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}, _Class) ->
+ensure_structured_error(#{?BT_CLASS_TAG_KEY := _, error := #beamtalk_error{} = Err}, _Class) ->
     Err;
 ensure_structured_error({eval_error, _, _} = Reason, _Class) ->
     ensure_structured_error(Reason);

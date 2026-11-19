@@ -96,6 +96,8 @@ fallback. A class name is package-qualified (`json@Parser`) only when two
 loaded class modules share it. Which frames are listed is not decided here.
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -export([
     wrap/1,
     dispatch/3,
@@ -197,7 +199,7 @@ wrap_frame({Module, Function, ArityOrArgs, Location}, ModuleToClass, Shared) ->
         end,
     ClassName = resolve_class_name(Module, ModuleToClass),
     #{
-        '$beamtalk_class' => 'StackFrame',
+        ?BT_CLASS_TAG_KEY => 'StackFrame',
         module => Module,
         function => Function,
         arity => Arity,
@@ -208,7 +210,7 @@ wrap_frame({Module, Function, ArityOrArgs, Location}, ModuleToClass, Shared) ->
     };
 wrap_frame(_Other, _ModuleToClass, _Shared) ->
     #{
-        '$beamtalk_class' => 'StackFrame',
+        ?BT_CLASS_TAG_KEY => 'StackFrame',
         module => undefined,
         function => undefined,
         arity => 0,

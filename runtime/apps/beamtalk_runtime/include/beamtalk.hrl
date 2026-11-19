@@ -259,7 +259,7 @@
 %% - __source__: Source code binary (or <<"">> if unavailable)
 %% - __method_info__: Map with arity and block function
 -type compiled_method() :: #{
-    '$beamtalk_class' := 'CompiledMethod',
+    ?BT_CLASS_TAG_KEY := 'CompiledMethod',
     '__selector__' := atom(),
     '__source__' := binary(),
     '__method_info__' := map(),

@@ -27,10 +27,6 @@ pub const CALL_STACK: &str = "$bt_call_stack";
 /// (ADR 0126 §5.1).
 pub const WIRE: &str = "$beamtalk_wire";
 
-// The three constants below (`CLASS_TAG`, `CLASS_MOD`, `SKIP_INITIALIZE`) are
-// exported as macros, but the runtime does not read them yet: its `.erl` files
-// still spell these atoms by hand (BT-5054). Codegen reads them.
-
 /// Key of the class tag in every value-type map and actor state map
 /// (`'$beamtalk_class' => 'Counter'`).
 pub const CLASS_TAG: &str = "$beamtalk_class";

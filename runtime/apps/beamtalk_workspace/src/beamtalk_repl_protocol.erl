@@ -20,6 +20,8 @@ standard protocol shape. The pre-0.5.0 legacy format ("type" field
 requests, "type"-keyed responses) has been removed.
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -export([
     decode/1,
     encode_result/3, encode_result/4, encode_result/5, encode_result/6,
@@ -404,7 +406,7 @@ otherwise. The `results` field contains a JSON map with `passed`,
 -spec encode_test_results(map(), protocol_msg()) -> binary().
 encode_test_results(
     #{
-        '$beamtalk_class' := 'TestResult',
+        ?BT_CLASS_TAG_KEY := 'TestResult',
         total := Total,
         passed := Passed,
         failed := Failed,

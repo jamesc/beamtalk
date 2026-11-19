@@ -448,7 +448,7 @@ decode_beam_error(#beamtalk_error{message = Msg}) ->
     beamtalk_text:to_binary(Msg);
 decode_beam_error(#{class := 'Exception', error := #beamtalk_error{message = Msg}}) ->
     beamtalk_text:to_binary(Msg);
-decode_beam_error(#{'$beamtalk_class' := _, error := #beamtalk_error{message = Msg}}) ->
+decode_beam_error(#{?BT_CLASS_TAG_KEY := _, error := #beamtalk_error{message = Msg}}) ->
     beamtalk_text:to_binary(Msg);
 decode_beam_error({badkey, Key}) ->
     <<"key ", (beamtalk_primitive:print_string(Key))/binary, " not found in dictionary">>;
@@ -992,7 +992,7 @@ extract_error_kind(#beamtalk_error{kind = Kind}) ->
 extract_error_kind(#{class := 'Exception', error := #beamtalk_error{kind = Kind}}) ->
     % ADR 0015: Exception objects wrap #beamtalk_error{} records
     Kind;
-extract_error_kind(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = Kind}}) ->
+extract_error_kind(#{?BT_CLASS_TAG_KEY := _, error := #beamtalk_error{kind = Kind}}) ->
     % RuntimeError wraps #beamtalk_error{} records
     Kind;
 extract_error_kind(Kind) when is_atom(Kind) ->
@@ -1212,7 +1212,7 @@ assignments return an updated copy of self.
 is_valid_setUp_result(Instance, Result) when is_map(Instance), is_map(Result) ->
     %% Use maps:find/2 so that two maps both lacking '$beamtalk_class' are NOT
     %% considered equal — the key must actually be present in both.
-    case {maps:find('$beamtalk_class', Instance), maps:find('$beamtalk_class', Result)} of
+    case {maps:find(?BT_CLASS_TAG_KEY, Instance), maps:find(?BT_CLASS_TAG_KEY, Result)} of
         {{ok, Class}, {ok, Class}} -> true;
         _ -> false
     end;

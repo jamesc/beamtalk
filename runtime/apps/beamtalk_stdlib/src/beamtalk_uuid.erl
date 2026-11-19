@@ -30,6 +30,8 @@ raw term comparison regardless of any class-level method, so an override
 would be dead code).
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 %% Class methods
 -export(['v4'/0, 'v7'/0, fromString/1, isValid/1]).
 
@@ -43,7 +45,7 @@ would be dead code).
 
 -export([lt/2, gt/2, lte/2, gte/2]).
 
--type t() :: #{'$beamtalk_class' := 'Uuid', bytes := <<_:128>>}.
+-type t() :: #{?BT_CLASS_TAG_KEY := 'Uuid', bytes := <<_:128>>}.
 -export_type([t/0]).
 
 %% \z (not $) anchors strictly at the end of the subject — plain $ in PCRE
@@ -136,7 +138,7 @@ isValid(Arg) ->
 
 -doc "Canonical lowercase hyphenated string form.".
 -spec 'asString'(t()) -> beamtalk_string:t().
-'asString'(#{'$beamtalk_class' := 'Uuid', bytes := Bytes}) ->
+'asString'(#{?BT_CLASS_TAG_KEY := 'Uuid', bytes := Bytes}) ->
     Hex = binary:encode_hex(Bytes, lowercase),
     <<A:8/binary, B:4/binary, C:4/binary, D:4/binary, E:12/binary>> = Hex,
     beamtalk_primitive:string_from_binary(
@@ -145,12 +147,12 @@ isValid(Arg) ->
 
 -doc "Raw 16-byte binary representation.".
 -spec 'asBinary'(t()) -> <<_:128>>.
-'asBinary'(#{'$beamtalk_class' := 'Uuid', bytes := Bytes}) ->
+'asBinary'(#{?BT_CLASS_TAG_KEY := 'Uuid', bytes := Bytes}) ->
     Bytes.
 
 -doc "The RFC 9562 version nibble (bits 48-51 of the 16-byte value).".
 -spec version(t()) -> 0..15.
-version(#{'$beamtalk_class' := 'Uuid', bytes := <<_:48, Version:4, _:76>>}) ->
+version(#{?BT_CLASS_TAG_KEY := 'Uuid', bytes := <<_:48, Version:4, _:76>>}) ->
     Version.
 
 -doc "Human-readable representation: Uuid(...).".
@@ -168,25 +170,25 @@ version(#{'$beamtalk_class' := 'Uuid', bytes := <<_:48, Version:4, _:76>>}) ->
 %% millisecond timestamp (and then the random tail) for v7 Uuids.
 
 -spec '<'(t(), t()) -> boolean().
-'<'(#{'$beamtalk_class' := 'Uuid', bytes := A}, #{'$beamtalk_class' := 'Uuid', bytes := B}) ->
+'<'(#{?BT_CLASS_TAG_KEY := 'Uuid', bytes := A}, #{?BT_CLASS_TAG_KEY := 'Uuid', bytes := B}) ->
     A < B;
 '<'(_, _) ->
     beamtalk_error:raise_type_error('Uuid', '<', <<"Argument must be a Uuid">>).
 
 -spec '>'(t(), t()) -> boolean().
-'>'(#{'$beamtalk_class' := 'Uuid', bytes := A}, #{'$beamtalk_class' := 'Uuid', bytes := B}) ->
+'>'(#{?BT_CLASS_TAG_KEY := 'Uuid', bytes := A}, #{?BT_CLASS_TAG_KEY := 'Uuid', bytes := B}) ->
     A > B;
 '>'(_, _) ->
     beamtalk_error:raise_type_error('Uuid', '>', <<"Argument must be a Uuid">>).
 
 -spec '=<'(t(), t()) -> boolean().
-'=<'(#{'$beamtalk_class' := 'Uuid', bytes := A}, #{'$beamtalk_class' := 'Uuid', bytes := B}) ->
+'=<'(#{?BT_CLASS_TAG_KEY := 'Uuid', bytes := A}, #{?BT_CLASS_TAG_KEY := 'Uuid', bytes := B}) ->
     A =< B;
 '=<'(_, _) ->
     beamtalk_error:raise_type_error('Uuid', '=<', <<"Argument must be a Uuid">>).
 
 -spec '>='(t(), t()) -> boolean().
-'>='(#{'$beamtalk_class' := 'Uuid', bytes := A}, #{'$beamtalk_class' := 'Uuid', bytes := B}) ->
+'>='(#{?BT_CLASS_TAG_KEY := 'Uuid', bytes := A}, #{?BT_CLASS_TAG_KEY := 'Uuid', bytes := B}) ->
     A >= B;
 '>='(_, _) ->
     beamtalk_error:raise_type_error('Uuid', '>=', <<"Argument must be a Uuid">>).
@@ -227,7 +229,7 @@ gte(Self, Other) -> '>='(Self, Other).
 
 -spec make_uuid(<<_:128>>) -> t().
 make_uuid(Bytes) ->
-    #{'$beamtalk_class' => 'Uuid', bytes => Bytes}.
+    #{?BT_CLASS_TAG_KEY => 'Uuid', bytes => Bytes}.
 
 -spec parse_uuid_string(binary()) -> {ok, <<_:128>>} | error.
 parse_uuid_string(Str) ->

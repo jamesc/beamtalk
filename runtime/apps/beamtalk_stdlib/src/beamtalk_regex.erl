@@ -23,6 +23,8 @@ Regex objects are represented as tagged maps:
 ```
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -export([from/1, from/2]).
 
 -export([source/1, 'printString'/1]).
@@ -44,7 +46,7 @@ Regex objects are represented as tagged maps:
 
 -type regex_option() :: caseless | multiline | dotall | extended | ungreedy.
 -type t() :: #{
-    '$beamtalk_class' := 'Regex',
+    ?BT_CLASS_TAG_KEY := 'Regex',
     source := beamtalk_string:t(),
     compiled := re:mp(),
     atom() => term()
@@ -76,7 +78,7 @@ from(Source) ->
         {ok, MP} ->
             beamtalk_result:from_tagged_tuple(
                 {ok, #{
-                    '$beamtalk_class' => 'Regex',
+                    ?BT_CLASS_TAG_KEY => 'Regex',
                     source => Tagged,
                     compiled => MP
                 }}
@@ -108,7 +110,7 @@ from(Source, Options) ->
         {ok, MP} ->
             beamtalk_result:from_tagged_tuple(
                 {ok, #{
-                    '$beamtalk_class' => 'Regex',
+                    ?BT_CLASS_TAG_KEY => 'Regex',
                     source => Tagged,
                     compiled => MP
                 }}
@@ -248,7 +250,7 @@ and the pattern to a `matcher()`. Any other shape raises the `String`
 text_and_matcher(Str, Pattern, Selector, Hint) ->
     Bin = beamtalk_text:unwrap_or_raise(Str, 'String', Selector, Hint),
     case Pattern of
-        #{'$beamtalk_class' := 'Regex', compiled := MP} ->
+        #{?BT_CLASS_TAG_KEY := 'Regex', compiled := MP} ->
             {Bin, {compiled, MP}};
         _ ->
             PatternBin = beamtalk_text:unwrap_or_raise(Pattern, 'String', Selector, Hint),

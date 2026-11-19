@@ -110,7 +110,7 @@ scan([Elem | Rest], Item) when not is_map(Elem) ->
     %% negative `includes:`, is exactly that.
     scan(Rest, Item);
 scan([Elem | Rest], Item) ->
-    case is_map_key('$beamtalk_class', Elem) andalso dispatch_equals(Elem, Item) of
+    case is_map_key(?BT_CLASS_TAG_KEY, Elem) andalso dispatch_equals(Elem, Item) of
         true -> true;
         false -> scan(Rest, Item)
     end;
@@ -175,7 +175,7 @@ cross-module call at all.
 """.
 -spec dispatchable(term()) -> boolean().
 dispatchable(X) when is_map(X) ->
-    is_map_key('$beamtalk_class', X);
+    is_map_key(?BT_CLASS_TAG_KEY, X);
 dispatchable(_NotATaggedMap) ->
     false.
 
