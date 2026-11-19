@@ -658,9 +658,6 @@ fn build_workspace_eval_cmd(
     format!(
         "try \
          ok = file:write_file(\"{pid_file_path_str}\", os:getpid()), \
-         application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
-         application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
-         application:set_env(beamtalk_runtime, tcp_port, {port}), \
          application:set_env(beamtalk_runtime, log_level, {log_level}), \
          {root_package_start}\
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \

@@ -116,7 +116,7 @@ tagged terms; `encode/2` is the only thing that turns them into JSON.
     | {diagnostics, [map()]}
     | {docs, binary()}
     | {codegen, CoreErlang :: binary(), Warnings :: [beamtalk_repl_protocol:warning()]}
-    | {methods, Methods :: [map()], StateVars :: [binary()]}
+    | {methods, Methods :: [map()], StateVars :: [map()]}
     | {inherited_methods, Methods :: [map()]}
     | {class_list, [map()]}
     | {test_results, map()}

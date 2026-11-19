@@ -32,7 +32,8 @@ where
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ReplResponse {
     // --- Protocol envelope ---
-    /// Legacy response type (`result`, `error`, `bindings`, `loaded`, `actors`).
+    /// Legacy response type (`result`, `error`, `loaded`, `actors`). The
+    /// server no longer sends it (it speaks `status`); a client still accepts it.
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub response_type: Option<String>,
 
@@ -58,7 +59,7 @@ pub struct ReplResponse {
     pub exit_code: Option<u8>,
 
     // --- Common payload ---
-    /// Result value (eval, clear, kill, clone, etc.).
+    /// Result value (eval, clone, and the `{value, _}` ops: nav, browse, tracing).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<serde_json::Value>,
 
@@ -94,11 +95,6 @@ pub struct ReplResponse {
     )]
     pub frames: Option<Vec<StackFrameInfo>>,
 
-    // --- Session / bindings ---
-    /// Variable bindings map (bindings op).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bindings: Option<serde_json::Value>,
-
     // --- Load operations ---
     /// Loaded class names (eval/load-file/load-source/load-project).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -123,11 +119,7 @@ pub struct ReplResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completions: Option<Vec<String>>,
 
-    // --- Symbol info ---
-    /// Symbol information (info op).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub info: Option<serde_json::Value>,
-
+    // --- Actor state ---
     /// Actor state (inspect op).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<serde_json::Value>,
@@ -154,7 +146,7 @@ pub struct ReplResponse {
     pub hint: Option<String>,
 
     // --- Documentation ---
-    /// Documentation text (docs op).
+    /// Documentation text (erlang-help op).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<String>,
 
@@ -421,6 +413,23 @@ pub struct ClassInfo {
     /// Whether the class is abstract (cannot be instantiated directly).
     #[serde(rename = "abstract")]
     pub is_abstract: bool,
+    /// Whether the class is internal to its package (ADR 0071). The server
+    /// always sends it; a missing key reads as `false`.
+    #[serde(default)]
+    pub internal: bool,
+    /// Absolute path of the file the class was compiled from, or `None` for a
+    /// class with no source file (built at run time, or a bootstrap class).
+    #[serde(default)]
+    pub source_file: Option<String>,
+    /// Number of live actors spawned from this class's module. The server
+    /// always sends it; the VS Code Workspace Explorer shows it.
+    #[serde(default)]
+    pub actor_count: Option<u32>,
+    /// Where the class's source comes from: `stdlib`, `project` or
+    /// `dependency` (the System Browser's `browse-classes` classifier). `None`
+    /// from a server that predates the field.
+    #[serde(default)]
+    pub source_origin: Option<String>,
 }
 
 /// Information about an active REPL session, deserialized from REPL JSON.
@@ -638,13 +647,11 @@ mod tests {
             message: Some(String::new()),
             error: Some(String::new()),
             frames: Some(vec![]),
-            bindings: Some(json.clone()),
             classes: Some(vec![]),
             class_list: Some(vec![]),
             actors: Some(vec![]),
             sessions: Some(vec![]),
             completions: Some(vec![]),
-            info: Some(json.clone()),
             state: Some(json.clone()),
             warnings: Some(vec![]),
             warning_details: Some(vec![]),
@@ -785,15 +792,6 @@ mod tests {
         let json = r#"{"id":"msg-009","value":42,"status":["done"]}"#;
         let resp: ReplResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.exit_code, None);
-    }
-
-    #[test]
-    fn deserialize_bindings() {
-        let json = r#"{"id":"msg-002","bindings":{"x":42},"status":["done"]}"#;
-        let resp: ReplResponse = serde_json::from_str(json).unwrap();
-        assert!(!resp.is_error());
-        let bindings = resp.bindings.unwrap();
-        assert_eq!(bindings["x"], 42);
     }
 
     #[test]

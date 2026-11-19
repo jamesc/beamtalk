@@ -13,7 +13,12 @@ export type ConnectionState = "connected" | "disconnected" | "reconnecting";
 export interface ActorInfo {
   pid: string;
   class: string;
-  spawned_at?: number;
+  /** Unix seconds; `null` on the wire for an actor that never recorded a start time. */
+  spawned_at?: number | null;
+  /** Backing module; sent by `actors`, absent from the `spawned` push frame. */
+  module?: string;
+  /** `true` for an actor the runtime started itself (`TranscriptStream`); the wire omits it otherwise. */
+  system?: boolean;
 }
 
 export interface ActorStoppedInfo {
