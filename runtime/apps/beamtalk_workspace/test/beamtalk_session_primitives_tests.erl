@@ -210,6 +210,18 @@ with_id_accepts_string_test_() ->
         ]
     end}.
 
+%% A BT-string tagged id ({beamtalk_string, Binary}) takes the to_binary_id/1
+%% BT-string clause; a session not in the table returns nil.
+with_id_bt_tagged_string_missing_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_assertEqual(
+                nil,
+                beamtalk_session_primitives:withId({beamtalk_string, <<"prim-bt-str-no-such">>})
+            )
+        ]
+    end}.
+
 %%====================================================================
 %% bindings/1 + cross-session read
 %%====================================================================
@@ -520,6 +532,50 @@ session_id_type_error_test_() ->
     end}.
 
 %%====================================================================
+%% Type errors — BindingsView and Session type checks
+%%====================================================================
+
+%% at/2 with non-BindingsView first arg: covers view_read_map catch-all,
+%% raise_view_type_error body, and all type_name/1 clauses except Integer.
+at_read_on_non_view_raises_type_error_test() ->
+    ?assertBtError(type_error, beamtalk_session_primitives:at(<<"text">>, x)),
+    ?assertBtError(type_error, beamtalk_session_primitives:at(some_atom, x)),
+    ?assertBtError(type_error, beamtalk_session_primitives:at(#{a => 1}, x)),
+    ?assertBtError(type_error, beamtalk_session_primitives:at([1, 2, 3], x)),
+    ?assertBtError(type_error, beamtalk_session_primitives:at(1.0, x)).
+
+%% at/3 catch-all with non-BindingsView first arg.
+at_write_on_non_view_raises_type_error_test() ->
+    ?assertBtError(type_error, beamtalk_session_primitives:at(42, x, 1)).
+
+%% removeKey/2 catch-all with non-BindingsView first arg.
+remove_key_on_non_view_raises_type_error_test() ->
+    ?assertBtError(type_error, beamtalk_session_primitives:removeKey(42, x)).
+
+%% bindings/1 with non-Session arg triggers session_id_pid catch-all.
+bindings_on_non_session_raises_type_error_test() ->
+    ?assertBtError(type_error, beamtalk_session_primitives:bindings(42)).
+
+%% printString/1 with non-Session arg triggers session_meta catch-all.
+print_string_on_non_session_raises_type_error_test() ->
+    ?assertBtError(type_error, beamtalk_session_primitives:printString(42)).
+
+%% at/3 with an integer key: to_name_atom catch-all raises a name type_error
+%% before enqueue_session_mutation is called.
+at_write_integer_key_raises_name_type_error_test() ->
+    FakeView = #{'$beamtalk_class' => 'BindingsView', scope => session,
+                 id => <<"fake">>, pid => self()},
+    ?assertBtError(type_error, beamtalk_session_primitives:at(FakeView, 42, value)).
+
+%% removeKey workspace-scope with a never-interned binary key: to_existing_name_atom
+%% returns error so the error->nil branch fires rather than calling unbind/1.
+remove_key_workspace_unknown_binary_key_returns_nil_test() ->
+    WView = #{'$beamtalk_class' => 'BindingsView', scope => workspace},
+    ?assertEqual(
+        nil, beamtalk_session_primitives:removeKey(WView, <<"beamtalk_cov_nightly_unknown_zz9z">>)
+    ).
+
+%%====================================================================
 %% Class-method dispatch propagates the caller's session context
 %% (ADR 0081): `Session current` is a class method, so dispatch
 %% hops from the eval worker to the Session class gen_server. The worker's
@@ -600,6 +656,52 @@ class_current_malformed_context_degrades_test_() ->
                 ?assertEqual(nil, NilSession),
                 %% The gen_server is still alive and serving after the malformed call.
                 ?assert(is_process_alive(ClassPid))
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Key type and edge-case paths
+%%====================================================================
+
+%% at/3 with binary and string (list) keys: covers to_name_atom/1 binary and
+%% list clauses. The session-scope write returns the value put.
+at_binary_and_string_key_write_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                Pid = start_session(<<"prim-bin-str-key">>),
+                seed_context(Pid, <<"prim-bin-str-key">>),
+                Session = beamtalk_session_primitives:current(),
+                View = beamtalk_session_primitives:bindings(Session),
+                %% Binary key → to_name_atom/1 binary clause.
+                ?assertEqual(99, beamtalk_session_primitives:at(View, <<"bin_key">>, 99)),
+                %% String (list of codepoints) key → to_name_atom/1 list clause.
+                ?assertEqual(77, beamtalk_session_primitives:at(View, "str_key", 77)),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%% at/2 with empty binary and empty list keys: each resolves via
+%% to_existing_name_atom/1's dedicated empty-string clauses to the atom ''
+%% (always interned) and returns nil when no such binding exists.
+%% Also verifies the type-error clause for integer keys in a read.
+at_empty_key_and_integer_key_read_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                Pid = start_session(<<"prim-key-edge">>),
+                seed_context(Pid, <<"prim-key-edge">>),
+                Session = beamtalk_session_primitives:current(),
+                View = beamtalk_session_primitives:bindings(Session),
+                %% Empty binary key → to_existing_name_atom/1 empty-binary clause.
+                ?assertEqual(nil, beamtalk_session_primitives:at(View, <<>>)),
+                %% Empty list key → to_existing_name_atom/1 empty-list clause.
+                ?assertEqual(nil, beamtalk_session_primitives:at(View, [])),
+                %% Integer key → to_existing_name_atom/1 type-error clause.
+                ?assertBtError(type_error, beamtalk_session_primitives:at(View, 42)),
+                beamtalk_repl_shell:stop(Pid)
             end)
         ]
     end}.
