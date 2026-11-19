@@ -76,3 +76,22 @@ fn parenthesised_plain_block_local_rebind_matches_bare() {
     );
     assert_compiles_through_erlc("bt@paren_block_local", &paren);
 }
+
+#[test]
+fn parenthesised_while_condition_local_rebind_matches_bare() {
+    // A non-tail statement of a carried `whileTrue:` condition: the lowering and the
+    // verifier's write-site list must see the same (unwrapped) node.
+    let src = |stmt: &str| {
+        format!(
+            "Value subclass: ParenWhileProbe\n  field: n = 0\n  run =>\n    i := 0\n    [\n      {stmt}\n      i < 3\n    ] whileTrue: [self.n := self.n + 1]\n    i\n"
+        )
+    };
+    let bare = codegen_named(&src("i := i + 1"), "bt@paren_while_cond");
+    let paren = codegen_named(&src("(i := i + 1)"), "bt@paren_while_cond");
+    assert_eq!(
+        run_fn(&bare, "'run'/1 ="),
+        run_fn(&paren, "'run'/1 ="),
+        "`(i := i + 1)` in a while condition must lower exactly like `i := i + 1`"
+    );
+    assert_compiles_through_erlc("bt@paren_while_cond", &paren);
+}

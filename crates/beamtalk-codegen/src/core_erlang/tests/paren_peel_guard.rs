@@ -126,10 +126,11 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-codegen/src/core_erlang/control_flow/exception_handling.rs",
         1,
     ),
-    // BT-5031: a non-tail while-condition statement.
+    // BT-5031: a non-tail while-condition statement, in the lowering loop and in
+    // the verifier's write-site list.
     (
         "beamtalk-codegen/src/core_erlang/control_flow/while_loops.rs",
-        1,
+        2,
     ),
     ("beamtalk-codegen/src/core_erlang/expr_shape.rs", 2),
     ("beamtalk-codegen/src/core_erlang/field_types.rs", 1),

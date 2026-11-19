@@ -803,6 +803,9 @@ impl CoreErlangGenerator {
         let written = self.loop_condition_written_locals(condition);
         rest.iter()
             .filter_map(|expr| {
+                // BT-5031: the lowering unwraps each non-tail condition statement, so
+                // the verifier's site list reads the same node (and span).
+                let expr = expr.unwrap_parens();
                 let names: Vec<String> = match expr {
                     Expression::Assignment { target, .. } => match target.as_ref() {
                         Expression::Identifier(id) => vec![id.name.to_string()],
