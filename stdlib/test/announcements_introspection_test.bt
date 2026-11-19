@@ -26,25 +26,29 @@ TestCase subclass: AnnouncementsIntrospectionTest
     nodes := self.announcer subscribersOf: ParentEvent
     self assert: nodes isEmpty
 
+  // Helper: subscribe a no-op block to IntrospectionEvent, get the first
+  // SubscriptionNode, yield it to aBlock, then unsubscribe.
+  withTestNode: aBlock =>
+    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
+    node := (self.announcer subscribersOf: IntrospectionEvent) first
+    aBlock value: node
+    sub unsubscribe
+
   // --- SubscriptionNode fields ---
   testNodeAnnouncementClass =>
-    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
-    node := (self.announcer subscribersOf: IntrospectionEvent) first
-    self assert: node announcementClass equals: IntrospectionEvent
-    sub unsubscribe
+    self withTestNode: [:node |
+      self assert: node announcementClass equals: IntrospectionEvent
+    ]
 
   testNodeSubscriberIsPid =>
-    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
-    node := (self.announcer subscribersOf: IntrospectionEvent) first
-    self assert: node subscriber class equals: Pid
-    sub unsubscribe
+    self withTestNode: [:node | self assert: node subscriber class equals: Pid]
 
   testNodeHandlerKindDoForBlock =>
-    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
-    node := (self.announcer subscribersOf: IntrospectionEvent) first
-    self assert: node handlerKind equals: #do
-    self deny: node once
-    sub unsubscribe
+    self
+      withTestNode: [:node |
+        self assert: node handlerKind equals: #do
+        self deny: node once
+      ]
 
   testNodeHandlerKindDoOnce =>
     sub := self.announcer when: IntrospectionEvent doOnce: [:e | nil]
@@ -114,8 +118,8 @@ TestCase subclass: AnnouncementsIntrospectionTest
 
   // --- SubscriptionNode printString ---
   testNodePrintStringMentionsClass =>
-    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
-    node := (self.announcer subscribersOf: IntrospectionEvent) first
-    self assert: (node printString includesSubstring: "IntrospectionEvent")
-    self assert: (node printString includesSubstring: "SubscriptionNode")
-    sub unsubscribe
+    self
+      withTestNode: [:node |
+        self assert: (node printString includesSubstring: "IntrospectionEvent")
+        self assert: (node printString includesSubstring: "SubscriptionNode")
+      ]
