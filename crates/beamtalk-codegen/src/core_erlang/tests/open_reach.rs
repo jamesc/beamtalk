@@ -116,8 +116,8 @@ fn the_exception_construct_open_is_reached_by_user_source_on_its_way_to_a_reject
 /// BT-5041: a class method has no `*_open` lowering for a conditional or an
 /// `on:do:`/`ensure:` that rebinds an outer local; the local-threading producer
 /// takes them first, and `generate_class_method_non_last_expr` reports an internal
-/// error for the two kinds. Pin that these shapes never reach that error: each
-/// compiles, or is rejected with a structured diagnostic, never `Internal`.
+/// error for the two kinds. Pin that these shapes never reach that error: each parses and
+/// compiles (so none can drift into `Internal`, or stop parsing and pass vacuously).
 #[test]
 fn class_method_local_threading_constructs_never_reach_the_internal_error_arm() {
     let bodies = [
@@ -133,10 +133,17 @@ fn class_method_local_threading_constructs_never_reach_the_internal_error_arm() 
     for (i, body) in bodies.iter().enumerate() {
         let src =
             format!("Object subclass: ClassMethodReach{i}\n\n  class probe: flag =>\n    {body}\n");
-        let (_, result) = compile(&src);
+        let (_, parse_diagnostics) = parse(lex_with_eof(&src));
         assert!(
-            !matches!(result, Err(CodeGenError::Internal(_))),
-            "class method reached the internal-error arm: {result:?}\n{src}"
+            parse_diagnostics.is_empty(),
+            "body {i} does not parse cleanly, so the pin would test nothing: {parse_diagnostics:?}\n{src}"
+        );
+        let (_, result) = compile(&src);
+        // Every shape compiles today (through the producer route); a rejection with a
+        // structured error would also be fine, but `Internal` never is.
+        assert!(
+            result.is_ok(),
+            "class method body {i} no longer compiles: {result:?}\n{src}"
         );
     }
 }
