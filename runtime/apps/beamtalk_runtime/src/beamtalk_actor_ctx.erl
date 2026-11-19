@@ -9,10 +9,12 @@
 Application-level trace context and causal trace IDs, split out of `beamtalk_actor` (BT-5047).
 
 The set/get/clear API for the `'$beamtalk_trace_ctx'` process-dictionary
-entry and the causal-ID reader used by `beamtalk_trace_store`. Building and
-restoring the *propagated* context on every send (`get_propagated_ctx/0`,
-`restore_propagated_ctx/1`) stays in `beamtalk_actor`: generated code calls it
-on the hot path.
+entry and the causal-ID reader used by `beamtalk_trace_store`. Building the
+*propagated* context on every send (`get_propagated_ctx/0`) lives in
+`beamtalk_actor_send`, where it is inlined into the send bodies; restoring it
+(`restore_propagated_ctx/1`) stays in `beamtalk_actor`, because generated code
+calls it on the hot path. `clear_stale_otel_ctx/0` reads the OTel context via
+`beamtalk_actor_send:get_otel_ctx/0`.
 """.
 
 -include("beamtalk.hrl").
