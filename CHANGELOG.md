@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Breaking: a repeated element name in a destructuring array pattern is a compile error (BT-5052).**
+  - Changed: `#[a, a] := #[1, 2]` (and a repeat in a nested array, `#[a, #[b, a]] := ...`) now fails with "Variable 'a' is bound multiple times in pattern". It compiled before and silently left `a` as the last element, because destructuring emits no equality guard. `#[a, ...a]` was already an error (BT-5050). `match:` arms are unchanged: `#[a, a] -> ...` still matches only when both elements are equal.
+  - Do: give each destructured element its own name. To check equality, compare after destructuring (`a = b`) or use a `match:` arm.
 - **Breaking: CLI flags renamed so one concept has one spelling (BT-5045).** There are no aliases for the old spellings: using one is now a clap "unexpected argument" error.
   - Renamed: `beamtalk repl --timeout <SECONDS>` is now `--idle-timeout <SECONDS>` (as `workspace create` already had). `beamtalk workspace logs --workspace NAME` is now `beamtalk workspace logs [NAME]` (positional, like `stop`, `status`, `attach` and `transcript`). `beamtalk workspace list --json` is now `--format json` (`text` or `json`, the `--format` of `lint` and `type-coverage`). `beamtalk workspace logs --format text|json` is now `--log-format text|json`; it is a validated enum, so an unknown value is a clap error rather than a runtime one.
   - Added: `--no-warnings` and `--warnings-as-errors` (mutually exclusive) on `build`, `check`, `test`, `build-stdlib` and the hidden test commands, from one shared definition. Before, `build` and `check` had no `--warnings-as-errors`, and `check` and `test` had no `--no-warnings`. `lint --warnings-as-errors` stays; its help now says it covers lint and live-recheck diagnostics.

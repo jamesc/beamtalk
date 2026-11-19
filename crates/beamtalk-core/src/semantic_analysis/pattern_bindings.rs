@@ -147,10 +147,18 @@ fn extract_pattern_bindings_impl(
             }
         }
 
-        // Array patterns: duplicates are allowed — codegen emits equality checks
+        // Array patterns: repeated element names are allowed only in match arms
+        // (`allow_duplicates`), where codegen emits equality checks. Destructuring
+        // emits no guard, so a repeat would silently rebind (BT-5052).
         Pattern::Array { elements, rest, .. } => {
             for element in elements {
-                extract_pattern_bindings_impl(element, bindings, seen, diagnostics, true);
+                extract_pattern_bindings_impl(
+                    element,
+                    bindings,
+                    seen,
+                    diagnostics,
+                    allow_duplicates,
+                );
             }
             if let Some(rest_pat) = rest {
                 // Elements may repeat (array match arms add an equality guard), but
@@ -445,29 +453,6 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_pattern_bindings_duplicate_in_array_is_allowed() {
-        // Pattern #[x, x] should NOT error — codegen emits equality check
-        let pattern = Pattern::Array {
-            elements: vec![
-                Pattern::Variable(Identifier::new("x", test_span())),
-                Pattern::Variable(Identifier::new("x", test_span())),
-            ],
-            list_syntax: false,
-            rest: None,
-            span: test_span(),
-        };
-        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
-
-        assert_eq!(bindings.len(), 2);
-        assert_eq!(bindings[0].name, "x");
-        assert_eq!(bindings[1].name, "x");
-        assert!(
-            diagnostics.is_empty(),
-            "Duplicate in array pattern should be allowed. Got: {diagnostics:?}"
-        );
-    }
-
-    #[test]
     fn test_extract_pattern_bindings_array_rest_repeating_element_is_error() {
         // Pattern #[a, ...a]: no equality guard for a rest, so `a` would silently rebind (BT-5050)
         let pattern = Pattern::Array {
@@ -485,6 +470,59 @@ mod tests {
         ] {
             assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
             assert!(diagnostics[0].message.contains("'a'"));
+        }
+    }
+
+    fn var(name: &str) -> Pattern {
+        Pattern::Variable(Identifier::new(name, test_span()))
+    }
+
+    fn array(elements: Vec<Pattern>) -> Pattern {
+        Pattern::Array {
+            elements,
+            list_syntax: false,
+            rest: None,
+            span: test_span(),
+        }
+    }
+
+    #[test]
+    fn test_destructure_array_repeated_element_is_error() {
+        // `#[a, a] := ...` has no equality guard, so the repeat would silently rebind (BT-5052)
+        let (_, diagnostics) = extract_pattern_bindings(&array(vec![var("a"), var("a")]));
+        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("Variable 'a' is bound multiple times in pattern")
+        );
+    }
+
+    #[test]
+    fn test_destructure_nested_array_repeated_element_is_error() {
+        // `#[a, #[b, a]]`: the repeat is in a nested array
+        let pattern = array(vec![var("a"), array(vec![var("b"), var("a")])]);
+        let (_, diagnostics) = extract_pattern_bindings(&pattern);
+        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+    }
+
+    #[test]
+    fn test_destructure_array_distinct_elements_ok() {
+        let pattern = array(vec![var("a"), array(vec![var("b"), var("c")])]);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
+        assert_eq!(bindings.len(), 3);
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_match_arm_array_repeated_element_still_allowed() {
+        // Match arms keep the equality guard, including in nested arrays
+        for pattern in [
+            array(vec![var("a"), var("a")]),
+            array(vec![var("a"), array(vec![var("b"), var("a")])]),
+        ] {
+            let (_, diagnostics) = extract_match_arm_bindings(&pattern);
+            assert!(diagnostics.is_empty(), "got: {diagnostics:?}");
         }
     }
 
