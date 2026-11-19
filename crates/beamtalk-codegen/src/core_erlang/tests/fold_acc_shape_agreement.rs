@@ -184,9 +184,9 @@ fn bare_and_tuple_folds_agree_with_the_map_oracle() {
     // BT-4641: CI sets BEAMTALK_REQUIRE_RUNTIME so a missing toolchain or
     // runtime turns this test red instead of silently degrading it.
     let require = std::env::var_os("BEAMTALK_REQUIRE_RUNTIME").is_some();
+    // A missing `erlc` skips locally and fails under `CI` /
+    // `BEAMTALK_REQUIRE_ERLANG` (BT-5034); the runtime requirement is separate.
     if !super::erlc_available() {
-        assert!(!require, "BEAMTALK_REQUIRE_RUNTIME set but erlc is missing");
-        eprintln!("erlc not available; skipping");
         return;
     }
     let ebins = runtime_ebins();

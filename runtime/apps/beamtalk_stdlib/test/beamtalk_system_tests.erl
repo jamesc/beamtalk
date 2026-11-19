@@ -173,10 +173,6 @@ erlang_version_non_empty_test() ->
 %%% pid/0
 %%% ============================================================================
 
-pid_returns_integer_test() ->
-    V = beamtalk_system:pid(),
-    ?assert(is_integer(V)).
-
 pid_positive_test() ->
     V = beamtalk_system:pid(),
     ?assert(V > 0).

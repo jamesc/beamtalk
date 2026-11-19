@@ -118,30 +118,23 @@ show_codegen_returns_core_erlang() ->
 
 show_codegen_rejects_during_eval() ->
     {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-codegen-busy">>),
-    %% Start a long-running eval to occupy the worker slot
-    Self = self(),
-    Caller = spawn(fun() ->
-        Res = beamtalk_repl_shell:eval(Pid, "1 + 2"),
-        Self ! {eval_done, Res}
+    %% Park the eval worker: a process that never finishes stands in for a
+    %% running eval, so the shell is busy for exactly as long as the test says.
+    Worker = spawn(fun() ->
+        receive
+            release -> ok
+        end
     end),
-    %% Wait until the eval request is in flight (caller blocked on
-    %% the reply) or already finished
-    ok = beamtalk_test_wait:idle(Caller),
-    %% Try show_codegen - if eval is still in progress, should get eval_busy
-    Result = beamtalk_repl_shell:show_codegen(Pid, "42"),
-    case Result of
-        {error, #beamtalk_error{kind = eval_busy}, _} ->
-            ok;
-        _ ->
-            %% Eval may have completed before show_codegen ran
-            %% (race condition in test - both outcomes are valid)
-            ok
-    end,
-    %% Drain eval result
-    receive
-        {eval_done, _} -> ok
-    after 5000 -> ok
-    end,
+    sys:replace_state(Pid, fun({SId, State, undefined}) ->
+        {SId, State, {Worker, make_ref(), {async, self()}}}
+    end),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = eval_busy}, _},
+        beamtalk_repl_shell:show_codegen(Pid, "42")
+    ),
+    %% Interrupting frees the slot: the same request now compiles.
+    ok = beamtalk_repl_shell:interrupt(Pid),
+    ?assertMatch({ok, _, _}, beamtalk_repl_shell:show_codegen(Pid, "42")),
     beamtalk_repl_shell:stop(Pid).
 
 %%====================================================================

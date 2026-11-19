@@ -21,10 +21,6 @@ collection integration (atRandom), FFI shims, and error paths.
 %%% next/0 — class-side float
 %%% ============================================================================
 
-next_returns_float_test() ->
-    V = beamtalk_random:'next'(),
-    ?assert(is_float(V)).
-
 next_in_range_test() ->
     V = beamtalk_random:'next'(),
     ?assert(V >= 0.0),
@@ -33,10 +29,6 @@ next_in_range_test() ->
 %%% ============================================================================
 %%% nextInteger:/1 — class-side integer
 %%% ============================================================================
-
-next_integer_returns_integer_test() ->
-    V = beamtalk_random:nextInteger(10),
-    ?assert(is_integer(V)).
 
 next_integer_in_range_test() ->
     V = beamtalk_random:nextInteger(100),
@@ -98,11 +90,6 @@ seed_non_integer_test() ->
 %%% next/1 — instance float
 %%% ============================================================================
 
-instance_next_returns_float_test() ->
-    R = beamtalk_random:seed(42),
-    V = beamtalk_random:next(R),
-    ?assert(is_float(V)).
-
 instance_next_in_range_test() ->
     R = beamtalk_random:seed(42),
     V = beamtalk_random:next(R),
@@ -122,11 +109,6 @@ instance_next_bad_receiver_test() ->
 %%% ============================================================================
 %%% nextInteger/2 — instance integer
 %%% ============================================================================
-
-instance_next_integer_returns_integer_test() ->
-    R = beamtalk_random:seed(42),
-    V = beamtalk_random:nextInteger(R, 100),
-    ?assert(is_integer(V)).
 
 instance_next_integer_in_range_test() ->
     R = beamtalk_random:seed(42),

@@ -693,9 +693,14 @@ mod tests {
 
     #[test]
     fn test_list_workspaces_empty_when_no_workspaces_dir() {
-        // list_workspaces handles missing ~/.beamtalk/workspaces/ gracefully
-        let result = list_workspaces();
-        assert!(result.is_ok());
+        // list_workspaces handles a missing workspaces/ directory gracefully.
+        // BEAMTALK_HOME points at an empty temp dir, never the developer's
+        // real ~/.beamtalk (BT-5034).
+        let home = tempfile::tempdir().unwrap();
+        let _guard = crate::commands::test_support::BeamtalkHomeOverride::new(home.path());
+        assert!(!home.path().join("workspaces").exists());
+        let workspaces = list_workspaces().expect("a missing workspaces dir is not an error");
+        assert!(workspaces.is_empty(), "got {workspaces:?}");
     }
 
     #[test]

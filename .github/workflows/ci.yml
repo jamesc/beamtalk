@@ -63,6 +63,11 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # BT-5034: a missing erlc/erl fails the Rust compile checks instead of
+  # skipping them (`beamtalk_core::test_helpers::test_support::skip_or_fail`).
+  # GitHub sets CI=true as well; this makes the contract explicit and keeps it
+  # if a job ever clears CI.
+  BEAMTALK_REQUIRE_ERLANG: "1"
 
 jobs:
   # ─── Path decisions, computed once (BT-4209) ───────────────────────────

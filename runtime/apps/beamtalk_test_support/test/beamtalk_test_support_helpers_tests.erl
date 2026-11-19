@@ -98,7 +98,7 @@ with_tmp_home_restores_on_crash_test() ->
 
 assert_bt_error_test() ->
     Err = #beamtalk_error{kind = does_not_understand, class = 'Integer', selector = foo},
-    ?assertBtError(does_not_understand, 'Integer', foo, error(#{error => Err})),
+    ?assertBtError(does_not_understand, 'Integer', foo, beamtalk_error:raise(Err)),
     ?assertBtErrorResult(does_not_understand, 'Integer', foo, {error, Err}).
 
 registry_and_runtime_test() ->
@@ -206,6 +206,12 @@ repl_assert_error_response_test() ->
 
 %%% BT-5038: ?awaitMessage / ?assertNoMessage / with_extension / unlinking kill
 
+flush_mailbox() ->
+    receive
+        _ -> flush_mailbox()
+    after 0 -> ok
+    end.
+
 await_message_binds_pattern_variables_test() ->
     self() ! {worker_ready, 42, ignored},
     ?awaitMessage({worker_ready, Id, _}),
@@ -214,6 +220,10 @@ await_message_binds_pattern_variables_test() ->
     ?awaitMessage({again, Id}, 100).
 
 await_message_timeout_names_pattern_and_shows_mailbox_test() ->
+    %% EUnit runs this module's tests in one process, so exit signals and
+    %% messages left by earlier tests (trapped `'EXIT'`s) may be in the mailbox:
+    %% start from an empty one so the expected mailbox is exactly ours.
+    flush_mailbox(),
     self() ! {unrelated, mail},
     try
         ?awaitMessage({never_sent, _Pid}, 10),

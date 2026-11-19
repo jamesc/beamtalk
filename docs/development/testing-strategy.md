@@ -326,7 +326,12 @@ These tests verify that generated Core Erlang actually compiles with `erlc`.
 4. Run `erlc +from_core`
 5. Assert compilation succeeds
 
-**Skipping:** Tests are skipped gracefully if `erlc` is not available.
+**Skipping:** A missing `erlc` skips these tests locally and **fails** them when `CI` or
+`BEAMTALK_REQUIRE_ERLANG` is set (BT-5034). One helper owns that decision:
+`beamtalk_core::test_helpers::test_support::skip_or_fail`, reached through `erlc_available()`,
+`erlang_available()`, `installed_otp_release()` and `erlc_batched`. A new test that needs
+`erlc`/`erl` calls one of those; it never prints "skipping" on its own. CI sets
+`BEAMTALK_REQUIRE_ERLANG: "1"` in `ci.yml` and `corpus.yml`.
 
 **Why this matters:** Snapshots can drift from actual erlc requirements. These tests catch syntax errors that snapshots miss.
 

@@ -763,12 +763,17 @@ mod tests {
 
     #[test]
     fn literal_variants() {
-        let _int = Literal::Integer(42);
-        let _float = Literal::Float(2.5);
-        let _string = Literal::String("hello".into());
-        let _symbol = Literal::Symbol("symbol".into());
-        let _char = Literal::Character('a');
-        let _array = Literal::List(vec![Literal::Integer(1), Literal::Integer(2)]);
+        let array = Literal::List(vec![Literal::Integer(1), Literal::Integer(2)]);
+        assert_eq!(
+            array,
+            Literal::List(vec![Literal::Integer(1), Literal::Integer(2)])
+        );
+        // Distinct variants never compare equal, and equal payloads do.
+        assert_eq!(Literal::Integer(42), Literal::Integer(42));
+        assert_ne!(Literal::Integer(42), Literal::Integer(43));
+        assert_ne!(Literal::String("a".into()), Literal::Symbol("a".into()));
+        assert_eq!(Literal::Float(2.5), Literal::Float(2.5));
+        assert_eq!(Literal::Character('a'), Literal::Character('a'));
     }
 
     #[test]

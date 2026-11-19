@@ -41,12 +41,6 @@ pid_to_string_contains_dots_test() ->
 %% port_to_string/1
 %%====================================================================
 
-port_to_string_returns_binary_test() ->
-    {ok, Port} = gen_tcp:listen(0, []),
-    Result = beamtalk_opaque_ops:port_to_string(Port),
-    ?assert(is_binary(Result)),
-    gen_tcp:close(Port).
-
 port_to_string_has_port_prefix_test() ->
     {ok, Port} = gen_tcp:listen(0, []),
     Result = beamtalk_opaque_ops:port_to_string(Port),

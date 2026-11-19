@@ -1007,7 +1007,7 @@ fn generated_field_condition_loops_agree_with_the_oracle_when_run() {
         let Some(observed) =
             super::value_type_fold_family_corpus::run_probes(&core, &names, &self_map)
         else {
-            println!("skipping the oracle run: erlc/erl not available");
+            // `run_probes` already failed (CI) or noted the skip (local).
             return;
         };
         let mismatches: Vec<String> = programs
