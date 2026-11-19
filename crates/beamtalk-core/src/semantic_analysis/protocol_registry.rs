@@ -988,6 +988,21 @@ impl ProtocolRegistry {
             if TypeChecker::is_return_type_refinement(&actual, &expected, hierarchy) {
                 continue;
             }
+            // As on the instance side: a widening override of a parent return
+            // that already met the requirement is reported once, at the
+            // override (BT-5026 checks class-side overrides too).
+            if TypeChecker::override_return_widening(
+                &method.defined_in,
+                &req.selector,
+                &actual,
+                true,
+                hierarchy,
+            )
+            .is_some_and(|w| {
+                TypeChecker::is_return_type_refinement(&w.parent_rt, &expected, hierarchy)
+            }) {
+                continue;
+            }
             mismatches.push(ReturnTypeMismatch {
                 selector: req.selector.clone(),
                 class_side: true,
