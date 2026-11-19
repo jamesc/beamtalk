@@ -5,7 +5,7 @@
 
 use super::*;
 use beamtalk_core::test_helpers::test_support::{
-    fragment_from, mismatched_brackets_from, truncated_from,
+    fragment_from, mismatched_brackets_from, proptest_config_default, truncated_from,
 };
 
 /// Near-valid Beamtalk source fragments (reuses patterns from parser property tests).
@@ -41,19 +41,8 @@ fn compile_input_strategy() -> impl Strategy<Value = String> {
     ]
 }
 
-/// Default is 512 cases for standard CI; override via `PROPTEST_CASES` env var
-/// for nightly extended runs (e.g., `PROPTEST_CASES=10000`).
-fn proptest_config() -> ProptestConfig {
-    let default = ProptestConfig::default();
-    ProptestConfig {
-        // Use at least 512 cases, but allow PROPTEST_CASES to increase beyond that
-        cases: default.cases.max(512),
-        ..default
-    }
-}
-
 proptest! {
-    #![proptest_config(proptest_config())]
+    #![proptest_config(proptest_config_default())]
 
     /// Property 1a: `handle_compile` never panics on arbitrary string input.
     #[test]

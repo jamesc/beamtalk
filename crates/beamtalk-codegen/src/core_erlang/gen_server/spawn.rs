@@ -625,25 +625,10 @@ mod tests {
     use crate::core_erlang::CoreErlangGenerator;
     use beamtalk_core::ast::{ClassDefinition, ClassKind, CommentAttachment, Identifier, Module};
     use beamtalk_core::source_analysis::Span;
+    use beamtalk_core::test_helpers::test_support::empty_module;
 
     fn generator() -> CoreErlangGenerator {
         CoreErlangGenerator::new("counter")
-    }
-
-    fn empty_module() -> Module {
-        Module {
-            pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
-            literal_comments: beamtalk_core::ast::LiteralComments::default(),
-            classes: vec![],
-            method_definitions: vec![],
-            protocols: vec![],
-            type_aliases: vec![],
-            native_declarations: vec![],
-            expressions: vec![],
-            span: Span::new(0, 0),
-            file_leading_comments: vec![],
-            file_trailing_comments: vec![],
-        }
     }
 
     fn module_with_superclass(sc: &str) -> Module {

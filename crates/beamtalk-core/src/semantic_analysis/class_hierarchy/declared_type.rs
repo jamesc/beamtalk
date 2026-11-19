@@ -1297,15 +1297,11 @@ mod tests {
 #[cfg(test)]
 mod property_tests {
     use super::*;
-    use crate::test_helpers::test_support::arb_declared_type;
+    use crate::test_helpers::test_support::{arb_declared_type, proptest_config_default};
     use proptest::prelude::*;
 
-    fn proptest_config() -> ProptestConfig {
-        crate::test_helpers::test_support::proptest_config_default()
-    }
-
     proptest! {
-        #![proptest_config(proptest_config())]
+        #![proptest_config(proptest_config_default())]
 
         /// `parse ∘ Display` never panics on any generated shape, including
         /// the ones (`\`, `&`, `FalseOr`) the parser can't fully represent.

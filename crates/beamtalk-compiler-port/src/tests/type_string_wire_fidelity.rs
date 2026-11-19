@@ -32,14 +32,14 @@
 //! repo's "No duplicate implementations" rule.
 
 use super::*;
-use beamtalk_core::test_helpers::test_support::arb_declared_type;
+use beamtalk_core::test_helpers::test_support::{arb_declared_type, proptest_config_default};
 
 fn arb_type_annotation_string() -> impl Strategy<Value = String> {
     arb_declared_type().prop_map(|dt| dt.to_string())
 }
 
 proptest! {
-    #![proptest_config(proptest_config())]
+    #![proptest_config(proptest_config_default())]
 
     /// A `return_type`/`param_types` string embedded in a real
     /// production response (`method_definition_ok_response`)
