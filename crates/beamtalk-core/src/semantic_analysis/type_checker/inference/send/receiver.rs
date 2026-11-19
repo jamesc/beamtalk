@@ -1393,7 +1393,6 @@ impl TypeChecker {
     /// here — an intentional tradeoff matching the non-union `Meta` path, since
     /// these operators are part of the universal `Object`/`ProtoObject`
     /// protocol and are not modelled as per-class hierarchy methods.
-    #[allow(clippy::too_many_lines)]
     pub(in crate::semantic_analysis::type_checker) fn infer_union_message_send(
         &mut self,
         members: &[InferredType],
@@ -1521,112 +1520,19 @@ impl TypeChecker {
             }
             if hierarchy.resolves_selector(resolve_name, selector) {
                 responding_count += 1;
-                if let Some(method) = hierarchy.find_method(resolve_name, selector) {
-                    if let Some(ref ret_ty) = method.return_type {
-                        if matches!(ret_ty, DeclaredType::SelfType) {
-                            // Self resolves to the concrete member type (with type args)
-                            return_types.push(member.clone());
-                        } else if matches!(ret_ty, DeclaredType::SelfClass) {
-                            // ADR 0083: `Self class` resolves to the metatype of
-                            // the concrete union member (was Dynamic pre-0083).
-                            // Use `resolve_name` so a singleton member
-                            // yields `Symbol class` (`#foo class` is `Symbol` at
-                            // runtime), not a phantom `Meta("#foo")`. A
-                            // protocol member's class is its protocol
-                            // metatype (ADR 0144), as on the bare path.
-                            return_types.push(
-                                if protocol_resolution == Some(ProtocolSendResolution::Object) {
-                                    InferredType::protocol_meta(member_name.clone())
-                                } else {
-                                    InferredType::meta(EcoString::from(resolve_name))
-                                },
-                            );
-                        } else if let DeclaredType::ClassOf(meta_class) = ret_ty
-                            && hierarchy.has_class(meta_class)
-                        {
-                            // ADR 0083: an explicit `X class` return on a union
-                            // member resolves to `Meta{X}` — mirrors the
-                            // non-union path. Without this branch the
-                            // ` class` suffix leaked through as
-                            // `Known("X class")`. An unregistered `X` falls
-                            // through to the arms below (like the non-union
-                            // path), so the member still contributes a type
-                            // instead of being silently dropped from the union.
-                            return_types.push(InferredType::meta(meta_class.clone()));
-                        } else if matches!(ret_ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n) == Some(WellKnownClass::Never))
-                        {
-                            // Bottom type for divergent methods
-                            return_types.push(InferredType::Never);
-                        } else {
-                            // Apply generic substitution for parameterised
-                            // union members (e.g. Array(Integer) in a union).
-                            let InferredType::Known { type_args, .. } = member else {
-                                unreachable!()
-                            };
-                            let subst = Self::build_inherited_substitution_map(
-                                hierarchy,
-                                member_name,
-                                type_args,
-                                &method.defined_in,
-                            );
-                            // Also substitute nested `Self`
-                            // (inside a generic) to the concrete member type
-                            // (with type args), even when the substitution map
-                            // is empty.
-                            let has_nested_self = Self::declared_type_contains_self(ret_ty);
-                            if !subst.is_empty() || has_nested_self {
-                                // Thread the concrete member type under
-                                // the `Self` subst key (see
-                                // `resolve_declared_type`'s `SelfType` arm).
-                                return_types.push(type_resolver::resolve_declared_type_in(
-                                    ret_ty,
-                                    &type_resolver::merge_substitutions(
-                                        &subst,
-                                        &type_resolver::SubstitutionMap::new(),
-                                        Some(member),
-                                    ),
-                                    self.protocol_registry.as_deref(),
-                                    self.alias_registry.as_deref(),
-                                    TypeStringContext::Substitution,
-                                    Some(hierarchy),
-                                ));
-                            } else if matches!(ret_ty, DeclaredType::Simple(n) if crate::semantic_analysis::type_checker::is_type_var_placeholder(n, hierarchy))
-                            {
-                                return_types.push(InferredType::Dynamic(DynamicReason::Unknown));
-                            } else {
-                                // Resolve through the
-                                // centralised structured resolver to preserve
-                                // parametric type args (`List(String)` keeps
-                                // its element type) and resolve union return
-                                // types into `InferredType::Union`.
-                                return_types.push(type_resolver::resolve_declared_type(
-                                    ret_ty,
-                                    &type_resolver::SubstitutionMap::new(),
-                                    self.protocol_registry.as_deref(),
-                                    self.alias_registry.as_deref(),
-                                    TypeStringContext::Declared,
-                                ));
-                            }
-                        }
-                    } else if let Some(ty) = Self::if_true_false_solo_boolean_ret_ty(
-                        selector,
+                return_types.push(self.union_member_return_type(
+                    &UnionMember {
+                        member,
+                        name: member_name,
                         resolve_name,
-                        arguments,
-                        arg_types,
-                        hierarchy,
-                    ) {
-                        // A `Boolean` union member responding to a
-                        // solo `ifTrue:`/`ifFalse:` with no declared return
-                        // type (by design) contributes `Boolean | R` instead
-                        // of poisoning the whole union to `Dynamic` — mirrors
-                        // the non-union `Known` receiver fix above.
-                        return_types.push(ty);
-                    } else {
-                        return_types.push(InferredType::Dynamic(DynamicReason::UnannotatedReturn));
-                    }
-                } else {
-                    return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
-                }
+                        is_protocol_object: protocol_resolution
+                            == Some(ProtocolSendResolution::Object),
+                    },
+                    selector,
+                    arguments,
+                    arg_types,
+                    hierarchy,
+                ));
             } else {
                 missing_names.push(member_name.clone());
                 // Do NOT push Dynamic here — a non-responding member
@@ -1654,28 +1560,7 @@ impl TypeChecker {
             && let Some(method) =
                 hierarchy.find_method(WellKnownClass::UndefinedObject.as_str(), selector)
         {
-            if let Some(ref ret_ty) = method.return_type {
-                let nil_contribution = if matches!(ret_ty, DeclaredType::SelfType) {
-                    InferredType::known(WellKnownClass::UndefinedObject.as_str())
-                } else if matches!(ret_ty, DeclaredType::SelfClass) {
-                    // ADR 0083: `nil class` → metatype of `UndefinedObject`.
-                    InferredType::meta(WellKnownClass::UndefinedObject.as_str())
-                } else if matches!(ret_ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n) == Some(WellKnownClass::Never))
-                {
-                    InferredType::Never
-                } else {
-                    type_resolver::resolve_declared_type(
-                        ret_ty,
-                        &type_resolver::SubstitutionMap::new(),
-                        self.protocol_registry.as_deref(),
-                        self.alias_registry.as_deref(),
-                        TypeStringContext::Declared,
-                    )
-                };
-                return_types.push(nil_contribution);
-            } else {
-                return_types.push(InferredType::Dynamic(DynamicReason::UnannotatedReturn));
-            }
+            return_types.push(self.nil_member_return_type(method.return_type.as_ref()));
         }
         // If UndefinedObject doesn't respond: no return-type widening.
 
@@ -1697,80 +1582,7 @@ impl TypeChecker {
             } else {
                 Severity::Hint
             };
-
-            // Render `UndefinedObject` as `Nil` for the union
-            // display, shared by both branches below — every union DNU,
-            // single- or multi-culprit, names the full union it was sent
-            // to, not just the non-responding member(s).
-            let member_names: Vec<String> = members
-                .iter()
-                .filter_map(|m| m.display_for_diagnostic().map(|n| n.to_string()))
-                .collect();
-            let union_display = member_names.join(" | ");
-
-            if let [only_missing] = missing_names.as_slice() {
-                // The common one-culprit shape reuses the same
-                // diagnostic builder a bare receiver's DNU uses
-                // (`emit_unknown_selector_warning`) — identical message
-                // shape (plus the `(in union ...)` suffix every union DNU
-                // carries, via `context_suffix`), and, new for unions, the
-                // same "did you mean" suggestion lookup. A singleton member
-                // (`#foo`) resolves its suggestions through `Symbol` — the
-                // same singleton-as-Symbol convention `resolve_name` above
-                // (and `resolve_class` elsewhere in this file) applies.
-                let suggestion_class =
-                    if crate::semantic_analysis::string_utils::is_symbol_singleton_name(
-                        only_missing,
-                    ) {
-                        EcoString::from("Symbol")
-                    } else {
-                        only_missing.clone()
-                    };
-                let display_name = InferredType::class_name_for_diagnostic(only_missing.as_str());
-                // Every DNU shape carries actionable advice, so pass the
-                // same generic hint the multi-culprit branch below always
-                // attaches — it's used only when no "did you mean"
-                // suggestion is found.
-                self.emit_unknown_selector_warning(
-                    &display_name,
-                    &suggestion_class,
-                    selector,
-                    span,
-                    hierarchy,
-                    false,
-                    severity,
-                    Some(&format!(" (in union {union_display})")),
-                    Some(
-                        "Use `respondsTo:` to check before sending, or `@expect type` to suppress",
-                    ),
-                );
-            } else {
-                // Multiple non-responding members: `emit_unknown_selector_warning`
-                // has no multi-subject mode — a per-member "did you mean"
-                // can't compose into that diagnostic's single hint field —
-                // so this stays its own combined-message construction.
-                // Map the missing list through the same diagnostic
-                // rewriter as the union display above.
-                let missing_display: Vec<EcoString> = missing_names
-                    .iter()
-                    .map(|n| InferredType::class_name_for_diagnostic(n.as_str()))
-                    .collect();
-                let message = format!(
-                    "{} do not understand '{selector}' (in union {union_display})",
-                    missing_display.join(", ")
-                );
-                let diag = match severity {
-                    Severity::Warning => Diagnostic::warning(message, span),
-                    Severity::Hint | Severity::Error | Severity::Lint => {
-                        Diagnostic::hint(message, span)
-                    }
-                }
-                .with_hint(
-                    "Use `respondsTo:` to check before sending, or `@expect type` to suppress",
-                )
-                .with_category(crate::source_analysis::DiagnosticCategory::Dnu);
-                self.diagnostics.push(diag);
-            }
+            self.report_union_dnu(members, &missing_names, severity, selector, span, hierarchy);
         }
 
         // If the union had Nil but all non-Nil members responded,
@@ -1778,6 +1590,246 @@ impl TypeChecker {
         // (Nil was skipped, so it's not in return_types).
         InferredType::union_of(&return_types)
     }
+
+    /// The return type contributed by a union member that responds to the
+    /// selector (`hierarchy.resolves_selector`), resolved from the method it
+    /// finds on `m.resolve_name`. One member of
+    /// [`Self::infer_union_message_send`].
+    fn union_member_return_type(
+        &self,
+        m: &UnionMember<'_>,
+        selector: &str,
+        arguments: &[Expression],
+        arg_types: &[InferredType],
+        hierarchy: &ClassHierarchy,
+    ) -> InferredType {
+        if let Some(method) = hierarchy.find_method(m.resolve_name, selector) {
+            if let Some(ref ret_ty) = method.return_type {
+                if matches!(ret_ty, DeclaredType::SelfType) {
+                    // Self resolves to the concrete member type (with type args)
+                    m.member.clone()
+                } else if matches!(ret_ty, DeclaredType::SelfClass) {
+                    // ADR 0083: `Self class` resolves to the metatype of
+                    // the concrete union member (was Dynamic pre-0083).
+                    // Use `resolve_name` so a singleton member
+                    // yields `Symbol class` (`#foo class` is `Symbol` at
+                    // runtime), not a phantom `Meta("#foo")`. A
+                    // protocol member's class is its protocol
+                    // metatype (ADR 0144), as on the bare path.
+                    if m.is_protocol_object {
+                        InferredType::protocol_meta(m.name.clone())
+                    } else {
+                        InferredType::meta(EcoString::from(m.resolve_name))
+                    }
+                } else if let DeclaredType::ClassOf(meta_class) = ret_ty
+                    && hierarchy.has_class(meta_class)
+                {
+                    // ADR 0083: an explicit `X class` return on a union
+                    // member resolves to `Meta{X}` — mirrors the
+                    // non-union path. Without this branch the
+                    // ` class` suffix leaked through as
+                    // `Known("X class")`. An unregistered `X` falls
+                    // through to the arms below (like the non-union
+                    // path), so the member still contributes a type
+                    // instead of being silently dropped from the union.
+                    InferredType::meta(meta_class.clone())
+                } else if matches!(ret_ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n) == Some(WellKnownClass::Never))
+                {
+                    // Bottom type for divergent methods
+                    InferredType::Never
+                } else {
+                    // Apply generic substitution for parameterised
+                    // union members (e.g. Array(Integer) in a union).
+                    let InferredType::Known { type_args, .. } = m.member else {
+                        unreachable!()
+                    };
+                    let subst = Self::build_inherited_substitution_map(
+                        hierarchy,
+                        m.name,
+                        type_args,
+                        &method.defined_in,
+                    );
+                    // Also substitute nested `Self`
+                    // (inside a generic) to the concrete member type
+                    // (with type args), even when the substitution map
+                    // is empty.
+                    let has_nested_self = Self::declared_type_contains_self(ret_ty);
+                    if !subst.is_empty() || has_nested_self {
+                        // Thread the concrete member type under
+                        // the `Self` subst key (see
+                        // `resolve_declared_type`'s `SelfType` arm).
+                        type_resolver::resolve_declared_type_in(
+                            ret_ty,
+                            &type_resolver::merge_substitutions(
+                                &subst,
+                                &type_resolver::SubstitutionMap::new(),
+                                Some(m.member),
+                            ),
+                            self.protocol_registry.as_deref(),
+                            self.alias_registry.as_deref(),
+                            TypeStringContext::Substitution,
+                            Some(hierarchy),
+                        )
+                    } else if matches!(ret_ty, DeclaredType::Simple(n) if crate::semantic_analysis::type_checker::is_type_var_placeholder(n, hierarchy))
+                    {
+                        InferredType::Dynamic(DynamicReason::Unknown)
+                    } else {
+                        // Resolve through the
+                        // centralised structured resolver to preserve
+                        // parametric type args (`List(String)` keeps
+                        // its element type) and resolve union return
+                        // types into `InferredType::Union`.
+                        type_resolver::resolve_declared_type(
+                            ret_ty,
+                            &type_resolver::SubstitutionMap::new(),
+                            self.protocol_registry.as_deref(),
+                            self.alias_registry.as_deref(),
+                            TypeStringContext::Declared,
+                        )
+                    }
+                }
+            } else if let Some(ty) = Self::if_true_false_solo_boolean_ret_ty(
+                selector,
+                m.resolve_name,
+                arguments,
+                arg_types,
+                hierarchy,
+            ) {
+                // A `Boolean` union member responding to a
+                // solo `ifTrue:`/`ifFalse:` with no declared return
+                // type (by design) contributes `Boolean | R` instead
+                // of poisoning the whole union to `Dynamic` — mirrors
+                // the non-union `Known` receiver fix above.
+                ty
+            } else {
+                InferredType::Dynamic(DynamicReason::UnannotatedReturn)
+            }
+        } else {
+            InferredType::Dynamic(DynamicReason::DynamicReceiver)
+        }
+    }
+
+    /// The return type `nil` contributes to a union send when it responds to
+    /// the selector with `return_type`. Normalises `Self`, `Self class` and
+    /// `Never` the same way other union members are, so an inherited `-> Self`
+    /// selector resolves to `UndefinedObject` (PR #2060).
+    fn nil_member_return_type(&self, return_type: Option<&DeclaredType>) -> InferredType {
+        if let Some(ret_ty) = return_type {
+            if matches!(ret_ty, DeclaredType::SelfType) {
+                InferredType::known(WellKnownClass::UndefinedObject.as_str())
+            } else if matches!(ret_ty, DeclaredType::SelfClass) {
+                // ADR 0083: `nil class` → metatype of `UndefinedObject`.
+                InferredType::meta(WellKnownClass::UndefinedObject.as_str())
+            } else if matches!(ret_ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n) == Some(WellKnownClass::Never))
+            {
+                InferredType::Never
+            } else {
+                type_resolver::resolve_declared_type(
+                    ret_ty,
+                    &type_resolver::SubstitutionMap::new(),
+                    self.protocol_registry.as_deref(),
+                    self.alias_registry.as_deref(),
+                    TypeStringContext::Declared,
+                )
+            }
+        } else {
+            InferredType::Dynamic(DynamicReason::UnannotatedReturn)
+        }
+    }
+
+    /// Reports the union DNU for `missing_names`: the one-culprit shape
+    /// reuses the bare receiver's diagnostic, several culprits a combined
+    /// message. `severity` comes from the per-member classification counts.
+    fn report_union_dnu(
+        &mut self,
+        members: &[InferredType],
+        missing_names: &[EcoString],
+        severity: Severity,
+        selector: &str,
+        span: Span,
+        hierarchy: &ClassHierarchy,
+    ) {
+        // Render `UndefinedObject` as `Nil` for the union
+        // display, shared by both branches below — every union DNU,
+        // single- or multi-culprit, names the full union it was sent
+        // to, not just the non-responding member(s).
+        let member_names: Vec<String> = members
+            .iter()
+            .filter_map(|m| m.display_for_diagnostic().map(|n| n.to_string()))
+            .collect();
+        let union_display = member_names.join(" | ");
+
+        if let [only_missing] = missing_names {
+            // The common one-culprit shape reuses the same
+            // diagnostic builder a bare receiver's DNU uses
+            // (`emit_unknown_selector_warning`) — identical message
+            // shape (plus the `(in union ...)` suffix every union DNU
+            // carries, via `context_suffix`), and, new for unions, the
+            // same "did you mean" suggestion lookup. A singleton member
+            // (`#foo`) resolves its suggestions through `Symbol` — the
+            // same singleton-as-Symbol convention `resolve_name` above
+            // (and `resolve_class` elsewhere in this file) applies.
+            let suggestion_class =
+                if crate::semantic_analysis::string_utils::is_symbol_singleton_name(only_missing) {
+                    EcoString::from("Symbol")
+                } else {
+                    only_missing.clone()
+                };
+            let display_name = InferredType::class_name_for_diagnostic(only_missing.as_str());
+            // Every DNU shape carries actionable advice, so pass the
+            // same generic hint the multi-culprit branch below always
+            // attaches — it's used only when no "did you mean"
+            // suggestion is found.
+            self.emit_unknown_selector_warning(
+                &display_name,
+                &suggestion_class,
+                selector,
+                span,
+                hierarchy,
+                false,
+                severity,
+                Some(&format!(" (in union {union_display})")),
+                Some("Use `respondsTo:` to check before sending, or `@expect type` to suppress"),
+            );
+        } else {
+            // Multiple non-responding members: `emit_unknown_selector_warning`
+            // has no multi-subject mode — a per-member "did you mean"
+            // can't compose into that diagnostic's single hint field —
+            // so this stays its own combined-message construction.
+            // Map the missing list through the same diagnostic
+            // rewriter as the union display above.
+            let missing_display: Vec<EcoString> = missing_names
+                .iter()
+                .map(|n| InferredType::class_name_for_diagnostic(n.as_str()))
+                .collect();
+            let message = format!(
+                "{} do not understand '{selector}' (in union {union_display})",
+                missing_display.join(", ")
+            );
+            let diag = match severity {
+                Severity::Warning => Diagnostic::warning(message, span),
+                Severity::Hint | Severity::Error | Severity::Lint => {
+                    Diagnostic::hint(message, span)
+                }
+            }
+            .with_hint("Use `respondsTo:` to check before sending, or `@expect type` to suppress")
+            .with_category(crate::source_analysis::DiagnosticCategory::Dnu);
+            self.diagnostics.push(diag);
+        }
+    }
+}
+
+/// One non-nil member of a union receiver, as
+/// [`TypeChecker::infer_union_message_send`] resolves it.
+struct UnionMember<'a> {
+    member: &'a InferredType,
+    /// The member's class name (a singleton keeps its `#foo` name).
+    name: &'a EcoString,
+    /// The class its method set is looked up through (`Symbol` for a
+    /// singleton, `Object` for a protocol member).
+    resolve_name: &'a str,
+    /// Whether the member is a protocol answering through `Object`.
+    is_protocol_object: bool,
 }
 
 /// Whether `ty` names a class other than `Boolean`/`True`/`False`, directly or
