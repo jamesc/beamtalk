@@ -2661,7 +2661,7 @@ mod tests {
     ///
     /// This test verifies that the canonicalization in `discovered_packages` deduplicates
     /// the relative `"."` and the same path expressed as an absolute path.
-    /// This test uses a temp dir with an explicit `set_current_dir` instead of
+    /// This test enters a temp dir with `CwdGuard::enter` instead of
     /// relying on the cargo-provided CWD because another test in this file also
     /// mutates the process CWD. The `#[serial(cwd)]` annotation prevents the two
     /// from racing. On macOS, `/var` is a symlink to `/private/var`, so the temp

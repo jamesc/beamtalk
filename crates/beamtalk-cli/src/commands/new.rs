@@ -402,7 +402,7 @@ mod tests {
     /// Helper: create a project in a temp dir and return the temp dir.
     ///
     /// `new_project` creates the project relative to the process cwd, so this
-    /// (and the inline `set_current_dir` calls below) mutate process-global
+    /// (and the `CwdGuard::enter` calls below) mutate process-global
     /// state: every caller must be `#[serial(cwd)]`. That only orders them
     /// against each other — code exercised by unannotated parallel tests must
     /// not depend on the process cwd (BT-4016).
