@@ -14,6 +14,7 @@ Single-method install, precheck and removal for the loader (`install_method/8,9`
 -include("beamtalk_repl_loader.hrl").
 
 -export([
+    changelog_warnings/1,
     install_method_with_source/10,
     maybe_autoflush/1,
     install_method/8,
@@ -743,7 +744,7 @@ load_recompiled_method(
             %% Best-effort: a ChangeLog failure must never fail the install — the
             %% method is already live in memory. emit_change_entry/1 logs and
             %% swallows its own errors.
-            ?ENTRIES:emit_change_entry(MethodInfo),
+            ChangeLogWarnings = changelog_warnings(?ENTRIES:emit_change_entry(MethodInfo)),
             %% (4) ADR 0082 Phase 4: when the workspace is in `autoflush: true'
             %% mode, every successful durable in-memory patch is immediately
             %% flushed to disk. Best-effort and synchronous; a flush failure does
@@ -780,7 +781,7 @@ load_recompiled_method(
                 ClassNameBin, SelectorBin, Side, CaptureOutcome
             ),
             Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
-            {ok, Result, <<>>, AllWarnings, State};
+            {ok, Result, <<>>, AllWarnings ++ ChangeLogWarnings, State};
         {activation_failed, {error, ActivationReason}} ->
             beamtalk_repl_loader_recheck:rollback_signature_generation(
                 ClassNameBin, SelectorBin, Side, CaptureOutcome
@@ -801,6 +802,11 @@ load_recompiled_method(
                     {error, {load_error, LoadReason}, <<>>, AllWarnings, State}
             end
     end.
+
+%% Reply warnings for a ChangeLog emit that did not record its entry (BT-5013).
+-spec changelog_warnings(beamtalk_repl_loader_changelog_entries:emit_result()) -> [binary()].
+changelog_warnings(ok) -> [];
+changelog_warnings({warning, Text}) -> [Text].
 
 %% Trigger `Workspace flush' when `autoflush: true' is set on the workspace
 %% (ADR 0082 Phase 4). Best-effort and synchronous:

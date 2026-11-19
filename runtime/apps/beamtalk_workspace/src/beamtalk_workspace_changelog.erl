@@ -250,7 +250,10 @@ interleave sequence numbers or partial writes.
 """.
 -spec append(append_input()) -> {ok, non_neg_integer()} | {error, #beamtalk_error{}}.
 append(Input) when is_map(Input) ->
-    gen_server:call(?MODULE, {append, Input}).
+    %% `infinity`: the server completes every append it receives (rotation can
+    %% run inside the call), so a caller timeout would report a failure for an
+    %% entry that is then recorded anyway (BT-5013).
+    gen_server:call(?MODULE, {append, Input}, infinity).
 
 -doc """
 Return all entries (including prior-epoch and orphan), oldest first.

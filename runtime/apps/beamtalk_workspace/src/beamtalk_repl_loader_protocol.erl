@@ -631,7 +631,7 @@ patch_protocol_provision_headed(ProtocolBin, SelectorBin, MethodSource, Opts, Wa
     case patch_protocol_provision_edit(ProtocolBin, SelectorBin, MethodSource, Opts) of
         ok ->
             Intent = maps:get(intent, Opts, durable),
-            ?ENTRIES:emit_change_entry(#{
+            ChangeLogWarning = ?ENTRIES:emit_change_entry(#{
                 class_name => ProtocolBin,
                 selector => SelectorBin,
                 is_class_method => false,
@@ -642,7 +642,9 @@ patch_protocol_provision_headed(ProtocolBin, SelectorBin, MethodSource, Opts, Wa
             }),
             beamtalk_repl_loader_methods:maybe_autoflush(Intent),
             Result = <<ProtocolBin/binary, ">>", SelectorBin/binary>>,
-            {ok, Result, <<>>, Warnings, State};
+            {ok, Result, <<>>,
+                Warnings ++ beamtalk_repl_loader_methods:changelog_warnings(ChangeLogWarning),
+                State};
         {error, Reason} ->
             {error, Reason, <<>>, Warnings, State}
     end.
