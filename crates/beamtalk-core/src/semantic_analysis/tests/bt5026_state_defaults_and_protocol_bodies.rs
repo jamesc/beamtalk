@@ -148,3 +148,27 @@ fn class_side_return_override_narrowing_is_clean() {
         messages(src)
     );
 }
+
+#[test]
+fn provided_method_dropped_by_excluding_is_still_analysed() {
+    let src = "Protocol define: Greeter\n  name -> String\n\n  greet -> String => nosuchVar\n\
+               Object subclass: User\n  uses: Greeter excluding: #(#greet)\n  name -> String => \"a\"\n";
+    assert_eq!(
+        count(src, "Undefined variable: nosuchVar"),
+        1,
+        "{:?}",
+        messages(src)
+    );
+}
+
+#[test]
+fn provided_method_overridden_by_user_is_still_analysed() {
+    let src = "Protocol define: Greeter\n  name -> String\n\n  greet -> String => nosuchVar\n\
+               Object subclass: User\n  uses: Greeter\n  name -> String => \"a\"\n  greet -> String => \"hi\"\n";
+    assert_eq!(
+        count(src, "Undefined variable: nosuchVar"),
+        1,
+        "{:?}",
+        messages(src)
+    );
+}

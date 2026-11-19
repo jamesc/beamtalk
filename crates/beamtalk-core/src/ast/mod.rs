@@ -227,25 +227,29 @@ impl Module {
             .filter_map(|d| d.default_value.as_ref())
     }
 
-    /// Provided-method bodies of protocols that no class in this module
-    /// `uses:` (BT-5026).
+    /// Protocol provided-method bodies that no class in this module carries a
+    /// flattened copy of (BT-5026).
     ///
-    /// A used protocol's provided methods reach analysis as copies the
-    /// flattener splices into each using class, so they are already covered by
-    /// [`Self::all_methods`] (once per user). A protocol with no user in the
-    /// module — typically a protocol-only file — has no such copy, so its own
-    /// bodies would otherwise never be analysed.
+    /// The flattener splices a copy of a provided method into each using class,
+    /// keeping the protocol's own span (`trait_expansion::substitute_provision`),
+    /// so those bodies are already covered by [`Self::all_methods`] (once per
+    /// user). A provided method with no copy anywhere would otherwise never be
+    /// analysed: one in a protocol-only file, one every user drops with
+    /// `excluding:`, or one every user overrides with its own method. A copy is
+    /// recognised by selector and span, so this re-derives none of the
+    /// flattener's rules. On a module that has not been flattened, every
+    /// provided method is returned.
     pub fn unused_protocol_provided_methods(&self) -> impl Iterator<Item = &MethodDefinition> {
         self.protocols
             .iter()
-            .filter(|p| {
+            .flat_map(|p| p.provided_methods.iter())
+            .filter(|m| {
                 !self
                     .classes
                     .iter()
-                    .flat_map(|c| &c.uses)
-                    .any(|u| u.protocol.name == p.name.name)
+                    .flat_map(|c| &c.methods)
+                    .any(|cm| cm.span == m.span && cm.selector == m.selector)
             })
-            .flat_map(|p| p.provided_methods.iter())
     }
 
     /// Iterate the methods written in class bodies (instance, then class side)
