@@ -17,6 +17,8 @@
 
 -define(CHILD_CLASS_KEY, '$beamtalk_child_class').
 
+-define(SUP_FLAGS_KEY, '$beamtalk_sup_flags').
+
 %% ADR 0135 §1: `{ClassName, Module}` of the supervisor, set by `begin_init/3`
 %% (read by `named/2` to check the class of a registered supervisor).
 -define(SUP_CLASS_KEY, '$beamtalk_sup_class').

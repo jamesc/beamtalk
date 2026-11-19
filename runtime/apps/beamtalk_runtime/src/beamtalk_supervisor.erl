@@ -151,7 +151,6 @@ functions that call OTP APIs from the caller's process context.
 %% Stores `{root, SupervisorTuple}` where SupervisorTuple is a
 %% `{beamtalk_supervisor, ClassName, Module, Pid}` value.
 -define(ROOT_SUPERVISOR_TABLE, beamtalk_root_supervisor).
--define(SUP_FLAGS_KEY, '$beamtalk_sup_flags').
 
 %%% ============================================================================
 %%% Public API
