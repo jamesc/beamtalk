@@ -283,15 +283,14 @@ fn batched_erlc_verdict() -> &'static Result<(), String> {
 
 /// Test that the generated Core Erlang compiles successfully with erlc.
 ///
-/// This test is skipped if `erlc` is not available on the system PATH.
+/// Skipped if `erlc` is not on the PATH, unless `CI` or `BEAMTALK_REQUIRE_ERLANG`
+/// is set, in which case a missing `erlc` fails the test.
 /// `erlc` runs once for the whole corpus (see [`batched_erlc_verdict`]); each
 /// case's test only recompiles its own module when that batch run failed.
 fn test_codegen_compiles(case_name: &str) {
+    // Skips locally when `erlc` is missing; fails under `CI` or
+    // `BEAMTALK_REQUIRE_ERLANG` (BT-5034).
     if !beamtalk_core::test_helpers::test_support::erlc_available() {
-        eprintln!(
-            "Skipping {} compilation test - erlc not available",
-            case_name
-        );
         return;
     }
 

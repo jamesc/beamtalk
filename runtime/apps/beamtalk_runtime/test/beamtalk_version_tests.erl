@@ -14,9 +14,6 @@ desktop-attach readiness handshake (ADR 0097).
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
-get_returns_map_test() ->
-    ?assert(is_map(beamtalk_version:get())).
-
 get_returns_expected_keys_test() ->
     Report = beamtalk_version:get(),
     ?assertEqual(

@@ -109,4 +109,6 @@ jobs:
         env:
           # BT-4641: fail, not skip, if erlc or the runtime is missing.
           BEAMTALK_REQUIRE_RUNTIME: "1"
+          # BT-5034: same for the shared erlc/erl skip-or-fail helper.
+          BEAMTALK_REQUIRE_ERLANG: "1"
         run: just test-corpus count:${{ matrix.shard }}/2

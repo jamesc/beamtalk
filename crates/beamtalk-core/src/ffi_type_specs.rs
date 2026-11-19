@@ -1973,10 +1973,7 @@ mod tests {
         assert!(!cache_dir.exists());
 
         let Some(registry) = extract_type_specs(&cache_dir, &[]) else {
-            eprintln!(
-                "skipping extract_type_specs_extracts_live_on_cold_cache: \
-                 no OTP .beam files discovered in this environment"
-            );
+            crate::test_helpers::test_support::skip_or_fail("OTP .beam files");
             return;
         };
         assert!(
@@ -1988,12 +1985,14 @@ mod tests {
 
     #[test]
     fn extract_type_specs_no_ebin_dirs_and_no_otp_returns_none_gracefully() {
-        // Not a behavioural assertion about OTP discovery (environment-dependent) —
-        // just confirms passing an empty dependency-ebin-dirs slice doesn't panic
-        // and produces a result consistent with whatever OTP discovery finds.
+        // With no dependency ebin dirs the result depends only on OTP
+        // discovery: `Some` exactly when OTP `.beam` files are found, `None`
+        // (not a panic) otherwise (BT-5034).
         let temp = TempDir::new().unwrap();
         let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
-        let _ = extract_type_specs(&cache_dir, &[]);
+        let otp_beams_found = discover_otp_beam_files().is_ok_and(|d| !d.beam_files.is_empty());
+        let registry = extract_type_specs(&cache_dir, &[]);
+        assert_eq!(registry.is_some(), otp_beams_found);
     }
 
     // -----------------------------------------------------------------------
@@ -2069,7 +2068,7 @@ mod tests {
     fn collect_known_erlang_modules_covers_installed_otp() {
         let otp = discover_otp_beam_files().unwrap_or_default();
         if !otp.discovered {
-            eprintln!("skipping: OTP discovery unavailable");
+            crate::test_helpers::test_support::skip_or_fail("OTP discovery");
             return;
         }
         let dir = tempfile::tempdir().unwrap();

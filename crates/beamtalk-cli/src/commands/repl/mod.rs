@@ -1210,11 +1210,18 @@ mod tests {
     #[test]
     #[serial(env_var)]
     fn resolve_port_default_without_env() {
-        // When no CLI flag and no env var, should return default (0 = OS-assigned)
+        // When no CLI flag and no env var, should return the default
+        // (0 = OS-assigned). The env var is cleared first so a developer's
+        // own BEAMTALK_REPL_PORT cannot change the answer (BT-5034).
+        let prev = std::env::var("BEAMTALK_REPL_PORT").ok();
+        // SAFETY: runs single-threaded via #[serial(env_var)]; restored below.
+        unsafe { std::env::remove_var("BEAMTALK_REPL_PORT") };
         let result = resolve_port(None);
-        // If env var is set, it will return that; if not, default
-        // The test verifies the function runs without error
-        assert!(result.is_ok());
+        if let Some(prev) = prev {
+            // SAFETY: as above.
+            unsafe { std::env::set_var("BEAMTALK_REPL_PORT", prev) };
+        }
+        assert_eq!(result.unwrap(), DEFAULT_REPL_PORT);
     }
 
     #[test]

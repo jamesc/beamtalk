@@ -459,7 +459,7 @@ all_classes_test() ->
     beamtalk_class_registry:ensure_pg_started(),
     %% all_classes returns whatever is in the pg group
     Result = beamtalk_class_registry:all_classes(),
-    ?assert(is_list(Result)).
+    ?assertEqual(lists:sort(pg:get_members(beamtalk_classes)), lists:sort(Result)).
 
 %%% ============================================================================
 %%% live_class_entries tests
@@ -1445,28 +1445,34 @@ bt1982_maybe_set_heir_with_heir_process_test() ->
 %% heir_option with a live heir process returns a non-empty list. Works whether
 %% or not a real heir is registered.
 bt1982_heir_option_with_heir_process_test() ->
-    case whereis(beamtalk_ets_heir) of
-        RealHeir when is_pid(RealHeir) ->
-            beamtalk_class_registry:ensure_pending_errors_table(),
-            ?assert(true);
-        undefined ->
-            FakeHeirPid = spawn(fun() ->
-                receive
-                    stop -> ok
-                end
-            end),
-            try
+    {Heir, Cleanup} =
+        case whereis(beamtalk_ets_heir) of
+            RealHeir when is_pid(RealHeir) ->
+                {RealHeir, fun() -> ok end};
+            undefined ->
+                FakeHeirPid = spawn(fun() ->
+                    receive
+                        stop -> ok
+                    end
+                end),
                 erlang:register(beamtalk_ets_heir, FakeHeirPid),
-                beamtalk_class_registry:ensure_pending_errors_table(),
-                ?assert(true)
-            after
-                try
-                    erlang:unregister(beamtalk_ets_heir)
-                catch
-                    _:_ -> ok
-                end,
-                FakeHeirPid ! stop
-            end
+                {FakeHeirPid, fun() ->
+                    try
+                        erlang:unregister(beamtalk_ets_heir)
+                    catch
+                        _:_ -> ok
+                    end,
+                    FakeHeirPid ! stop
+                end}
+        end,
+    try
+        %% With a heir process registered, the heir option names it ...
+        ?assertEqual([{heir, Heir, undefined}], beamtalk_ets_heir:heir_option()),
+        %% ... and creating the shared table under it succeeds.
+        ?assertEqual(ok, beamtalk_class_registry:ensure_pending_errors_table()),
+        ?assertNotEqual(undefined, ets:whereis(beamtalk_pending_load_errors))
+    after
+        Cleanup()
     end.
 
 %% restart_class finds module but the existing class process is already alive →

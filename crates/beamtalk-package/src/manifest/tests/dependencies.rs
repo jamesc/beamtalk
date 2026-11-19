@@ -260,7 +260,14 @@ mirror = "https://example.test/other"
 "#,
     );
 
-    assert!(parse_manifest_full(&path.join("beamtalk.toml")).is_err());
+    let err =
+        parse_manifest_full(&path.join("beamtalk.toml")).expect_err("manifest must be rejected");
+    let msg = err
+        .chain()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(": ");
+    assert!(msg.contains("unknown field `mirror`"), "got: {msg}");
 }
 
 // --- [stubs] section ---
@@ -308,7 +315,14 @@ extra = "not allowed"
 "#,
     );
 
-    assert!(parse_manifest_full(&path.join("beamtalk.toml")).is_err());
+    let err =
+        parse_manifest_full(&path.join("beamtalk.toml")).expect_err("manifest must be rejected");
+    let msg = err
+        .chain()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(": ");
+    assert!(msg.contains("unknown field `extra`"), "got: {msg}");
 }
 
 #[test]

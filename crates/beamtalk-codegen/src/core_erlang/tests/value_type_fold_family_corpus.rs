@@ -435,7 +435,7 @@ fn generated_field_writing_folds_agree_with_the_oracle_when_run() {
     let names: Vec<String> = programs.iter().map(|(n, _, _)| n.clone()).collect();
     let self_map = format!("#{{m => {}, n => {}}}", START.m, START.n);
     let Some(observed) = run_probes(&core, &names, &self_map) else {
-        println!("skipping the oracle run: erlc/erl not available");
+        // `run_probes` already failed (CI) or noted the skip (local).
         return;
     };
     let mut mismatches = Vec::new();
@@ -663,7 +663,7 @@ fn generated_field_writing_folds_in_conditional_arms_agree_with_the_oracle_when_
     let names: Vec<String> = programs.iter().map(|(n, _, _)| n.clone()).collect();
     let self_map = format!("#{{m => {}, n => {}}}", START.m, START.n);
     let Some(observed) = run_probes(&core, &names, &self_map) else {
-        println!("skipping the oracle run: erlc/erl not available");
+        // `run_probes` already failed (CI) or noted the skip (local).
         return;
     };
     let mut mismatches = Vec::new();

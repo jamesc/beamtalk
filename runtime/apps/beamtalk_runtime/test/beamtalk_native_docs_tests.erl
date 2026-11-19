@@ -143,19 +143,10 @@ module_doc_preloaded_test() ->
 %%% ============================================================================
 
 lookup_with_examples_test() ->
-    %% Many OTP functions have examples sections
-    %% lists:sort/1 often has examples in OTP 25+
-    case beamtalk_native_docs:lookup(lists, sort, 1) of
-        #{examples := Examples} when byte_size(Examples) > 0 ->
-            %% Examples section was found and extracted
-            ?assert(true);
-        #{examples := <<>>} ->
-            %% No examples section — still valid
-            ?assert(true);
-        {error, no_docs} ->
-            %% Shouldn't happen for lists:sort/1
-            ?assert(false)
-    end.
+    %% lists:sort/1 documents an Examples section on every supported OTP.
+    #{examples := Examples} = beamtalk_native_docs:lookup(lists, sort, 1),
+    ?assert(byte_size(Examples) > 0),
+    ?assertNotEqual(nomatch, binary:match(Examples, <<"lists:sort(">>)).
 
 %%% ============================================================================
 %%% Non-v1 Docs Format Tests
@@ -296,14 +287,11 @@ lookup_different_arities_test() ->
     ?assertNotEqual(Sig1, Sig2).
 
 lookup_zero_arity_function_test() ->
-    %% maps:new/0 should have docs in OTP 27+
-    case beamtalk_native_docs:lookup(maps, new, 0) of
-        #{doc := _, sig := _, examples := _} ->
-            ?assert(true);
-        {error, _} ->
-            %% Acceptable if this OTP version doesn't have docs for maps:new/0
-            ?assert(true)
-    end.
+    %% maps:new/0 is documented on every supported OTP.
+    #{doc := Doc, sig := Sig, examples := Examples} = beamtalk_native_docs:lookup(maps, new, 0),
+    ?assert(byte_size(Doc) > 0),
+    ?assertEqual(<<"new()">>, Sig),
+    ?assert(is_binary(Examples)).
 
 %%% ============================================================================
 %%% format_signatures edge cases (via lookup)
@@ -318,8 +306,8 @@ lookup_returns_binary_doc_test() ->
     %% Verify all return fields are binaries
     #{doc := Doc, sig := Sig, examples := Examples} =
         beamtalk_native_docs:lookup(lists, reverse, 1),
-    ?assert(is_binary(Doc)),
-    ?assert(is_binary(Sig)),
+    ?assertNotEqual(<<>>, Doc),
+    ?assertEqual(<<"reverse(List1)">>, Sig),
     ?assert(is_binary(Examples)).
 
 %%% ============================================================================

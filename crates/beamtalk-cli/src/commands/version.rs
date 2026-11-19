@@ -298,9 +298,13 @@ mod tests {
     #[serial(cwd)]
     fn test_run_no_args_shows_version() {
         let temp = TempDir::new().unwrap();
-        write_manifest(&temp, "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n");
+        let manifest = "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n";
+        write_manifest(&temp, manifest);
         let result = with_cwd(temp.path(), || run(&[]));
         assert!(result.is_ok(), "{:?}", result.err());
+        // Showing the version is read-only: the manifest is untouched.
+        let on_disk = std::fs::read_to_string(temp.path().join("beamtalk.toml")).unwrap();
+        assert_eq!(on_disk, manifest);
     }
 
     #[test]

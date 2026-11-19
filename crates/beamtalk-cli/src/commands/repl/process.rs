@@ -398,7 +398,12 @@ mod tests {
             .expect("spawn failed");
 
         let result = read_port_from_child(&mut child);
-        assert!(result.is_err(), "expected error for non-numeric port");
+        let err = result.expect_err("expected error for non-numeric port");
+        assert!(
+            err.to_string()
+                .contains("Invalid port in BEAMTALK_PORT line: not_a_port"),
+            "got: {err}"
+        );
         let _ = child.wait();
     }
 
@@ -413,7 +418,12 @@ mod tests {
             .expect("spawn failed");
 
         let result = read_port_from_child(&mut child);
-        assert!(result.is_err(), "expected error for out-of-range port");
+        let err = result.expect_err("expected error for out-of-range port");
+        assert!(
+            err.to_string()
+                .contains("Invalid port in BEAMTALK_PORT line: 99999"),
+            "got: {err}"
+        );
         let _ = child.wait();
     }
 
@@ -426,7 +436,8 @@ mod tests {
             .expect("spawn failed");
 
         let result = read_port_from_child(&mut child);
-        assert!(result.is_err(), "expected error when stdout is not piped");
+        let err = result.expect_err("expected error when stdout is not piped");
+        assert!(err.to_string().contains("Cannot read stdout"), "got: {err}");
         let _ = child.wait();
     }
 
@@ -458,7 +469,12 @@ mod tests {
         let result = resolve_port(None);
         // SAFETY: Test is serialized with #[serial(env_var)].
         unsafe { std::env::remove_var("BEAMTALK_REPL_PORT") };
-        assert!(result.is_err(), "expected parse error for invalid env port");
+        let err = result.expect_err("expected parse error for invalid env port");
+        assert!(
+            err.to_string()
+                .contains("Invalid BEAMTALK_REPL_PORT: not_a_port"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -526,6 +542,15 @@ mod tests {
             2,
             5,
         );
-        assert!(result.is_err(), "expected connection failure to propagate");
+        let Err(err) = result else {
+            panic!("expected connection failure to propagate");
+        };
+        // The last attempt's own error propagates, not the loop's generic
+        // fallback message.
+        assert!(
+            !err.to_string()
+                .contains("Failed to connect to REPL backend"),
+            "got: {err}"
+        );
     }
 }

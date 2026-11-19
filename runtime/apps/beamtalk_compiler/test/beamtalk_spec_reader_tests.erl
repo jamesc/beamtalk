@@ -1988,16 +1988,20 @@ read_types_gen_server_test() ->
     ?assert(is_list(Types)),
     ?assert(length(Types) > 0).
 
-%% Reading types from a preloaded module (erlang) returns no_debug_info.
+%% Reading types from a preloaded module (erlang): no .beam on disk, so a beam_lib error.
 read_types_preloaded_test() ->
     case code:which(erlang) of
         preloaded ->
-            %% Can't read abstract_code from preloaded modules directly
-            ok;
+            %% A preloaded module has no .beam on disk: a structured error,
+            %% never a crash.
+            ?assertMatch({error, {beam_lib, _}}, beamtalk_spec_reader:read_types(preloaded));
         BeamFile ->
-            %% Some test environments may have erlang.beam on disk
-            _Result = beamtalk_spec_reader:read_types(BeamFile),
-            ok
+            %% Some environments keep erlang.beam on disk: either its types
+            %% are read or it carries no debug info.
+            case beamtalk_spec_reader:read_types(BeamFile) of
+                {ok, Types} -> ?assert(is_list(Types) andalso Types =/= []);
+                {error, no_debug_info} -> ok
+            end
     end.
 
 %% Reading types from a nonexistent file returns error.
