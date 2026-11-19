@@ -78,7 +78,7 @@ colon stripped. The colon-free functions (`'after'/2`, `every/2`, `sleep/1`,
 %% Largest delay `erlang:send_after/3` and `receive ... after` accept.
 -define(MAX_TIMEOUT_MS, 4294967295).
 
--type t() :: #{'$beamtalk_class' := 'Timer', atom() => term()}.
+-type t() :: #{?BT_CLASS_TAG_KEY := 'Timer', atom() => term()}.
 -export_type([t/0]).
 
 %%% ============================================================================
@@ -91,7 +91,7 @@ Evaluate `Block` once after the given delay. Returns a Timer.
 The delay is Integer milliseconds or a Duration.
 """.
 -spec 'after'(integer() | beamtalk_duration:t(), Do :: function()) -> t().
-'after'(#{'$beamtalk_class' := 'Duration'} = D, Block) ->
+'after'(#{?BT_CLASS_TAG_KEY := 'Duration'} = D, Block) ->
     'after'(beamtalk_duration:'asMilliseconds'(D), Block);
 'after'(Ms, Block) when is_integer(Ms), Ms >= 0, is_function(Block, 0) ->
     Pid = spawn_link(fun() ->
@@ -129,7 +129,7 @@ Evaluate `Block` at the given repeat interval. Returns a Timer.
 The interval is Integer milliseconds or a Duration.
 """.
 -spec every(integer() | beamtalk_duration:t(), Do :: function()) -> t().
-every(#{'$beamtalk_class' := 'Duration'} = D, Block) ->
+every(#{?BT_CLASS_TAG_KEY := 'Duration'} = D, Block) ->
     every(beamtalk_duration:'asMilliseconds'(D), Block);
 every(Ms, Block) when is_integer(Ms), Ms > 0, is_function(Block, 0) ->
     Pid = spawn_link(fun() -> repeat_loop(Ms, Block) end),
@@ -156,7 +156,7 @@ Send `Msg` to `Target` once after the given delay. Returns a Timer.
 milliseconds or a Duration. Backed by `erlang:send_after/3`.
 """.
 -spec 'sendAfter'(term(), term(), integer() | beamtalk_duration:t()) -> t().
-'sendAfter'(Msg, Target, #{'$beamtalk_class' := 'Duration'} = D) ->
+'sendAfter'(Msg, Target, #{?BT_CLASS_TAG_KEY := 'Duration'} = D) ->
     'sendAfter'(Msg, Target, beamtalk_duration:'asMilliseconds'(D));
 'sendAfter'(Msg, Target, Ms) when is_integer(Ms), Ms >= 0, Ms =< ?MAX_TIMEOUT_MS ->
     case resolve_dest('send:to:after:', Target) of
@@ -187,7 +187,7 @@ Integer milliseconds or a Duration. Runs in a small unlinked process (the
 `every:do:` machinery) that stops on `cancel` or when a pid target dies.
 """.
 -spec 'sendEvery'(term(), term(), integer() | beamtalk_duration:t()) -> t().
-'sendEvery'(Msg, Target, #{'$beamtalk_class' := 'Duration'} = D) ->
+'sendEvery'(Msg, Target, #{?BT_CLASS_TAG_KEY := 'Duration'} = D) ->
     'sendEvery'(Msg, Target, beamtalk_duration:'asMilliseconds'(D));
 'sendEvery'(Msg, Target, Ms) when is_integer(Ms), Ms > 0, Ms =< ?MAX_TIMEOUT_MS ->
     case resolve_dest('send:to:every:', Target) of
@@ -215,7 +215,7 @@ Block the current process for the given delay.
 The delay is Integer milliseconds or a Duration.
 """.
 -spec sleep(integer() | beamtalk_duration:t()) -> 'nil'.
-sleep(#{'$beamtalk_class' := 'Duration'} = D) ->
+sleep(#{?BT_CLASS_TAG_KEY := 'Duration'} = D) ->
     sleep(beamtalk_duration:'asMilliseconds'(D));
 sleep(Ms) when is_integer(Ms), Ms >= 0 ->
     timer:sleep(Ms),
@@ -237,9 +237,9 @@ Uses an ack-based protocol: sends {cancel, self(), Ref} and waits for
 monitor DOWN message arrives instead and we return false.
 """.
 -spec cancel(t()) -> boolean().
-cancel(#{'$beamtalk_class' := 'Timer', tref := TRef}) ->
+cancel(#{?BT_CLASS_TAG_KEY := 'Timer', tref := TRef}) ->
     erlang:cancel_timer(TRef) =/= false;
-cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
+cancel(#{?BT_CLASS_TAG_KEY := 'Timer', pid := Pid}) ->
     Ref = make_ref(),
     Mon = erlang:monitor(process, Pid),
     Pid ! {cancel, self(), Ref},
@@ -256,14 +256,14 @@ cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
 
 -doc "True if this timer is still scheduled to fire.".
 -spec 'isActive'(t()) -> boolean().
-'isActive'(#{'$beamtalk_class' := 'Timer', tref := TRef}) ->
+'isActive'(#{?BT_CLASS_TAG_KEY := 'Timer', tref := TRef}) ->
     erlang:read_timer(TRef) =/= false;
-'isActive'(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
+'isActive'(#{?BT_CLASS_TAG_KEY := 'Timer', pid := Pid}) ->
     erlang:is_process_alive(Pid).
 
 -doc "Human-readable representation.".
 -spec 'printString'(t()) -> beamtalk_string:t().
-'printString'(#{'$beamtalk_class' := 'Timer'} = Self) ->
+'printString'(#{?BT_CLASS_TAG_KEY := 'Timer'} = Self) ->
     %% BT-4173: printString answers a String.
     beamtalk_primitive:string_from_binary(
         case 'isActive'(Self) of
@@ -296,11 +296,11 @@ cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
 
 -spec make_timer(pid()) -> t().
 make_timer(Pid) ->
-    #{'$beamtalk_class' => 'Timer', pid => Pid}.
+    #{?BT_CLASS_TAG_KEY => 'Timer', pid => Pid}.
 
 -spec make_tref_timer(reference()) -> t().
 make_tref_timer(TRef) ->
-    #{'$beamtalk_class' => 'Timer', tref => TRef}.
+    #{?BT_CLASS_TAG_KEY => 'Timer', tref => TRef}.
 
 %% Resolve a `to:` target to `{ok, Dest}`, where `Dest` is what
 %% `erlang:send/2` accepts: a pid, a locally registered name (re-resolved on

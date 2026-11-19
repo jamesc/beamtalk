@@ -349,7 +349,7 @@ validate_config_env(Config, Executable, ArgsList) ->
         undefined ->
             maybe_add_dir(Config, Base);
         Env when is_map(Env) ->
-            CleanEnv = maps:without(['$beamtalk_class'], Env),
+            CleanEnv = maps:without([?BT_CLASS_TAG_KEY], Env),
             case normalize_text_env(CleanEnv) of
                 {ok, BinEnv} ->
                     maybe_add_dir(Config, Base#{env => BinEnv});
@@ -374,9 +374,9 @@ maybe_add_dir(Config, Base) ->
 
 -doc "Coerce a Beamtalk Array (tagged map) or plain list to an Erlang list.".
 -spec coerce_args(term()) -> {ok, list()} | {error, term()}.
-coerce_args(#{'$beamtalk_class' := 'Array', 'data' := Data} = Arr) when is_map(Data) ->
+coerce_args(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data} = Arr) when is_map(Data) ->
     {ok, beamtalk_tagged_map:array_to_list(Arr)};
-coerce_args(#{'$beamtalk_class' := 'Array'}) ->
+coerce_args(#{?BT_CLASS_TAG_KEY := 'Array'}) ->
     {error, {type_error, args, invalid_array}};
 coerce_args(List) when is_list(List) ->
     {ok, List};

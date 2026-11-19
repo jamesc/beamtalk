@@ -81,6 +81,8 @@ is both, and `feed_event/2` drops the announcement the snapshot already
 covers. The index lives in the subscriber, never in the runtime.
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -export([
     list/0,
     lookup/1,
@@ -137,9 +139,9 @@ of a pid the snapshot already holds; everything else is `emit`. A stop clears
 the pid so a later spawn is never shadowed.
 """.
 -spec feed_event(map(), feed()) -> {emit | drop, feed()}.
-feed_event(#{'$beamtalk_class' := 'ActorSpawned', pid := Pid}, Feed) when is_map_key(Pid, Feed) ->
+feed_event(#{?BT_CLASS_TAG_KEY := 'ActorSpawned', pid := Pid}, Feed) when is_map_key(Pid, Feed) ->
     {drop, maps:remove(Pid, Feed)};
-feed_event(#{'$beamtalk_class' := 'ActorStopped', pid := Pid}, Feed) ->
+feed_event(#{?BT_CLASS_TAG_KEY := 'ActorStopped', pid := Pid}, Feed) ->
     {emit, maps:remove(Pid, Feed)};
 feed_event(_Event, Feed) ->
     {emit, Feed}.

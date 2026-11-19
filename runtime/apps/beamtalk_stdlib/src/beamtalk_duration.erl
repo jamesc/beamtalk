@@ -39,6 +39,8 @@ through named shims (`add`, `subtract`, `multiply`, `lt`, `gt`, `lte`,
 Erlang BIFs without dispatching (ADR 0002).
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 %% Class methods
 -export([milliseconds/1, seconds/1, minutes/1, hours/1, days/1]).
 -export([fromString/1]).
@@ -60,7 +62,7 @@ Erlang BIFs without dispatching (ADR 0002).
 -export([is_duration/1]).
 -endif.
 
--type t() :: #{'$beamtalk_class' := 'Duration', millis := integer()}.
+-type t() :: #{?BT_CLASS_TAG_KEY := 'Duration', millis := integer()}.
 -export_type([t/0]).
 
 -define(MS_PER_SECOND, 1000).
@@ -124,26 +126,26 @@ fromString(_) ->
 
 -doc "Total milliseconds (exact Integer).".
 -spec 'asMilliseconds'(t()) -> integer().
-'asMilliseconds'(#{'$beamtalk_class' := 'Duration', millis := Ms}) -> Ms.
+'asMilliseconds'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) -> Ms.
 
 -doc "Total whole seconds (Integer, truncated toward zero).".
 -spec 'asSeconds'(t()) -> integer().
-'asSeconds'(#{'$beamtalk_class' := 'Duration', millis := Ms}) ->
+'asSeconds'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) ->
     trunc_div(Ms, ?MS_PER_SECOND).
 
 -doc "Total whole minutes (Integer, truncated toward zero).".
 -spec 'asMinutes'(t()) -> integer().
-'asMinutes'(#{'$beamtalk_class' := 'Duration', millis := Ms}) ->
+'asMinutes'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) ->
     trunc_div(Ms, ?MS_PER_MINUTE).
 
 -doc "Total whole hours (Integer, truncated toward zero).".
 -spec 'asHours'(t()) -> integer().
-'asHours'(#{'$beamtalk_class' := 'Duration', millis := Ms}) ->
+'asHours'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) ->
     trunc_div(Ms, ?MS_PER_HOUR).
 
 -doc "Total whole days (Integer, truncated toward zero).".
 -spec 'totalDays'(t()) -> integer().
-'totalDays'(#{'$beamtalk_class' := 'Duration', millis := Ms}) ->
+'totalDays'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) ->
     trunc_div(Ms, ?MS_PER_DAY).
 
 %%% ============================================================================
@@ -152,11 +154,11 @@ fromString(_) ->
 
 -doc "True if this duration is exactly zero.".
 -spec 'isZero'(t()) -> boolean().
-'isZero'(#{'$beamtalk_class' := 'Duration', millis := Ms}) -> Ms =:= 0.
+'isZero'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) -> Ms =:= 0.
 
 -doc "True if this duration is negative.".
 -spec 'isNegative'(t()) -> boolean().
-'isNegative'(#{'$beamtalk_class' := 'Duration', millis := Ms}) -> Ms < 0.
+'isNegative'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) -> Ms < 0.
 
 %%% ============================================================================
 %%% Instance Methods — Formatting
@@ -169,9 +171,9 @@ Zero is `PT0S`; negative durations get a leading `-`. Round-trips through
 `fromString:`.
 """.
 -spec 'asString'(t()) -> beamtalk_string:t().
-'asString'(#{'$beamtalk_class' := 'Duration', millis := 0}) ->
+'asString'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := 0}) ->
     beamtalk_primitive:string_from_binary(<<"PT0S">>);
-'asString'(#{'$beamtalk_class' := 'Duration', millis := Ms}) ->
+'asString'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) ->
     Sign =
         case Ms < 0 of
             true -> <<"-">>;
@@ -202,9 +204,9 @@ Human-readable representation, e.g. `1h 30m`, `1d 2h`, `1s 500ms`, `0ms`.
 Zero components are omitted; negative durations get a leading `-`.
 """.
 -spec 'printString'(t()) -> beamtalk_string:t().
-'printString'(#{'$beamtalk_class' := 'Duration', millis := 0}) ->
+'printString'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := 0}) ->
     beamtalk_primitive:string_from_binary(<<"0ms">>);
-'printString'(#{'$beamtalk_class' := 'Duration', millis := Ms}) ->
+'printString'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) ->
     Sign =
         case Ms < 0 of
             true -> <<"-">>;
@@ -227,8 +229,8 @@ Zero components are omitted; negative durations get a leading `-`.
 
 -doc "Sum of two Durations.".
 -spec '+'(t(), t()) -> t().
-'+'(#{'$beamtalk_class' := 'Duration', millis := A}, #{
-    '$beamtalk_class' := 'Duration', millis := B
+'+'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := A}, #{
+    ?BT_CLASS_TAG_KEY := 'Duration', millis := B
 }) ->
     make_duration(A + B);
 '+'(_, _) ->
@@ -236,8 +238,8 @@ Zero components are omitted; negative durations get a leading `-`.
 
 -doc "Difference of two Durations (may be negative).".
 -spec '-'(t(), t()) -> t().
-'-'(#{'$beamtalk_class' := 'Duration', millis := A}, #{
-    '$beamtalk_class' := 'Duration', millis := B
+'-'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := A}, #{
+    ?BT_CLASS_TAG_KEY := 'Duration', millis := B
 }) ->
     make_duration(A - B);
 '-'(_, _) ->
@@ -245,9 +247,9 @@ Zero components are omitted; negative durations get a leading `-`.
 
 -doc "Scale a Duration by an Integer or Float scalar (Float rounds to ms).".
 -spec '*'(t(), number()) -> t().
-'*'(#{'$beamtalk_class' := 'Duration', millis := A}, Scalar) when is_integer(Scalar) ->
+'*'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := A}, Scalar) when is_integer(Scalar) ->
     make_duration(A * Scalar);
-'*'(#{'$beamtalk_class' := 'Duration', millis := A}, Scalar) when is_float(Scalar) ->
+'*'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := A}, Scalar) when is_float(Scalar) ->
     make_duration(round(A * Scalar));
 '*'(_, _) ->
     beamtalk_error:raise_type_error(
@@ -327,7 +329,7 @@ gte(Self, Other) -> '>='(Self, Other).
 -ifdef(TEST).
 -doc "True if the value is a Duration tagged map.".
 -spec is_duration(term()) -> boolean().
-is_duration(#{'$beamtalk_class' := 'Duration', millis := Ms}) -> is_integer(Ms);
+is_duration(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) -> is_integer(Ms);
 is_duration(_) -> false.
 -endif.
 
@@ -337,7 +339,7 @@ is_duration(_) -> false.
 
 -spec make_duration(integer()) -> t().
 make_duration(Ms) when is_integer(Ms) ->
-    #{'$beamtalk_class' => 'Duration', millis => Ms}.
+    #{?BT_CLASS_TAG_KEY => 'Duration', millis => Ms}.
 
 -spec from_scaled(number(), pos_integer(), atom()) -> t().
 from_scaled(N, Scale, _Selector) when is_integer(N) ->
@@ -431,8 +433,8 @@ pad_frac(B) when byte_size(B) =:= 2 -> <<B/binary, "0">>;
 pad_frac(B) -> B.
 
 -spec compare(atom(), t(), t()) -> boolean().
-compare(Op, #{'$beamtalk_class' := 'Duration', millis := A}, #{
-    '$beamtalk_class' := 'Duration', millis := B
+compare(Op, #{?BT_CLASS_TAG_KEY := 'Duration', millis := A}, #{
+    ?BT_CLASS_TAG_KEY := 'Duration', millis := B
 }) ->
     case Op of
         '<' -> A < B;

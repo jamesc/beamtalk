@@ -89,7 +89,7 @@ error:` with a `timeout`-kind error; blocks that already finished keep their
 real `Result`.
 """.
 -spec all([function()], integer() | beamtalk_duration:t()) -> [worker_result()].
-all(Blocks, #{'$beamtalk_class' := 'Duration'} = D) when is_list(Blocks) ->
+all(Blocks, #{?BT_CLASS_TAG_KEY := 'Duration'} = D) when is_list(Blocks) ->
     all(Blocks, beamtalk_duration:'asMilliseconds'(D));
 all(Blocks, TimeoutMs) when
     is_list(Blocks), is_integer(TimeoutMs), TimeoutMs >= 0

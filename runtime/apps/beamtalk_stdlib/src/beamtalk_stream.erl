@@ -21,6 +21,8 @@ where generator is a zero-arity function that returns either
 `{element, NextFun}` (an element and the continuation) or `done`.
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -export([
     %% Constructors
     from/1,
@@ -59,7 +61,7 @@ where generator is a zero-arity function that returns either
 -export([from_by/2]).
 -endif.
 
--type t() :: #{'$beamtalk_class' := 'Stream', atom() => term()}.
+-type t() :: #{?BT_CLASS_TAG_KEY := 'Stream', atom() => term()}.
 -export_type([t/0]).
 
 %%% ============================================================================
@@ -70,7 +72,7 @@ where generator is a zero-arity function that returns either
 -spec make_stream(fun(() -> {term(), fun()} | done), binary()) -> t().
 make_stream(Generator, Description) ->
     #{
-        '$beamtalk_class' => 'Stream',
+        ?BT_CLASS_TAG_KEY => 'Stream',
         generator => Generator,
         description => Description
     }.
@@ -82,7 +84,7 @@ The finalizer is called when any terminal operation completes (for cleanup of re
 -spec make_stream(fun(() -> {term(), fun()} | done), binary(), fun(() -> term())) -> t().
 make_stream(Generator, Description, Finalizer) when is_function(Finalizer, 0) ->
     #{
-        '$beamtalk_class' => 'Stream',
+        ?BT_CLASS_TAG_KEY => 'Stream',
         generator => Generator,
         description => Description,
         finalizer => Finalizer
@@ -170,7 +172,7 @@ on(_) ->
 -doc "Filter elements matching predicate.".
 -spec 'select'(t(), fun((term()) -> boolean())) -> t().
 'select'(
-    #{'$beamtalk_class' := 'Stream', generator := Gen, description := Desc} = Stream, Pred
+    #{?BT_CLASS_TAG_KEY := 'Stream', generator := Gen, description := Desc} = Stream, Pred
 ) when is_function(Pred, 1) ->
     NewGen = make_filter_gen(Gen, Pred),
     NewDesc = iolist_to_binary([Desc, <<" | select: [...]">>]),
@@ -181,7 +183,7 @@ on(_) ->
 -doc "Transform each element.".
 -spec 'collect'(t(), fun((term()) -> term())) -> t().
 'collect'(
-    #{'$beamtalk_class' := 'Stream', generator := Gen, description := Desc} = Stream, MapFun
+    #{?BT_CLASS_TAG_KEY := 'Stream', generator := Gen, description := Desc} = Stream, MapFun
 ) when is_function(MapFun, 1) ->
     NewGen = make_map_gen(Gen, MapFun),
     NewDesc = iolist_to_binary([Desc, <<" | collect: [...]">>]),
@@ -192,7 +194,7 @@ on(_) ->
 -doc "Inverse filter — exclude elements matching predicate.".
 -spec 'reject'(t(), fun((term()) -> boolean())) -> t().
 'reject'(
-    #{'$beamtalk_class' := 'Stream', generator := Gen, description := Desc} = Stream, Pred
+    #{?BT_CLASS_TAG_KEY := 'Stream', generator := Gen, description := Desc} = Stream, Pred
 ) when is_function(Pred, 1) ->
     NewGen = make_filter_gen(Gen, fun(X) -> not Pred(X) end),
     NewDesc = iolist_to_binary([Desc, <<" | reject: [...]">>]),
@@ -202,7 +204,7 @@ on(_) ->
 
 -doc "Skip first N elements.".
 -spec 'drop'(t(), Count :: non_neg_integer()) -> t().
-'drop'(#{'$beamtalk_class' := 'Stream', generator := Gen, description := Desc} = Stream, N) when
+'drop'(#{?BT_CLASS_TAG_KEY := 'Stream', generator := Gen, description := Desc} = Stream, N) when
     is_integer(N), N >= 0
 ->
     NewGen = make_drop_gen(Gen, N),
@@ -217,7 +219,7 @@ on(_) ->
 
 -doc "Return first N elements as a List.".
 -spec take(t(), Count :: non_neg_integer()) -> list().
-take(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, N) when is_integer(N), N >= 0 ->
+take(#{?BT_CLASS_TAG_KEY := 'Stream', generator := Gen} = Stream, N) when is_integer(N), N >= 0 ->
     try
         take_loop(Gen, N, [])
     after
@@ -228,7 +230,7 @@ take(_, _) ->
 
 -doc "Iterate with side effects, return nil.".
 -spec do(t(), Block :: fun((term()) -> term())) -> 'nil'.
-do(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Block) when is_function(Block, 1) ->
+do(#{?BT_CLASS_TAG_KEY := 'Stream', generator := Gen} = Stream, Block) when is_function(Block, 1) ->
     try
         do_loop(Gen, Block)
     after
@@ -240,7 +242,7 @@ do(_, _) ->
 
 -doc "Fold/reduce: inject initial value, accumulate with block.".
 -spec inject_into(t(), Init :: term(), Into :: fun((term(), term()) -> term())) -> term().
-inject_into(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Initial, Block) when
+inject_into(#{?BT_CLASS_TAG_KEY := 'Stream', generator := Gen} = Stream, Initial, Block) when
     is_function(Block, 2)
 ->
     try
@@ -261,7 +263,7 @@ An exhausted stream is the degenerate no-match case, so it raises the same
 `detect_if_none/3` is the non-raising form.
 """.
 -spec detect(t(), fun((term()) -> boolean())) -> term().
-detect(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred) when
+detect(#{?BT_CLASS_TAG_KEY := 'Stream', generator := Gen} = Stream, Pred) when
     is_function(Pred, 1)
 ->
     Result =
@@ -287,7 +289,7 @@ when the stream runs to exhaustion without a match, and a zero-arity function
 is called rather than answered, so `ifNone: [0]` yields `0`.
 """.
 -spec detect_if_none(t(), fun((term()) -> boolean()), term()) -> term().
-detect_if_none(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred, Default) when
+detect_if_none(#{?BT_CLASS_TAG_KEY := 'Stream', generator := Gen} = Stream, Pred, Default) when
     is_function(Pred, 1)
 ->
     Result =
@@ -308,7 +310,7 @@ detect_if_none(_, _, _) ->
 
 -doc "Materialize entire stream to a List.".
 -spec as_list(t()) -> list().
-as_list(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream) ->
+as_list(#{?BT_CLASS_TAG_KEY := 'Stream', generator := Gen} = Stream) ->
     try
         as_list_loop(Gen, [])
     after
@@ -317,7 +319,7 @@ as_list(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream) ->
 
 -doc "Return true if any element satisfies predicate.".
 -spec any_satisfy(t(), fun((term()) -> boolean())) -> boolean().
-any_satisfy(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred) when
+any_satisfy(#{?BT_CLASS_TAG_KEY := 'Stream', generator := Gen} = Stream, Pred) when
     is_function(Pred, 1)
 ->
     try
@@ -332,7 +334,7 @@ any_satisfy(_, _) ->
 
 -doc "Return true if all elements satisfy predicate.".
 -spec all_satisfy(t(), fun((term()) -> boolean())) -> boolean().
-all_satisfy(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred) when
+all_satisfy(#{?BT_CLASS_TAG_KEY := 'Stream', generator := Gen} = Stream, Pred) when
     is_function(Pred, 1)
 ->
     try
@@ -351,7 +353,7 @@ all_satisfy(_, _) ->
 
 -doc "Return pipeline description string.".
 -spec print_string(t()) -> binary().
-print_string(#{'$beamtalk_class' := 'Stream', description := Desc}) ->
+print_string(#{?BT_CLASS_TAG_KEY := 'Stream', description := Desc}) ->
     Desc.
 
 %%% ============================================================================

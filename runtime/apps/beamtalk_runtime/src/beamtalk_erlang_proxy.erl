@@ -91,7 +91,7 @@ See: ADR 0028 §1 (Module Proxy Pattern)
 -doc "Create a new ErlangModule proxy for the given module atom.".
 -spec new(atom()) -> map().
 new(Module) when is_atom(Module) ->
-    #{'$beamtalk_class' => 'ErlangModule', module => Module}.
+    #{?BT_CLASS_TAG_KEY => 'ErlangModule', module => Module}.
 
 -doc """
 Dispatch a Beamtalk message to the proxied Erlang module.

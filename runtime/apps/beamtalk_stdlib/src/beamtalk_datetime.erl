@@ -43,6 +43,8 @@ lookup) and pass it to `toOffset:`. Revisit if/when a tzdata dependency is
 adopted.
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 %% Class methods
 -export([now/0, 'monotonicNow'/0]).
 -export([year/3, year/6, year/7]).
@@ -63,7 +65,7 @@ adopted.
 -export([lt/2, gt/2, lte/2, gte/2, eql/2, neq/2, sneq/2]).
 
 -type field() :: year | month | day | hour | minute | second.
--type t() :: #{'$beamtalk_class' := 'DateTime', atom() => term()}.
+-type t() :: #{?BT_CLASS_TAG_KEY := 'DateTime', atom() => term()}.
 -export_type([t/0]).
 
 %% Gregorian seconds at Unix epoch (1970-01-01 00:00:00)
@@ -402,7 +404,7 @@ DateTime has second resolution; any sub-second milliseconds in the
 Duration are truncated toward zero.
 """.
 -spec addDuration(t(), beamtalk_duration:t()) -> t().
-addDuration(Self, #{'$beamtalk_class' := 'Duration'} = D) ->
+addDuration(Self, #{?BT_CLASS_TAG_KEY := 'Duration'} = D) ->
     add_seconds(Self, beamtalk_duration:'asSeconds'(D), 'addDuration:');
 addDuration(_, _) ->
     beamtalk_error:raise_type_error('DateTime', 'addDuration:', <<"Argument must be a Duration">>).
@@ -413,14 +415,14 @@ Difference between two DateTimes as a Duration.
 `A - B` is positive when A is later than B.
 """.
 -spec '-'(t(), t()) -> beamtalk_duration:t().
-'-'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+'-'(Self, #{?BT_CLASS_TAG_KEY := 'DateTime'} = Other) ->
     beamtalk_duration:seconds(diffSeconds(Self, Other));
 '-'(_, _) ->
     beamtalk_error:raise_type_error('DateTime', '-', <<"Argument must be a DateTime">>).
 
 -doc "Difference in seconds between this and another DateTime.".
 -spec diffSeconds(t(), t()) -> integer().
-diffSeconds(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+diffSeconds(Self, #{?BT_CLASS_TAG_KEY := 'DateTime'} = Other) ->
     'asTimestamp'(Self) - 'asTimestamp'(Other);
 diffSeconds(_, _) ->
     beamtalk_error:raise_type_error('DateTime', 'diffSeconds:', <<"Argument must be a DateTime">>).
@@ -430,25 +432,25 @@ diffSeconds(_, _) ->
 %%% ============================================================================
 
 -spec '<'(t(), t()) -> boolean().
-'<'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+'<'(Self, #{?BT_CLASS_TAG_KEY := 'DateTime'} = Other) ->
     'asTimestamp'(Self) < 'asTimestamp'(Other);
 '<'(_, _) ->
     beamtalk_error:raise_type_error('DateTime', '<', <<"Argument must be a DateTime">>).
 
 -spec '>'(t(), t()) -> boolean().
-'>'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+'>'(Self, #{?BT_CLASS_TAG_KEY := 'DateTime'} = Other) ->
     'asTimestamp'(Self) > 'asTimestamp'(Other);
 '>'(_, _) ->
     beamtalk_error:raise_type_error('DateTime', '>', <<"Argument must be a DateTime">>).
 
 -spec '=<'(t(), t()) -> boolean().
-'=<'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+'=<'(Self, #{?BT_CLASS_TAG_KEY := 'DateTime'} = Other) ->
     'asTimestamp'(Self) =< 'asTimestamp'(Other);
 '=<'(_, _) ->
     beamtalk_error:raise_type_error('DateTime', '=<', <<"Argument must be a DateTime">>).
 
 -spec '>='(t(), t()) -> boolean().
-'>='(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+'>='(Self, #{?BT_CLASS_TAG_KEY := 'DateTime'} = Other) ->
     'asTimestamp'(Self) >= 'asTimestamp'(Other);
 '>='(_, _) ->
     beamtalk_error:raise_type_error('DateTime', '>=', <<"Argument must be a DateTime">>).
@@ -460,13 +462,13 @@ diffSeconds(_, _) ->
 '<='(Self, Other) -> '=<'(Self, Other).
 
 -spec '=:='(t(), t()) -> boolean().
-'=:='(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+'=:='(Self, #{?BT_CLASS_TAG_KEY := 'DateTime'} = Other) ->
     'asTimestamp'(Self) =:= 'asTimestamp'(Other);
 '=:='(_, _) ->
     beamtalk_error:raise_type_error('DateTime', '=:=', <<"Argument must be a DateTime">>).
 
 -spec '/='(t(), t()) -> boolean().
-'/='(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+'/='(Self, #{?BT_CLASS_TAG_KEY := 'DateTime'} = Other) ->
     'asTimestamp'(Self) /= 'asTimestamp'(Other);
 '/='(_, _) ->
     beamtalk_error:raise_type_error('DateTime', '/=', <<"Argument must be a DateTime">>).
@@ -513,7 +515,7 @@ neq(Self, Other) -> '/='(Self, Other).
 
 %% `sneq:with:` → strips to `sneq`, arity 2 (strict inequality)
 -spec sneq(t(), t()) -> boolean().
-sneq(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+sneq(Self, #{?BT_CLASS_TAG_KEY := 'DateTime'} = Other) ->
     'asTimestamp'(Self) =/= 'asTimestamp'(Other);
 sneq(_, _) ->
     beamtalk_error:raise_type_error('DateTime', sneq, <<"Argument must be a DateTime">>).
@@ -544,7 +546,7 @@ make_datetime(Y, Mo, D, H, Mi, S) ->
 ) -> t().
 make_datetime(Y, Mo, D, H, Mi, S, Off) ->
     #{
-        '$beamtalk_class' => 'DateTime',
+        ?BT_CLASS_TAG_KEY => 'DateTime',
         year => Y,
         month => Mo,
         day => D,

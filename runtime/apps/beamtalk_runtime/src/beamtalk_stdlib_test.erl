@@ -26,6 +26,8 @@ Where:
   Location    :: binary() - source location "file:line `expr`"
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -export([
     run_and_assert/2,
     report_results/2,
@@ -184,7 +186,7 @@ run_one({error, EvalMod, ExpectedKind, _VarName, Location}, Bindings) ->
     catch
         %% Wrapped Exception objects (ADR 0015)
         error:#{
-            '$beamtalk_class' := _,
+            ?BT_CLASS_TAG_KEY := _,
             error := {beamtalk_error, Kind, _, _, _, _, _}
         } ->
             check_error_kind(Kind, ExpectedKind, Location, Bindings);

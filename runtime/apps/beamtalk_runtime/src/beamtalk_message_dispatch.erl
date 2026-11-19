@@ -272,7 +272,7 @@ send_number_coercion(Right, Selector, Args, OrigOp) ->
         send(Right, Selector, Args)
     catch
         error:#{
-            '$beamtalk_class' := _,
+            ?BT_CLASS_TAG_KEY := _,
             error := #beamtalk_error{
                 kind = does_not_understand,
                 class = RightClass,

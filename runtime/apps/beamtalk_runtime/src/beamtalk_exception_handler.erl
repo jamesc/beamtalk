@@ -208,7 +208,7 @@ typically wrapped maps.
 -spec matches_class(term(), term()) -> boolean().
 matches_class(nil, _Error) ->
     true;
-matches_class(Filter, #{'$beamtalk_class' := _, error := Error}) ->
+matches_class(Filter, #{?BT_CLASS_TAG_KEY := _, error := Error}) ->
     matches_class(Filter, Error);
 matches_class(#beamtalk_object{class = ClassName}, Error) ->
     matches_class_name(ClassName, Error);
@@ -242,7 +242,7 @@ matches_class_name(ClassName, #beamtalk_error{kind = Kind, class = ErrorClass}) 
     beamtalk_class_registry:inherits_from(ActualClass, BaseName);
 matches_class_name(ClassName, RawError) when not is_map(RawError) ->
     %% Raw Erlang error (e.g. badarith) — wrap to get a kind, then match
-    #{'$beamtalk_class' := _, error := Inner} = wrap(RawError),
+    #{?BT_CLASS_TAG_KEY := _, error := Inner} = wrap(RawError),
     matches_class_name(ClassName, Inner);
 matches_class_name(_ClassName, _Other) ->
     false.
@@ -268,7 +268,7 @@ error's class field directly if it is a registered exception subclass
 """.
 -spec wrap(#beamtalk_error{} | term()) -> map().
 wrap(#beamtalk_error{} = Error) ->
-    #{'$beamtalk_class' => exception_class(Error), error => Error};
+    #{?BT_CLASS_TAG_KEY => exception_class(Error), error => Error};
 wrap(Other) ->
     wrap_raw(Other).
 
@@ -525,7 +525,7 @@ wrap_classified(Kind, Class, Selector, Message, Hint, Details) ->
         hint = wrap_hint(Hint),
         details = Details
     },
-    #{'$beamtalk_class' => kind_to_class(Kind), error => GenError}.
+    #{?BT_CLASS_TAG_KEY => kind_to_class(Kind), error => GenError}.
 
 %% Extract the {Selector, Class} breadcrumb from a dispatch context.
 -spec breadcrumb(map()) -> {atom() | undefined, atom() | undefined}.
@@ -700,7 +700,7 @@ passes through unchanged. Used in `on:do:` catch clauses to handle both
 pre-wrapped exceptions (from raise/1) and raw Erlang exceptions.
 """.
 -spec ensure_wrapped(term()) -> map().
-ensure_wrapped(#{'$beamtalk_class' := _} = Already) ->
+ensure_wrapped(#{?BT_CLASS_TAG_KEY := _} = Already) ->
     Already;
 ensure_wrapped(Other) ->
     wrap(Other).
@@ -746,7 +746,7 @@ table, and almost no handler reads `e stackTrace`, so doing it on every
 catch made a raise far more expensive than it needed to be.
 """.
 -spec ensure_wrapped(term(), list()) -> map().
-ensure_wrapped(#{'$beamtalk_class' := _} = Already, Stacktrace) ->
+ensure_wrapped(#{?BT_CLASS_TAG_KEY := _} = Already, Stacktrace) ->
     keep_innermost_stacktrace(Already, Stacktrace);
 ensure_wrapped(Other, Stacktrace) ->
     Wrapped = wrap_with_stacktrace(Other, Stacktrace),
@@ -781,7 +781,7 @@ ExitError/ThrowError classes are used instead of RuntimeError.
 %% only when the wrapped exception's `details.reason` IS the caught term (the
 %% generic exit/throw clauses below); every branch that substitutes a Beamtalk
 %% exception for the caught term re-raises that exception as an `error`.
-ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already, Stacktrace) ->
+ensure_wrapped(_Type, #{?BT_CLASS_TAG_KEY := _} = Already, Stacktrace) ->
     (keep_innermost_stacktrace(Already, Stacktrace))#{erlang_class => error};
 ensure_wrapped(_Type, #beamtalk_error{} = Error, Stacktrace) ->
     Wrapped = wrap(Error),
@@ -820,7 +820,7 @@ ensure_wrapped(error, undef, Stacktrace) ->
         ),
         details = Details
     },
-    Wrapped = #{'$beamtalk_class' => kind_to_class(runtime_error), error => GenError},
+    Wrapped = #{?BT_CLASS_TAG_KEY => kind_to_class(runtime_error), error => GenError},
     Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error};
 ensure_wrapped(exit, Reason, Stacktrace) ->
     Error = #beamtalk_error{
@@ -897,7 +897,7 @@ more specific inner one. `undef`, `exit`, `throw`, and `#beamtalk_error{}` keep
 their existing ensure_wrapped/3 handling.
 """.
 -spec ensure_wrapped(atom(), term(), list(), map()) -> map().
-ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already0, Stacktrace, _Context) ->
+ensure_wrapped(_Type, #{?BT_CLASS_TAG_KEY := _} = Already0, Stacktrace, _Context) ->
     Already = Already0#{erlang_class => error},
     %% Innermost classification already applied — preserve it and any stacktrace it
     %% already carries. Backfill from this frame only when absent, so stacktrace
@@ -966,7 +966,7 @@ dispatch('stackTrace', [], Self) ->
 dispatch('fullStackTrace', [], Self) ->
     %% Every captured frame, innermost first, hidden ones flagged (`isHidden`).
     frames(Self);
-dispatch('class', [], #{'$beamtalk_class' := Class}) ->
+dispatch('class', [], #{?BT_CLASS_TAG_KEY := Class}) ->
     Class;
 dispatch('signal', [], Self) ->
     signal_instance(Self);
@@ -975,7 +975,7 @@ dispatch('pass', [], #{erlang_class := Class} = Self) ->
 dispatch('pass', [], Self) ->
     %% Never caught (e.g. a fresh `Exception new`) — behaves exactly like signal.
     signal_instance(Self);
-dispatch('signal:', [Message], #{'$beamtalk_class' := ClassName}) ->
+dispatch('signal:', [Message], #{?BT_CLASS_TAG_KEY := ClassName}) ->
     %% Preserve exception class name from the signaling object
     signal_message(Message, ClassName).
 
@@ -989,7 +989,7 @@ wrap_hint(Hint) when is_binary(Hint) ->
 -spec signal_instance(map()) -> no_return().
 signal_instance(#{error := Error}) ->
     raise_signal(Error);
-signal_instance(#{'$beamtalk_class' := ClassName}) ->
+signal_instance(#{?BT_CLASS_TAG_KEY := ClassName}) ->
     %% New exception instance (no error field yet) — create and raise
     signal_from_class(ClassName).
 
@@ -1073,7 +1073,7 @@ caller. A bare Erlang reason carries nothing, so its catch stack is the only
 one. The single rule behind the `beamtalk run` and `beamtalk test` traces.
 """.
 -spec raise_site_stacktrace(term(), list()) -> list().
-raise_site_stacktrace(#{'$beamtalk_class' := _} = Exception, CatchStacktrace) ->
+raise_site_stacktrace(#{?BT_CLASS_TAG_KEY := _} = Exception, CatchStacktrace) ->
     case raise_stacktrace(Exception) of
         [] -> CatchStacktrace;
         Carried -> Carried
@@ -1157,7 +1157,7 @@ raw_reason_from(_Details, []) ->
 raw_reason_from(Details, [Key | Rest]) ->
     case Details of
         #{Key := #beamtalk_error{}} -> nil;
-        #{Key := #{'$beamtalk_class' := _, error := #beamtalk_error{}}} -> nil;
+        #{Key := #{?BT_CLASS_TAG_KEY := _, error := #beamtalk_error{}}} -> nil;
         #{Key := Reason} -> Reason;
         _ -> raw_reason_from(Details, Rest)
     end.
@@ -1209,7 +1209,7 @@ from a runtime failure whatever kind a caller chose.
 raise_signal(#beamtalk_error{} = Error) ->
     %% Built in one step, not wrap/1 then an update, to allocate one map.
     error(#{
-        '$beamtalk_class' => exception_class(Error),
+        ?BT_CLASS_TAG_KEY => exception_class(Error),
         error => Error,
         '$beamtalk_signal' => true
     }).

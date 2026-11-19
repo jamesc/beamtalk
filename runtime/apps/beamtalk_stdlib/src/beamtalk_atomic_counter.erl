@@ -49,6 +49,8 @@ AtomicCounter objects are represented as tagged maps:
 - Existing FFI pattern: `beamtalk_ets.erl`
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 %% Class methods
 -export([new/1, named/1]).
 
@@ -59,7 +61,7 @@ AtomicCounter objects are represented as tagged maps:
 %% because the unary `value` selector is intercepted by block-evaluation codegen (see ADR-0101).
 -export([readValue/1]).
 
--type t() :: #{'$beamtalk_class' := 'AtomicCounter', atom() => term()}.
+-type t() :: #{?BT_CLASS_TAG_KEY := 'AtomicCounter', atom() => term()}.
 -export_type([t/0]).
 
 %%% ============================================================================
@@ -126,7 +128,7 @@ named(_) ->
 
 -doc "Atomically add 1. Returns the new value.".
 -spec increment(t()) -> integer().
-increment(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}) ->
+increment(#{?BT_CLASS_TAG_KEY := 'AtomicCounter', table := TableName}) ->
     try
         ets:update_counter(TableName, value, 1)
     catch
@@ -137,13 +139,13 @@ increment(_Self) ->
 
 -doc "Atomically add N. Returns the new value.".
 -spec incrementBy(t(), By :: integer()) -> integer().
-incrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}, N) when is_integer(N) ->
+incrementBy(#{?BT_CLASS_TAG_KEY := 'AtomicCounter', table := TableName}, N) when is_integer(N) ->
     try
         ets:update_counter(TableName, value, N)
     catch
         error:badarg -> stale_counter_error('incrementBy:', TableName)
     end;
-incrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := _}, _N) ->
+incrementBy(#{?BT_CLASS_TAG_KEY := 'AtomicCounter', table := _}, _N) ->
     beamtalk_error:raise_type_error(
         'AtomicCounter', 'incrementBy:', <<"Argument must be an Integer">>
     );
@@ -152,7 +154,7 @@ incrementBy(_Self, _N) ->
 
 -doc "Atomically subtract 1. Returns the new value.".
 -spec decrement(t()) -> integer().
-decrement(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}) ->
+decrement(#{?BT_CLASS_TAG_KEY := 'AtomicCounter', table := TableName}) ->
     try
         ets:update_counter(TableName, value, -1)
     catch
@@ -163,13 +165,13 @@ decrement(_Self) ->
 
 -doc "Atomically subtract N. Returns the new value.".
 -spec decrementBy(t(), By :: integer()) -> integer().
-decrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}, N) when is_integer(N) ->
+decrementBy(#{?BT_CLASS_TAG_KEY := 'AtomicCounter', table := TableName}, N) when is_integer(N) ->
     try
         ets:update_counter(TableName, value, -N)
     catch
         error:badarg -> stale_counter_error('decrementBy:', TableName)
     end;
-decrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := _}, _N) ->
+decrementBy(#{?BT_CLASS_TAG_KEY := 'AtomicCounter', table := _}, _N) ->
     beamtalk_error:raise_type_error(
         'AtomicCounter', 'decrementBy:', <<"Argument must be an Integer">>
     );
@@ -178,7 +180,7 @@ decrementBy(_Self, _N) ->
 
 -doc "Read the current value.".
 -spec value(t()) -> integer().
-value(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}) ->
+value(#{?BT_CLASS_TAG_KEY := 'AtomicCounter', table := TableName}) ->
     try
         case ets:lookup(TableName, value) of
             [{value, N}] -> N;
@@ -203,7 +205,7 @@ readValue(Self) -> value(Self).
 
 -doc "Reset the counter to 0. Returns nil.".
 -spec reset(t()) -> nil.
-reset(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}) ->
+reset(#{?BT_CLASS_TAG_KEY := 'AtomicCounter', table := TableName}) ->
     try
         ets:insert(TableName, {value, 0}),
         nil
@@ -220,7 +222,7 @@ Raises `stale_counter` if the table no longer exists (already deleted or owner e
 Raises `permission_error` if the table still exists but the caller does not own it.
 """.
 -spec delete(t()) -> nil.
-delete(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}) ->
+delete(#{?BT_CLASS_TAG_KEY := 'AtomicCounter', table := TableName}) ->
     try
         ets:delete(TableName),
         nil
@@ -261,7 +263,7 @@ delete(_Self) ->
 -doc "Build an AtomicCounter tagged map for the given table name.".
 -spec make_counter(atom()) -> t().
 make_counter(Name) ->
-    #{'$beamtalk_class' => 'AtomicCounter', table => Name}.
+    #{?BT_CLASS_TAG_KEY => 'AtomicCounter', table => Name}.
 
 -doc "Build a structured error for a stale or deleted counter table.".
 -spec stale_counter_error(atom(), atom()) -> no_return().

@@ -23,6 +23,8 @@ from the first clause (Erlang convention); parameter types are the union
 across all clauses (BT-4457).
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -export([
     read_specs/1,
     read_specs_batch/1,
@@ -1273,7 +1275,7 @@ Looks for a `'$beamtalk_class' := ClassName` exact field. Returns
 extract_beamtalk_class([]) ->
     error;
 extract_beamtalk_class([
-    {type, _, map_field_exact, [{atom, _, '$beamtalk_class'}, {atom, _, ClassName}]}
+    {type, _, map_field_exact, [{atom, _, ?BT_CLASS_TAG_KEY}, {atom, _, ClassName}]}
     | _
 ]) ->
     {ok, ClassName};

@@ -26,6 +26,8 @@ See also: beamtalk_primitive For dispatch based on tagged map classification.
 See also: beamtalk_object For Object base class reflection using tagged maps.
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 %% Tag key constant
 -export([class_key/0]).
 
@@ -52,7 +54,7 @@ This is the single source of truth for the key. All modules that create
 or inspect tagged maps should use this function instead of a bare literal.
 """.
 -spec class_key() -> atom().
-class_key() -> '$beamtalk_class'.
+class_key() -> ?BT_CLASS_TAG_KEY.
 
 %%% ============================================================================
 %%% Classification
@@ -71,7 +73,7 @@ Non-map values always return `undefined`.
 -spec class_of(term()) -> atom() | undefined.
 class_of(Map) when is_map(Map) ->
     % elp:fixme W0032 maps:find with complex branch logic
-    case maps:find('$beamtalk_class', Map) of
+    case maps:find(?BT_CLASS_TAG_KEY, Map) of
         {ok, Class} when is_atom(Class) ->
             Class;
         _ ->
@@ -84,7 +86,7 @@ class_of(_) ->
 -spec class_of(term(), atom()) -> atom().
 class_of(Map, Default) when is_map(Map) ->
     % elp:fixme W0032 maps:find with complex branch logic
-    case maps:find('$beamtalk_class', Map) of
+    case maps:find(?BT_CLASS_TAG_KEY, Map) of
         {ok, Class} when is_atom(Class) ->
             Class;
         _ ->
@@ -97,9 +99,9 @@ class_of(_, Default) ->
 -spec is_tagged(term()) -> boolean().
 is_tagged(Map) when is_map(Map) ->
     % elp:fixme W0032 maps:find with complex branch logic
-    case maps:find('$beamtalk_class', Map) of
+    case maps:find(?BT_CLASS_TAG_KEY, Map) of
         {ok, Class} when is_atom(Class) -> true;
-        _ -> maps:is_key('__class_mod__', Map)
+        _ -> maps:is_key(?BT_CLASS_MOD_KEY, Map)
     end;
 is_tagged(_) ->
     false.
@@ -138,7 +140,7 @@ is_builtin_collection(_) ->
 -spec class_name_from_mod(map(), atom()) -> atom().
 class_name_from_mod(Map, Default) ->
     % elp:fixme W0032 maps:find with complex branch logic
-    case maps:find('__class_mod__', Map) of
+    case maps:find(?BT_CLASS_MOD_KEY, Map) of
         {ok, Mod} when is_atom(Mod) ->
             case erlang:function_exported(Mod, class_name, 0) of
                 true -> Mod:class_name();
@@ -169,8 +171,8 @@ never sees it in the first place.
 -spec internal_fields() -> [atom()].
 internal_fields() ->
     [
-        '$beamtalk_class',
-        '__class_mod__',
+        ?BT_CLASS_TAG_KEY,
+        ?BT_CLASS_MOD_KEY,
         '__methods__',
         '__registry_pid__',
         '__shape_version__'

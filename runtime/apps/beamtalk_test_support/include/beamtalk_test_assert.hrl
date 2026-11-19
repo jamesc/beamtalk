@@ -17,7 +17,7 @@
 -define(assertBtError(Kind, Class, Selector, Expr),
     ?assertError(
         #{
-            '$beamtalk_class' := _,
+            ?BT_CLASS_TAG_KEY := _,
             error := #beamtalk_error{kind = Kind, class = Class, selector = Selector}
         },
         Expr
@@ -37,7 +37,7 @@
 -define(assertBtErrorTagged(ExcClass, Kind, Class, Selector, Expr),
     ?assertError(
         #{
-            '$beamtalk_class' := ExcClass,
+            ?BT_CLASS_TAG_KEY := ExcClass,
             error := #beamtalk_error{kind = Kind, class = Class, selector = Selector}
         },
         Expr
@@ -48,7 +48,7 @@
 -define(assertBtErrorDetails(Kind, Class, Selector, Details, Expr),
     ?assertError(
         #{
-            '$beamtalk_class' := _,
+            ?BT_CLASS_TAG_KEY := _,
             error := #beamtalk_error{
                 kind = Kind, class = Class, selector = Selector, details = Details
             }
@@ -61,7 +61,7 @@
 -define(assertBtErrorHint(Kind, Class, Selector, Hint, Expr),
     ?assertError(
         #{
-            '$beamtalk_class' := _,
+            ?BT_CLASS_TAG_KEY := _,
             error := #beamtalk_error{
                 kind = Kind, class = Class, selector = Selector, hint = Hint
             }
@@ -75,7 +75,7 @@
 -define(assertBtErrorMessage(Kind, Class, Selector, Message, Expr),
     ?assertError(
         #{
-            '$beamtalk_class' := _,
+            ?BT_CLASS_TAG_KEY := _,
             error := #beamtalk_error{
                 kind = Kind, class = Class, selector = Selector, message = Message
             }
@@ -88,7 +88,7 @@
 %% `#beamtalk_error{}` Pattern (use when several of message/hint/details are
 %% asserted together).
 -define(assertBtErrorMatch(Pattern, Expr),
-    ?assertError(#{'$beamtalk_class' := _, error := Pattern}, Expr)
+    ?assertError(#{?BT_CLASS_TAG_KEY := _, error := Pattern}, Expr)
 ).
 
 %% As `?assertBtError/4`, and Needle (a binary) must occur in the error's
@@ -131,7 +131,7 @@
                 )
         catch
             error:#{
-                '$beamtalk_class' := _,
+                ?BT_CLASS_TAG_KEY := _,
                 error := #beamtalk_error{kind = Kind, class = Class, selector = Selector} =
                     __BtRaised
             } ->
@@ -146,10 +146,10 @@
 -define(assertBtResultObjError(Kind, Class, Selector, Expr),
     ?assertMatch(
         #{
-            '$beamtalk_class' := 'Result',
+            ?BT_CLASS_TAG_KEY := 'Result',
             'isOk' := false,
             'errReason' := #{
-                '$beamtalk_class' := _,
+                ?BT_CLASS_TAG_KEY := _,
                 error := #beamtalk_error{kind = Kind, class = Class, selector = Selector}
             }
         },

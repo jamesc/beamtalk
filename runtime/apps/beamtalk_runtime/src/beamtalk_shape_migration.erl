@@ -465,7 +465,7 @@ safe_value_new_defaults(_Class, Module) ->
 safe_actor_init_defaults(Class, Module) ->
     %% bt-catcher-audit: not-applicable-other-process - actor init/1 field defaults, not a
     %% class-method region
-    try Module:init(#{'__skip_initialize__' => true}) of
+    try Module:init(#{?BT_SKIP_INITIALIZE_KEY => true}) of
         {ok, Map} when is_map(Map) ->
             Map;
         Other ->
@@ -810,7 +810,7 @@ unpack({beamtalk_shape, Class, ShapeVersion, Fields}, Policy, Depth) when
                     case migrate(Class, ShapeVersion, UnpackedFields) of
                         {ok, NewFields, ToVersion} ->
                             {ok, NewFields#{
-                                '$beamtalk_class' => Class, '__shape_version__' => ToVersion
+                                ?BT_CLASS_TAG_KEY => Class, '__shape_version__' => ToVersion
                             }};
                         {error, _} = Err ->
                             Err
@@ -925,7 +925,7 @@ step_error(Class, Step, Selector, Reason) ->
 %% through `format_safe/2` (whose clause matches it directly, independent of
 %% the stacktrace argument) for a readable hint instead of a raw term dump.
 -spec format_step_reason(term()) -> binary().
-format_step_reason({error, #{'$beamtalk_class' := _, error := #beamtalk_error{}} = Wrapped}) ->
+format_step_reason({error, #{?BT_CLASS_TAG_KEY := _, error := #beamtalk_error{}} = Wrapped}) ->
     beamtalk_error:format_safe(Wrapped, []);
 format_step_reason(Reason) ->
     beamtalk_error:format_safe(Reason).

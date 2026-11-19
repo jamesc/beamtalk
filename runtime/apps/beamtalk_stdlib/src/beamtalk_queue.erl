@@ -42,6 +42,8 @@ Queue objects are represented as tagged maps:
 - Erlang `:queue` module documentation
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 %% Class methods
 -define(RECEIVER_HINT, <<"Receiver must be a Queue instance">>).
 
@@ -50,7 +52,7 @@ Queue objects are represented as tagged maps:
 %% Instance methods — no-colon forms used by the FFI proxy
 -export([enqueue/2, dequeue/1, peek/1, isEmpty/1, size/1]).
 
--type t() :: #{'$beamtalk_class' := 'Queue', atom() => term()}.
+-type t() :: #{?BT_CLASS_TAG_KEY := 'Queue', atom() => term()}.
 -export_type([t/0]).
 
 %%% ============================================================================
@@ -76,7 +78,7 @@ Add an element to the back of the queue. Returns a new Queue.
 O(1) amortised.
 """.
 -spec enqueue(t(), Elem :: term()) -> t().
-enqueue(#{'$beamtalk_class' := 'Queue', queue := Q}, Elem) ->
+enqueue(#{?BT_CLASS_TAG_KEY := 'Queue', queue := Q}, Elem) ->
     make_queue(queue:in(Elem, Q));
 enqueue(_Self, _Elem) ->
     beamtalk_error:raise_type_error('Queue', 'enqueue:', ?RECEIVER_HINT).
@@ -88,7 +90,7 @@ Returns a 2-tuple `{Value, NewQueue}` where `NewQueue` is a Queue map.
 Raises `empty_queue` if the queue is empty.
 """.
 -spec dequeue(t()) -> {term(), t()}.
-dequeue(#{'$beamtalk_class' := 'Queue', queue := Q}) ->
+dequeue(#{?BT_CLASS_TAG_KEY := 'Queue', queue := Q}) ->
     case queue:out(Q) of
         {empty, _} ->
             empty_queue_error('dequeue');
@@ -104,7 +106,7 @@ Return the front element without removing it.
 Raises `empty_queue` if the queue is empty.
 """.
 -spec peek(t()) -> term().
-peek(#{'$beamtalk_class' := 'Queue', queue := Q}) ->
+peek(#{?BT_CLASS_TAG_KEY := 'Queue', queue := Q}) ->
     case queue:peek(Q) of
         empty -> empty_queue_error('peek');
         {value, Value} -> Value
@@ -114,14 +116,14 @@ peek(_Self) ->
 
 -doc "Return true if the queue contains no elements.".
 -spec isEmpty(t()) -> boolean().
-isEmpty(#{'$beamtalk_class' := 'Queue', queue := Q}) ->
+isEmpty(#{?BT_CLASS_TAG_KEY := 'Queue', queue := Q}) ->
     queue:is_empty(Q);
 isEmpty(_Self) ->
     beamtalk_error:raise_type_error('Queue', 'isEmpty', ?RECEIVER_HINT).
 
 -doc "Return the number of elements in the queue.".
 -spec size(t()) -> non_neg_integer().
-size(#{'$beamtalk_class' := 'Queue', queue := Q}) ->
+size(#{?BT_CLASS_TAG_KEY := 'Queue', queue := Q}) ->
     queue:len(Q);
 size(_Self) ->
     beamtalk_error:raise_type_error('Queue', 'size', ?RECEIVER_HINT).
@@ -133,7 +135,7 @@ size(_Self) ->
 -doc "Build a Queue tagged map wrapping the given Erlang queue data structure.".
 -spec make_queue(term()) -> t().
 make_queue(Q) ->
-    #{'$beamtalk_class' => 'Queue', queue => Q}.
+    #{?BT_CLASS_TAG_KEY => 'Queue', queue => Q}.
 
 -doc "Raise an empty_queue error for the given selector.".
 -spec empty_queue_error(atom()) -> no_return().

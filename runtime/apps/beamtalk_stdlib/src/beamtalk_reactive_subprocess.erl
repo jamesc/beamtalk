@@ -130,7 +130,7 @@ open(Command, Args, Env, Dir, Notify) when is_map(Env), is_record(Notify, beamta
     BinArgs = beamtalk_subprocess_port:normalize_args(
         'ReactiveSubprocess', ArgsList, 'open:args:env:dir:notify:'
     ),
-    EnvMap = maps:without(['$beamtalk_class'], Env),
+    EnvMap = maps:without([?BT_CLASS_TAG_KEY], Env),
     BinEnv = beamtalk_subprocess_port:normalize_env(
         'ReactiveSubprocess', EnvMap, 'open:args:env:dir:notify:'
     ),

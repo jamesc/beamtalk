@@ -52,10 +52,10 @@ object can apply the active-vs-full filtering in Beamtalk. This is what
 %% beamtalk_spec_reader) infer this FFI result as the `ChangeLog` Beamtalk
 %% class rather than a bare `Dictionary`, matching `Workspace>>changes`
 %% declared `-> ChangeLog` return type. Mirrors `beamtalk_ets:t()`.
--spec changeLog() -> #{'$beamtalk_class' := 'ChangeLog', entries := [map()]}.
+-spec changeLog() -> #{?BT_CLASS_TAG_KEY := 'ChangeLog', entries := [map()]}.
 changeLog() ->
     #{
-        '$beamtalk_class' => 'ChangeLog',
+        ?BT_CLASS_TAG_KEY => 'ChangeLog',
         entries => change_entries()
     }.
 
@@ -140,7 +140,7 @@ entry_to_value(#entry{} = E, Survivors) ->
             false -> {false, undefined}
         end,
     #{
-        '$beamtalk_class' => 'ChangeEntry',
+        ?BT_CLASS_TAG_KEY => 'ChangeEntry',
         seq => E#entry.seq,
         className => binary_to_atom(E#entry.class, utf8),
         selector => selector_symbol(E#entry.selector),

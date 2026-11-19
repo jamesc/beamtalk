@@ -30,6 +30,8 @@ Arrays are immutable — operations returning modified arrays return new tagged
 maps.
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -export([
     from_list/1,
     size/1,
@@ -54,7 +56,7 @@ maps.
 %% Wrap a canonical index→value data map in the tagged Array map.
 -spec new(map()) -> map().
 new(Data) when is_map(Data) ->
-    #{'$beamtalk_class' => 'Array', 'data' => Data}.
+    #{?BT_CLASS_TAG_KEY => 'Array', 'data' => Data}.
 
 %% Build the canonical index→value map from an ordered list of elements.
 -spec data_from_list(list()) -> map().
@@ -88,12 +90,12 @@ from_list(_NonList) ->
 
 -doc "Return the number of elements in the Array.".
 -spec size(map()) -> non_neg_integer().
-size(#{'$beamtalk_class' := 'Array', 'data' := Data}) ->
+size(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}) ->
     maps:size(Data).
 
 -doc "Return true if the Array has no elements.".
 -spec is_empty(map()) -> boolean().
-is_empty(#{'$beamtalk_class' := 'Array', 'data' := Data}) ->
+is_empty(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}) ->
     maps:size(Data) =:= 0.
 
 -doc """
@@ -106,7 +108,7 @@ Indexing an *empty* Array raises `empty_collection` instead, matching
 whether or not the Array is empty, so it stays `index_out_of_bounds`.
 """.
 -spec at(map(), integer()) -> term().
-at(#{'$beamtalk_class' := 'Array', 'data' := Data}, Index) when is_integer(Index), Index >= 1 ->
+at(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, Index) when is_integer(Index), Index >= 1 ->
     N = maps:size(Data),
     if
         N =:= 0 ->
@@ -127,11 +129,11 @@ at(#{'$beamtalk_class' := 'Array', 'data' := Data}, Index) when is_integer(Index
         true ->
             maps:get(Index - 1, Data)
     end;
-at(#{'$beamtalk_class' := 'Array'}, Index) when is_integer(Index) ->
+at(#{?BT_CLASS_TAG_KEY := 'Array'}, Index) when is_integer(Index) ->
     beamtalk_error:raise(
         beamtalk_error:new(index_out_of_bounds, 'Array', 'at:', <<"Index must be >= 1">>)
     );
-at(#{'$beamtalk_class' := 'Array'}, _Index) ->
+at(#{?BT_CLASS_TAG_KEY := 'Array'}, _Index) ->
     beamtalk_error:raise_type_error('Array', 'at:', <<"Index must be an Integer">>).
 
 -doc """
@@ -142,7 +144,7 @@ raises `empty_collection` on an empty Array so `on:do:` can handle all three
 element accessors with the same clause.
 """.
 -spec first(map()) -> term().
-first(#{'$beamtalk_class' := 'Array', 'data' := Data}) ->
+first(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}) ->
     case maps:size(Data) of
         0 ->
             beamtalk_error:raise(
@@ -163,7 +165,7 @@ Return the last element of the Array.
 Raises `empty_collection` if the Array is empty (see `first/1`).
 """.
 -spec last(map()) -> term().
-last(#{'$beamtalk_class' := 'Array', 'data' := Data}) ->
+last(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}) ->
     N = maps:size(Data),
     case N of
         0 ->
@@ -189,7 +191,7 @@ the same associations, regardless of edit history). No copy-on-write cache slot,
 so repeated `at:put:` in a loop is O(n log n), not O(n²) — see ADR 0090.
 """.
 -spec at_put(map(), integer(), term()) -> map().
-at_put(#{'$beamtalk_class' := 'Array', 'data' := Data}, Index, Value) when
+at_put(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, Index, Value) when
     is_integer(Index), Index >= 1
 ->
     N = maps:size(Data),
@@ -205,11 +207,11 @@ at_put(#{'$beamtalk_class' := 'Array', 'data' := Data}, Index, Value) when
             %% place and never inserts a new key — keeping the map canonical.
             new(Data#{Index - 1 => Value})
     end;
-at_put(#{'$beamtalk_class' := 'Array'}, Index, _Value) when is_integer(Index) ->
+at_put(#{?BT_CLASS_TAG_KEY := 'Array'}, Index, _Value) when is_integer(Index) ->
     beamtalk_error:raise(
         beamtalk_error:new(index_out_of_bounds, 'Array', 'at:put:', <<"Index must be >= 1">>)
     );
-at_put(#{'$beamtalk_class' := 'Array'}, _Index, _Value) ->
+at_put(#{?BT_CLASS_TAG_KEY := 'Array'}, _Index, _Value) ->
     beamtalk_error:raise_type_error('Array', 'at:put:', <<"Index must be an Integer">>).
 
 %%% ============================================================================
@@ -218,15 +220,15 @@ at_put(#{'$beamtalk_class' := 'Array'}, _Index, _Value) ->
 
 -doc "Apply a block to each element of the Array in order. Returns nil.".
 -spec do(map(), fun((term()) -> term())) -> 'nil'.
-do(#{'$beamtalk_class' := 'Array', 'data' := Data}, Block) when is_function(Block, 1) ->
+do(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, Block) when is_function(Block, 1) ->
     lists:foreach(Block, data_to_list(Data)),
     nil;
-do(#{'$beamtalk_class' := 'Array'}, _Block) ->
+do(#{?BT_CLASS_TAG_KEY := 'Array'}, _Block) ->
     beamtalk_error:raise_type_error('Array', 'do:', <<"Block must be a unary function">>).
 
 -doc "Return true if the Array contains the given element.".
 -spec includes(map(), term()) -> boolean().
-includes(#{'$beamtalk_class' := 'Array', 'data' := Data}, Element) ->
+includes(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, Element) ->
     %% Fold directly over the map (no intermediate maps:values/1 list) for the
     %% raw pass, matching the strict-equality membership the old array:foldl
     %% scan used.
@@ -245,19 +247,19 @@ includes(#{'$beamtalk_class' := 'Array', 'data' := Data}, Element) ->
 
 -doc "Map a block over the Array, returning a new Array.".
 -spec collect(map(), fun((term()) -> term())) -> map().
-collect(#{'$beamtalk_class' := 'Array', 'data' := Data}, Block) when is_function(Block, 1) ->
+collect(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, Block) when is_function(Block, 1) ->
     %% maps:map preserves keys (0..N-1), so the result stays canonical.
     new(maps:map(fun(_Index, Elem) -> Block(Elem) end, Data));
-collect(#{'$beamtalk_class' := 'Array'}, _Block) ->
+collect(#{?BT_CLASS_TAG_KEY := 'Array'}, _Block) ->
     beamtalk_error:raise_type_error('Array', 'collect:', <<"Block must be a unary function">>).
 
 -doc "Select elements for which block returns true, returning a new Array.".
 -spec select(map(), fun((term()) -> boolean())) -> map().
-select(#{'$beamtalk_class' := 'Array', 'data' := Data}, Block) when is_function(Block, 1) ->
+select(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, Block) when is_function(Block, 1) ->
     %% Re-index the kept elements to 0..M-1 so the result is canonical.
     Kept = [Elem || Elem <- data_to_list(Data), Block(Elem) =:= true],
     new(data_from_list(Kept));
-select(#{'$beamtalk_class' := 'Array'}, _Block) ->
+select(#{?BT_CLASS_TAG_KEY := 'Array'}, _Block) ->
     beamtalk_error:raise_type_error('Array', 'select:', <<"Block must be a unary function">>).
 
 -doc """
@@ -267,11 +269,11 @@ Calls Block(Acc, Elem) for each element — accumulator first, element second �
 matching the Beamtalk `block value: acc value: each` convention.
 """.
 -spec inject_into(map(), term(), fun((term(), term()) -> term())) -> term().
-inject_into(#{'$beamtalk_class' := 'Array', 'data' := Data}, Initial, Block) when
+inject_into(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, Initial, Block) when
     is_function(Block, 2)
 ->
     lists:foldl(fun(Elem, Acc) -> Block(Acc, Elem) end, Initial, data_to_list(Data));
-inject_into(#{'$beamtalk_class' := 'Array'}, _Initial, _Block) ->
+inject_into(#{?BT_CLASS_TAG_KEY := 'Array'}, _Initial, _Block) ->
     beamtalk_error:raise_type_error('Array', 'inject:into:', <<"Block must be a binary function">>).
 
 %%% ============================================================================
@@ -285,7 +287,7 @@ Used by codegen for rest patterns in array destructuring:
 `#[a, b, ...rest] := arr` generates `slice_from(Arr, 3)` for the rest binding.
 """.
 -spec slice_from(map(), integer()) -> map().
-slice_from(#{'$beamtalk_class' := 'Array', 'data' := Data}, From) when
+slice_from(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, From) when
     is_integer(From), From >= 1
 ->
     case From > maps:size(Data) of
@@ -295,11 +297,11 @@ slice_from(#{'$beamtalk_class' := 'Array', 'data' := Data}, From) when
             Rest = lists:nthtail(From - 1, data_to_list(Data)),
             new(data_from_list(Rest))
     end;
-slice_from(#{'$beamtalk_class' := 'Array'}, From) when is_integer(From) ->
+slice_from(#{?BT_CLASS_TAG_KEY := 'Array'}, From) when is_integer(From) ->
     beamtalk_error:raise(
         beamtalk_error:new(index_out_of_bounds, 'Array', 'sliceFrom:', <<"Index must be >= 1">>)
     );
-slice_from(#{'$beamtalk_class' := 'Array'}, _From) ->
+slice_from(#{?BT_CLASS_TAG_KEY := 'Array'}, _From) ->
     beamtalk_error:raise_type_error('Array', 'sliceFrom:', <<"Index must be an Integer">>).
 
 %%% ============================================================================
@@ -312,7 +314,7 @@ Return a developer-readable string representation of the Array.
 Format: `#[elem1, elem2, ...]`
 """.
 -spec print_string(map()) -> binary().
-print_string(#{'$beamtalk_class' := 'Array', 'data' := Data}) ->
+print_string(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}) ->
     Parts = [beamtalk_primitive:print_string(E) || E <- data_to_list(Data)],
     Joined = lists:join(<<", ">>, Parts),
     iolist_to_binary(["#[", Joined, "]"]).

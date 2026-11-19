@@ -209,9 +209,9 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 -type handler() :: term().
 
 %% Beamtalk object types for FFI type inference.
--type announcer() :: #{'$beamtalk_class' := 'Announcer', atom() => term()}.
--type system_announcer() :: #{'$beamtalk_class' := 'SystemAnnouncer', atom() => term()}.
--type subscription() :: #{'$beamtalk_class' := 'Subscription', atom() => term()}.
+-type announcer() :: #{?BT_CLASS_TAG_KEY := 'Announcer', atom() => term()}.
+-type system_announcer() :: #{?BT_CLASS_TAG_KEY := 'SystemAnnouncer', atom() => term()}.
+-type subscription() :: #{?BT_CLASS_TAG_KEY := 'Subscription', atom() => term()}.
 
 %% An immutable `SubscriptionNode` snapshot record (ADR 0093 §7). A
 %% tagged map minted here so the Beamtalk type checker infers FFI results as
@@ -219,13 +219,13 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 %% declaration: the subscribed-to event class (a class object), the announcer
 %% scope it was read from, the live subscriber pid, the handler kind
 %% (`#do | #send | #doOnce`), and the `once` flag.
--type subscription_node() :: #{'$beamtalk_class' := 'SubscriptionNode', atom() => term()}.
+-type subscription_node() :: #{?BT_CLASS_TAG_KEY := 'SubscriptionNode', atom() => term()}.
 
 %% An `AnnouncementNavigation` handle: a tagged map carrying the
 %% announcer scope it navigates, minted by `navigationFor/1`. Tagged so the
 %% Beamtalk type checker infers FFI results as `AnnouncementNavigation`.
 -type announcement_navigation() :: #{
-    '$beamtalk_class' := 'AnnouncementNavigation', atom() => term()
+    ?BT_CLASS_TAG_KEY := 'AnnouncementNavigation', atom() => term()
 }.
 
 %% A subscription row in the primary `set` table, keyed by the unique `SubRef`.
@@ -1096,7 +1096,7 @@ carried in the handle so the navigation's queries scope to it.
 """.
 -spec 'navigationFor'(announcer() | system_announcer()) -> announcement_navigation().
 'navigationFor'(Announcer) ->
-    #{'$beamtalk_class' => 'AnnouncementNavigation', announcer => Announcer}.
+    #{?BT_CLASS_TAG_KEY => 'AnnouncementNavigation', announcer => Announcer}.
 
 -doc "Snapshot of the navigated announcer's subscriptions. Backs `AnnouncementNavigation subscriptions`.".
 -spec 'navSubscriptionNodes'(announcement_navigation()) -> [subscription_node()].
@@ -1128,7 +1128,7 @@ carried in the handle so the navigation's queries scope to it.
     subscription_node().
 subscription_node({_SubRef, _AnnouncerRef, Class, SubscriberPid, Handler, Once}, Announcer) ->
     #{
-        '$beamtalk_class' => 'SubscriptionNode',
+        ?BT_CLASS_TAG_KEY => 'SubscriptionNode',
         announcementClass => class_object(Class),
         announcer => Announcer,
         subscriber => SubscriberPid,
@@ -1432,10 +1432,10 @@ class name: `MyAnnouncer new class` is `MyAnnouncer`.
 'newAnnouncer'(undefined) ->
     %% `Announcer`'s own compiled `new/0` has no receiver to pass
     %% (`class_new('undefined')`), and is only ever `Announcer new`.
-    #{'$beamtalk_class' => 'Announcer', ref => make_ref()};
+    #{?BT_CLASS_TAG_KEY => 'Announcer', ref => make_ref()};
 'newAnnouncer'(#beamtalk_object{pid = ClassPid}) ->
     ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
-    #{'$beamtalk_class' => ClassName, ref => make_ref()}.
+    #{?BT_CLASS_TAG_KEY => ClassName, ref => make_ref()}.
 
 -doc """
 Return the singleton SystemAnnouncer handle. The system bus uses the atom
@@ -1445,7 +1445,7 @@ it as the shared bus. Called from `SystemAnnouncer current`.
 """.
 -spec 'systemAnnouncer'() -> system_announcer().
 'systemAnnouncer'() ->
-    #{'$beamtalk_class' => 'SystemAnnouncer', ref => beamtalk_system_announcer}.
+    #{?BT_CLASS_TAG_KEY => 'SystemAnnouncer', ref => beamtalk_system_announcer}.
 
 -doc """
 Raise UnsupportedOperation when `announceAndWait:` is called on the system bus.
@@ -1628,7 +1628,7 @@ system_announce_running(EventClass, Fields) when is_atom(EventClass), is_map(Fie
         [] ->
             ok;
         Matching ->
-            Event = Fields#{'$beamtalk_class' => EventClass},
+            Event = Fields#{?BT_CLASS_TAG_KEY => EventClass},
             Refs = walk_matching(?SYSTEM_ANNOUNCER_REF, EventClass, Matching),
             dispatch_refs(Refs, EventClass, Event)
     end.
@@ -1744,7 +1744,7 @@ subscribe_and_wrap(Announcer, ClassRef, Handler, OnceFlag) ->
     AnnouncerRef = announcer_ref(Announcer),
     case subscribe(AnnouncerRef, Class, self(), Handler, OnceFlag) of
         {ok, SubRef} ->
-            #{'$beamtalk_class' => 'Subscription', ref => SubRef};
+            #{?BT_CLASS_TAG_KEY => 'Subscription', ref => SubRef};
         {error, Error} ->
             erlang:error(Error)
     end.
@@ -1795,7 +1795,7 @@ class_name({beamtalk_object, Tag, _Module, Pid}) when is_atom(Tag), is_pid(Pid) 
                 _ -> Tag
             end
     end;
-class_name(#{'$beamtalk_class' := Class}) when is_atom(Class) ->
+class_name(#{?BT_CLASS_TAG_KEY := Class}) when is_atom(Class) ->
     Class;
 class_name(_) ->
     'Announcement'.
@@ -1835,7 +1835,7 @@ announcer_ref(_) ->
 Extract the announcement class atom from an event (its `$beamtalk_class` key).
 """.
 -spec event_class(term()) -> announcement_class().
-event_class(#{'$beamtalk_class' := Class}) when is_atom(Class) ->
+event_class(#{?BT_CLASS_TAG_KEY := Class}) when is_atom(Class) ->
     Class;
 event_class(Event) when is_atom(Event) ->
     Event;

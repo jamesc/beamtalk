@@ -179,7 +179,7 @@ decode/encode helpers and the pending-action helpers.
 -include_lib("kernel/include/logger.hrl").
 
 %% BT-4090: the `ReplyTo` handle (runtime-minted, `'$beamtalk_class'`-tagged).
--type reply_to() :: #{'$beamtalk_class' := 'ReplyTo', from := term()}.
+-type reply_to() :: #{?BT_CLASS_TAG_KEY := 'ReplyTo', from := term()}.
 
 %% BT-3967: process-dictionary key holding a deferred self-stop request
 %% (`self stopWith: Reason` from inside a method), consumed by
@@ -1941,7 +1941,7 @@ leak path never surfaces as a watched-actor changed slot.
 """.
 -spec changed_state_keys(map(), map()) -> [atom()].
 changed_state_keys(OldState, NewState) ->
-    InternalKeys = ['__methods__', beamtalk_tagged_map:class_key(), '__class_mod__'],
+    InternalKeys = ['__methods__', beamtalk_tagged_map:class_key(), ?BT_CLASS_MOD_KEY],
     AllKeys = lists:usort(maps:keys(OldState) ++ maps:keys(NewState)),
     UserKeys = [K || K <- AllKeys -- InternalKeys, not beamtalk_tagged_map:is_local_temp_key(K)],
     [
@@ -1981,7 +1981,7 @@ and self-sends within methods.
 make_self(State) ->
     #beamtalk_object{
         class = beamtalk_tagged_map:class_of(State),
-        class_mod = maps:get('__class_mod__', State, undefined),
+        class_mod = maps:get(?BT_CLASS_MOD_KEY, State, undefined),
         pid = self()
     }.
 
@@ -2105,7 +2105,7 @@ takeDeferredCall(_Self) ->
 
 -spec reply_to_handle(term()) -> reply_to().
 reply_to_handle(From) ->
-    #{'$beamtalk_class' => 'ReplyTo', from => From}.
+    #{?BT_CLASS_TAG_KEY => 'ReplyTo', from => From}.
 
 -doc """
 FFI shim for `ReplyTo>>reply:` (BT-4090): answer a parked caller with
@@ -2116,7 +2116,7 @@ timed out or died, or a second reply to the same caller, is a silent no-op
 (OTP drops it). Answers `ok`.
 """.
 -spec replyToDeferred(reply_to(), term()) -> ok.
-replyToDeferred(#{'$beamtalk_class' := 'ReplyTo', from := From}, Value) ->
+replyToDeferred(#{?BT_CLASS_TAG_KEY := 'ReplyTo', from := From}, Value) ->
     Reply = encode_reply_for_tagged(From, 'reply:', Value),
     gen_server:reply(From, Reply),
     ok.
@@ -2128,7 +2128,7 @@ the `handle_call` error arm (`{error, Encoded}`, wire-encoded when remote).
 Same silent no-op rules as `replyToDeferred/2`. Answers `ok`.
 """.
 -spec replyErrorToDeferred(reply_to(), term()) -> ok.
-replyErrorToDeferred(#{'$beamtalk_class' := 'ReplyTo', from := From}, Error) ->
+replyErrorToDeferred(#{?BT_CLASS_TAG_KEY := 'ReplyTo', from := From}, Error) ->
     Reply =
         case encode_reply_for_tagged(From, 'replyError:', Error) of
             {ok, EncodedError} -> {error, EncodedError};

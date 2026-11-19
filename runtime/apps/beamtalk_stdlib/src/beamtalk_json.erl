@@ -302,7 +302,7 @@ reach `json:encode/1` as a tuple. Non-tagged keys pass through untouched.
 """.
 -spec encode_map_fields(map(), [term()]) -> map().
 encode_map_fields(Map, Seen) ->
-    Cleaned = maps:remove('$beamtalk_class', Map),
+    Cleaned = maps:remove(?BT_CLASS_TAG_KEY, Map),
     maps:from_list([
         {prepare_key(K), prepare_for_encode(V, Seen)}
      || {K, V} <- maps:to_list(Cleaned)

@@ -42,6 +42,8 @@ implementation. The instance-side `next`/`nextInteger:` selectors delegate
 directly to `next/1` / `nextInteger/2` (ADR 0101).
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -export(['next'/0, nextInteger/1, 'new'/0, seed/1]).
 %% Instance-side `native:` delegation targets (ADR 0101): the first
 %% keyword + self-threading rule maps `rng next` → `next/1` and
@@ -50,7 +52,7 @@ directly to `next/1` / `nextInteger/2` (ADR 0101).
 -export([next/1, nextInteger/2]).
 -export(['atRandom'/1]).
 
--type t() :: #{'$beamtalk_class' := 'Random', atom() => term()}.
+-type t() :: #{?BT_CLASS_TAG_KEY := 'Random', atom() => term()}.
 -export_type([t/0]).
 
 %%% ============================================================================
@@ -82,7 +84,7 @@ nextInteger(_) ->
 'new'() ->
     State = rand:seed_s(exsss),
     #{
-        '$beamtalk_class' => 'Random',
+        ?BT_CLASS_TAG_KEY => 'Random',
         state => State
     }.
 
@@ -91,7 +93,7 @@ nextInteger(_) ->
 seed(Seed) when is_integer(Seed) ->
     State = rand:seed_s(exsss, {Seed, Seed, Seed}),
     #{
-        '$beamtalk_class' => 'Random',
+        ?BT_CLASS_TAG_KEY => 'Random',
         state => State
     };
 seed(_) ->

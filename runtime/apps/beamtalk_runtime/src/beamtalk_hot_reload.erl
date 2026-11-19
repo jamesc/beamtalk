@@ -37,6 +37,7 @@ runtime.
 """.
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
 
 %% Public API
 -export([code_change/3, trigger_code_change/2, trigger_code_change/3]).
@@ -242,7 +243,7 @@ seed_internal_keys(ClassName, Module, InternalKeys, FallbackKeys) ->
         %% bt-catcher-audit: not-applicable-no-block - default-state init/1, no caller-supplied
         %% block
         try
-            Module:init(#{'__skip_initialize__' => true})
+            Module:init(#{?BT_SKIP_INITIALIZE_KEY => true})
         catch
             _:_ -> init_error
         end

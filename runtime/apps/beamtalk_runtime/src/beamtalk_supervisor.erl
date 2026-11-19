@@ -139,7 +139,7 @@ functions that call OTP APIs from the caller's process context.
 %% exact `'$beamtalk_class'` field lets the type checker infer FFI results as
 %% `SupervisorChild` (see `beamtalk_process_navigation`'s `node_map()`).
 -type supervisor_child() :: #{
-    '$beamtalk_class' := 'SupervisorChild',
+    ?BT_CLASS_TAG_KEY := 'SupervisorChild',
     id := term(),
     child := beamtalk_object() | pid() | nil,
     status := running | restarting | stopped,

@@ -27,6 +27,8 @@ other while keeping both DRY.
 * `close/1` — close the exec port
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -export([
     flush_and_collect/2,
     bt_array_to_list/3,
@@ -104,11 +106,11 @@ lists; Array values returned from collection operations are tagged maps.
 Raises `type_error` via `beamtalk_error` on invalid input.
 """.
 -spec bt_array_to_list(atom(), term(), atom()) -> list().
-bt_array_to_list(_Class, #{'$beamtalk_class' := 'Array', 'data' := Data} = Arr, _Selector) when
+bt_array_to_list(_Class, #{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data} = Arr, _Selector) when
     is_map(Data)
 ->
     beamtalk_tagged_map:array_to_list(Arr);
-bt_array_to_list(Class, #{'$beamtalk_class' := 'Array'}, Selector) ->
+bt_array_to_list(Class, #{?BT_CLASS_TAG_KEY := 'Array'}, Selector) ->
     beamtalk_error:raise_type_error(Class, Selector, undefined);
 bt_array_to_list(_Class, List, _Selector) when is_list(List) ->
     List;

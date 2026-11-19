@@ -30,6 +30,8 @@ disagree only for numbers, so mutually-`==` elements form a short contiguous
 run that those helpers scan strictly.
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -define(ARG_HINT, <<"Argument must be a Set">>).
 
 -export([
@@ -55,12 +57,12 @@ run that those helpers scan strictly.
 -doc "Create a new empty Set.".
 -spec new() -> map().
 new() ->
-    #{'$beamtalk_class' => 'Set', elements => []}.
+    #{?BT_CLASS_TAG_KEY => 'Set', elements => []}.
 
 -doc "Create a Set from a list of elements.".
 -spec from_list(list()) -> map().
 from_list(List) when is_list(List) ->
-    #{'$beamtalk_class' => 'Set', elements => beamtalk_list:unique(List)};
+    #{?BT_CLASS_TAG_KEY => 'Set', elements => beamtalk_list:unique(List)};
 from_list(_NonList) ->
     beamtalk_error:raise_type_error('Set', 'fromList:', <<"Expected a List argument">>).
 
@@ -70,17 +72,17 @@ from_list(_NonList) ->
 
 -doc "Return the number of elements in the Set.".
 -spec size(map()) -> non_neg_integer().
-size(#{'$beamtalk_class' := 'Set', elements := Elements}) ->
+size(#{?BT_CLASS_TAG_KEY := 'Set', elements := Elements}) ->
     length(Elements).
 
 -doc "Return true if the Set has no elements.".
 -spec is_empty(map()) -> boolean().
-is_empty(#{'$beamtalk_class' := 'Set', elements := Elements}) ->
+is_empty(#{?BT_CLASS_TAG_KEY := 'Set', elements := Elements}) ->
     Elements =:= [].
 
 -doc "Return true if the Set contains the given element.".
 -spec includes(map(), term()) -> boolean().
-includes(#{'$beamtalk_class' := 'Set', elements := Elements}, Element) ->
+includes(#{?BT_CLASS_TAG_KEY := 'Set', elements := Elements}, Element) ->
     beamtalk_list:strict_member_sorted(Element, Elements).
 
 %%% ============================================================================
@@ -89,13 +91,13 @@ includes(#{'$beamtalk_class' := 'Set', elements := Elements}, Element) ->
 
 -doc "Add an element to the Set, returning a new Set.".
 -spec add(map(), term()) -> map().
-add(#{'$beamtalk_class' := 'Set', elements := Elements}, Element) ->
-    #{'$beamtalk_class' => 'Set', elements => strict_add(Element, Elements)}.
+add(#{?BT_CLASS_TAG_KEY := 'Set', elements := Elements}, Element) ->
+    #{?BT_CLASS_TAG_KEY => 'Set', elements => strict_add(Element, Elements)}.
 
 -doc "Remove an element from the Set, returning a new Set.".
 -spec remove(map(), term()) -> map().
-remove(#{'$beamtalk_class' := 'Set', elements := Elements}, Element) ->
-    #{'$beamtalk_class' => 'Set', elements => strict_del(Element, Elements)}.
+remove(#{?BT_CLASS_TAG_KEY := 'Set', elements := Elements}, Element) ->
+    #{?BT_CLASS_TAG_KEY => 'Set', elements => strict_del(Element, Elements)}.
 
 %%% ============================================================================
 %%% Set Operations (returns new Set)
@@ -104,11 +106,11 @@ remove(#{'$beamtalk_class' := 'Set', elements := Elements}, Element) ->
 -doc "Return the union of two Sets.".
 -spec union(map(), map()) -> map().
 union(
-    #{'$beamtalk_class' := 'Set', elements := E1},
-    #{'$beamtalk_class' := 'Set', elements := E2}
+    #{?BT_CLASS_TAG_KEY := 'Set', elements := E1},
+    #{?BT_CLASS_TAG_KEY := 'Set', elements := E2}
 ) ->
-    #{'$beamtalk_class' => 'Set', elements => beamtalk_list:unique(E1 ++ E2)};
-union(#{'$beamtalk_class' := 'Set'}, _Other) ->
+    #{?BT_CLASS_TAG_KEY => 'Set', elements => beamtalk_list:unique(E1 ++ E2)};
+union(#{?BT_CLASS_TAG_KEY := 'Set'}, _Other) ->
     beamtalk_error:raise_type_error('Set', 'union:', ?ARG_HINT);
 union(_, _) ->
     beamtalk_error:raise_type_error('Set', 'union:', ?ARG_HINT).
@@ -116,11 +118,11 @@ union(_, _) ->
 -doc "Return the intersection of two Sets.".
 -spec intersection(map(), map()) -> map().
 intersection(
-    #{'$beamtalk_class' := 'Set', elements := E1},
-    #{'$beamtalk_class' := 'Set', elements := E2}
+    #{?BT_CLASS_TAG_KEY := 'Set', elements := E1},
+    #{?BT_CLASS_TAG_KEY := 'Set', elements := E2}
 ) ->
-    #{'$beamtalk_class' => 'Set', elements => strict_intersection(E1, E2)};
-intersection(#{'$beamtalk_class' := 'Set'}, _Other) ->
+    #{?BT_CLASS_TAG_KEY => 'Set', elements => strict_intersection(E1, E2)};
+intersection(#{?BT_CLASS_TAG_KEY := 'Set'}, _Other) ->
     beamtalk_error:raise_type_error('Set', 'intersection:', ?ARG_HINT);
 intersection(_, _) ->
     beamtalk_error:raise_type_error('Set', 'intersection:', ?ARG_HINT).
@@ -128,11 +130,11 @@ intersection(_, _) ->
 -doc "Return the difference of two Sets (elements in self but not other).".
 -spec difference(map(), map()) -> map().
 difference(
-    #{'$beamtalk_class' := 'Set', elements := E1},
-    #{'$beamtalk_class' := 'Set', elements := E2}
+    #{?BT_CLASS_TAG_KEY := 'Set', elements := E1},
+    #{?BT_CLASS_TAG_KEY := 'Set', elements := E2}
 ) ->
-    #{'$beamtalk_class' => 'Set', elements => strict_difference(E1, E2)};
-difference(#{'$beamtalk_class' := 'Set'}, _Other) ->
+    #{?BT_CLASS_TAG_KEY => 'Set', elements => strict_difference(E1, E2)};
+difference(#{?BT_CLASS_TAG_KEY := 'Set'}, _Other) ->
     beamtalk_error:raise_type_error('Set', 'difference:', ?ARG_HINT);
 difference(_, _) ->
     beamtalk_error:raise_type_error('Set', 'difference:', ?ARG_HINT).
@@ -144,11 +146,11 @@ difference(_, _) ->
 -doc "Return true if self is a subset of other.".
 -spec is_subset_of(map(), map()) -> boolean().
 is_subset_of(
-    #{'$beamtalk_class' := 'Set', elements := E1},
-    #{'$beamtalk_class' := 'Set', elements := E2}
+    #{?BT_CLASS_TAG_KEY := 'Set', elements := E1},
+    #{?BT_CLASS_TAG_KEY := 'Set', elements := E2}
 ) ->
     strict_is_subset(E1, E2);
-is_subset_of(#{'$beamtalk_class' := 'Set'}, _Other) ->
+is_subset_of(#{?BT_CLASS_TAG_KEY := 'Set'}, _Other) ->
     beamtalk_error:raise_type_error('Set', 'isSubsetOf:', ?ARG_HINT);
 is_subset_of(_, _) ->
     beamtalk_error:raise_type_error('Set', 'isSubsetOf:', ?ARG_HINT).
@@ -159,7 +161,7 @@ is_subset_of(_, _) ->
 
 -doc "Return the elements as a plain list (already a sorted list).".
 -spec as_list(map()) -> list().
-as_list(#{'$beamtalk_class' := 'Set', elements := Elements}) ->
+as_list(#{?BT_CLASS_TAG_KEY := 'Set', elements := Elements}) ->
     Elements.
 
 %%% ============================================================================
@@ -168,10 +170,10 @@ as_list(#{'$beamtalk_class' := 'Set', elements := Elements}) ->
 
 -doc "Apply a block to each element of the Set.".
 -spec do(map(), fun((term()) -> term())) -> 'nil'.
-do(#{'$beamtalk_class' := 'Set', elements := Elements}, Block) when is_function(Block, 1) ->
+do(#{?BT_CLASS_TAG_KEY := 'Set', elements := Elements}, Block) when is_function(Block, 1) ->
     lists:foreach(Block, Elements),
     nil;
-do(#{'$beamtalk_class' := 'Set'}, _Block) ->
+do(#{?BT_CLASS_TAG_KEY := 'Set'}, _Block) ->
     beamtalk_error:raise_type_error('Set', 'do:', <<"Block must be a unary function">>).
 
 %%% ============================================================================

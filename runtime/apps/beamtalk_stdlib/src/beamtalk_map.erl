@@ -15,6 +15,8 @@ stdlib module bt@stdlib@dictionary.
 Replaces the former beamtalk_map.erl hand-written dispatch module.
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 -export([
     at_if_absent/3,
     at_if_present/3,
@@ -144,7 +146,7 @@ Used by Dictionary>>printString and REPL display.
 -spec print_string(map()) -> binary().
 print_string(Map) ->
     %% Strip the $beamtalk_class tag if present (plain dictionaries don't have it)
-    PlainMap = maps:remove('$beamtalk_class', Map),
+    PlainMap = maps:remove(?BT_CLASS_TAG_KEY, Map),
     Pairs = maps:fold(
         fun(K, V, Acc) ->
             KeyStr = beamtalk_primitive:print_string(K),
