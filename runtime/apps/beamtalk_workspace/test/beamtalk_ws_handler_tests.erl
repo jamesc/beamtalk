@@ -252,6 +252,37 @@ auth_malformed_json_closes_test() ->
     ?assertEqual(<<"auth_error">>, maps:get(<<"type">>, Decoded)),
     ?assert(lists:keymember(close, 1, Frames)).
 
+%% BT-5018: OTP 28 `json:decode/1` raises `{unexpected_sequence, _}` for an
+%% unpaired surrogate escape, which the auth handler did not catch, so an
+%% unauthenticated peer could crash the handler. Every malformed frame must get
+%% the same generic `auth_error` and a close, revealing nothing about the parse.
+auth_malformed_frames_get_generic_auth_error_test_() ->
+    Frames = [
+        <<"{\"type\":\"auth\",\"cookie\":\"\\ud800\"}">>,
+        <<"{\"type\":\"auth\",\"cookie\":\"\\udc00\"}">>,
+        <<"{\"type\":\"auth\",\"cookie\":\"\\ud800\\u0041\"}">>,
+        <<"{\"cookie\":\"a\\ud800">>,
+        <<"{\"a\":", 255, "}">>,
+        <<"{\"a\":\"", 195, "\"}">>,
+        <<"[1,2">>,
+        <<>>
+    ],
+    [
+        {iolist_to_binary(io_lib:format("~p", [F])), fun() ->
+            {Out, State} = beamtalk_ws_handler:websocket_handle({text, F}, unauth_state()),
+            ?assertEqual(false, State#ws_state.authenticated),
+            [{text, Reply}, {close, 1008, <<"Authentication required">>}] = Out,
+            ?assertEqual(
+                #{
+                    <<"type">> => <<"auth_error">>,
+                    <<"message">> => <<"Malformed auth message">>
+                },
+                json:decode(Reply)
+            )
+        end}
+     || F <- Frames
+    ].
+
 auth_non_auth_message_rejected_test() ->
     Json = iolist_to_binary(json:encode(#{<<"type">> => <<"eval">>})),
     {Frames, _State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
@@ -626,8 +657,7 @@ shutdown_non_binary_cookie_denied_test() ->
     ?assertMatch([{text, _} | _], Frames).
 
 subscribe_logs_all_levels_test() ->
-    %% Drive every parse_log_level/1 clause (including the unknown -> debug
-    %% fallback) and the no-level default.
+    %% Drive every parse_log_level/1 clause and the no-level default.
     Levels = [
         <<"emergency">>,
         <<"alert">>,
@@ -636,8 +666,7 @@ subscribe_logs_all_levels_test() ->
         <<"warning">>,
         <<"notice">>,
         <<"info">>,
-        <<"debug">>,
-        <<"bogus-level">>
+        <<"debug">>
     ],
     lists:foreach(
         fun(Level) ->
@@ -652,6 +681,59 @@ subscribe_logs_all_levels_test() ->
     {_, S2} = beamtalk_ws_handler:websocket_handle({text, NoLevel}, authed_state()),
     ?assert(S2#ws_state.log_subscribed),
     beamtalk_ws_log_handler:unsubscribe().
+
+%% BT-5018: an unknown level used to become `debug`, the most verbose stream.
+%% It is now an error and leaves the subscription exactly as it was.
+subscribe_logs_unknown_level_is_an_error_test() ->
+    beamtalk_ws_log_handler:unsubscribe(),
+    lists:foreach(
+        fun(Bad) ->
+            Json = op_json(<<"subscribe-logs">>, #{<<"level">> => Bad}),
+            {Frames, S} = beamtalk_ws_handler:websocket_handle({text, Json}, authed_state()),
+            Decoded = first_text(Frames),
+            ?assertMatch([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)),
+            ?assertMatch(<<_/binary>>, maps:get(<<"error">>, Decoded)),
+            ?assertNot(S#ws_state.log_subscribed),
+            ?assertEqual([], ets:lookup(beamtalk_ws_log_subscribers, self()))
+        end,
+        [<<"bogus-level">>, <<"DEBUG">>, 7, null]
+    ).
+
+%% An unknown level on an existing subscription keeps the old level.
+subscribe_logs_unknown_level_keeps_existing_subscription_test() ->
+    Ok = op_json(<<"subscribe-logs">>, #{<<"level">> => <<"error">>}),
+    {_, S1} = beamtalk_ws_handler:websocket_handle({text, Ok}, authed_state()),
+    Bad = op_json(<<"subscribe-logs">>, #{<<"level">> => <<"nope">>}),
+    {Frames, S2} = beamtalk_ws_handler:websocket_handle({text, Bad}, S1),
+    ?assertMatch([<<"done">>, <<"error">>], maps:get(<<"status">>, first_text(Frames))),
+    ?assert(S2#ws_state.log_subscribed),
+    ?assertMatch([{_, error, _, _}], ets:lookup(beamtalk_ws_log_subscribers, self())),
+    beamtalk_ws_log_handler:unsubscribe().
+
+%% BT-5018: changing the level 50 times must not grow the processes watching
+%% the connection (each change used to leak one unlinked monitor process).
+subscribe_logs_level_changes_do_not_leak_processes_test() ->
+    Before = length(element(2, process_info(self(), monitored_by))),
+    Levels = [<<"debug">>, <<"info">>, <<"warning">>, <<"error">>],
+    State = lists:foldl(
+        fun(N, S0) ->
+            Json = op_json(<<"subscribe-logs">>, #{<<"level">> => lists:nth(N rem 4 + 1, Levels)}),
+            {_, S} = beamtalk_ws_handler:websocket_handle({text, Json}, S0),
+            S
+        end,
+        authed_state(),
+        lists:seq(1, 50)
+    ),
+    ?assert(State#ws_state.log_subscribed),
+    ok = beamtalk_test_wait:until(fun() ->
+        length(element(2, process_info(self(), monitored_by))) >= Before + 1
+    end),
+    ?assertEqual(Before + 1, length(element(2, process_info(self(), monitored_by)))),
+    Off = op_json(<<"unsubscribe-logs">>, #{}),
+    {_, _} = beamtalk_ws_handler:websocket_handle({text, Off}, State),
+    ok = beamtalk_test_wait:until(fun() ->
+        length(element(2, process_info(self(), monitored_by))) =:= Before
+    end).
 
 %%% ===========================================================================
 %%% websocket_info/2 — streaming + push frames (authenticated, pending eval)
@@ -762,6 +844,26 @@ transcript_output_pushes_frame_test() ->
     ),
     Decoded = first_text(Frames),
     ?assertEqual(<<"transcript">>, maps:get(<<"push">>, Decoded)).
+
+%% BT-5018: `show:` of an unchecked string (`asStringUnchecked`) puts invalid
+%% UTF-8 on the transcript; `json:encode/1` raises on it, which killed the
+%% connection. The push now carries the hex rendering `ensure_utf8/1` gives.
+transcript_output_invalid_utf8_keeps_connection_test() ->
+    Bad = <<"ok ", 255, 254, " tail">>,
+    {Frames, State} = beamtalk_ws_handler:websocket_info(
+        {transcript_output, Bad}, authed_state()
+    ),
+    Decoded = first_text(Frames),
+    ?assertEqual(<<"transcript">>, maps:get(<<"push">>, Decoded)),
+    ?assertEqual(<<"<<">>, binary:part(maps:get(<<"text">>, Decoded), 0, 2)),
+    %% (`json:decode/1` already rejects invalid UTF-8; this pins that the push survived.)
+    ?assertMatch(<<_/binary>>, maps:get(<<"text">>, Decoded)),
+    ?assert(State#ws_state.authenticated),
+    %% Valid UTF-8 (including multi-byte) is passed through untouched.
+    {Ok, _} = beamtalk_ws_handler:websocket_info(
+        {transcript_output, <<"caf", 195, 169>>}, authed_state()
+    ),
+    ?assertEqual(<<"caf", 195, 169>>, maps:get(<<"text">>, first_text(Ok))).
 
 actor_spawned_pushes_frame_test() ->
     Event = #{'$beamtalk_class' => 'ActorSpawned', actorClass => 'Counter', pid => self()},
@@ -1047,6 +1149,15 @@ log_event_not_subscribed_dropped_test() ->
 %%% websocket_info/2 — late messages dropped when no eval pending
 %%% ===========================================================================
 
+eval_out_invalid_utf8_keeps_connection_test() ->
+    Msg = make_msg(<<"eval">>),
+    State = (authed_state())#ws_state{pending_eval = Msg},
+    Bad = <<"out ", 255, 254>>,
+    {Frames, State1} = beamtalk_ws_handler:websocket_info({eval_out, Bad}, State),
+    Decoded = first_text(Frames),
+    ?assertEqual(<<"<<">>, binary:part(maps:get(<<"out">>, Decoded), 0, 2)),
+    ?assertEqual(Msg, State1#ws_state.pending_eval).
+
 late_eval_out_dropped_test() ->
     State = authed_state(),
     ?assertEqual({ok, State}, beamtalk_ws_handler:websocket_info({eval_out, <<"x">>}, State)).
@@ -1087,6 +1198,28 @@ session_down_closes_and_clears_test() ->
     ?assertEqual(false, State1#ws_state.authenticated),
     ?assertEqual(undefined, State1#ws_state.session_id),
     ?assert(lists:keymember(close, 1, Frames)).
+
+%% A client-requested `close` (and idle shutdown) stops the session with
+%% `normal`: the connection closes with 1000. A crash or kill keeps 1011.
+session_down_close_code_test_() ->
+    [
+        {iolist_to_binary(io_lib:format("~p", [Reason])), fun() ->
+            beamtalk_session_table:new(),
+            beamtalk_session_table:insert(<<"sess-1">>, self()),
+            MonRef = make_ref(),
+            State = (authed_state())#ws_state{session_mon = MonRef},
+            {Frames, _} = beamtalk_ws_handler:websocket_info(
+                {'DOWN', MonRef, process, self(), Reason}, State
+            ),
+            ?assertMatch([{close, Code, <<"Session terminated">>}], Frames)
+        end}
+     || {Reason, Code} <- [
+            {normal, 1000},
+            {killed, 1011},
+            {shutdown, 1011},
+            {{badmatch, oops}, 1011}
+        ]
+    ].
 
 %%% ===========================================================================
 %%% terminate/3

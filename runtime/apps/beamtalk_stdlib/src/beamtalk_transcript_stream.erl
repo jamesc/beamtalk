@@ -378,20 +378,22 @@ remove_subscriber(Pid, #state{subscribers = Subs} = State) ->
     end.
 
 -doc """
-Ensure a binary is valid UTF-8. Returns the binary unchanged if valid,
-or a ~p (io_lib:format("~p", ...)) representation if it contains invalid
-or incomplete UTF-8 data.
+Ensure a binary is valid UTF-8, so `json:encode/1` can never reject it.
+
+Returns the binary unchanged if valid. Otherwise it answers the `Binary
+printString` hex rendering (`<<ff fe>>`), pure ASCII. (An earlier `~p`
+rendering printed the offending bytes as latin1 characters, so the "fixed"
+text was still invalid UTF-8; BT-5018.)
 
 BT-4170: a tagged `String` unwraps first (validating the bytes — only
-`asStringUnchecked` can smuggle invalid bytes into one, and the `~p`
-fallback below contains even that).
+`asStringUnchecked` can smuggle invalid bytes into one, and the hex fallback
+below contains even that).
 """.
 -spec ensure_utf8(binary() | beamtalk_string:t()) -> binary().
 ensure_utf8({beamtalk_string, Bin}) when is_binary(Bin) ->
     ensure_utf8(Bin);
-ensure_utf8(Bin) ->
-    case unicode:characters_to_binary(Bin) of
-        Utf8 when is_binary(Utf8) -> Utf8;
-        {error, _, _} -> list_to_binary(io_lib:format("~p", [Bin]));
-        {incomplete, _, _} -> list_to_binary(io_lib:format("~p", [Bin]))
+ensure_utf8(Bin) when is_binary(Bin) ->
+    case beamtalk_primitive:is_utf8(Bin) of
+        true -> Bin;
+        false -> beamtalk_primitive:string_to_binary(beamtalk_binary:print_string(Bin))
     end.

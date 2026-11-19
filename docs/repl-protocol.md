@@ -27,7 +27,7 @@ The auth message accepts these fields:
 |-------|------|----------|-------------|
 | `cookie` | string | yes | Workspace cookie, validated against `erlang:get_cookie()`. |
 | `client` | string | no | Originating client surface, recorded as the session's `kind` and surfaced by `Workspace sessions` / `Session kind` / `Session info`. Normalised against an allowlist (`repl`, `mcp`, `lsp`, `liveview`, `ide`, `attach`, `vscode`, `shutdown`); any other value collapses to `unknown`. The CLI REPL sends `repl`, the MCP server `mcp`, the LSP `lsp`, the VS Code extension's workspace client `vscode` (protocol-only version gate, see below), `workspace stop` sends `shutdown` (version-exempt, restricted to the `shutdown` op). |
-| `resume` | string | no | Session id to resume. When the id maps to a live session within the grace window the connection re-binds to it; otherwise (unknown, dead, or non-string) a fresh session is created. |
+| `resume` | string | no | Session id to resume. When the id maps to a live session within the grace window the connection re-binds to it; otherwise (unknown, dead, or non-string) a fresh session is created. Resuming does not detach an earlier connection: several sockets can be bound to one session at once. Each streamed `eval` reply (`out` chunks, `need-input`, the final value) goes only to the socket that sent that `eval`; session-wide push frames (`transcript`, actors, classes, …) go to every bound socket. Two sockets should not issue overlapping evals on one session. |
 | `beamtalk_version` | string | yes (gated nodes) | Client toolchain version (`BEAMTALK_VERSION`, verbatim). Missing or mismatched values are rejected with `auth_error` — the field is required in practice; only pre-lock nodes accept auth without it. |
 | `protocol_version` | string | yes (gated nodes) | Client wire protocol version (`2.0`). Same required-in-practice status as `beamtalk_version`. |
 
@@ -904,6 +904,18 @@ Transcript output from the workspace's `Transcript` object.
 ```json
 {"push": "transcript", "text": "Hello from Transcript"}
 ```
+
+Text that is not valid UTF-8 (for example from `asStringUnchecked`) is pushed as its Erlang `~p` rendering rather than closing the connection; the same applies to the `out` chunks of a streamed `eval`.
+
+### Logs Channel
+
+Live OTP log events, started by `subscribe-logs` (optional `level`: `emergency`, `alert`, `critical`, `error`, `warning`, `notice`, `info` or `debug`; default `debug`) and stopped by `unsubscribe-logs`. Sending `subscribe-logs` again changes the level. An unknown `level` is answered with an `invalid_argument` error and leaves any existing subscription unchanged.
+
+```json
+{"type": "push", "channel": "logs", "event": "entry", "data": {"level": "info", "time": "...", "msg": "..."}}
+```
+
+Backpressure: the connection's mailbox is the only buffer between the node's log volume and the socket. While it holds 1000 or more messages, further log events are dropped for that connection (other subscribers still get them) and counted (`beamtalk_ws_log_handler:dropped_count/1`). Nothing is sent to the client about the drop, and the connection stays open.
 
 ### Actors Channel (BT-690)
 

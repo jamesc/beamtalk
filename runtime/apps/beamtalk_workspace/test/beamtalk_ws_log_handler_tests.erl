@@ -45,7 +45,11 @@ subscribe_unsubscribe_test_() ->
         fun format_includes_domain_metadata/0,
         fun format_includes_class_metadata/0,
         fun format_utf8_text_is_not_double_encoded/0,
-        fun format_codepoint_above_255_is_encoded/0
+        fun format_codepoint_above_255_is_encoded/0,
+        fun resubscribe_does_not_leak_monitor_processes/0,
+        fun unsubscribe_stops_monitor_process/0,
+        fun slow_subscriber_drops_over_queue_limit/0,
+        fun drop_counter_is_zero_for_unknown_subscriber/0
     ]}.
 
 %%% ===========================================================================
@@ -167,6 +171,72 @@ resubscribe_updates_level() ->
     ?assertMatch(#{level := <<"info">>}, Received),
     beamtalk_ws_log_handler:unsubscribe().
 
+%% BT-5018: every `subscribe/1` used to spawn another unlinked monitor process
+%% and `unsubscribe/0` never stopped it, so each log-level change leaked one.
+%% The processes monitoring the subscriber are the observable: one, however
+%% many level changes.
+resubscribe_does_not_leak_monitor_processes() ->
+    Before = length(monitors_of(self())),
+    Levels = [debug, info, warning, error],
+    lists:foreach(
+        fun(N) -> beamtalk_ws_log_handler:subscribe(lists:nth(N rem 4 + 1, Levels)) end,
+        lists:seq(1, 50)
+    ),
+    %% The monitor attaches asynchronously; wait for it, then confirm it is the
+    %% only one.
+    ok = beamtalk_test_wait:until(fun() -> length(monitors_of(self())) >= Before + 1 end),
+    ?assertEqual(Before + 1, length(monitors_of(self()))),
+    beamtalk_ws_log_handler:unsubscribe(),
+    ok = beamtalk_test_wait:until(fun() -> length(monitors_of(self())) =:= Before end),
+    %% Unsubscribe/subscribe cycles (what the WebSocket handler does on a level
+    %% change) leave no extra monitor behind either.
+    lists:foreach(
+        fun(_) ->
+            beamtalk_ws_log_handler:subscribe(info),
+            beamtalk_ws_log_handler:unsubscribe()
+        end,
+        lists:seq(1, 50)
+    ),
+    ok = beamtalk_test_wait:until(fun() -> length(monitors_of(self())) =:= Before end).
+
+unsubscribe_stops_monitor_process() ->
+    beamtalk_ws_log_handler:subscribe(debug),
+    [{_, debug, MonPid, 0}] = ets:lookup(beamtalk_ws_log_subscribers, self()),
+    ?assert(is_process_alive(MonPid)),
+    beamtalk_ws_log_handler:unsubscribe(),
+    ok = beamtalk_test_wait:dead(MonPid),
+    ?assertEqual([], ets:lookup(beamtalk_ws_log_subscribers, self())).
+
+%% BT-5018 backpressure policy: a subscriber whose mailbox is at the limit has
+%% further events dropped (not queued), and the drops are counted.
+slow_subscriber_drops_over_queue_limit() ->
+    Limit = beamtalk_ws_log_handler:queue_limit(),
+    Parent = self(),
+    %% Never reads its mailbox: a stalled socket.
+    Slow = spawn(fun() ->
+        beamtalk_ws_log_handler:subscribe(debug),
+        Parent ! subscribed,
+        receive
+            stop -> ok
+        end
+    end),
+    receive
+        subscribed -> ok
+    end,
+    Extra = 25,
+    lists:foreach(
+        fun(N) -> ?LOG_INFO("flood ~p", [N], #{domain => [beamtalk, runtime]}) end,
+        lists:seq(1, Limit + Extra)
+    ),
+    {message_queue_len, Queued} = process_info(Slow, message_queue_len),
+    ?assert(Queued =< Limit),
+    ?assertEqual(Extra, beamtalk_ws_log_handler:dropped_count(Slow)),
+    Slow ! stop,
+    ok = beamtalk_test_wait:dead(Slow).
+
+drop_counter_is_zero_for_unknown_subscriber() ->
+    ?assertEqual(0, beamtalk_ws_log_handler:dropped_count(spawn(fun() -> ok end))).
+
 format_includes_domain_metadata() ->
     beamtalk_ws_log_handler:subscribe(debug),
     ?LOG_INFO("domain test", #{domain => [beamtalk, user]}),
@@ -227,3 +297,8 @@ forward_log_events(Parent, Tag) ->
             Parent ! {forwarded_log, Tag, Data},
             forward_log_events(Parent, Tag)
     end.
+
+%% Pids that currently monitor `Pid`.
+monitors_of(Pid) ->
+    {monitored_by, By} = process_info(Pid, monitored_by),
+    By.
