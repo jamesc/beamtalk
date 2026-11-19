@@ -95,7 +95,6 @@ dispatch_test_() ->
             {"BT-3199: a connected Program exit: passes through a value-type extension",
                 fun test_extension_script_exit_passthrough/0},
             {"responds_to extension method", fun test_responds_to_extension_method/0},
-            {"BT-283: dispatch lookup performance", fun test_dispatch_lookup_performance/0},
             {"BT-283: dynamic method found after put_method",
                 fun test_dynamic_method_responds_to/0},
             {"BT-283: inherited dynamic method found via chain walk",
@@ -479,38 +478,8 @@ test_responds_to_extension_method() ->
 %%% Performance and Correctness Tests (ADR 0032 Phase 1)
 %%% ============================================================================
 
-%% Benchmark: chain walk dispatch for inherited methods
-%% ADR 0032 Phase 1: flattened table removed; direct hierarchy walk used instead.
-test_dispatch_lookup_performance() ->
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-
-    State = #{
-        '$beamtalk_class' => 'Counter',
-        'value' => 0
-    },
-    Self = make_ref(),
-
-    %% Warm up
-    _ = beamtalk_dispatch:lookup(increment, [], Self, State, 'Counter'),
-
-    %% Benchmark chain walk for an inherited method.
-    %% 'class' is defined in Object, so Counter -> Actor -> Object (depth 3).
-    N = 10000,
-
-    Start = erlang:monotonic_time(microsecond),
-    lists:foreach(
-        fun(_) ->
-            _ = beamtalk_dispatch:lookup(class, [], Self, State, 'Counter')
-        end,
-        lists:seq(1, N)
-    ),
-    End = erlang:monotonic_time(microsecond),
-
-    AvgTime = (End - Start) / N,
-    ?LOG_NOTICE("Chain walk: ~p lookups in ~p μs (avg ~.2f μs/call)", [N, End - Start, AvgTime]),
-
-    %% Chain walk at depth 3 should complete well within 500 μs/call on any CI machine
-    ?assert(AvgTime < 500.0).
+%% BT-283's chain-walk timing check lives in runtime/perf (`just perf`,
+%% bench_dispatch_lookup): a wall-clock bound is not a unit test (BT-5035).
 
 %% Test that a dynamically added method is immediately discoverable via responds_to.
 %% ADR 0032 Phase 1: no flattened table invalidation needed — chain walk is always current.

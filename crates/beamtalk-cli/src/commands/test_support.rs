@@ -37,6 +37,14 @@ use super::workspace::storage::{NodeInfo, WorkspaceMetadata};
 /// [`beamtalk_repl_protocol::test_ports::closed_port`].
 pub(crate) use beamtalk_repl_protocol::test_ports::closed_port;
 
+/// A real, absolute, stable directory to stand in for "the project directory"
+/// in tests (BT-5035). Tests must not use `std::env::current_dir()` for this:
+/// the process cwd is global, and a `#[serial(cwd)]` test that `chdir`s into a
+/// temp directory (later deleted) races every non-serial test that reads it.
+pub(crate) fn stable_project_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
 /// Build a unique workspace ID per test so parallel `cargo test` threads
 /// never collide on the same on-disk directory or lockfile. `label` should
 /// identify the calling test module (e.g. `"shutdown"`, `"transcript"`) so a
@@ -106,11 +114,73 @@ static BEAMTALK_HOME_LOCK: RwLock<()> = RwLock::new(());
 /// read side would wait forever on that thread's own write lock (BT-4382,
 /// the BT-4374 self-deadlock that hung `run_prune` tests). A test must use
 /// one or the other, never both.
-pub(crate) fn real_home_guard() -> RwLockReadGuard<'static, ()> {
+pub(crate) fn real_home_guard() -> SharedHomeGuard {
     assert_no_home_override_held("real_home_guard()");
-    BEAMTALK_HOME_LOCK
+    let lock = BEAMTALK_HOME_LOCK
         .read()
-        .unwrap_or_else(PoisonError::into_inner)
+        .unwrap_or_else(PoisonError::into_inner);
+    SharedHomeGuard::enter(lock)
+}
+
+/// Process-wide hermetic home shared by every [`real_home_guard`] holder
+/// (BT-5035). Despite the historical name, those tests never touch the
+/// developer's real `~/.beamtalk`: the first holder creates a private temp
+/// directory and points `BEAMTALK_HOME` at it, the last holder to drop
+/// removes it and restores the previous value. A [`BeamtalkHomeOverride`]
+/// takes the exclusive side of [`BEAMTALK_HOME_LOCK`], so it can only run
+/// when this count is zero and the variable is already restored.
+struct SharedHome {
+    holders: usize,
+    dir: Option<tempfile::TempDir>,
+    prev: Option<std::ffi::OsString>,
+}
+
+static SHARED_HOME: std::sync::Mutex<SharedHome> = std::sync::Mutex::new(SharedHome {
+    holders: 0,
+    dir: None,
+    prev: None,
+});
+
+/// Shared (read) side of [`BEAMTALK_HOME_LOCK`] plus a reference on the
+/// process-wide hermetic home. See [`real_home_guard`].
+pub(crate) struct SharedHomeGuard {
+    _lock: RwLockReadGuard<'static, ()>,
+}
+
+impl SharedHomeGuard {
+    fn enter(lock: RwLockReadGuard<'static, ()>) -> Self {
+        let mut shared = SHARED_HOME.lock().unwrap_or_else(PoisonError::into_inner);
+        if shared.holders == 0 {
+            let dir = tempfile::Builder::new()
+                .prefix("beamtalk-test-home-")
+                .tempdir()
+                .expect("create hermetic BEAMTALK_HOME");
+            shared.prev = std::env::var_os("BEAMTALK_HOME");
+            // SAFETY: the read lock excludes every `BeamtalkHomeOverride`, and
+            // the first holder sets this under the `SHARED_HOME` mutex before
+            // any other holder can proceed past `enter`.
+            unsafe { std::env::set_var("BEAMTALK_HOME", dir.path()) };
+            shared.dir = Some(dir);
+        }
+        shared.holders += 1;
+        Self { _lock: lock }
+    }
+}
+
+impl Drop for SharedHomeGuard {
+    fn drop(&mut self) {
+        let mut shared = SHARED_HOME.lock().unwrap_or_else(PoisonError::into_inner);
+        shared.holders -= 1;
+        if shared.holders == 0 {
+            // SAFETY: still holding the read lock (`_lock` drops after this
+            // method returns), so no `BeamtalkHomeOverride` is active.
+            match shared.prev.take() {
+                Some(v) => unsafe { std::env::set_var("BEAMTALK_HOME", v) },
+                None => unsafe { std::env::remove_var("BEAMTALK_HOME") },
+            }
+            shared.dir = None;
+        }
+    }
 }
 
 std::thread_local! {
@@ -180,7 +250,7 @@ impl Drop for BeamtalkHomeOverride {
 /// failing assertion never leaves real state behind.
 pub(crate) struct WorkspaceFixture {
     pub(crate) id: String,
-    _guard: RwLockReadGuard<'static, ()>,
+    _guard: SharedHomeGuard,
 }
 
 impl WorkspaceFixture {
