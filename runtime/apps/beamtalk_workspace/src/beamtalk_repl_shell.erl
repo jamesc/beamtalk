@@ -703,7 +703,7 @@ handle_info(session_idle_timeout, {SessionId, _State, Worker} = FullState) ->
             {noreply, FullState};
         true when Worker =/= undefined ->
             %% Mid-eval: never stop under a running evaluation; look again later.
-            erlang:send_after(?BUSY_RECHECK_MS, self(), session_idle_timeout),
+            arm_idle_timer(?BUSY_RECHECK_MS),
             {noreply, FullState};
         true ->
             ?LOG_INFO("Detached REPL session idle, stopping", #{
@@ -750,8 +750,10 @@ forget_session(SessionId) ->
 -spec lifecycle() -> map().
 lifecycle() ->
     case get(?LIFECYCLE_KEY) of
-        undefined -> #{clients => #{}, ever_attached => false, deadline => undefined};
-        L -> L
+        undefined ->
+            #{clients => #{}, ever_attached => false, deadline => undefined, timer => undefined};
+        L ->
+            L
     end.
 
 -spec current_lifecycle_state(term()) -> attached | unattached | busy | detached.
@@ -766,9 +768,10 @@ current_lifecycle_state(Worker) ->
 
 -spec attach_client(pid()) -> ok.
 attach_client(ClientPid) ->
-    #{clients := Clients} = L = lifecycle(),
+    #{clients := Clients} = lifecycle(),
     Ref = erlang:monitor(process, ClientPid),
-    put(?LIFECYCLE_KEY, L#{
+    cancel_idle_timer(),
+    put(?LIFECYCLE_KEY, (lifecycle())#{
         clients => Clients#{Ref => ClientPid}, ever_attached => true, deadline => undefined
     }),
     ok.
@@ -796,8 +799,27 @@ detach_client(Ref) ->
 schedule_idle_timeout() ->
     #{deadline := Deadline} = lifecycle(),
     Delay = max(0, Deadline - erlang:monotonic_time(millisecond)),
-    erlang:send_after(Delay, self(), session_idle_timeout),
+    arm_idle_timer(Delay).
+
+%% Arm the single idle timer, cancelling any earlier one so flapping
+%% attach/detach (or a busy recheck chain) never leaves duplicates alive.
+-spec arm_idle_timer(non_neg_integer()) -> ok.
+arm_idle_timer(Delay) ->
+    cancel_idle_timer(),
+    Ref = erlang:send_after(Delay, self(), session_idle_timeout),
+    put(?LIFECYCLE_KEY, (lifecycle())#{timer => Ref}),
     ok.
+
+-spec cancel_idle_timer() -> ok.
+cancel_idle_timer() ->
+    case lifecycle() of
+        #{timer := Ref} when is_reference(Ref) ->
+            _ = erlang:cancel_timer(Ref),
+            put(?LIFECYCLE_KEY, (lifecycle())#{timer => undefined}),
+            ok;
+        _ ->
+            ok
+    end.
 
 -spec idle_expired() -> boolean().
 idle_expired() ->

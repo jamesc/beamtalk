@@ -143,7 +143,10 @@ stop_session(SessionPid) when is_pid(SessionPid) ->
         end,
     case supervisor:terminate_child(?MODULE, SessionPid) of
         ok ->
-            is_binary(SessionId) andalso beamtalk_session_table:delete(SessionId, SessionPid),
+            case SessionId of
+                undefined -> beamtalk_session_table:delete_pid(SessionPid);
+                _ -> beamtalk_session_table:delete(SessionId, SessionPid)
+            end,
             ok;
         {error, Reason} = Error ->
             ?LOG_DEBUG(
