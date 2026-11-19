@@ -45,13 +45,6 @@ fn responds_to(var_name: &str, selector_name: &str) -> Expression {
     )
 }
 
-/// ADR 0102 §2 group 2: `x class =:= Bar` against a hierarchy-unrelated
-/// sealed class types the (unreachable) true branch `Never` and fires the
-/// impossible-class-comparison hint, mirroring
-/// `check_impossible_singleton_comparison`'s "can never be true" wording.
-/// The receiver's type must be *inferred* from value flow (here `x := 42`) —
-/// the hint is provenance-gated and stays silent for declared annotations
-/// (see `bt2741_declared_annotation_receiver_no_hint_true_branch_still_never`).
 /// End-to-end class-test narrowing through a method body: `(case, type of the
 /// `x` parameter, method body, expected "does not understand" warnings)`. The
 /// method is `TestClass >> process: x :: <type> =>`. The case name is in the
@@ -135,7 +128,7 @@ fn narrowing_control_flow_dnu_counts() {
     for &(case, param_type, body, expected) in NARROWING_DNU_CASES {
         let source =
             format!("Object subclass: TestClass\n  process: x :: {param_type} =>\n{body}\n");
-        let warnings: Vec<_> = diags(&source)
+        let warnings: Vec<_> = diags_parse_ok(&source)
             .into_iter()
             .filter(|d| d.message.contains("does not understand"))
             .collect();
@@ -148,6 +141,13 @@ fn narrowing_control_flow_dnu_counts() {
     }
 }
 
+/// ADR 0102 §2 group 2: `x class =:= Bar` against a hierarchy-unrelated
+/// sealed class types the (unreachable) true branch `Never` and fires the
+/// impossible-class-comparison hint, mirroring
+/// `check_impossible_singleton_comparison`'s "can never be true" wording.
+/// The receiver's type must be *inferred* from value flow (here `x := 42`) —
+/// the hint is provenance-gated and stays silent for declared annotations
+/// (see `bt2741_declared_annotation_receiver_no_hint_true_branch_still_never`).
 #[test]
 fn bt2741_class_eq_unrelated_class_true_branch_never_emits_hint() {
     let hierarchy = ClassHierarchy::with_builtins();
