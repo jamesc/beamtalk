@@ -647,7 +647,7 @@ fn section6_standalone_method_actor_self_send_is_an_error() {
 /// block …`); no `callee*` method carries any ADR 0131 threading diagnostic.
 #[test]
 fn adr0133_rejected_fixtures_report_the_escaping_assignment() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");
+    let root = beamtalk_workspace::cargo_workspace_root!().join("stdlib/test/fixtures");
     let mut names: Vec<String> = std::fs::read_dir(&root)
         .expect("fixtures directory")
         .filter_map(|entry| {
@@ -1373,7 +1373,7 @@ fn try_do_with_a_block_that_writes_no_local_is_not_a_construct_that_threads() {
 /// left to pin.)
 #[test]
 fn adr0131_probe_matrix_pins() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");
+    let root = beamtalk_workspace::cargo_workspace_root!().join("stdlib/test/fixtures");
     let read = |name: &str| {
         std::fs::read_to_string(root.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
     };
@@ -4267,7 +4267,7 @@ fn an_ensure_cleanup_that_binds_its_own_local_is_not_a_stale_read() {
 /// (BT-3799's matrix, once inert `.pending` files) is accepted.
 #[test]
 fn adr0131_nested_assign_fixtures_are_accepted() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");
+    let root = beamtalk_workspace::cargo_workspace_root!().join("stdlib/test/fixtures");
     for context in ["class", "value", "actor"] {
         let name = format!("adr0131nested_assign_{context}.bt");
         let src =

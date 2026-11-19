@@ -3408,7 +3408,7 @@ fn direct_constructors_value_new_init_is_intrinsic_router() {
     // The walk skips `Value`'s `new:` assuming the `@intrinsic
     // basicNewWith` router; `MethodInfo` has no body, so pin the body
     // by parsing `stdlib/src/value.bt` itself.
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/src/value.bt");
+    let path = beamtalk_workspace::cargo_workspace_root!().join("stdlib/src/value.bt");
     let source =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let tokens = crate::source_analysis::lex_with_eof(&source);
@@ -3889,7 +3889,7 @@ fn indirect_value_subclass_user_keyword_suppresses_keyword_verdict() {
 /// reaches it in `propagate_class_kind`, but it keeps a `None` anchor.
 #[test]
 fn value_itself_is_never_anchored() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/src/value.bt");
+    let path = beamtalk_workspace::cargo_workspace_root!().join("stdlib/src/value.bt");
     let source =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let tokens = crate::source_analysis::lex_with_eof(&source);
@@ -4290,8 +4290,8 @@ fn explicit_class_new_stdlib_audit() {
         // `@primitive "metaclassNew"` builds a metaclass: not a plain forward.
         ("metaclass.bt", false),
     ] {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../stdlib/src")
+        let path = beamtalk_workspace::cargo_workspace_root!()
+            .join("stdlib/src")
             .join(file);
         let source = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
@@ -4403,8 +4403,8 @@ fn explicit_class_new1_stdlib_audit() {
         ("regex.bt", false),
         ("uuid.bt", false),
     ] {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../stdlib/src")
+        let path = beamtalk_workspace::cargo_workspace_root!()
+            .join("stdlib/src")
             .join(file);
         let source = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));

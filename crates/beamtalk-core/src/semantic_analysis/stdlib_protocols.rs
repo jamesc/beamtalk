@@ -185,7 +185,7 @@ mod tests {
     /// linger) until `build-stdlib` regenerates the table.
     #[test]
     fn generated_table_matches_stdlib_sources() {
-        let stdlib_src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/src");
+        let stdlib_src = beamtalk_workspace::cargo_workspace_root!().join("stdlib/src");
         let mut expected = Vec::new();
         for entry in std::fs::read_dir(&stdlib_src).expect("stdlib/src") {
             let path = entry.expect("dir entry").path();

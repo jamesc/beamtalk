@@ -96,7 +96,7 @@ fn programs() -> Vec<(usize, String)> {
 }
 
 fn runtime_ebins() -> Vec<PathBuf> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/_build/default/lib");
+    let root = beamtalk_workspace::cargo_workspace_root!().join("runtime/_build/default/lib");
     let Ok(rd) = std::fs::read_dir(&root) else {
         return Vec::new();
     };
@@ -107,7 +107,7 @@ fn runtime_ebins() -> Vec<PathBuf> {
         .collect();
     // The compiled stdlib classes (`bt@stdlib@dictionary`, ...) live here.
     let stdlib =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/apps/beamtalk_stdlib/ebin");
+        beamtalk_workspace::cargo_workspace_root!().join("runtime/apps/beamtalk_stdlib/ebin");
     if stdlib.is_dir() {
         ebins.push(stdlib);
     }
