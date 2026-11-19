@@ -138,9 +138,13 @@ fn class_method_local_threading_constructs_never_reach_the_internal_error_arm() 
             parse_diagnostics.is_empty(),
             "body {i} does not parse cleanly, so the pin would test nothing: {parse_diagnostics:?}\n{src}"
         );
-        let (_, result) = compile(&src);
-        // Every shape compiles today (through the producer route); a rejection with a
-        // structured error would also be fine, but `Internal` never is.
+        let (hits, result) = compile(&src);
+        // Every shape compiles today (through the producer route). Require success, not just
+        // "not `Internal`": a structured rejection would hide a regression in the producer route.
+        assert!(
+            hits.iter().all(|h| !h.ends_with("_open")),
+            "body {i} took an *_open lowering: {hits:?}\n{src}"
+        );
         assert!(
             result.is_ok(),
             "class method body {i} no longer compiles: {result:?}\n{src}"
