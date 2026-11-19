@@ -52,13 +52,13 @@ stop_test_counter(Pid) ->
 get_propagated_ctx_returns_map_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"returns a map", fun() ->
-            Ctx = beamtalk_actor:get_propagated_ctx(),
+            Ctx = beamtalk_actor_send:get_propagated_ctx(),
             ?assert(is_map(Ctx))
         end},
         {"omits otel when otel_ctx not loaded (BT-4113: only present context)", fun() ->
             %% otel_ctx is not loaded in test env
             ?assertNot(erlang:function_exported(otel_ctx, get_current, 0)),
-            Ctx = beamtalk_actor:get_propagated_ctx(),
+            Ctx = beamtalk_actor_send:get_propagated_ctx(),
             ?assertEqual(error, maps:find(otel, Ctx))
         end}
     ]}.
@@ -95,8 +95,9 @@ function_exported_guard_test_() ->
         {"otel_ctx:attach/1 is not exported in test env", fun() ->
             ?assertNot(erlang:function_exported(otel_ctx, attach, 1))
         end},
-        {"beamtalk_actor:get_propagated_ctx/0 is exported", fun() ->
-            ?assert(erlang:function_exported(beamtalk_actor, get_propagated_ctx, 0))
+        {"beamtalk_actor_send:get_propagated_ctx/0 is exported", fun() ->
+            {module, beamtalk_actor_send} = code:ensure_loaded(beamtalk_actor_send),
+            ?assert(erlang:function_exported(beamtalk_actor_send, get_propagated_ctx, 0))
         end},
         {"beamtalk_actor:restore_propagated_ctx/1 is exported", fun() ->
             ?assert(erlang:function_exported(beamtalk_actor, restore_propagated_ctx, 1))
@@ -235,7 +236,7 @@ mock_otel_ctx_test_() ->
         [
             {"get_propagated_ctx captures OTel context when otel_ctx loaded", fun() ->
                 ?assert(erlang:function_exported(otel_ctx, get_current, 0)),
-                Ctx = beamtalk_actor:get_propagated_ctx(),
+                Ctx = beamtalk_actor_send:get_propagated_ctx(),
                 ?assertEqual({mock_trace_id, 12345}, maps:get(otel, Ctx))
             end},
             {"restore_propagated_ctx attaches OTel context when otel_ctx loaded", fun() ->

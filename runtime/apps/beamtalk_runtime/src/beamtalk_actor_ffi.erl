@@ -421,7 +421,7 @@ unregister(#beamtalk_object{pid = {registered, Name0, Node0}} = Self) when
             ok;
         {error, {node_down, _}} ->
             beamtalk_error:raise(
-                (beamtalk_actor:node_down_error_record(Node0, unregister))#beamtalk_error{
+                (beamtalk_actor_send:node_down_error_record(Node0, unregister))#beamtalk_error{
                     class = Self#beamtalk_object.class
                 }
             );
@@ -1086,7 +1086,7 @@ class_self_to_name_and_module(Other) ->
 ADR 0079: derive a current pid from a `#beamtalk_object{}`
 identity slot. Pid identities pass through unchanged; name-resolving
 proxies (`{registered, Name}`, `{registered, Name, Node}`, `{global, Name}`) resolve
-via `beamtalk_actor:resolve_proxy_or_error/2`. Returns a structured
+via `beamtalk_actor_send:resolve_proxy_or_error/2`. Returns a structured
 `no_such_process` error when the name is not currently registered, or
 `node_down` when a node-qualified ref's node is unreachable.
 """.
@@ -1101,7 +1101,7 @@ proxy_pid(#beamtalk_object{pid = Pid}, _Selector) when is_pid(Pid) ->
     {ok, Pid};
 proxy_pid(#beamtalk_object{pid = Ref}, Selector) when ?IS_PROXY_REF(Ref) ->
     %% BT-4676: the one proxy resolver lives in beamtalk_actor.
-    beamtalk_actor:resolve_proxy_or_error(Ref, Selector);
+    beamtalk_actor_send:resolve_proxy_or_error(Ref, Selector);
 proxy_pid(#beamtalk_object{class = ClassName, pid = Other}, Selector) ->
     {error,
         beamtalk_error:with_hint(

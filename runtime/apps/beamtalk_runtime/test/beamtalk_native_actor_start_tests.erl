@@ -26,10 +26,10 @@ get_value(Pid) ->
 %% Stop a linked test process without taking the test process down.
 backing_module_test() ->
     ?assertEqual(
-        beamtalk_test_native_counter, beamtalk_actor:native_backing_module(?FACADE)
+        beamtalk_test_native_counter, beamtalk_actor_start:native_backing_module(?FACADE)
     ),
     %% A hand-written gen_server has no `__beamtalk_meta/0`.
-    ?assertEqual(none, beamtalk_actor:native_backing_module(beamtalk_test_native_counter)).
+    ?assertEqual(none, beamtalk_actor_start:native_backing_module(beamtalk_test_native_counter)).
 
 anonymous_linked_start_test() ->
     {ok, Pid} = beamtalk_actor:safe_spawn_linked(?FACADE, #{initial => 3}),

@@ -190,6 +190,10 @@
 %% rather than one per caller (AGENTS.md "No duplicate implementations").
 -define(BT_ACTOR_WIRE_MODULE, beamtalk_actor).
 
+%% Default `gen_server:stop/3` timeout for `stop` / `stopWith:` (ms). Shared by
+%% `beamtalk_actor`'s stop paths and `beamtalk_actor_send`'s `stop` selectors.
+-define(STOP_TIMEOUT, 5000).
+
 %% BT-3992: how long a starter (`spawn`, a supervisor starting an actor
 %% child) waits for the new actor's `initialize` to return, in ms. Shared by
 %% `beamtalk_actor`'s await and `beamtalk_supervisor`'s init-timeout hint

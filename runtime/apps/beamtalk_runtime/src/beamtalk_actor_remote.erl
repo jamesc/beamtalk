@@ -218,7 +218,7 @@ remote_spawn_erpc_call(Node, ClassName, NameOrUndefined, Selector, TargetFun, Ex
         {ok, {error, Reason}} ->
             {error, beamtalk_actor_ffi:generic_spawn_error(ClassName, Selector, Reason)};
         {error, {node_down, _}} ->
-            {error, beamtalk_actor:node_down_error_record(Node, Selector)};
+            {error, beamtalk_actor_send:node_down_error_record(Node, Selector)};
         {error, timeout} ->
             {error, remote_timeout_error_record(ClassName, Selector, false)};
         {error, {other, Reason}} ->
@@ -309,7 +309,7 @@ builds spawn-specific errors for the generic case instead.
     beamtalk_call_failure:erpc_error(), node(), atom(), atom()
 ) -> #beamtalk_error{}.
 remote_failure_error({node_down, _}, Node, _Class, Selector) ->
-    beamtalk_actor:node_down_error_record(Node, Selector);
+    beamtalk_actor_send:node_down_error_record(Node, Selector);
 remote_failure_error(timeout, _Node, Class, Selector) ->
     remote_timeout_error_record(Class, Selector, true);
 remote_failure_error({other, Reason}, _Node, Class, Selector) ->
