@@ -614,8 +614,7 @@ impl CoreErlangGenerator {
 mod tests {
     use super::SpawnVariant;
     use crate::core_erlang::CoreErlangGenerator;
-    use beamtalk_core::ast::{ClassDefinition, ClassKind, CommentAttachment, Identifier, Module};
-    use beamtalk_core::source_analysis::Span;
+    use beamtalk_core::ast::{ClassDefinition, ClassKind, Module};
     use beamtalk_core::test_helpers::test_support::empty_module;
 
     fn generator() -> CoreErlangGenerator {
@@ -623,42 +622,12 @@ mod tests {
     }
 
     fn module_with_superclass(sc: &str) -> Module {
-        let class = ClassDefinition {
-            name: Identifier::new("Counter", Span::new(0, 0)),
-            superclass: Some(Identifier::new(sc, Span::new(0, 0))),
-            superclass_package: None,
-            class_kind: ClassKind::Actor,
-            is_abstract: false,
-            is_sealed: false,
-            is_typed: false,
-            is_internal: false,
-            supervisor_kind: None,
-            state: vec![],
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            superclass_type_args: vec![],
-            uses: vec![],
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            backing_module: None,
-            handle_scope: None,
-            shape_version: None,
-            span: Span::new(0, 0),
-        };
+        let class = ClassDefinition::test("Counter", Some(sc), ClassKind::Actor);
         Module {
             pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
             literal_comments: beamtalk_core::ast::LiteralComments::default(),
             classes: vec![class],
-            method_definitions: vec![],
-            protocols: vec![],
-            type_aliases: vec![],
-            native_declarations: vec![],
-            expressions: vec![],
-            span: Span::new(0, 0),
-            file_leading_comments: vec![],
-            file_trailing_comments: vec![],
+            ..empty_module()
         }
     }
 

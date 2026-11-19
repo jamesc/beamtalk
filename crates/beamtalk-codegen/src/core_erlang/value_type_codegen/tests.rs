@@ -3,9 +3,10 @@
 
 use crate::core_erlang::CoreErlangGenerator;
 use beamtalk_core::ast::{
-    ClassDefinition, ClassKind, DeclaredKeyword, Identifier, Literal, Module, StateDeclaration,
+    ClassDefinition, ClassKind, Identifier, Literal, Module, StateDeclaration,
 };
 use beamtalk_core::source_analysis::Span;
+use beamtalk_core::test_helpers::test_support::empty_module;
 
 fn s() -> Span {
     Span::new(0, 0)
@@ -15,18 +16,13 @@ fn make_value_class(name: &str, slots: &[&str]) -> ClassDefinition {
     let state = slots
         .iter()
         .map(|slot_name| StateDeclaration {
-            name: Identifier::new(*slot_name, s()),
-            type_annotation: None,
             default_value: Some(beamtalk_core::ast::Expression::Literal(
                 Literal::Integer(0),
                 s(),
             )),
-            expect: None,
             comments: beamtalk_core::ast::CommentAttachment::default(),
-            doc_comment: None,
-            declared_keyword: DeclaredKeyword::default(),
             slot_kind: beamtalk_core::ast::SlotKind::default(),
-            span: s(),
+            ..StateDeclaration::new(Identifier::new(*slot_name, s()), s())
         })
         .collect();
     let mut class = ClassDefinition::new(
@@ -189,14 +185,8 @@ fn test_generate_value_type_module_includes_class_name() {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
         span: s(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let mut generator = CoreErlangGenerator::new("point");
     let doc = generator.generate_value_type_module(&module).unwrap();
@@ -228,14 +218,8 @@ fn test_generate_value_type_module_never_emits_shape_version_key() {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
         span: s(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let mut generator = CoreErlangGenerator::new("point");
     let doc = generator.generate_value_type_module(&module).unwrap();

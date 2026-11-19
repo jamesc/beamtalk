@@ -10,42 +10,12 @@ use super::*;
 
 #[test]
 fn test_is_actor_class_direct_actor_subclass() {
-    let class = ClassDefinition {
-        name: Identifier::new("Counter", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
+    let class = ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor);
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let hierarchy =
         beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
@@ -56,42 +26,12 @@ fn test_is_actor_class_direct_actor_subclass() {
 
 #[test]
 fn test_is_actor_class_object_subclass_is_value_type() {
-    let class = ClassDefinition {
-        name: Identifier::new("Point", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Object", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
+    let class = ClassDefinition::test("Point", Some("Object"), ClassKind::Object);
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let hierarchy =
         beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
@@ -104,67 +44,15 @@ fn test_is_actor_class_object_subclass_is_value_type() {
 fn test_is_actor_class_multi_level_inheritance() {
     // LoggingCounter extends Counter extends Actor
     // Should still be detected as actor
-    let counter = ClassDefinition {
-        name: Identifier::new("Counter", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
-    let logging_counter = ClassDefinition {
-        name: Identifier::new("LoggingCounter", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Counter", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
+    let counter = ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor);
+    let logging_counter =
+        ClassDefinition::test("LoggingCounter", Some("Counter"), ClassKind::Object);
     // Module with both classes; first class is LoggingCounter
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![counter, logging_counter.clone()],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let hierarchy =
         beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
@@ -176,14 +64,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![logging_counter],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     // Build hierarchy from full module so Counter is known
     assert!(CoreErlangGenerator::is_actor_class(&module_lc, &hierarchy));
@@ -203,42 +84,12 @@ fn test_is_actor_class_no_classes_defaults_to_actor() {
 fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
     // LoggingCounter extends Counter, but Counter is NOT in this module.
     // Hierarchy chain is incomplete; should default to actor (backward compat).
-    let class = ClassDefinition {
-        name: Identifier::new("LoggingCounter", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Counter", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
+    let class = ClassDefinition::test("LoggingCounter", Some("Counter"), ClassKind::Object);
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let hierarchy =
         beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
@@ -250,42 +101,12 @@ fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
 #[test]
 fn test_is_actor_class_collection_subclass_is_value_type() {
     // Collection extends Value (built-in), so subclasses are value types.
-    let class = ClassDefinition {
-        name: Identifier::new("MyList", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Collection", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
+    let class = ClassDefinition::test("MyList", Some("Collection"), ClassKind::Object);
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let hierarchy =
         beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
@@ -301,42 +122,12 @@ fn test_is_actor_class_collection_subclass_is_value_type() {
 fn test_is_actor_class_integer_subclass_is_value_type() {
     // Integer is a sealed built-in extending Object — subclass should be value type.
     // (Sealed enforcement is separate; codegen should still route correctly.)
-    let class = ClassDefinition {
-        name: Identifier::new("MyInt", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Integer", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
+    let class = ClassDefinition::test("MyInt", Some("Integer"), ClassKind::Object);
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let hierarchy =
         beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
@@ -352,41 +143,14 @@ fn test_is_actor_class_integer_subclass_is_value_type() {
 fn test_is_actor_class_root_class_is_value_type() {
     // Root class (superclass: None → "none") should be value type, not actor.
     let class = ClassDefinition {
-        name: Identifier::new("ProtoObject", Span::new(0, 0)),
-        superclass: None,
-        superclass_package: None,
-        class_kind: ClassKind::Object,
         is_abstract: true,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test("ProtoObject", None, ClassKind::Object)
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let hierarchy =
         beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
@@ -437,14 +201,7 @@ fn test_actor_value_classification_consistent_regardless_of_exception_grandchild
                 pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
                 literal_comments: beamtalk_core::ast::LiteralComments::default(),
                 classes: vec![class.clone()],
-                method_definitions: Vec::new(),
-                protocols: Vec::new(),
-                type_aliases: Vec::new(),
-                native_declarations: Vec::new(),
-                expressions: vec![],
-                span: Span::new(0, 0),
-                file_leading_comments: vec![],
-                file_trailing_comments: Vec::new(),
+                ..empty_module()
             };
             assert!(
                 !CoreErlangGenerator::is_actor_class(&single_class_module, &hierarchy),
@@ -462,15 +219,9 @@ fn test_generate_with_bindings_compiles_value_type() {
         Identifier::new("Point", Span::new(0, 0)),
         Identifier::new("Object", Span::new(0, 0)),
         vec![StateDeclaration {
-            name: Identifier::new("x", Span::new(0, 0)),
-            type_annotation: None,
             default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            declared_keyword: DeclaredKeyword::default(),
             slot_kind: beamtalk_core::ast::SlotKind::default(),
-            span: Span::new(0, 0),
+            ..StateDeclaration::test("x")
         }],
         vec![],
         Span::new(0, 0),
@@ -479,14 +230,7 @@ fn test_generate_with_bindings_compiles_value_type() {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
 
     let bindings = primitive_bindings::PrimitiveBindingTable::new();
@@ -759,51 +503,18 @@ fn test_value_subclass_synthetic_accessor_metadata_gated_to_value_kind() {
 fn test_object_subclass_no_auto_getters() {
     // `Object subclass:` (ClassKind::Object) must NOT generate auto-getters.
     let class = ClassDefinition {
-        name: Identifier::new("Point", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Object", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
         state: vec![StateDeclaration {
-            name: Identifier::new("x", Span::new(0, 0)),
-            type_annotation: None,
             default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            declared_keyword: DeclaredKeyword::default(),
             slot_kind: beamtalk_core::ast::SlotKind::default(),
-            span: Span::new(0, 0),
+            ..StateDeclaration::test("x")
         }],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test("Point", Some("Object"), ClassKind::Object)
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
@@ -827,68 +538,25 @@ fn test_value_subclass_user_defined_overrides_auto() {
     let x_method = MethodDefinition {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("x".into()),
-        parameters: vec![],
-        return_type: None,
         body: vec![bare(Expression::Literal(
             Literal::Integer(99),
             Span::new(0, 0),
         ))],
-        kind: MethodKind::Primary,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        expect: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        span: Span::new(0, 0),
+        ..MethodDefinition::test("x")
     };
     let class = ClassDefinition {
-        name: Identifier::new("MyVal", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Value", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
         state: vec![StateDeclaration {
-            name: Identifier::new("x", Span::new(0, 0)),
-            type_annotation: None,
-            default_value: None,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            declared_keyword: DeclaredKeyword::default(),
             slot_kind: beamtalk_core::ast::SlotKind::default(),
-            span: Span::new(0, 0),
+            ..StateDeclaration::test("x")
         }],
         methods: vec![x_method],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test("MyVal", Some("Value"), ClassKind::Value)
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let result = generate_module(&module, CodegenOptions::new("bt@my_val"));
     let code = result.unwrap();
@@ -904,42 +572,12 @@ fn test_value_subclass_user_defined_overrides_auto() {
 #[test]
 fn test_value_subclass_no_slots_no_keyword_constructor() {
     // A Value subclass with no slots produces no keyword constructor.
-    let class = ClassDefinition {
-        name: Identifier::new("Empty", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Value", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
+    let class = ClassDefinition::test("Empty", Some("Value"), ClassKind::Value);
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let result = generate_module(&module, CodegenOptions::new("bt@empty"));
     let code = result.unwrap();
@@ -967,91 +605,51 @@ fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
     // The generated `class_withName:/3` body should call `class_symName:` (constructor),
     // NOT `symName` (instance getter).
     let class = ClassDefinition {
-        name: Identifier::new("SchemeSymbol", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Value", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
         state: vec![StateDeclaration {
-            name: Identifier::new("symName", Span::new(0, 0)),
-            type_annotation: None,
             default_value: Some(Expression::Literal(
                 Literal::String("".into()),
                 Span::new(0, 0),
             )),
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            declared_keyword: DeclaredKeyword::default(),
             slot_kind: beamtalk_core::ast::SlotKind::default(),
-            span: Span::new(0, 0),
+            ..StateDeclaration::test("symName")
         }],
-        methods: vec![],
         class_methods: vec![MethodDefinition {
             pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
             literal_comments: beamtalk_core::ast::LiteralComments::default(),
-            selector: MessageSelector::Keyword(vec![KeywordPart::new(
-                "withName:",
-                Span::new(0, 0),
-            )]),
-            parameters: vec![ParameterDefinition::new(Identifier::new(
-                "n",
-                Span::new(0, 0),
-            ))],
-            body: vec![bare(Expression::MessageSend {
-                receiver: Box::new(Expression::ClassReference {
-                    name: Identifier::new("SchemeSymbol", Span::new(0, 0)),
-                    span: Span::new(0, 0),
-                    package: None,
-                }),
-                selector: MessageSelector::Keyword(vec![KeywordPart::new(
-                    "symName:",
-                    Span::new(0, 0),
-                )]),
-                arguments: vec![Expression::Identifier(Identifier::new(
+            is_class_method: true,
+            ..MethodDefinition::new(
+                MessageSelector::Keyword(vec![KeywordPart::new("withName:", Span::new(0, 0))]),
+                vec![ParameterDefinition::new(Identifier::new(
                     "n",
                     Span::new(0, 0),
                 ))],
-                is_cast: false,
-                span: Span::new(0, 0),
-            })],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: true,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: Span::new(0, 0),
+                vec![bare(Expression::MessageSend {
+                    receiver: Box::new(Expression::ClassReference {
+                        name: Identifier::new("SchemeSymbol", Span::new(0, 0)),
+                        span: Span::new(0, 0),
+                        package: None,
+                    }),
+                    selector: MessageSelector::Keyword(vec![KeywordPart::new(
+                        "symName:",
+                        Span::new(0, 0),
+                    )]),
+                    arguments: vec![Expression::Identifier(Identifier::new(
+                        "n",
+                        Span::new(0, 0),
+                    ))],
+                    is_cast: false,
+                    span: Span::new(0, 0),
+                })],
+                Span::new(0, 0),
+            )
         }],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test("SchemeSymbol", Some("Value"), ClassKind::Value)
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let result = generate_module(&module, CodegenOptions::new("bt@scheme_symbol"));
     let code = result.unwrap();

@@ -180,89 +180,43 @@ fn test_generate_has_method_empty_module_produces_empty_member_list() {
 #[test]
 fn test_generate_has_method_lists_primary_class_methods() {
     // A module with an Actor class should list all primary methods in has_method/1.
-    use beamtalk_core::ast::{ClassDefinition, MethodDefinition, MethodKind};
+    use beamtalk_core::ast::{ClassDefinition, MethodDefinition};
 
     let class = ClassDefinition {
-        name: Identifier::new("Counter", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![
             MethodDefinition {
                 pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
                 literal_comments: beamtalk_core::ast::LiteralComments::default(),
-                selector: MessageSelector::Unary("increment".into()),
-                parameters: vec![],
                 body: vec![bare(Expression::Literal(
                     Literal::Integer(0),
                     Span::new(0, 0),
                 ))],
-                return_type: None,
-                is_sealed: false,
-                is_internal: false,
-                is_class_method: false,
-                kind: MethodKind::Primary,
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                span: Span::new(0, 0),
+                ..MethodDefinition::test("increment")
             },
             MethodDefinition {
                 pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
                 literal_comments: beamtalk_core::ast::LiteralComments::default(),
-                selector: MessageSelector::Keyword(vec![KeywordPart::new(
-                    "setValue:",
+                ..MethodDefinition::new(
+                    MessageSelector::Keyword(vec![KeywordPart::new("setValue:", Span::new(0, 0))]),
+                    vec![ParameterDefinition {
+                        name: Identifier::new("value", Span::new(0, 0)),
+                        type_annotation: None,
+                    }],
+                    vec![bare(Expression::Literal(
+                        Literal::Integer(0),
+                        Span::new(0, 0),
+                    ))],
                     Span::new(0, 0),
-                )]),
-                parameters: vec![ParameterDefinition {
-                    name: Identifier::new("value", Span::new(0, 0)),
-                    type_annotation: None,
-                }],
-                body: vec![bare(Expression::Literal(
-                    Literal::Integer(0),
-                    Span::new(0, 0),
-                ))],
-                return_type: None,
-                is_sealed: false,
-                is_internal: false,
-                is_class_method: false,
-                kind: MethodKind::Primary,
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                span: Span::new(0, 0),
+                )
             },
         ],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
 
     let generator = CoreErlangGenerator::new("counter");
@@ -328,28 +282,8 @@ fn actor_class_def(
     methods: Vec<MethodDefinition>,
 ) -> ClassDefinition {
     ClassDefinition {
-        name: Identifier::new(name, Span::new(0, 0)),
-        superclass: Some(Identifier::new(superclass, Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods,
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test(name, Some(superclass), ClassKind::Actor)
     }
 }
 
@@ -358,14 +292,7 @@ fn module_with_class(class: ClassDefinition) -> Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     }
 }
 
@@ -373,21 +300,11 @@ fn unary_method(name: &str) -> MethodDefinition {
     MethodDefinition {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary(name.into()),
-        parameters: vec![],
         body: vec![bare(Expression::Literal(
             Literal::Integer(0),
             Span::new(0, 0),
         ))],
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        kind: MethodKind::Primary,
-        expect: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        span: Span::new(0, 0),
+        ..MethodDefinition::test(name)
     }
 }
 
@@ -400,37 +317,31 @@ fn catch_all_dnu_method() -> MethodDefinition {
     MethodDefinition {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        selector: MessageSelector::Keyword(vec![
-            KeywordPart::new("doesNotUnderstand:", Span::new(0, 0)),
-            KeywordPart::new("args:", Span::new(0, 0)),
-        ]),
-        parameters: vec![
-            ParameterDefinition {
-                name: Identifier::new("selector", Span::new(0, 0)),
-                type_annotation: None,
-            },
-            ParameterDefinition {
-                name: Identifier::new("args", Span::new(0, 0)),
-                type_annotation: None,
-            },
-        ],
-        body: vec![bare(Expression::Primitive {
-            name: "erlangModuleLookup".into(),
-            is_quoted: false,
-            is_intrinsic: true,
-            is_inferred: false,
-            no_user_code: false,
-            span: Span::new(0, 0),
-        })],
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        kind: MethodKind::Primary,
-        expect: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        span: Span::new(0, 0),
+        ..MethodDefinition::new(
+            MessageSelector::Keyword(vec![
+                KeywordPart::new("doesNotUnderstand:", Span::new(0, 0)),
+                KeywordPart::new("args:", Span::new(0, 0)),
+            ]),
+            vec![
+                ParameterDefinition {
+                    name: Identifier::new("selector", Span::new(0, 0)),
+                    type_annotation: None,
+                },
+                ParameterDefinition {
+                    name: Identifier::new("args", Span::new(0, 0)),
+                    type_annotation: None,
+                },
+            ],
+            vec![bare(Expression::Primitive {
+                name: "erlangModuleLookup".into(),
+                is_quoted: false,
+                is_intrinsic: true,
+                is_inferred: false,
+                no_user_code: false,
+                span: Span::new(0, 0),
+            })],
+            Span::new(0, 0),
+        )
     }
 }
 
