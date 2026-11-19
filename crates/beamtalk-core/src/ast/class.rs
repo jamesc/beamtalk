@@ -375,28 +375,15 @@ impl ClassDefinition {
     pub fn test(name: &str, superclass: Option<&str>, kind: ClassKind) -> Self {
         let span = Span::new(0, 0);
         Self {
-            name: Identifier::new(name, span),
-            superclass: superclass.map(|s| Identifier::new(s, span)),
-            superclass_package: None,
             class_kind: kind,
-            is_abstract: false,
-            is_sealed: false,
-            is_typed: false,
-            is_internal: false,
-            supervisor_kind: None,
-            state: Vec::new(),
-            methods: Vec::new(),
-            class_methods: Vec::new(),
-            class_variables: Vec::new(),
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            backing_module: None,
-            handle_scope: None,
-            shape_version: None,
-            type_params: Vec::new(),
-            superclass_type_args: Vec::new(),
-            uses: Vec::new(),
-            span,
+            ..Self::with_modifiers(
+                Identifier::new(name, span),
+                superclass.map(|s| Identifier::new(s, span)),
+                ClassModifiers::default(),
+                Vec::new(),
+                Vec::new(),
+                span,
+            )
         }
     }
 
