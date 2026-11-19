@@ -17,7 +17,7 @@ use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType, Me
 use crate::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::type_checker::known_remote;
-use crate::semantic_analysis::type_checker::narrowing::facts::FactsCtx;
+use crate::semantic_analysis::type_checker::narrowing::facts::{CondFacts, Facts, FactsCtx};
 use crate::semantic_analysis::type_checker::narrowing::visitors::expr_contains_returning_self_send;
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::validation::ProtocolSendResolution;
@@ -27,6 +27,58 @@ use crate::semantic_analysis::type_checker::{
 };
 use crate::source_analysis::{Diagnostic, Severity, Span, is_equality_operator};
 use ecow::EcoString;
+use std::ops::ControlFlow;
+
+/// What identifies the send being inferred, handed to
+/// [`TypeChecker::infer_message_send_with_receiver_ty_inner`].
+#[derive(Clone, Copy)]
+struct SendSite<'a> {
+    receiver: &'a Expression,
+    selector: &'a MessageSelector,
+    arguments: &'a [Expression],
+    span: Span,
+    hierarchy: &'a ClassHierarchy,
+    in_abstract_method: bool,
+}
+
+/// The send being inferred, as every receiver-kind phase sees it: the
+/// [`SendSite`] plus the receiver type after `Negation` unwrapping and the
+/// `Dictionary` view (ADR 0102 §5, ADR 0147), the selector name, and the
+/// un-viewed shape receiver the keyed operations need.
+#[derive(Clone, Copy)]
+struct SendCtx<'a> {
+    receiver: &'a Expression,
+    receiver_ty: &'a InferredType,
+    /// The receiver before the `Dictionary` view, when it is a map shape.
+    shape_receiver_ty: Option<&'a InferredType>,
+    selector: &'a MessageSelector,
+    selector_name: &'a EcoString,
+    arguments: &'a [Expression],
+    span: Span,
+    hierarchy: &'a ClassHierarchy,
+    in_abstract_method: bool,
+}
+
+/// A `Known` receiver being resolved: its class and type arguments, the
+/// class its method set is looked up through, and whether that is `Object`
+/// by way of a protocol receiver.
+#[derive(Clone, Copy)]
+struct KnownRecv<'a> {
+    class_name: &'a EcoString,
+    type_args: &'a [InferredType],
+    resolve_class: &'a EcoString,
+    via_object: bool,
+}
+
+/// What a send's receiver proves about its block arguments.
+struct BlockFacts {
+    /// `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:`: facts for the arms.
+    branch: Option<CondFacts>,
+    /// `and:` / `or:`: facts the lazy block runs under.
+    connective: Option<Facts>,
+    /// `whileTrue:` / `whileFalse:`: facts the body runs under.
+    loop_body: Option<Facts>,
+}
 
 impl TypeChecker {
     /// Variant of [`Self::infer_message_send`] that takes a pre-computed receiver
@@ -88,14 +140,16 @@ impl TypeChecker {
             None => (selector, arguments),
         };
         let ty = self.infer_message_send_with_receiver_ty_inner(
-            receiver,
+            SendSite {
+                receiver,
+                selector,
+                arguments,
+                span,
+                hierarchy,
+                in_abstract_method,
+            },
             receiver_ty,
-            selector,
-            arguments,
-            span,
-            hierarchy,
             env,
-            in_abstract_method,
         );
         if receiver.is_self_or_super()
             && !self.in_value_type_body
@@ -119,585 +173,60 @@ impl TypeChecker {
         ty
     }
 
-    #[allow(clippy::too_many_arguments)] // split from infer_message_send to share body
-    #[allow(clippy::too_many_lines)] // generic substitution adds necessary branches
     fn infer_message_send_with_receiver_ty_inner(
         &mut self,
-        receiver: &Expression,
+        site: SendSite<'_>,
         receiver_ty: InferredType,
-        selector: &MessageSelector,
-        arguments: &[Expression],
-        span: Span,
-        hierarchy: &ClassHierarchy,
         env: &mut TypeEnv,
-        in_abstract_method: bool,
     ) -> InferredType {
-        // ADR 0102 §5: a `Negation{base, excluded}`-typed receiver's
-        // method lookup / conformance resolves through `base` — "identically
-        // to a bare `base`-typed receiver" (every class admitted by the
-        // negation is, by construction, a subclass of `base`, so it declares
-        // no capability beyond `base`'s). The simplest faithful
-        // implementation dispatches the *entire* send as if the receiver
-        // were typed `base`, which also gives Q4 (ADR 0100 receiver-knowledge
-        // classification) for free — DNU/argument checks below fall through
-        // to exactly the same `hierarchy`/`check_instance_selector` path a
-        // bare `base`-typed receiver would take. One deliberate
-        // simplification: a `Self`-returning method's result widens back to
-        // `base` rather than re-wrapping the exclusion — the ADR specifies
-        // conformance/lookup parity with `base`, not flow-preservation of the
-        // exclusion through `Self`.
-        let receiver_ty = if let InferredType::Negation { base, .. } = receiver_ty {
-            *base
-        } else {
-            receiver_ty
-        };
-        // ADR 0147 "Dictionary view": every message a map shape does not
-        // handle specially is sent to the `Dictionary(K, V)` it behaves as
-        // (`K` the join of the key types, `V` of the value types; `Object`
-        // for both when open). The shape-aware keyed operations (`at:`,
-        // `at:ifAbsent:`, `at:ifPresent:`, `at:ifPresent:ifAbsent:`,
-        // `at:put:`) read the per-key types, so they keep the un-viewed
-        // receiver; everything else sees the `Dictionary` view.
-        let shape_receiver_ty =
-            crate::semantic_analysis::type_checker::shape_keyed::KeyedOp::from_selector(
-                &selector.name(),
-            )
-            .map(|_| receiver_ty.clone());
-        let receiver_ty = receiver_ty.dictionary_view().unwrap_or(receiver_ty);
-
-        let selector_name = selector.name();
-
-        // Control-flow narrowing (ADR 0068 Phase 1g):
-        // When the selector is ifTrue:, ifFalse:, or ifTrue:ifFalse:, detect
-        // type-testing patterns in the receiver and narrow variable types inside
-        // block arguments.
-        let is_branching = matches!(
-            selector.well_known(),
-            Some(
-                WellKnownSelector::IfTrue
-                    | WellKnownSelector::IfFalse
-                    | WellKnownSelector::IfTrueIfFalse
-            )
-        );
-        // BT-4710: one recursive function answers what the receiver proves
-        // when true and when false — single tests, `and:` / `or:` chains of
-        // them (mixed with conditions it cannot read), all alike.
-        let branch_facts = if is_branching {
-            let facts = self.condition_facts(receiver, env, hierarchy, FactsCtx::arm(span));
-            // A bare recognised test keeps the narrowing dispatch even for an
-            // arm with nothing to narrow (a solo `ifFalse:` over
-            // `respondsTo:` still types its block's return); a chain narrows
-            // only when this send's arm gains a fact.
-            let narrows = match selector.well_known() {
-                Some(WellKnownSelector::IfTrue) => !facts.when_true.is_empty(),
-                Some(WellKnownSelector::IfFalse) => !facts.when_false.is_empty(),
-                _ => !facts.when_true.is_empty() || !facts.when_false.is_empty(),
-            };
-            (narrows || Self::detect_narrowing(receiver).is_some()).then_some(facts)
-        } else {
-            None
-        };
-        // The lazy block of `<cond> and: [...]` runs only when `<cond>`
-        // answered true; of `<cond> or: [...]`, only when it answered false.
-        let connective_facts = match selector_name.as_str() {
-            "and:" | "or:" => {
-                let facts = self.condition_facts(receiver, env, hierarchy, FactsCtx::arm(span));
-                let assumed = if selector_name == "and:" {
-                    facts.when_true
-                } else {
-                    facts.when_false
-                };
-                (!assumed.is_empty()).then_some(assumed)
-            }
-            _ => None,
-        };
-
-        // BT-4713: the body of `[cond] whileTrue: [body]` runs only when the
-        // condition block's last expression answered true (`whileFalse:`:
-        // false), so the body sees the facts that expression proves.
-        let loop_facts = self.loop_body_facts(receiver, selector, arguments, env, hierarchy, span);
-
-        // `Object >> then:` (ADR 0145 § 2, BT-4515): types a literal block's
-        // parameter as the receiver and answers the block's result type. Only
-        // for an instance-side receiver whose every class answers `then:`
-        // with `Object`'s method — a class's own `then:` (a promise, say)
-        // and class-side receivers keep the generic path, as for `ifNil:`.
-        let is_object_then = selector_name == super::super::blocks::THEN_SELECTOR
-            && !Self::is_class_side_receiver(receiver, env)
-            && Self::then_resolves_to_object(&receiver_ty, hierarchy);
-
-        // BT-4636: collect the block arguments' writes to outer locals and join
-        // them into `env` once all arguments are inferred (see
-        // `TypeChecker::defer_block_widening`).
-        let outer_defer = std::mem::replace(&mut self.defer_block_widening, true);
-        let outer_deferred = std::mem::take(&mut self.deferred_block_widenings);
-
-        // Infer argument types, applying narrowing to block arguments when detected.
-        let arg_types: Vec<InferredType> = if let Some(ref facts) = branch_facts {
-            self.infer_args_with_facts(
-                arguments,
-                &selector_name,
-                facts,
-                hierarchy,
-                env,
-                in_abstract_method,
-            )
-        } else if selector.well_known() == Some(WellKnownSelector::OnDo) {
-            // Exception handler block parameter inference.
-            // `[...] on: SomeException do: [:e | ...]` — infer `e` as `SomeException`
-            // when the first argument is a class reference.
-            self.infer_args_for_on_do(arguments, hierarchy, env, in_abstract_method)
-        } else if matches!(
-            selector.well_known(),
-            Some(
-                WellKnownSelector::IfNil
-                    | WellKnownSelector::IfNotNil
-                    | WellKnownSelector::IfNilIfNotNil
-                    | WellKnownSelector::IfNotNilIfNil
-            )
-        ) {
-            // Narrow block parameter of `ifNotNil: [:x | ...]` to the
-            // non-nil branch of the receiver's type. Dual of the receiver-side
-            // `isNil ifFalse:` narrowing.
-            // Solo `ifNil:` is routed through here too, purely so its
-            // niladic block's `Block(..., R)` return type is preserved — the
-            // generic `infer_args_with_block_context` path requires a `Known`
-            // receiver to resolve block param types from a method signature,
-            // which a `T | Nil` union receiver never is.
-            self.infer_args_for_if_not_nil(
-                &selector_name,
-                arguments,
-                &receiver_ty,
-                hierarchy,
-                env,
-                in_abstract_method,
-            )
-        } else if let Some(types) = shape_receiver_ty.as_ref().and_then(|shape_ty| {
-            self.infer_args_for_shape_if_present(
-                &selector_name,
-                arguments,
-                shape_ty,
-                hierarchy,
-                env,
-                in_abstract_method,
-            )
-        }) {
-            types
-        } else if is_object_then {
-            self.infer_args_for_then(arguments, &receiver_ty, hierarchy, env, in_abstract_method)
-        } else if let (Some(assumed), Some(arg)) = (loop_facts.as_ref(), arguments.first()) {
-            let narrowings: Vec<(&EnvKey, &InferredType)> = assumed.iter().collect();
-            vec![self.infer_block_with_narrowings(
-                arg,
-                &narrowings,
-                hierarchy,
-                env,
-                in_abstract_method,
-            )]
-        } else if let (Some(assumed), Some(arg)) = (connective_facts.as_ref(), arguments.first()) {
-            // `X notNil and: [...]`, `<cond> or: [...]`, any chain of tests:
-            // the block sees the facts its receiver proves. Because
-            // `TypeEnv::child()` clones the whole binding map instead of
-            // layering scopes, nested sends inside the block — including
-            // further `and:` chains and binary-message argument positions
-            // like `5 >= local` in `local > 0 and: [5 >= local]` — see the
-            // narrowed type too.
-            let narrowings: Vec<(&EnvKey, &InferredType)> = assumed.iter().collect();
-            vec![self.infer_block_with_narrowings(
-                arg,
-                &narrowings,
-                hierarchy,
-                env,
-                in_abstract_method,
-            )]
-        } else {
-            self.infer_generic_send_args(
-                arguments,
-                receiver,
-                &receiver_ty,
-                &selector_name,
-                hierarchy,
-                env,
-                in_abstract_method,
-            )
-        };
-
-        self.defer_block_widening = outer_defer;
-        let deferred = std::mem::replace(&mut self.deferred_block_widenings, outer_deferred);
-        Self::apply_deferred_block_widenings(&deferred, env);
-
-        // BT-4444: `[:x :: T | ...] value: arg` — check each argument
-        // against the literal's annotated parameter types.
-        self.check_block_literal_value_args(
+        let SendSite {
             receiver,
-            &receiver_ty,
             selector,
             arguments,
-            &arg_types,
-            hierarchy,
-        );
-
-        // ADR 0147: shape-aware keyed operations on a shape (or a union with
-        // a shape member) receiver.
-        if let Some(shape_ty) = &shape_receiver_ty
-            && let Some(ty) = self.infer_shape_keyed_send(
-                shape_ty,
-                &selector_name,
-                arguments,
-                &arg_types,
-                span,
-                hierarchy,
-            )
-        {
-            return ty;
-        }
-
-        // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
-        // `expr asType: SomeClass` asserts expr is SomeClass, returns Known(SomeClass)
-        //
-        // Stays a string comparison rather than a `WellKnownSelector`
-        // variant — `beamtalk-codegen`'s `expr_shape::selector_dispatches_via_self`
-        // already documents `asType:` (alongside `yourself`) as a
-        // "class-specific or compile-time-only construct that does not
-        // warrant universal selector classification".
-        if selector_name == "asType:" {
-            if let Some(Expression::ClassReference { name, .. }) = arguments.first() {
-                return InferredType::known(name.name.clone());
-            }
-            return receiver_ty;
-        }
-
-        // `Object >> then:` (BT-4515) answers its block's result type.
-        if is_object_then
-            && let (Some(arg), Some(ty)) = (arguments.first(), arg_types.first())
-            && Self::then_block_has_one_param(arg)
-            && let Some(ty) = Self::block_arg_result_ty(arg, ty)
-        {
-            return ty;
-        }
-
-        // `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return the union of
-        // both branch bodies' return types. `infer_args_for_if_not_nil`
-        // already inferred both branches as `Block(..., R)` with
-        // narrowed params, so we read back R from each arg and union them.
-        // Blocks with a non-local return (`^`) exit the enclosing method —
-        // their branch contributes `Never`, and `union_of` skips Never, so
-        // the expression's type comes from the surviving branch.
-        //
-        // Restricted to non-class-side receivers: `ClassName ifNil: ... ifNotNil: ...`
-        // and `self ifNil: ... ifNotNil: ...` inside a class method must
-        // flow through `check_class_side_send` so an invalid metaclass send
-        // still emits DNU. The helper unwraps parens so `(ClassName) ifNil: ...`
-        // and `(self) ifNil: ...` aren't accidentally treated as non-class-side.
-        let is_class_side_receiver = Self::is_class_side_receiver(receiver, env);
-        if !is_class_side_receiver {
-            if matches!(
-                selector.well_known(),
-                Some(WellKnownSelector::IfNilIfNotNil | WellKnownSelector::IfNotNilIfNil)
-            ) {
-                if let Some(ty) = Self::if_nil_branch_union_ret_ty(arguments, &arg_types) {
-                    return ty;
-                }
-            } else if matches!(
-                selector.well_known(),
-                Some(WellKnownSelector::IfNil | WellKnownSelector::IfNotNil)
-            ) {
-                // Solo `ifNil:` / `ifNotNil:` on a `T | Nil` union
-                // receiver infer as `T | R` / `R | Nil` — the union of the
-                // "self" branch (executed when the nil-check doesn't match)
-                // and the block branch's inferred return type.
-                if let Some(ty) = Self::if_nil_solo_union_ret_ty(
-                    &selector_name,
-                    &receiver_ty,
-                    arguments,
-                    &arg_types,
-                    hierarchy,
-                ) {
-                    return ty;
-                }
-            }
-        }
-
-        // Validate binary operand types when both sides are known
-        // Only check if the receiver type actually defines the operator (avoids
-        // duplicate warnings when the selector is already unknown).
-        //
-        // `binary_operand_check_ran` tracks whether
-        // `check_binary_operand_types` actually validated this argument —
-        // not merely whether it was called. `check_binary_operand_types`
-        // returns `false` for Known/Known shapes it has no bespoke logic for
-        // (e.g. `String>>,`, `Integer>>**` — any binary selector outside
-        // +-*/ arithmetic, </>/<=/>= comparison, or `++` concat on String),
-        // so those must still fall through to the generic
-        // `check_argument_types` below, exactly like a `Union` argument
-        // that fails the Known/Known destructure entirely.
-        let mut binary_operand_check_ran = false;
-        if let MessageSelector::Binary(op) = selector {
-            if let (
-                InferredType::Known {
-                    class_name: recv_ty,
-                    ..
-                },
-                Some(InferredType::Known {
-                    class_name: arg_ty, ..
-                }),
-            ) = (&receiver_ty, arg_types.first())
-            {
-                // A symbol-literal receiver is typed as the singleton `#name`;
-                // its operators resolve on `Symbol` (BT-3928).
-                if hierarchy.resolves_selector(
-                    super::super::method_resolution_class(recv_ty),
-                    &selector_name,
-                ) {
-                    // Collect origin info for the argument expression
-                    let arg_origin = arguments.first().and_then(|arg_expr| {
-                        if let Expression::Identifier(ident) = arg_expr {
-                            env.get_local_origin(&ident.name)
-                                .map(|o| (o.description.clone(), Some(o.span)))
-                        } else {
-                            None
-                        }
-                    });
-                    binary_operand_check_ran = self.check_binary_operand_types(
-                        recv_ty,
-                        op,
-                        arg_ty,
-                        span,
-                        hierarchy,
-                        arg_origin.as_ref(),
-                    );
-                }
-            }
-            // BT-4023: `anException =:= #sym` (either order) is always false.
-            if let Some(arg) = arguments.first() {
-                self.check_exception_symbol_comparison(
-                    op,
-                    receiver,
-                    &receiver_ty,
-                    arg,
-                    arg_types.first(),
-                    span,
-                    hierarchy,
-                );
-            }
-        }
-
-        // BT-4257: a provably raw Binary compared with, or looked up
-        // against, a String never matches.
-        self.check_binary_string_compare(
-            receiver,
-            &receiver_ty,
-            selector,
-            arguments,
-            &arg_types,
             span,
-            env,
-        );
+            hierarchy,
+            in_abstract_method,
+        } = site;
+        let (receiver_ty, shape_receiver_ty) =
+            Self::normalise_send_receiver_ty(receiver_ty, selector);
+        let selector_name = selector.name();
+        let ctx = SendCtx {
+            receiver,
+            receiver_ty: &receiver_ty,
+            shape_receiver_ty: shape_receiver_ty.as_ref(),
+            selector,
+            selector_name: &selector_name,
+            arguments,
+            span,
+            hierarchy,
+            in_abstract_method,
+        };
+
+        let (arg_types, is_object_then) = self.infer_send_arg_types(&ctx, env);
+        if let Some(ty) = self.infer_special_selector_send(&ctx, &arg_types, is_object_then, env) {
+            return ty;
+        }
+        let binary_operand_check_ran = self.check_send_operands(&ctx, &arg_types, env);
 
         // If receiver is a class reference, check class-side methods.
         // Unwrap parens so `(HTTPRouter) foo:` dispatches class-side
         // — matches the block-param inference normalisation above.
         if let Expression::ClassReference { name, package, .. } = receiver.unwrap_parens() {
-            let class_name = &name.name;
-
-            // ADR 0127 §3 "Name resolution": `json@Parser` where this hierarchy
-            // only describes another package's `Parser` — nothing to check
-            // against, and the user's same-named class must not capture it.
-            if hierarchy.qualified_ref_names_other_class(
-                class_name,
-                package.as_ref().map(|p| p.name.as_str()),
-            ) {
-                return InferredType::Dynamic(DynamicReason::Unknown);
-            }
-
-            // ADR 0075: `Erlang <module>` — return ErlangModule<module_name> type
-            // to enable FFI call type inference on the outer message send.
-            // Class protocol selectors (class, new, superclass, etc.)
-            // must NOT be intercepted as module lookups — they are handled by
-            // normal class-side dispatch. Package-qualified references
-            // (`json@Erlang lists`) are excluded too — they name a package-scoped
-            // class, not the compiler's built-in FFI bridge. Both rules are
-            // centralized in `crate::ffi_receiver` (mirrored here via
-            // `is_class_protocol_selector` since this call site splits the
-            // receiver/selector apart rather than holding the combined send).
-            if class_name == "Erlang"
-                && package.is_none()
-                && let MessageSelector::Unary(module_name) = selector
-                && !super::is_class_protocol_selector(module_name)
-            {
-                // Static module name: `Erlang lists` → ErlangModule<lists>
-                return InferredType::Known {
-                    class_name: EcoString::from(WellKnownClass::ErlangModule.as_str()),
-                    type_args: vec![InferredType::Known {
-                        class_name: module_name.clone(),
-                        type_args: vec![],
-                        provenance:
-                            crate::semantic_analysis::type_checker::TypeProvenance::Inferred(span),
-                    }],
-                    provenance: crate::semantic_analysis::type_checker::TypeProvenance::Inferred(
-                        span,
-                    ),
-                };
-            }
-            // Class protocol selector or dynamic module: fall through to
-            // normal class-side dispatch.
-
-            self.check_argument_types(
-                class_name,
-                &selector_name,
-                &arg_types,
-                span,
-                hierarchy,
-                true,
-                Some(arguments),
-                Some(env),
-                &[],
-            );
-            // ADR 0104 Phase 2: `C spawnWith: #{...}` literal-map key check.
-            self.check_spawn_with_map_keys(class_name, &selector_name, arguments, hierarchy);
-            // ADR 0124 §6/§7 (A3+A4): `C new` / `C new: #{...}` Value
-            // construction-site definite-assignment check.
-            self.check_value_construction_definite_assignment(
-                class_name,
-                &selector_name,
-                arguments,
-                span,
-                hierarchy,
-            );
-            // ADR 0124 §6 (A2b, BT-1948): `C spawn` / `C spawnWith: #{...}`
-            // Actor construction-site definite-assignment check.
-            self.check_actor_construction_definite_assignment(
-                class_name,
-                &selector_name,
-                arguments,
-                span,
-                hierarchy,
-            );
-            return self.check_class_side_send(
-                class_name,
-                &selector_name,
-                span,
-                hierarchy,
-                &arg_types,
-            );
+            return self.infer_class_reference_send(&ctx, name, package.as_ref(), &arg_types, env);
         }
 
-        // ADR 0083: type-driven class-side dispatch. When the receiver's
-        // *inferred type* is a metatype `Meta{C}` — e.g. a value typed
-        // `Self class` / `X class`, the result of `obj class`, or a class value
-        // flowing through a variable/collection/FFI return — route the send to
-        // class-side lookup on `C` exactly like a syntactic `C foo:`. This
-        // generalizes `is_class_side_receiver` from a syntactic test (class
-        // literal / `self` in a class method) to a type-driven one.
+        // ADR 0083: type-driven class-side dispatch for a `Meta{C}` receiver.
         if let InferredType::Meta {
-            class_name: ref meta_class,
+            class_name: meta_class,
             ..
-        } = receiver_ty
+        } = &receiver_ty
         {
-            // The equality/identity comparison operators (`==`, `=:=`,
-            // `/=`, `=/=`) are value/identity comparisons every object —
-            // including a class object — supports at runtime via the universal
-            // `Object`/`ProtoObject` protocol, but they are not modelled as
-            // hierarchy methods. Routing them through class-side DNU lookup
-            // would emit a false `C class does not understand '=:='` (it broke
-            // `x class =:= Foo` narrowing). Treat ONLY these comparison
-            // selectors as Boolean-returning without a class-side check —
-            // matching the pre-0083 behaviour where `Self class` was Dynamic.
-            // Other binary selectors (e.g. `+`) must fall through to normal
-            // class-side / tower lookup (and DNU if unresolved); typing
-            // `SomeClass + 1` as Boolean would be wrong and suppress the DNU.
-            if let MessageSelector::Binary(op) = selector
-                && is_equality_operator(op)
-            {
-                return InferredType::known("Boolean");
-            }
-            // `aClass class` is the metaclass of the class object. The static
-            // hierarchy doesn't track per-class metaclasses precisely, so fall
-            // back to the `Metaclass` tower class.
-            if selector.well_known() == Some(WellKnownSelector::Class) {
-                return InferredType::known("Metaclass");
-            }
-            self.check_argument_types(
-                meta_class,
-                &selector_name,
-                &arg_types,
-                span,
-                hierarchy,
-                true,
-                Some(arguments),
-                Some(env),
-                &[],
-            );
-            // ADR 0104 Phase 2: type-driven `cls spawnWith: #{...}`
-            // (receiver typed `Meta{C}`) literal-map key check.
-            self.check_spawn_with_map_keys(meta_class, &selector_name, arguments, hierarchy);
-            // ADR 0124 §6/§7 (A3+A4): type-driven `cls new`/`cls new:
-            // #{...}` Value construction-site definite-assignment check.
-            self.check_value_construction_definite_assignment(
-                meta_class,
-                &selector_name,
-                arguments,
-                span,
-                hierarchy,
-            );
-            // ADR 0124 §6 (A2b, BT-1948): type-driven `cls spawn`/`cls
-            // spawnWith: #{...}` Actor construction-site
-            // definite-assignment check.
-            self.check_actor_construction_definite_assignment(
-                meta_class,
-                &selector_name,
-                arguments,
-                span,
-                hierarchy,
-            );
-            let class_side =
-                self.check_class_side_send(meta_class, &selector_name, span, hierarchy, &arg_types);
-            // ADR 0083: when no class-side method on `C` defined the result, a
-            // class object still responds to its metaclass-tower *instance*
-            // protocol (`Metaclass → Class → Behaviour → Object → ProtoObject`)
-            // at runtime — e.g. `Behaviour>>name -> Symbol`,
-            // `Behaviour>>superclass`. `check_class_side_send` only propagates
-            // `-> Never` from that chain (to avoid false DNUs on class
-            // *literals*); for a metatype-typed receiver we know the value is a
-            // class object, so apply the tower instance method's declared
-            // return type. Only overrides a Dynamic result, never a concrete
-            // class-side answer.
-            if matches!(class_side, InferredType::Dynamic(_))
-                && let Some(ty) = Self::class_object_tower_return(
-                    &selector_name,
-                    hierarchy,
-                    &InferredType::meta(meta_class.clone()),
-                )
-            {
-                return ty;
-            }
-            return class_side;
+            return self.infer_meta_receiver_send(&ctx, meta_class, &arg_types, env);
         }
 
-        // ADR 0144: a `P class` receiver is the class object of some class
-        // conforming to protocol `P`. Resolve against `P`'s `class`
-        // requirements, then the class-object protocol every class answers.
-        if let InferredType::ProtocolMeta {
-            ref protocol_name, ..
-        } = receiver_ty
-        {
-            if let MessageSelector::Binary(op) = selector
-                && is_equality_operator(op)
-            {
-                return InferredType::known("Boolean");
-            }
-            if selector.well_known() == Some(WellKnownSelector::Class) {
-                return InferredType::known("Metaclass");
-            }
-            return self.infer_protocol_meta_send(
-                protocol_name,
-                &selector_name,
-                &arg_types,
-                arguments,
-                span,
-                hierarchy,
-                env,
-            );
+        // ADR 0144: a `P class` receiver.
+        if let InferredType::ProtocolMeta { protocol_name, .. } = &receiver_ty {
+            return self.infer_protocol_meta_receiver_send(&ctx, protocol_name, &arg_types, env);
         }
 
         // Set when a `Known`-receiver's solo `ifTrue:`/`ifFalse:`
@@ -711,380 +240,21 @@ impl TypeChecker {
 
         // For instance-side sends on known types
         if let InferredType::Known {
-            ref class_name,
-            ref type_args,
+            class_name,
+            type_args,
             ..
-        } = receiver_ty
+        } = &receiver_ty
         {
-            // In class methods, self sends should check class-side methods,
-            // and so should `super` sends — against the superclass, which is
-            // `receiver_ty` for `super` (BT-4001).
-            if Self::is_class_method_self_or_super(receiver, env) {
-                if !in_abstract_method {
-                    self.check_argument_types(
-                        class_name,
-                        &selector_name,
-                        &arg_types,
-                        span,
-                        hierarchy,
-                        true,
-                        Some(arguments),
-                        Some(env),
-                        &[],
-                    );
-                    // ADR 0104 Phase 2: `self spawnWith: #{...}`
-                    // literal-map key check — the class-reference and
-                    // Meta-typed-receiver branches above already run this;
-                    // unifying the cascade continuation loop onto
-                    // this shared path surfaced that this branch was
-                    // the one class-side shape missing it.
-                    self.check_spawn_with_map_keys(
-                        class_name,
-                        &selector_name,
-                        arguments,
-                        hierarchy,
-                    );
-                    // ADR 0124 §6/§7 (A3+A4): `self new`/`self new: #{...}`
-                    // Value construction-site definite-assignment check —
-                    // the canonical class-method factory site (e.g.
-                    // `WorkflowHandle class for:client:`).
-                    self.check_value_construction_definite_assignment(
-                        class_name,
-                        &selector_name,
-                        arguments,
-                        span,
-                        hierarchy,
-                    );
-                    // ADR 0124 §6 (A2b, BT-1948): `self spawn` Actor
-                    // construction-site definite-assignment check — spawning
-                    // a sibling actor from a class-method factory.
-                    self.check_actor_construction_definite_assignment(
-                        class_name,
-                        &selector_name,
-                        arguments,
-                        span,
-                        hierarchy,
-                    );
-                    return self.check_class_side_send(
-                        class_name,
-                        &selector_name,
-                        span,
-                        hierarchy,
-                        &arg_types,
-                    );
-                }
-                return InferredType::Dynamic(DynamicReason::DynamicReceiver);
-            }
-
-            // ADR 0075: FFI call type inference for ErlangModule<module_name>.
-            // When the receiver is typed as ErlangModule with a known module name
-            // (from `Erlang lists` or a variable assigned from one), extract the
-            // Erlang function name and arity, then look up in NativeTypeRegistry.
-            // Class protocol selectors (class, new, printString, etc.)
-            // and binary selectors (==, etc.) on ErlangModule instances must use
-            // normal dispatch, not FFI lookup.
-            if WellKnownClass::from_str(class_name) == Some(WellKnownClass::ErlangModule)
-                && !super::is_class_protocol_selector(&selector_name)
-                && !matches!(selector, MessageSelector::Binary(_))
-            {
-                return self
-                    .infer_ffi_call(type_args, selector, arguments, &arg_types, span, hierarchy);
-            }
-
-            // ADR 0075 amendment: literal-index tuple access.
-            // `aTuple at: <literal int>` on a `Tuple(T1, …, Tn)` with known
-            // positional element types infers the element type at that 1-based
-            // index. A non-literal index, an out-of-range literal, or a bare
-            // `Tuple` (no type_args) falls through to normal dispatch (Dynamic),
-            // so this never produces a false positive.
-            if let Some(elem_ty) =
-                Self::infer_literal_index_tuple_at(class_name, &selector_name, type_args, arguments)
-            {
-                self.check_instance_selector(class_name, &selector_name, span, hierarchy);
-                return elem_ty;
-            }
-
-            // Validation routes ALL singleton receivers (including binary sends)
-            // through `Symbol` — that is fine: `Symbol` understands `=:=`/`=`, so
-            // no spurious DNU, and the impossible-comparison hint fires
-            // via the Dynamic fall-through below, not via validation. Only the
-            // *inference* redirect (`resolve_class`) excludes binary sends.
-            self.check_instance_selector(class_name, &selector_name, span, hierarchy);
-            // A non-union singleton receiver (`#text`) is a subtype of
-            // `Symbol` but not itself in the hierarchy, so method lookup and
-            // argument/return-type inference would otherwise fall through to
-            // Dynamic — losing the inference it had when typed `Symbol`. Resolve
-            // its protocol through `Symbol`, mirroring the singleton-union member
-            // handling. `class_name` (`#text`) is still used for
-            // `Self` returns and user-facing messages.
-            //
-            // `!contains('|')` keeps this symmetric with `check_instance_selector`
-            // (a `Known` is never a union today, but a future `Known { "#a | #b" }`
-            // must not silently route here while validation leaves it untouched).
-            // Binary sends are excluded: an equality op on a singleton receiver
-            // (`#west =:= unionVar`) must fall through to the
-            // statically-decidable-comparison hint below rather than
-            // short-circuiting on `Symbol`'s `=:=`.
-            //
-            // A protocol receiver's non-protocol selector that every object
-            // answers (`printString`, `respondsTo:`) resolves through
-            // `Object`'s method table for its argument and return types
-            // (BT-4594). This includes binary sends: `p = x` on a protocol
-            // receiver infers `Object`'s `Boolean` rather than `Dynamic` —
-            // the singleton exclusion above does not apply.
-            let via_object = self.protocol_send_resolution(class_name, &selector_name, hierarchy)
-                == Some(ProtocolSendResolution::Object);
-            let resolve_class: EcoString = if via_object {
-                EcoString::from(WellKnownClass::Object.as_str())
-            } else if !class_name.contains('|') && !matches!(selector, MessageSelector::Binary(_)) {
-                EcoString::from(super::super::method_resolution_class(class_name))
-            } else {
-                class_name.clone()
-            };
-            // Skip argument type check for binary messages only when
-            // `check_binary_operand_types` already ran above (the Known/Known
-            // case) — it provides more specific warnings for
-            // arithmetic/comparison/concat. When the argument's
-            // inferred type didn't match that Known/Known pattern (e.g. a
-            // `Union` like `String | Nil`), fall back to the generic
-            // `check_argument_types` so the argument still gets *some*
-            // coverage instead of none.
-            if !matches!(selector, MessageSelector::Binary(_)) || !binary_operand_check_ran {
-                // ADR 0126 §6: known-remote provenance of the receiver —
-                // the only `check_argument_types` call site with the raw
-                // receiver expression on hand (every other call site sends
-                // `self`, a class reference, or a metatype, none of which
-                // is ever known-remote).
-                let receiver_known_remote = known_remote::classify(receiver, &|id| {
-                    env.known_remote(&EnvKey::local(id.name.clone()))
-                });
-                self.check_argument_types_with_known_remote(
-                    &resolve_class,
-                    &selector_name,
-                    &arg_types,
-                    span,
-                    hierarchy,
-                    false,
-                    Some(arguments),
-                    Some(env),
-                    type_args,
-                    receiver_known_remote.as_ref(),
-                    receiver.is_self_or_super(),
-                );
-            }
-
-            // Infer return type from method info
-            if let Some(method) = hierarchy.find_method(&resolve_class, &selector_name) {
-                if let Some(ref ret_ty) = method.return_type {
-                    // ADR 0104 Phase 3: `withTimeout:` return-type
-                    // transparency. The generated-builtins table records the
-                    // static return type `TimeoutProxy`, but the proxy is
-                    // transparent — it forwards every message to the wrapped
-                    // actor and a timed-out call *raises* rather than returning,
-                    // so method return types are unchanged. Typing the result as
-                    // the opaque `TimeoutProxy` would make every forwarded
-                    // selector (`slowDb query: sql`) `Dynamic`. Instead, a
-                    // `withTimeout:` send on a receiver of static type `C` is
-                    // typed as `C` (with its type args preserved), so forwarded
-                    // calls resolve the wrapped class's real return types. The
-                    // table can only hold a static string, so the transparency
-                    // rule is applied here. Restricted to `Actor` and its
-                    // subclasses (`is_actor_subclass` returns true for the base
-                    // `Actor` itself too) so the rule's correctness is an explicit
-                    // constraint, not an implicit consequence of `TimeoutProxy`
-                    // being inaccessible from user code (a user
-                    // `withTimeout: -> TimeoutProxy` on a non-Actor class would
-                    // otherwise be silently retyped).
-                    if selector.well_known() == Some(WellKnownSelector::WithTimeout)
-                        && matches!(ret_ty, DeclaredType::Simple(n) if n == "TimeoutProxy")
-                        && hierarchy.is_actor_subclass(&resolve_class)
-                    {
-                        return receiver_ty.clone();
-                    }
-
-                    // `Self` resolves to the static receiver class (with type args)
-                    if matches!(ret_ty, DeclaredType::SelfType) {
-                        if type_args.is_empty() {
-                            return InferredType::known(class_name.clone());
-                        }
-                        return InferredType::Known {
-                            class_name: class_name.clone(),
-                            type_args: type_args.clone(),
-                            provenance:
-                                crate::semantic_analysis::type_checker::TypeProvenance::Substituted(
-                                    crate::source_analysis::Span::default(),
-                                ),
-                        };
-                    }
-
-                    // ADR 0083: `Self class` — the method returns the receiver's
-                    // class object. Resolve to the metatype of the static
-                    // receiver class so that downstream class-side sends
-                    // (`obj class new`, `self species withAll:`) route through
-                    // `find_class_method`. Pre-0083 this returned `Dynamic`.
-                    if matches!(ret_ty, DeclaredType::SelfClass) {
-                        // A protocol receiver's class is some class
-                        // conforming to it: the protocol metatype (ADR 0144),
-                        // not the `Object class` its signature came from.
-                        if via_object {
-                            return InferredType::protocol_meta(class_name.clone());
-                        }
-                        // For a singleton receiver, `resolve_class` is
-                        // `Symbol` so `#text class` is `Symbol class` (`#text` is a
-                        // Symbol at runtime), not a phantom `Meta("#text")`.
-                        return InferredType::meta(resolve_class.clone());
-                    }
-                    // ADR 0083: `X class` — the method returns the metatype of a
-                    // specific named class (`X class` annotation).
-                    if let DeclaredType::ClassOf(meta_class) = ret_ty
-                        && hierarchy.has_class(meta_class)
-                    {
-                        return InferredType::meta(meta_class.clone());
-                    }
-
-                    // `Never` resolves to the bottom type (divergent methods)
-                    if matches!(ret_ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n) == Some(WellKnownClass::Never))
-                    {
-                        return InferredType::Never;
-                    }
-
-                    // Build substitution map, composing through inheritance chain
-                    // if the method is inherited (ADR 0068 Phase 1b)
-                    let subst = Self::build_inherited_substitution_map(
-                        hierarchy,
-                        &resolve_class,
-                        type_args,
-                        &method.defined_in,
-                    );
-
-                    // Infer method-local type params from arguments (works for
-                    // any parametric param type: Block, Result, Array, etc.)
-                    let method_subst = Self::infer_method_local_params(
-                        method,
-                        &arg_types,
-                        &subst,
-                        hierarchy,
-                        &method.defined_in,
-                    );
-
-                    // Apply generic substitution if we have type args, method-local
-                    // params, or the return type mentions `Self` nested inside a
-                    // generic/union. For the last case, even if no
-                    // param substitutions apply, we still need to rewrite `Self`
-                    // to the receiver class so callers see the narrowed type.
-                    let has_nested_self = Self::declared_type_contains_self(ret_ty);
-                    if !subst.is_empty() || !method_subst.is_empty() || has_nested_self {
-                        // Thread the full receiver type (with type args)
-                        // under the reserved `Self` subst key so nested `Self` in
-                        // generics like `Result(Self, Error)` resolves to e.g.
-                        // `Box(Integer)` not bare `Box` (the shared
-                        // `resolve_declared_type` resolver's `SelfType` arm reads
-                        // this same key — see its doc).
-                        return type_resolver::resolve_declared_type_in(
-                            ret_ty,
-                            &type_resolver::merge_substitutions(
-                                &subst,
-                                &method_subst,
-                                Some(&receiver_ty),
-                            ),
-                            self.protocol_registry.as_deref(),
-                            self.alias_registry.as_deref(),
-                            TypeStringContext::Substitution,
-                            Some(hierarchy),
-                        );
-                    }
-
-                    // If the return type is an unresolved type param
-                    // (single uppercase letter like E, T, V), fall back to Dynamic
-                    // so downstream sends don't get false DNU warnings.
-                    if let DeclaredType::Simple(n) = ret_ty
-                        && crate::semantic_analysis::type_checker::is_type_var_placeholder(
-                            n, hierarchy,
-                        )
-                    {
-                        return InferredType::Dynamic(DynamicReason::Unknown);
-                    }
-
-                    // Resolve the return type through the centralised
-                    // structured resolver, which preserves the full
-                    // parameterised type — `List(String)` becomes
-                    // `Known("List", [Known("String")])` rather than a
-                    // bare `Known("List", [])` that would silently drop
-                    // the element type.
-                    //
-                    // Also handles:
-                    //  * union return types like `Integer | Nil`
-                    //    resolve into `InferredType::Union`, enabling narrowing.
-                    //  * Plain class names — pass through to `Known(name, [])`.
-                    //  * Nested generics — `Result(List(String), Error)`
-                    //    keeps both layers.
-                    //  * a cross-file alias name expands to its
-                    //    declared union/structural type instead of staying
-                    //    an opaque nominal class.
-                    return type_resolver::resolve_declared_type(
-                        ret_ty,
-                        &type_resolver::SubstitutionMap::new(),
-                        self.protocol_registry.as_deref(),
-                        self.alias_registry.as_deref(),
-                        TypeStringContext::Declared,
-                    );
-                }
-
-                // `ret_ty` is None — the method exists but declares
-                // no return type. For `Boolean>>ifTrue:`/`ifFalse:` this is
-                // by design (see `boolean.bt`): a solo `ifTrue:`/`ifFalse:`
-                // on an unnarrowed `Boolean` receiver can't soundly promise
-                // `R` (the sibling branch — e.g. `False>>ifTrue:` — returns
-                // `self` without invoking the block), but collapsing all the
-                // way to `Dynamic` is more conservative than necessary: the
-                // sound type is the union of that `Boolean` self-branch and
-                // the block's own return type. Mirrors
-                // `if_nil_solo_union_ret_ty`'s fix for `ifNil:`/`ifNotNil:`.
-                if let Some(ty) = Self::if_true_false_solo_boolean_ret_ty(
-                    &selector_name,
-                    &resolve_class,
-                    arguments,
-                    &arg_types,
-                    hierarchy,
-                ) {
-                    return ty;
-                }
-
-                // Only reclassify the terminal Dynamic fallback's reason for
-                // the `ifTrue:`/`ifFalse:` family this issue targets — other
-                // deliberately-unannotated methods (e.g. `Block>>on:do:`,
-                // whose return type is a separate, unresolved soundness gap
-                // predating this fix) keep the pre-existing `DynamicReceiver`
-                // reason so they don't newly start firing the "Dynamic in
-                // typed class" warning as a side effect of this narrower fix.
-                if matches!(
-                    selector.well_known(),
-                    Some(WellKnownSelector::IfTrue | WellKnownSelector::IfFalse)
-                ) {
-                    known_method_unannotated_return = true;
-                }
-            }
-
-            // Block value/value:/value:value: — return the last type arg.
-            // Block is variadic: Block(R), Block(A, R), Block(A, B, R), etc.
-            // The convention is that the last type arg is always the return type.
-            if WellKnownClass::from_str(class_name) == Some(WellKnownClass::Block)
-                && !type_args.is_empty()
-                && selector
-                    .well_known()
-                    .is_some_and(WellKnownSelector::is_block_value)
-            {
-                return type_args.last().unwrap().clone();
-            }
-
-            // Fall back to return types inferred earlier in this same pass.
-            // Method bodies are processed before top-level expressions, so inferred
-            // return types are available for chain resolution without a second pass.
-            // Return the full InferredType from the cache, preserving
-            // type_args so callers see e.g. List(String) instead of bare List.
-            let key = (class_name.clone(), selector_name.clone(), false);
-            if let Some(ret_ty) = self.method_return_types.get(&key) {
-                return ret_ty.clone();
+            match self.infer_known_receiver_send(
+                &ctx,
+                class_name,
+                type_args,
+                &arg_types,
+                binary_operand_check_ran,
+                env,
+            ) {
+                ControlFlow::Break(ty) => return ty,
+                ControlFlow::Continue(unannotated) => known_method_unannotated_return = unannotated,
             }
         }
 
@@ -1142,6 +312,1204 @@ impl TypeChecker {
         } else {
             DynamicReason::DynamicReceiver
         })
+    }
+
+    /// ADR 0102 §5 and ADR 0147: the receiver type a send is judged under.
+    /// A `Negation` receiver dispatches as its base, and a map shape (other
+    /// than for the keyed operations, which keep the shape) as the
+    /// `Dictionary` view. Answers `(receiver_ty, shape_receiver_ty)`.
+    fn normalise_send_receiver_ty(
+        receiver_ty: InferredType,
+        selector: &MessageSelector,
+    ) -> (InferredType, Option<InferredType>) {
+        // ADR 0102 §5: a `Negation{base, excluded}`-typed receiver's
+        // method lookup / conformance resolves through `base` — "identically
+        // to a bare `base`-typed receiver" (every class admitted by the
+        // negation is, by construction, a subclass of `base`, so it declares
+        // no capability beyond `base`'s). The simplest faithful
+        // implementation dispatches the *entire* send as if the receiver
+        // were typed `base`, which also gives Q4 (ADR 0100 receiver-knowledge
+        // classification) for free — DNU/argument checks below fall through
+        // to exactly the same `hierarchy`/`check_instance_selector` path a
+        // bare `base`-typed receiver would take. One deliberate
+        // simplification: a `Self`-returning method's result widens back to
+        // `base` rather than re-wrapping the exclusion — the ADR specifies
+        // conformance/lookup parity with `base`, not flow-preservation of the
+        // exclusion through `Self`.
+        let receiver_ty = if let InferredType::Negation { base, .. } = receiver_ty {
+            *base
+        } else {
+            receiver_ty
+        };
+        // ADR 0147 "Dictionary view": every message a map shape does not
+        // handle specially is sent to the `Dictionary(K, V)` it behaves as
+        // (`K` the join of the key types, `V` of the value types; `Object`
+        // for both when open). The shape-aware keyed operations (`at:`,
+        // `at:ifAbsent:`, `at:ifPresent:`, `at:ifPresent:ifAbsent:`,
+        // `at:put:`) read the per-key types, so they keep the un-viewed
+        // receiver; everything else sees the `Dictionary` view.
+        let shape_receiver_ty =
+            crate::semantic_analysis::type_checker::shape_keyed::KeyedOp::from_selector(
+                &selector.name(),
+            )
+            .map(|_| receiver_ty.clone());
+        let receiver_ty = receiver_ty.dictionary_view().unwrap_or(receiver_ty);
+        (receiver_ty, shape_receiver_ty)
+    }
+
+    /// What the receiver proves for the send's lazy block arguments:
+    /// `ifTrue:`-family branch facts (ADR 0068 Phase 1g, BT-4710), the facts
+    /// an `and:` / `or:` block runs under, and a `whileTrue:` / `whileFalse:`
+    /// body's facts (BT-4713).
+    fn send_block_facts(&mut self, ctx: &SendCtx<'_>, env: &mut TypeEnv) -> BlockFacts {
+        let SendCtx {
+            receiver,
+            selector,
+            selector_name,
+            arguments,
+            span,
+            hierarchy,
+            ..
+        } = *ctx;
+        // Control-flow narrowing (ADR 0068 Phase 1g):
+        // When the selector is ifTrue:, ifFalse:, or ifTrue:ifFalse:, detect
+        // type-testing patterns in the receiver and narrow variable types inside
+        // block arguments.
+        let is_branching = matches!(
+            selector.well_known(),
+            Some(
+                WellKnownSelector::IfTrue
+                    | WellKnownSelector::IfFalse
+                    | WellKnownSelector::IfTrueIfFalse
+            )
+        );
+        // BT-4710: one recursive function answers what the receiver proves
+        // when true and when false — single tests, `and:` / `or:` chains of
+        // them (mixed with conditions it cannot read), all alike.
+        let branch_facts = if is_branching {
+            let facts = self.condition_facts(receiver, env, hierarchy, FactsCtx::arm(span));
+            // A bare recognised test keeps the narrowing dispatch even for an
+            // arm with nothing to narrow (a solo `ifFalse:` over
+            // `respondsTo:` still types its block's return); a chain narrows
+            // only when this send's arm gains a fact.
+            let narrows = match selector.well_known() {
+                Some(WellKnownSelector::IfTrue) => !facts.when_true.is_empty(),
+                Some(WellKnownSelector::IfFalse) => !facts.when_false.is_empty(),
+                _ => !facts.when_true.is_empty() || !facts.when_false.is_empty(),
+            };
+            (narrows || Self::detect_narrowing(receiver).is_some()).then_some(facts)
+        } else {
+            None
+        };
+        // The lazy block of `<cond> and: [...]` runs only when `<cond>`
+        // answered true; of `<cond> or: [...]`, only when it answered false.
+        let connective_facts = match selector_name.as_str() {
+            "and:" | "or:" => {
+                let facts = self.condition_facts(receiver, env, hierarchy, FactsCtx::arm(span));
+                let assumed = if selector_name == "and:" {
+                    facts.when_true
+                } else {
+                    facts.when_false
+                };
+                (!assumed.is_empty()).then_some(assumed)
+            }
+            _ => None,
+        };
+
+        // BT-4713: the body of `[cond] whileTrue: [body]` runs only when the
+        // condition block's last expression answered true (`whileFalse:`:
+        // false), so the body sees the facts that expression proves.
+        let loop_facts = self.loop_body_facts(receiver, selector, arguments, env, hierarchy, span);
+        BlockFacts {
+            branch: branch_facts,
+            connective: connective_facts,
+            loop_body: loop_facts,
+        }
+    }
+
+    /// Infers the argument types of a send, narrowing block arguments by the
+    /// control-flow facts the receiver proves (`ifTrue:`, `and:`, `whileTrue:`
+    /// and friends) and giving handler / `ifNotNil:` / `then:` blocks their
+    /// parameter types. Block-argument writes to outer locals are collected
+    /// and joined into `env` once, afterwards (BT-4636). Answers the argument
+    /// types and whether this is an `Object >> then:` send.
+    fn infer_send_arg_types(
+        &mut self,
+        ctx: &SendCtx<'_>,
+        env: &mut TypeEnv,
+    ) -> (Vec<InferredType>, bool) {
+        let SendCtx {
+            receiver,
+            receiver_ty,
+            shape_receiver_ty,
+            selector,
+            selector_name,
+            arguments,
+            hierarchy,
+            in_abstract_method,
+            ..
+        } = *ctx;
+        let BlockFacts {
+            branch: branch_facts,
+            connective: connective_facts,
+            loop_body: loop_facts,
+        } = self.send_block_facts(ctx, env);
+
+        // `Object >> then:` (ADR 0145 § 2, BT-4515): types a literal block's
+        // parameter as the receiver and answers the block's result type. Only
+        // for an instance-side receiver whose every class answers `then:`
+        // with `Object`'s method — a class's own `then:` (a promise, say)
+        // and class-side receivers keep the generic path, as for `ifNil:`.
+        let is_object_then = selector_name == super::super::blocks::THEN_SELECTOR
+            && !Self::is_class_side_receiver(receiver, env)
+            && Self::then_resolves_to_object(receiver_ty, hierarchy);
+
+        // BT-4636: collect the block arguments' writes to outer locals and join
+        // them into `env` once all arguments are inferred (see
+        // `TypeChecker::defer_block_widening`).
+        let outer_defer = std::mem::replace(&mut self.defer_block_widening, true);
+        let outer_deferred = std::mem::take(&mut self.deferred_block_widenings);
+
+        // Infer argument types, applying narrowing to block arguments when detected.
+        let arg_types: Vec<InferredType> = if let Some(ref facts) = branch_facts {
+            self.infer_args_with_facts(
+                arguments,
+                selector_name,
+                facts,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )
+        } else if selector.well_known() == Some(WellKnownSelector::OnDo) {
+            // Exception handler block parameter inference.
+            // `[...] on: SomeException do: [:e | ...]` — infer `e` as `SomeException`
+            // when the first argument is a class reference.
+            self.infer_args_for_on_do(arguments, hierarchy, env, in_abstract_method)
+        } else if matches!(
+            selector.well_known(),
+            Some(
+                WellKnownSelector::IfNil
+                    | WellKnownSelector::IfNotNil
+                    | WellKnownSelector::IfNilIfNotNil
+                    | WellKnownSelector::IfNotNilIfNil
+            )
+        ) {
+            // Narrow block parameter of `ifNotNil: [:x | ...]` to the
+            // non-nil branch of the receiver's type. Dual of the receiver-side
+            // `isNil ifFalse:` narrowing.
+            // Solo `ifNil:` is routed through here too, purely so its
+            // niladic block's `Block(..., R)` return type is preserved — the
+            // generic `infer_args_with_block_context` path requires a `Known`
+            // receiver to resolve block param types from a method signature,
+            // which a `T | Nil` union receiver never is.
+            self.infer_args_for_if_not_nil(
+                selector_name,
+                arguments,
+                receiver_ty,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )
+        } else if let Some(types) = shape_receiver_ty.and_then(|shape_ty| {
+            self.infer_args_for_shape_if_present(
+                selector_name,
+                arguments,
+                shape_ty,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )
+        }) {
+            types
+        } else if is_object_then {
+            self.infer_args_for_then(arguments, receiver_ty, hierarchy, env, in_abstract_method)
+        } else if let (Some(assumed), Some(arg)) = (loop_facts.as_ref(), arguments.first()) {
+            let narrowings: Vec<(&EnvKey, &InferredType)> = assumed.iter().collect();
+            vec![self.infer_block_with_narrowings(
+                arg,
+                &narrowings,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )]
+        } else if let (Some(assumed), Some(arg)) = (connective_facts.as_ref(), arguments.first()) {
+            // `X notNil and: [...]`, `<cond> or: [...]`, any chain of tests:
+            // the block sees the facts its receiver proves. Because
+            // `TypeEnv::child()` clones the whole binding map instead of
+            // layering scopes, nested sends inside the block — including
+            // further `and:` chains and binary-message argument positions
+            // like `5 >= local` in `local > 0 and: [5 >= local]` — see the
+            // narrowed type too.
+            let narrowings: Vec<(&EnvKey, &InferredType)> = assumed.iter().collect();
+            vec![self.infer_block_with_narrowings(
+                arg,
+                &narrowings,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )]
+        } else {
+            self.infer_generic_send_args(
+                arguments,
+                receiver,
+                receiver_ty,
+                selector_name,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )
+        };
+
+        self.defer_block_widening = outer_defer;
+        let deferred = std::mem::replace(&mut self.deferred_block_widenings, outer_deferred);
+        Self::apply_deferred_block_widenings(&deferred, env);
+
+        (arg_types, is_object_then)
+    }
+
+    /// Selectors whose result is decided before any receiver-kind dispatch:
+    /// shape-keyed operations, `asType:`, `Object >> then:` and the
+    /// `ifNil:` family. `None` falls through to the general path.
+    fn infer_special_selector_send(
+        &mut self,
+        ctx: &SendCtx<'_>,
+        arg_types: &[InferredType],
+        is_object_then: bool,
+        env: &mut TypeEnv,
+    ) -> Option<InferredType> {
+        let SendCtx {
+            receiver,
+            receiver_ty,
+            shape_receiver_ty,
+            selector,
+            selector_name,
+            arguments,
+            span,
+            hierarchy,
+            ..
+        } = *ctx;
+        // BT-4444: `[:x :: T | ...] value: arg` — check each argument
+        // against the literal's annotated parameter types.
+        self.check_block_literal_value_args(
+            receiver,
+            receiver_ty,
+            selector,
+            arguments,
+            arg_types,
+            hierarchy,
+        );
+
+        // ADR 0147: shape-aware keyed operations on a shape (or a union with
+        // a shape member) receiver.
+        if let Some(shape_ty) = shape_receiver_ty
+            && let Some(ty) = self.infer_shape_keyed_send(
+                shape_ty,
+                selector_name,
+                arguments,
+                arg_types,
+                span,
+                hierarchy,
+            )
+        {
+            return Some(ty);
+        }
+
+        // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
+        // `expr asType: SomeClass` asserts expr is SomeClass, returns Known(SomeClass)
+        //
+        // Stays a string comparison rather than a `WellKnownSelector`
+        // variant — `beamtalk-codegen`'s `expr_shape::selector_dispatches_via_self`
+        // already documents `asType:` (alongside `yourself`) as a
+        // "class-specific or compile-time-only construct that does not
+        // warrant universal selector classification".
+        if selector_name == "asType:" {
+            if let Some(Expression::ClassReference { name, .. }) = arguments.first() {
+                return Some(InferredType::known(name.name.clone()));
+            }
+            return Some(receiver_ty.clone());
+        }
+
+        // `Object >> then:` (BT-4515) answers its block's result type.
+        if is_object_then
+            && let (Some(arg), Some(ty)) = (arguments.first(), arg_types.first())
+            && Self::then_block_has_one_param(arg)
+            && let Some(ty) = Self::block_arg_result_ty(arg, ty)
+        {
+            return Some(ty);
+        }
+
+        // `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return the union of
+        // both branch bodies' return types. `infer_args_for_if_not_nil`
+        // already inferred both branches as `Block(..., R)` with
+        // narrowed params, so we read back R from each arg and union them.
+        // Blocks with a non-local return (`^`) exit the enclosing method —
+        // their branch contributes `Never`, and `union_of` skips Never, so
+        // the expression's type comes from the surviving branch.
+        //
+        // Restricted to non-class-side receivers: `ClassName ifNil: ... ifNotNil: ...`
+        // and `self ifNil: ... ifNotNil: ...` inside a class method must
+        // flow through `check_class_side_send` so an invalid metaclass send
+        // still emits DNU. The helper unwraps parens so `(ClassName) ifNil: ...`
+        // and `(self) ifNil: ...` aren't accidentally treated as non-class-side.
+        let is_class_side_receiver = Self::is_class_side_receiver(receiver, env);
+        if !is_class_side_receiver {
+            if matches!(
+                selector.well_known(),
+                Some(WellKnownSelector::IfNilIfNotNil | WellKnownSelector::IfNotNilIfNil)
+            ) {
+                if let Some(ty) = Self::if_nil_branch_union_ret_ty(arguments, arg_types) {
+                    return Some(ty);
+                }
+            } else if matches!(
+                selector.well_known(),
+                Some(WellKnownSelector::IfNil | WellKnownSelector::IfNotNil)
+            ) {
+                // Solo `ifNil:` / `ifNotNil:` on a `T | Nil` union
+                // receiver infer as `T | R` / `R | Nil` — the union of the
+                // "self" branch (executed when the nil-check doesn't match)
+                // and the block branch's inferred return type.
+                if let Some(ty) = Self::if_nil_solo_union_ret_ty(
+                    selector_name,
+                    receiver_ty,
+                    arguments,
+                    arg_types,
+                    hierarchy,
+                ) {
+                    return Some(ty);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Validates the operands of a binary send (arithmetic, comparison,
+    /// concatenation, exception-symbol and Binary/String comparisons).
+    /// Answers whether `check_binary_operand_types` validated the argument,
+    /// so the generic argument check can be skipped for it.
+    fn check_send_operands(
+        &mut self,
+        ctx: &SendCtx<'_>,
+        arg_types: &[InferredType],
+        env: &mut TypeEnv,
+    ) -> bool {
+        let SendCtx {
+            receiver,
+            receiver_ty,
+            selector,
+            selector_name,
+            arguments,
+            span,
+            hierarchy,
+            ..
+        } = *ctx;
+        // Validate binary operand types when both sides are known
+        // Only check if the receiver type actually defines the operator (avoids
+        // duplicate warnings when the selector is already unknown).
+        //
+        // `binary_operand_check_ran` tracks whether
+        // `check_binary_operand_types` actually validated this argument —
+        // not merely whether it was called. `check_binary_operand_types`
+        // returns `false` for Known/Known shapes it has no bespoke logic for
+        // (e.g. `String>>,`, `Integer>>**` — any binary selector outside
+        // +-*/ arithmetic, </>/<=/>= comparison, or `++` concat on String),
+        // so those must still fall through to the generic
+        // `check_argument_types` below, exactly like a `Union` argument
+        // that fails the Known/Known destructure entirely.
+        let mut binary_operand_check_ran = false;
+        if let MessageSelector::Binary(op) = selector {
+            if let (
+                InferredType::Known {
+                    class_name: recv_ty,
+                    ..
+                },
+                Some(InferredType::Known {
+                    class_name: arg_ty, ..
+                }),
+            ) = (receiver_ty, arg_types.first())
+            {
+                // A symbol-literal receiver is typed as the singleton `#name`;
+                // its operators resolve on `Symbol` (BT-3928).
+                if hierarchy.resolves_selector(
+                    super::super::method_resolution_class(recv_ty),
+                    selector_name,
+                ) {
+                    // Collect origin info for the argument expression
+                    let arg_origin = arguments.first().and_then(|arg_expr| {
+                        if let Expression::Identifier(ident) = arg_expr {
+                            env.get_local_origin(&ident.name)
+                                .map(|o| (o.description.clone(), Some(o.span)))
+                        } else {
+                            None
+                        }
+                    });
+                    binary_operand_check_ran = self.check_binary_operand_types(
+                        recv_ty,
+                        op,
+                        arg_ty,
+                        span,
+                        hierarchy,
+                        arg_origin.as_ref(),
+                    );
+                }
+            }
+            // BT-4023: `anException =:= #sym` (either order) is always false.
+            if let Some(arg) = arguments.first() {
+                self.check_exception_symbol_comparison(
+                    op,
+                    receiver,
+                    receiver_ty,
+                    arg,
+                    arg_types.first(),
+                    span,
+                    hierarchy,
+                );
+            }
+        }
+
+        // BT-4257: a provably raw Binary compared with, or looked up
+        // against, a String never matches.
+        self.check_binary_string_compare(
+            receiver,
+            receiver_ty,
+            selector,
+            arguments,
+            arg_types,
+            span,
+            env,
+        );
+
+        binary_operand_check_ran
+    }
+
+    /// A send to a class reference (`Foo bar`, `Erlang lists`): class-side
+    /// argument and construction-site checks, then class-side dispatch.
+    fn infer_class_reference_send(
+        &mut self,
+        ctx: &SendCtx<'_>,
+        name: &crate::ast::Identifier,
+        package: Option<&crate::ast::Identifier>,
+        arg_types: &[InferredType],
+        env: &mut TypeEnv,
+    ) -> InferredType {
+        let SendCtx {
+            selector,
+            selector_name,
+            arguments,
+            span,
+            hierarchy,
+            ..
+        } = *ctx;
+        let class_name = &name.name;
+
+        // ADR 0127 §3 "Name resolution": `json@Parser` where this hierarchy
+        // only describes another package's `Parser` — nothing to check
+        // against, and the user's same-named class must not capture it.
+        if hierarchy.qualified_ref_names_other_class(class_name, package.map(|p| p.name.as_str())) {
+            return InferredType::Dynamic(DynamicReason::Unknown);
+        }
+
+        // ADR 0075: `Erlang <module>` — return ErlangModule<module_name> type
+        // to enable FFI call type inference on the outer message send.
+        // Class protocol selectors (class, new, superclass, etc.)
+        // must NOT be intercepted as module lookups — they are handled by
+        // normal class-side dispatch. Package-qualified references
+        // (`json@Erlang lists`) are excluded too — they name a package-scoped
+        // class, not the compiler's built-in FFI bridge. Both rules are
+        // centralized in `crate::ffi_receiver` (mirrored here via
+        // `is_class_protocol_selector` since this call site splits the
+        // receiver/selector apart rather than holding the combined send).
+        if class_name == "Erlang"
+            && package.is_none()
+            && let MessageSelector::Unary(module_name) = selector
+            && !super::is_class_protocol_selector(module_name)
+        {
+            // Static module name: `Erlang lists` → ErlangModule<lists>
+            return InferredType::Known {
+                class_name: EcoString::from(WellKnownClass::ErlangModule.as_str()),
+                type_args: vec![InferredType::Known {
+                    class_name: module_name.clone(),
+                    type_args: vec![],
+                    provenance: crate::semantic_analysis::type_checker::TypeProvenance::Inferred(
+                        span,
+                    ),
+                }],
+                provenance: crate::semantic_analysis::type_checker::TypeProvenance::Inferred(span),
+            };
+        }
+        // Class protocol selector or dynamic module: fall through to
+        // normal class-side dispatch.
+
+        self.check_argument_types(
+            class_name,
+            selector_name,
+            arg_types,
+            span,
+            hierarchy,
+            true,
+            Some(arguments),
+            Some(env),
+            &[],
+        );
+        // ADR 0104 Phase 2: `C spawnWith: #{...}` literal-map key check.
+        self.check_spawn_with_map_keys(class_name, selector_name, arguments, hierarchy);
+        // ADR 0124 §6/§7 (A3+A4): `C new` / `C new: #{...}` Value
+        // construction-site definite-assignment check.
+        self.check_value_construction_definite_assignment(
+            class_name,
+            selector_name,
+            arguments,
+            span,
+            hierarchy,
+        );
+        // ADR 0124 §6 (A2b, BT-1948): `C spawn` / `C spawnWith: #{...}`
+        // Actor construction-site definite-assignment check.
+        self.check_actor_construction_definite_assignment(
+            class_name,
+            selector_name,
+            arguments,
+            span,
+            hierarchy,
+        );
+        self.check_class_side_send(class_name, selector_name, span, hierarchy, arg_types)
+    }
+
+    /// ADR 0083: a send to a receiver whose inferred type is the metatype
+    /// `Meta{C}` routes to class-side lookup on `C`, then falls back to the
+    /// metaclass-tower instance protocol.
+    fn infer_meta_receiver_send(
+        &mut self,
+        ctx: &SendCtx<'_>,
+        meta_class: &EcoString,
+        arg_types: &[InferredType],
+        env: &mut TypeEnv,
+    ) -> InferredType {
+        let SendCtx {
+            selector,
+            selector_name,
+            arguments,
+            span,
+            hierarchy,
+            ..
+        } = *ctx;
+        // The equality/identity comparison operators (`==`, `=:=`,
+        // `/=`, `=/=`) are value/identity comparisons every object —
+        // including a class object — supports at runtime via the universal
+        // `Object`/`ProtoObject` protocol, but they are not modelled as
+        // hierarchy methods. Routing them through class-side DNU lookup
+        // would emit a false `C class does not understand '=:='` (it broke
+        // `x class =:= Foo` narrowing). Treat ONLY these comparison
+        // selectors as Boolean-returning without a class-side check —
+        // matching the pre-0083 behaviour where `Self class` was Dynamic.
+        // Other binary selectors (e.g. `+`) must fall through to normal
+        // class-side / tower lookup (and DNU if unresolved); typing
+        // `SomeClass + 1` as Boolean would be wrong and suppress the DNU.
+        if let MessageSelector::Binary(op) = selector
+            && is_equality_operator(op)
+        {
+            return InferredType::known("Boolean");
+        }
+        // `aClass class` is the metaclass of the class object. The static
+        // hierarchy doesn't track per-class metaclasses precisely, so fall
+        // back to the `Metaclass` tower class.
+        if selector.well_known() == Some(WellKnownSelector::Class) {
+            return InferredType::known("Metaclass");
+        }
+        self.check_argument_types(
+            meta_class,
+            selector_name,
+            arg_types,
+            span,
+            hierarchy,
+            true,
+            Some(arguments),
+            Some(env),
+            &[],
+        );
+        // ADR 0104 Phase 2: type-driven `cls spawnWith: #{...}`
+        // (receiver typed `Meta{C}`) literal-map key check.
+        self.check_spawn_with_map_keys(meta_class, selector_name, arguments, hierarchy);
+        // ADR 0124 §6/§7 (A3+A4): type-driven `cls new`/`cls new:
+        // #{...}` Value construction-site definite-assignment check.
+        self.check_value_construction_definite_assignment(
+            meta_class,
+            selector_name,
+            arguments,
+            span,
+            hierarchy,
+        );
+        // ADR 0124 §6 (A2b, BT-1948): type-driven `cls spawn`/`cls
+        // spawnWith: #{...}` Actor construction-site
+        // definite-assignment check.
+        self.check_actor_construction_definite_assignment(
+            meta_class,
+            selector_name,
+            arguments,
+            span,
+            hierarchy,
+        );
+        let class_side =
+            self.check_class_side_send(meta_class, selector_name, span, hierarchy, arg_types);
+        // ADR 0083: when no class-side method on `C` defined the result, a
+        // class object still responds to its metaclass-tower *instance*
+        // protocol (`Metaclass → Class → Behaviour → Object → ProtoObject`)
+        // at runtime — e.g. `Behaviour>>name -> Symbol`,
+        // `Behaviour>>superclass`. `check_class_side_send` only propagates
+        // `-> Never` from that chain (to avoid false DNUs on class
+        // *literals*); for a metatype-typed receiver we know the value is a
+        // class object, so apply the tower instance method's declared
+        // return type. Only overrides a Dynamic result, never a concrete
+        // class-side answer.
+        if matches!(class_side, InferredType::Dynamic(_))
+            && let Some(ty) = Self::class_object_tower_return(
+                selector_name,
+                hierarchy,
+                &InferredType::meta(meta_class.clone()),
+            )
+        {
+            return ty;
+        }
+        class_side
+    }
+
+    /// ADR 0144: a send to a `P class` receiver resolves against `P`'s
+    /// `class` requirements, then the class-object protocol every class
+    /// answers.
+    fn infer_protocol_meta_receiver_send(
+        &mut self,
+        ctx: &SendCtx<'_>,
+        protocol_name: &EcoString,
+        arg_types: &[InferredType],
+        env: &mut TypeEnv,
+    ) -> InferredType {
+        let SendCtx {
+            selector,
+            selector_name,
+            arguments,
+            span,
+            hierarchy,
+            ..
+        } = *ctx;
+        if let MessageSelector::Binary(op) = selector
+            && is_equality_operator(op)
+        {
+            return InferredType::known("Boolean");
+        }
+        if selector.well_known() == Some(WellKnownSelector::Class) {
+            return InferredType::known("Metaclass");
+        }
+        self.infer_protocol_meta_send(
+            protocol_name,
+            selector_name,
+            arg_types,
+            arguments,
+            span,
+            hierarchy,
+            env,
+        )
+    }
+
+    /// A send to `self` / `super` inside a class method checks class-side
+    /// methods (against the superclass for `super`, BT-4001).
+    fn infer_class_method_self_send(
+        &mut self,
+        ctx: &SendCtx<'_>,
+        class_name: &EcoString,
+        arg_types: &[InferredType],
+        env: &mut TypeEnv,
+    ) -> InferredType {
+        let SendCtx {
+            selector_name,
+            arguments,
+            span,
+            hierarchy,
+            in_abstract_method,
+            ..
+        } = *ctx;
+        if !in_abstract_method {
+            self.check_argument_types(
+                class_name,
+                selector_name,
+                arg_types,
+                span,
+                hierarchy,
+                true,
+                Some(arguments),
+                Some(env),
+                &[],
+            );
+            // ADR 0104 Phase 2: `self spawnWith: #{...}`
+            // literal-map key check — the class-reference and
+            // Meta-typed-receiver branches above already run this;
+            // unifying the cascade continuation loop onto
+            // this shared path surfaced that this branch was
+            // the one class-side shape missing it.
+            self.check_spawn_with_map_keys(class_name, selector_name, arguments, hierarchy);
+            // ADR 0124 §6/§7 (A3+A4): `self new`/`self new: #{...}`
+            // Value construction-site definite-assignment check —
+            // the canonical class-method factory site (e.g.
+            // `WorkflowHandle class for:client:`).
+            self.check_value_construction_definite_assignment(
+                class_name,
+                selector_name,
+                arguments,
+                span,
+                hierarchy,
+            );
+            // ADR 0124 §6 (A2b, BT-1948): `self spawn` Actor
+            // construction-site definite-assignment check — spawning
+            // a sibling actor from a class-method factory.
+            self.check_actor_construction_definite_assignment(
+                class_name,
+                selector_name,
+                arguments,
+                span,
+                hierarchy,
+            );
+            return self.check_class_side_send(
+                class_name,
+                selector_name,
+                span,
+                hierarchy,
+                arg_types,
+            );
+        }
+        InferredType::Dynamic(DynamicReason::DynamicReceiver)
+    }
+
+    /// An instance-side send on a `Known` receiver. `Break` carries the
+    /// inferred type once resolved; `Continue(unannotated)` falls through to
+    /// the general tail, `unannotated` recording that a solo
+    /// `ifTrue:`/`ifFalse:` found a method with no declared return type.
+    fn infer_known_receiver_send(
+        &mut self,
+        ctx: &SendCtx<'_>,
+        class_name: &EcoString,
+        type_args: &[InferredType],
+        arg_types: &[InferredType],
+        binary_operand_check_ran: bool,
+        env: &mut TypeEnv,
+    ) -> ControlFlow<InferredType, bool> {
+        let SendCtx {
+            receiver,
+            selector,
+            selector_name,
+            arguments,
+            span,
+            hierarchy,
+            ..
+        } = *ctx;
+        // In class methods, self sends should check class-side methods,
+        // and so should `super` sends — against the superclass, which is
+        // `receiver_ty` for `super` (BT-4001).
+        if Self::is_class_method_self_or_super(receiver, env) {
+            return ControlFlow::Break(
+                self.infer_class_method_self_send(ctx, class_name, arg_types, env),
+            );
+        }
+
+        // ADR 0075: FFI call type inference for ErlangModule<module_name>.
+        // When the receiver is typed as ErlangModule with a known module name
+        // (from `Erlang lists` or a variable assigned from one), extract the
+        // Erlang function name and arity, then look up in NativeTypeRegistry.
+        // Class protocol selectors (class, new, printString, etc.)
+        // and binary selectors (==, etc.) on ErlangModule instances must use
+        // normal dispatch, not FFI lookup.
+        if WellKnownClass::from_str(class_name) == Some(WellKnownClass::ErlangModule)
+            && !super::is_class_protocol_selector(selector_name)
+            && !matches!(selector, MessageSelector::Binary(_))
+        {
+            return ControlFlow::Break(
+                self.infer_ffi_call(type_args, selector, arguments, arg_types, span, hierarchy),
+            );
+        }
+
+        // ADR 0075 amendment: literal-index tuple access.
+        // `aTuple at: <literal int>` on a `Tuple(T1, …, Tn)` with known
+        // positional element types infers the element type at that 1-based
+        // index. A non-literal index, an out-of-range literal, or a bare
+        // `Tuple` (no type_args) falls through to normal dispatch (Dynamic),
+        // so this never produces a false positive.
+        if let Some(elem_ty) =
+            Self::infer_literal_index_tuple_at(class_name, selector_name, type_args, arguments)
+        {
+            self.check_instance_selector(class_name, selector_name, span, hierarchy);
+            return ControlFlow::Break(elem_ty);
+        }
+
+        let (resolve_class, via_object) = self.check_known_send_args(
+            ctx,
+            class_name,
+            type_args,
+            arg_types,
+            binary_operand_check_ran,
+            env,
+        );
+        self.known_receiver_return_type(
+            ctx,
+            &KnownRecv {
+                class_name,
+                type_args,
+                resolve_class: &resolve_class,
+                via_object,
+            },
+            arg_types,
+        )
+    }
+
+    /// Validates a `Known` receiver's selector and argument types and
+    /// answers the class its method set is looked up through (`Object` for a
+    /// protocol receiver's universal selector, `Symbol` for a singleton) and
+    /// whether the send resolves via `Object`.
+    fn check_known_send_args(
+        &mut self,
+        ctx: &SendCtx<'_>,
+        class_name: &EcoString,
+        type_args: &[InferredType],
+        arg_types: &[InferredType],
+        binary_operand_check_ran: bool,
+        env: &mut TypeEnv,
+    ) -> (EcoString, bool) {
+        let SendCtx {
+            receiver,
+            selector,
+            selector_name,
+            arguments,
+            span,
+            hierarchy,
+            ..
+        } = *ctx;
+        // Validation routes ALL singleton receivers (including binary sends)
+        // through `Symbol` — that is fine: `Symbol` understands `=:=`/`=`, so
+        // no spurious DNU, and the impossible-comparison hint fires
+        // via the Dynamic fall-through below, not via validation. Only the
+        // *inference* redirect (`resolve_class`) excludes binary sends.
+        self.check_instance_selector(class_name, selector_name, span, hierarchy);
+        // A non-union singleton receiver (`#text`) is a subtype of
+        // `Symbol` but not itself in the hierarchy, so method lookup and
+        // argument/return-type inference would otherwise fall through to
+        // Dynamic — losing the inference it had when typed `Symbol`. Resolve
+        // its protocol through `Symbol`, mirroring the singleton-union member
+        // handling. `class_name` (`#text`) is still used for
+        // `Self` returns and user-facing messages.
+        //
+        // `!contains('|')` keeps this symmetric with `check_instance_selector`
+        // (a `Known` is never a union today, but a future `Known { "#a | #b" }`
+        // must not silently route here while validation leaves it untouched).
+        // Binary sends are excluded: an equality op on a singleton receiver
+        // (`#west =:= unionVar`) must fall through to the
+        // statically-decidable-comparison hint below rather than
+        // short-circuiting on `Symbol`'s `=:=`.
+        //
+        // A protocol receiver's non-protocol selector that every object
+        // answers (`printString`, `respondsTo:`) resolves through
+        // `Object`'s method table for its argument and return types
+        // (BT-4594). This includes binary sends: `p = x` on a protocol
+        // receiver infers `Object`'s `Boolean` rather than `Dynamic` —
+        // the singleton exclusion above does not apply.
+        let via_object = self.protocol_send_resolution(class_name, selector_name, hierarchy)
+            == Some(ProtocolSendResolution::Object);
+        let resolve_class: EcoString = if via_object {
+            EcoString::from(WellKnownClass::Object.as_str())
+        } else if !class_name.contains('|') && !matches!(selector, MessageSelector::Binary(_)) {
+            EcoString::from(super::super::method_resolution_class(class_name))
+        } else {
+            class_name.clone()
+        };
+        // Skip argument type check for binary messages only when
+        // `check_binary_operand_types` already ran above (the Known/Known
+        // case) — it provides more specific warnings for
+        // arithmetic/comparison/concat. When the argument's
+        // inferred type didn't match that Known/Known pattern (e.g. a
+        // `Union` like `String | Nil`), fall back to the generic
+        // `check_argument_types` so the argument still gets *some*
+        // coverage instead of none.
+        if !matches!(selector, MessageSelector::Binary(_)) || !binary_operand_check_ran {
+            // ADR 0126 §6: known-remote provenance of the receiver —
+            // the only `check_argument_types` call site with the raw
+            // receiver expression on hand (every other call site sends
+            // `self`, a class reference, or a metatype, none of which
+            // is ever known-remote).
+            let receiver_known_remote = known_remote::classify(receiver, &|id| {
+                env.known_remote(&EnvKey::local(id.name.clone()))
+            });
+            self.check_argument_types_with_known_remote(
+                &resolve_class,
+                selector_name,
+                arg_types,
+                span,
+                hierarchy,
+                false,
+                Some(arguments),
+                Some(env),
+                type_args,
+                receiver_known_remote.as_ref(),
+                receiver.is_self_or_super(),
+            );
+        }
+
+        (resolve_class, via_object)
+    }
+
+    /// The return type of a `Known` receiver's send, from the method found
+    /// on `recv.resolve_class`, the block-value convention or the return
+    /// types inferred earlier in this pass. `Continue(unannotated)` when none
+    /// resolves it.
+    fn known_receiver_return_type(
+        &self,
+        ctx: &SendCtx<'_>,
+        recv: &KnownRecv<'_>,
+        arg_types: &[InferredType],
+    ) -> ControlFlow<InferredType, bool> {
+        let SendCtx {
+            selector,
+            selector_name,
+            arguments,
+            hierarchy,
+            ..
+        } = *ctx;
+        let KnownRecv {
+            class_name,
+            type_args,
+            resolve_class,
+            ..
+        } = *recv;
+        let mut known_method_unannotated_return = false;
+        if let Some(method) = hierarchy.find_method(resolve_class, selector_name) {
+            if let Some(ref ret_ty) = method.return_type {
+                return ControlFlow::Break(
+                    self.declared_return_type(ctx, recv, method, ret_ty, arg_types),
+                );
+            }
+
+            // `ret_ty` is None — the method exists but declares
+            // no return type. For `Boolean>>ifTrue:`/`ifFalse:` this is
+            // by design (see `boolean.bt`): a solo `ifTrue:`/`ifFalse:`
+            // on an unnarrowed `Boolean` receiver can't soundly promise
+            // `R` (the sibling branch — e.g. `False>>ifTrue:` — returns
+            // `self` without invoking the block), but collapsing all the
+            // way to `Dynamic` is more conservative than necessary: the
+            // sound type is the union of that `Boolean` self-branch and
+            // the block's own return type. Mirrors
+            // `if_nil_solo_union_ret_ty`'s fix for `ifNil:`/`ifNotNil:`.
+            if let Some(ty) = Self::if_true_false_solo_boolean_ret_ty(
+                selector_name,
+                resolve_class,
+                arguments,
+                arg_types,
+                hierarchy,
+            ) {
+                return ControlFlow::Break(ty);
+            }
+
+            // Only reclassify the terminal Dynamic fallback's reason for
+            // the `ifTrue:`/`ifFalse:` family this issue targets — other
+            // deliberately-unannotated methods (e.g. `Block>>on:do:`,
+            // whose return type is a separate, unresolved soundness gap
+            // predating this fix) keep the pre-existing `DynamicReceiver`
+            // reason so they don't newly start firing the "Dynamic in
+            // typed class" warning as a side effect of this narrower fix.
+            if matches!(
+                selector.well_known(),
+                Some(WellKnownSelector::IfTrue | WellKnownSelector::IfFalse)
+            ) {
+                known_method_unannotated_return = true;
+            }
+        }
+
+        // Block value/value:/value:value: — return the last type arg.
+        // Block is variadic: Block(R), Block(A, R), Block(A, B, R), etc.
+        // The convention is that the last type arg is always the return type.
+        if WellKnownClass::from_str(class_name) == Some(WellKnownClass::Block)
+            && !type_args.is_empty()
+            && selector
+                .well_known()
+                .is_some_and(WellKnownSelector::is_block_value)
+        {
+            return ControlFlow::Break(type_args.last().unwrap().clone());
+        }
+
+        // Fall back to return types inferred earlier in this same pass.
+        // Method bodies are processed before top-level expressions, so inferred
+        // return types are available for chain resolution without a second pass.
+        // Return the full InferredType from the cache, preserving
+        // type_args so callers see e.g. List(String) instead of bare List.
+        let key = (class_name.clone(), selector_name.clone(), false);
+        if let Some(ret_ty) = self.method_return_types.get(&key) {
+            return ControlFlow::Break(ret_ty.clone());
+        }
+
+        ControlFlow::Continue(known_method_unannotated_return)
+    }
+
+    /// The result type of a `Known` receiver's send when the method found
+    /// declares a return type: `Self`, `Self class`, `X class`, `Never`,
+    /// generic substitution or the plain resolved type.
+    fn declared_return_type(
+        &self,
+        ctx: &SendCtx<'_>,
+        recv: &KnownRecv<'_>,
+        method: &MethodInfo,
+        ret_ty: &DeclaredType,
+        arg_types: &[InferredType],
+    ) -> InferredType {
+        let SendCtx {
+            receiver_ty,
+            selector,
+            hierarchy,
+            ..
+        } = *ctx;
+        let KnownRecv {
+            class_name,
+            type_args,
+            resolve_class,
+            via_object,
+        } = *recv;
+        // ADR 0104 Phase 3: `withTimeout:` return-type
+        // transparency. The generated-builtins table records the
+        // static return type `TimeoutProxy`, but the proxy is
+        // transparent — it forwards every message to the wrapped
+        // actor and a timed-out call *raises* rather than returning,
+        // so method return types are unchanged. Typing the result as
+        // the opaque `TimeoutProxy` would make every forwarded
+        // selector (`slowDb query: sql`) `Dynamic`. Instead, a
+        // `withTimeout:` send on a receiver of static type `C` is
+        // typed as `C` (with its type args preserved), so forwarded
+        // calls resolve the wrapped class's real return types. The
+        // table can only hold a static string, so the transparency
+        // rule is applied here. Restricted to `Actor` and its
+        // subclasses (`is_actor_subclass` returns true for the base
+        // `Actor` itself too) so the rule's correctness is an explicit
+        // constraint, not an implicit consequence of `TimeoutProxy`
+        // being inaccessible from user code (a user
+        // `withTimeout: -> TimeoutProxy` on a non-Actor class would
+        // otherwise be silently retyped).
+        if selector.well_known() == Some(WellKnownSelector::WithTimeout)
+            && matches!(ret_ty, DeclaredType::Simple(n) if n == "TimeoutProxy")
+            && hierarchy.is_actor_subclass(resolve_class)
+        {
+            return receiver_ty.clone();
+        }
+
+        // `Self` resolves to the static receiver class (with type args)
+        if matches!(ret_ty, DeclaredType::SelfType) {
+            if type_args.is_empty() {
+                return InferredType::known(class_name.clone());
+            }
+            return InferredType::Known {
+                class_name: class_name.clone(),
+                type_args: type_args.to_vec(),
+                provenance: crate::semantic_analysis::type_checker::TypeProvenance::Substituted(
+                    crate::source_analysis::Span::default(),
+                ),
+            };
+        }
+
+        // ADR 0083: `Self class` — the method returns the receiver's
+        // class object. Resolve to the metatype of the static
+        // receiver class so that downstream class-side sends
+        // (`obj class new`, `self species withAll:`) route through
+        // `find_class_method`. Pre-0083 this returned `Dynamic`.
+        if matches!(ret_ty, DeclaredType::SelfClass) {
+            // A protocol receiver's class is some class
+            // conforming to it: the protocol metatype (ADR 0144),
+            // not the `Object class` its signature came from.
+            if via_object {
+                return InferredType::protocol_meta(class_name.clone());
+            }
+            // For a singleton receiver, `resolve_class` is
+            // `Symbol` so `#text class` is `Symbol class` (`#text` is a
+            // Symbol at runtime), not a phantom `Meta("#text")`.
+            return InferredType::meta(resolve_class.clone());
+        }
+        // ADR 0083: `X class` — the method returns the metatype of a
+        // specific named class (`X class` annotation).
+        if let DeclaredType::ClassOf(meta_class) = ret_ty
+            && hierarchy.has_class(meta_class)
+        {
+            return InferredType::meta(meta_class.clone());
+        }
+
+        // `Never` resolves to the bottom type (divergent methods)
+        if matches!(ret_ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n) == Some(WellKnownClass::Never))
+        {
+            return InferredType::Never;
+        }
+
+        // Build substitution map, composing through inheritance chain
+        // if the method is inherited (ADR 0068 Phase 1b)
+        let subst = Self::build_inherited_substitution_map(
+            hierarchy,
+            resolve_class,
+            type_args,
+            &method.defined_in,
+        );
+
+        // Infer method-local type params from arguments (works for
+        // any parametric param type: Block, Result, Array, etc.)
+        let method_subst = Self::infer_method_local_params(
+            method,
+            arg_types,
+            &subst,
+            hierarchy,
+            &method.defined_in,
+        );
+
+        // Apply generic substitution if we have type args, method-local
+        // params, or the return type mentions `Self` nested inside a
+        // generic/union. For the last case, even if no
+        // param substitutions apply, we still need to rewrite `Self`
+        // to the receiver class so callers see the narrowed type.
+        let has_nested_self = Self::declared_type_contains_self(ret_ty);
+        if !subst.is_empty() || !method_subst.is_empty() || has_nested_self {
+            // Thread the full receiver type (with type args)
+            // under the reserved `Self` subst key so nested `Self` in
+            // generics like `Result(Self, Error)` resolves to e.g.
+            // `Box(Integer)` not bare `Box` (the shared
+            // `resolve_declared_type` resolver's `SelfType` arm reads
+            // this same key — see its doc).
+            return type_resolver::resolve_declared_type_in(
+                ret_ty,
+                &type_resolver::merge_substitutions(&subst, &method_subst, Some(receiver_ty)),
+                self.protocol_registry.as_deref(),
+                self.alias_registry.as_deref(),
+                TypeStringContext::Substitution,
+                Some(hierarchy),
+            );
+        }
+
+        // If the return type is an unresolved type param
+        // (single uppercase letter like E, T, V), fall back to Dynamic
+        // so downstream sends don't get false DNU warnings.
+        if let DeclaredType::Simple(n) = ret_ty
+            && crate::semantic_analysis::type_checker::is_type_var_placeholder(n, hierarchy)
+        {
+            return InferredType::Dynamic(DynamicReason::Unknown);
+        }
+
+        // Resolve the return type through the centralised
+        // structured resolver, which preserves the full
+        // parameterised type — `List(String)` becomes
+        // `Known("List", [Known("String")])` rather than a
+        // bare `Known("List", [])` that would silently drop
+        // the element type.
+        //
+        // Also handles:
+        //  * union return types like `Integer | Nil`
+        //    resolve into `InferredType::Union`, enabling narrowing.
+        //  * Plain class names — pass through to `Known(name, [])`.
+        //  * Nested generics — `Result(List(String), Error)`
+        //    keeps both layers.
+        //  * a cross-file alias name expands to its
+        //    declared union/structural type instead of staying
+        //    an opaque nominal class.
+        type_resolver::resolve_declared_type(
+            ret_ty,
+            &type_resolver::SubstitutionMap::new(),
+            self.protocol_registry.as_deref(),
+            self.alias_registry.as_deref(),
+            TypeStringContext::Declared,
+        )
     }
 
     /// A protocol `class` requirement's declared parameter types, with any

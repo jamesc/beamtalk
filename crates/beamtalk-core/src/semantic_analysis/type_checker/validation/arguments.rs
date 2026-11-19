@@ -326,8 +326,7 @@ impl TypeChecker {
         // (Symbol, JsonValue)` gives `{K -> Symbol, V -> JsonValue}`. Empty
         // (a no-op below) when the receiver has no type args or the class
         // has no type params, so a non-generic call is entirely unaffected.
-        // Hoisted out of the loop since, like `metaclass_name`, it's
-        // constant across all arguments.
+        // Hoisted out of the loop since it's constant across all arguments.
         //
         // Adversarial-review follow-up: an earlier version of this fix
         // special-cased `class_subst.remove("K")` (Dictionary/Ets's
@@ -670,52 +669,53 @@ impl TypeChecker {
         // instance-side chain fails, re-check via `Metaclass` so parameters
         // declared `:: Behaviour` / `:: Class` / `:: Object` / `:: ProtoObject`
         // accept any class literal.
-        let metaclass_name: EcoString = "Metaclass".into();
-        {
-            // Short-circuit: only consult the metaclass chain when the
-            // instance-side check fails. Keeps the hot path at one
-            // `is_type_compatible` call per argument.
-            //
-            // `is_type_compatible` has a shortcut where
-            // `expected == "Class"` accepts any known class name
-            // unconditionally. With the metaclass-tower check
-            // handling class literals properly, that shortcut must be
-            // scoped to class-literal arguments here so a plain
-            // `TestCase` instance does not satisfy a `:: Class`
-            // parameter.
-            //
-            // This guard must
-            // check `expected_structural`, not the bare `expected_ty`
-            // — otherwise `type MyAlias = Class` would resolve to
-            // `expected_structural == "Class"` while `expected_ty`
-            // still names the alias, silently skipping the guard and
-            // letting `is_type_compatible`'s shortcut accept
-            // any known class instance against a `:: MyAlias` param.
-            //
-            // With the shortcut suppressed, a value whose own type is
-            // `Class` or a subclass of it (e.g. a forwarded `:: Class`
-            // parameter, BT-4599) is still compatible: check that by
-            // the nominal chain directly, bypassing the shortcut.
-            let class_shortcut_applies =
-                expected_structural.as_str() == "Class" && !is_class_ref_arg;
-            let instance_compat = if class_shortcut_applies {
-                hierarchy.is_subclass_of(actual_ty, "Class")
-            } else {
-                Self::is_type_compatible(actual_ty, expected_structural, hierarchy)
-            };
-            let class_literal_compat = !instance_compat
-                && is_class_ref_arg
-                && hierarchy.has_class(actual_ty)
-                && Self::is_type_compatible(&metaclass_name, expected_structural, hierarchy);
-            if !instance_compat && !class_literal_compat {
-                let param_pos = i + 1;
-                // Use hint severity for generic type params (likely false positive)
-                let is_generic = super::super::is_type_var_placeholder(actual_ty, hierarchy);
-                // Render `UndefinedObject` as `Nil` in user-facing messages.
-                let actual_display = InferredType::class_name_for_diagnostic(actual_ty.as_str());
-                let expected_display = expected_display.clone();
-                let mut diag = if is_generic {
-                    Diagnostic::hint(
+        // Short-circuit: only consult the metaclass chain when the
+        // instance-side check fails. Keeps the hot path at one
+        // `is_type_compatible` call per argument.
+        //
+        // `is_type_compatible` has a shortcut where
+        // `expected == "Class"` accepts any known class name
+        // unconditionally. With the metaclass-tower check
+        // handling class literals properly, that shortcut must be
+        // scoped to class-literal arguments here so a plain
+        // `TestCase` instance does not satisfy a `:: Class`
+        // parameter.
+        //
+        // This guard must
+        // check `expected_structural`, not the bare `expected_ty`
+        // — otherwise `type MyAlias = Class` would resolve to
+        // `expected_structural == "Class"` while `expected_ty`
+        // still names the alias, silently skipping the guard and
+        // letting `is_type_compatible`'s shortcut accept
+        // any known class instance against a `:: MyAlias` param.
+        //
+        // With the shortcut suppressed, a value whose own type is
+        // `Class` or a subclass of it (e.g. a forwarded `:: Class`
+        // parameter, BT-4599) is still compatible: check that by
+        // the nominal chain directly, bypassing the shortcut.
+        let class_shortcut_applies = expected_structural.as_str() == "Class" && !is_class_ref_arg;
+        let instance_compat = if class_shortcut_applies {
+            hierarchy.is_subclass_of(actual_ty, "Class")
+        } else {
+            Self::is_type_compatible(actual_ty, expected_structural, hierarchy)
+        };
+        let class_literal_compat = !instance_compat
+            && is_class_ref_arg
+            && hierarchy.has_class(actual_ty)
+            && Self::is_type_compatible(
+                &EcoString::from("Metaclass"),
+                expected_structural,
+                hierarchy,
+            );
+        if !instance_compat && !class_literal_compat {
+            let param_pos = i + 1;
+            // Use hint severity for generic type params (likely false positive)
+            let is_generic = super::super::is_type_var_placeholder(actual_ty, hierarchy);
+            // Render `UndefinedObject` as `Nil` in user-facing messages.
+            let actual_display = InferredType::class_name_for_diagnostic(actual_ty.as_str());
+            let expected_display = expected_display.clone();
+            let mut diag = if is_generic {
+                Diagnostic::hint(
                                 format!(
                                     "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {actual_display}"
                                 ),
@@ -725,20 +725,19 @@ impl TypeChecker {
                                 "This is likely a false positive — `{actual_display}` is a generic type parameter that may be {expected_display} at runtime. \
                                  Use `@expect type` to suppress"
                             ))
-                } else {
-                    Diagnostic::warning(
+            } else {
+                Diagnostic::warning(
                                 format!(
                                     "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {actual_display}"
                                 ),
                                 span,
                             )
                             .with_hint(format!("Expected {expected_display} (or a subclass), got {actual_display}"))
-                };
-                // Attach origin note if available
-                diag = Self::with_arg_origin_note(diag, site);
-                self.diagnostics
-                    .push(diag.with_category(DiagnosticCategory::Type));
-            }
+            };
+            // Attach origin note if available
+            diag = Self::with_arg_origin_note(diag, site);
+            self.diagnostics
+                .push(diag.with_category(DiagnosticCategory::Type));
         }
     }
 
