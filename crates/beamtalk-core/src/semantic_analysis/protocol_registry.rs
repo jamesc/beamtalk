@@ -1177,6 +1177,7 @@ mod tests {
         ProtocolMethodSignature, TypeAnnotation, TypeParamDecl,
     };
     use crate::semantic_analysis::class_hierarchy::ClassInfo;
+    use crate::test_helpers::test_support::empty_module;
 
     use crate::test_helpers::test_support::unit_span as span;
 
@@ -1246,10 +1247,6 @@ mod tests {
         let mut proto = make_protocol(name, methods);
         proto.extending = Some(ident(extending));
         proto
-    }
-
-    fn empty_module() -> Module {
-        Module::new(vec![], span())
     }
 
     fn make_class(name: &str, superclass: &str, methods: Vec<&str>) -> ClassDefinition {

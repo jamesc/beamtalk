@@ -2850,6 +2850,7 @@ mod tests {
         Module, StateDeclaration, TypeAnnotation,
     };
     use beamtalk_core::source_analysis::Span;
+    use beamtalk_core::test_helpers::test_support::empty_module;
 
     fn s() -> Span {
         Span::new(0, 0)
@@ -2865,22 +2866,6 @@ mod tests {
 
     fn union_ta(types: Vec<TypeAnnotation>) -> TypeAnnotation {
         TypeAnnotation::Union { types, span: s() }
-    }
-
-    fn empty_module() -> Module {
-        Module {
-            pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
-            literal_comments: beamtalk_core::ast::LiteralComments::default(),
-            classes: Vec::new(),
-            method_definitions: Vec::new(),
-            protocols: Vec::new(),
-            type_aliases: Vec::new(),
-            native_declarations: Vec::new(),
-            expressions: Vec::new(),
-            span: s(),
-            file_leading_comments: Vec::new(),
-            file_trailing_comments: Vec::new(),
-        }
     }
 
     fn module_with_class(class: ClassDefinition) -> Module {
