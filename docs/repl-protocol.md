@@ -337,7 +337,7 @@ List all active REPL sessions in the workspace.
 
 **Response:**
 ```json
-{"id": "msg-012", "sessions": [{"id": "<0.456.0>"}, {"id": "<0.789.0>"}], "status": ["done"]}
+{"id": "msg-012", "sessions": [{"id": "session_1234_5678"}, {"id": "session_2345_6789"}], "status": ["done"]}
 ```
 
 #### `clone` — Clone Session
@@ -356,7 +356,7 @@ Create a new session (returns the new session ID).
 
 #### `close` — Close Session
 
-Close the current session and clean up resources.
+Close the current session. Terminates the shell process, removes the session from the workspace, and closes the WebSocket connection (close code 1000). Detached sessions that are not resumed within the idle timeout (default 4 hours) are automatically cleaned up.
 
 **Request:**
 ```json
