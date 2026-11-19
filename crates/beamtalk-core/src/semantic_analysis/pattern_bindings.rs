@@ -153,10 +153,10 @@ fn extract_pattern_bindings_impl(
                 extract_pattern_bindings_impl(element, bindings, seen, diagnostics, true);
             }
             if let Some(rest_pat) = rest {
-                // Elements may repeat (equality guard), but the rest binds a list
-                // and an element never equals it, so `#[a, ...a]` can never match.
-                // Strict mode here makes a rest that repeats a name an error, like
-                // a duplicate in a tuple or list pattern (BT-5050).
+                // Elements may repeat (array match arms add an equality guard), but
+                // the rest is destructuring-only and gets no guard: a repeated name
+                // would silently rebind to the sub-array. Strict mode here makes a
+                // rest that repeats a name an error, like a tuple/list duplicate (BT-5050).
                 extract_pattern_bindings_impl(rest_pat, bindings, seen, diagnostics, false);
             }
         }
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn test_extract_pattern_bindings_array_rest_repeating_element_is_error() {
-        // Pattern #[a, ...a]: the rest is a list, an element never equals it (BT-5050)
+        // Pattern #[a, ...a]: no equality guard for a rest, so `a` would silently rebind (BT-5050)
         let pattern = Pattern::Array {
             elements: vec![Pattern::Variable(Identifier::new("a", test_span()))],
             list_syntax: false,
