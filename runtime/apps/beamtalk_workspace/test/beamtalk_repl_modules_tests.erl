@@ -257,46 +257,31 @@ full_lifecycle_test() ->
 %% format_time_ago/1 tests
 %% ===================================================================
 
-format_time_ago_seconds_test() ->
-    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(30)),
-    ?assert(lists:suffix("s ago", Result)).
+%% One row per case: {Seconds, ExpectedSuffix}. Zero is asserted exactly.
+%% The seconds value is the EUnit test title, so a failure names the case.
+format_time_ago_cases() ->
+    [
+        {0, exactly, "0s ago"},
+        {30, suffix, "s ago"},
+        {59, suffix, "s ago"},
+        {60, suffix, "m ago"},
+        {120, suffix, "m ago"},
+        {3599, suffix, "m ago"},
+        {3600, suffix, "h ago"},
+        {7200, suffix, "h ago"},
+        {86399, suffix, "h ago"},
+        {86400, suffix, "d ago"},
+        {172800, suffix, "d ago"}
+    ].
 
-format_time_ago_minutes_test() ->
-    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(120)),
-    ?assert(lists:suffix("m ago", Result)).
-
-format_time_ago_hours_test() ->
-    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(7200)),
-    ?assert(lists:suffix("h ago", Result)).
-
-format_time_ago_days_test() ->
-    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(172800)),
-    ?assert(lists:suffix("d ago", Result)).
-
-format_time_ago_zero_test() ->
-    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(0)),
-    ?assertEqual("0s ago", Result).
-
-format_time_ago_boundary_59_test() ->
-    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(59)),
-    ?assert(lists:suffix("s ago", Result)).
-
-format_time_ago_boundary_60_test() ->
-    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(60)),
-    ?assert(lists:suffix("m ago", Result)).
-
-format_time_ago_boundary_3599_test() ->
-    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(3599)),
-    ?assert(lists:suffix("m ago", Result)).
-
-format_time_ago_boundary_3600_test() ->
-    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(3600)),
-    ?assert(lists:suffix("h ago", Result)).
-
-format_time_ago_boundary_86399_test() ->
-    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(86399)),
-    ?assert(lists:suffix("h ago", Result)).
-
-format_time_ago_boundary_86400_test() ->
-    Result = lists:flatten(beamtalk_repl_modules:format_time_ago(86400)),
-    ?assert(lists:suffix("d ago", Result)).
+format_time_ago_test_() ->
+    [
+        {"format_time_ago(" ++ integer_to_list(Seconds) ++ ")", fun() ->
+            Result = lists:flatten(beamtalk_repl_modules:format_time_ago(Seconds)),
+            case Mode of
+                exactly -> ?assertEqual(Expected, Result);
+                suffix -> ?assert(lists:suffix(Expected, Result))
+            end
+        end}
+     || {Seconds, Mode, Expected} <- format_time_ago_cases()
+    ].
