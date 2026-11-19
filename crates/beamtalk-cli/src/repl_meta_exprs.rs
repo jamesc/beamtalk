@@ -207,189 +207,305 @@ pub fn rename_method_expr_for(arg: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// Asserts each `(case, argument, expected)` row of `table` through `f`.
+    /// The case name and the argument are in the failure message.
+    fn check(f: fn(&str) -> Option<String>, table: &[(&str, &str, Option<&str>)]) {
+        for &(case, argument, expected) in table {
+            assert_eq!(
+                f(argument).as_deref(),
+                expected,
+                "case `{case}`: argument {argument:?}"
+            );
+        }
+    }
+
     #[test]
-    fn translates_to_remove_selector_send() {
-        assert_eq!(
-            remove_method_expr_for("Counter increment"),
-            Some("Counter removeSelector: #increment".to_string())
+    fn remove_method_expr_for_cases() {
+        check(
+            remove_method_expr_for,
+            &[
+                (
+                    "translates_to_remove_selector_send",
+                    "Counter increment",
+                    Some("Counter removeSelector: #increment"),
+                ),
+                (
+                    "preserves_keyword_selectors",
+                    "Dict at:put:",
+                    Some("Dict removeSelector: #at:put:"),
+                ),
+                (
+                    "strips_leading_hash_on_selector",
+                    "Counter #increment",
+                    Some("Counter removeSelector: #increment"),
+                ),
+                (
+                    "trims_surrounding_whitespace",
+                    "  Counter   increment  ",
+                    Some("Counter removeSelector: #increment"),
+                ),
+                (
+                    "with_missing_selector_reports_no_expression",
+                    "Counter",
+                    None,
+                ),
+                (
+                    "with_missing_selector_reports_no_expression",
+                    "Counter ",
+                    None,
+                ),
+                ("with_empty_argument_reports_no_expression", "", None),
+                ("with_empty_argument_reports_no_expression", "   ", None),
+                // A selector of just "#" strips down to empty and must hit the
+                // usage-error path, not a malformed `Counter removeSelector: #` eval.
+                (
+                    "with_bare_hash_selector_reports_no_expression",
+                    "Counter #",
+                    None,
+                ),
+                // "#" followed by only whitespace must re-trim to empty and hit the
+                // usage-error path, not just the bare-hash case above.
+                (
+                    "with_only_whitespace_after_hash_reports_no_expression",
+                    "Counter #  ",
+                    None,
+                ),
+                // Whitespace right after "#" (before real selector content) must be
+                // trimmed away, producing a clean expression instead of the
+                // malformed `Counter removeSelector: #  increment`.
+                (
+                    "strips_whitespace_between_hash_and_selector",
+                    "Counter #  increment",
+                    Some("Counter removeSelector: #increment"),
+                ),
+            ],
         );
     }
 
     #[test]
-    fn preserves_keyword_selectors() {
-        assert_eq!(
-            remove_method_expr_for("Dict at:put:"),
-            Some("Dict removeSelector: #at:put:".to_string())
+    fn flush_expr_for_cases() {
+        check(
+            flush_expr_for,
+            &[
+                (
+                    "flush_class_selector_translates_to_workspace_flush_message",
+                    "Counter",
+                    Some("Workspace flush: Counter"),
+                ),
+                // A leading "#" here is a legitimate Symbol-kind argument (not a
+                // decorated method name like `remove_method_expr_for`'s selector),
+                // so it must survive untouched.
+                (
+                    "flush_symbol_kind_selector_translates_verbatim",
+                    "#'new-class'",
+                    Some("Workspace flush: #'new-class'"),
+                ),
+                (
+                    "flush_dictionary_selector_translates_verbatim",
+                    "#{ #file => \"src/foo.bt\" }",
+                    Some("Workspace flush: #{ #file => \"src/foo.bt\" }"),
+                ),
+                (
+                    "flush_trims_surrounding_whitespace",
+                    "  Counter  ",
+                    Some("Workspace flush: Counter"),
+                ),
+                ("flush_with_empty_selector_reports_no_expression", "", None),
+                // The historical-bug-class risk this guards against: a hand-copied
+                // test-harness mirror of `Workspace flush: {selector}` that skips
+                // this emptiness check (as the old `tests/repl_protocol.rs` inline
+                // duplicate did) would blindly eval a malformed bare
+                // `Workspace flush: ` send instead of hitting the usage-error path.
+                // Because both the real dispatch and the test harness now call this
+                // one function, that drift can no longer happen.
+                (
+                    "flush_with_whitespace_only_selector_reports_no_expression",
+                    "   ",
+                    None,
+                ),
+            ],
         );
     }
 
     #[test]
-    fn strips_leading_hash_on_selector() {
-        assert_eq!(
-            remove_method_expr_for("Counter #increment"),
-            Some("Counter removeSelector: #increment".to_string())
+    fn remove_class_expr_for_cases() {
+        check(
+            remove_class_expr_for,
+            &[
+                (
+                    "remove_class_translates_to_remove_from_system_send",
+                    "Counter",
+                    Some("Counter removeFromSystem"),
+                ),
+                (
+                    "remove_class_trims_surrounding_whitespace",
+                    "  Counter  ",
+                    Some("Counter removeFromSystem"),
+                ),
+                (
+                    "remove_class_with_empty_argument_reports_no_expression",
+                    "",
+                    None,
+                ),
+                (
+                    "remove_class_with_empty_argument_reports_no_expression",
+                    "   ",
+                    None,
+                ),
+            ],
         );
     }
 
     #[test]
-    fn trims_surrounding_whitespace() {
-        assert_eq!(
-            remove_method_expr_for("  Counter   increment  "),
-            Some("Counter removeSelector: #increment".to_string())
+    fn flush_destructive_expr_for_cases() {
+        check(
+            flush_destructive_expr_for,
+            &[
+                (
+                    "flush_destructive_class_selector_appends_confirm_destructive_keyword",
+                    "Counter",
+                    Some("Workspace flush: Counter confirmDestructive: true"),
+                ),
+                (
+                    "flush_destructive_symbol_kind_selector_translates_verbatim",
+                    "#'remove-class'",
+                    Some("Workspace flush: #'remove-class' confirmDestructive: true"),
+                ),
+                (
+                    "flush_destructive_trims_surrounding_whitespace",
+                    "  Counter  ",
+                    Some("Workspace flush: Counter confirmDestructive: true"),
+                ),
+                (
+                    "flush_destructive_with_empty_selector_reports_no_expression",
+                    "",
+                    None,
+                ),
+                (
+                    "flush_destructive_with_empty_selector_reports_no_expression",
+                    "   ",
+                    None,
+                ),
+            ],
         );
     }
 
     #[test]
-    fn with_missing_selector_reports_no_expression() {
-        assert_eq!(remove_method_expr_for("Counter"), None);
-        assert_eq!(remove_method_expr_for("Counter "), None);
-    }
-
-    #[test]
-    fn with_empty_argument_reports_no_expression() {
-        assert_eq!(remove_method_expr_for(""), None);
-        assert_eq!(remove_method_expr_for("   "), None);
-    }
-
-    #[test]
-    fn with_bare_hash_selector_reports_no_expression() {
-        // A selector of just "#" strips down to empty and must hit the
-        // usage-error path, not a malformed `Counter removeSelector: #` eval.
-        assert_eq!(remove_method_expr_for("Counter #"), None);
-    }
-
-    #[test]
-    fn with_only_whitespace_after_hash_reports_no_expression() {
-        // "#" followed by only whitespace must re-trim to empty and hit the
-        // usage-error path, not just the bare-hash case above.
-        assert_eq!(remove_method_expr_for("Counter #  "), None);
-    }
-
-    #[test]
-    fn strips_whitespace_between_hash_and_selector() {
-        // Whitespace right after "#" (before real selector content) must be
-        // trimmed away, producing a clean expression instead of the
-        // malformed `Counter removeSelector: #  increment`.
-        assert_eq!(
-            remove_method_expr_for("Counter #  increment"),
-            Some("Counter removeSelector: #increment".to_string())
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // flush_expr_for
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn flush_class_selector_translates_to_workspace_flush_message() {
-        assert_eq!(
-            flush_expr_for("Counter"),
-            Some("Workspace flush: Counter".to_string())
-        );
-    }
-
-    #[test]
-    fn flush_symbol_kind_selector_translates_verbatim() {
-        // A leading "#" here is a legitimate Symbol-kind argument (not a
-        // decorated method name like `remove_method_expr_for`'s selector),
-        // so it must survive untouched.
-        assert_eq!(
-            flush_expr_for("#'new-class'"),
-            Some("Workspace flush: #'new-class'".to_string())
+    fn rename_class_expr_for_cases() {
+        check(
+            rename_class_expr_for,
+            &[
+                (
+                    "rename_class_translates_to_rename_to_send",
+                    "Counter Accumulator",
+                    Some("Counter renameTo: #Accumulator"),
+                ),
+                (
+                    "rename_class_strips_leading_hash_on_new_name",
+                    "Counter #Accumulator",
+                    Some("Counter renameTo: #Accumulator"),
+                ),
+                (
+                    "rename_class_trims_surrounding_whitespace",
+                    "  Counter   Accumulator  ",
+                    Some("Counter renameTo: #Accumulator"),
+                ),
+                (
+                    "rename_class_with_missing_new_name_reports_no_expression",
+                    "Counter",
+                    None,
+                ),
+                (
+                    "rename_class_with_missing_new_name_reports_no_expression",
+                    "Counter ",
+                    None,
+                ),
+                (
+                    "rename_class_with_empty_argument_reports_no_expression",
+                    "",
+                    None,
+                ),
+                (
+                    "rename_class_with_empty_argument_reports_no_expression",
+                    "   ",
+                    None,
+                ),
+                (
+                    "rename_class_with_extra_token_reports_no_expression",
+                    "Counter Accumulator Extra",
+                    None,
+                ),
+                (
+                    "rename_class_with_bare_hash_new_name_reports_no_expression",
+                    "Counter #",
+                    None,
+                ),
+            ],
         );
     }
 
     #[test]
-    fn flush_dictionary_selector_translates_verbatim() {
-        assert_eq!(
-            flush_expr_for("#{ #file => \"src/foo.bt\" }"),
-            Some("Workspace flush: #{ #file => \"src/foo.bt\" }".to_string())
+    fn rename_method_expr_for_cases() {
+        check(
+            rename_method_expr_for,
+            &[
+                (
+                    "rename_method_translates_to_rename_selector_to_send",
+                    "Counter increment incrementBy",
+                    Some("Counter renameSelector: #increment to: #incrementBy"),
+                ),
+                (
+                    "rename_method_preserves_keyword_selectors",
+                    "Dict at:put: atKey:put:",
+                    Some("Dict renameSelector: #at:put: to: #atKey:put:"),
+                ),
+                (
+                    "rename_method_strips_leading_hash_on_both_selectors",
+                    "Counter #increment #incrementBy",
+                    Some("Counter renameSelector: #increment to: #incrementBy"),
+                ),
+                (
+                    "rename_method_trims_surrounding_whitespace",
+                    "  Counter   increment   incrementBy  ",
+                    Some("Counter renameSelector: #increment to: #incrementBy"),
+                ),
+                (
+                    "rename_method_with_missing_tokens_reports_no_expression",
+                    "Counter",
+                    None,
+                ),
+                (
+                    "rename_method_with_missing_tokens_reports_no_expression",
+                    "Counter increment",
+                    None,
+                ),
+                (
+                    "rename_method_with_missing_tokens_reports_no_expression",
+                    "",
+                    None,
+                ),
+                (
+                    "rename_method_with_missing_tokens_reports_no_expression",
+                    "   ",
+                    None,
+                ),
+                (
+                    "rename_method_with_extra_token_reports_no_expression",
+                    "Counter increment incrementBy Extra",
+                    None,
+                ),
+                (
+                    "rename_method_with_bare_hash_selector_reports_no_expression",
+                    "Counter # incrementBy",
+                    None,
+                ),
+                (
+                    "rename_method_with_bare_hash_selector_reports_no_expression",
+                    "Counter increment #",
+                    None,
+                ),
+            ],
         );
-    }
-
-    #[test]
-    fn flush_trims_surrounding_whitespace() {
-        assert_eq!(
-            flush_expr_for("  Counter  "),
-            Some("Workspace flush: Counter".to_string())
-        );
-    }
-
-    #[test]
-    fn flush_with_empty_selector_reports_no_expression() {
-        assert_eq!(flush_expr_for(""), None);
-    }
-
-    #[test]
-    fn flush_with_whitespace_only_selector_reports_no_expression() {
-        // The historical-bug-class risk this guards against: a hand-copied
-        // test-harness mirror of `Workspace flush: {selector}` that skips
-        // this emptiness check (as the old `tests/repl_protocol.rs` inline
-        // duplicate did) would blindly eval a malformed bare
-        // `Workspace flush: ` send instead of hitting the usage-error path.
-        // Because both the real dispatch and the test harness now call this
-        // one function, that drift can no longer happen.
-        assert_eq!(flush_expr_for("   "), None);
-    }
-
-    // -----------------------------------------------------------------------
-    // remove_class_expr_for
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn remove_class_translates_to_remove_from_system_send() {
-        assert_eq!(
-            remove_class_expr_for("Counter"),
-            Some("Counter removeFromSystem".to_string())
-        );
-    }
-
-    #[test]
-    fn remove_class_trims_surrounding_whitespace() {
-        assert_eq!(
-            remove_class_expr_for("  Counter  "),
-            Some("Counter removeFromSystem".to_string())
-        );
-    }
-
-    #[test]
-    fn remove_class_with_empty_argument_reports_no_expression() {
-        assert_eq!(remove_class_expr_for(""), None);
-        assert_eq!(remove_class_expr_for("   "), None);
-    }
-
-    // -----------------------------------------------------------------------
-    // flush_destructive_expr_for
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn flush_destructive_class_selector_appends_confirm_destructive_keyword() {
-        assert_eq!(
-            flush_destructive_expr_for("Counter"),
-            Some("Workspace flush: Counter confirmDestructive: true".to_string())
-        );
-    }
-
-    #[test]
-    fn flush_destructive_symbol_kind_selector_translates_verbatim() {
-        assert_eq!(
-            flush_destructive_expr_for("#'remove-class'"),
-            Some("Workspace flush: #'remove-class' confirmDestructive: true".to_string())
-        );
-    }
-
-    #[test]
-    fn flush_destructive_trims_surrounding_whitespace() {
-        assert_eq!(
-            flush_destructive_expr_for("  Counter  "),
-            Some("Workspace flush: Counter confirmDestructive: true".to_string())
-        );
-    }
-
-    #[test]
-    fn flush_destructive_with_empty_selector_reports_no_expression() {
-        assert_eq!(flush_destructive_expr_for(""), None);
-        assert_eq!(flush_destructive_expr_for("   "), None);
     }
 
     #[test]
@@ -398,113 +514,5 @@ mod tests {
             FLUSH_INCLUDING_DESTRUCTIVE_EXPR,
             "Workspace flushIncludingDestructive"
         );
-    }
-
-    // -----------------------------------------------------------------------
-    // rename_class_expr_for
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn rename_class_translates_to_rename_to_send() {
-        assert_eq!(
-            rename_class_expr_for("Counter Accumulator"),
-            Some("Counter renameTo: #Accumulator".to_string())
-        );
-    }
-
-    #[test]
-    fn rename_class_strips_leading_hash_on_new_name() {
-        assert_eq!(
-            rename_class_expr_for("Counter #Accumulator"),
-            Some("Counter renameTo: #Accumulator".to_string())
-        );
-    }
-
-    #[test]
-    fn rename_class_trims_surrounding_whitespace() {
-        assert_eq!(
-            rename_class_expr_for("  Counter   Accumulator  "),
-            Some("Counter renameTo: #Accumulator".to_string())
-        );
-    }
-
-    #[test]
-    fn rename_class_with_missing_new_name_reports_no_expression() {
-        assert_eq!(rename_class_expr_for("Counter"), None);
-        assert_eq!(rename_class_expr_for("Counter "), None);
-    }
-
-    #[test]
-    fn rename_class_with_empty_argument_reports_no_expression() {
-        assert_eq!(rename_class_expr_for(""), None);
-        assert_eq!(rename_class_expr_for("   "), None);
-    }
-
-    #[test]
-    fn rename_class_with_extra_token_reports_no_expression() {
-        assert_eq!(rename_class_expr_for("Counter Accumulator Extra"), None);
-    }
-
-    #[test]
-    fn rename_class_with_bare_hash_new_name_reports_no_expression() {
-        assert_eq!(rename_class_expr_for("Counter #"), None);
-    }
-
-    // -----------------------------------------------------------------------
-    // rename_method_expr_for
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn rename_method_translates_to_rename_selector_to_send() {
-        assert_eq!(
-            rename_method_expr_for("Counter increment incrementBy"),
-            Some("Counter renameSelector: #increment to: #incrementBy".to_string())
-        );
-    }
-
-    #[test]
-    fn rename_method_preserves_keyword_selectors() {
-        assert_eq!(
-            rename_method_expr_for("Dict at:put: atKey:put:"),
-            Some("Dict renameSelector: #at:put: to: #atKey:put:".to_string())
-        );
-    }
-
-    #[test]
-    fn rename_method_strips_leading_hash_on_both_selectors() {
-        assert_eq!(
-            rename_method_expr_for("Counter #increment #incrementBy"),
-            Some("Counter renameSelector: #increment to: #incrementBy".to_string())
-        );
-    }
-
-    #[test]
-    fn rename_method_trims_surrounding_whitespace() {
-        assert_eq!(
-            rename_method_expr_for("  Counter   increment   incrementBy  "),
-            Some("Counter renameSelector: #increment to: #incrementBy".to_string())
-        );
-    }
-
-    #[test]
-    fn rename_method_with_missing_tokens_reports_no_expression() {
-        assert_eq!(rename_method_expr_for("Counter"), None);
-        assert_eq!(rename_method_expr_for("Counter increment"), None);
-        assert_eq!(rename_method_expr_for(""), None);
-        assert_eq!(rename_method_expr_for("   "), None);
-    }
-
-    #[test]
-    fn rename_method_with_extra_token_reports_no_expression() {
-        assert_eq!(
-            rename_method_expr_for("Counter increment incrementBy Extra"),
-            None
-        );
-    }
-
-    #[test]
-    fn rename_method_with_bare_hash_selector_reports_no_expression() {
-        assert_eq!(rename_method_expr_for("Counter # incrementBy"), None);
-        assert_eq!(rename_method_expr_for("Counter increment #"), None);
     }
 }
