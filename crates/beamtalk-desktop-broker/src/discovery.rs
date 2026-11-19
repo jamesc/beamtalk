@@ -220,6 +220,28 @@ fn sort_by_project_path(summaries: &mut [WorkspaceSummary]) {
 mod tests {
     use super::*;
 
+    /// BT-5014: the broker reads every shape of `metadata.json` the shared
+    /// fixture pins (Rust-written, Erlang-written, `project_path: null`).
+    #[test]
+    fn parse_metadata_reads_shared_schema_fixture() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../runtime/apps/beamtalk_workspace/test/fixtures/workspace_metadata_schema.json",
+        );
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+
+        let sample = parse_metadata("dir", &fixture["sample"].to_string()).unwrap();
+        assert_eq!(sample.id, "fixture_ws");
+        assert_eq!(
+            sample.project_path,
+            Some(PathBuf::from("/bt_test/fixture_project"))
+        );
+        assert_eq!(sample.node_name, "beamtalk_workspace_fixture_ws@localhost");
+
+        let null_path = parse_metadata("dir", &fixture["null_project_path"].to_string()).unwrap();
+        assert_eq!(null_path.project_path, None);
+    }
+
     #[test]
     fn default_node_name_matches_cli_convention() {
         assert_eq!(
