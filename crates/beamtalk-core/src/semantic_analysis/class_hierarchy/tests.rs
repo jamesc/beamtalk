@@ -4,7 +4,7 @@
 use super::builtins::builtin_method;
 use super::*;
 use crate::ast::{
-    ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword, Identifier, MethodDefinition,
+    ClassDefinition, ClassKind, CommentAttachment, Identifier, MethodDefinition,
     ParameterDefinition, StateDeclaration, TypeAnnotation,
 };
 use crate::semantic_analysis::test_helpers::test_span;
@@ -383,53 +383,9 @@ fn resolves_selector_through_unknown_external_parent_to_object() {
 // --- User-defined class tests ---
 fn make_user_class(name: &str, superclass: &str) -> ClassDefinition {
     ClassDefinition {
-        name: Identifier::new(name, test_span()),
-        superclass: Some(Identifier::new(superclass, test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::from_superclass_name(superclass),
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![StateDeclaration {
-            name: Identifier::new("count", test_span()),
-            type_annotation: None,
-            default_value: None,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            declared_keyword: DeclaredKeyword::default(),
-            slot_kind: crate::ast::SlotKind::default(),
-            span: test_span(),
-        }],
-        methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: crate::ast::MessageSelector::Unary("increment".into()),
-            parameters: vec![],
-            body: vec![],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
-        }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        state: vec![StateDeclaration::test("count")],
+        methods: vec![MethodDefinition::test("increment")],
+        ..ClassDefinition::test_subclass(name, superclass)
     }
 }
 #[test]
@@ -600,43 +556,11 @@ fn make_class_with_sealed_method(
     sealed: bool,
 ) -> ClassDefinition {
     ClassDefinition {
-        name: Identifier::new(name, test_span()),
-        superclass: Some(Identifier::new(superclass, test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::from_superclass_name(superclass),
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: crate::ast::MessageSelector::Unary(method_name.into()),
-            parameters: vec![],
-            body: vec![],
-            return_type: None,
             is_sealed: sealed,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test(method_name)
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test_subclass(name, superclass)
     }
 }
 fn make_class_with_sealed_class_method(
@@ -646,43 +570,12 @@ fn make_class_with_sealed_class_method(
     sealed: bool,
 ) -> ClassDefinition {
     ClassDefinition {
-        name: Identifier::new(name, test_span()),
-        superclass: Some(Identifier::new(superclass, test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::from_superclass_name(superclass),
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
         class_methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: crate::ast::MessageSelector::Unary(method_name.into()),
-            parameters: vec![],
-            body: vec![],
-            return_type: None,
             is_sealed: sealed,
-            is_internal: false,
             is_class_method: true,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test(method_name)
         }],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test_subclass(name, superclass)
     }
 }
 #[test]
@@ -1082,15 +975,7 @@ fn user_class_param_types_propagated() {
 // --- State field type tests ---
 fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
     ClassDefinition {
-        name: Identifier::new(name, test_span()),
-        superclass: Some(Identifier::new(superclass, test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::from_superclass_name(superclass),
-        is_abstract: false,
-        is_sealed: false,
         is_typed: true,
-        is_internal: false,
-        supervisor_kind: None,
         state: vec![
             StateDeclaration::with_type(
                 Identifier::new("count", test_span()),
@@ -1099,18 +984,7 @@ fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
             ),
             StateDeclaration::new(Identifier::new("label", test_span()), test_span()),
         ],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test_subclass(name, superclass)
     }
 }
 /// BT-4679: the former `state_field_type_returns_type_for_annotated_field`,
