@@ -1193,7 +1193,7 @@ child_label(BClass, RegName) ->
 class_name_of(nil) ->
     nil;
 class_name_of(BClass) when is_tuple(BClass) ->
-    beamtalk_object_class:class_name_safe(element(4, BClass)).
+    beamtalk_object_class_read:class_name_safe(element(4, BClass)).
 
 %% Best-effort behaviour-class atom for a restarting child id (a class atom when
 %% the id names a Beamtalk class), or `nil`.

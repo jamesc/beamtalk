@@ -194,7 +194,7 @@ class_identity(Pid) when node(Pid) =:= node() ->
     end;
 class_identity(Pid) ->
     try
-        Name = beamtalk_object_class:class_name_safe(Pid),
+        Name = beamtalk_object_class_read:class_name_safe(Pid),
         {ok, Name, beamtalk_object_class:module_name_safe(Pid)}
     catch
         %% noconnection/noproc/timeout, or the class dying mid-call.
@@ -242,7 +242,7 @@ is `==` to the registry reference).
 """.
 -spec class_object_from_pid(pid()) -> #beamtalk_object{}.
 class_object_from_pid(Pid) when is_pid(Pid) ->
-    ClassName = beamtalk_object_class:class_name_safe(Pid),
+    ClassName = beamtalk_object_class_read:class_name_safe(Pid),
     ModuleName = beamtalk_object_class:module_name_safe(Pid),
     ClassTag = class_object_tag(ClassName),
     #beamtalk_object{class = ClassTag, class_mod = ModuleName, pid = Pid}.
@@ -1430,7 +1430,7 @@ remove_module_less_class(ClassName, Module) ->
                                 }
                             ),
                             case
-                                beamtalk_object_class:remove_dead_class_registration(
+                                beamtalk_object_class_teardown:remove_dead_class_registration(
                                     ClassName, Module
                                 )
                             of

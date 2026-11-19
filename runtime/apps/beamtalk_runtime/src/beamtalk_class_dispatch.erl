@@ -1518,7 +1518,7 @@ class_method_result(ClassPid, Selector, Args, Reply) ->
             %% process is serving and time out when it is busy.
             class_chain_send(
                 ClassPid,
-                beamtalk_object_class:class_name_safe(ClassPid),
+                beamtalk_object_class_read:class_name_safe(ClassPid),
                 beamtalk_object_class:module_name_safe(ClassPid),
                 Selector,
                 Args
@@ -1594,7 +1594,7 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
                 {reply, Result, _NewState} ->
                     Result;
                 {error, #beamtalk_error{kind = does_not_understand}} ->
-                    ClassName = beamtalk_object_class:class_name_safe(Pid),
+                    ClassName = beamtalk_object_class_read:class_name_safe(Pid),
                     Error = beamtalk_error:new(
                         does_not_understand,
                         ClassName,

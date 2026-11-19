@@ -28,7 +28,6 @@ and join the `beamtalk_classes` pg group for enumeration.
 %% API
 -export([
     start/2,
-    remove_dead_class_registration/2,
     start_link/1,
     start_link/2,
     new/1,
@@ -51,16 +50,8 @@ and join the `beamtalk_classes` pg group for enumeration.
     is_constructible/1,
     shape_version/1,
     class_name/1,
-    class_name_safe/1,
-    class_name_or_undefined/1,
     module_name/1,
     module_name_safe/1,
-    superclass_safe/1,
-    instance_methods_safe/1,
-    instance_variables_safe/1,
-    local_class_method_selectors_safe/1,
-    local_instance_method_infos_safe/1,
-    compiled_method_safe/3,
     class_send/3,
     class_send/4,
     local_call/3,
@@ -86,6 +77,9 @@ and join the `beamtalk_classes` pg group for enumeration.
     terminate/2,
     code_change/3
 ]).
+
+%% BT-5047: used by the specs of the modules split out of this one.
+-export_type([class_name/0, selector/0]).
 
 -type class_name() :: atom().
 -type selector() :: atom().
@@ -378,52 +372,6 @@ class_name(ClassPid) ->
     gen_server:call(ClassPid, class_name).
 
 -doc """
-Get the class name, preferring a message-free metadata lookup.
-
-`class_name/1`'s `gen_server:call(ClassPid, class_name)` uses the default 5s
-timeout and queues behind whatever `ClassPid` is currently running, so it
-fails with `{timeout, {gen_server, call, [ClassPid, class_name]}}` when the
-class process is busy serving a long class-side call (BT-3820). This resolves
-the name via `beamtalk_class_registry:class_name_for_pid/1` (a pure ETS reverse
-lookup, no message send), falling back to `class_name/1` only on a miss. The
-same caveat as `module_name_safe/1` applies to an untrappable `kill`.
-
-Stale-name behaviour: the reverse index is kept for a class process that
-crashed without running `terminate/2` (auto-restart recovery), so for such a
-pid this returns the old name instead of exiting `noproc` — but only until the
-restart, which deletes the dead pid's row (after which this exits `noproc`).
-Callers acting by *name* in that window (`classRemoveFromSystem`,
-`classRenameTo`, `classReload`, ...) may find no class registered under it.
-Callers needing a liveness guarantee must check `is_process_alive/1`.
-""".
--spec class_name_safe(pid()) -> class_name().
-class_name_safe(ClassPid) when ClassPid =:= self() ->
-    get(beamtalk_class_name);
-class_name_safe(ClassPid) ->
-    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
-        {ok, ClassName} -> ClassName;
-        not_found -> class_name(ClassPid)
-    end.
-
--doc """
-Registered class name from the pure ETS reverse index only, or `undefined`.
-
-Never sends a message, so unlike `class_name_safe/1` it cannot exit `noproc`
-when the class stops mid-probe. Used as the class-name thunk of
-`beamtalk_primitive:ensure_class_module_loaded/2`: `undefined` never equals a
-module, so a miss falls back to the plain `code:ensure_loaded/1` probe
-(BT-4627).
-""".
--spec class_name_or_undefined(pid()) -> class_name() | undefined.
-class_name_or_undefined(ClassPid) when ClassPid =:= self() ->
-    get(beamtalk_class_name);
-class_name_or_undefined(ClassPid) ->
-    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
-        {ok, ClassName} -> ClassName;
-        not_found -> undefined
-    end.
-
--doc """
 Get the module name.
 
 If called from within the class gen_server itself (self-call), read
@@ -474,253 +422,11 @@ function correctly falls back to `module_name/1` and preserves the noproc/timeou
 module_name_safe(ClassPid) when ClassPid =:= self() ->
     get(beamtalk_class_module);
 module_name_safe(ClassPid) ->
-    read_published(
+    beamtalk_object_class_read:read_published(
         ClassPid,
         fun beamtalk_class_metadata:lookup_module/1,
         fun() -> module_name(ClassPid) end
     ).
-
--doc """
-Get the superclass, preferring a deadlock-safe metadata lookup.
-
-Mirrors `module_name_safe/1`: resolves via
-`beamtalk_class_registry:class_name_for_pid/1` (a pure ETS reverse lookup, no
-message send) followed by `beamtalk_class_metadata:lookup_superclass/1` — the
-same ETS row `beamtalk_class_dispatch` reads on the dispatch hot path, kept in
-sync with the process dictionary by `sync_identity/6` at every `init/1` and
-`apply_class_info/2`. Falls back to `superclass/1`'s `gen_server:call` only if
-either lookup misses.
-
-Without this, `beamtalk_behaviour_intrinsics` would read the superclass via
-`gen_server:call(ClassPid, superclass)` — a second, independent source from
-the one dispatch uses, which could disagree with it mid-reload (ADR 0057).
-Prefer this function at any reflection/hierarchy-walk call site instead.
-""".
--spec superclass_safe(pid()) -> class_name() | none.
-superclass_safe(ClassPid) when ClassPid =:= self() ->
-    get(beamtalk_class_superclass);
-superclass_safe(ClassPid) ->
-    read_published(
-        ClassPid,
-        fun beamtalk_class_metadata:lookup_superclass/1,
-        fun() -> superclass(ClassPid) end
-    ).
-
--doc """
-Local (non-inherited) instance-method selectors, preferring a message-free read.
-
-`methods/1`'s `gen_server:call(ClassPid, methods)` queues behind whatever
-`ClassPid` is running, so calling it from inside another class's handler
-(`Foo methods`, `allInstVarNames`, the protocol-conformance walk, ...) deadlocks
-two busy classes against each other until the 5s call timeout (BT-3826; the
-invariant is "a class process never makes a blocking call into another class
-process while handling a call"). This reads the selectors the owning class
-published with `beamtalk_class_publish:publish_reflection/1`.
-
-Falls back to `methods/1` only when there is no row to read -- a remote pid
-(the node-local ETS cannot name it; the cross-node call path is unchanged), or
-a class that has not published yet.
-""".
--spec instance_methods_safe(pid()) -> [selector()].
-instance_methods_safe(ClassPid) ->
-    read_published(
-        ClassPid,
-        fun beamtalk_class_metadata:lookup_instance_methods/1,
-        fun() -> methods(ClassPid) end
-    ).
-
--doc """
-Own declared instance variables (not inherited), preferring a message-free read.
-
-Same contract and fallback as `instance_methods_safe/1`, for
-`gen_server:call(ClassPid, instance_variables)`.
-""".
--spec instance_variables_safe(pid()) -> [atom()].
-instance_variables_safe(ClassPid) ->
-    read_published(
-        ClassPid,
-        fun beamtalk_class_metadata:lookup_instance_variables/1,
-        fun() -> instance_variables(ClassPid) end
-    ).
-
--doc """
-Local (non-inherited) class-side method selectors, preferring a message-free read.
-
-The selectors are the `selectors` field of the unified metadata row that
-`sync_identity/6` keeps current (and `put_class_method` refreshes), the same
-source `beamtalk_class_dispatch` reads -- so unlike `local_class_methods/1` this
-never queues behind the owning class. Falls back to `local_class_methods/1`
-under the same conditions as `instance_methods_safe/1`.
-""".
--spec local_class_method_selectors_safe(pid()) -> [selector()].
-local_class_method_selectors_safe(ClassPid) ->
-    read_published(
-        ClassPid,
-        fun(ClassName) ->
-            case beamtalk_class_metadata:lookup_methods(ClassName) of
-                {ok, _Module, Selectors} -> {ok, Selectors};
-                not_found -> not_found
-            end
-        end,
-        fun() -> local_class_methods(ClassPid) end
-    ).
-
--doc """
-Local instance methods as `selector => MethodInfo`, preferring a message-free read.
-
-Reads the per-method records the owning class published with
-`beamtalk_class_publish:publish_reflection/1`; falls back to the `get_instance_methods` call under the
-same conditions as `instance_methods_safe/1`.
-""".
--spec local_instance_method_infos_safe(pid()) -> #{selector() => map()}.
-local_instance_method_infos_safe(ClassPid) ->
-    read_published(
-        ClassPid,
-        fun(ClassName) ->
-            case beamtalk_class_metadata:lookup_instance_methods(ClassName) of
-                {ok, _} ->
-                    {ok,
-                        maps:map(
-                            fun(_Sel, #{info := Info}) -> Info end,
-                            beamtalk_class_metadata:lookup_method_records(ClassName, instance)
-                        )};
-                not_found ->
-                    not_found
-            end
-        end,
-        fun() ->
-            {ok, InstanceMethods} = gen_server:call(ClassPid, get_instance_methods),
-            InstanceMethods
-        end
-    ).
-
--doc """
-Resolve `Selector` to a `CompiledMethod` map on `ClassPid`'s own method table
-(`Side = instance`) or, for `Side = class`, on its class-side table and then the
-superclass chain's (the walk `{class_method, Sel}` has always done). Returns
-`nil` when not found.
-
-Message-free for a published local class: reads the per-method records
-`beamtalk_class_publish:publish_reflection/1` keeps current, so it never queues behind a busy class
-process (BT-3832 -- `beamtalk_method_resolver` runs inside class handlers via
-`Behaviour >>`). Falls back to the `{method, Sel}` / `{class_method, Sel}` call
-only for a remote pid or a class that has not published yet.
-""".
--spec compiled_method_safe(pid(), instance | class, selector()) -> map() | 'nil'.
-compiled_method_safe(ClassPid, Side, Selector) ->
-    case published_class_name(ClassPid) of
-        {ok, ClassName} ->
-            published_compiled_method(ClassName, Side, Selector);
-        not_found ->
-            Msg =
-                case Side of
-                    instance -> {method, Selector};
-                    class -> {class_method, Selector}
-                end,
-            gen_server:call(ClassPid, Msg)
-    end.
-
-%% The one shape shared by the `*_safe` accessors: resolve `ClassPid` to its class
-%% name through the node-local reverse index (no message; `self()` reads the
-%% process dictionary), then `Lookup(ClassName)` in the published metadata. A miss
-%% at either step runs `Fallback()`, the blocking `gen_server:call` the accessor
-%% exists to avoid, so a remote pid or an unpublished class behaves as before.
--spec read_published(
-    pid(),
-    fun((class_name()) -> {ok, Value} | not_found),
-    fun(() -> Value)
-) -> Value when
-    Value :: term().
-read_published(ClassPid, Lookup, Fallback) ->
-    case reflection_class_name(ClassPid) of
-        {ok, ClassName} ->
-            case Lookup(ClassName) of
-                {ok, Value} -> Value;
-                not_found -> Fallback()
-            end;
-        not_found ->
-            Fallback()
-    end.
-
-%% A class name for a pid whose reflection state is in ETS, else `not_found`.
--spec published_class_name(pid()) -> {ok, class_name()} | not_found.
-published_class_name(ClassPid) ->
-    case reflection_class_name(ClassPid) of
-        {ok, ClassName} ->
-            case beamtalk_class_metadata:lookup_instance_methods(ClassName) of
-                {ok, _} -> {ok, ClassName};
-                not_found -> not_found
-            end;
-        not_found ->
-            not_found
-    end.
-
--spec published_compiled_method(class_name(), instance | class, selector()) ->
-    map() | 'nil'.
-published_compiled_method(ClassName, instance, Selector) ->
-    local_compiled_method(ClassName, instance, Selector);
-published_compiled_method(ClassName, class, Selector) ->
-    StepFun = fun(Name, _Depth) ->
-        case local_compiled_method(Name, class, Selector) of
-            nil ->
-                case beamtalk_class_metadata:lookup_superclass(Name) of
-                    {ok, none} -> not_found;
-                    {ok, Super} -> {next, Super};
-                    not_found -> not_found
-                end;
-            Method ->
-                {found, Method}
-        end
-    end,
-    Ctx = #{start => ClassName, selector => Selector},
-    case beamtalk_hierarchy:walk_or_warn(ClassName, StepFun, published_compiled_method, Ctx) of
-        {found, Method} -> Method;
-        not_found -> nil;
-        {cycle, _} -> nil
-    end.
-
-%% `ClassName`'s own `CompiledMethod` for `Selector` (no chain walk), or `nil`.
--spec local_compiled_method(class_name(), instance | class, selector()) ->
-    map() | 'nil'.
-local_compiled_method(ClassName, Side, Selector) ->
-    case beamtalk_class_metadata:lookup_method_record(ClassName, Side, Selector) of
-        {ok, #{info := Info, source := Source, signature := Sig, doc := Doc}} ->
-            compiled_method_map(ClassName, Side, Selector, Info, Source, Sig, Doc);
-        not_found ->
-            nil
-    end.
-
-%% The one constructor for a `CompiledMethod` map, shared by the
-%% `{method, _}` / `{class_method, _}` handlers and the ETS read path.
--spec compiled_method_map(
-    class_name(), instance | class, selector(), map(), binary(), term(), term()
-) -> map().
-compiled_method_map(ClassName, Side, Selector, Info, Source, Sig, Doc) ->
-    #{
-        '$beamtalk_class' => 'CompiledMethod',
-        '__selector__' => Selector,
-        '__source__' => Source,
-        '__signature__' => Sig,
-        '__method_info__' => Info,
-        '__doc__' => Doc,
-        %% ADR 0127 §12: `CompiledMethod origin` is looked up lazily from these
-        %% two keys by `beamtalk_compiled_method_ops` when reflection asks for
-        %% it. It is never computed here: this constructor also serves method
-        %% resolution, and an xref read per resolution cost ~20 us (BT-4071).
-        '__defining_class__' => ClassName,
-        '__side__' => Side
-    }.
-
-%% The class name for a pid, from the node-local reverse index (no message).
-%% `self()` reads the process dictionary, like `class_name_safe/1`.
--spec reflection_class_name(pid()) -> {ok, class_name()} | not_found.
-reflection_class_name(ClassPid) when ClassPid =:= self() ->
-    case get(beamtalk_class_name) of
-        undefined -> not_found;
-        Name -> {ok, Name}
-    end;
-reflection_class_name(ClassPid) ->
-    beamtalk_class_registry:class_name_for_pid(ClassPid).
 
 -doc """
 Send a message to a class object synchronously (ADR 0013 Phase 1).
@@ -907,7 +613,10 @@ probe_local_method(ClassPid, Selector, EnsureLoaded, ResolveFun) ->
                     case EnsureLoaded of
                         true ->
                             _ = beamtalk_primitive:ensure_class_module_loaded(
-                                fun() -> class_name_or_undefined(ClassPid) end, ModuleName
+                                fun() ->
+                                    beamtalk_object_class_read:class_name_or_undefined(ClassPid)
+                                end,
+                                ModuleName
                             );
                         false ->
                             ok
@@ -944,7 +653,7 @@ probe_local_method(ClassPid, Selector, EnsureLoaded, ResolveFun) ->
 %% only for a pid with no published row (remote pid, unpublished class).
 -spec local_method_defined(pid(), selector()) -> boolean().
 local_method_defined(ClassPid, Selector) ->
-    case reflection_class_name(ClassPid) of
+    case beamtalk_object_class_read:reflection_class_name(ClassPid) of
         {ok, ClassName} ->
             case beamtalk_class_metadata:lookup_instance_methods(ClassName) of
                 {ok, Selectors} -> lists:member(Selector, Selectors);
@@ -1050,7 +759,7 @@ is_typed(ClassPid) ->
 -doc "Check if a class is abstract (cannot be instantiated). Message-free; see `class_flag/3`.".
 -spec is_abstract(pid()) -> boolean().
 is_abstract(ClassPid) ->
-    case reflection_class_name(ClassPid) of
+    case beamtalk_object_class_read:reflection_class_name(ClassPid) of
         {ok, ClassName} ->
             case beamtalk_class_metadata:lookup_is_abstract(ClassName) of
                 {ok, IsAbstract} -> IsAbstract;
@@ -1082,7 +791,7 @@ blocking call into another class process while handling a call (BT-3820/BT-3832)
 """.
 -spec class_flag(pid(), is_sealed | is_typed | is_internal | shape_version, atom()) -> term().
 class_flag(ClassPid, Flag, CallMsg) ->
-    case reflection_class_name(ClassPid) of
+    case beamtalk_object_class_read:reflection_class_name(ClassPid) of
         {ok, ClassName} ->
             case beamtalk_class_metadata:lookup_flag(ClassName, Flag) of
                 {ok, Value} -> Value;
@@ -1925,7 +1634,7 @@ terminate(Reason, #class_state{name = ClassName}) ->
     %% `ClassRemoved` is announced, and pg and the pid-keyed indexes are left
     %% to their readers' liveness filters, as after a kill.
     case beamtalk_class_registry:is_deliberate_stop(Reason) of
-        true -> remove_class_registration(ClassName);
+        true -> beamtalk_object_class_teardown:remove_class_registration(ClassName);
         false -> ok
     end,
     %% Drop this class's classVars live-snapshot row, whatever the reason.
@@ -1937,159 +1646,6 @@ terminate(Reason, #class_state{name = ClassName}) ->
     _ =
         (try
             beamtalk_class_registry:forget_class_state_snapshot(self())
-        catch
-            _:_ -> ok
-        end),
-    ok.
-
--doc """
-The removal teardown `terminate/2` runs for a deliberate stop
-(`beamtalk_class_registry:is_deliberate_stop/1`): announce `ClassRemoved`
-and drop the class's metadata, reverse-index, pg, loaded-class and
-backing-module entries, so the class is gone from every registry.
-""".
--spec remove_class_registration(class_name()) -> ok.
-remove_class_registration(ClassName) ->
-    remove_registration(ClassName, fun(Pid) ->
-        beamtalk_class_registry:forget_class_pids(Pid, ClassName),
-        beamtalk_class_registry:forget_loaded_class(ClassName, Pid),
-        beamtalk_class_registry:forget_backing_module_entries(ClassName, Pid),
-        %% Only this (terminating) process leaves the group. The dead-class
-        %% path never does: pg drops dead members itself, and its caller
-        %% may be an unrelated live class.
-        pg:leave(beamtalk_classes, Pid)
-    end).
-
--doc """
-The same teardown as `remove_class_registration/1` for a class whose process
-is already dead and cannot be restarted (BT-4646: a crashed module-less
-`ClassBuilder` class). Runs in the caller, so the pid-keyed index rows are
-dropped by liveness (`beamtalk_class_registry:forget_dead_incarnations/1`)
-rather than by `self()`. Also runs the registry purge
-(`beamtalk_class_lifecycle:class_removed/2`), tells the workspace layer as
-`removeFromSystem` does, and flushes the derived-fact cache.
-""".
--spec remove_dead_class_registration(class_name(), module()) -> ok | {alive, pid()}.
-remove_dead_class_registration(ClassName, Module) ->
-    %% Registration does not take the removal lock, so a class of the same name
-    %% can be rebuilt while this runs (BT-4794). The metadata row is therefore
-    %% deleted only while it still names the dead owner seen here
-    %% (`delete_if_owner/2`, one atomic claim), and the pid-keyed index rows are
-    %% dropped per dead pid, so a rebuilt class's rows are never touched.
-    %% `ClassRemoved` is announced last so a subscriber that rebuilds the class
-    %% in response cannot have its fresh rows deleted by this teardown.
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        Pid when is_pid(Pid) ->
-            {alive, Pid};
-        undefined ->
-            case beamtalk_class_metadata:lookup_owner(ClassName) of
-                not_found ->
-                    %% Already removed by someone else: nothing left to claim
-                    %% or announce.
-                    beamtalk_class_registry:forget_dead_incarnations(ClassName);
-                {ok, Owner} ->
-                    %% The name is registered before `init/1` writes the row,
-                    %% so a rebuild between the lookup above and this read makes
-                    %% its live pid the owner: only a dead owner is claimed.
-                    case is_process_alive(Owner) of
-                        true ->
-                            %% Alive and registered: a live class. Alive but
-                            %% not registered is a process on its way out
-                            %% (`terminate/2` unregistered it and removes its
-                            %% own rows): nothing to hand back or remove.
-                            case beamtalk_class_registry:whereis_class(ClassName) of
-                                LivePid when is_pid(LivePid) -> {alive, LivePid};
-                                undefined -> ok
-                            end;
-                        false ->
-                            remove_claimed_dead_class(ClassName, Module, Owner)
-                    end
-            end
-    end.
-
--spec remove_claimed_dead_class(class_name(), module(), pid()) -> ok | {alive, pid()}.
-remove_claimed_dead_class(ClassName, Module, Owner) ->
-    case beamtalk_class_metadata:delete_if_owner(ClassName, Owner) of
-        false ->
-            %% The row names another owner (the class was rebuilt after the
-            %% re-check), or is already gone (another teardown won; the dead
-            %% owner's own dependents are dropped either way). Leave any
-            %% rebuilt class registered and announce nothing: the `ClassRemoved`
-            %% announcement belongs to the teardown that won the claim. The dead
-            %% pid's index rows are kept: a holder of the old class object
-            %% recovers through the reverse-index row (BT-4552), exactly as
-            %% after `restart_compiled_class/4`; the stale loaded-class/backing
-            %% rows are filtered by liveness.
-            case beamtalk_class_registry:whereis_class(ClassName) of
-                NewPid when is_pid(NewPid) -> {alive, NewPid};
-                undefined -> ok
-            end;
-        true ->
-            %% One more look before the name-keyed purges and the announcement:
-            %% a rebuild that landed after the last teardown check must not be
-            %% purged or announced as removed, nor lose its predecessor's
-            %% reverse-index row (BT-4552 recovery).
-            case beamtalk_class_registry:whereis_class(ClassName) of
-                RebuiltPid when is_pid(RebuiltPid) ->
-                    {alive, RebuiltPid};
-                undefined ->
-                    beamtalk_class_registry:forget_dead_incarnations(ClassName),
-                    announce_dead_class_removed(ClassName, Module)
-            end
-    end.
-
--spec announce_dead_class_removed(class_name(), module()) -> ok.
-announce_dead_class_removed(ClassName, Module) ->
-    _ =
-        (try
-            beamtalk_class_lifecycle:class_removed(ClassName, Module)
-        catch
-            _:_ -> ok
-        end),
-    _ =
-        (try
-            beamtalk_behaviour_intrinsics:publish_class_removed(ClassName, Module)
-        catch
-            _:_ -> ok
-        end),
-    _ =
-        (try
-            beamtalk_class_derived_cache:invalidate()
-        catch
-            _:_ -> ok
-        end),
-    beamtalk_class_publish:announce_class_lifecycle('ClassRemoved', ClassName),
-    ok.
-
--spec remove_registration(class_name(), fun((pid()) -> term())) -> ok.
-remove_registration(ClassName, ForgetPidRows) ->
-    %% ADR 0093 §2: Announce ClassRemoved on the system bus as the class
-    %% process shuts down (e.g. removeFromSystem). The event carries only the
-    %% class name, so it is independent of the metadata-row deletion below.
-    beamtalk_class_publish:announce_class_lifecycle('ClassRemoved', ClassName),
-    teardown_registration(ClassName, ForgetPidRows).
-
--spec teardown_registration(class_name(), fun((pid()) -> term())) -> ok.
-teardown_registration(ClassName, ForgetPidRows) ->
-    %% Single metadata row → single owner-scoped delete (BT-4808: never a
-    %% rebuilt class's row); it also drops this process's class-method funs,
-    %% method records, flags and subclass edge. Wrapped in try/catch to be
-    %% safe during node shutdown when ETS/pg may be gone.
-    _ =
-        (try
-            beamtalk_class_metadata:delete_if_owner(ClassName, self())
-        catch
-            _:_ -> ok
-        end),
-    %% Drop the pid reverse index, loaded-class and backing-module rows with
-    %% the metadata row: the class is removed and its rows must not keep
-    %% naming it. A crash keeps them for auto-restart recovery (BT-4552,
-    %% BT-4622, `restart_class/1`). The pid-guarded forgets never clobber a
-    %% replacement pid's row (a reload that already recorded one).
-    %% bt-catcher-audit: not-applicable-no-block - ForgetPidRows is an internal registry-cleanup fun, never a Beamtalk block
-    _ =
-        (try
-            ForgetPidRows(self())
         catch
             _:_ -> ok
         end),
@@ -2319,7 +1875,7 @@ process while handling a call. A cyclic hierarchy is cut off by the
 find_inherited_class_method(_Selector, none) ->
     nil;
 find_inherited_class_method(Selector, SuperName) ->
-    published_compiled_method(SuperName, class, Selector).
+    beamtalk_object_class_read:published_compiled_method(SuperName, class, Selector).
 
 -doc """
 Whether a class-side extension registered on `ClassName` itself, or an ADR
@@ -2494,7 +2050,9 @@ state_compiled_method(ClassName, Side, Selector, State) ->
         #{Selector := Info} ->
             #{source := Source, signature := Sig, doc := Doc} =
                 beamtalk_class_publish:method_record(Side, Selector, Info, reflection_view(State)),
-            compiled_method_map(ClassName, Side, Selector, Info, Source, Sig, Doc);
+            beamtalk_object_class_read:compiled_method_map(
+                ClassName, Side, Selector, Info, Source, Sig, Doc
+            );
         _ ->
             nil
     end.

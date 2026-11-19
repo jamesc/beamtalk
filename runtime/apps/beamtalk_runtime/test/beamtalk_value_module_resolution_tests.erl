@@ -331,7 +331,7 @@ inherited_object_send_makes_no_xref_call() ->
             [
                 {beamtalk_xref, '_', '_'},
                 {ets, tab2list, 1},
-                {beamtalk_object_class, compiled_method_map, 7},
+                {beamtalk_object_class_read, compiled_method_map, 7},
                 {beamtalk_object_class, method, 2},
                 {gen_server, call, '_'}
             ],

@@ -518,7 +518,7 @@ classObject(Self) ->
 class_identity(Self) ->
     ClassPid = element(4, Self),
     {
-        beamtalk_object_class:class_name_safe(ClassPid),
+        beamtalk_object_class_read:class_name_safe(ClassPid),
         beamtalk_object_class:module_name_safe(ClassPid)
     }.
 
@@ -1043,7 +1043,7 @@ generated from the compiler's (`beamtalk_supervisor_config.hrl`).
 -spec warn_removed_class_side_config(pid(), atom()) -> ok.
 warn_removed_class_side_config(ClassPid, Selector) ->
     case lists:member(Selector, ?BT_REMOVED_CLASS_SIDE_SUPERVISOR_CONFIG) of
-        true -> warn_if_supervisor(beamtalk_object_class:class_name_safe(ClassPid), Selector);
+        true -> warn_if_supervisor(beamtalk_object_class_read:class_name_safe(ClassPid), Selector);
         false -> ok
     end.
 
@@ -1124,7 +1124,7 @@ Self is the class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
 -spec current(beamtalk_object()) -> term() | nil.
 current(Self) ->
     ClassPid = element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     Module = beamtalk_object_class:module_name_safe(ClassPid),
     case whereis(Module) of
         undefined ->
@@ -1363,7 +1363,7 @@ whichChild(Self, ClassArg) ->
             [] ->
                 {ok, nil};
             [{_Id, ChildPid, _, _}] when is_pid(ChildPid) ->
-                ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
+                ChildClass = beamtalk_object_class_read:class_name_safe(ChildClassPid),
                 {ok, beamtalk_supervisor_announce:wrap_child(ChildClass, ChildModule, ChildPid)};
             [_NotRunning] ->
                 {ok, nil};

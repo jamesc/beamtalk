@@ -13,7 +13,7 @@ various class reference formats (pid, atom, class object tuple) and
 returns a CompiledMethod map or nil.
 
 This is a stateless domain service that reads the method records each class
-publishes to ETS (`beamtalk_object_class:compiled_method_safe/3`) rather than
+publishes to ETS (`beamtalk_object_class_read:compiled_method_safe/3`) rather than
 calling the class gen_server (BT-3832): it runs inside class handlers
 (`Behaviour >>`), where a blocking call into another class process deadlocks two
 busy classes until the 5s timeout. A remote pid keeps the `gen_server:call` path.
@@ -179,12 +179,12 @@ itself starts at the immediate superclass.
 """.
 -spec resolve_with_hierarchy(pid(), selector()) -> compiled_method() | 'nil'.
 resolve_with_hierarchy(ClassPid, Selector) ->
-    case beamtalk_object_class:compiled_method_safe(ClassPid, instance, Selector) of
+    case beamtalk_object_class_read:compiled_method_safe(ClassPid, instance, Selector) of
         nil ->
             StepFun = fun(Pid, _Depth) -> method_step(Pid, Selector) end,
             Ctx = #{
                 selector => Selector,
-                node_name => fun beamtalk_object_class:class_name_safe/1
+                node_name => fun beamtalk_object_class_read:class_name_safe/1
             },
             case
                 beamtalk_hierarchy:walk_or_warn(
@@ -204,12 +204,12 @@ Resolve a class-side method on the class identified by `ClassPid`.
 
 Reads the class-side `CompiledMethod` record (source / signature / doc) the
 class published, walking the metaclass parallel hierarchy for an inherited
-class method (`beamtalk_object_class:compiled_method_safe/3`). Returns
+class method (`beamtalk_object_class_read:compiled_method_safe/3`). Returns
 `nil` when no class method with the selector is defined in the chain.
 """.
 -spec resolve_class_side(pid(), selector()) -> compiled_method() | 'nil'.
 resolve_class_side(ClassPid, Selector) ->
-    beamtalk_object_class:compiled_method_safe(ClassPid, class, Selector).
+    beamtalk_object_class_read:compiled_method_safe(ClassPid, class, Selector).
 
 -doc """
 Per-node probe for the `beamtalk_hierarchy:walk_or_warn/4` walk: check
@@ -218,7 +218,7 @@ superclass's pid as the next node.
 """.
 -spec method_step(pid(), selector()) -> beamtalk_hierarchy:step_result(compiled_method()).
 method_step(ClassPid, Selector) ->
-    case beamtalk_object_class:compiled_method_safe(ClassPid, instance, Selector) of
+    case beamtalk_object_class_read:compiled_method_safe(ClassPid, instance, Selector) of
         nil ->
             case superclass_pid(ClassPid) of
                 none -> not_found;
@@ -234,7 +234,7 @@ there is no superclass or its process is not registered.
 """.
 -spec superclass_pid(pid()) -> pid() | none.
 superclass_pid(ClassPid) ->
-    case beamtalk_object_class:superclass_safe(ClassPid) of
+    case beamtalk_object_class_read:superclass_safe(ClassPid) of
         none ->
             none;
         SuperName ->

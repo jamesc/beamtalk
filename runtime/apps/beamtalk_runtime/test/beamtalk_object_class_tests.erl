@@ -2518,7 +2518,7 @@ safe_name_lookups_do_not_message_class_process_group() ->
             ok = sys:suspend(Pid),
             try
                 ?assertEqual(
-                    'SafeLookupTestClass', beamtalk_object_class:class_name_safe(Pid)
+                    'SafeLookupTestClass', beamtalk_object_class_read:class_name_safe(Pid)
                 ),
                 ?assertEqual(
                     safe_lookup_test_class, beamtalk_object_class:module_name_safe(Pid)
@@ -2535,7 +2535,7 @@ safe_name_lookups_do_not_message_class_process_group() ->
             %% Once resumed the ETS-backed and call-backed answers agree.
             ?assertEqual(
                 beamtalk_object_class:class_name(Pid),
-                beamtalk_object_class:class_name_safe(Pid)
+                beamtalk_object_class_read:class_name_safe(Pid)
             )
         end)
     ]}.
