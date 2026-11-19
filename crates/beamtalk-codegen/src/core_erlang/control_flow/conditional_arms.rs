@@ -204,6 +204,8 @@ impl CoreErlangGenerator {
         for (i, expr) in body.iter().enumerate() {
             // BT-3838: a NON-last arm statement's value is discarded, so `(s)` is exactly `s`
             // (see `lower_body_exprs_with_reply_in_sites`); the last one is the arm's value.
+            // BT-5031: same policy and same reason as the actor walker there, pinned by
+            // `paren_statement_walkers_test.bt`.
             let expr = if i == body.len() - 1 {
                 expr
             } else {

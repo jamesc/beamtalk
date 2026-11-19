@@ -466,6 +466,7 @@ mod module_info;
 mod nlr;
 mod nlr_closure_call_corpus;
 mod operand_evaluation_order;
+mod paren_arm_statements;
 mod paren_peel_guard;
 mod paren_transparency;
 mod pipeline;

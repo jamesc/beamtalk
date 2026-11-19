@@ -1,0 +1,53 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5031: a parenthesised statement is exactly the bare statement, in every
+// statement position and in every body walker (actor, value type, class method).
+// Each method runs one of four shapes in parentheses, either NON-last (followed
+// by a read) or LAST, and the expected answers are in
+// stdlib/test/paren_statement_walkers_test.bt.
+//
+// The four shapes: a local rebind `(x := x + 1)`, a field write
+// `(self.count := self.count + 1)`, a conditional with a field-writing arm
+// `(c ifTrue: [self.count := 1])` and a loop that writes a field
+// `(xs do: [:e | self.count := self.count + e])`.
+
+Object subclass: ParenStmtClassMethods
+  classState: count = 0
+
+  class getCount => self.count
+
+  class reset => self.count := 0
+
+  class localNonLast =>
+    x := 1
+    (x := x + 1)
+    x
+
+  class localLast =>
+    x := 1
+    (x := x + 1)
+
+  class fieldNonLast =>
+    (self.count := self.count + 1)
+    self.count
+
+  class fieldLast => (self.count := self.count + 1)
+
+  class condNonLast =>
+    c := true
+    (c ifTrue: [self.count := 1])
+    self.count
+
+  class condLast =>
+    c := true
+    (c ifTrue: [self.count := 1])
+
+  class doNonLast =>
+    xs := #(1, 2, 3)
+    (xs do: [:e | self.count := self.count + e])
+    self.count
+
+  class doLast =>
+    xs := #(1, 2, 3)
+    (xs do: [:e | self.count := self.count + e])
