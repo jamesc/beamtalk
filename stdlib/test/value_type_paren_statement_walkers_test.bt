@@ -7,6 +7,12 @@
 // `(xs do: [:e | self.count := self.count + e])`, non-last and last. The test class is
 // itself the value type (as in value_type_field_assignment_value_position_test.bt);
 // the actor and class-method cells are in paren_statement_walkers_test.bt.
+//
+// The arm cells (`armLocal`, `armField`) found two real defects: the value-type
+// conditional arm builder and the plain-block body classifier keyed on the raw node, so a
+// parenthesised `(x := x + 1)` in an arm lost its rebind and `(self.n := v)` in an arm
+// failed to compile. Both now unwrap the statement; the Rust twin is
+// crates/beamtalk-codegen/src/core_erlang/tests/paren_arm_statements.rs.
 
 TestCase subclass: ValueTypeParenStatementWalkersTest
   field: count = 0
@@ -37,7 +43,6 @@ TestCase subclass: ValueTypeParenStatementWalkersTest
   condLast =>
     c := true
     (c ifTrue: [self.count := 1])
-    self
 
   doNonLast =>
     xs := #(1, 2, 3)
@@ -47,7 +52,27 @@ TestCase subclass: ValueTypeParenStatementWalkersTest
   doLast =>
     xs := #(1, 2, 3)
     (xs do: [:e | self.count := self.count + e])
-    self
+
+  // A parenthesised statement inside a multi-statement conditional arm (the
+  // value-type arm builder, `build_vt_conditional_branch_pieces_inner`): a parenthesised statement keeps its write.
+  armLocal =>
+    c := true
+    c
+      ifTrue: [
+        x := 1
+        (x := x + 1)
+        x
+      ]
+      ifFalse: [0]
+
+  armField =>
+    c := true
+    c
+      ifTrue: [
+        (self.count := self.count + 1)
+        self.count
+      ]
+      ifFalse: [0]
 
   testLocalNonLast => self assert: self localNonLast equals: 2
 
@@ -59,8 +84,16 @@ TestCase subclass: ValueTypeParenStatementWalkersTest
 
   testCondNonLast => self assert: self condNonLast equals: 1
 
-  testCondLast => self assert: self condLast getCount equals: 1
+  // BT-4092 answers the updated receiver only for a trailing field ASSIGNMENT. A
+  // trailing conditional answers its arm's value and a trailing loop answers nil, so
+  // the caller cannot observe the receiver's write there; these cells pin that the
+  // parenthesised last conditional/loop compiles and answers what the bare form does.
+  testCondLast => self assert: self condLast equals: 1
 
   testDoNonLast => self assert: self doNonLast equals: 6
 
-  testDoLast => self assert: self doLast getCount equals: 6
+  testDoLast => self assert: self doLast equals: nil
+
+  testArmLocal => self assert: self armLocal equals: 2
+
+  testArmField => self assert: self armField equals: 1

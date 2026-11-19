@@ -34,6 +34,26 @@ Actor subclass: ParenStmtActor
 
   fieldLast => (self.count := self.count + 1)
 
+  // A parenthesised statement inside a multi-statement conditional arm.
+  armLocal =>
+    c := true
+    c
+      ifTrue: [
+        x := 1
+        (x := x + 1)
+        x
+      ]
+      ifFalse: [0]
+
+  armField =>
+    c := true
+    c
+      ifTrue: [
+        (self.count := self.count + 1)
+        self.count
+      ]
+      ifFalse: [0]
+
   condNonLast =>
     c := true
     (c ifTrue: [self.count := 1])

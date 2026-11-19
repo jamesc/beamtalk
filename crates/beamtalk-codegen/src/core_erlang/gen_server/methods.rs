@@ -783,11 +783,13 @@ impl CoreErlangGenerator {
             // local write. A NON-last statement's value is discarded, so `(s)` is exactly
             // `s`: unwrap it once here, for every kind. The last statement is the method
             // value, so it is left as written. BT-5031: that asymmetry with the value-type
-            // walker (which unwraps the last statement too) is safe, not a gap: the
-            // producer and threaded-last lowerings that take a last statement unwrap it
-            // themselves (`lower_threaded_last`), and `paren_statement_walkers_test.bt`
-            // pins the four shapes (local rebind, field write, field-writing conditional,
-            // field-writing loop) in last position here.
+            // walker (which unwraps the last statement too) is safe, not a gap: a
+            // parenthesised last statement is classified `Pure` (`classify_body_expr`
+            // does not look through parens) and lowered by `lower_reply_pure` ->
+            // `threaded_expression`, whose `threaded_expression_core` unwraps it.
+            // `paren_statement_walkers_test.bt` pins the four shapes (local rebind,
+            // field write, field-writing conditional, field-writing loop) in last
+            // position here.
             let expr = if i == body.len() - 1 {
                 expr
             } else {

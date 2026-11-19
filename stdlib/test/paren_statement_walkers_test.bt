@@ -42,6 +42,10 @@ TestCase subclass: ParenStatementWalkersTest
     self.actor doLast
     self assert: self.actor getCount equals: 6
 
+  testActorArmLocal => self assert: self.actor armLocal equals: 2
+
+  testActorArmField => self assert: self.actor armField equals: 1
+
   // --- class method ---
   testClassLocalNonLast =>
     self assert: ParenStmtClassMethods localNonLast equals: 2

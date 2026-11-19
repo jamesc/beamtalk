@@ -1,0 +1,77 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! BT-5031: `(s)` is exactly `s` in every statement of a value-type conditional arm.
+//!
+//! The arm builder (`build_vt_conditional_branch_pieces_inner`) and its field-write guard
+//! (`reject_unthreadable_value_self_field_write_in_arm`) classify each arm statement with
+//! predicates that do not look through parentheses, so a parenthesised arm statement fell
+//! to the generic path: a local rebind lost its write and a field write was rejected.
+
+use super::{assert_compiles_through_erlc, codegen_named};
+
+/// The `run:` function of the generated module: the part under test.
+fn run_fn(code: &str) -> &str {
+    let start = code.find("'run:'/2 =").expect("run: is generated");
+    let rest = &code[start..];
+    rest.find("\n\n'").map_or(rest, |end| &rest[..end])
+}
+
+fn vt_method(arm_stmt: &str) -> String {
+    format!(
+        "Value subclass: ParenArmProbe\n  field: n = 0\n  run: c =>\n    c ifTrue: [\n      x := 1\n      {arm_stmt}\n      x\n    ] ifFalse: [0]\n"
+    )
+}
+
+fn vt_field_method(arm_stmt: &str) -> String {
+    format!(
+        "Value subclass: ParenArmProbe\n  field: n = 0\n  run: c =>\n    c ifTrue: [\n      {arm_stmt}\n      self.n\n    ] ifFalse: [0]\n"
+    )
+}
+
+#[test]
+fn parenthesised_arm_local_rebind_matches_bare() {
+    let bare = codegen_named(&vt_method("x := x + 1"), "bt@paren_arm_local");
+    let paren = codegen_named(&vt_method("(x := x + 1)"), "bt@paren_arm_local");
+    assert_eq!(
+        run_fn(&bare),
+        run_fn(&paren),
+        "`(x := x + 1)` must lower exactly like `x := x + 1`"
+    );
+    assert_compiles_through_erlc("bt@paren_arm_local", &paren);
+}
+
+#[test]
+fn parenthesised_arm_field_write_matches_bare() {
+    let bare = codegen_named(
+        &vt_field_method("self.n := self.n + 1"),
+        "bt@paren_arm_field",
+    );
+    let paren = codegen_named(
+        &vt_field_method("(self.n := self.n + 1)"),
+        "bt@paren_arm_field",
+    );
+    assert_eq!(
+        run_fn(&bare),
+        run_fn(&paren),
+        "`(self.n := ...)` must lower exactly like `self.n := ...`"
+    );
+    assert_compiles_through_erlc("bt@paren_arm_field", &paren);
+}
+
+#[test]
+fn parenthesised_plain_block_local_rebind_matches_bare() {
+    // A plain (Tier 1) closure body goes through the same `generate_block_body_slice`.
+    let src = |stmt: &str| {
+        format!(
+            "Value subclass: ParenBlockProbe\n  field: n = 0\n  run =>\n    b := [\n      x := 1\n      {stmt}\n      x\n    ]\n    b value\n"
+        )
+    };
+    let bare = codegen_named(&src("x := x + 1"), "bt@paren_block_local");
+    let paren = codegen_named(&src("(x := x + 1)"), "bt@paren_block_local");
+    assert_eq!(
+        bare, paren,
+        "`(x := x + 1)` in a block body must lower exactly like `x := x + 1`"
+    );
+    assert_compiles_through_erlc("bt@paren_block_local", &paren);
+}

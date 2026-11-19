@@ -681,6 +681,9 @@ impl CoreErlangGenerator {
         let stmts = self.with_body_producer_sites(&filtered, false, false, |this| {
             let mut stmts: Vec<ThreadedStmt> = Vec::new();
             for expr in rest {
+                // BT-5031: a non-tail condition statement's value is discarded, so
+                // `(s)` is exactly `s`; every branch below keys on the raw node.
+                let expr = expr.unwrap_parens();
                 let span = expr.span();
                 if CoreErlangGenerator::is_local_var_assignment(expr) {
                     // In base `StateAcc` mode (the only mode a carried
