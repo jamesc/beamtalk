@@ -558,15 +558,12 @@ fn test_bt897_subdirectory_module_name_consistency() {
         is_internal: false,
         supervisor_kind: None,
         state: vec![StateDeclaration {
-            name: Identifier::new("listeners", Span::new(0, 9)),
             default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
-            type_annotation: None,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            declared_keyword: DeclaredKeyword::default(),
             slot_kind: beamtalk_core::ast::SlotKind::default(),
-            span: Span::new(0, 10),
+            ..StateDeclaration::new(
+                Identifier::new("listeners", Span::new(0, 9)),
+                Span::new(0, 10),
+            )
         }],
         methods: vec![],
         class_methods: vec![],
@@ -586,14 +583,8 @@ fn test_bt897_subdirectory_module_name_consistency() {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        method_definitions: vec![],
-        protocols: Vec::new(),
         span: Span::new(0, 50),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
 
     // Use a subdirectory-qualified module name (package mode with subdirectories)

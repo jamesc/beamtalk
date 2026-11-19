@@ -8,82 +8,28 @@ use super::*;
 /// Build a minimal `Supervisor subclass: WebApp` module with `supervisor_kind = Static`.
 pub(super) fn make_static_supervisor_module() -> Module {
     let class = ClassDefinition {
-        name: Identifier::new("WebApp", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Supervisor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
         supervisor_kind: Some(SupervisorKind::Static),
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test("WebApp", Some("Supervisor"), ClassKind::Object)
     };
     Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: vec![],
+        ..empty_module()
     }
 }
 
 /// Build a minimal `DynamicSupervisor subclass: WorkerPool` module.
 fn make_dynamic_supervisor_module() -> Module {
     let class = ClassDefinition {
-        name: Identifier::new("WorkerPool", Span::new(0, 0)),
-        superclass: Some(Identifier::new("DynamicSupervisor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
         supervisor_kind: Some(SupervisorKind::Dynamic),
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test("WorkerPool", Some("DynamicSupervisor"), ClassKind::Object)
     };
     Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: vec![],
+        ..empty_module()
     }
 }
 
@@ -323,21 +269,11 @@ fn test_supervisor_instance_methods_are_compiled_with_dispatch() {
     module.classes[0].methods.push(MethodDefinition {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("childSpecs".into()),
-        parameters: vec![],
         body: vec![bare(Expression::Literal(
             Literal::List(vec![]),
             Span::new(0, 0),
         ))],
-        kind: MethodKind::Primary,
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        span: Span::new(0, 0),
-        doc_comment: None,
-        expect: None,
-        comments: CommentAttachment::default(),
+        ..MethodDefinition::test("childSpecs")
     });
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
@@ -404,58 +340,22 @@ fn test_static_supervisor_with_user_class_method_exports_it() {
     let children_method = MethodDefinition {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("children".into()),
-        parameters: vec![],
         body: vec![bare(Expression::Literal(
             Literal::List(vec![]),
             Span::new(0, 0),
         ))],
-        kind: MethodKind::Primary,
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        span: Span::new(0, 0),
-        doc_comment: None,
-        expect: None,
-        comments: CommentAttachment::default(),
+        ..MethodDefinition::test("children")
     };
     let class = ClassDefinition {
-        name: Identifier::new("WebApp", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Supervisor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
         supervisor_kind: Some(SupervisorKind::Static),
-        state: vec![],
-        methods: vec![],
         class_methods: vec![children_method],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test("WebApp", Some("Supervisor"), ClassKind::Object)
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: vec![],
+        ..empty_module()
     };
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
@@ -490,64 +390,30 @@ fn test_static_supervisor_class_method_alias_param_emits_user_type_and_named_typ
     let strategy_method = MethodDefinition {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        selector: MessageSelector::Keyword(vec![KeywordPart::new(
-            "defaultStrategy:",
+        ..MethodDefinition::new(
+            MessageSelector::Keyword(vec![KeywordPart::new("defaultStrategy:", Span::new(0, 0))]),
+            vec![ParameterDefinition::with_type(
+                Identifier::new("policy", Span::new(0, 0)),
+                TypeAnnotation::simple("RestartStrategy", Span::new(0, 0)),
+            )],
+            vec![bare(Expression::Identifier(Identifier::new(
+                "policy",
+                Span::new(0, 0),
+            )))],
             Span::new(0, 0),
-        )]),
-        parameters: vec![ParameterDefinition::with_type(
-            Identifier::new("policy", Span::new(0, 0)),
-            TypeAnnotation::simple("RestartStrategy", Span::new(0, 0)),
-        )],
-        body: vec![bare(Expression::Identifier(Identifier::new(
-            "policy",
-            Span::new(0, 0),
-        )))],
-        kind: MethodKind::Primary,
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        span: Span::new(0, 0),
-        doc_comment: None,
-        expect: None,
-        comments: CommentAttachment::default(),
+        )
     };
     let class = ClassDefinition {
-        name: Identifier::new("WebApp", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Supervisor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
         supervisor_kind: Some(SupervisorKind::Static),
-        state: vec![],
-        methods: vec![],
         class_methods: vec![strategy_method],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test("WebApp", Some("Supervisor"), ClassKind::Object)
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: vec![],
-        protocols: Vec::new(),
         type_aliases: vec![strategy_alias],
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: vec![],
+        ..empty_module()
     };
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
@@ -595,65 +461,30 @@ fn test_static_supervisor_cross_module_alias_reference_emits_user_type() {
     let strategy_method = MethodDefinition {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        selector: MessageSelector::Keyword(vec![KeywordPart::new(
-            "defaultStrategy:",
+        ..MethodDefinition::new(
+            MessageSelector::Keyword(vec![KeywordPart::new("defaultStrategy:", Span::new(0, 0))]),
+            vec![ParameterDefinition::with_type(
+                Identifier::new("policy", Span::new(0, 0)),
+                TypeAnnotation::simple("RestartStrategy", Span::new(0, 0)),
+            )],
+            vec![bare(Expression::Identifier(Identifier::new(
+                "policy",
+                Span::new(0, 0),
+            )))],
             Span::new(0, 0),
-        )]),
-        parameters: vec![ParameterDefinition::with_type(
-            Identifier::new("policy", Span::new(0, 0)),
-            TypeAnnotation::simple("RestartStrategy", Span::new(0, 0)),
-        )],
-        body: vec![bare(Expression::Identifier(Identifier::new(
-            "policy",
-            Span::new(0, 0),
-        )))],
-        kind: MethodKind::Primary,
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        span: Span::new(0, 0),
-        doc_comment: None,
-        expect: None,
-        comments: CommentAttachment::default(),
+        )
     };
     let class = ClassDefinition {
-        name: Identifier::new("WebApp", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Supervisor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
         supervisor_kind: Some(SupervisorKind::Static),
-        state: vec![],
-        methods: vec![],
         class_methods: vec![strategy_method],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test("WebApp", Some("Supervisor"), ClassKind::Object)
     };
     // No `type_aliases` of its own — the module only references the name.
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: vec![],
+        ..empty_module()
     };
     let code = generate_module(
         &module,
@@ -703,65 +534,30 @@ fn test_dynamic_supervisor_cross_module_alias_reference_emits_user_type() {
     let strategy_method = MethodDefinition {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        selector: MessageSelector::Keyword(vec![KeywordPart::new(
-            "defaultStrategy:",
+        ..MethodDefinition::new(
+            MessageSelector::Keyword(vec![KeywordPart::new("defaultStrategy:", Span::new(0, 0))]),
+            vec![ParameterDefinition::with_type(
+                Identifier::new("policy", Span::new(0, 0)),
+                TypeAnnotation::simple("RestartStrategy", Span::new(0, 0)),
+            )],
+            vec![bare(Expression::Identifier(Identifier::new(
+                "policy",
+                Span::new(0, 0),
+            )))],
             Span::new(0, 0),
-        )]),
-        parameters: vec![ParameterDefinition::with_type(
-            Identifier::new("policy", Span::new(0, 0)),
-            TypeAnnotation::simple("RestartStrategy", Span::new(0, 0)),
-        )],
-        body: vec![bare(Expression::Identifier(Identifier::new(
-            "policy",
-            Span::new(0, 0),
-        )))],
-        kind: MethodKind::Primary,
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        span: Span::new(0, 0),
-        doc_comment: None,
-        expect: None,
-        comments: CommentAttachment::default(),
+        )
     };
     let class = ClassDefinition {
-        name: Identifier::new("WorkerPool", Span::new(0, 0)),
-        superclass: Some(Identifier::new("DynamicSupervisor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
         supervisor_kind: Some(SupervisorKind::Dynamic),
-        state: vec![],
-        methods: vec![],
         class_methods: vec![strategy_method],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test("WorkerPool", Some("DynamicSupervisor"), ClassKind::Object)
     };
     // No `type_aliases` of its own — the module only references the name.
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: vec![],
+        ..empty_module()
     };
     let code = generate_module(
         &module,
@@ -790,58 +586,22 @@ fn test_dynamic_supervisor_with_user_class_method_exports_it() {
     let max_concurrency_method = MethodDefinition {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("maxConcurrency".into()),
-        parameters: vec![],
         body: vec![bare(Expression::Literal(
             Literal::Integer(10),
             Span::new(0, 0),
         ))],
-        kind: MethodKind::Primary,
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        span: Span::new(0, 0),
-        doc_comment: None,
-        expect: None,
-        comments: CommentAttachment::default(),
+        ..MethodDefinition::test("maxConcurrency")
     };
     let class = ClassDefinition {
-        name: Identifier::new("WorkerPool", Span::new(0, 0)),
-        superclass: Some(Identifier::new("DynamicSupervisor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
         supervisor_kind: Some(SupervisorKind::Dynamic),
-        state: vec![],
-        methods: vec![],
         class_methods: vec![max_concurrency_method],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test("WorkerPool", Some("DynamicSupervisor"), ClassKind::Object)
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: vec![],
+        ..empty_module()
     };
     let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
         .expect("codegen should succeed");

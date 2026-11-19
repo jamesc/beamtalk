@@ -13,8 +13,6 @@ fn protocol_only_module_generates_register_class() {
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        classes: vec![],
-        method_definitions: Vec::new(),
         protocols: vec![ProtocolDefinition {
             name: Identifier::new("Displayable", Span::new(0, 0)),
             type_params: vec![],
@@ -34,12 +32,7 @@ fn protocol_only_module_generates_register_class() {
             doc_comment: None,
             span: Span::new(0, 0),
         }],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
 
     let result = generate_module(&module, CodegenOptions::new("bt@proto_only"));

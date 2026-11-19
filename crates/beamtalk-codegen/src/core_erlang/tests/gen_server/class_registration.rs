@@ -30,10 +30,7 @@ fn test_generate_empty_module() {
 )]
 fn test_class_registration_generation() {
     // Test that class definitions generate registration code
-    use beamtalk_core::ast::{
-        ClassDefinition, DeclaredKeyword, Identifier, MethodDefinition, MethodKind,
-        StateDeclaration,
-    };
+    use beamtalk_core::ast::{ClassDefinition, Identifier, MethodDefinition, StateDeclaration};
     use beamtalk_core::source_analysis::Span;
 
     // Create a Counter class with instance variables and methods
@@ -48,54 +45,28 @@ fn test_class_registration_generation() {
         is_internal: false,
         supervisor_kind: None,
         state: vec![StateDeclaration {
-            name: Identifier::new("value", Span::new(0, 5)),
             default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
-            type_annotation: None,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            declared_keyword: DeclaredKeyword::default(),
             slot_kind: beamtalk_core::ast::SlotKind::default(),
-            span: Span::new(0, 10),
+            ..StateDeclaration::new(Identifier::new("value", Span::new(0, 5)), Span::new(0, 10))
         }],
         methods: vec![
             MethodDefinition {
                 pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
                 literal_comments: beamtalk_core::ast::LiteralComments::default(),
-                selector: MessageSelector::Unary("increment".into()),
-                parameters: vec![],
                 body: vec![bare(Expression::Literal(
                     Literal::Integer(42),
                     Span::new(0, 2),
                 ))],
-                return_type: None,
-                is_sealed: false,
-                is_internal: false,
-                is_class_method: false,
-                kind: MethodKind::Primary,
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                span: Span::new(0, 10),
+                ..MethodDefinition::test_at("increment", Span::new(0, 10))
             },
             MethodDefinition {
                 pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
                 literal_comments: beamtalk_core::ast::LiteralComments::default(),
-                selector: MessageSelector::Unary("getValue".into()),
-                parameters: vec![],
                 body: vec![bare(Expression::Literal(
                     Literal::Integer(42),
                     Span::new(0, 2),
                 ))],
-                return_type: None,
-                is_sealed: false,
-                is_internal: false,
-                is_class_method: false,
-                kind: MethodKind::Primary,
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                span: Span::new(0, 10),
+                ..MethodDefinition::test_at("getValue", Span::new(0, 10))
             },
         ],
         class_methods: vec![],
@@ -114,15 +85,9 @@ fn test_class_registration_generation() {
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
         span: Span::new(0, 50),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
 
     let code =
@@ -468,7 +433,7 @@ fn test_no_class_registration_for_empty_module() {
 #[allow(clippy::too_many_lines)]
 fn test_multiple_classes_registration() {
     // Test that modules with multiple classes register all of them
-    use beamtalk_core::ast::{ClassDefinition, DeclaredKeyword, Identifier, StateDeclaration};
+    use beamtalk_core::ast::{ClassDefinition, Identifier, StateDeclaration};
     use beamtalk_core::source_analysis::Span;
 
     fn make_actor_class(
@@ -489,15 +454,12 @@ fn test_multiple_classes_registration() {
             is_internal: false,
             supervisor_kind: None,
             state: vec![StateDeclaration {
-                name: Identifier::new(field, Span::new(0, field_len)),
                 default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
-                type_annotation: None,
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                declared_keyword: DeclaredKeyword::default(),
                 slot_kind: beamtalk_core::ast::SlotKind::default(),
-                span: Span::new(0, 10),
+                ..StateDeclaration::new(
+                    Identifier::new(field, Span::new(0, field_len)),
+                    Span::new(0, 10),
+                )
             }],
             methods: vec![],
             class_methods: vec![],
@@ -517,18 +479,12 @@ fn test_multiple_classes_registration() {
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
         classes: vec![
             make_actor_class("Counter", 7, "value", 5, 20),
             make_actor_class("Logger", 6, "messages", 8, 30),
         ],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
         span: Span::new(0, 50),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
 
     let code = generate_module(&module, CodegenOptions::new("multi_actors"))
@@ -632,7 +588,7 @@ fn test_multi_class_early_error_short_circuits() {
     //
     // We verify this by checking the generated code structure: each _RegN
     // (except the last) must be wrapped in a case that short-circuits on error.
-    use beamtalk_core::ast::{ClassDefinition, DeclaredKeyword, Identifier, StateDeclaration};
+    use beamtalk_core::ast::{ClassDefinition, Identifier, StateDeclaration};
     use beamtalk_core::source_analysis::Span;
 
     fn make_class(name: &str, name_len: u32, span_end: u32) -> ClassDefinition {
@@ -647,15 +603,9 @@ fn test_multi_class_early_error_short_circuits() {
             is_internal: false,
             supervisor_kind: None,
             state: vec![StateDeclaration {
-                name: Identifier::new("x", Span::new(0, 1)),
                 default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
-                type_annotation: None,
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                declared_keyword: DeclaredKeyword::default(),
                 slot_kind: beamtalk_core::ast::SlotKind::default(),
-                span: Span::new(0, 5),
+                ..StateDeclaration::new(Identifier::new("x", Span::new(0, 1)), Span::new(0, 5))
             }],
             methods: vec![],
             class_methods: vec![],
@@ -678,15 +628,9 @@ fn test_multi_class_early_error_short_circuits() {
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
         classes: vec![make_class("ShadowA", 7, 20), make_class("ValidB", 6, 30)],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
         span: Span::new(0, 50),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
 
     let code = generate_module(&module, CodegenOptions::new("multi_shadow"))
@@ -721,7 +665,7 @@ fn test_three_class_short_circuit_nesting() {
     // Verify nesting correctness for N=3 classes.
     // Short-circuit cases are added for indices 0 and 1 (all except the last).
     // The last class (index 2) is returned directly with no extra wrapping.
-    use beamtalk_core::ast::{ClassDefinition, DeclaredKeyword, Identifier, StateDeclaration};
+    use beamtalk_core::ast::{ClassDefinition, Identifier, StateDeclaration};
     use beamtalk_core::source_analysis::Span;
 
     fn make_class(name: &str, name_len: u32) -> ClassDefinition {
@@ -736,15 +680,9 @@ fn test_three_class_short_circuit_nesting() {
             is_internal: false,
             supervisor_kind: None,
             state: vec![StateDeclaration {
-                name: Identifier::new("x", Span::new(0, 1)),
                 default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
-                type_annotation: None,
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                declared_keyword: DeclaredKeyword::default(),
                 slot_kind: beamtalk_core::ast::SlotKind::default(),
-                span: Span::new(0, 5),
+                ..StateDeclaration::new(Identifier::new("x", Span::new(0, 1)), Span::new(0, 5))
             }],
             methods: vec![],
             class_methods: vec![],
@@ -764,15 +702,9 @@ fn test_three_class_short_circuit_nesting() {
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
         classes: vec![make_class("A", 1), make_class("B", 1), make_class("C", 1)],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
         span: Span::new(0, 60),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
 
     let code = generate_module(&module, CodegenOptions::new("three_classes"))

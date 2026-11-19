@@ -7,8 +7,8 @@ use super::{
 use crate::core_erlang::tests::bare;
 use crate::core_erlang::value_accessors::AutoSlotMethods;
 use beamtalk_core::ast::{
-    ClassDefinition, ClassKind, CommentAttachment, Expression, ExpressionStatement, Identifier,
-    KeywordPart, MessageSelector, MethodDefinition, MethodKind, ParameterDefinition,
+    ClassDefinition, ClassKind, Expression, ExpressionStatement, Identifier, KeywordPart,
+    MessageSelector, MethodDefinition, ParameterDefinition,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -21,28 +21,8 @@ fn s() -> Span {
 /// unused stub.
 fn class_with_methods(methods: Vec<MethodDefinition>) -> ClassDefinition {
     ClassDefinition {
-        name: Identifier::new("Fixture", s()),
-        superclass: Some(Identifier::new("Object", s())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods,
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: s(),
+        ..ClassDefinition::test_at("Fixture", Some("Object"), ClassKind::Actor, s())
     }
 }
 
@@ -50,30 +30,24 @@ fn dnu_method(body: Vec<ExpressionStatement>) -> MethodDefinition {
     MethodDefinition {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        selector: MessageSelector::Keyword(vec![
-            KeywordPart::new("doesNotUnderstand:", s()),
-            KeywordPart::new("args:", s()),
-        ]),
-        parameters: vec![
-            ParameterDefinition {
-                name: Identifier::new("selector", s()),
-                type_annotation: None,
-            },
-            ParameterDefinition {
-                name: Identifier::new("args", s()),
-                type_annotation: None,
-            },
-        ],
-        body,
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        kind: MethodKind::Primary,
-        expect: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        span: s(),
+        ..MethodDefinition::new(
+            MessageSelector::Keyword(vec![
+                KeywordPart::new("doesNotUnderstand:", s()),
+                KeywordPart::new("args:", s()),
+            ]),
+            vec![
+                ParameterDefinition {
+                    name: Identifier::new("selector", s()),
+                    type_annotation: None,
+                },
+                ParameterDefinition {
+                    name: Identifier::new("args", s()),
+                    type_annotation: None,
+                },
+            ],
+            body,
+            s(),
+        )
     }
 }
 

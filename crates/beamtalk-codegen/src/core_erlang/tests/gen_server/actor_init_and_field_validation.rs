@@ -250,51 +250,19 @@ fn test_init_actor_with_declared_shape_version_writes_real_value() {
 fn make_actor_typed_no_default(field_name: &str, ty: TypeAnnotation) -> Module {
     let s = Span::new(0, 0);
     let class = ClassDefinition {
-        name: Identifier::new("TestActor", s),
-        superclass: Some(Identifier::new("Actor", s)),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
         state: vec![StateDeclaration {
-            name: Identifier::new(field_name, s),
             type_annotation: Some(ty),
-            default_value: None,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            declared_keyword: DeclaredKeyword::default(),
             slot_kind: beamtalk_core::ast::SlotKind::default(),
-            span: s,
+            ..StateDeclaration::new(Identifier::new(field_name, s), s)
         }],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: s,
+        ..ClassDefinition::test_at("TestActor", Some("Actor"), ClassKind::Actor, s)
     };
     Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
         span: s,
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     }
 }
 

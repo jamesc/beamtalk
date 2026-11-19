@@ -27,64 +27,27 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
 fn test_value_subclass_typed_fields_emit_type_alias() {
     // Value subclass with typed state: declarations emits '-type t()' attribute.
     let class = ClassDefinition {
-        name: Identifier::new("Point", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Value", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
         state: vec![
             StateDeclaration {
-                name: Identifier::new("x", Span::new(0, 0)),
                 type_annotation: Some(TypeAnnotation::simple("Integer", Span::new(0, 0))),
                 default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                declared_keyword: DeclaredKeyword::default(),
                 slot_kind: beamtalk_core::ast::SlotKind::default(),
-                span: Span::new(0, 0),
+                ..StateDeclaration::test("x")
             },
             StateDeclaration {
-                name: Identifier::new("y", Span::new(0, 0)),
                 type_annotation: Some(TypeAnnotation::simple("Integer", Span::new(0, 0))),
                 default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                declared_keyword: DeclaredKeyword::default(),
                 slot_kind: beamtalk_core::ast::SlotKind::default(),
-                span: Span::new(0, 0),
+                ..StateDeclaration::test("y")
             },
         ],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test("Point", Some("Value"), ClassKind::Value)
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     assert!(result.is_ok(), "Codegen should succeed: {result:?}");

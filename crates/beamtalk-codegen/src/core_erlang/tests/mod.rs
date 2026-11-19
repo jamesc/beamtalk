@@ -32,7 +32,7 @@ pub use super::*;
 pub use beamtalk_core::ast::*;
 pub use beamtalk_core::source_analysis::Span;
 
-pub(crate) use beamtalk_core::test_helpers::test_support::bare;
+pub(crate) use beamtalk_core::test_helpers::test_support::{bare, empty_module};
 
 /// Asserts that the given Core Erlang source compiles successfully through `erlc`.
 ///
@@ -346,64 +346,25 @@ pub(crate) fn verifier_report(
 /// Builds a Module with a `Value subclass: Point` with x and y slots.
 pub(crate) fn make_value_subclass_point() -> Module {
     let class = ClassDefinition {
-        name: Identifier::new("Point", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Value", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
         state: vec![
             StateDeclaration {
-                name: Identifier::new("x", Span::new(0, 0)),
-                type_annotation: None,
                 default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                declared_keyword: DeclaredKeyword::default(),
                 slot_kind: beamtalk_core::ast::SlotKind::default(),
-                span: Span::new(0, 0),
+                ..StateDeclaration::test("x")
             },
             StateDeclaration {
-                name: Identifier::new("y", Span::new(0, 0)),
-                type_annotation: None,
                 default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                declared_keyword: DeclaredKeyword::default(),
                 slot_kind: beamtalk_core::ast::SlotKind::default(),
-                span: Span::new(0, 0),
+                ..StateDeclaration::test("y")
             },
         ],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
+        ..ClassDefinition::test("Point", Some("Value"), ClassKind::Value)
     };
     Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     }
 }
 

@@ -11,7 +11,7 @@ use beamtalk_core::ast::{
     ParameterDefinition, ShapeVersionDeclaration, TypeAnnotation, TypeParamDecl,
 };
 use beamtalk_core::source_analysis::Span;
-use beamtalk_core::test_helpers::test_support::make_actor_class;
+use beamtalk_core::test_helpers::test_support::{empty_module, make_actor_class};
 
 fn s() -> Span {
     Span::new(0, 0)
@@ -52,14 +52,8 @@ fn test_meta_type_params_in_meta_map() {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: vec![],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
         span: s(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let doc = CoreErlangGenerator::build_meta_map_doc(
         module.classes.first().unwrap(),
@@ -82,14 +76,8 @@ fn module_with(class: ClassDefinition) -> Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: vec![],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
         span: s(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     }
 }
 
@@ -196,14 +184,8 @@ fn test_meta_type_params_empty_for_non_generic() {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: vec![],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
         span: s(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let doc = CoreErlangGenerator::build_meta_map_doc(
         module.classes.first().unwrap(),
@@ -227,14 +209,8 @@ fn test_meta_map_includes_package_name() {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: vec![],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
         span: s(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let doc = CoreErlangGenerator::build_meta_map_doc(
         module.classes.first().unwrap(),
@@ -258,14 +234,8 @@ fn test_meta_map_package_none_without_package() {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: vec![],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
         span: s(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let doc = CoreErlangGenerator::build_meta_map_doc(
         module.classes.first().unwrap(),
@@ -289,14 +259,8 @@ fn test_meta_map_includes_kind_actor() {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: vec![],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
         span: s(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let doc = CoreErlangGenerator::build_meta_map_doc(
         module.classes.first().unwrap(),
@@ -321,14 +285,8 @@ fn test_meta_map_includes_kind_value() {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: vec![],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
         span: s(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let doc = CoreErlangGenerator::build_meta_map_doc(
         module.classes.first().unwrap(),
@@ -371,14 +329,8 @@ fn test_meta_map_visibility_public_by_default() {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: vec![],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
         span: s(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let doc = CoreErlangGenerator::build_meta_map_doc(
         module.classes.first().unwrap(),
@@ -403,14 +355,8 @@ fn test_meta_map_visibility_internal() {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: vec![],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
         span: s(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
     let doc = CoreErlangGenerator::build_meta_map_doc(
         module.classes.first().unwrap(),
