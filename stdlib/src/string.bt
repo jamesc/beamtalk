@@ -290,6 +290,13 @@ sealed typed Binary subclass: String
 
   /// Test if the receiver starts with the given prefix.
   ///
+  /// Compares bytes, not graphemes: `startsWith:` with `"e"` is `true` for an
+  /// `e` followed by the combining accent U+0301, although `take: 1` of that
+  /// text is the whole grapheme. `includesSubstring:`
+  /// and `endsWith:` compare bytes too. Intended: byte comparison is exact,
+  /// fast and what the prefix/suffix tests of paths, URLs and keywords want
+  /// (BT-5030).
+  ///
   /// ## Examples
   /// ```beamtalk
   /// "hello" startsWith: "hel"   // => true
@@ -350,6 +357,11 @@ sealed typed Binary subclass: String
   lines -> List(String) => @primitive
 
   /// Split the string into words (whitespace-separated).
+  ///
+  /// Splits on ASCII whitespace only (space, tab, newline, carriage return,
+  /// ...); other Unicode spaces such as U+00A0 stay inside a word, while
+  /// `trim` removes Unicode whitespace at the ends. Intended: a word
+  /// splitter that does not guess at locale-dependent separators (BT-5030).
   ///
   /// ## Examples
   /// ```beamtalk
@@ -601,6 +613,15 @@ sealed typed Binary subclass: String
 
   /// Test if the string matches a regular expression pattern.
   /// Accepts a String pattern or compiled Regex object.
+  ///
+  /// A String pattern compiles in Unicode mode (BT-5030): `.` matches one
+  /// code point (not one grapheme: use `\X` for a whole grapheme), `\w`, `\b` and `\d` see non-ASCII letters and digits, and
+  /// caseless matching folds non-ASCII case. Every regex operation on
+  /// String (`firstMatch:`, `allMatches:`, `replaceRegex:with:`,
+  /// `splitRegex:`, ...) and `Regex class>>from:` behave this way. Only a
+  /// bare Erlang binary pattern passed through the FFI keeps `re`'s byte
+  /// semantics. Write `[0-9]` rather than `\d` when only ASCII digits are
+  /// wanted, for example before calling `asInteger`.
   ///
   /// ## Examples
   /// ```beamtalk

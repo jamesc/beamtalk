@@ -144,6 +144,16 @@ String operations respect Unicode grapheme clusters (user-perceived characters):
 "straße" uppercase    // => "STRASSE" (German ß → SS)
 ```
 
+**Regular expressions are code-point-based on Strings (BT-5030).** A `String` pattern (`matchesRegex:`, `allMatches:`, `replaceAllRegex:with:`, `Regex from:`, ...) compiles in Unicode mode, so indexes and lengths inside a match count code points, not bytes (`.` matches one code point, not one grapheme: use `\X` for a whole grapheme such as `e` plus a combining accent):
+
+```beamtalk
+"héllo" allMatches: "."                    // => #("h", "é", "l", "l", "o")
+"héllo wörld" allMatches: "\\w+"            // => #("héllo", "wörld")
+"ÉCOLE" matchesRegex: "école" options: #(#caseless)  // => true
+```
+
+Before BT-5030 the same calls ran in byte mode: `.` matched one byte, so the first two raised `parse_error` ("Match boundary splits a multi-byte character") or, for `\w`, split words at every non-ASCII letter, and caseless matching ignored non-ASCII case. `\d` now also matches non-ASCII decimal digits; write `[0-9]` when only ASCII digits are wanted. A bare Erlang binary pattern passed through the FFI keeps byte semantics. `startsWith:`, `endsWith:` and `includesSubstring:` compare bytes, and `words` splits on ASCII whitespace only, while `indexOf:`, `take:` and `drop:` count graphemes (see the class docs).
+
 ### Inherited Byte-Level Methods
 
 String inherits byte-level methods from Binary. These provide unambiguous byte access regardless of grapheme semantics:

@@ -134,3 +134,28 @@ TestCase subclass: RegexTest
     self assert: (Regex from: "." options: #(#dotall)) isOk
     self assert: (Regex from: "a b" options: #(#extended)) isOk
     self assert: (Regex from: "a+" options: #(#ungreedy)) isOk
+
+  // BT-5030: String regexes compile in Unicode mode ([unicode, ucp]), so `.`
+  // matches one character, `\w`/`\b` see non-ASCII letters and caseless
+  // matching folds non-ASCII case. (Bare Erlang binaries keep byte semantics.)
+  testNonAsciiDotMatchesOneCharacter =>
+    self assert: ("héllo" allMatches: ".") equals: #("h", "é", "l", "l", "o")
+    self assert: ("héllo" replaceAllRegex: "." with: "x") equals: "xxxxx"
+    self assert: ("héllo" firstMatch: "h.l") equals: "hél"
+    self assert: ("héllo" replaceRegex: "." with: "x") equals: "xéllo"
+    self assert: ("日本語" splitRegex: "本") equals: #("日", "語")
+
+  testNonAsciiWordCharacters =>
+    self assert: ("héllo wörld" allMatches: "\\w+") equals: #("héllo", "wörld")
+    self assert: ("héllo" matchesRegex: "^\\w+$")
+    self assert: ("héllo wörld" allMatches: "\\b\\w") equals: #("h", "w")
+
+  testNonAsciiCaselessMatching =>
+    self assert: ("ÉCOLE" matchesRegex: "^école$" options: #(#caseless))
+    self assert: ("ÉCOLE" matchesRegex: (Regex from: "école" options: #(#caseless)) unwrap)
+    self deny: ("ÉCOLE" matchesRegex: "^école$")
+
+  testNonAsciiCompiledRegex =>
+    dots := (Regex from: ".") unwrap
+    self assert: ("héllo" allMatches: dots) size equals: 5
+    self assert: ("héllo" replaceAllRegex: dots with: "-") equals: "-----"
