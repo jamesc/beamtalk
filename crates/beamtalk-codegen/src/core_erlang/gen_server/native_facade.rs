@@ -183,8 +183,8 @@ impl CoreErlangGenerator {
                 )
             })?;
 
-        push_fn(self.generate_native_spawn_0()?);
-        push_fn(self.generate_native_spawn_1(backing_module)?);
+        push_fn(self.generate_native_spawn_0());
+        push_fn(self.generate_native_spawn_1(backing_module));
 
         // BT-4104: the backing module's own start_link has no atomic monitor,
         // so spawn_monitored/0,1 raise instead of failing with `undef`.
@@ -199,18 +199,18 @@ impl CoreErlangGenerator {
         );
 
         // new/0 and new/1 error methods (actors can't use new)
-        push_fn(self.generate_actor_new_error_method()?);
-        push_fn(self.generate_actor_new_with_args_error_method()?);
+        push_fn(self.generate_actor_new_error_method());
+        push_fn(self.generate_actor_new_with_args_error_method());
 
         // superclass/0 and class_name/0
-        push_fn(self.generate_superclass_function(module)?);
-        push_fn(self.generate_class_name_function(module)?);
+        push_fn(self.generate_superclass_function(module));
+        push_fn(self.generate_class_name_function(module));
 
         // method_table/0
-        push_fn(self.generate_method_table(module)?);
+        push_fn(self.generate_method_table(module));
 
         // has_method/1
-        docs.push(self.generate_has_method(module)?);
+        docs.push(self.generate_has_method(module));
 
         // Generate dispatch functions for self delegate methods. The facade
         // passes its static class to the send (BT-4949, ADR 0150), so the send
@@ -253,8 +253,7 @@ impl CoreErlangGenerator {
     /// 'spawn'/0 = fun () ->
     ///     call 'bt@stdlib@subprocess':'spawn'(~{}~)
     /// ```
-    #[allow(clippy::unnecessary_wraps)]
-    fn generate_native_spawn_0(&mut self) -> Result<Document<'static>> {
+    fn generate_native_spawn_0(&mut self) -> Document<'static> {
         let doc = docvec![
             "'spawn'/0 = fun () ->",
             nest(
@@ -271,7 +270,7 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        Ok(doc)
+        doc
     }
 
     /// Generates `spawn/1` for native facade — calls `BackingModule:start_link/1`.
@@ -301,12 +300,11 @@ impl CoreErlangGenerator {
     ///         end
     ///     end
     /// ```
-    #[allow(clippy::unnecessary_wraps)]
     #[expect(
         clippy::too_many_lines,
         reason = "native spawn-with-args handles map validation, try-catch, and error details"
     )]
-    fn generate_native_spawn_1(&mut self, backing_module: &str) -> Result<Document<'static>> {
+    fn generate_native_spawn_1(&mut self, backing_module: &str) -> Document<'static> {
         let class_name = self.class_name();
         let module_name = self.module_name.clone();
 
@@ -471,12 +469,11 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        Ok(doc)
+        doc
     }
 
     /// Generates `__beamtalk_meta/0` for native facade — includes `native` and `backing_module`.
     #[allow(clippy::unused_self)]
-    #[allow(clippy::unnecessary_wraps)]
     fn generate_native_meta_function(&self, module: &Module) -> Result<Document<'static>> {
         let Some(class) = module.classes.first() else {
             return Ok(Document::Nil);

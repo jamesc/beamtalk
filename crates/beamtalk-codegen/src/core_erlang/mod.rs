@@ -240,7 +240,9 @@ impl CoreErlangGenerator {
             // runtime — the class process is registered under the bare name —
             // so a qualified reference yields the same canonical class object
             // as `Foo`.
-            Expression::ClassReference { name, .. } => self.generate_class_reference(&name.name),
+            Expression::ClassReference { name, .. } => {
+                Ok(self.generate_class_reference(&name.name))
+            }
             Expression::Super(_) => {
                 // Super by itself is not a valid expression - it must be used
                 // as a message receiver (e.g., `super increment`). Semantic
@@ -511,11 +513,10 @@ impl CoreErlangGenerator {
     /// carries the canonical `'Foo class'` tag so it compares equal to every
     /// runtime-built class object for the same class (BT-4074). Package-aware
     /// registry disambiguation is a future phase.
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_class_reference(
         &mut self,
         class_name: &str,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         // ADR 0129 §7: REPL top-level expressions resolve a name through the
         // session map (locals and `bind:as:` entries) before the class registry.
         // Methods and batch-compiled code use the registry only, so a missing
@@ -526,7 +527,7 @@ impl CoreErlangGenerator {
             let state_var = self.current_state_var();
             let error_doc = self.class_not_found_error_doc(class_name);
 
-            return Ok(docvec![
+            return docvec![
                 "case call 'maps':'find'(",
                 leaf::atom(class_name.to_string()),
                 ", ",
@@ -540,7 +541,7 @@ impl CoreErlangGenerator {
                 error_doc,
                 Self::class_object_from_registry_clause(&class_pid_var, &class_mod_var, class_name),
                 "end end",
-            ]);
+            ];
         }
 
         if let Some(module) = self.pinned_builtin_class_module(class_name) {
@@ -548,14 +549,14 @@ impl CoreErlangGenerator {
             let object_clause =
                 Self::class_object_with_module_clause(&class_pid_var, module, class_name);
             let error_doc = self.class_not_found_error_doc(class_name);
-            return Ok(docvec![
+            return docvec![
                 "case ",
                 Self::registered_class_pid_doc(class_name),
                 " of ",
                 error_doc,
                 object_clause,
                 "end",
-            ]);
+            ];
         }
 
         // BT-4756: read the class reference from the class's static call map
@@ -567,7 +568,7 @@ impl CoreErlangGenerator {
         let ref_var = self.fresh_var("ClassRef");
         let miss_var = self.fresh_var("ClassRef");
         let error_doc = self.class_not_found_error_doc(class_name);
-        Ok(docvec![
+        docvec![
             "case call 'persistent_term':'get'(",
             leaf::atom(util::static_calls_key(class_name)),
             ", ~{}~) of <~{",
@@ -585,7 +586,7 @@ impl CoreErlangGenerator {
             "> when 'true' -> ",
             leaf::var(miss_var),
             " end end",
-        ])
+        ]
     }
 
     /// BT-4756: `{'class_ref', '<Name> class'}`, the class literal's key in

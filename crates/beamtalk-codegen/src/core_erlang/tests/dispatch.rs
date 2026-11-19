@@ -3405,7 +3405,7 @@ fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
 #[test]
 fn test_class_literal_reads_static_call_map() {
     let mut generator = CoreErlangGenerator::new("bt@my_app@main");
-    let doc = generator.generate_class_reference("Point").unwrap();
+    let doc = generator.generate_class_reference("Point");
     let output = doc.to_pretty_string();
     assert_has(
         "class literal must read its {class_ref, Tag} entry",
@@ -3442,7 +3442,6 @@ fn test_builtin_class_literal_bakes_pinned_module() {
     let mut generator = CoreErlangGenerator::new("bt@my_app@main");
     let output = generator
         .generate_class_reference("String")
-        .unwrap()
         .to_pretty_string();
     let shape = regex::Regex::new(
         r"(?s)case call 'erlang':'whereis'\('beamtalk_class_String'\) of\s*<'undefined'> when 'true' -> .*'class_not_found', 'String'.*<([\w@]+)> when 'true' -> \{'beamtalk_object', 'String class', 'bt@stdlib@string', ([\w@]+)\}\s*end",
@@ -3471,10 +3470,7 @@ fn test_builtin_class_literal_bakes_pinned_module() {
 fn test_builtin_class_literal_without_own_pinned_module_keeps_lookup() {
     for class in ["ErlangModule", "Character", "Boolean", "Object"] {
         let mut generator = CoreErlangGenerator::new("bt@my_app@main");
-        let output = generator
-            .generate_class_reference(class)
-            .unwrap()
-            .to_pretty_string();
+        let output = generator.generate_class_reference(class).to_pretty_string();
         assert_has(
             &format!("{class} must read its reference from the static call map"),
             &output,

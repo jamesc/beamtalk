@@ -16,9 +16,9 @@
 //! alike — split out of `gen_server/methods.rs`, which was actor-specific
 //! in name but carried this shared logic.
 
+use super::CoreErlangGenerator;
 use super::gen_server::extract_package_from_module_name;
 use super::value_accessors::{AutoSlotMethods, compute_auto_slot_methods};
-use super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{
@@ -159,20 +159,19 @@ impl CoreErlangGenerator {
     ///     }~
     /// ```
     #[allow(clippy::unused_self)] // method on impl for API consistency
-    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_meta_function(
         &self,
         module: &Module,
         synthesize_supervision_spec: bool,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let Some(class) = module.classes.first() else {
-            return Ok(Document::Nil);
+            return Document::Nil;
         };
 
         // ADR 0070 Phase 4: Extract package name from BEAM module name (bt@{package}@{class})
         let package_name = extract_package_from_module_name(&self.module_name);
 
-        Ok(docvec![
+        docvec![
             "'__beamtalk_meta'/0 = fun () ->\n",
             "    ",
             // include_standalone: false — standalone methods are folded into the class (BT-4721), not static
@@ -185,7 +184,7 @@ impl CoreErlangGenerator {
                 self.meta_provenance(),
             ),
             "\n\n",
-        ])
+        ]
     }
 
     /// Builds the Core Erlang map document for the static class metadata.

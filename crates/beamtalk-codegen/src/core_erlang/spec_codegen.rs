@@ -64,6 +64,7 @@ use std::collections::HashSet;
 use ecow::EcoString;
 
 use super::selector_mangler::safe_class_method_fn_name;
+use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::{atom, int_lit};
 use beamtalk_cerl_doc::{Document, join};
@@ -544,7 +545,9 @@ pub fn generate_type_alias(
 
     // '$beamtalk_class' tag field: always present, value = the class atom
     field_types.push(docvec![
-        "{'type', 0, 'map_field_exact', [{'atom', 0, '$beamtalk_class'}, {'atom', 0, ",
+        "{'type', 0, 'map_field_exact', [{'atom', 0, ",
+        atom(sentinel_tags::CLASS_TAG),
+        "}, {'atom', 0, ",
         atom(class_name.to_string()),
         "}]}"
     ]);

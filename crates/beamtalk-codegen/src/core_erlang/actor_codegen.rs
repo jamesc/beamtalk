@@ -301,18 +301,18 @@ impl CoreErlangGenerator {
             SpawnVariant::MonitoredAsync,
         ] {
             if is_abstract {
-                push_fn(self.generate_abstract_spawn_error_method(variant)?)?;
-                push_fn(self.generate_abstract_spawn_with_args_error_method(variant)?)?;
+                push_fn(self.generate_abstract_spawn_error_method(variant))?;
+                push_fn(self.generate_abstract_spawn_with_args_error_method(variant))?;
             } else {
-                push_fn(self.generate_spawn_function(module, variant)?)?;
-                push_fn(self.generate_spawn_with_args_function(module, variant)?)?;
+                push_fn(self.generate_spawn_function(module, variant))?;
+                push_fn(self.generate_spawn_with_args_function(module, variant))?;
             }
         }
 
-        push_fn(self.generate_actor_new_error_method()?)?;
-        push_fn(self.generate_actor_new_with_args_error_method()?)?;
-        push_fn(self.generate_superclass_function(module)?)?;
-        push_fn(self.generate_class_name_function(module)?)?;
+        push_fn(self.generate_actor_new_error_method())?;
+        push_fn(self.generate_actor_new_with_args_error_method())?;
+        push_fn(self.generate_superclass_function(module))?;
+        push_fn(self.generate_class_name_function(module))?;
         push_fn(self.generate_init_function(module)?)?;
 
         // Abstract classes skip gen_server callback scaffolding.
@@ -320,13 +320,13 @@ impl CoreErlangGenerator {
             push_fn(self.generate_abstract_callbacks_doc())?;
         } else {
             // handle_continue dispatches initialize after the loop starts
-            push_fn(self.generate_handle_continue(module)?)?;
-            push_fn(self.generate_handle_cast(module)?)?;
-            push_fn(self.generate_handle_call(module)?)?;
-            push_fn(self.generate_handle_info(module)?)?;
-            push_fn(self.generate_code_change()?)?;
-            push_fn(self.generate_terminate(module)?)?;
-            push_fn(self.generate_safe_dispatch()?)?;
+            push_fn(self.generate_handle_continue(module))?;
+            push_fn(self.generate_handle_cast(module))?;
+            push_fn(self.generate_handle_call(module))?;
+            push_fn(self.generate_handle_info(module))?;
+            push_fn(self.generate_code_change())?;
+            push_fn(self.generate_terminate(module))?;
+            push_fn(self.generate_safe_dispatch())?;
         }
         // BT-4567: abstract classes too — a concrete subclass chains to their
         // `'__beamtalk_secrets'/0`.
@@ -336,10 +336,10 @@ impl CoreErlangGenerator {
         if has_primitive_methods {
             push_fn(self.generate_primitive_dispatch_3_doc())?;
         }
-        push_fn(self.generate_method_table(module)?)?;
-        push_fn(self.generate_method_lines(module)?)?;
+        push_fn(self.generate_method_table(module))?;
+        push_fn(self.generate_method_lines(module))?;
         // has_method/1 — no trailing newline needed
-        docs.push(self.generate_has_method(module)?);
+        docs.push(self.generate_has_method(module));
 
         // Generate sealed method standalone functions
         if !self.sealed_method_selectors().is_empty() {
@@ -381,7 +381,7 @@ impl CoreErlangGenerator {
         if !module.classes.is_empty() {
             // Generate __beamtalk_meta/0 for zero-process reflection
             docs.push(Document::Str("\n"));
-            docs.push(self.generate_meta_function(module, needs_spec_synthesis)?);
+            docs.push(self.generate_meta_function(module, needs_spec_synthesis));
             // Generate register_class/0 for class system registration
             docs.push(self.generate_register_class(module, needs_spec_synthesis)?);
         } else if has_protocols || has_foreign_extensions {

@@ -843,10 +843,6 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Generates an instance method for a value type.
-    ///
-    /// Value type methods are pure functions that take Self as first parameter
-    /// and return a new instance (immutable semantics).
     /// ADR 0101: Build the body of a `self delegate` method on a
     /// `native:` Object as a call through the unified FFI boundary.
     ///

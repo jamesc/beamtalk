@@ -27,6 +27,7 @@ use super::super::control_flow::ArmFrame;
 use super::super::threaded_ir::{ThreadedValue, VersionPrefix};
 use super::super::util::index_lit;
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
+use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form::{self, Layout};
@@ -974,7 +975,9 @@ impl CoreErlangGenerator {
             leaf::var(match_var.to_string()),
             ") of ",
             "<'true'> when 'true' -> ",
-            "case call 'maps':'get'('$beamtalk_class', ",
+            "case call 'maps':'get'(",
+            leaf::atom(sentinel_tags::CLASS_TAG),
+            ", ",
             leaf::var(match_var.to_string()),
             ", 'undefined') of ",
             "<'Array'> when 'true' -> ",
@@ -1479,7 +1482,9 @@ impl CoreErlangGenerator {
             leaf::var(nested_var.clone()),
             ") of ",
             "<'true'> when 'true' -> ",
-            "case call 'maps':'get'('$beamtalk_class', ",
+            "case call 'maps':'get'(",
+            leaf::atom(sentinel_tags::CLASS_TAG),
+            ", ",
             leaf::var(nested_var.clone()),
             ", 'undefined') of ",
             "<'Array'> when 'true' -> ",
@@ -1795,7 +1800,8 @@ impl CoreErlangGenerator {
         let mut parts: Vec<Document<'static>> = vec![Document::Str("~{")];
 
         // Class tag
-        parts.push(Document::Str("'$beamtalk_class' := "));
+        parts.push(leaf::atom(sentinel_tags::CLASS_TAG));
+        parts.push(Document::Str(" := "));
         parts.push(leaf::atom(class.name.to_string()));
 
         // Discriminator fields (fixed values distinguishing variants)

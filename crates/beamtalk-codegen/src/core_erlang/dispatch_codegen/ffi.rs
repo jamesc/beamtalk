@@ -9,6 +9,7 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use crate::core_erlang::exception_forms::{CatchVars, try_catch_doc};
+use crate::core_erlang::sentinel_tags;
 use crate::core_erlang::{CoreErlangGenerator, Result};
 
 use beamtalk_cerl_doc::Document;
@@ -124,7 +125,9 @@ impl CoreErlangGenerator {
                     if !beamtalk_core::ffi_receiver::is_class_protocol_selector(module_name) =>
                 {
                     let doc = docvec![
-                        "~{'$beamtalk_class' => 'ErlangModule', 'module' => ",
+                        "~{",
+                        leaf::atom(sentinel_tags::CLASS_TAG),
+                        " => 'ErlangModule', 'module' => ",
                         leaf::atom(module_name.clone()),
                         "}~",
                     ];

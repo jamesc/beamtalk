@@ -16,3 +16,4 @@ build-literal	crates/beamtalk-lsp/src/server/core.rs	rebar3's runtime/_build/def
 build-literal	crates/beamtalk-parity-tests/src/drivers/cli.rs	directory-name skip list for a tree walk; the crate does not depend on beamtalk-core
 self-name	crates/beamtalk-core/src/ast/expression.rs	the definition of Expression::is_self() itself
 build-literal	crates/beamtalk-core/src/build_layout.rs	the BuildLayout definition itself (BUILD_DIR_NAME)
+send-form-call	crates/beamtalk-codegen/src/core_erlang/dispatch_codegen/mod.rs	the runtime_send_doc definition itself (the one construction of the send call)

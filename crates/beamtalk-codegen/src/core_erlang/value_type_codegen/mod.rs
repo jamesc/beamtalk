@@ -28,6 +28,7 @@ use super::threaded_ir::{ThreadedStmt, ValueRef, VersionPrefix};
 use super::util::ClassIdentity;
 use super::value_accessors::{AutoSlotMethods, has_opaque_native_representation};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, concat, join, leaf, line, nest};
 use beamtalk_core::ast::{ClassDefinition, ClassKind, MethodKind, Module, TypeAnnotation};
@@ -357,7 +358,7 @@ impl CoreErlangGenerator {
         // because that method compiles to 'new'/1 (Self parameter), which would clash
         // with the auto-generated 'new'/1 (InitArgs parameter).
         if !has_explicit_new_with && !has_explicit_new {
-            docs.push(self.generate_value_type_new_with_args(class)?);
+            docs.push(self.generate_value_type_new_with_args(class));
             docs.push(Document::Str("\n"));
         }
 
@@ -384,17 +385,17 @@ impl CoreErlangGenerator {
 
         // Generate dispatch/3 and has_method/1 for all value types
         // (superclass delegation chain — same pattern as actors)
-        docs.push(self.generate_primitive_dispatch(class, auto_methods.as_ref())?);
+        docs.push(self.generate_primitive_dispatch(class, auto_methods.as_ref()));
         docs.push(Document::Str("\n"));
         // Generate dispatch/4 for actor hierarchy walk.
         // The dispatch service only calls modules that export dispatch/4.
-        docs.push(self.generate_dispatch_4(class)?);
+        docs.push(self.generate_dispatch_4(class));
         docs.push(Document::Str("\n"));
-        docs.push(self.generate_primitive_has_method(class, auto_methods.as_ref())?);
+        docs.push(self.generate_primitive_has_method(class, auto_methods.as_ref()));
         docs.push(Document::Str("\n"));
 
         // Generate superclass/0 for reflection
-        docs.push(self.generate_superclass_function(module)?);
+        docs.push(self.generate_superclass_function(module));
 
         // Generate class-side method functions
         if !class.class_methods.is_empty() {
@@ -432,7 +433,7 @@ impl CoreErlangGenerator {
         docs.push(Document::Str("\n"));
 
         // Generate __beamtalk_meta/0 for zero-process reflection
-        docs.push(self.generate_meta_function(module, false)?);
+        docs.push(self.generate_meta_function(module, false));
 
         let (name, body) = (self.module_name.clone(), Document::Vec(docs));
         Ok(core_module(name, exports, attributes, body))
@@ -600,7 +601,7 @@ impl CoreErlangGenerator {
     fn generate_value_type_new(&mut self, class: &ClassDefinition) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
         if Self::is_non_instantiable_primitive(class_name.as_str()) {
-            return self.generate_primitive_new_error(class_name.as_str(), "new", 0);
+            return Ok(self.generate_primitive_new_error(class_name.as_str(), "new", 0));
         }
         if let Some(empty_val) = Self::collection_empty_value(class_name.as_str()) {
             return Ok(Self::generate_collection_new(empty_val));
@@ -622,7 +623,8 @@ impl CoreErlangGenerator {
         {
             let mut own_field_parts: Vec<Document<'static>> = Vec::new();
             own_field_parts.push(docvec![
-                "'$beamtalk_class' => ",
+                leaf::atom(sentinel_tags::CLASS_TAG),
+                " => ",
                 leaf::atom(class_name.clone()),
             ]);
             // BT-4591: defaults that run code are bound in source order.
@@ -669,7 +671,9 @@ impl CoreErlangGenerator {
             "'new'/0 = fun () ->\n",
             "    ",
             prelude,
-            "~{'$beamtalk_class' => '",
+            "~{",
+            leaf::atom(sentinel_tags::CLASS_TAG),
+            " => '",
             leaf::var(class_name),
             "'",
             concat(field_parts),
@@ -761,17 +765,14 @@ impl CoreErlangGenerator {
     /// - `native:` classes carrying no declared fields: raises `instantiation_error`
     /// - Other value types: validates initialization arguments against the
     ///   declared fields (BT-4030 `#unknown_field`), then merges
-    fn generate_value_type_new_with_args(
-        &mut self,
-        class: &ClassDefinition,
-    ) -> Result<Document<'static>> {
+    fn generate_value_type_new_with_args(&mut self, class: &ClassDefinition) -> Document<'static> {
         let class_name = self.class_name().clone();
         if Self::is_non_instantiable_primitive(class_name.as_str()) {
             return self.generate_primitive_new_error(class_name.as_str(), "new:", 1);
         }
         // Dictionary new: #{key => val} returns the map directly
         if class_name == "Dictionary" {
-            return Ok(Self::generate_collection_new_with_args());
+            return Self::generate_collection_new_with_args();
         }
         // List and Tuple have no meaningful init-from-map pattern
         if Self::collection_empty_value(class_name.as_str()).is_some() {
@@ -780,11 +781,11 @@ impl CoreErlangGenerator {
         // `new:` merges over what `new` builds, so an opaque native
         // representation leaves it just as hollow — same error, same guidance.
         if has_opaque_native_representation(class) {
-            return Ok(Self::generate_native_new_error(class, "new:", 1));
+            return Self::generate_native_new_error(class, "new:", 1);
         }
 
         let module_name = self.module_name.clone();
-        Ok(docvec![
+        docvec![
             "'new'/1 = fun (InitArgs) ->\n",
             "    let DefaultState = call '",
             leaf::var(module_name),
@@ -802,18 +803,18 @@ impl CoreErlangGenerator {
             " in\n",
             "    call 'maps':'merge'(DefaultState, CheckedArgs)\n",
             "\n",
-        ])
+        ]
     }
 
     /// Generates a `new` or `new:` function that raises `instantiation_error`
     /// for primitive types that cannot be instantiated with `new`.
-    #[allow(clippy::unnecessary_wraps, clippy::unused_self)] // uniform codegen interface
+    #[allow(clippy::unused_self)] // uniform codegen interface
     fn generate_primitive_new_error(
         &mut self,
         class_name: &str,
         selector: &str,
         arity: usize,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         let hint =
             format!("{class_name} is a primitive type and cannot be instantiated with {selector}");
 
@@ -823,7 +824,7 @@ impl CoreErlangGenerator {
             "'new'/1 = fun (_InitArgs) ->"
         };
 
-        Ok(docvec![
+        docvec![
             function_head,
             nest(
                 INDENT,
@@ -834,7 +835,7 @@ impl CoreErlangGenerator {
             ),
             "\n",
             "\n",
-        ])
+        ]
     }
 
     /// generates a `new`/`new:` function that raises `instantiation_error`

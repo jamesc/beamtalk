@@ -27,6 +27,19 @@ pub const CALL_STACK: &str = "$bt_call_stack";
 /// (ADR 0126 §5.1).
 pub const WIRE: &str = "$beamtalk_wire";
 
+// The three constants below (`CLASS_TAG`, `CLASS_MOD`, `SKIP_INITIALIZE`) are
+// exported as macros, but the runtime does not read them yet: its `.erl` files
+// still spell these atoms by hand (BT-5054). Codegen reads them.
+
+/// Key of the class tag in every value-type map and actor state map
+/// (`'$beamtalk_class' => 'Counter'`).
+pub const CLASS_TAG: &str = "$beamtalk_class";
+/// Actor state-map key carrying the instance's compiled class module.
+pub const CLASS_MOD: &str = "__class_mod__";
+/// `init/1` argument key a child sets when it calls its parent's `init/1` as a
+/// state-building helper (so the parent skips `initialize`).
+pub const SKIP_INITIALIZE: &str = "__skip_initialize__";
+
 /// Content of `beamtalk_sentinel_tags.hrl`, generated from the constants above.
 #[must_use]
 pub fn erlang_header() -> String {
@@ -58,6 +71,16 @@ pub fn erlang_header() -> String {
          %% First element of the versioned distribution-wire request envelope.\n\
          -define(BT_WIRE_TAG, '{WIRE}').\n\
          \n\
+         %% Class tag key of every value-type map and actor state map.\n\
+         -define(BT_CLASS_TAG_KEY, '{CLASS_TAG}').\n\
+         \n\
+         %% Actor state-map key carrying the instance's compiled class module.\n\
+         -define(BT_CLASS_MOD_KEY, '{CLASS_MOD}').\n\
+         \n\
+         %% `init/1` argument key a child sets when calling its parent's `init/1`\n\
+         %% as a state-building helper.\n\
+         -define(BT_SKIP_INITIALIZE_KEY, '{SKIP_INITIALIZE}').\n\
+         \n\
          -endif.\n"
     )
 }
@@ -75,6 +98,9 @@ mod tests {
             ("BT_INIT_ACK_KEY", INIT_ACK),
             ("BT_CALL_STACK_KEY", CALL_STACK),
             ("BT_WIRE_TAG", WIRE),
+            ("BT_CLASS_TAG_KEY", CLASS_TAG),
+            ("BT_CLASS_MOD_KEY", CLASS_MOD),
+            ("BT_SKIP_INITIALIZE_KEY", SKIP_INITIALIZE),
         ] {
             assert!(
                 h.contains(&format!("-define({macro_name}, '{atom}').")),
