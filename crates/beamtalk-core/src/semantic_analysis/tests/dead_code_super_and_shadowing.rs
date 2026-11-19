@@ -13,21 +13,7 @@ use super::*;
 fn test_dead_code_after_return_in_method() {
     // Method: getValue => ^ 42. self doSomething
     let class = ClassDefinition {
-        name: Identifier::new("Foo", test_span()),
-        superclass: Some(Identifier::new("Object", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("getValue".into()),
-            parameters: vec![],
             body: vec![
                 bare(Expression::Return {
                     value: Box::new(Expression::Literal(Literal::Integer(42), Span::new(0, 4))),
@@ -44,42 +30,12 @@ fn test_dead_code_after_return_in_method() {
                     span: Span::new(5, 20),
                 }),
             ],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("getValue")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Foo", Some("Object"), ClassKind::Object)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let dead_code: Vec<_> = result
@@ -99,58 +55,14 @@ fn test_dead_code_after_return_in_method() {
 fn test_no_dead_code_without_return() {
     // Method with no return: getValue => 42
     let class = ClassDefinition {
-        name: Identifier::new("Foo", test_span()),
-        superclass: Some(Identifier::new("Object", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("getValue".into()),
-            parameters: vec![],
             body: vec![bare(Expression::Literal(Literal::Integer(42), test_span()))],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("getValue")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Foo", Some("Object"), ClassKind::Object)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let dead_code: Vec<_> = result
@@ -178,58 +90,14 @@ fn test_dead_code_in_block() {
 
     // Put block inside a method body so it's in scope
     let class = ClassDefinition {
-        name: Identifier::new("Foo", test_span()),
-        superclass: Some(Identifier::new("Object", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("test".into()),
-            parameters: vec![],
             body: vec![bare(block)],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("test")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Foo", Some("Object"), ClassKind::Object)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let dead_code: Vec<_> = result
@@ -244,61 +112,17 @@ fn test_dead_code_in_block() {
 fn test_return_at_end_no_warning() {
     // Return as the last expression — no dead code
     let class = ClassDefinition {
-        name: Identifier::new("Foo", test_span()),
-        superclass: Some(Identifier::new("Object", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("getValue".into()),
-            parameters: vec![],
             body: vec![bare(Expression::Return {
                 value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
                 span: test_span(),
             })],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("getValue")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Foo", Some("Object"), ClassKind::Object)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let dead_code: Vec<_> = result
@@ -336,21 +160,7 @@ fn test_super_outside_method_gives_error() {
 fn test_super_inside_method_no_error() {
     // super inside a method body should not emit an error from name resolution
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("reset".into()),
-            parameters: vec![],
             body: vec![bare(Expression::MessageSend {
                 receiver: Box::new(Expression::Super(test_span())),
                 selector: MessageSelector::Unary("reset".into()),
@@ -358,42 +168,12 @@ fn test_super_inside_method_no_error() {
                 is_cast: false,
                 span: test_span(),
             })],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("reset")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let super_errors: Vec<_> = result
@@ -660,58 +440,14 @@ fn test_block_param_shadows_outer_variable() {
 
     // Put in method body
     let class = ClassDefinition {
-        name: Identifier::new("Foo", test_span()),
-        superclass: Some(Identifier::new("Object", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("test".into()),
-            parameters: vec![],
             body: vec![bare(outer_block)],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("test")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Foo", Some("Object"), ClassKind::Object)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let shadow_warnings: Vec<_> = result
@@ -751,58 +487,14 @@ fn test_underscore_prefixed_no_shadow_warning() {
     ));
 
     let class = ClassDefinition {
-        name: Identifier::new("Foo", test_span()),
-        superclass: Some(Identifier::new("Object", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("test".into()),
-            parameters: vec![],
             body: vec![bare(outer_block)],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("test")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Foo", Some("Object"), ClassKind::Object)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let shadow_warnings: Vec<_> = result
@@ -840,58 +532,14 @@ fn test_no_shadow_warning_different_names() {
     ));
 
     let class = ClassDefinition {
-        name: Identifier::new("Foo", test_span()),
-        superclass: Some(Identifier::new("Object", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("test".into()),
-            parameters: vec![],
             body: vec![bare(outer_block)],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("test")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Foo", Some("Object"), ClassKind::Object)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     let shadow_warnings: Vec<_> = result

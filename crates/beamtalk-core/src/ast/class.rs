@@ -358,6 +358,47 @@ impl ClassDefinition {
     }
 }
 
+#[cfg(any(test, feature = "test"))]
+impl ClassDefinition {
+    /// Test fixture: a plain, non-abstract, non-sealed class named `name` that
+    /// extends `superclass` (`None` for a root class), with every other field at
+    /// its neutral value (no state, methods, comments or type parameters) and a
+    /// zero-length span.
+    ///
+    /// Tests override the fields they care about with struct-update syntax:
+    /// `ClassDefinition { is_abstract: true, ..ClassDefinition::test("Shape", Some("Actor"), ClassKind::Actor) }`.
+    /// [`ClassDefinition::test_subclass`] derives the kind from the superclass
+    /// name the way the parser does. Deliberately not a `Default` impl: no
+    /// production caller builds a nameless class. Compiled only for tests and
+    /// the `test` feature (dependent crates' dev-dependencies).
+    #[must_use]
+    pub fn test(name: &str, superclass: Option<&str>, kind: ClassKind) -> Self {
+        let span = Span::new(0, 0);
+        Self {
+            class_kind: kind,
+            ..Self::with_modifiers(
+                Identifier::new(name, span),
+                superclass.map(|s| Identifier::new(s, span)),
+                ClassModifiers::default(),
+                Vec::new(),
+                Vec::new(),
+                span,
+            )
+        }
+    }
+
+    /// [`ClassDefinition::test`] for `name` extending `superclass`, with the
+    /// kind the parser would assign ([`ClassKind::from_superclass_name`]).
+    #[must_use]
+    pub fn test_subclass(name: &str, superclass: &str) -> Self {
+        Self::test(
+            name,
+            Some(superclass),
+            ClassKind::from_superclass_name(superclass),
+        )
+    }
+}
+
 /// A declared `shapeVersion: N` header clause (ADR 0123 §1).
 ///
 /// Mirrors [`Identifier`]'s role for `handle_scope`: `version` is the parsed
@@ -740,6 +781,18 @@ pub struct StateDeclaration {
     pub doc_comment: Option<String>,
     /// Source location.
     pub span: Span,
+}
+
+#[cfg(any(test, feature = "test"))]
+impl StateDeclaration {
+    /// Test fixture: an untyped `state:` slot named `name` with no default and a
+    /// zero-length span. Tests override the fields they care about with
+    /// struct-update syntax. Compiled only for tests and the `test` feature.
+    #[must_use]
+    pub fn test(name: &str) -> Self {
+        let span = Span::new(0, 0);
+        Self::new(Identifier::new(name, span), span)
+    }
 }
 
 impl StateDeclaration {

@@ -23,74 +23,15 @@ fn test_analyse_populates_class_hierarchy() {
 
 #[test]
 fn test_analyse_hierarchy_includes_user_classes() {
-    use crate::ast::{
-        ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword, MethodDefinition,
-        MethodKind, StateDeclaration,
-    };
+    use crate::ast::{ClassDefinition, ClassKind, MethodDefinition, StateDeclaration};
 
     let class = ClassDefinition {
-        name: Identifier::new("Counter", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![StateDeclaration {
-            name: Identifier::new("count", test_span()),
-            type_annotation: None,
-            default_value: None,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            declared_keyword: DeclaredKeyword::default(),
-            slot_kind: crate::ast::SlotKind::default(),
-            span: test_span(),
-        }],
-        methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("increment".into()),
-            parameters: vec![],
-            body: vec![],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
-        }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        state: vec![StateDeclaration::test("count")],
+        methods: vec![MethodDefinition::test("increment")],
+        ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     assert!(result.class_hierarchy.has_class("Counter"));
@@ -114,44 +55,9 @@ fn test_analyse_hierarchy_includes_user_classes() {
 fn test_analyse_reports_sealed_class_diagnostic() {
     use crate::ast::{ClassDefinition, ClassKind};
 
-    let class = ClassDefinition {
-        name: Identifier::new("MyInt", test_span()),
-        superclass: Some(Identifier::new("Integer", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
-    };
+    let class = ClassDefinition::test("MyInt", Some("Integer"), ClassKind::Object);
 
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
+    let module = module_with_classes(vec![class]);
     let result = analyse(&module);
 
     // Should have sealed class diagnostic
@@ -460,47 +366,16 @@ fn test_cascade_responds_to_with_identifier_no_error() {
 
 #[test]
 fn test_abstract_class_instantiation_error() {
-    use crate::ast::{ClassDefinition, ClassKind, CommentAttachment, MethodDefinition, MethodKind};
+    use crate::ast::{ClassDefinition, ClassKind, MethodDefinition};
 
     // abstract class cannot be instantiated
     let class = ClassDefinition {
-        name: Identifier::new("Shape", test_span()),
-        superclass: Some(Identifier::new("Actor", test_span())),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
         is_abstract: true,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("area".into()),
-            parameters: vec![],
             body: vec![bare(Expression::Literal(Literal::Integer(42), test_span()))],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test("area")
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: test_span(),
+        ..ClassDefinition::test("Shape", Some("Actor"), ClassKind::Actor)
     };
 
     // Top-level expression: Shape spawn
@@ -517,17 +392,9 @@ fn test_abstract_class_instantiation_error() {
     };
 
     let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
         classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
         expressions: vec![bare(spawn_expr)],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
+        ..empty_module()
     };
 
     let result = analyse(&module);
