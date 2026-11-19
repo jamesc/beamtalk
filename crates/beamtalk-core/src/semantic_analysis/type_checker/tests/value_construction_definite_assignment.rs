@@ -20,28 +20,10 @@ fn stored_snapshot_value(
     class_methods: Vec<MethodDefinition>,
 ) -> ClassDefinition {
     ClassDefinition {
-        name: ident("StoredSnapshot"),
-        superclass: Some(ident("Value")),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
         is_typed: true,
-        is_internal: false,
-        supervisor_kind: None,
         state,
-        methods: vec![],
         class_methods,
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: span(),
+        ..ClassDefinition::test_at("StoredSnapshot", Some("Value"), ClassKind::Value, span())
     }
 }
 
@@ -57,28 +39,9 @@ fn native_value_class(state: Vec<StateDeclaration>) -> ClassDefinition {
 /// never fires for Actors (out of scope, BT-1948).
 fn counter_actor(state: Vec<StateDeclaration>) -> ClassDefinition {
     ClassDefinition {
-        name: ident("Counter"),
-        superclass: Some(ident("Actor")),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
         is_typed: true,
-        is_internal: false,
-        supervisor_kind: None,
         state,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: span(),
+        ..ClassDefinition::test_at("Counter", Some("Actor"), ClassKind::Actor, span())
     }
 }
 
@@ -370,58 +333,33 @@ fn factory_self_new_colon_supplying_every_field_is_clean() {
         span(),
     );
     let mut factory = MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Keyword(vec![
-            KeywordPart::new("for:", span()),
-            KeywordPart::new("client:", span()),
-        ]),
-        parameters: vec![
-            ParameterDefinition::new(ident("workflowId")),
-            ParameterDefinition::new(ident("aClient")),
-        ],
-        body: vec![bare(msg_send(
-            var("self"),
-            MessageSelector::Keyword(vec![KeywordPart::new("new:", span())]),
-            vec![map_lit(vec![
-                (key("workflowId"), var("workflowId")),
-                (key("client"), var("aClient")),
-            ])],
-        ))],
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
         is_class_method: true,
-        kind: MethodKind::Primary,
-        expect: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        span: span(),
+        ..MethodDefinition::new(
+            MessageSelector::Keyword(vec![
+                KeywordPart::new("for:", span()),
+                KeywordPart::new("client:", span()),
+            ]),
+            vec![
+                ParameterDefinition::new(ident("workflowId")),
+                ParameterDefinition::new(ident("aClient")),
+            ],
+            vec![bare(msg_send(
+                var("self"),
+                MessageSelector::Keyword(vec![KeywordPart::new("new:", span())]),
+                vec![map_lit(vec![
+                    (key("workflowId"), var("workflowId")),
+                    (key("client"), var("aClient")),
+                ])],
+            ))],
+            span(),
+        )
     };
     factory.is_class_method = true;
     let class = ClassDefinition {
-        name: ident("WorkflowHandle"),
-        superclass: Some(ident("Value")),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
         is_typed: true,
-        is_internal: false,
-        supervisor_kind: None,
         state: vec![workflow_id_field, client_field],
-        methods: vec![],
         class_methods: vec![factory],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: span(),
+        ..ClassDefinition::test_at("WorkflowHandle", Some("Value"), ClassKind::Value, span())
     };
     let module = make_module(vec![]);
     let hierarchy = build_class_hierarchy(class);
@@ -493,28 +431,9 @@ fn shadowed_field_does_not_duplicate_diagnostic() {
         )
     };
     let parent = ClassDefinition {
-        name: ident("ParentValue"),
-        superclass: Some(ident("Value")),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
         is_typed: true,
-        is_internal: false,
-        supervisor_kind: None,
         state: vec![count_field()],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: span(),
+        ..ClassDefinition::test_at("ParentValue", Some("Value"), ClassKind::Value, span())
     };
     let mut child = parent.clone();
     child.name = ident("ChildValue");

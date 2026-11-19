@@ -388,11 +388,19 @@ impl MethodDefinition {
     #[cfg(any(test, feature = "test"))]
     #[must_use]
     pub fn test(selector: &str) -> Self {
+        Self::test_at(selector, Span::new(0, 0))
+    }
+
+    /// [`MethodDefinition::test`] with `span` as the method's span, for tests
+    /// whose assertions depend on a non-zero-length span.
+    #[cfg(any(test, feature = "test"))]
+    #[must_use]
+    pub fn test_at(selector: &str, span: Span) -> Self {
         Self::new(
             MessageSelector::Unary(selector.into()),
             Vec::new(),
             Vec::new(),
-            Span::new(0, 0),
+            span,
         )
     }
 

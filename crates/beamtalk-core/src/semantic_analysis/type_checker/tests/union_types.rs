@@ -730,56 +730,26 @@ fn union_receiver_no_members_respond_returns_dynamic() {
 #[test]
 fn false_or_param_resolves_to_union() {
     // A method with parameter `x :: Integer | False` should infer x as Union.
-    let method = MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Keyword(vec![KeywordPart::new("check:", span())]),
-        parameters: vec![ParameterDefinition::with_type(
+    let method = MethodDefinition::new(
+        MessageSelector::Keyword(vec![KeywordPart::new("check:", span())]),
+        vec![ParameterDefinition::with_type(
             ident("x"),
             TypeAnnotation::FalseOr {
                 inner: Box::new(TypeAnnotation::Simple(ident("Integer"))),
                 span: span(),
             },
         )],
-        body: vec![bare(msg_send(
+        vec![bare(msg_send(
             Expression::Identifier(ident("x")),
             MessageSelector::Unary("isNil".into()),
             vec![],
         ))],
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        kind: MethodKind::Primary,
-        expect: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        span: span(),
-    };
+        span(),
+    );
 
     let class = ClassDefinition {
-        name: ident("MyClass"),
-        superclass: Some(ident("Object")),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![method],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: span(),
+        ..ClassDefinition::test_at("MyClass", Some("Object"), ClassKind::Value, span())
     };
 
     let module = Module {
@@ -811,43 +781,11 @@ fn false_or_param_resolves_to_union() {
 #[test]
 fn bt3076_union_member_class_of_unregistered_class_still_contributes() {
     let make_class = |name: &str, ret: TypeAnnotation| ClassDefinition {
-        name: ident(name),
-        superclass: Some(ident("Object")),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("tag".into()),
-            parameters: vec![],
-            body: vec![],
             return_type: Some(ret),
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: span(),
+            ..MethodDefinition::test_at("tag", span())
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: span(),
+        ..ClassDefinition::test_at(name, Some("Object"), ClassKind::Value, span())
     };
 
     let module = Module {

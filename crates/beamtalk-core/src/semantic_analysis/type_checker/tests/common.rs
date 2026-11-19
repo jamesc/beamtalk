@@ -570,16 +570,14 @@ pub(super) fn make_keyword_method(
     params: Vec<(&str, Option<&str>)>,
     body: Vec<Expression>,
 ) -> MethodDefinition {
-    MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Keyword(
+    MethodDefinition::new(
+        MessageSelector::Keyword(
             selector_parts
                 .iter()
                 .map(|k| KeywordPart::new(*k, span()))
                 .collect(),
         ),
-        parameters: params
+        params
             .into_iter()
             .map(|(name, ty)| {
                 if let Some(t) = ty {
@@ -589,17 +587,9 @@ pub(super) fn make_keyword_method(
                 }
             })
             .collect(),
-        body: body.into_iter().map(ExpressionStatement::bare).collect(),
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        kind: MethodKind::Primary,
-        expect: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        span: span(),
-    }
+        body.into_iter().map(ExpressionStatement::bare).collect(),
+        span(),
+    )
 }
 
 pub(super) fn counter_class_with_typed_state(
@@ -607,28 +597,9 @@ pub(super) fn counter_class_with_typed_state(
     state: Vec<StateDeclaration>,
 ) -> ClassDefinition {
     ClassDefinition {
-        name: ident("Counter"),
-        superclass: Some(ident("Object")),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
         state,
         methods,
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: span(),
+        ..ClassDefinition::test_at("Counter", Some("Object"), ClassKind::Object, span())
     }
 }
 
@@ -674,47 +645,15 @@ pub(super) fn make_class_with_methods(
     instance_methods: Vec<MethodDefinition>,
 ) -> ClassDefinition {
     ClassDefinition {
-        name: ident(name),
-        superclass: Some(ident("Object")),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: instance_methods,
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: span(),
+        ..ClassDefinition::test_at(name, Some("Object"), ClassKind::Value, span())
     }
 }
 
 pub(super) fn make_method(selector: &str, body: Vec<Expression>) -> MethodDefinition {
     MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary(selector.into()),
-        parameters: vec![],
         body: body.into_iter().map(ExpressionStatement::bare).collect(),
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        kind: MethodKind::Primary,
-        expect: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        span: span(),
+        ..MethodDefinition::test_at(selector, span())
     }
 }
 

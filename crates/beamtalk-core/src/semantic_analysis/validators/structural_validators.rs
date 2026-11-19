@@ -584,7 +584,7 @@ mod tests {
     use super::*;
     use crate::ast::{
         ClassDefinition, CommentAttachment, ExpressionStatement, Identifier, KeywordPart,
-        MethodDefinition, MethodKind, TypeParamDecl,
+        MethodDefinition, TypeParamDecl,
     };
     use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
     use crate::semantic_analysis::test_helpers::parse_and_build;
@@ -1324,20 +1324,8 @@ mod tests {
 
     fn make_method(body_expr: Expression) -> MethodDefinition {
         MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("test".into()),
-            parameters: vec![],
             body: vec![ExpressionStatement::bare(body_expr)],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::test_at("test", test_span())
         }
     }
 
