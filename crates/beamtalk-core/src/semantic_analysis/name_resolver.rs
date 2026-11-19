@@ -133,9 +133,10 @@ impl NameResolver {
             self.scope.pop();
         }
 
-        // BT-5026: provided methods of a protocol no class here `uses:` (a
-        // protocol-only file). A used protocol's bodies are resolved as the
-        // copies spliced into each user. Same shape as an extension method.
+        // BT-5026: provided methods with no flattened copy
+        // (`Module::unused_protocol_provided_methods`); the rest are resolved
+        // as the copies spliced into each user. Same shape as an extension
+        // method.
         for method in module.unused_protocol_provided_methods() {
             self.scope.push();
             self.resolve_method(method);

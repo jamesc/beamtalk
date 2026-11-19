@@ -242,14 +242,19 @@ impl Module {
     pub fn unused_protocol_provided_methods(&self) -> impl Iterator<Item = &MethodDefinition> {
         self.protocols
             .iter()
-            .flat_map(|p| p.provided_methods.iter())
-            .filter(|m| {
-                !self
-                    .classes
-                    .iter()
-                    .flat_map(|c| &c.methods)
-                    .any(|cm| cm.span == m.span && cm.selector == m.selector)
+            .flat_map(|p| p.provided_methods.iter().map(move |m| (p, m)))
+            .filter(|(p, m)| {
+                // The class must also `uses:` this protocol: a span carries no
+                // file identity, so a copy from a cross-file protocol could
+                // otherwise match a local method at the same offsets.
+                !self.classes.iter().any(|c| {
+                    c.uses.iter().any(|u| u.protocol.name == p.name.name)
+                        && c.methods
+                            .iter()
+                            .any(|cm| cm.span == m.span && cm.selector == m.selector)
+                })
             })
+            .map(|(_, m)| m)
     }
 
     /// Iterate the methods written in class bodies (instance, then class side)

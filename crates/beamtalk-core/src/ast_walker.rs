@@ -741,7 +741,8 @@ where
         }
     });
     // BT-5026: state / class-variable defaults and the provided-method bodies
-    // of protocols with no user in this module are not statement sequences of
+    // that have no flattened copy (`Module::unused_protocol_provided_methods`)
+    // are not statement sequences of
     // `for_each_expr_seq`, but the validators built on this walker must see
     // them (`state: w = AbstractThing new`).
     for default in module.state_default_exprs() {

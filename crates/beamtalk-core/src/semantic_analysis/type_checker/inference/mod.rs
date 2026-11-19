@@ -136,7 +136,7 @@ impl TypeChecker {
                     false, // instance method
                     is_abstract,
                     is_typed,
-                    true,
+                    true, // check override compatibility against the instance-side parent
                     true,
                     value_type_body,
                     hierarchy,

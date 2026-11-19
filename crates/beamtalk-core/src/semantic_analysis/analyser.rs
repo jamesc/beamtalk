@@ -78,8 +78,9 @@ impl Analyser {
             self.scope.pop();
         }
 
-        // BT-5026: provided methods of protocols no class here `uses:`,
-        // mirroring `NameResolver::resolve_module`.
+        // BT-5026: provided methods with no flattened copy
+        // (`Module::unused_protocol_provided_methods`), mirroring
+        // `NameResolver::resolve_module`.
         for method in module.unused_protocol_provided_methods() {
             self.scope.push();
             self.analyse_method(method);
