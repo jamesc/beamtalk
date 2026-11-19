@@ -24,7 +24,6 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::path_util::to_forward_slash;
-use beamtalk_codegen::core_erlang::escape_atom_chars;
 
 pub use beamtalk_core::ffi_type_specs::{
     BeamPaths, KERNEL_LOGGER_STDERR, RuntimeLayout, beam_paths, beam_paths_for_layout,
@@ -55,39 +54,6 @@ pub fn build_eval_cmd(
     let root_package_start = root_package_fragment(root_package);
     format!(
         "{root_package_start}\
-         {}, \
-         {hex_deps_start}\
-         {otp_app_start}\
-         {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
-         io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
-         receive stop -> ok end.",
-        startup_prelude(port, bind_addr, log_level),
-    )
-}
-
-/// Build the Erlang `-eval` command with an explicit node name.
-///
-/// Like [`build_eval_cmd`] but also stores the node name in the application
-/// environment before starting the workspace application.
-///
-/// The `node_name` is escaped for safe interpolation into an Erlang
-/// single-quoted atom literal.
-pub fn build_eval_cmd_with_node(
-    port: u16,
-    node_name: &str,
-    bind_addr: Option<Ipv4Addr>,
-    log_level: &str,
-    otp_app_name: Option<&str>,
-    root_package: Option<&str>,
-    hex_dep_names: &[String],
-) -> String {
-    let safe_name = escape_atom_chars(node_name);
-    let hex_deps_start = hex_deps_start_fragment(hex_dep_names);
-    let otp_app_start = otp_app_start_fragment(otp_app_name);
-    let root_package_start = root_package_fragment(root_package);
-    format!(
-        "{root_package_start}\
-         application:set_env(beamtalk_runtime, node_name, '{safe_name}'), \
          {}, \
          {hex_deps_start}\
          {otp_app_start}\
@@ -199,7 +165,6 @@ pub fn startup_prelude(port: u16, bind_addr: Option<Ipv4Addr>, log_level: &str) 
     let idle_seconds = beamtalk_workspace::DEFAULT_IDLE_TIMEOUT_SECONDS;
     format!(
         "logger:remove_handler(default), \
-         application:set_env(beamtalk_runtime, repl_port, {port}), \
          application:set_env(beamtalk_runtime, log_level, {log_level}), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, Cwd}} = file:get_cwd(), \
@@ -236,7 +201,6 @@ pub fn build_release_console_eval_cmd(
     let bind_addr_erl = format_bind_addr_erl(bind_addr);
     format!(
         "logger:remove_handler(default), \
-         application:set_env(beamtalk_runtime, repl_port, {port}), \
          application:set_env(beamtalk_runtime, log_level, {log_level}), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(#{{ \
@@ -327,12 +291,14 @@ pub fn discover_beam_paths() -> miette::Result<DiscoveredRuntime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn eval_cmd_contains_required_steps() {
         let cmd = build_eval_cmd(9000, None, "info", None, None, &[]);
-        // Must set application env before starting apps
-        assert!(cmd.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
+        // The port reaches the runtime through the workspace supervisor config
+        // map only; no app-env key carries it (BT-5049).
+        assert!(!cmd.contains("repl_port"));
         // Must start the workspace OTP application
         assert!(cmd.contains("application:ensure_all_started(beamtalk_workspace)"));
         // Must start the workspace supervisor
@@ -357,24 +323,9 @@ mod tests {
             .unwrap_or_else(|| panic!("root_package not recorded: {cmd}"));
         let sup = cmd.find("beamtalk_workspace_sup:start_link").unwrap();
         assert!(root < sup, "{cmd}");
-        let with_node =
-            build_eval_cmd_with_node(9000, "n", None, "info", None, Some("my_pkg"), &[]);
-        assert!(with_node.contains("set_root_package"), "{with_node}");
+        let with_pkg = build_eval_cmd(9000, None, "info", None, Some("my_pkg"), &[]);
+        assert!(with_pkg.contains("set_root_package"), "{with_pkg}");
         assert!(!build_eval_cmd(9000, None, "info", None, None, &[]).contains("root_package"));
-    }
-
-    #[test]
-    fn eval_cmd_with_node_includes_node_name() {
-        let cmd = build_eval_cmd_with_node(9000, "mynode", None, "info", None, None, &[]);
-        assert!(cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"));
-        assert!(cmd.contains("beamtalk_workspace_sup:start_link"));
-    }
-
-    #[test]
-    fn eval_cmd_with_node_escapes_special_chars() {
-        let cmd = build_eval_cmd_with_node(9000, "node'inject", None, "info", None, None, &[]);
-        assert!(cmd.contains("node\\'inject"));
-        assert!(!cmd.contains("node'inject"));
     }
 
     #[test]
@@ -399,9 +350,8 @@ mod tests {
     }
 
     #[test]
-    fn startup_prelude_contains_set_env_and_ensure_started() {
+    fn startup_prelude_ensures_started() {
         let prelude = startup_prelude(9000, None, "info");
-        assert!(prelude.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
         assert!(prelude.contains("application:ensure_all_started(beamtalk_workspace)"));
         // Must start workspace supervisor (which starts all singletons and services)
         assert!(prelude.contains("beamtalk_workspace_sup:start_link"));
@@ -470,13 +420,6 @@ mod tests {
     }
 
     #[test]
-    fn eval_cmd_with_node_and_otp_app() {
-        let cmd = build_eval_cmd_with_node(9000, "mynode", None, "info", Some("my_app"), None, &[]);
-        assert!(cmd.contains("application:ensure_all_started(my_app)"));
-        assert!(cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"));
-    }
-
-    #[test]
     fn eval_cmd_with_hex_deps_starts_them_before_workspace() {
         let hex_deps = vec!["gun".to_string(), "cowboy".to_string()];
         let cmd = build_eval_cmd(9000, None, "info", None, None, &hex_deps);
@@ -494,20 +437,6 @@ mod tests {
         assert!(
             cowboy_pos < port_pos,
             "Hex deps should start before port query: {cmd}"
-        );
-    }
-
-    #[test]
-    fn eval_cmd_with_node_and_hex_deps() {
-        let hex_deps = vec!["hackney".to_string()];
-        let cmd = build_eval_cmd_with_node(9000, "mynode", None, "info", None, None, &hex_deps);
-        assert!(
-            cmd.contains("ensure_all_started(hackney)"),
-            "Should start hackney: {cmd}"
-        );
-        assert!(
-            cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"),
-            "Should set node name: {cmd}"
         );
     }
 
@@ -545,5 +474,81 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Every `application:set_env(beamtalk_runtime, KEY, …)` the CLI emits must be
+    /// read by some `application:get_env(beamtalk_runtime, KEY…)` in the Erlang
+    /// runtime (BT-5049). A key nothing reads is dead config that looks like a
+    /// second path for a value that actually travels through the
+    /// `beamtalk_workspace_sup:start_link(#{...})` config map.
+    #[test]
+    fn app_env_keys_the_cli_sets_are_read_by_the_runtime() {
+        fn keys_after(text: &str, needle: &str) -> Vec<String> {
+            text.match_indices(needle)
+                .filter_map(|(i, _)| {
+                    let key: String = text[i + needle.len()..]
+                        .trim_start()
+                        .chars()
+                        .take_while(|c| c.is_ascii_lowercase() || *c == '_')
+                        .collect();
+                    (!key.is_empty()).then_some(key)
+                })
+                .collect()
+        }
+        fn rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("read dir").flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    rs_files(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        fn erl_files(apps: &Path) -> Vec<PathBuf> {
+            let mut out = Vec::new();
+            for app in std::fs::read_dir(apps).expect("read apps").flatten() {
+                let src = app.path().join("src");
+                if let Ok(entries) = std::fs::read_dir(&src) {
+                    out.extend(
+                        entries
+                            .flatten()
+                            .map(|e| e.path())
+                            .filter(|p| p.extension().is_some_and(|e| e == "erl")),
+                    );
+                }
+            }
+            out
+        }
+
+        let root = beamtalk_workspace::cargo_workspace_root!();
+        let mut sources = Vec::new();
+        rs_files(&root.join("crates/beamtalk-cli/src"), &mut sources);
+        let set_needle = ["application:set_env(", "beamtalk_runtime,"].concat();
+        let mut set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for file in &sources {
+            let text = std::fs::read_to_string(file).expect("read cli source");
+            set.extend(keys_after(&text, &set_needle));
+        }
+        assert!(
+            set.contains("log_level"),
+            "the scan must see the keys the CLI really sets: {set:?}"
+        );
+
+        let get_needle = ["get_env(", "beamtalk_runtime,"].concat();
+        let mut read: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for file in erl_files(&root.join("runtime/apps")) {
+            let text = std::fs::read_to_string(&file).expect("read erlang source");
+            read.extend(keys_after(&text, &get_needle));
+        }
+        assert!(
+            read.contains("log_level"),
+            "the scan must see the keys the runtime really reads: {read:?}"
+        );
+        let unread: Vec<_> = set.difference(&read).collect();
+        assert!(
+            unread.is_empty(),
+            "the CLI sets beamtalk_runtime app-env keys nothing reads: {unread:?}"
+        );
     }
 }
