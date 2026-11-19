@@ -1254,10 +1254,17 @@ do_mark_flushed(Seqs, State) ->
 %%% Bounded ring + archive rotation
 %%% ----------------------------------------------------------------------------
 
-%% When the on-disk log exceeds MAX_ENTRIES, archive the oldest segment
+%% When the on-disk log exceeds MAX_ENTRIES, archive the oldest *inactive*
+%% entries (flushed, orphaned or prior-epoch; see `is_active/1`) as a segment
 %% (metadata as a gzipped .jsonl, the referenced source bodies as a gzipped tar)
-%% and drop those entries from the live log + ETS. Human and agent entries are
-%% pruned on equal footing — only the ring bound applies.
+%% and drop them from the live log + ETS. Human and agent entries are pruned on
+%% equal footing.
+%%
+%% Active entries are the unflushed live edits that `flush`, `changes` and
+%% `revert:` operate on; archiving one would silently lose it (BT-5016), so they
+%% are never rotated out. If the active entries alone exceed the bound, the ring
+%% is left over its limit (nothing is dropped) and one WARNING is logged until
+%% the overflow clears (flush or `changes clear`).
 %%
 %% Rotation is transactional: the live ETS and changes.jsonl are mutated ONLY
 %% after the archive segment is written AND the trimmed log is rewritten, both
@@ -1269,14 +1276,46 @@ maybe_rotate(#state{changes_dir = undefined} = State) ->
     State;
 maybe_rotate(State) ->
     All = entries(),
-    case length(All) > ?MAX_ENTRIES of
+    Overflow = length(All) - ?MAX_ENTRIES,
+    case Overflow > 0 of
         false ->
-            State;
+            State#state{ring_overflow_warned = false};
         true ->
-            Overflow = length(All) - ?MAX_ENTRIES,
-            {ToArchive, ToKeep} = lists:split(Overflow, All),
-            beamtalk_workspace_changelog_log:rotate_transactional(ToArchive, ToKeep, State)
+            Archivable = [E || E <- All, not is_active(E)],
+            ToArchive = lists:sublist(Archivable, Overflow),
+            State1 =
+                case ToArchive of
+                    [] ->
+                        State;
+                    _ ->
+                        ArchSeqs = sets:from_list([E#entry.seq || E <- ToArchive], [{version, 2}]),
+                        ToKeep = [E || E <- All, not sets:is_element(E#entry.seq, ArchSeqs)],
+                        beamtalk_workspace_changelog_log:rotate_transactional(
+                            ToArchive, ToKeep, State
+                        )
+                end,
+            warn_active_overflow(Overflow - length(ToArchive), State1)
     end.
+
+%% Warn once per overflow episode that unflushed entries alone exceed the bound.
+-spec warn_active_overflow(integer(), #state{}) -> #state{}.
+warn_active_overflow(Unarchivable, #state{ring_overflow_warned = false} = State) when
+    Unarchivable > 0
+->
+    ?LOG_WARNING(
+        "ChangeLog holds more than the ring bound of unflushed entries; "
+        "none are archived. Run `Workspace flush` or `Workspace changes clear`.",
+        #{
+            max_entries => ?MAX_ENTRIES,
+            unarchivable => Unarchivable,
+            domain => [beamtalk, runtime]
+        }
+    ),
+    State#state{ring_overflow_warned = true};
+warn_active_overflow(Unarchivable, State) when Unarchivable =< 0 ->
+    State#state{ring_overflow_warned = false};
+warn_active_overflow(_Unarchivable, State) ->
+    State.
 
 -spec ensure_ets() -> ok.
 ensure_ets() ->
