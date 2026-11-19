@@ -528,7 +528,12 @@ jobs:
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: stable
-          targets: x86_64-pc-windows-msvc
+
+      # rust-toolchain.toml pins the channel cargo actually uses, so the
+      # target goes on that toolchain (the action's `targets:` input would
+      # only add it to `stable`).
+      - name: Add the Windows target
+        run: rustup target add x86_64-pc-windows-msvc
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
