@@ -112,3 +112,31 @@ fn the_exception_construct_open_is_reached_by_user_source_on_its_way_to_a_reject
         "expected the structured rejection, got {result:?}"
     );
 }
+
+/// BT-5041: a class method has no `*_open` lowering for a conditional or an
+/// `on:do:`/`ensure:` that rebinds an outer local; the local-threading producer
+/// takes them first, and `generate_class_method_non_last_expr` reports an internal
+/// error for the two kinds. Pin that these shapes never reach that error: each
+/// compiles, or is rejected with a structured diagnostic, never `Internal`.
+#[test]
+fn class_method_local_threading_constructs_never_reach_the_internal_error_arm() {
+    let bodies = [
+        "t := 0\n    flag ifTrue: [#(1, 2) do: [:e | t := t + e]. t := t + 1] ifFalse: [t := 2]\n    t",
+        "t := 0\n    flag ifTrue: [(flag and: [t > 0]) ifTrue: [t := 5] ifFalse: [t := 6]. t := t + 1] ifFalse: [t := 2]\n    t",
+        "t := 0\n    flag ifTrue: [[t := t + 1] on: Error do: [:e | t := 0]. t := t + 1] ifFalse: [t := 2]\n    t",
+        "t := 0\n    [flag ifTrue: [t := 1] ifFalse: [t := 2]. t := t + 1] on: Error do: [:e | t := 0]\n    t",
+        "t := 0\n    [t := t + 1. flag ifTrue: [t := 3]] ensure: [t := t + 10]\n    t",
+        "t := 0\n    flag match: [#yes -> [t := 1]; _ -> [t := 2]]\n    t",
+        "t := 0\n    flag ifTrue: [flag match: [#yes -> [t := 1]; _ -> [t := 2]]] ifFalse: [t := 9]\n    t",
+        "t := 0\n    u := 0\n    flag ifTrue: [t := 1. flag not ifTrue: [u := 1] ifFalse: [t := t + 1]] ifFalse: [u := 2]\n    t + u",
+    ];
+    for (i, body) in bodies.iter().enumerate() {
+        let src =
+            format!("Object subclass: ClassMethodReach{i}\n\n  class probe: flag =>\n    {body}\n");
+        let (_, result) = compile(&src);
+        assert!(
+            !matches!(result, Err(CodeGenError::Internal(_))),
+            "class method reached the internal-error arm: {result:?}\n{src}"
+        );
+    }
+}
