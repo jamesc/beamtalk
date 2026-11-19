@@ -175,7 +175,8 @@ jobs:
           # BT-5057: beamtalk-exec has `#[cfg(unix)]` / `#[cfg(windows)]` halves,
           # and the Windows one otherwise compiles only in ci-platforms.yml
           # (opt-in) and nightly.
-          exec=$(flag matches 'crates/beamtalk-exec/*' Cargo.toml Cargo.lock \
+          exec=$(flag matches 'crates/beamtalk-exec/*' 'crates/beamtalk-etf/*' \
+              'crates/beamtalk-build/*' Cargo.toml Cargo.lock \
               rust-toolchain.toml '.github/workflows/ci.yml')
 
           # BT-5033: `npm test` and `tsc` for the extension. Besides the
