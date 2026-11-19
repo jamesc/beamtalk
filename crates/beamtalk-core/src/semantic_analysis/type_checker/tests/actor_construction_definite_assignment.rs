@@ -24,28 +24,11 @@ fn counter_actor(
     class_methods: Vec<MethodDefinition>,
 ) -> ClassDefinition {
     ClassDefinition {
-        name: ident("Counter"),
-        superclass: Some(ident("Actor")),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
         is_typed: true,
-        is_internal: false,
-        supervisor_kind: None,
         state,
         methods,
         class_methods,
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: span(),
+        ..ClassDefinition::test_at("Counter", Some("Actor"), ClassKind::Actor, span())
     }
 }
 
@@ -61,28 +44,9 @@ fn native_actor(state: Vec<StateDeclaration>) -> ClassDefinition {
 /// never fires for Values (that's BT-3552's own check).
 fn widget_value(state: Vec<StateDeclaration>) -> ClassDefinition {
     ClassDefinition {
-        name: ident("Widget"),
-        superclass: Some(ident("Object")),
-        superclass_package: None,
-        class_kind: ClassKind::Value,
-        is_abstract: false,
-        is_sealed: false,
         is_typed: true,
-        is_internal: false,
-        supervisor_kind: None,
         state,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: span(),
+        ..ClassDefinition::test_at("Widget", Some("Object"), ClassKind::Value, span())
     }
 }
 

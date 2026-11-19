@@ -22,20 +22,9 @@ use super::common::*;
 /// directly with a hand-constructed `body_type`, bypassing inference.
 fn method_with_return_type(return_type: TypeAnnotation) -> MethodDefinition {
     MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("probe".into()),
-        parameters: vec![],
         body: vec![bare(int_lit(0))],
         return_type: Some(return_type),
-        kind: MethodKind::Primary,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        span: span(),
-        doc_comment: None,
-        expect: None,
-        comments: CommentAttachment::default(),
+        ..MethodDefinition::test_at("probe", span())
     }
 }
 

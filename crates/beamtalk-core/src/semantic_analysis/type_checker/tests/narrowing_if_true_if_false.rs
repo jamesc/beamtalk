@@ -149,11 +149,9 @@ fn bt_2020_result_is_ok_if_true_if_false_preserves_my_val() {
         // a: r :: Result =>
         //   picked := r isOk ifTrue: [r value] ifFalse: [MyVal new]
         //   picked xyzzyNonsense
-        let a_method = MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Keyword(vec![KeywordPart::new("a:", span())]),
-            parameters: vec![ParameterDefinition::with_type(
+        let a_method = MethodDefinition::new(
+            MessageSelector::Keyword(vec![KeywordPart::new("a:", span())]),
+            vec![ParameterDefinition::with_type(
                 ident("r"),
                 TypeAnnotation::Generic {
                     base: ident("Result"),
@@ -164,7 +162,7 @@ fn bt_2020_result_is_ok_if_true_if_false_preserves_my_val() {
                     span: span(),
                 },
             )],
-            body: vec![
+            vec![
                 bare(assign(
                     "picked",
                     if_true_if_false(
@@ -187,16 +185,8 @@ fn bt_2020_result_is_ok_if_true_if_false_preserves_my_val() {
                     vec![],
                 )),
             ],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: span(),
-        };
+            span(),
+        );
         ClassDefinition::new(
             ident("NarrowBlockProbe"),
             ident("Object"),

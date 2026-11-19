@@ -13,63 +13,17 @@ fn test_super_infers_parent_class_type() {
     // class Child < Parent; method: reset => super reset
     // super should infer as Parent type, not Dynamic
     let parent = ClassDefinition {
-        name: ident("Parent"),
-        superclass: Some(ident("Object")),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("reset".into()),
-            parameters: vec![],
             body: vec![bare(int_lit(0))],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: span(),
+            ..MethodDefinition::test_at("reset", span())
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: span(),
+        ..ClassDefinition::test_at("Parent", Some("Object"), ClassKind::Object, span())
     };
 
     let super_span = Span::new(100, 105);
     let msg_span = Span::new(100, 115);
     let child = ClassDefinition {
-        name: ident("Child"),
-        superclass: Some(ident("Parent")),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("reset".into()),
-            parameters: vec![],
             body: vec![bare(Expression::MessageSend {
                 receiver: Box::new(Expression::Super(super_span)),
                 selector: MessageSelector::Unary("reset".into()),
@@ -77,27 +31,9 @@ fn test_super_infers_parent_class_type() {
                 is_cast: false,
                 span: msg_span,
             })],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: span(),
+            ..MethodDefinition::test_at("reset", span())
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: span(),
+        ..ClassDefinition::test_at("Child", Some("Parent"), ClassKind::Object, span())
     };
 
     let module = make_module_with_classes(vec![], vec![parent, child]);
@@ -118,87 +54,23 @@ fn test_super_unknown_selector_warns() {
     // class Child < Parent; method: test => super nonExistent
     // Should warn because Parent doesn't have nonExistent
     let parent = ClassDefinition {
-        name: ident("Parent"),
-        superclass: Some(ident("Object")),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("reset".into()),
-            parameters: vec![],
             body: vec![bare(int_lit(0))],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: span(),
+            ..MethodDefinition::test_at("reset", span())
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: span(),
+        ..ClassDefinition::test_at("Parent", Some("Object"), ClassKind::Object, span())
     };
 
     let child = ClassDefinition {
-        name: ident("Child"),
-        superclass: Some(ident("Parent")),
-        superclass_package: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Unary("test".into()),
-            parameters: vec![],
             body: vec![bare(msg_send(
                 Expression::Super(span()),
                 MessageSelector::Unary("nonExistent".into()),
                 vec![],
             ))],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: span(),
+            ..MethodDefinition::test_at("test", span())
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: span(),
+        ..ClassDefinition::test_at("Child", Some("Parent"), ClassKind::Object, span())
     };
 
     let module = make_module_with_classes(vec![], vec![parent, child]);

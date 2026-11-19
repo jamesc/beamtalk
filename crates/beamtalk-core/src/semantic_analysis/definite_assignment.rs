@@ -270,7 +270,7 @@ fn inferred_admits_nil(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{CommentAttachment, DeclaredKeyword, Identifier};
+    use crate::ast::Identifier;
     use crate::semantic_analysis::alias_registry::AliasInfo;
 
     use crate::test_helpers::test_support::test_span as span;
@@ -281,15 +281,10 @@ mod tests {
         slot_kind: SlotKind,
     ) -> StateDeclaration {
         StateDeclaration {
-            name: Identifier::new("x", span()),
             type_annotation,
             default_value,
-            declared_keyword: DeclaredKeyword::default(),
             slot_kind,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: span(),
+            ..StateDeclaration::new(Identifier::new("x", span()), span())
         }
     }
 

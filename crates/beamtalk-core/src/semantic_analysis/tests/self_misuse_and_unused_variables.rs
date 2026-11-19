@@ -167,28 +167,18 @@ fn test_unused_parameter_emits_warning() {
     // Unused method parameter should warn
     // process: newValue => 0  // Warning: parameter newValue unused
     let class = ClassDefinition {
-        methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
+        methods: vec![MethodDefinition::new(
+            MessageSelector::Keyword(vec![crate::ast::KeywordPart {
                 keyword: "setValue:".into(),
                 span: test_span(),
             }]),
-            parameters: vec![crate::ast::ParameterDefinition {
+            vec![crate::ast::ParameterDefinition {
                 name: Identifier::new("newValue", test_span()),
                 type_annotation: None,
             }],
-            body: vec![bare(Expression::Literal(Literal::Integer(0), test_span()))],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
-        }],
+            vec![bare(Expression::Literal(Literal::Integer(0), test_span()))],
+            test_span(),
+        )],
         ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
 
@@ -210,28 +200,18 @@ fn test_unused_parameter_underscore_suppresses_warning() {
     // Parameter prefixed with _ should not warn
     // process: _newValue => 0  // No warning
     let class = ClassDefinition {
-        methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
+        methods: vec![MethodDefinition::new(
+            MessageSelector::Keyword(vec![crate::ast::KeywordPart {
                 keyword: "setValue:".into(),
                 span: test_span(),
             }]),
-            parameters: vec![crate::ast::ParameterDefinition {
+            vec![crate::ast::ParameterDefinition {
                 name: Identifier::new("_newValue", test_span()),
                 type_annotation: None,
             }],
-            body: vec![bare(Expression::Literal(Literal::Integer(0), test_span()))],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
-        }],
+            vec![bare(Expression::Literal(Literal::Integer(0), test_span()))],
+            test_span(),
+        )],
         ..ClassDefinition::test("Counter", Some("Actor"), crate::ast::ClassKind::Actor)
     };
 
@@ -251,31 +231,21 @@ fn test_used_parameter_no_warning() {
     // Used method parameter should not warn
     // process: x => x  // No warning
     let class = ClassDefinition {
-        methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
+        methods: vec![MethodDefinition::new(
+            MessageSelector::Keyword(vec![crate::ast::KeywordPart {
                 keyword: "process:".into(),
                 span: test_span(),
             }]),
-            parameters: vec![crate::ast::ParameterDefinition {
+            vec![crate::ast::ParameterDefinition {
                 name: Identifier::new("x", test_span()),
                 type_annotation: None,
             }],
-            body: vec![bare(Expression::Identifier(Identifier::new(
+            vec![bare(Expression::Identifier(Identifier::new(
                 "x",
                 test_span(),
             )))],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
-        }],
+            test_span(),
+        )],
         ..ClassDefinition::test("Counter", Some("Actor"), crate::ast::ClassKind::Actor)
     };
 
@@ -296,18 +266,16 @@ fn test_unused_parameter_primitive_body_no_warning() {
     // no unused-parameter warning should fire.
     // at: index => @primitive "at:"
     let class = ClassDefinition {
-        methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
+        methods: vec![MethodDefinition::new(
+            MessageSelector::Keyword(vec![crate::ast::KeywordPart {
                 keyword: "at:".into(),
                 span: test_span(),
             }]),
-            parameters: vec![crate::ast::ParameterDefinition {
+            vec![crate::ast::ParameterDefinition {
                 name: Identifier::new("index", test_span()),
                 type_annotation: None,
             }],
-            body: vec![bare(Expression::Primitive {
+            vec![bare(Expression::Primitive {
                 name: "at:".into(),
                 is_quoted: true,
                 is_intrinsic: false,
@@ -315,16 +283,8 @@ fn test_unused_parameter_primitive_body_no_warning() {
                 no_user_code: false,
                 span: test_span(),
             })],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
-        }],
+            test_span(),
+        )],
         ..ClassDefinition::test("Array", Some("Object"), ClassKind::Object)
     };
     let module = module_with_classes(vec![class]);
@@ -346,18 +306,16 @@ fn test_unused_parameter_intrinsic_body_no_warning() {
     // no unused-parameter warning should fire.
     // spawnWith: initArgs => @intrinsic actorSpawnWith
     let class = ClassDefinition {
-        methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
+        methods: vec![MethodDefinition::new(
+            MessageSelector::Keyword(vec![crate::ast::KeywordPart {
                 keyword: "spawnWith:".into(),
                 span: test_span(),
             }]),
-            parameters: vec![crate::ast::ParameterDefinition {
+            vec![crate::ast::ParameterDefinition {
                 name: Identifier::new("initArgs", test_span()),
                 type_annotation: None,
             }],
-            body: vec![bare(Expression::Primitive {
+            vec![bare(Expression::Primitive {
                 name: "actorSpawnWith".into(),
                 is_quoted: false,
                 is_intrinsic: false,
@@ -365,16 +323,8 @@ fn test_unused_parameter_intrinsic_body_no_warning() {
                 no_user_code: false,
                 span: test_span(),
             })],
-            return_type: None,
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: crate::ast::MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
-        }],
+            test_span(),
+        )],
         ..ClassDefinition::test("Actor", Some("Object"), ClassKind::Object)
     };
     let module = module_with_classes(vec![class]);

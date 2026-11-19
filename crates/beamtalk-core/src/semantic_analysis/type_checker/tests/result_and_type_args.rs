@@ -384,9 +384,6 @@ fn type_args_for_generic_class_no_false_positive() {
 fn type_args_for_non_generic_class_in_method_param_warns() {
     // Method parameter annotated as `:: Boolean(Integer)` — Boolean has no type params
     let method = MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("doSomething".into()),
         parameters: vec![ParameterDefinition {
             name: ident("flag"),
             type_annotation: Some(TypeAnnotation::Generic {
@@ -395,16 +392,7 @@ fn type_args_for_non_generic_class_in_method_param_warns() {
                 span: span(),
             }),
         }],
-        body: vec![],
-        kind: MethodKind::Primary,
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        expect: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        span: span(),
+        ..MethodDefinition::test_at("doSomething", span())
     };
     let class = counter_class_with_typed_state(vec![method], vec![]);
     let module = make_module_with_classes(vec![], vec![class]);
@@ -463,9 +451,6 @@ fn type_args_for_block_no_false_positive() {
     // Block uses type args as documentation convention (e.g., `Block(E, Boolean)`)
     // This should NOT trigger the "no type parameters" warning
     let method = MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("doSomething".into()),
         parameters: vec![ParameterDefinition {
             name: ident("block"),
             type_annotation: Some(TypeAnnotation::Generic {
@@ -477,16 +462,7 @@ fn type_args_for_block_no_false_positive() {
                 span: span(),
             }),
         }],
-        body: vec![],
-        kind: MethodKind::Primary,
-        return_type: None,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        expect: None,
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        span: span(),
+        ..MethodDefinition::test_at("doSomething", span())
     };
     let class = counter_class_with_typed_state(vec![method], vec![]);
     let module = make_module_with_classes(vec![], vec![class]);

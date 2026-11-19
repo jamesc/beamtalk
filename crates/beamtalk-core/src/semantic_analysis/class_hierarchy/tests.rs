@@ -737,38 +737,8 @@ fn user_class_with_unknown_superclass() {
 fn duplicate_instance_method_detected() {
     let class = ClassDefinition {
         methods: vec![
-            MethodDefinition {
-                pipeline_sends: crate::ast::PipelineSends::default(),
-                literal_comments: crate::ast::LiteralComments::default(),
-                selector: crate::ast::MessageSelector::Unary("increment".into()),
-                parameters: vec![],
-                body: vec![],
-                return_type: None,
-                is_sealed: false,
-                is_internal: false,
-                is_class_method: false,
-                kind: MethodKind::Primary,
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                span: Span::new(10, 20),
-            },
-            MethodDefinition {
-                pipeline_sends: crate::ast::PipelineSends::default(),
-                literal_comments: crate::ast::LiteralComments::default(),
-                selector: crate::ast::MessageSelector::Unary("increment".into()),
-                parameters: vec![],
-                body: vec![],
-                return_type: None,
-                is_sealed: false,
-                is_internal: false,
-                is_class_method: false,
-                kind: MethodKind::Primary,
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                span: Span::new(30, 40),
-            },
+            MethodDefinition::test_at("increment", Span::new(10, 20)),
+            MethodDefinition::test_at("increment", Span::new(30, 40)),
         ],
         ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
     };
@@ -786,36 +756,12 @@ fn duplicate_class_method_detected() {
     let class = ClassDefinition {
         class_methods: vec![
             MethodDefinition {
-                pipeline_sends: crate::ast::PipelineSends::default(),
-                literal_comments: crate::ast::LiteralComments::default(),
-                selector: crate::ast::MessageSelector::Unary("create".into()),
-                parameters: vec![],
-                body: vec![],
-                return_type: None,
-                is_sealed: false,
-                is_internal: false,
                 is_class_method: true,
-                kind: MethodKind::Primary,
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                span: Span::new(10, 20),
+                ..MethodDefinition::test_at("create", Span::new(10, 20))
             },
             MethodDefinition {
-                pipeline_sends: crate::ast::PipelineSends::default(),
-                literal_comments: crate::ast::LiteralComments::default(),
-                selector: crate::ast::MessageSelector::Unary("create".into()),
-                parameters: vec![],
-                body: vec![],
-                return_type: None,
-                is_sealed: false,
-                is_internal: false,
                 is_class_method: true,
-                kind: MethodKind::Primary,
-                expect: None,
-                comments: CommentAttachment::default(),
-                doc_comment: None,
-                span: Span::new(30, 40),
+                ..MethodDefinition::test_at("create", Span::new(30, 40))
             },
         ],
         ..ClassDefinition::test("Counter", Some("Actor"), ClassKind::Actor)
@@ -938,26 +884,19 @@ fn user_class_return_type_propagated() {
 fn user_class_param_types_propagated() {
     let class = ClassDefinition {
         methods: vec![MethodDefinition {
-            pipeline_sends: crate::ast::PipelineSends::default(),
-            literal_comments: crate::ast::LiteralComments::default(),
-            selector: crate::ast::MessageSelector::Keyword(vec![crate::ast::KeywordPart {
-                keyword: "add:".into(),
-                span: test_span(),
-            }]),
-            parameters: vec![ParameterDefinition::with_type(
-                Identifier::new("amount", test_span()),
-                TypeAnnotation::simple("Integer", test_span()),
-            )],
-            body: vec![],
             return_type: Some(TypeAnnotation::simple("Counter", test_span())),
-            is_sealed: false,
-            is_internal: false,
-            is_class_method: false,
-            kind: MethodKind::Primary,
-            expect: None,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: test_span(),
+            ..MethodDefinition::new(
+                crate::ast::MessageSelector::Keyword(vec![crate::ast::KeywordPart {
+                    keyword: "add:".into(),
+                    span: test_span(),
+                }]),
+                vec![ParameterDefinition::with_type(
+                    Identifier::new("amount", test_span()),
+                    TypeAnnotation::simple("Integer", test_span()),
+                )],
+                vec![],
+                test_span(),
+            )
         }],
         ..ClassDefinition::test("Counter", Some("Object"), ClassKind::Object)
     };
@@ -2081,19 +2020,15 @@ fn cross_file_value_sub_subclass_finds_new() {
     // Build hierarchy from a module containing only Child (extends Base)
     // Give Child a field so auto-slot methods can be verified.
     let mut child_class = make_user_class("Child", "Base");
-    child_class.state.push(crate::ast::StateDeclaration {
-        name: crate::ast::Identifier {
-            name: EcoString::from("count"),
-            span: test_span(),
-        },
-        default_value: None,
-        type_annotation: None,
+    child_class.state.push(StateDeclaration {
         declared_keyword: crate::ast::DeclaredKeyword::Field,
-        slot_kind: crate::ast::SlotKind::default(),
-        expect: None,
-        comments: crate::ast::CommentAttachment::default(),
-        doc_comment: None,
-        span: test_span(),
+        ..StateDeclaration::new(
+            crate::ast::Identifier {
+                name: EcoString::from("count"),
+                span: test_span(),
+            },
+            test_span(),
+        )
     });
     let module = module_with_classes(vec![child_class]);
     let (Ok(mut h), _) = ClassHierarchy::build(&module) else {

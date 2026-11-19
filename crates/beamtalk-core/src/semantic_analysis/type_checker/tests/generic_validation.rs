@@ -16,10 +16,6 @@ fn bt2022_generic_return_type_inner_arg_mismatch_warns() {
     add_generic_result_class(&mut hierarchy);
 
     let method = MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("compute".into()),
-        parameters: vec![],
         body: vec![bare(int_lit(42))],
         return_type: Some(TypeAnnotation::Generic {
             base: ident("GenResult"),
@@ -29,14 +25,7 @@ fn bt2022_generic_return_type_inner_arg_mismatch_warns() {
             ],
             span: span(),
         }),
-        kind: MethodKind::Primary,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        span: span(),
-        doc_comment: None,
-        expect: None,
-        comments: CommentAttachment::default(),
+        ..MethodDefinition::test_at("compute", span())
     };
 
     // Body infers as GenResult(String, Error) — inner arg mismatch
@@ -81,10 +70,6 @@ fn bt2022_generic_return_type_matching_inner_args_no_warning() {
     add_generic_result_class(&mut hierarchy);
 
     let method = MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("compute".into()),
-        parameters: vec![],
         body: vec![bare(int_lit(42))],
         return_type: Some(TypeAnnotation::Generic {
             base: ident("GenResult"),
@@ -94,14 +79,7 @@ fn bt2022_generic_return_type_matching_inner_args_no_warning() {
             ],
             span: span(),
         }),
-        kind: MethodKind::Primary,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        span: span(),
-        doc_comment: None,
-        expect: None,
-        comments: CommentAttachment::default(),
+        ..MethodDefinition::test_at("compute", span())
     };
 
     // Body infers as GenResult(Integer, Error) — exact match
@@ -132,10 +110,6 @@ fn bt2022_generic_return_type_bare_body_no_warning() {
     add_generic_result_class(&mut hierarchy);
 
     let method = MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("compute".into()),
-        parameters: vec![],
         body: vec![bare(int_lit(42))],
         return_type: Some(TypeAnnotation::Generic {
             base: ident("GenResult"),
@@ -145,14 +119,7 @@ fn bt2022_generic_return_type_bare_body_no_warning() {
             ],
             span: span(),
         }),
-        kind: MethodKind::Primary,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        span: span(),
-        doc_comment: None,
-        expect: None,
-        comments: CommentAttachment::default(),
+        ..MethodDefinition::test_at("compute", span())
     };
 
     // Body infers as bare GenResult (no type_args) — no enough info to warn
@@ -177,10 +144,6 @@ fn bt2022_dictionary_inner_arg_mismatch_warns() {
     let hierarchy = ClassHierarchy::with_builtins();
 
     let method = MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("data".into()),
-        parameters: vec![],
         body: vec![bare(int_lit(42))],
         return_type: Some(TypeAnnotation::Generic {
             base: ident("Dictionary"),
@@ -190,14 +153,7 @@ fn bt2022_dictionary_inner_arg_mismatch_warns() {
             ],
             span: span(),
         }),
-        kind: MethodKind::Primary,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        span: span(),
-        doc_comment: None,
-        expect: None,
-        comments: CommentAttachment::default(),
+        ..MethodDefinition::test_at("data", span())
     };
 
     // Body returns Dictionary(Symbol, String) — value type mismatch
@@ -226,24 +182,13 @@ fn bt2022_list_inner_arg_mismatch_warns() {
     let hierarchy = ClassHierarchy::with_builtins();
 
     let method = MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("items".into()),
-        parameters: vec![],
         body: vec![bare(int_lit(42))],
         return_type: Some(TypeAnnotation::Generic {
             base: ident("Array"),
             parameters: vec![TypeAnnotation::Simple(ident("Integer"))],
             span: span(),
         }),
-        kind: MethodKind::Primary,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        span: span(),
-        doc_comment: None,
-        expect: None,
-        comments: CommentAttachment::default(),
+        ..MethodDefinition::test_at("items", span())
     };
 
     // Body returns Array(String) — type arg mismatch
@@ -358,20 +303,9 @@ fn bt2033_never_return_with_known_body_warns() {
     let hierarchy = ClassHierarchy::with_builtins();
 
     let method = MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("diverge".into()),
-        parameters: vec![],
         body: vec![bare(int_lit(42))],
         return_type: Some(TypeAnnotation::Simple(ident("Never"))),
-        kind: MethodKind::Primary,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        span: span(),
-        doc_comment: None,
-        expect: None,
-        comments: CommentAttachment::default(),
+        ..MethodDefinition::test_at("diverge", span())
     };
 
     // Body infers as Integer — clearly not divergent
@@ -408,20 +342,9 @@ fn bt2033_never_return_with_never_body_no_warning() {
     let hierarchy = ClassHierarchy::with_builtins();
 
     let method = MethodDefinition {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        selector: MessageSelector::Unary("diverge".into()),
-        parameters: vec![],
         body: vec![bare(int_lit(42))],
         return_type: Some(TypeAnnotation::Simple(ident("Never"))),
-        kind: MethodKind::Primary,
-        is_sealed: false,
-        is_internal: false,
-        is_class_method: false,
-        span: span(),
-        doc_comment: None,
-        expect: None,
-        comments: CommentAttachment::default(),
+        ..MethodDefinition::test_at("diverge", span())
     };
 
     // Body is divergent (e.g. always `self error: ...`)

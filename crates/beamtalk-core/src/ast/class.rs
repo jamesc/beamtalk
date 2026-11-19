@@ -373,7 +373,14 @@ impl ClassDefinition {
     /// the `test` feature (dependent crates' dev-dependencies).
     #[must_use]
     pub fn test(name: &str, superclass: Option<&str>, kind: ClassKind) -> Self {
-        let span = Span::new(0, 0);
+        Self::test_at(name, superclass, kind, Span::new(0, 0))
+    }
+
+    /// [`ClassDefinition::test`] with `span` as the span of the class and of its
+    /// name and superclass identifiers, for tests whose assertions depend on a
+    /// non-zero-length span.
+    #[must_use]
+    pub fn test_at(name: &str, superclass: Option<&str>, kind: ClassKind, span: Span) -> Self {
         Self {
             class_kind: kind,
             ..Self::with_modifiers(
