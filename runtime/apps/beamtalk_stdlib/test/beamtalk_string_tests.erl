@@ -170,39 +170,35 @@ includes_full_match_test() ->
 %%% starts_with/2
 %%% ============================================================================
 
-starts_with_true_test() ->
-    ?assertEqual(true, beamtalk_string:starts_with(<<"hello">>, <<"hel">>)).
+%% One row per case: {Name, Expected, Args}. The row name is the EUnit test
+%% title, so a failure names the case.
+table(Group, Fun, Cases) ->
+    [
+        {Group ++ ": " ++ Name, ?_assertEqual(Expected, apply(beamtalk_string, Fun, Args))}
+     || {Name, Expected, Args} <- Cases
+    ].
 
-starts_with_false_test() ->
-    ?assertEqual(false, beamtalk_string:starts_with(<<"hello">>, <<"world">>)).
-
-starts_with_empty_test() ->
-    ?assertEqual(true, beamtalk_string:starts_with(<<"hello">>, <<>>)).
-
-starts_with_full_test() ->
-    ?assertEqual(true, beamtalk_string:starts_with(<<"hello">>, <<"hello">>)).
-
-starts_with_longer_prefix_test() ->
-    ?assertEqual(false, beamtalk_string:starts_with(<<"hi">>, <<"hello">>)).
+starts_with_test_() ->
+    table("starts_with", starts_with, [
+        {"true", true, [<<"hello">>, <<"hel">>]},
+        {"false", false, [<<"hello">>, <<"world">>]},
+        {"empty prefix", true, [<<"hello">>, <<>>]},
+        {"full string", true, [<<"hello">>, <<"hello">>]},
+        {"longer prefix", false, [<<"hi">>, <<"hello">>]}
+    ]).
 
 %%% ============================================================================
 %%% ends_with/2
 %%% ============================================================================
 
-ends_with_true_test() ->
-    ?assertEqual(true, beamtalk_string:ends_with(<<"hello">>, <<"llo">>)).
-
-ends_with_false_test() ->
-    ?assertEqual(false, beamtalk_string:ends_with(<<"hello">>, <<"world">>)).
-
-ends_with_empty_test() ->
-    ?assertEqual(true, beamtalk_string:ends_with(<<"hello">>, <<>>)).
-
-ends_with_full_test() ->
-    ?assertEqual(true, beamtalk_string:ends_with(<<"hello">>, <<"hello">>)).
-
-ends_with_longer_suffix_test() ->
-    ?assertEqual(false, beamtalk_string:ends_with(<<"hi">>, <<"hello">>)).
+ends_with_test_() ->
+    table("ends_with", ends_with, [
+        {"true", true, [<<"hello">>, <<"llo">>]},
+        {"false", false, [<<"hello">>, <<"world">>]},
+        {"empty suffix", true, [<<"hello">>, <<>>]},
+        {"full string", true, [<<"hello">>, <<"hello">>]},
+        {"longer suffix", false, [<<"hi">>, <<"hello">>]}
+    ]).
 
 %%% ============================================================================
 %%% index_of/2
@@ -486,78 +482,46 @@ lines_empty_test() ->
 %%% words/1
 %%% ============================================================================
 
-words_basic_test() ->
-    ?assertEqual(
-        [{beamtalk_string, <<"hello">>}, {beamtalk_string, <<"world">>}],
-        beamtalk_string:words(<<"hello world">>)
-    ).
-
-words_extra_spaces_test() ->
-    ?assertEqual(
-        [{beamtalk_string, <<"hello">>}, {beamtalk_string, <<"world">>}],
-        beamtalk_string:words(<<"  hello   world  ">>)
-    ).
-
-words_tabs_test() ->
-    ?assertEqual(
-        [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}],
-        beamtalk_string:words(<<"a\tb">>)
-    ).
-
-words_single_test() ->
-    ?assertEqual(
-        [{beamtalk_string, <<"hello">>}],
-        beamtalk_string:words(<<"hello">>)
-    ).
-
-words_empty_test() ->
-    ?assertEqual(
-        [],
-        beamtalk_string:words(<<>>)
-    ).
+words_test_() ->
+    table("words", words, [
+        {"basic", [{beamtalk_string, <<"hello">>}, {beamtalk_string, <<"world">>}], [
+            <<"hello world">>
+        ]},
+        {"extra spaces", [{beamtalk_string, <<"hello">>}, {beamtalk_string, <<"world">>}], [
+            <<"  hello   world  ">>
+        ]},
+        {"tabs", [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}], [<<"a\tb">>]},
+        {"single", [{beamtalk_string, <<"hello">>}], [<<"hello">>]},
+        {"empty", [], [<<>>]}
+    ]).
 
 %%% ============================================================================
 %%% take/2
 %%% ============================================================================
 
-take_basic_test() ->
-    ?assertEqual({beamtalk_string, <<"hel">>}, beamtalk_string:take(<<"hello">>, 3)).
-
-take_all_test() ->
-    ?assertEqual({beamtalk_string, <<"hello">>}, beamtalk_string:take(<<"hello">>, 10)).
-
-take_zero_test() ->
-    ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:take(<<"hello">>, 0)).
-
-take_negative_test() ->
-    ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:take(<<"hello">>, -1)).
-
-take_utf8_test() ->
-    Str = unicode:characters_to_binary("h\x{E9}llo"),
-    ?assertEqual(
-        {beamtalk_string, unicode:characters_to_binary("h\x{E9}")},
-        beamtalk_string:take(Str, 2)
-    ).
+take_test_() ->
+    table("take", take, [
+        {"basic", {beamtalk_string, <<"hel">>}, [<<"hello">>, 3]},
+        {"more than length", {beamtalk_string, <<"hello">>}, [<<"hello">>, 10]},
+        {"zero", {beamtalk_string, <<>>}, [<<"hello">>, 0]},
+        {"negative", {beamtalk_string, <<>>}, [<<"hello">>, -1]},
+        {"utf8", {beamtalk_string, unicode:characters_to_binary("h\x{E9}")}, [
+            unicode:characters_to_binary("h\x{E9}llo"), 2
+        ]}
+    ]).
 
 %%% ============================================================================
 %%% drop/2
 %%% ============================================================================
 
-drop_basic_test() ->
-    ?assertEqual({beamtalk_string, <<"llo">>}, beamtalk_string:drop(<<"hello">>, 2)).
-
-drop_all_test() ->
-    ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:drop(<<"hello">>, 10)).
-
-drop_zero_test() ->
-    ?assertEqual({beamtalk_string, <<"hello">>}, beamtalk_string:drop(<<"hello">>, 0)).
-
-drop_negative_test() ->
-    ?assertEqual({beamtalk_string, <<"hello">>}, beamtalk_string:drop(<<"hello">>, -1)).
-
-drop_utf8_test() ->
-    Str = unicode:characters_to_binary("h\x{E9}llo"),
-    ?assertEqual({beamtalk_string, <<"llo">>}, beamtalk_string:drop(Str, 2)).
+drop_test_() ->
+    table("drop", drop, [
+        {"basic", {beamtalk_string, <<"llo">>}, [<<"hello">>, 2]},
+        {"more than length", {beamtalk_string, <<>>}, [<<"hello">>, 10]},
+        {"zero", {beamtalk_string, <<"hello">>}, [<<"hello">>, 0]},
+        {"negative", {beamtalk_string, <<"hello">>}, [<<"hello">>, -1]},
+        {"utf8", {beamtalk_string, <<"llo">>}, [unicode:characters_to_binary("h\x{E9}llo"), 2]}
+    ]).
 
 %%% ============================================================================
 %%% is_blank/1
@@ -573,20 +537,14 @@ is_not_empty_test() ->
     ?assertEqual(false, beamtalk_string:is_not_empty(<<>>)),
     ?assertEqual(true, beamtalk_string:is_not_empty(<<"é"/utf8>>)).
 
-is_blank_empty_test() ->
-    ?assertEqual(true, beamtalk_string:is_blank(<<>>)).
-
-is_blank_spaces_test() ->
-    ?assertEqual(true, beamtalk_string:is_blank(<<"   ">>)).
-
-is_blank_tabs_test() ->
-    ?assertEqual(true, beamtalk_string:is_blank(<<"\t\n">>)).
-
-is_blank_content_test() ->
-    ?assertEqual(false, beamtalk_string:is_blank(<<"hello">>)).
-
-is_blank_mixed_test() ->
-    ?assertEqual(false, beamtalk_string:is_blank(<<"  hi  ">>)).
+is_blank_test_() ->
+    table("is_blank", is_blank, [
+        {"empty", true, [<<>>]},
+        {"spaces", true, [<<"   ">>]},
+        {"tab and newline", true, [<<"\t\n">>]},
+        {"content", false, [<<"hello">>]},
+        {"mixed", false, [<<"  hi  ">>]}
+    ]).
 
 %%% ============================================================================
 %%% is_digit/1
@@ -627,20 +585,14 @@ is_alpha_empty_test() ->
 %%% from_code_point/1
 %%% ============================================================================
 
-from_code_point_ascii_test() ->
-    ?assertEqual({beamtalk_string, <<"A">>}, beamtalk_string:from_code_point(65)).
-
-from_code_point_lowercase_test() ->
-    ?assertEqual({beamtalk_string, <<"z">>}, beamtalk_string:from_code_point(122)).
-
-from_code_point_multibyte_test() ->
-    ?assertEqual({beamtalk_string, <<"\x{20AC}"/utf8>>}, beamtalk_string:from_code_point(8364)).
-
-from_code_point_emoji_test() ->
-    ?assertEqual({beamtalk_string, <<"\x{1F600}"/utf8>>}, beamtalk_string:from_code_point(128512)).
-
-from_code_point_zero_test() ->
-    ?assertEqual({beamtalk_string, <<0>>}, beamtalk_string:from_code_point(0)).
+from_code_point_test_() ->
+    table("from_code_point", from_code_point, [
+        {"ascii", {beamtalk_string, <<"A">>}, [65]},
+        {"lowercase", {beamtalk_string, <<"z">>}, [122]},
+        {"multibyte", {beamtalk_string, <<"\x{20AC}"/utf8>>}, [8364]},
+        {"emoji", {beamtalk_string, <<"\x{1F600}"/utf8>>}, [128512]},
+        {"zero", {beamtalk_string, <<0>>}, [0]}
+    ]).
 
 from_code_point_negative_raises_test() ->
     ?assertBtError(type_error, 'String', 'fromCodePoint:', beamtalk_string:from_code_point(-1)).
