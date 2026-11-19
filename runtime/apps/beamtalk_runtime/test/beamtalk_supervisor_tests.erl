@@ -2734,7 +2734,7 @@ set_child_class(Obj) ->
     ok.
 
 child_class_entry(Obj) ->
-    {beamtalk_object_class:class_name_safe(element(4, Obj)), element(3, Obj)}.
+    {beamtalk_object_class_read:class_name_safe(element(4, Obj)), element(3, Obj)}.
 
 %% Called from this module's supervisor init/1: plant the child-class entry a
 %% test stored with set_child_class/1, as dynamic_init/3 would.

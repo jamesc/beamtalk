@@ -160,7 +160,7 @@ rename_selector(Self, OldSelector, NewSelector, Sent) ->
     ok = beamtalk_refactor_support:refuse_in_own_class_process(erlang:element(4, Self), Sent),
     ok = beamtalk_refactor_support:require_method_capability(
         'renameSelector:to:',
-        beamtalk_object_class:class_name_safe(erlang:element(4, Self)),
+        beamtalk_object_class_read:class_name_safe(erlang:element(4, Self)),
         OldSelector
     ),
     %% A runtime class-method fun has no source to rewrite, so rename sees
@@ -171,7 +171,7 @@ rename_selector(Self, OldSelector, NewSelector, Sent) ->
         true ->
             ok = ensure_rename_selector_collision_free(Self, NewSelector),
             {Side, ClassPid} = beamtalk_class_refactor:removal_target(Self),
-            ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+            ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
             ok = beamtalk_class_refactor:refuse_if_protocol_provided(
                 ClassName, Side, OldSelector, rename
             ),
@@ -258,7 +258,7 @@ ensure_rename_selector_collision_free(Self, NewSelector) ->
         beamtalk_behaviour_intrinsics:classIncludesSelector(Self, NewSelector),
         fun() ->
             ClassPid = erlang:element(4, Self),
-            ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+            ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
             beamtalk_refactor_support:rename_collision_error(selector, ClassName, NewSelector)
         end
     ).

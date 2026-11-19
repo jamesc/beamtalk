@@ -1908,8 +1908,8 @@ bt3826_reflection_follows_class_mutation_test() ->
     },
     {ok, Pid} = beamtalk_object_class:start_link(Name, Info),
     try
-        ?assertEqual([bt3826Foo], beamtalk_object_class:instance_methods_safe(Pid)),
-        ?assertEqual([bt3826X], beamtalk_object_class:instance_variables_safe(Pid)),
+        ?assertEqual([bt3826Foo], beamtalk_object_class_read:instance_methods_safe(Pid)),
+        ?assertEqual([bt3826X], beamtalk_object_class_read:instance_variables_safe(Pid)),
         ?assertEqual(
             {ok, 'Integer'}, beamtalk_class_registry:get_method_return_type(Name, bt3826Foo)
         ),
@@ -1918,26 +1918,28 @@ bt3826_reflection_follows_class_mutation_test() ->
         ok = beamtalk_object_class:put_method(Pid, bt3826Bar, fun(_Self) -> ok end),
         ?assertEqual(
             lists:sort([bt3826Foo, bt3826Bar]),
-            lists:sort(beamtalk_object_class:instance_methods_safe(Pid))
+            lists:sort(beamtalk_object_class_read:instance_methods_safe(Pid))
         ),
         ?assertEqual(
             lists:sort(gen_server:call(Pid, methods)),
-            lists:sort(beamtalk_object_class:instance_methods_safe(Pid))
+            lists:sort(beamtalk_object_class_read:instance_methods_safe(Pid))
         ),
         ?assertEqual(
             {error, not_found}, beamtalk_class_registry:get_method_return_type(Name, bt3826Foo)
         ),
         %% put_class_method refreshes the class-side selectors.
         ok = beamtalk_object_class:put_class_method(Pid, bt3826Make, fun(_ClassSelf) -> ok end),
-        ?assertEqual([bt3826Make], beamtalk_object_class:local_class_method_selectors_safe(Pid)),
+        ?assertEqual(
+            [bt3826Make], beamtalk_object_class_read:local_class_method_selectors_safe(Pid)
+        ),
         %% update_class (hot reload) replaces fields and methods.
         {ok, _} = beamtalk_object_class:update_class(Name, #{
             instance_methods => #{bt3826Baz => #{block => fun() -> ok end, arity => 0}},
             fields => [bt3826Z],
             method_return_types => #{bt3826Baz => 'String'}
         }),
-        ?assertEqual([bt3826Baz], beamtalk_object_class:instance_methods_safe(Pid)),
-        ?assertEqual([bt3826Z], beamtalk_object_class:instance_variables_safe(Pid)),
+        ?assertEqual([bt3826Baz], beamtalk_object_class_read:instance_methods_safe(Pid)),
+        ?assertEqual([bt3826Z], beamtalk_object_class_read:instance_variables_safe(Pid)),
         ?assertEqual(
             {ok, 'String'}, beamtalk_class_registry:get_method_return_type(Name, bt3826Baz)
         ),
@@ -2010,12 +2012,14 @@ bt3832_compiled_method_records_track_class_state_test() ->
     }),
     try
         %% Inherited class-side method: ETS walk == the class process's own walk.
-        Inherited = beamtalk_object_class:compiled_method_safe(SubPid, class, bt3832Make),
+        Inherited = beamtalk_object_class_read:compiled_method_safe(SubPid, class, bt3832Make),
         ?assertMatch(
             #{'__selector__' := bt3832Make, '__source__' := <<"class make => 1">>}, Inherited
         ),
         ?assertEqual(Inherited, gen_server:call(SubPid, {class_method, bt3832Make})),
-        ?assertEqual(nil, beamtalk_object_class:compiled_method_safe(SubPid, class, bt3832Nope)),
+        ?assertEqual(
+            nil, beamtalk_object_class_read:compiled_method_safe(SubPid, class, bt3832Nope)
+        ),
         %% Hot patch (put_method) and doc update are visible immediately.
         ok = beamtalk_object_class:put_method(
             SuperPid, bt3832Patched, fun(_Self) -> 1 end, <<"p">>

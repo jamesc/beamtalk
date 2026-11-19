@@ -167,7 +167,7 @@ classRemoveSelectorIfAbsent(Self, Selector, AbsentBlock) ->
 remove_selector(Self, Selector, Sent) ->
     {Side, ClassPid} = removal_target(Self),
     ok = beamtalk_refactor_support:refuse_in_own_class_process(ClassPid, Sent),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     case Side =:= instance andalso beamtalk_protocol_registry:is_protocol(ClassName) of
         true -> remove_protocol_selector(ClassName, Selector);
         false -> remove_class_selector(Self, ClassName, Side, Selector)
@@ -476,7 +476,7 @@ object, on success.
 classRenameTo(Self, NewName) when is_atom(NewName) ->
     ClassPid = erlang:element(4, Self),
     ok = beamtalk_refactor_support:refuse_in_own_class_process(ClassPid, 'renameTo:'),
-    OldName = beamtalk_object_class:class_name_safe(ClassPid),
+    OldName = beamtalk_object_class_read:class_name_safe(ClassPid),
     ok = beamtalk_refactor_support:require_class_capability(
         'renameTo:', OldName, [<<"renameTo: #">>, atom_to_binary(NewName, utf8)]
     ),
@@ -1086,7 +1086,7 @@ log_class_rename(OldNameBin, NewNameBin, Classification, RewriteResult) ->
 -spec selector_not_found_error(#beamtalk_object{}, atom()) -> #beamtalk_error{}.
 selector_not_found_error(Self, Selector) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     Error0 = beamtalk_error:new(selector_not_found, ClassName, Selector),
     Msg = iolist_to_binary([
         atom_to_binary(ClassName, utf8),
@@ -1145,7 +1145,7 @@ compile_source_op(ephemeral) -> 'tryCompile:source:'.
 do_compile_source(Self, Selector, Source, Intent) ->
     ClassPid = erlang:element(4, Self),
     ok = beamtalk_refactor_support:refuse_in_own_class_process(ClassPid, compile_source_op(Intent)),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     ok = beamtalk_capability:require_workspace(compile_source_op(Intent), ClassName),
     ok = beamtalk_refactor_support:require_method_capability(
         compile_source_op(Intent), ClassName, Selector
@@ -1194,7 +1194,7 @@ same underlying shape).
 -spec classPrecheckCompileSource(#beamtalk_object{}, atom(), binary()) -> map().
 classPrecheckCompileSource(Self, Selector, Source) ->
     ClassPid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     ok = beamtalk_capability:require_workspace('precheckCompile:source:', ClassName),
     ok = beamtalk_refactor_support:require_method_capability(
         'precheckCompile:source:', ClassName, Selector

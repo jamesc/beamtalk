@@ -201,7 +201,10 @@ child_class_entry_with_kind({ChildClass, ChildModule} = Entry) ->
 child_class_entry(ClassName, ChildClass) ->
     case is_tuple(ChildClass) andalso beamtalk_class_registry:is_class_object(ChildClass) of
         true ->
-            {beamtalk_object_class:class_name_safe(element(4, ChildClass)), element(3, ChildClass)};
+            {
+                beamtalk_object_class_read:class_name_safe(element(4, ChildClass)),
+                element(3, ChildClass)
+            };
         false ->
             exit(
                 beamtalk_error:bad_value(

@@ -276,7 +276,7 @@ moveClass(ClassArg, NewPath) ->
                 )
         end,
     ClassPid = erlang:element(4, ClassArg),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     case beamtalk_repl_loader_rewrite:move_class(ClassName, NewPathBin) of
         ok -> ClassArg;
         {error, Err} -> beamtalk_error:raise(Err)
@@ -653,7 +653,7 @@ startSupervisor(ClassArg) ->
             ok
     end,
     ClassPid = element(4, ClassArg),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     Module = beamtalk_object_class:module_name_safe(ClassPid),
     case beamtalk_supervisor:is_supervisor(ClassName) of
         false ->
@@ -766,7 +766,7 @@ stopSupervisor(ClassArg) ->
             ok
     end,
     ClassPid = element(4, ClassArg),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
     case beamtalk_supervisor:is_supervisor(ClassName) of
         false ->
             raise_stop_supervisor_type_error(
