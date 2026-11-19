@@ -98,14 +98,20 @@ fn test_find_source_files_non_bt_file_error() {
     write_test_file(&test_file, "not beamtalk");
 
     let result = find_source_files(&test_file);
-    assert!(result.is_err());
+    let err = result.expect_err("a non-.bt file is not a source file");
+    assert!(err.to_string().contains("test.txt"), "got: {err}");
 }
 
 #[test]
 fn test_find_source_files_nonexistent_path() {
     let path = Utf8PathBuf::from("/nonexistent/path");
     let result = find_source_files(&path);
-    assert!(result.is_err());
+    let err = result.expect_err("a missing path is an error");
+    assert!(
+        err.to_string()
+            .contains("Path '/nonexistent/path' does not exist"),
+        "got: {err}"
+    );
 }
 
 #[cfg(unix)]
@@ -186,7 +192,11 @@ fn test_compile_file_with_syntax_error() {
         &CompileContext::default(),
         None,
     );
-    assert!(result.is_err());
+    let err = result.expect_err("a syntax error fails the compile");
+    assert!(
+        err.to_string().contains("Failed to compile") && err.to_string().contains("test.bt"),
+        "got: {err}"
+    );
 }
 
 #[test]
@@ -195,7 +205,11 @@ fn test_build_empty_directory() {
     let project_path = create_test_project(&temp);
 
     let result = build(project_path.as_str(), &default_options(), false);
-    assert!(result.is_err());
+    let err = result.expect_err("an empty project has nothing to build");
+    assert!(
+        err.to_string().contains("No .bt source files found"),
+        "got: {err}"
+    );
 }
 
 #[test]

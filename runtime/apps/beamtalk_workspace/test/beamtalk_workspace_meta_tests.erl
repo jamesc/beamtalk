@@ -994,6 +994,78 @@ settings_survive_restart_test() ->
         _ = file:delete(MetaFile)
     end.
 
+%%% BT-5014: metadata.json has two writers (Rust CLI, this server)
+
+schema_fixture() ->
+    beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_workspace",
+        "test",
+        "fixtures",
+        "workspace_metadata_schema.json"
+    ]).
+
+%% Start the server over a metadata.json seeded from `Seed`, deliver
+%% `persist_to_disk` directly (no debounce wait) and return the decoded file.
+persist_over(WsId, Seed) ->
+    stop_if_running(),
+    MetaFile = metadata_path_for(WsId),
+    ok = filelib:ensure_dir(MetaFile),
+    ok = file:write_file(MetaFile, iolist_to_binary(json:encode(Seed))),
+    try
+        {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+            workspace_id => WsId,
+            project_path => <<"/bt_test/fixture_project">>,
+            created_at => 1700000000
+        }),
+        Pid ! persist_to_disk,
+        ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
+        {ok, Bin} = file:read_file(MetaFile),
+        gen_server:stop(Pid),
+        beamtalk_test_wait:dead(Pid),
+        json:decode(Bin)
+    after
+        _ = file:delete(MetaFile)
+    end.
+
+persist_preserves_keys_it_does_not_own_test() ->
+    #{<<"sample">> := Sample, <<"erlang_owned">> := ErlangOwned} = schema_fixture(),
+    WsId = <<"schema_fixture_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
+    Persisted = persist_over(WsId, Sample#{<<"workspace_id">> => WsId}),
+    %% Rust-owned key and a key from a future writer survive the Erlang persist.
+    ?assertEqual(<<"fixture_pkg">>, maps:get(<<"project_fingerprint">>, Persisted)),
+    ?assertEqual(#{<<"kept">> => true}, maps:get(<<"unknown_future_key">>, Persisted)),
+    %% Every key this writer owns is present.
+    [?assert(maps:is_key(K, Persisted), K) || K <- ErlangOwned].
+
+persist_keeps_recorded_project_path_when_unknown_test() ->
+    %% A server started without a project_path must not erase the CLI's.
+    stop_if_running(),
+    #{<<"sample">> := Sample} = schema_fixture(),
+    WsId = <<"schema_nopath_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    ok = filelib:ensure_dir(MetaFile),
+    ok = file:write_file(
+        MetaFile, iolist_to_binary(json:encode(Sample#{<<"workspace_id">> => WsId}))
+    ),
+    try
+        {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+            workspace_id => WsId, created_at => 1700000000
+        }),
+        Pid ! persist_to_disk,
+        ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
+        {ok, Bin} = file:read_file(MetaFile),
+        gen_server:stop(Pid),
+        beamtalk_test_wait:dead(Pid),
+        ?assertEqual(
+            <<"/bt_test/fixture_project">>,
+            maps:get(<<"project_path">>, json:decode(Bin))
+        )
+    after
+        _ = file:delete(MetaFile)
+    end.
+
 settings_get_returns_default_in_run_mode_test() ->
     %% No gen_server running ⇒ get_setting/2 must return the default rather
     %% than crash, mirroring the other graceful-on-noproc accessors.

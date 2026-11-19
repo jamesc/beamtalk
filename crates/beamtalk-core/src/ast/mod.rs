@@ -216,6 +216,46 @@ impl Module {
             .chain(self.method_definitions.iter().map(|s| &s.method))
     }
 
+    /// Every state and class-variable default expression in this module
+    /// (BT-5026). Defaults are not method bodies, so [`Self::all_methods`] and
+    /// the statement-sequence walkers never reach them; this is the one shared
+    /// enumeration of them.
+    pub fn state_default_exprs(&self) -> impl Iterator<Item = &Expression> {
+        self.classes
+            .iter()
+            .flat_map(ClassDefinition::state_default_exprs)
+    }
+
+    /// Protocol provided-method bodies that no class in this module carries a
+    /// flattened copy of (BT-5026).
+    ///
+    /// The flattener splices a copy of a provided method into each using class,
+    /// keeping the protocol's own span (`trait_expansion::substitute_provision`),
+    /// so those bodies are already covered by [`Self::all_methods`] (once per
+    /// user). A provided method with no copy anywhere would otherwise never be
+    /// analysed: one in a protocol-only file, one every user drops with
+    /// `excluding:`, or one every user overrides with its own method. A copy is
+    /// recognised by selector and span, so this re-derives none of the
+    /// flattener's rules. On a module that has not been flattened, every
+    /// provided method is returned.
+    pub fn unused_protocol_provided_methods(&self) -> impl Iterator<Item = &MethodDefinition> {
+        self.protocols
+            .iter()
+            .flat_map(|p| p.provided_methods.iter().map(move |m| (p, m)))
+            .filter(|(p, m)| {
+                // The class must also `uses:` this protocol: a span carries no
+                // file identity, so a copy from a cross-file protocol could
+                // otherwise match a local method at the same offsets.
+                !self.classes.iter().any(|c| {
+                    c.uses.iter().any(|u| u.protocol.name == p.name.name)
+                        && c.methods
+                            .iter()
+                            .any(|cm| cm.span == m.span && cm.selector == m.selector)
+                })
+            })
+            .map(|(_, m)| m)
+    }
+
     /// Iterate the methods written in class bodies (instance, then class side)
     /// with their owning class name and side. Excludes standalone definitions;
     /// [`Self::methods_with_owner`] adds them.
@@ -763,12 +803,17 @@ mod tests {
 
     #[test]
     fn literal_variants() {
-        let _int = Literal::Integer(42);
-        let _float = Literal::Float(2.5);
-        let _string = Literal::String("hello".into());
-        let _symbol = Literal::Symbol("symbol".into());
-        let _char = Literal::Character('a');
-        let _array = Literal::List(vec![Literal::Integer(1), Literal::Integer(2)]);
+        let array = Literal::List(vec![Literal::Integer(1), Literal::Integer(2)]);
+        assert_eq!(
+            array,
+            Literal::List(vec![Literal::Integer(1), Literal::Integer(2)])
+        );
+        // Distinct variants never compare equal, and equal payloads do.
+        assert_eq!(Literal::Integer(42), Literal::Integer(42));
+        assert_ne!(Literal::Integer(42), Literal::Integer(43));
+        assert_ne!(Literal::String("a".into()), Literal::Symbol("a".into()));
+        assert_eq!(Literal::Float(2.5), Literal::Float(2.5));
+        assert_eq!(Literal::Character('a'), Literal::Character('a'));
     }
 
     #[test]

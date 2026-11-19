@@ -21,6 +21,7 @@ use super::storage::{
     workspace_exists,
 };
 use beamtalk_repl_protocol::RequestBuilder;
+use beamtalk_workspace::pid_liveness::still_same_process;
 
 use crate::commands::protocol::ProtocolClient;
 
@@ -96,7 +97,12 @@ pub(super) fn wait_for_workspace_exit(host: &str, port: u16, timeout_secs: u64) 
 /// Cross-platform: `SIGKILL` on Unix and `TerminateProcess` on Windows, via
 /// `beamtalk_workspace::pid_liveness::kill_process`.
 /// Used as fallback when TCP graceful shutdown fails or times out.
-pub(super) fn force_kill_process(pid: u32) -> Result<()> {
+///
+/// `start_time` is the process start time recorded in `node.info`. When it is
+/// `Some`, the kill is skipped if the PID's current start time differs: the
+/// recorded node has exited and the OS recycled its PID for an unrelated
+/// process, which must not be killed. `None` (unrecorded) trusts the PID.
+pub(super) fn force_kill_process(pid: u32, start_time: Option<u64>) -> Result<()> {
     // PID 0 is sentinel for when PID tracking is unavailable
     if pid == 0 {
         return Err(miette!(
@@ -105,16 +111,24 @@ pub(super) fn force_kill_process(pid: u32) -> Result<()> {
         ));
     }
 
-    beamtalk_workspace::pid_liveness::kill_process(pid, None, || true)
-        .map_err(|err| miette!("Failed to kill process {pid}: {err}"))
+    beamtalk_workspace::pid_liveness::kill_process(pid, None, || {
+        still_same_process(pid, start_time)
+    })
+    .map_err(|err| miette!("Failed to kill process {pid}: {err}"))
 }
 
 /// Force-kill a process and wait for it to release its port.
 ///
 /// Combines `force_kill_process` and `wait_for_workspace_exit` into a single
 /// operation used in multiple shutdown fallback paths.
-fn force_kill_and_wait(pid: u32, host: &str, port: u16, timeout_secs: u64) -> Result<()> {
-    force_kill_process(pid)?;
+fn force_kill_and_wait(
+    pid: u32,
+    start_time: Option<u64>,
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+) -> Result<()> {
+    force_kill_process(pid, start_time)?;
     wait_for_workspace_exit(host, port, timeout_secs).map_err(|_| {
         miette!(
             "Workspace did not release port {} within {}s after forced stop. \
@@ -165,7 +179,13 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
                     ));
                 }
                 // Ensure the node has actually released its port before returning.
-                force_kill_and_wait(info.pid, host, info.port, FORCE_KILL_WAIT_TIMEOUT_SECS)?;
+                force_kill_and_wait(
+                    info.pid,
+                    info.start_time,
+                    host,
+                    info.port,
+                    FORCE_KILL_WAIT_TIMEOUT_SECS,
+                )?;
             } else {
                 eprintln!(
                     "Stopping workspace '{workspace_id}' (port {})...",
@@ -192,6 +212,7 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
                             eprintln!("Graceful shutdown timed out, force-killing...");
                             force_kill_and_wait(
                                 info.pid,
+                                info.start_time,
                                 host,
                                 info.port,
                                 FORCE_KILL_WAIT_TIMEOUT_SECS,
@@ -211,6 +232,7 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
                         eprintln!("TCP shutdown failed ({e}), force-killing...");
                         force_kill_and_wait(
                             info.pid,
+                            info.start_time,
                             host,
                             info.port,
                             FORCE_KILL_WAIT_TIMEOUT_SECS,
@@ -387,7 +409,7 @@ mod tests {
 
     #[test]
     fn force_kill_process_pid_zero_returns_sentinel_error() {
-        let err = force_kill_process(0).unwrap_err();
+        let err = force_kill_process(0, None).unwrap_err();
         assert!(err.to_string().contains("process ID unavailable"));
     }
 
@@ -400,7 +422,7 @@ mod tests {
             .expect("spawn sleep");
         let pid = child.id();
 
-        force_kill_process(pid).expect("force_kill_process should succeed");
+        force_kill_process(pid, None).expect("force_kill_process should succeed");
 
         // Reap the killed child (avoids a zombie) and confirm it is
         // actually gone, not just that the syscall returned 0.
@@ -421,7 +443,47 @@ mod tests {
         let pid = child.id();
         child.wait().expect("wait for true to exit");
 
-        force_kill_process(pid).expect("killing an already-exited pid should be Ok");
+        force_kill_process(pid, None).expect("killing an already-exited pid should be Ok");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn force_kill_process_skips_a_pid_whose_start_time_changed() {
+        // `cat` exits 0 when its stdin closes, so "was it killed?" is read from
+        // its exit status rather than raced against signal delivery.
+        let mut child = std::process::Command::new("cat")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn cat");
+        let pid = child.id();
+        let real = beamtalk_workspace::pid_liveness::proc_start_time(pid)
+            .expect("start time readable for a live child");
+
+        // A recorded start time that differs means the PID was recycled: the
+        // process now holding it is not the recorded node and must survive.
+        force_kill_process(pid, Some(real + 1)).expect("a mismatch is a skip, not an error");
+        drop(child.stdin.take()); // EOF: a surviving `cat` exits cleanly
+        let status = child.wait().expect("wait for cat");
+        assert!(
+            status.success(),
+            "mismatched start time must not kill the process, got {status:?}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn force_kill_process_kills_when_the_start_time_matches() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+        let real = beamtalk_workspace::pid_liveness::proc_start_time(pid)
+            .expect("start time readable for a live child");
+
+        force_kill_process(pid, Some(real)).expect("matching start time kills");
+        let status = child.wait().expect("reap killed child");
+        assert!(!status.success(), "matching start time must kill");
     }
 
     // -- force_kill_and_wait ------------------------------------------------
@@ -439,7 +501,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().expect("local_addr").port();
 
-        let err = force_kill_and_wait(pid, "127.0.0.1", port, 1).unwrap_err();
+        let err = force_kill_and_wait(pid, None, "127.0.0.1", port, 1).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("did not release port"), "got: {msg}");
         assert!(msg.contains("retry shortly"), "got: {msg}");

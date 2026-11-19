@@ -16,7 +16,12 @@ use serde::{Deserialize, Serialize};
 pub struct WorkspaceMetadata {
     /// Unique identifier (hash of project path or user-provided name).
     pub workspace_id: String,
-    /// Absolute path to the project directory.
+    /// Absolute path to the project directory. The Erlang writer
+    /// (`beamtalk_workspace_meta`) can record `null` (or omit the key) when it
+    /// does not know the path; that reads as an empty, non-absolute path
+    /// (BT-5014), which the self-heal in `create_workspace_impl` treats like
+    /// any other legacy non-absolute value.
+    #[serde(default, deserialize_with = "deserialize_nullable_path")]
     pub project_path: PathBuf,
     /// Unix timestamp (seconds) when the workspace was created.
     pub created_at: u64,
@@ -31,6 +36,14 @@ pub struct WorkspaceMetadata {
     /// existed deserializes as `None` (legacy, ungated) rather than failing.
     #[serde(default)]
     pub project_fingerprint: Option<String>,
+}
+
+/// `null` reads as an empty path (see [`WorkspaceMetadata::project_path`]).
+fn deserialize_nullable_path<'de, D>(deserializer: D) -> std::result::Result<PathBuf, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<PathBuf>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 /// Node information stored in ~/.beamtalk/workspaces/{id}/node.info
@@ -149,15 +162,37 @@ pub fn get_workspace_metadata(workspace_id: &str) -> Result<WorkspaceMetadata> {
 }
 
 /// Save workspace metadata.
+///
+/// `metadata.json` has a second writer, the Erlang `beamtalk_workspace_meta`
+/// server, which owns `node_name`, `loaded_modules`, `class_sources`,
+/// `settings`, … (BT-5014). Read-merge-write: only the keys
+/// [`WorkspaceMetadata`] models are replaced; every other key already in the
+/// file is kept. An unreadable or non-object file is replaced outright.
 pub fn save_workspace_metadata(metadata: &WorkspaceMetadata) -> Result<()> {
     let dir = workspace_dir(&metadata.workspace_id)?;
     fs::create_dir_all(&dir).into_diagnostic()?;
 
     let metadata_path = dir.join("metadata.json");
-    let content = serde_json::to_string_pretty(metadata).into_diagnostic()?;
+    let content = merged_metadata_json(&metadata_path, metadata)?;
     fs::write(metadata_path, content).into_diagnostic()?;
 
     Ok(())
+}
+
+/// Serialize `metadata` over whatever JSON object is already at `path`.
+fn merged_metadata_json(path: &Path, metadata: &WorkspaceMetadata) -> Result<String> {
+    let mut merged = fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|value| match value {
+            serde_json::Value::Object(map) => Some(map),
+            _ => None,
+        })
+        .unwrap_or_default();
+    if let serde_json::Value::Object(owned) = serde_json::to_value(metadata).into_diagnostic()? {
+        merged.extend(owned);
+    }
+    serde_json::to_string_pretty(&merged).into_diagnostic()
 }
 
 /// Write `content` to `path` with owner-only permissions (0600 on Unix).
@@ -272,7 +307,6 @@ pub(super) fn read_port_file(workspace_id: &str) -> Result<Option<(u16, Option<S
 }
 
 /// Read process start time — delegates to `beamtalk_workspace::pid_liveness::proc_start_time`.
-#[cfg(target_os = "linux")]
 pub(super) fn read_proc_start_time(pid: u32) -> Option<u64> {
     beamtalk_workspace::pid_liveness::proc_start_time(pid)
 }
@@ -353,6 +387,84 @@ pub(super) fn acquire_workspace_lock(workspace_id: &str) -> Result<fs::File> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Shared Rust/Erlang/broker schema fixture for `metadata.json` (BT-5014);
+    /// Erlang half: `beamtalk_workspace_meta_tests`, broker half:
+    /// `beamtalk-desktop-broker`'s `discovery` tests.
+    fn schema_fixture() -> serde_json::Value {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../runtime/apps/beamtalk_workspace/test/fixtures/workspace_metadata_schema.json",
+        );
+        serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn metadata_fixture_rust_owned_keys_match_struct() {
+        let fixture = schema_fixture();
+        let sample: WorkspaceMetadata = serde_json::from_value(fixture["sample"].clone()).unwrap();
+        let serde_json::Value::Object(map) = serde_json::to_value(&sample).unwrap() else {
+            panic!("metadata serializes to an object");
+        };
+        let mut actual: Vec<&str> = map.keys().map(String::as_str).collect();
+        let mut expected: Vec<&str> = fixture["rust_owned"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|k| k.as_str().unwrap())
+            .collect();
+        actual.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(actual, expected);
+    }
+
+    /// The Erlang writer records `"project_path": null` when it does not know
+    /// the path; that must load, not be reported as a corrupt file.
+    #[test]
+    fn metadata_null_project_path_is_readable() {
+        let fixture = schema_fixture();
+        let loaded: WorkspaceMetadata =
+            serde_json::from_value(fixture["null_project_path"].clone()).unwrap();
+        assert_eq!(loaded.workspace_id, "fixture_ws");
+        assert!(loaded.project_path.as_os_str().is_empty());
+        assert_eq!(loaded.project_fingerprint, None);
+    }
+
+    /// A Rust rewrite replaces only the keys it owns; the Erlang-owned ones
+    /// (and keys from future writers) survive.
+    #[test]
+    fn metadata_rewrite_preserves_keys_rust_does_not_own() {
+        let fixture = schema_fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("metadata.json");
+        fs::write(&path, fixture["sample"].to_string()).unwrap();
+
+        let mut metadata: WorkspaceMetadata =
+            serde_json::from_value(fixture["sample"].clone()).unwrap();
+        metadata.project_path = PathBuf::from("/healed/path");
+        let rewritten: serde_json::Value =
+            serde_json::from_str(&merged_metadata_json(&path, &metadata).unwrap()).unwrap();
+
+        assert_eq!(rewritten["project_path"], "/healed/path");
+        for (key, value) in fixture["sample"].as_object().unwrap() {
+            if key != "project_path" {
+                assert_eq!(&rewritten[key], value, "key {key} must be preserved");
+            }
+        }
+    }
+
+    #[test]
+    fn metadata_rewrite_replaces_unreadable_file() {
+        let fixture = schema_fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("metadata.json");
+        fs::write(&path, "not json").unwrap();
+        let metadata: WorkspaceMetadata =
+            serde_json::from_value(fixture["sample"].clone()).unwrap();
+        let rewritten: serde_json::Value =
+            serde_json::from_str(&merged_metadata_json(&path, &metadata).unwrap()).unwrap();
+        assert_eq!(rewritten["workspace_id"], "fixture_ws");
+        assert!(rewritten.get("node_name").is_none());
+    }
 
     /// Verify that `get_workspace_metadata` returns a clear error for an empty file.
     #[test]

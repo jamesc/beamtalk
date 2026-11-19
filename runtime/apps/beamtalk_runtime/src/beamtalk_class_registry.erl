@@ -124,7 +124,7 @@ Fetch all live class entries from the registry.
 
 Returns a list of {Name, ModuleName, Pid} tuples for all registered class
 processes that are still alive. Dead processes (noproc, timeout) are silently
-filtered out. Returns [] if the pg process group is not running.
+filtered out. Returns [] if the pg process group is not running (`pg:get_members/1` returns [] for an unstarted scope, it does not exit).
 
 Sends no messages to local class processes (BT-3820): name and module come from the
 metadata ETS rows (`class_name_safe/1`, `module_name_safe/1`), and a dead local
@@ -139,29 +139,21 @@ process while handling a call); this function runs inside class handlers
 -type class_entry() :: {atom(), module(), pid()}.
 -spec live_class_entries() -> [class_entry()].
 live_class_entries() ->
-    try
-        ClassPids = all_classes(),
-        lists:filtermap(
-            fun(Pid) ->
-                %% BT-3820: ETS-backed reads only. A class process runs
-                %% class-side methods that reach this function (protocol
-                %% conformance, process navigation); a `gen_server:call`
-                %% per class here deadlocks two such classes against each
-                %% other until the 5s call timeout.
-                case class_identity(Pid) of
-                    {ok, Name, Mod} -> {true, {Name, Mod, Pid}};
-                    skip -> false
-                end
-            end,
-            ClassPids
-        )
-    catch
-        exit:{noproc, _} ->
-            ?LOG_WARNING("pg not started when fetching class entries", #{
-                module => ?MODULE, domain => [beamtalk, runtime]
-            }),
-            []
-    end.
+    ClassPids = all_classes(),
+    lists:filtermap(
+        fun(Pid) ->
+            %% BT-3820: ETS-backed reads only. A class process runs
+            %% class-side methods that reach this function (protocol
+            %% conformance, process navigation); a `gen_server:call`
+            %% per class here deadlocks two such classes against each
+            %% other until the 5s call timeout.
+            case class_identity(Pid) of
+                {ok, Name, Mod} -> {true, {Name, Mod, Pid}};
+                skip -> false
+            end
+        end,
+        ClassPids
+    ).
 
 %% Resolve a pg member's `{Name, Module}`. `skip` for a pid that is not a live,
 %% fully registered class.
@@ -215,34 +207,29 @@ Return all loaded user classes (those with a source file recorded).
 Excludes stdlib and ClassBuilder-created classes (they have no source file).
 Returns a list of {beamtalk_object, ClassTag, ModuleName, Pid} tuples for
 all user-defined classes that are still alive. Dead processes are silently
-filtered out. Returns [] if the pg process group is not running.
+filtered out. Returns [] if the pg process group is not running (`pg:get_members/1` returns [] for an unstarted scope, it does not exit).
 """.
 -type user_class_entry() :: {beamtalk_object, atom(), module(), pid()}.
 -spec user_classes() -> [user_class_entry()].
 user_classes() ->
-    try
-        ClassPids = all_classes(),
-        lists:filtermap(
-            fun(Pid) ->
-                case class_identity(Pid) of
-                    skip ->
-                        false;
-                    {ok, ClassName, ModuleName} ->
-                        case beamtalk_reflection:source_file_from_module(ModuleName) of
-                            nil ->
-                                false;
-                            _SourceFile ->
-                                ClassTag = class_object_tag(ClassName),
-                                {true, {beamtalk_object, ClassTag, ModuleName, Pid}}
-                        end
-                end
-            end,
-            ClassPids
-        )
-    catch
-        exit:{noproc, _} ->
-            []
-    end.
+    ClassPids = all_classes(),
+    lists:filtermap(
+        fun(Pid) ->
+            case class_identity(Pid) of
+                skip ->
+                    false;
+                {ok, ClassName, ModuleName} ->
+                    case beamtalk_reflection:source_file_from_module(ModuleName) of
+                        nil ->
+                            false;
+                        _SourceFile ->
+                            ClassTag = class_object_tag(ClassName),
+                            {true, {beamtalk_object, ClassTag, ModuleName, Pid}}
+                    end
+            end
+        end,
+        ClassPids
+    ).
 
 -doc """
 Build a canonical class object record from a class gen_server pid.

@@ -164,7 +164,7 @@ start_anon_supervisor_with_worker(ChildId) ->
     },
     SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
     {ok, Pid} = supervisor:start_link(?MODULE, {SupFlags, [ChildSpec]}),
-    ?awaitMessage({worker_ready, _}, 1000),
+    ?awaitMessage({worker_ready, _}),
     Pid.
 
 -doc "OTP-compatible worker start function (returns {ok, Pid}).".
@@ -209,7 +209,7 @@ start_anon_supervisor_with_workers(ChildIds) ->
     %% Wait for all workers to report ready.
     lists:foreach(
         fun(_) ->
-            ?awaitMessage({worker_ready, _}, 1000)
+            ?awaitMessage({worker_ready, _})
         end,
         ChildIds
     ),
@@ -237,7 +237,7 @@ start_anon_supervisor_with_specs(Specs) ->
     %% (each comes from a different worker process), so the pids are looked
     %% up by id.
     [
-        ?awaitMessage({worker_ready, _}, 1000)
+        ?awaitMessage({worker_ready, _})
      || _ <- Specs
     ],
     Children = supervisor:which_children(Pid),
@@ -265,7 +265,7 @@ start_named_supervisor_with_worker(Name, ChildId) ->
     Pid.
 
 wait_for_worker() ->
-    ?awaitMessage({worker_ready, WorkerPid}, 1000),
+    ?awaitMessage({worker_ready, WorkerPid}),
     {ok, WorkerPid}.
 
 make_supervisor_tuple(ClassName, Module, Pid) ->
@@ -530,7 +530,7 @@ terminate_restart_delete_by_id_test() ->
         {ok, B2} = beamtalk_supervisor:restartChild(Self, a2),
         ?assert(is_pid(B2)),
         ?assertNotEqual(B, B2),
-        ?awaitMessage({worker_ready, B2}, 1000),
+        ?awaitMessage({worker_ready, B2}),
         %% delete after terminate
         {ok, nil} = beamtalk_supervisor:terminateChildId(Self, a2),
         ?assertEqual({ok, nil}, beamtalk_supervisor:deleteChild(Self, a2)),
@@ -746,7 +746,7 @@ declaration_order_survives_one_for_all_restart_test() ->
             SupFlags = #{strategy => Strategy, intensity => 5, period => 5},
             {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, ChildSpecs}),
             [
-                ?awaitMessage({worker_ready, _}, 1000)
+                ?awaitMessage({worker_ready, _})
              || _ <- ChildSpecs
             ],
             {o2, W2, _, _} = lists:keyfind(o2, 1, supervisor:which_children(SupPid)),
@@ -760,7 +760,7 @@ declaration_order_survives_one_for_all_restart_test() ->
                         rest_for_one -> 2
                     end,
                 [
-                    ?awaitMessage({worker_ready, _}, 1000)
+                    ?awaitMessage({worker_ready, _})
                  || _ <- lists:seq(1, NRestarted)
                 ],
                 {ok, Infos} = beamtalk_supervisor:childInfos(Sup),
@@ -908,9 +908,9 @@ count_children_dynamic_supervisor_with_children_test() ->
         Self = make_supervisor_tuple('TestDynCount2', test_dyn_cnt2, SupPid),
         Parent = self(),
         {ok, _Child1} = supervisor:start_child(SupPid, [Parent]),
-        ?awaitMessage({worker_ready, _}, 1000),
+        ?awaitMessage({worker_ready, _}),
         {ok, _Child2} = supervisor:start_child(SupPid, [Parent]),
-        ?awaitMessage({worker_ready, _}, 1000),
+        ?awaitMessage({worker_ready, _}),
         ?assertEqual({ok, 2}, beamtalk_supervisor:countChildren(Self))
     after
         gen_server:stop(SupPid)
@@ -942,7 +942,7 @@ terminate_child_by_pid_test() ->
         %% Start a dynamic child; start_worker/1 expects a parent pid to signal readiness.
         Parent = self(),
         {ok, ChildPid} = supervisor:start_child(SupPid, [Parent]),
-        ?awaitMessage({worker_ready, _}, 1000),
+        ?awaitMessage({worker_ready, _}),
         ?assert(is_process_alive(ChildPid)),
         %% terminateChild/2 DynamicSupervisor path: Arg is an actor tuple (not a class object).
         %% is_class_object returns false (no " class" suffix in element 2), so the pid branch runs.
@@ -2793,7 +2793,7 @@ startChild_announces_child_added_test() ->
     try
         Self = {beamtalk_supervisor, 'BT2445DynSup', ?MODULE, SupPid},
         {ok, _Child} = beamtalk_supervisor:startChild(Self),
-        ?awaitMessage({child_added, Event}, 1000),
+        ?awaitMessage({child_added, Event}),
         ?assertEqual('SupervisionChildAdded', maps:get('$beamtalk_class', Event)),
         ?assertEqual('BT2445DynSup', maps:get(supervisor, Event)),
         ?assertEqual('BT2445DynWorker', maps:get(childClass, Event))
@@ -2817,7 +2817,7 @@ startChild_arity2_success_test() ->
         Self = {beamtalk_supervisor, 'BT1980DynArgsSup', ?MODULE, SupPid},
         Result = beamtalk_supervisor:startChild(Self, self()),
         %% Drain the worker_ready message start_worker/1 sends us.
-        ?awaitMessage({worker_ready, _}, 1000),
+        ?awaitMessage({worker_ready, _}),
         ?assertMatch({ok, {beamtalk_object, 'BT1980DynArgs', ?MODULE, _}}, Result)
     after
         ChildClassPid ! stop,
@@ -2919,7 +2919,7 @@ wrap_child_actor_returns_beamtalk_object_test() ->
     },
     SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
     {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, [ChildSpec]}),
-    ?awaitMessage({worker_ready, _}, 1000),
+    ?awaitMessage({worker_ready, _}),
     FakeClassPid = spawn(fun() ->
         (fun Loop() ->
             receive
@@ -2959,7 +2959,7 @@ wrap_child_supervisor_returns_beamtalk_supervisor_test() ->
     },
     SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
     {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, [ChildSpec]}),
-    ?awaitMessage({worker_ready, _}, 1000),
+    ?awaitMessage({worker_ready, _}),
     FakeClassPid = spawn(fun() ->
         (fun Loop() ->
             receive
@@ -3052,7 +3052,7 @@ terminateChild_child_alias_delegates_test() ->
     SupPid = start_dynamic_supervisor(),
     Parent = self(),
     {ok, ChildPid} = supervisor:start_child(SupPid, [Parent]),
-    ?awaitMessage({worker_ready, _}, 1000),
+    ?awaitMessage({worker_ready, _}),
     Self = make_supervisor_tuple('BT1980AliasChild', bt1980_alias_child_mod, SupPid),
     ChildArg = {beamtalk_object, 'SomeActor', some_mod, ChildPid},
     try
@@ -3126,7 +3126,7 @@ terminate_child_static_terminate_failed_test() ->
         }}
     ),
     {ok, Child} = supervisor:start_child(SupPid, [self()]),
-    ?awaitMessage({worker_ready, _}, 1000),
+    ?awaitMessage({worker_ready, _}),
     Self = make_supervisor_tuple('BT1998StaticFail', bt1998_static_fail_mod, SupPid),
     try
         Result = beamtalk_supervisor:terminateChildId(Self, some_id),

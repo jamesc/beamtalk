@@ -36,11 +36,17 @@ handle_term(<<"sessions">>, _Params, _Msg, _SessionPid) ->
         undefined ->
             {sessions, []};
         _Sup ->
+            %% Report the protocol session ids — the values `resume` accepts —
+            %% not the shell pids (BT-5012).
             Children = supervisor:which_children(beamtalk_session_sup),
             Sessions = lists:filtermap(
                 fun
                     ({_Id, Pid, _Type, _Modules}) when is_pid(Pid) ->
-                        {true, #{id => list_to_binary(pid_to_list(Pid))}};
+                        try beamtalk_repl_shell:get_session_id(Pid, 1000) of
+                            {ok, SessionId} -> {true, #{id => SessionId}}
+                        catch
+                            exit:_ -> false
+                        end;
                     (_) ->
                         false
                 end,
@@ -67,7 +73,11 @@ handle_term(<<"clone">>, _Params, _Msg, _SessionPid) ->
                     ])
                 )}
     end;
-handle_term(<<"close">>, _Params, _Msg, _SessionPid) ->
+handle_term(<<"close">>, _Params, _Msg, SessionPid) ->
+    %% Stop the session shell; its terminate removes the table row (BT-5012).
+    %% Only children of the session supervisor are stopped, so a caller that is
+    %% not a session (e.g. an in-process test) is left alone.
+    _ = stop_session(SessionPid),
     {status, ok};
 handle_term(<<"health">>, _Params, _Msg, _SessionPid) ->
     {ok, Nonce} = beamtalk_repl_server:get_nonce(),
@@ -99,3 +109,12 @@ handle_term(<<"shutdown">>, Params, _Msg, _SessionPid) ->
                     <<"Provide the correct node cookie for shutdown.">>
                 )}
     end.
+
+-spec stop_session(term()) -> ok | {error, term()}.
+stop_session(SessionPid) when is_pid(SessionPid) ->
+    case whereis(beamtalk_session_sup) of
+        undefined -> {error, not_found};
+        _ -> beamtalk_session_sup:stop_session(SessionPid)
+    end;
+stop_session(_) ->
+    {error, not_found}.

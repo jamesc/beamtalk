@@ -15,6 +15,9 @@ beamtalk_repl_json_tests.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
+%% logger handler callback for `tcp_preauth_malformed_frame_test/1`
+-export([log/2]).
+
 %%====================================================================
 %% Tests
 %%====================================================================
@@ -70,6 +73,9 @@ tcp_integration_test_() ->
         [
             {"connect snapshot lists the system actor", fun() ->
                 tcp_snapshot_system_actor_test(Port)
+            end},
+            {"malformed pre-auth frames get auth_error and no crash report", fun() ->
+                tcp_preauth_malformed_frame_test(Port)
             end},
             {"clear op", fun() -> tcp_clear_test(Port) end},
             {"bindings op (empty)", fun() -> tcp_bindings_empty_test(Port) end},
@@ -226,7 +232,9 @@ tcp_send_op(Port, OpJson) ->
 %% Minimal WebSocket client for tests.
 %% Performs HTTP upgrade, cookie auth, then supports text frame send/recv.
 
-ws_connect(Port) ->
+%% Open a connection and finish the HTTP upgrade and the `auth-required`
+%% greeting, but send nothing: the peer is still unauthenticated.
+ws_connect_unauthenticated(Port) ->
     {ok, Sock} = gen_tcp:connect(
         {127, 0, 0, 1},
         Port,
@@ -253,6 +261,10 @@ ws_connect(Port) ->
     {ok, Rest} = ws_consume_http_response(Sock),
     %% Read auth-required message (may already be in Rest buffer)
     {ok, _AuthRequired} = ws_recv_with_buf(Sock, Rest),
+    Sock.
+
+ws_connect(Port) ->
+    Sock = ws_connect_unauthenticated(Port),
     %% Send cookie auth, including this node's own versions for the
     %% handshake gate (BT-4327).
     Cookie = atom_to_binary(erlang:get_cookie(), utf8),
@@ -666,6 +678,52 @@ tcp_inspect_dead_actor_test(Port) ->
     ?assertMatch(#{<<"id">> := <<"t19">>}, Resp),
     %% Should return error (not alive or not known)
     ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% BT-5018: malformed frames sent over a real, unauthenticated connection get
+%% the generic `auth_error` and a close. Before the fix a lone-surrogate escape
+%% raised `{unexpected_sequence, _}` in the handler, which crashed with a crash
+%% report and closed the socket without any reply. (Frames that are not UTF-8 at
+%% all never reach the handler: cowboy closes those itself with 1007.)
+tcp_preauth_malformed_frame_test(Port) ->
+    HandlerId = beamtalk_preauth_crash_watch,
+    ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{parent => self()}}),
+    try
+        lists:foreach(
+            fun(Frame) ->
+                Sock = ws_connect_unauthenticated(Port),
+                ws_send(Sock, Frame),
+                {ok, Reply} = ws_recv(Sock),
+                ?assertEqual(
+                    #{
+                        <<"type">> => <<"auth_error">>,
+                        <<"message">> => <<"Malformed auth message">>
+                    },
+                    json:decode(Reply)
+                ),
+                ?assertMatch({close, <<1008:16, _/binary>>}, ws_recv(Sock)),
+                gen_tcp:close(Sock)
+            end,
+            [
+                <<"{\"type\":\"auth\",\"cookie\":\"\\ud800\\u0041\"}">>,
+                <<"{\"type\":\"auth\",\"cookie\":\"\\udc00\"}">>,
+                <<"{\"type\":\"auth\",\"cookie\":\"\\ud800\"}">>,
+                <<"{\"type\":\"auth\"">>
+            ]
+        ),
+        %% The handler logs its own `warning` for a rejected auth; a crash is an `error`.
+        ?assertNoMessage({preauth_crash, _}, 200)
+    after
+        _ = logger:remove_handler(HandlerId)
+    end.
+
+%% logger handler: forward error-level events (crash reports) to the test.
+log(#{level := Level} = Event, #{config := #{parent := Parent}}) when
+    Level =:= error; Level =:= critical; Level =:= alert; Level =:= emergency
+->
+    Parent ! {preauth_crash, Event},
+    ok;
+log(_Event, _Config) ->
+    ok.
 
 %% Test: malformed JSON falls back to raw eval
 tcp_malformed_json_test(Port) ->

@@ -87,30 +87,115 @@ pub fn parse_workspace_id(stdout: &str) -> Option<String> {
     beamtalk_workspace::parse_repl_workspace_id(stdout)
 }
 
-/// Find any running workspace and return its port, cookie, and workspace ID.
-///
-/// Scans `~/.beamtalk/workspaces/` for directories with port files.
-/// Returns the workspace ID for port re-discovery on reconnect.
-pub fn discover_any_port_cookie_and_id() -> Option<(u16, String, String)> {
-    tracing::debug!("scanning for any running workspace");
-    let dir = beamtalk_workspace::workspaces_base_dir().ok()?;
-    let entries = std::fs::read_dir(dir).ok()?;
+/// How long a candidate workspace has to accept a TCP connection before it
+/// is considered dead.
+const LIVENESS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 
-    for entry in entries.flatten() {
-        let is_dir = entry.file_type().is_ok_and(|ft| ft.is_dir());
-        if is_dir {
-            let workspace_id = entry.file_name();
-            let workspace_id = workspace_id.to_string_lossy();
-            if let Some(port) = read_port_file(&workspace_id)
-                && let Some(cookie) = read_cookie_file(&workspace_id)
-            {
-                tracing::info!(port, workspace_id = %workspace_id, "discovered running workspace");
-                return Some((port, cookie, workspace_id.into_owned()));
-            }
+/// Find a running workspace and return its port, cookie, and workspace ID.
+///
+/// Scans `~/.beamtalk/workspaces/` for candidates and keeps only the live ones
+/// (see [`candidate_is_live`]). The workspace for the current directory wins
+/// when it is live; otherwise a single live candidate is used; several live
+/// candidates are an error naming them, because guessing could attach to
+/// another project's workspace (BT-5029).
+///
+/// Returns the workspace ID for port re-discovery on reconnect.
+///
+/// # Errors
+///
+/// Returns a message listing the candidates when more than one live workspace
+/// exists and none belongs to the current directory.
+pub fn discover_any_port_cookie_and_id() -> Result<Option<(u16, String, String)>, String> {
+    tracing::debug!("scanning for any running workspace");
+    let Ok(root) = beamtalk_workspace::workspaces_base_dir() else {
+        return Ok(None);
+    };
+    let cwd_id = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| generate_workspace_id(&cwd));
+    discover_any_in(&root, cwd_id.as_deref())
+}
+
+/// [`discover_any_port_cookie_and_id`] over an explicit workspaces root and
+/// current-directory workspace ID.
+fn discover_any_in(
+    root: &Path,
+    cwd_workspace_id: Option<&str>,
+) -> Result<Option<(u16, String, String)>, String> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Ok(None);
+    };
+    let mut live: Vec<(u16, String, String)> = entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|ft| ft.is_dir()))
+        .filter_map(|entry| {
+            let id = entry.file_name().to_string_lossy().into_owned();
+            let port = beamtalk_workspace::read_port_file_under(root, &id)
+                .ok()
+                .flatten()
+                .map(|(port, _nonce)| port)?;
+            let cookie = beamtalk_workspace::read_cookie_file_under(root, &id)
+                .ok()
+                .flatten()?;
+            candidate_is_live(&entry.path(), port).then_some((port, cookie, id))
+        })
+        .collect();
+    // `read_dir` order is unspecified; sort so errors and tests are stable.
+    live.sort_by(|a, b| a.2.cmp(&b.2));
+
+    if let Some(id) = cwd_workspace_id
+        && let Some(pos) = live.iter().position(|(_, _, ws)| ws == id)
+    {
+        let found = live.swap_remove(pos);
+        tracing::info!(port = found.0, workspace_id = %found.2, "using workspace for current directory");
+        return Ok(Some(found));
+    }
+    match live.len() {
+        0 => {
+            tracing::debug!("no running workspace found");
+            Ok(None)
+        }
+        1 => {
+            let found = live.remove(0);
+            tracing::info!(port = found.0, workspace_id = %found.2, "discovered running workspace");
+            Ok(Some(found))
+        }
+        _ => {
+            let ids: Vec<&str> = live.iter().map(|(_, _, id)| id.as_str()).collect();
+            Err(format!(
+                "Found {} running beamtalk workspaces ({}) and none belongs to the current \
+                 directory. Pass --workspace-id <id> or --port to choose one.",
+                ids.len(),
+                ids.join(", ")
+            ))
         }
     }
-    tracing::debug!("no running workspace found");
-    None
+}
+
+/// Whether the workspace in `dir` is alive, not a crashed node's leftovers.
+///
+/// Two checks, both must hold:
+/// - when `node.info` records the BEAM node's `pid` (and, where the platform
+///   provides one, its `start_time`), that process is still the same one
+///   ([`beamtalk_workspace::pid_liveness`]); and
+/// - something accepts a TCP connection on the recorded port.
+fn candidate_is_live(dir: &Path, port: u16) -> bool {
+    if let Ok(content) = std::fs::read_to_string(dir.join("node.info"))
+        && let Ok(info) = serde_json::from_str::<serde_json::Value>(&content)
+        && let Some(pid) = info
+            .get("pid")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|p| u32::try_from(p).ok())
+    {
+        let start_time = info.get("start_time").and_then(serde_json::Value::as_u64);
+        if !beamtalk_workspace::pid_liveness::is_process_alive(pid)
+            || !beamtalk_workspace::pid_liveness::still_same_process(pid, start_time)
+        {
+            return false;
+        }
+    }
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    std::net::TcpStream::connect_timeout(&addr, LIVENESS_PROBE_TIMEOUT).is_ok()
 }
 
 #[cfg(test)]
@@ -309,5 +394,92 @@ mod tests {
 
         // Cleanup
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // --- BT-5029: auto-discovery liveness / ambiguity (hermetic: a private
+    // workspaces root, no `~/.beamtalk`, listeners on ephemeral ports) ---
+
+    fn write_workspace(root: &Path, id: &str, port: u16, pid: Option<u32>) {
+        let dir = root.join(id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("port"), format!("{port}\nnonce")).unwrap();
+        fs::write(dir.join("cookie"), "cookie").unwrap();
+        if let Some(pid) = pid {
+            fs::write(dir.join("node.info"), format!("{{\"pid\": {pid}}}")).unwrap();
+        }
+    }
+
+    /// A bound port that nothing listens on: bind, record, drop would race
+    /// other tests, so use a listener we keep alive for the live case and a
+    /// port from a listener we have *closed* only for the dead case.
+    fn dead_port() -> u16 {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        drop(l);
+        port
+    }
+
+    fn live_listener() -> (std::net::TcpListener, u16) {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        (l, port)
+    }
+
+    #[test]
+    fn discovery_skips_dead_workspace_leftovers() {
+        let root = tempfile::tempdir().unwrap();
+        let (_l, live) = live_listener();
+        write_workspace(root.path(), "aaaa_dead", dead_port(), None);
+        write_workspace(root.path(), "zzzz_live", live, None);
+        let found = discover_any_in(root.path(), None).unwrap().unwrap();
+        assert_eq!(found.2, "zzzz_live");
+        assert_eq!(found.0, live);
+    }
+
+    #[test]
+    fn discovery_skips_workspace_whose_recorded_pid_is_gone() {
+        let root = tempfile::tempdir().unwrap();
+        let (_l, port) = live_listener();
+        // Port answers (reused by someone else) but node.info names a pid
+        // that cannot exist.
+        write_workspace(root.path(), "stale", port, Some(u32::MAX - 1));
+        assert_eq!(discover_any_in(root.path(), None).unwrap(), None);
+    }
+
+    #[test]
+    fn discovery_prefers_workspace_for_current_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let (_l1, p1) = live_listener();
+        let (_l2, p2) = live_listener();
+        write_workspace(root.path(), "other", p1, None);
+        write_workspace(root.path(), "mine", p2, None);
+        let found = discover_any_in(root.path(), Some("mine")).unwrap().unwrap();
+        assert_eq!(found.2, "mine");
+    }
+
+    #[test]
+    fn discovery_with_several_live_workspaces_and_no_match_is_an_error() {
+        let root = tempfile::tempdir().unwrap();
+        let (_l1, p1) = live_listener();
+        let (_l2, p2) = live_listener();
+        write_workspace(root.path(), "one", p1, None);
+        write_workspace(root.path(), "two", p2, None);
+        let err = discover_any_in(root.path(), Some("neither")).unwrap_err();
+        assert!(err.contains("one") && err.contains("two"), "got: {err}");
+        assert!(err.contains("--workspace-id"), "got: {err}");
+    }
+
+    #[test]
+    fn discovery_with_one_live_workspace_uses_it() {
+        let root = tempfile::tempdir().unwrap();
+        let (_l, p) = live_listener();
+        write_workspace(root.path(), "solo", p, None);
+        assert_eq!(
+            discover_any_in(root.path(), Some("not-it"))
+                .unwrap()
+                .unwrap()
+                .2,
+            "solo"
+        );
     }
 }

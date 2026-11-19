@@ -28,11 +28,6 @@ setup() ->
 %%% all/0 tests
 %%% ============================================================================
 
-all_returns_list_test() ->
-    setup(),
-    Result = beamtalk_package:all(),
-    ?assert(is_list(Result)).
-
 all_includes_stdlib_test() ->
     setup(),
     Result = beamtalk_package:all(),
@@ -148,10 +143,8 @@ classes_returns_empty_for_unknown_package_test() ->
 classes_returns_atoms_test() ->
     setup(),
     Result = beamtalk_package:classes(<<"stdlib">>),
-    lists:foreach(
-        fun(Name) -> ?assert(is_atom(Name)) end,
-        Result
-    ).
+    ?assertNotEqual([], Result),
+    ?assertEqual([], [Name || Name <- Result, not is_atom(Name)]).
 
 %%% ============================================================================
 %%% dependencies/1 tests

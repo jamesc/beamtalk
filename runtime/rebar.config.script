@@ -71,7 +71,7 @@ end,
 %% The ONE place a test-dir module may be left out is `EunitExcluded`, each
 %% with its reason. A stale entry (the module is gone, or is now reached as a
 %% companion) fails the config load rather than lingering.
-EunitApps = [beamtalk_runtime, beamtalk_workspace, beamtalk_compiler],
+EunitApps = [beamtalk_runtime, beamtalk_workspace, beamtalk_compiler, beamtalk_test_support],
 EunitExcluded = [
     %% {Module, "why it cannot run in the default EUnit pass"}
 ],

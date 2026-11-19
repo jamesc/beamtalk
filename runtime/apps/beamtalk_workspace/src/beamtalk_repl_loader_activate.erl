@@ -6,7 +6,7 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-Module activation for the loader: loading a compiled class module into the class registry and driving the hot-reload cascade (`register_classes/2`, `trigger_hot_reload/2`, descendant reload, suspended-actor findings). Moved verbatim out of `beamtalk_repl_loader` (BT-4907).
+Module activation for the loader: loading a compiled class module into the class registry and driving the hot-reload cascade (`register_class_module/1`, `trigger_hot_reload/2`, descendant reload, suspended-actor findings). Moved verbatim out of `beamtalk_repl_loader` (BT-4907).
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -16,7 +16,8 @@ Module activation for the loader: loading a compiled class module into the class
 -export([
     activate_module/2,
     activate_module/3,
-    activate_module/4
+    activate_module/4,
+    register_class_module/1
 ]).
 
 %% Exported for testing (only in test builds)
@@ -24,8 +25,6 @@ Module activation for the loader: loading a compiled class module into the class
 -export([
     resolve_class_name/1,
     existing_atom_or_undefined/1,
-    %% No cross-module production caller (BT-4903).
-    register_classes/2,
     trigger_hot_reload/2
 ]).
 -endif.
@@ -34,17 +33,25 @@ Module activation for the loader: loading a compiled class module into the class
 Activate a loaded module: register classes, trigger hot reload,
 and update workspace metadata.
 """.
--spec activate_module(atom(), [map()]) -> ok.
+-spec activate_module(atom(), [map()]) -> ok | {error, #beamtalk_error{}}.
 activate_module(ModuleName, Classes) ->
     activate_module(ModuleName, Classes, undefined).
 
 -doc """
 Activate a loaded module with an optional source path for workspace metadata.
+
+BT-5015: returns `{error, #beamtalk_error{kind = registration_error}}` when
+`register_class/0` fails, before hot reload, workspace bookkeeping and rechecks.
+The module is already loaded by then and is deliberately **not** purged here: on
+a reload the previous code is already replaced, so deleting the module would
+take down a live class. Callers report the error and skip their own
+bookkeeping (source tracking, ChangeLog); `beamtalk_repl_eval` purges a freshly
+defined protocol module itself.
 Passing SourcePath ensures the source file is recorded in workspace_meta so that
 new VS Code sessions (which have an empty session tracker) can still navigate to source.
 
 ADR 0105 Phase 2: `spawn_shape_recheck/1` fires last, after
-`register_classes/2` has installed the new `register_class/0` (which is what
+`register_class_module/1` has installed the new `register_class/0` (which is what
 refreshes the compiler port's ambient class-hierarchy cache — see
 `beamtalk_recheck:trigger_shape/2`'s moduledoc) — so a shape-change re-check
 always sees the *new* shape when it recompiles a candidate dependent. Runs
@@ -97,7 +104,7 @@ leaf-change detection `activate_module/4` (below) accepts — see that
 function's doc for why the detection has to happen in the *caller*, before
 `code:load_binary/3`, not here.
 """.
--spec activate_module(atom(), [map()], string() | undefined) -> ok.
+-spec activate_module(atom(), [map()], string() | undefined) -> ok | {error, #beamtalk_error{}}.
 activate_module(ModuleName, Classes, SourcePath) ->
     activate_module(ModuleName, Classes, SourcePath, []).
 
@@ -112,7 +119,7 @@ and `code:load_binary/3` runs a module's `on_load` function **synchronously,
 before returning** — so by the time *any* `activate_module/*` arity could
 inspect the hierarchy, the calling `register_class/0` (registering the new
 subclass link) has already run, even though `activate_module/3`'s own
-`register_classes/2` call (a redundant, harmless second invocation of the
+`register_class_module/1` call (a redundant, harmless second invocation of the
 same idempotent `register_class/0`) has not. This is exactly why
 `prime_shape_capture/1` (ADR 0105 Phase 2's shape-generation seed) already
 has to run before `code:load_binary/3` too — same ordering hazard, same
@@ -125,30 +132,63 @@ declared superclass) pass `[]` via the `activate_module/2,3` arities
 instead, which is correct, not a gap: neither path can ever produce a
 transition this mechanism needs to catch.
 """.
--spec activate_module(atom(), [map()], string() | undefined, [binary()]) -> ok.
+-spec activate_module(atom(), [map()], string() | undefined, [binary()]) ->
+    ok | {error, #beamtalk_error{}}.
 activate_module(ModuleName, Classes, SourcePath, NewlyNonLeafSuperclasses) ->
-    register_classes(Classes, ModuleName),
-    trigger_hot_reload(ModuleName, Classes),
-    beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
-    beamtalk_workspace_meta:update_activity(),
-    beamtalk_repl_loader_recheck:spawn_shape_recheck(Classes),
-    beamtalk_repl_loader_recheck:spawn_leaf_change_recheck(NewlyNonLeafSuperclasses).
+    case register_class_module(ModuleName) of
+        ok ->
+            trigger_hot_reload(ModuleName, Classes),
+            beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
+            beamtalk_workspace_meta:update_activity(),
+            beamtalk_repl_loader_recheck:spawn_shape_recheck(Classes),
+            beamtalk_repl_loader_recheck:spawn_leaf_change_recheck(NewlyNonLeafSuperclasses);
+        {error, _} = Error ->
+            %% BT-5015: no hot reload, module registration or recheck for a
+            %% class that did not register.
+            Error
+    end.
 
--doc "Register loaded classes by calling the module's register_class/0 function.".
--spec register_classes([map()], atom()) -> ok.
-register_classes(_ClassInfoList, ModuleName) ->
+-doc """
+Register a loaded module's classes by calling its `register_class/0`.
+
+BT-5015: a module that exports no `register_class/0` registers nothing (`ok`).
+Any other failure — a raise, or an `{error, _}` return — is logged at ERROR and
+returned as a structured `registration_error`, so the load fails instead of
+reporting a class that never registered (bad superclass, name collision,
+registry error) as loaded. Nothing is tolerated: `code:load_binary/3` already ran
+this same function as the module's `on_load`, so a failure here is a real one.
+""".
+-spec register_class_module(atom()) -> ok | {error, #beamtalk_error{}}.
+register_class_module(ModuleName) ->
     case erlang:function_exported(ModuleName, register_class, 0) of
         true ->
             %% bt-catcher-audit: not-applicable-no-block - compiled register_class/0, registration
             %% only
-            try
-                ModuleName:register_class()
+            try ModuleName:register_class() of
+                {error, RegReason} ->
+                    registration_failed(ModuleName, RegReason, undefined);
+                _Ok ->
+                    ok
             catch
-                _:_ -> ok
+                Class:Reason:Stacktrace ->
+                    registration_failed(ModuleName, Reason, {Class, Stacktrace})
             end;
         false ->
             ok
     end.
+
+-spec registration_failed(atom(), term(), undefined | {atom(), list()}) ->
+    {error, #beamtalk_error{}}.
+registration_failed(ModuleName, Reason, Raised) ->
+    ?LOG_ERROR(
+        "register_class/0 failed for ~p: ~p",
+        [ModuleName, Reason],
+        #{domain => [beamtalk, runtime], module => ModuleName, raised => Raised}
+    ),
+    {error,
+        beamtalk_repl_errors:ensure_structured_error(
+            {registration_error, {ModuleName, Reason}}
+        )}.
 
 -doc """
 Trigger hot reload for existing actors after module reload.

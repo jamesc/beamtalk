@@ -83,11 +83,17 @@ pub(crate) type FakeReplResponder =
 /// responders only model the operation under test. Later `describe`
 /// requests (e.g. the `describe` tool itself) pass through to `responder`.
 pub(crate) async fn spawn_fake_repl(responder: FakeReplResponder) -> FakeRepl {
+    spawn_ws(HandshakeMode::Ok, "fake-session", fake_responder(responder)).await
+}
+
+/// The per-connection responder behind [`spawn_fake_repl`]: answers the first
+/// `describe` with matching versions and defaults `id`/`status`.
+fn fake_responder(responder: FakeReplResponder) -> beamtalk_repl_protocol::test_support::Responder {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let version_check_done = Arc::new(AtomicBool::new(false));
-    let responder: beamtalk_repl_protocol::test_support::Responder = Box::new(move |request| {
+    Box::new(move |request| {
         let is_first_describe = request.get("op").and_then(|v| v.as_str()) == Some("describe")
             && !version_check_done.swap(true, Ordering::SeqCst);
         if is_first_describe {
@@ -104,8 +110,23 @@ pub(crate) async fn spawn_fake_repl(responder: FakeReplResponder) -> FakeRepl {
             reply["status"] = serde_json::json!(["done"]);
         }
         vec![text(&reply)]
-    });
-    spawn_ws(HandshakeMode::Ok, "fake-session", responder).await
+    })
+}
+
+/// Like [`fake_mcp`], but the fake also accepts a second connection — the
+/// short-lived one `interrupt` opens (BT-5029) — answering it with a fresh
+/// responder from `make_responder`.
+pub(crate) async fn fake_mcp_with_interrupt_connection(
+    make_responder: impl Fn() -> FakeReplResponder + Send + 'static,
+) -> (FakeRepl, BeamtalkMcp) {
+    let fake = beamtalk_repl_protocol::test_support::spawn_concurrent("fake-session", move || {
+        fake_responder(make_responder())
+    })
+    .await;
+    let client = ReplClient::connect(fake.port, "test-cookie", None)
+        .await
+        .expect("fake REPL handshake should succeed");
+    (fake, BeamtalkMcp::new(Arc::new(client)))
 }
 
 /// A responder that always answers with `value` in the response's

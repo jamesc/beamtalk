@@ -56,11 +56,28 @@ impl TypeChecker {
         }
     }
 
+    /// The inherited method `selector` on the instance or class side
+    /// (BT-5026): class-side overrides are checked against class-side parents
+    /// with the same rules as instance-side ones.
+    fn find_on_side<'h>(
+        hierarchy: &'h ClassHierarchy,
+        class_name: &str,
+        selector: &str,
+        is_class_method: bool,
+    ) -> Option<&'h crate::semantic_analysis::class_hierarchy::MethodInfo> {
+        if is_class_method {
+            hierarchy.find_class_method(class_name, selector)
+        } else {
+            hierarchy.find_method(class_name, selector)
+        }
+    }
+
     /// Check that a child method's parameter types are compatible with its parent's.
     pub(in super::super) fn check_override_param_compatibility(
         &mut self,
         method: &crate::ast::MethodDefinition,
         class_name: &EcoString,
+        is_class_method: bool,
         hierarchy: &ClassHierarchy,
     ) {
         let selector = method.selector.name();
@@ -70,7 +87,9 @@ impl TypeChecker {
         let Some(ref superclass) = class_info.superclass else {
             return;
         };
-        let Some(parent_method) = hierarchy.find_method(superclass, &selector) else {
+        let Some(parent_method) =
+            Self::find_on_side(hierarchy, superclass, &selector, is_class_method)
+        else {
             return;
         };
         if parent_method.param_types.is_empty() {
@@ -78,7 +97,9 @@ impl TypeChecker {
         }
 
         // Get child param types from MethodInfo
-        let Some(child_method) = hierarchy.find_method(class_name, &selector) else {
+        let Some(child_method) =
+            Self::find_on_side(hierarchy, class_name, &selector, is_class_method)
+        else {
             return;
         };
 
@@ -137,6 +158,7 @@ impl TypeChecker {
         &mut self,
         method: &crate::ast::MethodDefinition,
         class_name: &EcoString,
+        is_class_method: bool,
         hierarchy: &ClassHierarchy,
     ) {
         // Judge *this* definition's own annotation: a class body and a
@@ -146,9 +168,13 @@ impl TypeChecker {
             return;
         };
         let selector = method.selector.name();
-        let Some(widening) =
-            Self::override_return_widening(class_name, &selector, &own_rt, hierarchy)
-        else {
+        let Some(widening) = Self::override_return_widening(
+            class_name,
+            &selector,
+            &own_rt,
+            is_class_method,
+            hierarchy,
+        ) else {
             return;
         };
         let OverrideReturnWidening {
@@ -182,10 +208,11 @@ impl TypeChecker {
         class_name: &str,
         selector: &str,
         child_rt: &DeclaredType,
+        is_class_method: bool,
         hierarchy: &ClassHierarchy,
     ) -> Option<OverrideReturnWidening> {
         let superclass = hierarchy.get_class(class_name)?.superclass.clone()?;
-        let parent_method = hierarchy.find_method(&superclass, selector)?;
+        let parent_method = Self::find_on_side(hierarchy, &superclass, selector, is_class_method)?;
         let parent_rt = parent_method.return_type.clone()?;
         // Class type params (possibly multi-letter, which the shared rule's
         // single-letter heuristic would miss) have no substitution here.

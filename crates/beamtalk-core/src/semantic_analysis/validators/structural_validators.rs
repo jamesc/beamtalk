@@ -1148,11 +1148,11 @@ mod tests {
         // offers must not trip the unresolved-FFI lint. BT-4724: checked
         // against the modules discovered from the installed OTP.
         let Ok(otp) = crate::ffi_type_specs::discover_otp_beam_files() else {
-            eprintln!("skipping: `erl` unavailable");
+            crate::test_helpers::test_support::skip_or_fail("`erl`");
             return;
         };
         if !otp.discovered {
-            eprintln!("skipping: OTP discovery unavailable");
+            crate::test_helpers::test_support::skip_or_fail("OTP discovery");
             return;
         }
         let known = crate::ffi_type_specs::KnownErlangModules::enabled(otp.module_names);

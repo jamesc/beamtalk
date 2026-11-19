@@ -2793,7 +2793,7 @@ sweep_and_sync() ->
 %% continuation is pending. The first call is served after the sweep message.
 wait_sweep_done() ->
     beamtalk_test_wait:until(fun() ->
-        gen_server:call(beamtalk_trace_store, sweep_pending) =:= false
+        beamtalk_trace_store:sweep_pending(beamtalk_trace_store) =:= false
     end).
 
 sweep_remote_pid_test_() ->
@@ -2897,7 +2897,7 @@ chunked_sweep_yields_between_chunks_test_() ->
                 kill_then_sweep(Pids),
                 %% A call queued behind the first chunk is served while the
                 %% sweep still has chunks left: the server yielded.
-                ?assertEqual(true, gen_server:call(beamtalk_trace_store, sweep_pending)),
+                ?assertEqual(true, beamtalk_trace_store:sweep_pending(beamtalk_trace_store)),
                 %% An overlapping tick starts no second sweep and loses nothing.
                 beamtalk_trace_store ! sweep_eviction,
                 wait_sweep_done(),
@@ -2913,9 +2913,9 @@ chunked_sweep_drop_continuation_test_() ->
                 %% clear/0 mid-sweep drops the continuation.
                 beamtalk_trace_store:enable(),
                 kill_then_sweep(fill_live_pid_rows(3 * 2000 + 10)),
-                ?assertEqual(true, gen_server:call(beamtalk_trace_store, sweep_pending)),
+                ?assertEqual(true, beamtalk_trace_store:sweep_pending(beamtalk_trace_store)),
                 beamtalk_trace_store:clear(),
-                ?assertEqual(false, gen_server:call(beamtalk_trace_store, sweep_pending)),
+                ?assertEqual(false, beamtalk_trace_store:sweep_pending(beamtalk_trace_store)),
                 ?assertEqual(0, pid_row_count())
             end)},
         {timeout, 60,
@@ -2923,16 +2923,16 @@ chunked_sweep_drop_continuation_test_() ->
                 %% disable/0 mid-sweep drops it too.
                 beamtalk_trace_store:enable(),
                 kill_then_sweep(fill_live_pid_rows(3 * 2000 + 10)),
-                ?assertEqual(true, gen_server:call(beamtalk_trace_store, sweep_pending)),
+                ?assertEqual(true, beamtalk_trace_store:sweep_pending(beamtalk_trace_store)),
                 beamtalk_trace_store:disable(),
-                ?assertEqual(false, gen_server:call(beamtalk_trace_store, sweep_pending)),
+                ?assertEqual(false, beamtalk_trace_store:sweep_pending(beamtalk_trace_store)),
                 ?assertEqual(0, pid_row_count())
             end)},
         ?_test(begin
             %% A resume message for a dropped sweep is ignored.
             Store = whereis(beamtalk_trace_store),
             Store ! {sweep_continue, make_ref()},
-            ?assertEqual(false, gen_server:call(beamtalk_trace_store, sweep_pending)),
+            ?assertEqual(false, beamtalk_trace_store:sweep_pending(beamtalk_trace_store)),
             ?assertEqual(Store, whereis(beamtalk_trace_store))
         end)
     ]}.
@@ -2944,7 +2944,7 @@ chunked_sweep_stale_continuation_test_() ->
             beamtalk_trace_store:enable(),
             kill_then_sweep(fill_live_pid_rows(2 * 2000 + 10)),
             Store = whereis(beamtalk_trace_store),
-            ?assertEqual(true, gen_server:call(Store, sweep_pending)),
+            ?assertEqual(true, beamtalk_trace_store:sweep_pending(Store)),
             %% A continuation for another table, deleted since: `select/1`
             %% rejects it with `badarg`, as it does for a deleted pid table.
             Foreign = ets:new(bt4124_foreign, []),
@@ -2954,7 +2954,7 @@ chunked_sweep_stale_continuation_test_() ->
             Token = make_ref(),
             sys:replace_state(Store, fun(S) -> setelement(4, S, {Token, ForeignCont}) end),
             Store ! {sweep_continue, Token},
-            ?assertEqual(false, gen_server:call(Store, sweep_pending)),
+            ?assertEqual(false, beamtalk_trace_store:sweep_pending(Store)),
             ?assertEqual(Store, whereis(beamtalk_trace_store))
         end),
         ?_test(begin

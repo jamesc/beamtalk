@@ -15,6 +15,19 @@ minimum log level. Events below the subscriber's level filter are
 silently dropped. Subscribers are automatically cleaned up when the
 process terminates (via monitor).
 
+Each subscriber has exactly one monitor process, started on its first
+`subscribe/1` and kept across level changes (a re-subscribe only updates the
+level). `unsubscribe/0` stops it, so level changes never accumulate processes.
+
+## Backpressure
+
+A subscriber is a WebSocket handler, and its mailbox is the only buffer between
+the node's log volume and a possibly slow socket. `log/2` therefore skips any
+subscriber whose mailbox already holds `queue_limit/0` messages: the event is
+dropped for that subscriber only (others still get it) and its drop counter,
+readable via `dropped_count/1`, is incremented. Dropping is silent on the wire;
+the client keeps receiving the newest events once it catches up.
+
 The handler is registered with OTP logger during workspace startup
 (`beamtalk_workspace_sup`) and removed on shutdown.
 
@@ -40,13 +53,16 @@ Subscribers receive `{log_event, Map}` messages where Map contains:
 """.
 
 %% Public API
--export([subscribe/0, subscribe/1, unsubscribe/0]).
+-export([subscribe/0, subscribe/1, unsubscribe/0, queue_limit/0, dropped_count/1]).
 
 %% OTP logger handler callbacks
 -export([log/2, adding_handler/1, removing_handler/1]).
 
 %% ETS table for subscriber tracking
 -define(SUB_TABLE, beamtalk_ws_log_subscribers).
+
+%% Subscriber mailbox length at which further log events are dropped for it.
+-define(QUEUE_LIMIT, 1000).
 
 %% OTP log level ordering (lower number = more severe)
 -define(LEVEL_VALUE(L),
@@ -71,31 +87,67 @@ Subscribers receive `{log_event, Map}` messages where Map contains:
 subscribe() ->
     subscribe(debug).
 
--doc "Subscribe the calling process to log events at or above `Level`.".
+-doc """
+Subscribe the calling process to log events at or above `Level`.
+
+Calling it again updates the level of the existing subscription; the
+subscriber's monitor process is reused, not replaced.
+""".
 -spec subscribe(logger:level()) -> ok.
 subscribe(Level) when is_atom(Level) ->
     ensure_table(),
     Pid = self(),
-    %% Remove any existing subscription (allows level update).
-    ets:delete(?SUB_TABLE, Pid),
-    %% Insert the subscription entry, then spawn a monitor process.
-    %% The monitor must be established *after* insert so that if the
-    %% subscriber dies between insert and monitor, the DOWN fires and
-    %% cleans up the entry. If the subscriber dies *before* insert,
-    %% `erlang:monitor` on a dead pid delivers DOWN immediately,
-    %% cleaning up the entry we just inserted.
-    ets:insert(?SUB_TABLE, {Pid, Level}),
-    spawn(fun() -> monitor_subscriber(Pid) end),
+    case ets:lookup(?SUB_TABLE, Pid) of
+        [{Pid, _OldLevel, _MonPid, _Dropped}] ->
+            %% Update only the level: rewriting the row could overwrite a drop
+            %% counted by `deliver/2` in the meantime.
+            ets:update_element(?SUB_TABLE, Pid, {2, Level}),
+            ok;
+        [] ->
+            %% Insert the subscription entry, then release the monitor process,
+            %% which only starts watching `Pid` once told the row exists. If the
+            %% subscriber dies before that, `erlang:monitor` on a dead pid
+            %% delivers DOWN immediately and the row is cleaned up all the same.
+            MonPid = spawn(fun() -> monitor_subscriber(Pid) end),
+            ets:insert(?SUB_TABLE, {Pid, Level, MonPid, 0}),
+            MonPid ! registered
+    end,
     ok.
 
--doc "Unsubscribe the calling process from log events.".
+-doc "Unsubscribe the calling process from log events and stop its monitor.".
 -spec unsubscribe() -> ok.
 unsubscribe() ->
     case ets:info(?SUB_TABLE) of
-        undefined -> ok;
-        _ -> ets:delete(?SUB_TABLE, self())
+        undefined ->
+            ok;
+        _ ->
+            case ets:take(?SUB_TABLE, self()) of
+                [{_Pid, _Level, MonPid, _Dropped}] -> MonPid ! stop;
+                [] -> ok
+            end
     end,
     ok.
+
+-doc "Mailbox length at which log events start being dropped for a subscriber.".
+-spec queue_limit() -> pos_integer().
+queue_limit() ->
+    ?QUEUE_LIMIT.
+
+-doc """
+Number of log events dropped for `Pid` because its mailbox was at
+`queue_limit/0`. Zero for a process that is not subscribed.
+""".
+-spec dropped_count(pid()) -> non_neg_integer().
+dropped_count(Pid) ->
+    case ets:info(?SUB_TABLE) of
+        undefined ->
+            0;
+        _ ->
+            case ets:lookup(?SUB_TABLE, Pid) of
+                [{_, _, _, Dropped}] -> Dropped;
+                [] -> 0
+            end
+    end.
 
 %%====================================================================
 %% OTP logger handler callbacks
@@ -149,13 +201,11 @@ log(#{level := Level} = LogEvent, _Config) ->
                                 #{level => atom_to_binary(Level, utf8), msg => <<"[format error]">>}
                         end,
                     lists:foreach(
-                        fun({Pid, SubLevel}) ->
+                        fun({Pid, SubLevel, _MonPid, _Dropped}) ->
                             SubLevelVal = ?LEVEL_VALUE(SubLevel),
                             case LevelVal =< SubLevelVal of
-                                true ->
-                                    Pid ! {log_event, Formatted};
-                                false ->
-                                    ok
+                                true -> deliver(Pid, Formatted);
+                                false -> ok
                             end
                         end,
                         Subscribers
@@ -168,16 +218,52 @@ log(#{level := Level} = LogEvent, _Config) ->
 %% Internal helpers
 %%====================================================================
 
--doc "Monitor a subscriber and clean up its ETS entry when it dies.".
+-doc """
+Send a log event to a subscriber unless its mailbox is at the limit, in which
+case the event is dropped and counted. A dead subscriber is skipped (its
+monitor process removes the row).
+""".
+-spec deliver(pid(), map()) -> ok.
+deliver(Pid, Formatted) ->
+    case process_info(Pid, message_queue_len) of
+        {message_queue_len, Len} when Len >= ?QUEUE_LIMIT ->
+            %% The row may have been removed since `log/2` read it.
+            try
+                ets:update_counter(?SUB_TABLE, Pid, {4, 1})
+            catch
+                error:badarg -> ok
+            end,
+            ok;
+        {message_queue_len, _} ->
+            Pid ! {log_event, Formatted},
+            ok;
+        undefined ->
+            ok
+    end.
+
+-doc """
+Monitor a subscriber and clean up its ETS entry when it dies. Started by
+`subscribe/1`; ends on the subscriber's death or when `unsubscribe/0` sends
+`stop`.
+""".
 -spec monitor_subscriber(pid()) -> ok.
 monitor_subscriber(Pid) ->
+    receive
+        registered -> ok;
+        stop -> exit(normal)
+    end,
     MonRef = erlang:monitor(process, Pid),
     receive
         {'DOWN', MonRef, process, Pid, _Reason} ->
+            %% Delete only a row this process owns: after unsubscribe/subscribe
+            %% the row belongs to a newer monitor.
             case ets:info(?SUB_TABLE) of
                 undefined -> ok;
-                _ -> ets:delete(?SUB_TABLE, Pid)
+                _ -> ets:match_delete(?SUB_TABLE, {Pid, '_', self(), '_'})
             end,
+            ok;
+        stop ->
+            erlang:demonitor(MonRef, [flush]),
             ok
     end.
 

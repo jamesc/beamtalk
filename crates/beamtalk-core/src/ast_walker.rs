@@ -608,6 +608,17 @@ pub fn cascade_sends(expr: &Expression) -> impl Iterator<Item = SendRef<'_>> {
     parts.into_iter().flatten()
 }
 
+/// The second and later messages of the cascade `expr`, each paired with the
+/// cascade's shared receiver. Empty when `expr` is not a cascade.
+///
+/// For a pass driven by [`walk_expression`]: the walker already reaches the
+/// folded first message as a plain `MessageSend` (it is `Cascade::receiver`),
+/// so a pass judging every send visits plain sends there and the later
+/// messages here, and judges each message exactly once.
+pub fn later_cascade_sends(expr: &Expression) -> impl Iterator<Item = SendRef<'_>> {
+    cascade_sends(expr).filter(|s| s.site == SendSite::CascadeLater)
+}
+
 /// [`cascade_sends`] for a cascade already taken apart into its `receiver`
 /// (the folded first `MessageSend`, or a bare receiver) and its later
 /// `messages`, as the type checker holds it.
@@ -729,6 +740,19 @@ where
             walk_expression(&stmt.expression, f);
         }
     });
+    // BT-5026: state / class-variable defaults and the provided-method bodies
+    // that have no flattened copy (`Module::unused_protocol_provided_methods`)
+    // are not statement sequences of
+    // `for_each_expr_seq`, but the validators built on this walker must see
+    // them (`state: w = AbstractThing new`).
+    for default in module.state_default_exprs() {
+        walk_expression(default, f);
+    }
+    for method in module.unused_protocol_provided_methods() {
+        for stmt in &method.body {
+            walk_expression(&stmt.expression, f);
+        }
+    }
 }
 
 #[cfg(test)]

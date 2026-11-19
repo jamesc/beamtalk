@@ -231,8 +231,11 @@ fn configured_stdlib_falls_back_to_sysroot_when_none() {
 fn sysroot_stdlib_source_dir_smoke_test() {
     // Verify sysroot_stdlib_source_dir doesn't panic regardless of
     // the environment — the result depends on the test runner's
-    // installation layout and may be Some or None.
-    let _ = sysroot_stdlib_source_dir();
+    // installation layout and may be Some or None. Whatever it finds must be
+    // a real directory, never a dangling path.
+    if let Some(dir) = sysroot_stdlib_source_dir() {
+        assert!(dir.is_dir(), "{} is not a directory", dir.display());
+    }
 }
 
 #[test]

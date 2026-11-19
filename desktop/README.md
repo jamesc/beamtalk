@@ -114,13 +114,15 @@ version ever changes** — package names and transitive-dependency
 guarantees are specific to `noble`'s package set and aren't guaranteed to
 hold on a future Ubuntu release.
 
-**This packaging lane is unverified for the same reason the app itself is**
-(see below) — no macOS/Linux/Windows Tauri toolchain has been available to
-actually run `cargo tauri build` end-to-end here, so it is wired as
-`workflow_dispatch`/`workflow_call` only, not yet called from `release.yml`'s
-`on: release` path. Flip that once a real run confirms the build (and,
-separately, the signing/notarization steps against real Apple secrets) works
-on every platform.
+**Verification status (BT-5006).** `desktop-release.yml` has been run end to
+end via `workflow_dispatch` on every platform (Linux x86_64, macOS arm64 +
+x86_64, Windows x86_64): each leg builds, packages and uploads its artifact,
+and `release.yml`'s `desktop-app` job now calls it on every release. The
+macOS legs were run with no Apple secrets, so they produced unsigned,
+un-notarized bundles — the intended behaviour when the secrets are absent.
+Still unverified: macOS signing/notarization against real Apple secrets
+(owner provisions them), and the *installed* app on Linux and Windows (needs
+a person at those machines).
 
 ### Windows-specific gaps (BT-2988, documented rather than silently worked around)
 
@@ -153,11 +155,12 @@ on every platform.
   remains the fallback net for whatever this mechanism still misses.
 - **No code signing.** See the Packaging section above — the `.msi`/NSIS
   `.exe` this lane produces are unsigned.
-- **CI build lane is unverified.** `desktop-release.yml`'s Windows leg (WiX/
-  NSIS self-download, WebView2 Runtime presence, `package-desktop-release.sh`'s
-  `windows-x86_64` case) has not been exercised against a real
-  `windows-2022` run — see that workflow's header comment for the specific
-  list of unverified assumptions.
+- **CI build lane is verified; the installed app is not.** The Windows leg of
+  `desktop-release.yml` has produced the `.msi` and NSIS `.exe` on a real
+  `windows-2022` run (BT-5006), but nobody has installed and launched them.
+  That run also fixed two real bugs: `mix release` omitted `bin\bt_attach.bat`
+  (`include_executables_for` was `[:unix]`), and `assets.setup` could not spawn
+  `npm.cmd` from `mix cmd`.
 - **Console-window suppression and the CI build-lane's `--config` quoting
   were both real bugs, now fixed rather than open gaps.** Without
   `windows_subsystem = "windows"` (`desktop/src-tauri/src/main.rs`) a
@@ -243,6 +246,9 @@ root/sudo access to install them). What that means concretely:
   made it into git; see that file's `desktop/src-tauri/Cargo.lock`
   exception), so the dependency graph is genuinely pinned now, not just
   described as such.
+- **Since BT-5006**: the crate compiles and bundles on real Linux, macOS
+  (arm64 + x86_64) and Windows CI runners (`desktop-release.yml`); the
+  paragraph below describes the earlier sandboxed state.
 - **Not verified in any sandboxed session**: this crate's own Rust source
   (`main.rs`, `commands.rs`, `state.rs`, `launcher.rs`, `dto.rs`) was never
   type-checked by `rustc` in this repo's development sandboxes — none of them

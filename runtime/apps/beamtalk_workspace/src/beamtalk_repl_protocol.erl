@@ -274,7 +274,9 @@ Sent as an intermediate message during eval before the final done message.
 -spec encode_out(binary(), protocol_msg(), binary()) -> binary().
 encode_out(Chunk, Msg, Stream) ->
     Base = base_response(Msg),
-    iolist_to_binary(json:encode(Base#{Stream => Chunk})).
+    %% A chunk with invalid UTF-8 (`asStringUnchecked`, a binary write) would make
+    %% `json:encode/1` raise and take the connection down (BT-5018).
+    iolist_to_binary(json:encode(Base#{Stream => beamtalk_transcript_stream:ensure_utf8(Chunk)})).
 
 -doc """
 Encode a need-input status message.

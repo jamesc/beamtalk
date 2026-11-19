@@ -17,9 +17,6 @@ Tests the Time class backing functions: nowS/0, nowMs/0, nowUs/0.
 %%% nowS/0
 %%% ============================================================================
 
-now_s_returns_integer_test() ->
-    ?assert(is_integer(beamtalk_time:nowS())).
-
 now_s_is_positive_test() ->
     ?assert(beamtalk_time:nowS() > 0).
 
@@ -31,18 +28,12 @@ now_s_is_reasonable_epoch_test() ->
 %%% nowMs/0
 %%% ============================================================================
 
-now_ms_returns_integer_test() ->
-    ?assert(is_integer(beamtalk_time:nowMs())).
-
 now_ms_is_positive_test() ->
     ?assert(beamtalk_time:nowMs() > 0).
 
 %%% ============================================================================
 %%% nowUs/0
 %%% ============================================================================
-
-now_us_returns_integer_test() ->
-    ?assert(is_integer(beamtalk_time:nowUs())).
 
 now_us_is_positive_test() ->
     ?assert(beamtalk_time:nowUs() > 0).

@@ -396,6 +396,14 @@ mod tests {
 
     use beamtalk_repl_protocol::test_ports::closed_port;
 
+    /// How long the stalling test peers sit silent (BT-5035). A probe that
+    /// ignores its own deadline blocks for this long.
+    const PEER_STALL: Duration = Duration::from_secs(30);
+    /// A probe that honoured its (sub-second) deadline returns far below this
+    /// bound, yet it is a third of `PEER_STALL`, so a loaded runner's
+    /// scheduling jitter cannot flip the result either way.
+    const STALL_BOUND: Duration = Duration::from_secs(10);
+
     /// Symmetric `ProbeTimeouts` for tests that don't care about the
     /// http_up-vs-readiness split — see `probe_timeouts_use_the_right_stage`
     /// below for a test that specifically exercises the split.
@@ -666,7 +674,7 @@ mod tests {
                 let mut buf = [0u8; 1024];
                 let _ = socket.read(&mut buf);
                 let _ = socket.write_all(b"HTTP/1.1 200 OK\r\n"); // never sends the blank line
-                thread::sleep(Duration::from_secs(5));
+                thread::sleep(PEER_STALL);
             }
         });
 
@@ -675,8 +683,11 @@ mod tests {
         let _ = http_get("127.0.0.1", port, "/readiness", timeout);
         let elapsed = started.elapsed();
 
+        // BT-5035: not a tight multiple of `timeout` (flaky on a loaded
+        // runner). A broken deadline blocks for the whole `PEER_STALL`, so
+        // anything under `STALL_BOUND` proves the deadline was honoured.
         assert!(
-            elapsed < timeout * 3,
+            elapsed < STALL_BOUND,
             "http_get took {elapsed:?} against a {timeout:?} timeout — the overall \
              deadline was not respected across the read loop"
         );
@@ -783,12 +794,12 @@ mod tests {
             if let Ok((mut socket, _)) = listener.accept() {
                 let mut buf = [0u8; 1024];
                 let _ = socket.read(&mut buf);
-                thread::sleep(Duration::from_secs(5)); // never responds
+                thread::sleep(PEER_STALL); // never responds
             }
         });
 
         let timeouts = ProbeTimeouts {
-            http_up: Duration::from_secs(5),
+            http_up: PEER_STALL,
             readiness: Duration::from_millis(150),
         };
         let mut probe = http_probe("127.0.0.1", port, timeouts);
@@ -803,8 +814,8 @@ mod tests {
             "unresponsive peer times out as HttpDown"
         );
         assert!(
-            elapsed < Duration::from_secs(1),
-            "readiness probe took {elapsed:?} — used the 5s http_up timeout \
+            elapsed < STALL_BOUND,
+            "readiness probe took {elapsed:?} — used the {PEER_STALL:?} http_up timeout \
              instead of the 150ms readiness timeout"
         );
     }

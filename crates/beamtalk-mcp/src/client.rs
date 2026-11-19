@@ -26,6 +26,22 @@ use tracing::instrument;
 /// Default timeout for REPL I/O operations.
 const REPL_IO_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Timeout for `eval` operations.
+///
+/// Defaults to [`REPL_IO_TIMEOUT`] (30 s); `BEAMTALK_MCP_EVAL_TIMEOUT`
+/// (seconds) raises or lowers it for the whole server, and the `evaluate`
+/// tool's `timeout_secs` overrides it per call.
+fn eval_io_timeout() -> Duration {
+    static CACHED: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *CACHED.get_or_init(|| {
+        std::env::var("BEAMTALK_MCP_EVAL_TIMEOUT")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&secs| secs > 0)
+            .map_or(REPL_IO_TIMEOUT, Duration::from_secs)
+    })
+}
+
 /// Timeout for test operations, which can run large suites.
 ///
 /// Defaults to 120 seconds, configurable via `BEAMTALK_MCP_TEST_TIMEOUT`
@@ -33,12 +49,16 @@ const REPL_IO_TIMEOUT: Duration = Duration::from_secs(30);
 fn test_io_timeout() -> Duration {
     static CACHED: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
     *CACHED.get_or_init(|| {
-        std::env::var("BEAMTALK_MCP_TEST_TIMEOUT")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .filter(|&secs| secs > 0)
-            .map_or(Duration::from_mins(2), Duration::from_secs)
+        parse_test_io_timeout(std::env::var("BEAMTALK_MCP_TEST_TIMEOUT").ok().as_deref())
     })
+}
+
+/// Pure parse of the `BEAMTALK_MCP_TEST_TIMEOUT` value (seconds); unset,
+/// unparsable and zero all fall back to the 120 s default.
+fn parse_test_io_timeout(raw: Option<&str>) -> Duration {
+    raw.and_then(|s| s.parse::<u64>().ok())
+        .filter(|&secs| secs > 0)
+        .map_or(Duration::from_mins(2), Duration::from_secs)
 }
 
 /// Timeout for establishing a WebSocket connection.
@@ -488,9 +508,22 @@ impl ReplClient {
         code: &str,
         trace: bool,
     ) -> Result<ReplResponse, String> {
+        self.evaluate_with_timeout(code, trace, None).await
+    }
+
+    /// [`evaluate_with_options`](Self::evaluate_with_options) with an optional
+    /// per-call receive timeout (`None` = [`eval_io_timeout`]).
+    pub async fn evaluate_with_timeout(
+        &self,
+        code: &str,
+        trace: bool,
+        timeout: Option<Duration>,
+    ) -> Result<ReplResponse, String> {
         tracing::debug!(op = "eval", code_len = code.len(), trace, "REPL request");
         let request = RequestBuilder::eval_with_trace(code, trace);
-        let result = self.send_once(&request).await;
+        let result = self
+            .send_once_with_timeout(&request, timeout.unwrap_or_else(eval_io_timeout))
+            .await;
         tracing::debug!(op = "eval", ok = result.is_ok(), "REPL response");
         result
     }
@@ -528,15 +561,53 @@ impl ReplClient {
 
     /// Send an interrupt operation to cancel a running evaluation.
     ///
-    /// Note: Since the MCP client uses a single Mutex-protected WebSocket,
-    /// interrupt cannot preempt an in-flight eval on the same connection.
-    /// This is suitable for canceling evaluations from separate MCP tool
-    /// invocations or when no eval is in progress.
-    ///
-    /// Uses [`send_once`] (no retry) — a retry after reconnect could cancel
-    /// a different evaluation that started after the session was resumed.
+    /// The main connection is held by the in-flight eval for its whole
+    /// request, so the interrupt travels on its own short-lived authenticated
+    /// connection (resuming this client's session so the server targets the
+    /// right evaluation), exactly as the CLI REPL does. It never touches the
+    /// main socket's lock and is not retried — a retry could cancel a
+    /// different evaluation that started in the meantime.
     pub async fn interrupt(&self) -> Result<ReplResponse, String> {
-        self.send_once(&RequestBuilder::interrupt()).await
+        let port = self.port.load(Ordering::Relaxed);
+        let cookie = self
+            .cookie
+            .lock()
+            .map_err(|_| "Internal cookie state unavailable".to_string())?
+            .clone();
+        let session = self.session.lock().await.clone();
+        let request = match session.as_deref() {
+            Some(s) => RequestBuilder::interrupt_with_session(s),
+            None => RequestBuilder::interrupt(),
+        };
+
+        let url = format!("ws://127.0.0.1:{port}/ws");
+        let mut ws = ws_client::connect_with_timeout(&url, CONNECT_TIMEOUT)
+            .await
+            .map_err(|e| format!("Failed to open interrupt connection to {url}: {e:?}"))?;
+        perform_auth_handshake(&mut ws, &cookie, session.as_deref()).await?;
+        verify_server_versions(&mut ws).await?;
+
+        let result = async {
+            ws.send(Message::Text(
+                serde_json::to_string(&request)
+                    .map_err(|e| format!("Failed to serialize: {e}"))?
+                    .into(),
+            ))
+            .await
+            .map_err(|e| format!("Failed to send interrupt: {e}"))?;
+            loop {
+                let text = read_text_message_with_timeout(&mut ws, REPL_IO_TIMEOUT).await?;
+                let parsed: serde_json::Value = serde_json::from_str(&text)
+                    .map_err(|e| format!("Failed to parse response: {e}\nRaw: {text}"))?;
+                if parsed.get("status").is_some() {
+                    return serde_json::from_value(parsed)
+                        .map_err(|e| format!("Failed to deserialize response: {e}\nRaw: {text}"));
+                }
+            }
+        }
+        .await;
+        let _ = tokio::time::timeout(Duration::from_secs(1), ws.close(None)).await;
+        result
     }
 
     /// Send a show-codegen operation to inspect generated Core Erlang.
@@ -683,7 +754,7 @@ impl ReplClient {
     ///   would cause double-execution.
     ///
     /// Used by: [`eval`], [`evaluate_with_options`], [`load_file`], [`load_project`],
-    /// [`reload`], [`clear`], [`unload`], [`interrupt`].
+    /// [`reload`], [`clear`], [`unload`].
     ///
     /// Test methods ([`test_class`], [`test_file`], [`test_all`]) call
     /// [`send_once_with_timeout`] directly with a longer timeout.
@@ -1529,6 +1600,158 @@ mod tests {
         Ok(())
     }
 
+    /// Concurrent loopback node for BT-5029: unlike the shared one-connection
+    /// double, it serves every accepted connection on its own task so an
+    /// `interrupt` arriving on a second connection can release an `eval`
+    /// that is blocked on the first.
+    ///
+    /// `eval` blocks until an `interrupt` arrives (on any connection), then
+    /// answers with an "interrupted" error; `interrupt` answers `done` and
+    /// records the `session` it carried.
+    struct InterruptNode {
+        port: u16,
+        interrupt_sessions: Arc<std::sync::Mutex<Vec<Option<String>>>>,
+        accepted: Arc<std::sync::atomic::AtomicUsize>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Drop for InterruptNode {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    async fn spawn_interrupt_node() -> InterruptNode {
+        use futures_util::StreamExt;
+        use serde_json::{Value, json};
+        use std::sync::atomic::AtomicUsize;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let released = Arc::new(tokio::sync::Notify::new());
+        let interrupt_sessions = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let (sessions, count, notify) = (
+            Arc::clone(&interrupt_sessions),
+            Arc::clone(&accepted),
+            Arc::clone(&released),
+        );
+        let task = tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                count.fetch_add(1, Ordering::SeqCst);
+                let (sessions, notify) = (Arc::clone(&sessions), Arc::clone(&notify));
+                tokio::spawn(async move {
+                    let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else {
+                        return;
+                    };
+                    let send = |v: Value| Message::Text(v.to_string().into());
+                    let _ = ws.send(send(json!({"op": "auth-required"}))).await;
+                    let _ = ws.next().await; // client auth frame
+                    let _ = ws.send(send(json!({"type": "auth_ok"}))).await;
+                    let _ = ws
+                        .send(send(json!({"op": "session-started", "session": "sess-1"})))
+                        .await;
+                    while let Some(Ok(Message::Text(body))) = ws.next().await {
+                        let req: Value = serde_json::from_str(&body).unwrap_or(json!({}));
+                        let reply = match req.get("op").and_then(Value::as_str) {
+                            Some("describe") => {
+                                beamtalk_repl_protocol::test_support::describe_reply(
+                                    &req,
+                                    &beamtalk_repl_protocol::test_support::matching_versions(),
+                                )
+                            }
+                            Some("eval") => {
+                                notify.notified().await;
+                                send(json!({"status": ["done", "error"], "error": "interrupted"}))
+                            }
+                            Some("interrupt") => {
+                                sessions.lock().unwrap().push(
+                                    req.get("session").and_then(Value::as_str).map(String::from),
+                                );
+                                notify.notify_waiters();
+                                send(json!({"status": ["done"]}))
+                            }
+                            _ => send(json!({"status": ["done"]})),
+                        };
+                        if ws.send(reply).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+        InterruptNode {
+            port,
+            interrupt_sessions,
+            accepted,
+            task,
+        }
+    }
+
+    /// BT-5029: `interrupt` must not queue behind the eval it cancels. The
+    /// 10 s guard exists only so a regression fails instead of hanging; the
+    /// assertions are on outcomes, not elapsed time.
+    #[tokio::test]
+    async fn interrupt_cancels_in_flight_eval_over_separate_connection() {
+        let node = spawn_interrupt_node().await;
+        let client = Arc::new(
+            ReplClient::connect(node.port, "cookie", None)
+                .await
+                .expect("connect"),
+        );
+
+        let eval = {
+            let client = Arc::clone(&client);
+            tokio::spawn(async move { client.eval("[true] whileTrue").await })
+        };
+        // Wait until the node has actually received the eval-holding
+        // connection's request, i.e. a second connection is the only way in.
+        while node.accepted.load(Ordering::SeqCst) < 1 {
+            tokio::task::yield_now().await;
+        }
+
+        let interrupt = tokio::time::timeout(Duration::from_secs(10), client.interrupt())
+            .await
+            .expect("interrupt must not wait for the in-flight eval")
+            .expect("interrupt");
+        assert!(!interrupt.is_error());
+
+        let eval = tokio::time::timeout(Duration::from_secs(10), eval)
+            .await
+            .expect("eval must end once interrupted")
+            .expect("join")
+            .expect("eval response");
+        assert!(eval.is_error(), "eval should report the interruption");
+        assert_eq!(
+            eval.error_message(),
+            Some("interrupted"),
+            "eval ended because of the interrupt"
+        );
+
+        assert_eq!(node.accepted.load(Ordering::SeqCst), 2, "own connection");
+        assert_eq!(
+            *node.interrupt_sessions.lock().unwrap(),
+            vec![Some("sess-1".to_string())],
+            "interrupt targets this client's session"
+        );
+    }
+
+    /// BT-5029: the eval timeout is selectable per call.
+    #[tokio::test]
+    async fn evaluate_with_timeout_honours_per_call_timeout() {
+        let node = spawn_interrupt_node().await; // `eval` never answers on its own
+        let client = ReplClient::connect(node.port, "cookie", None)
+            .await
+            .expect("connect");
+        let err = client
+            .evaluate_with_timeout("1", false, Some(Duration::from_millis(100)))
+            .await
+            .expect_err("a silent eval must time out");
+        assert!(err.contains("timed out"), "got: {err}");
+    }
+
     #[tokio::test]
     #[ignore = "integration test"]
     async fn test_interrupt() -> Result<(), Box<dyn std::error::Error>> {
@@ -2168,10 +2391,16 @@ mod tests {
 
     #[test]
     fn test_io_timeout_default_is_120s() {
-        // When BEAMTALK_MCP_TEST_TIMEOUT is not set, default is 120s.
-        // Note: OnceLock makes this a one-shot test per process, so we only
-        // verify the default (env var is not set in the test environment).
-        let timeout = test_io_timeout();
-        assert_eq!(timeout, Duration::from_mins(2));
+        // Tests the pure parser, not the env var / `OnceLock`, so the result
+        // does not depend on the caller's environment (BT-5035).
+        assert_eq!(parse_test_io_timeout(None), Duration::from_mins(2));
+        assert_eq!(parse_test_io_timeout(Some("")), Duration::from_mins(2));
+        assert_eq!(parse_test_io_timeout(Some("abc")), Duration::from_mins(2));
+        assert_eq!(parse_test_io_timeout(Some("0")), Duration::from_mins(2));
+    }
+
+    #[test]
+    fn test_io_timeout_honours_override_seconds() {
+        assert_eq!(parse_test_io_timeout(Some("30")), Duration::from_secs(30));
     }
 }

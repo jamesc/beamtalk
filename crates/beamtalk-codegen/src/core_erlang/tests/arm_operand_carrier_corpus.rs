@@ -328,7 +328,7 @@ fn value_type_field_writing_folds_in_conditional_arms_agree_with_the_oracle_when
     let core = codegen(&src);
     let names: Vec<String> = expected.iter().map(|(n, _)| n.clone()).collect();
     let Some(observed) = run_probes(&core, &names, "#{m => 0, n => 0}") else {
-        println!("skipping the oracle run: erlc/erl not available");
+        // `run_probes` already failed (CI) or noted the skip (local).
         return;
     };
     let mismatches: Vec<String> = expected

@@ -19,6 +19,15 @@ use tungstenite::{Error as WsError, Message, WebSocket};
 /// Default connection timeout in milliseconds.
 const CONNECT_TIMEOUT_MS: u64 = 5000;
 
+/// Default deadline for the WebSocket upgrade, auth and `describe` exchange
+/// that follows a successful TCP connect (BT-5029).
+///
+/// A listener that accepts TCP but never answers (e.g. a reused stale port)
+/// would otherwise block these blocking reads forever. The deadline applies
+/// only to the handshake; the caller's `read_timeout` governs the connection
+/// afterwards, so long-running evals are unaffected.
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Check if a tungstenite error is a transport-level failure worth retrying.
 /// Protocol, UTF-8, and capacity errors indicate a message-level problem
 /// that reconnecting won't fix.
@@ -31,6 +40,43 @@ fn is_transport_error(e: &WsError) -> bool {
             | WsError::WriteBufferFull(_)
     )
 }
+
+/// How `connect_impl` performs the handshake.
+#[derive(Clone, Copy)]
+struct HandshakeOpts {
+    /// Verify the node's `describe` versions after auth.
+    verify_versions: bool,
+    /// Surface tag sent in the `auth` frame.
+    client_surface: &'static str,
+    /// Deadline for the upgrade + auth exchange.
+    timeout: Duration,
+}
+
+/// Whether a handshake failure was the read deadline expiring.
+fn handshake_timed_out(
+    e: &tungstenite::HandshakeError<tungstenite::ClientHandshake<TcpStream>>,
+) -> bool {
+    match e {
+        tungstenite::HandshakeError::Interrupted(_) => true,
+        tungstenite::HandshakeError::Failure(WsError::Io(io)) => is_timeout_kind(io.kind()),
+        tungstenite::HandshakeError::Failure(_) => false,
+    }
+}
+
+fn is_timeout_kind(kind: std::io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    )
+}
+
+/// Auth-phase reads surface the deadline as a formatted `WebSocket read error`.
+fn is_timeout_message(e: &miette::Report) -> bool {
+    e.to_string().contains(READ_TIMED_OUT)
+}
+
+/// Marker text for a read that hit the socket's read deadline.
+const READ_TIMED_OUT: &str = "read timed out";
 
 /// Low-level JSON-over-WebSocket protocol client (ADR 0020).
 ///
@@ -89,7 +135,38 @@ impl ProtocolClient {
         read_timeout: Option<Duration>,
         resume: Option<&str>,
     ) -> Result<Self> {
-        Self::connect_impl(host, port, cookie, read_timeout, resume, true, "repl")
+        Self::connect_with_handshake_timeout(
+            host,
+            port,
+            cookie,
+            read_timeout,
+            resume,
+            HANDSHAKE_TIMEOUT,
+        )
+    }
+
+    /// [`connect_with_resume`](Self::connect_with_resume) with an explicit
+    /// handshake deadline (injectable so tests need not wait out the default).
+    pub fn connect_with_handshake_timeout(
+        host: &str,
+        port: u16,
+        cookie: &str,
+        read_timeout: Option<Duration>,
+        resume: Option<&str>,
+        handshake_timeout: Duration,
+    ) -> Result<Self> {
+        Self::connect_impl(
+            host,
+            port,
+            cookie,
+            read_timeout,
+            resume,
+            HandshakeOpts {
+                verify_versions: true,
+                client_surface: "repl",
+                timeout: handshake_timeout,
+            },
+        )
     }
 
     /// Connect for workspace shutdown (BT-4327).
@@ -106,7 +183,18 @@ impl ProtocolClient {
         cookie: &str,
         read_timeout: Option<Duration>,
     ) -> Result<Self> {
-        Self::connect_impl(host, port, cookie, read_timeout, None, false, "shutdown")
+        Self::connect_impl(
+            host,
+            port,
+            cookie,
+            read_timeout,
+            None,
+            HandshakeOpts {
+                verify_versions: false,
+                client_surface: "shutdown",
+                timeout: HANDSHAKE_TIMEOUT,
+            },
+        )
     }
 
     /// Shared constructor: `verify_versions` selects the post-auth
@@ -117,9 +205,13 @@ impl ProtocolClient {
         cookie: &str,
         read_timeout: Option<Duration>,
         resume: Option<&str>,
-        verify_versions: bool,
-        client_surface: &'static str,
+        opts: HandshakeOpts,
     ) -> Result<Self> {
+        let HandshakeOpts {
+            verify_versions,
+            client_surface,
+            timeout: handshake_timeout,
+        } = opts;
         let addr = format!("{host}:{port}");
         let tcp_stream = TcpStream::connect_timeout(
             &addr.parse().into_diagnostic()?,
@@ -127,15 +219,23 @@ impl ProtocolClient {
         )
         .map_err(|e| miette!("Failed to connect to workspace at {addr}: {e}"))?;
 
-        if let Some(timeout) = read_timeout {
-            tcp_stream
-                .set_read_timeout(Some(timeout))
-                .into_diagnostic()?;
-        }
+        // The handshake deadline replaces the caller's read timeout until the
+        // auth exchange completes, then the caller's setting is restored.
+        tcp_stream
+            .set_read_timeout(Some(handshake_timeout))
+            .into_diagnostic()?;
 
         let url = format!("ws://{addr}/ws");
-        let (ws, _response) = tungstenite::client(url, tcp_stream)
-            .map_err(|e| miette!("WebSocket handshake failed: {e}"))?;
+        let (ws, _response) = tungstenite::client(url, tcp_stream).map_err(|e| {
+            if handshake_timed_out(&e) {
+                miette!(
+                    "Timed out after {}s waiting for the workspace at {addr} to answer the WebSocket upgrade",
+                    handshake_timeout.as_secs_f64()
+                )
+            } else {
+                miette!("WebSocket handshake failed: {e}")
+            }
+        })?;
 
         let mut client = Self {
             ws,
@@ -150,7 +250,17 @@ impl ProtocolClient {
             print_transcript: true,
         };
 
-        client.perform_auth_handshake(resume)?;
+        client.perform_auth_handshake(resume).map_err(|e| {
+            if is_timeout_message(&e) {
+                miette!(
+                    "Timed out after {}s waiting for the workspace at {addr} to finish authenticating: {e}",
+                    handshake_timeout.as_secs_f64()
+                )
+            } else {
+                e
+            }
+        })?;
+        client.set_read_timeout(read_timeout)?;
         Ok(client)
     }
 
@@ -243,8 +353,11 @@ impl ProtocolClient {
             &self.cookie,
             self.read_timeout,
             requested_session.as_deref(),
-            self.verify_versions,
-            self.client_surface,
+            HandshakeOpts {
+                verify_versions: self.verify_versions,
+                client_surface: self.client_surface,
+                timeout: HANDSHAKE_TIMEOUT,
+            },
         ) {
             Ok(c) => c,
             Err(e) => {
@@ -350,10 +463,12 @@ impl ProtocolClient {
     /// push messages inline and skipping other push messages.
     fn read_response(&mut self) -> Result<serde_json::Value> {
         loop {
-            let msg = self
-                .ws
-                .read()
-                .map_err(|e| miette!("WebSocket read error: {e}"))?;
+            let msg = self.ws.read().map_err(|e| match &e {
+                WsError::Io(io) if is_timeout_kind(io.kind()) => {
+                    miette!("WebSocket {READ_TIMED_OUT}")
+                }
+                _ => miette!("WebSocket read error: {e}"),
+            })?;
             match msg {
                 Message::Text(text) => {
                     let parsed: serde_json::Value = serde_json::from_str(&text)

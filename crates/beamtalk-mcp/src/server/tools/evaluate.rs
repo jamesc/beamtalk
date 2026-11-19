@@ -7,6 +7,7 @@
 //! REPL session.
 
 use std::fmt::Write;
+use std::time::Duration;
 
 use beamtalk_core::unparse::escape_string_literal;
 use beamtalk_repl_protocol::format::{self as fmt, Diagnostic as FmtDiagnostic};
@@ -45,7 +46,14 @@ impl BeamtalkMcp {
         );
         let response = self
             .client
-            .evaluate_with_options(&params.code, use_trace)
+            .evaluate_with_timeout(
+                &params.code,
+                use_trace,
+                params
+                    .timeout_secs
+                    .filter(|&s| s > 0)
+                    .map(Duration::from_secs),
+            )
             .await
             .internal_err()?;
 

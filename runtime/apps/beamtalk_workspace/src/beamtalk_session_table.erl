@@ -17,7 +17,7 @@ delete, and lookup operations go through this module so that:
   * The common "resolve session ID → live PID" pattern lives in one place.
 """.
 
--export([new/0, insert/2, delete/1, lookup/1, lookup_alive/1, resolve_pid/2]).
+-export([new/0, insert/2, delete/1, delete/2, delete_pid/1, lookup/1, lookup_alive/1, resolve_pid/2]).
 
 -doc """
 Create the session ETS table if it does not already exist.
@@ -42,6 +42,32 @@ insert(SessionId, Pid) when is_binary(SessionId), is_pid(Pid) ->
 -spec delete(binary()) -> true.
 delete(SessionId) when is_binary(SessionId) ->
     ets:delete(beamtalk_sessions, SessionId).
+
+-doc """
+Remove a session row only if it still points at `Pid`.
+
+Used by a stopping session shell so it can never remove a row that was
+re-registered for the same id by another process. Safe when the table does not
+exist (unit tests that start a bare shell).
+""".
+-spec delete(binary(), pid()) -> ok.
+delete(SessionId, Pid) when is_binary(SessionId), is_pid(Pid) ->
+    try
+        ets:delete_object(beamtalk_sessions, {SessionId, Pid}),
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-doc "Remove every row that points at `Pid` (when the session id is unknown).".
+-spec delete_pid(pid()) -> ok.
+delete_pid(Pid) when is_pid(Pid) ->
+    try
+        ets:match_delete(beamtalk_sessions, {'_', Pid}),
+        ok
+    catch
+        error:badarg -> ok
+    end.
 
 -doc """
 Look up a session by ID.

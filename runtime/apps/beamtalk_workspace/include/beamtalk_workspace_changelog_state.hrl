@@ -15,5 +15,8 @@
     %% Next sequence number to assign (monotonic across restarts).
     next_seq :: non_neg_integer(),
     %% Epoch for entries appended in this session (bumped each start).
-    epoch :: non_neg_integer()
+    epoch :: non_neg_integer(),
+    %% True once the "active entries exceed the ring bound" warning has been
+    %% logged for the current overflow episode (BT-5016); cleared when it ends.
+    ring_overflow_warned = false :: boolean()
 }).

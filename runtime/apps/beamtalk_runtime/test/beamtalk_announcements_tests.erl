@@ -31,6 +31,8 @@ gap (whose `DOWN` was lost to the dead bus process).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+
+-export([log/2]).
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
@@ -1729,3 +1731,69 @@ system_bus() -> beamtalk_system_announcer.
 %%% Module-level fixture (BT-4962): loading a compiled `bt@stdlib@*` module starts
 %%% class processes; with no runtime app to own them they would outlive this suite.
 eunit_wrapper_(Tests) -> beamtalk_test_class_teardown:leak_free(Tests).
+
+%%% ============================================================================
+%%% BT-5023: async (veneer) handler failures are logged like the sync path
+%%% ============================================================================
+
+%% logger handler callback: forward events to the capturing test process.
+log(LogEvent, #{config := #{parent := Parent}}) ->
+    Parent ! {announcements_log_event, LogEvent},
+    ok.
+
+async_handler_crash_is_logged_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) -> [?_test(async_handler_crash_is_logged())] end}.
+
+async_handler_crash_is_logged() ->
+    OldLevel = maps:get(level, logger:get_primary_config()),
+    ok = logger:set_primary_config(level, all),
+    HandlerId = beamtalk_test_unique:atom("bt5023_announcements"),
+    ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{parent => self()}, level => all}),
+    Sub = spawn_idle(),
+    try
+        Raising = fun(_E) -> error(boom_bt5023) end,
+        {ok, _} = beamtalk_announcements:subscribe('AsyncCrashEvent', Sub, Raising, false),
+        ok = beamtalk_announcements:system_announce('AsyncCrashEvent', #{k => v}),
+        ?awaitMessage(
+            {announcements_log_event, #{
+                msg :=
+                    {report, #{
+                        event := announcement_handler_crashed, event_class := 'AsyncCrashEvent'
+                    }}
+            }},
+            2000
+        )
+    after
+        stop_idle(Sub),
+        logger:remove_handler(HandlerId),
+        logger:set_primary_config(level, OldLevel)
+    end.
+
+%% The wait is bounded by the timeout in total, not re-armed per message.
+gather_replies_total_wait_bounded_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        {timeout, 10,
+            ?_test(begin
+                Subs = [spawn_idle() || _ <- lists:seq(1, 4)],
+                try
+                    %% Each handler acks ~150ms after the last; with a re-arming
+                    %% timeout of 400ms the wait would reach well past 400ms.
+                    lists:foreach(
+                        fun({N, Sub}) ->
+                            %% sleep: staggered handler completion
+                            H = fun(_E) -> timer:sleep(N * 150) end,
+                            {ok, _} = beamtalk_announcements:subscribe(
+                                'StaggerEvent', Sub, H, false
+                            )
+                        end,
+                        lists:zip(lists:seq(1, 4), Subs)
+                    ),
+                    Start = erlang:monotonic_time(millisecond),
+                    ok = beamtalk_announcements:announceAndWait('StaggerEvent', e, 400),
+                    Elapsed = erlang:monotonic_time(millisecond) - Start,
+                    ?assert(Elapsed < 580)
+                after
+                    lists:foreach(fun stop_idle/1, Subs)
+                end
+            end)}
+    end}.

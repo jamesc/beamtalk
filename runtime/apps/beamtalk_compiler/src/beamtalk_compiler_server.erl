@@ -22,6 +22,8 @@ to avoid temp files on disk.
 
 %% Default `gen_server:call' budget for requests that reach the compiler port.
 -define(CALL_TIMEOUT_MS, 30000).
+-define(MAX_PORT_REOPENS, 3).
+-define(PORT_REOPEN_WINDOW_MS, 60000).
 %% Budget for cheap, cache-only or latency-sensitive calls.
 -define(QUICK_CALL_TIMEOUT_MS, 5000).
 %% `safe_call/4' fallbacks, one pair per result shape.
@@ -177,21 +179,10 @@ port_forwards() -> ?PORT_FORWARDS.
     %% cost/benefit for both, so a fix to one without the other would just
     %% leave them inconsistent).
     aliases = #{} :: #{binary() => binary()},
-    %% Test-only: when set (via inject_diagnostics_failure/1, only
-    %% exported in TEST builds), the *next* diagnostics/3 call fails with this
-    %% reason instead of reaching the real compiler port, then self-clears.
-    %% Always `undefined` in production — nothing outside TEST builds can set
-    %% it. See inject_diagnostics_failure/1's doc for why this exists.
-    diagnostics_fault = undefined :: undefined | binary(),
-    %% Test-only: when `true` (via inject_diagnostics_exit/0, only
-    %% exported in TEST builds), the *next* diagnostics/3 call stops this
-    %% process instead of replying, simulating the compiler port's
-    %% gen_server:call itself exiting (`noproc`/`timeout`) rather than an
-    %% ordinary `{error, _}` return. No self-clear flag needed, unlike
-    %% `diagnostics_fault` above — the process restart itself is the clear
-    %% (a fresh `init/1` always starts with `false`). Always `false` in
-    %% production. See inject_diagnostics_exit/0's doc for why this exists.
-    diagnostics_exit_fault = false :: boolean()
+    %% BT-5021: monotonic-ms times of recent in-place port reopens, bounding
+    %% them (`?MAX_PORT_REOPENS` per `?PORT_REOPEN_WINDOW_MS`) so a compiler
+    %% that dies on every request still escalates to the supervisor.
+    port_reopens = [] :: [integer()]
 }).
 
 %%% Public API
@@ -423,8 +414,8 @@ Deterministic and safe to use per-test: `beamtalk_compiler_sup` supervises
 this server with `one_for_one`/`permanent`, so it is restarted immediately
 after the stop, and the very next `diagnostics/3` call (in this test or any
 other) reaches a fresh, healthy process — no explicit re-clear needed, unlike
-`inject_diagnostics_failure/1`'s flag (a fresh `init/1` always starts with
-`diagnostics_exit_fault = false`). Never touches the port itself, and
+`inject_diagnostics_failure/1`'s flag (the fault flags live in the server's
+process dictionary, so a restarted process starts with none set). Never touches the port itself, and
 unrelated requests (`compile_expression`, `compile`, ...) are unaffected.
 
 **Shared crash budget:** each use spends one of `beamtalk_compiler_sup`'s
@@ -1076,7 +1067,39 @@ init(_Args) ->
     end,
     {ok, #state{port = Port, classes = Classes}}.
 
-handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From, State) ->
+%% Test builds intercept the fault-injection requests before the real clauses
+%% (BT-5023). The fault state lives in the process dictionary, not the `#state{}`
+%% record, so a release build has neither the clauses nor any trace of the
+%% fields; `-ifdef` can only gate whole functions, hence this wrapper.
+-ifdef(TEST).
+handle_call({inject_diagnostics_failure, Reason}, _From, State) ->
+    put(diagnostics_fault, Reason),
+    {reply, ok, State};
+handle_call(inject_diagnostics_exit, _From, State) ->
+    put(diagnostics_exit_fault, true),
+    {reply, ok, State};
+handle_call({diagnostics, _Source, _Mode, _Options} = Request, From, State) ->
+    case {get(diagnostics_exit_fault), erase(diagnostics_fault)} of
+        {true, _} ->
+            %% See inject_diagnostics_exit/0: stop without replying so the
+            %% caller's gen_server:call exits (`shutdown`, so no crash report;
+            %% the `permanent` supervisor restarts it, which clears the flag).
+            {stop, shutdown, State};
+        {_, undefined} ->
+            do_handle_call(Request, From, State);
+        {_, Fault} ->
+            %% See inject_diagnostics_failure/1: consumed by exactly this one
+            %% request, the real port is never touched.
+            {reply, {error, [#{message => Fault}]}, State}
+    end;
+handle_call(Request, From, State) ->
+    do_handle_call(Request, From, State).
+-else.
+handle_call(Request, From, State) ->
+    do_handle_call(Request, From, State).
+-endif.
+
+do_handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From, State) ->
     %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
     %% Default known_type_aliases to the ambient alias cache, the
     %% same backstop `compile`/`compile_method` apply unconditionally below —
@@ -1100,7 +1123,7 @@ handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From,
         State#state.port, Source, ModuleName, KnownVars, Options1
     ),
     {reply, Result, State};
-handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, _From, State) ->
+do_handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, _From, State) ->
     %% See the identical `maps:merge/2` backstop on the
     %% `compile_expression` clause above — same reasoning applies here.
     Options1 = inject_ambient_defaulting_aliases(Options, State),
@@ -1108,7 +1131,7 @@ handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, 
         State#state.port, Source, ModuleName, KnownVars, Options1
     ),
     {reply, Result, State};
-handle_call({compile, Source, Options}, _From, State) ->
+do_handle_call({compile, Source, Options}, _From, State) ->
     %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
     %% ADR 0108 hot-reload re-check trigger: likewise inject the
     %% ambient alias cache, unconditionally — unlike diagnostics/3's
@@ -1129,38 +1152,18 @@ handle_call({compile, Source, Options}, _From, State) ->
     Options1 = inject_ambient(Options, State),
     Result = do_compile(State#state.port, Source, Options1),
     {reply, Result, State};
-handle_call({compile_method, ClassSource, MethodSource, Options}, _From, State) ->
+do_handle_call({compile_method, ClassSource, MethodSource, Options}, _From, State) ->
     %% See `handle_call({compile, ...})`'s identical comment above.
     Options1 = inject_ambient(Options, State),
     Result = do_compile_method(State#state.port, ClassSource, MethodSource, Options1),
     {reply, Result, State};
-handle_call({resolve_completion_type, Expression}, _From, State) ->
+do_handle_call({resolve_completion_type, Expression}, _From, State) ->
     %% Forward class hierarchy so user-defined classes are visible.
     Result = beamtalk_compiler_port:resolve_completion_type(
         State#state.port, Expression, State#state.classes
     ),
     {reply, Result, State};
-handle_call(
-    {diagnostics, _Source, _Mode, _Options}, _From, #state{diagnostics_exit_fault = true} = State
-) ->
-    %% Test-only fault injection, see inject_diagnostics_exit/0:
-    %% stop without replying — the caller's gen_server:call raises an exit
-    %% (`{shutdown, {gen_server, call, [...]}}`) instead of getting a normal
-    %% return, simulating the compiler port's call itself exiting. `shutdown`
-    %% (not a crash reason) so this produces no crash report noise; the
-    %% `permanent` supervisor restarts it regardless of exit reason.
-    {stop, shutdown, State};
-handle_call(
-    {diagnostics, _Source, _Mode, _Options}, _From, #state{diagnostics_fault = Fault} = State
-) when
-    Fault =/= undefined
-->
-    %% Test-only fault injection, see inject_diagnostics_failure/1:
-    %% consumed by exactly this one request — the real port is never touched,
-    %% and the flag clears itself so every following diagnostics call (this
-    %% one included, on retry) reaches the real port again.
-    {reply, {error, [#{message => Fault}]}, State#state{diagnostics_fault = undefined}};
-handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
+do_handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
     %% ADR 0105 Phase 1: only thread the ambient class cache when
     %% explicitly requested (see diagnostics/3's moduledoc) — the default
     %% stays class-context-free so the keystroke-driven cockpit editor path
@@ -1205,7 +1208,7 @@ handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
         maps:get(source_path, Options, undefined)
     ),
     {reply, Result, State};
-handle_call({port_call, Fun, Args}, _From, #state{port = Port} = State) ->
+do_handle_call({port_call, Fun, Args}, _From, #state{port = Port} = State) ->
     %% The pure forwards (BT-5046): every request that is just
     %% `beamtalk_compiler_port:Fun(Port, Args...)` shares this one clause. The
     %% set is closed (`?PORT_FORWARDS`): anything else is an unknown call, so a
@@ -1217,22 +1220,18 @@ handle_call({port_call, Fun, Args}, _From, #state{port = Port} = State) ->
         false ->
             {reply, {error, unknown_request}, State}
     end;
-handle_call(version, _From, State) ->
+do_handle_call(version, _From, State) ->
     Result = do_version(State#state.port),
     {reply, Result, State};
-handle_call(clear_classes, _From, State) ->
+do_handle_call(clear_classes, _From, State) ->
     {reply, ok, State#state{classes = #{}, aliases = #{}, protocols = #{}}};
-handle_call({inject_diagnostics_failure, Reason}, _From, State) ->
-    {reply, ok, State#state{diagnostics_fault = Reason}};
-handle_call(inject_diagnostics_exit, _From, State) ->
-    {reply, ok, State#state{diagnostics_exit_fault = true}};
-handle_call(get_classes, _From, State) ->
+do_handle_call(get_classes, _From, State) ->
     {reply, State#state.classes, State};
-handle_call(get_protocols, _From, State) ->
+do_handle_call(get_protocols, _From, State) ->
     {reply, State#state.protocols, State};
-handle_call(get_aliases, _From, State) ->
+do_handle_call(get_aliases, _From, State) ->
     {reply, alias_source_list(State#state.aliases), State};
-handle_call({register_aliases, AliasSources}, _From, State) ->
+do_handle_call({register_aliases, AliasSources}, _From, State) ->
     %% ADR 0108 hot-reload re-check trigger: merge by alias name
     %% (adversarial review finding) — see the `aliases` field's doc for why
     %% this must not be a whole-cache replacement. `alias_name_from_source/1`
@@ -1245,7 +1244,7 @@ handle_call({register_aliases, AliasSources}, _From, State) ->
      || Source <- AliasSources, {ok, Name} <- [alias_name_from_source(Source)]
     ]),
     {reply, ok, State#state{aliases = maps:merge(State#state.aliases, NewEntries)}};
-handle_call(_Request, _From, State) ->
+do_handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
 handle_cast({register_class, ClassName, MetaMap}, State) ->
@@ -1274,6 +1273,32 @@ handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
         domain => [beamtalk, runtime], status => Status
     }),
     {stop, {port_exit_status, Status}, State};
+handle_info({'EXIT', Port, normal}, #state{port = Port} = State) ->
+    %% BT-5021: a port that closed normally is the one `port_roundtrip/6`
+    %% closes after a request timeout (a late reply must not poison the next
+    %% request), or one that died after `exit_status` was consumed there.
+    %% Stopping here discarded the `aliases`/`protocols` caches and every class
+    %% not backed by a loaded module, which a restart cannot rebuild. Open a
+    %% fresh port and keep the state, but only a few times per window: a
+    %% compiler that dies on every request must still reach the supervisor's
+    %% restart intensity. A crash seen as an `exit_status` message above, or
+    %% an abnormal EXIT below, stops the server at once.
+    Now = erlang:monotonic_time(millisecond),
+    Recent = [T || T <- State#state.port_reopens, Now - T < ?PORT_REOPEN_WINDOW_MS],
+    case length(Recent) >= ?MAX_PORT_REOPENS of
+        true ->
+            ?LOG_ERROR(#{
+                domain => [beamtalk, runtime],
+                msg => <<"Compiler port keeps closing; stopping the compiler server">>,
+                reopens => length(Recent)
+            }),
+            {stop, {port_exit, normal}, State};
+        false ->
+            ?LOG_WARNING(#{
+                domain => [beamtalk, runtime], msg => <<"Compiler port closed; opening a new port">>
+            }),
+            {noreply, State#state{port = open_port(), port_reopens = [Now | Recent]}}
+    end;
 handle_info({'EXIT', Port, Reason}, #state{port = Port} = State) ->
     ?LOG_ERROR("Compiler port EXIT", #{domain => [beamtalk, runtime], reason => Reason}),
     {stop, {port_exit, Reason}, State};

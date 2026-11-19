@@ -139,8 +139,9 @@ mod tests {
         // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
         let _guard = unsafe { EnvVarGuard::clear("BEAMTALK_WORKSPACE") };
         let dir = beamtalk_dir().expect("Failed to get beamtalk_dir");
-        // Should be ~/.beamtalk/sessions/shell-{ppid}
-        assert!(dir.starts_with(dirs::home_dir().unwrap().join(".beamtalk")));
+        // Should be <beamtalk root>/sessions/shell-{ppid}, where the root is
+        // the (hermetic, under `real_home_guard`) `BEAMTALK_HOME`.
+        assert!(dir.starts_with(beamtalk_workspace::beamtalk_root_dir().unwrap()));
         assert!(dir.parent().unwrap().ends_with("sessions"));
         let dir_name = dir.file_name().unwrap().to_string_lossy();
         assert!(

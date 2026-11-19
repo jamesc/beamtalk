@@ -49,11 +49,9 @@ session_connect_updates_activity_test() ->
     }),
 
     try
-        %% Get initial activity time
-        {ok, InitialTime} = beamtalk_workspace_meta:get_last_activity(),
-
-        %% Wait for the second-resolution clock to tick past the initial time
-        ok = wait_clock_after(InitialTime),
+        %% Back-date the stamp so the next update is strictly newer without
+        %% waiting for the second-resolution clock to roll over
+        InitialTime = backdate_activity(MetaPid),
 
         %% Simulate session connection by calling update_activity
         %% (This is what beamtalk_repl_server does when a session is created)
@@ -77,11 +75,9 @@ actor_spawn_updates_activity_test() ->
     }),
 
     try
-        %% Get initial activity time
-        {ok, InitialTime} = beamtalk_workspace_meta:get_last_activity(),
-
-        %% Wait for the second-resolution clock to tick past the initial time
-        ok = wait_clock_after(InitialTime),
+        %% Back-date the stamp so the next update is strictly newer without
+        %% waiting for the second-resolution clock to roll over
+        InitialTime = backdate_activity(MetaPid),
 
         %% Simulate actor spawn by calling update_activity directly (this test
         %% pins the activity clock, not a spawn path)
@@ -105,11 +101,9 @@ code_reload_updates_activity_test() ->
     }),
 
     try
-        %% Get initial activity time
-        {ok, InitialTime} = beamtalk_workspace_meta:get_last_activity(),
-
-        %% Wait for the second-resolution clock to tick past the initial time
-        ok = wait_clock_after(InitialTime),
+        %% Back-date the stamp so the next update is strictly newer without
+        %% waiting for the second-resolution clock to roll over
+        InitialTime = backdate_activity(MetaPid),
 
         %% Simulate code reload by calling update_activity
         %% (This is what beamtalk_repl_eval:do_load does after module load)
@@ -133,26 +127,16 @@ multiple_activity_updates_test() ->
     }),
 
     try
-        %% Get initial activity time
-        {ok, Time1} = beamtalk_workspace_meta:get_last_activity(),
-
-        %% Update 1
-        ok = wait_clock_after(Time1),
-        ok = beamtalk_workspace_meta:update_activity(),
-        {ok, Time2} = beamtalk_workspace_meta:get_last_activity(),
-        ?assert(Time2 > Time1, "First update should increase time"),
-
-        %% Update 2
-        ok = wait_clock_after(Time2),
-        ok = beamtalk_workspace_meta:update_activity(),
-        {ok, Time3} = beamtalk_workspace_meta:get_last_activity(),
-        ?assert(Time3 > Time2, "Second update should increase time"),
-
-        %% Update 3
-        ok = wait_clock_after(Time3),
-        ok = beamtalk_workspace_meta:update_activity(),
-        {ok, Time4} = beamtalk_workspace_meta:get_last_activity(),
-        ?assert(Time4 > Time3, "Third update should increase time")
+        %% Each round back-dates the stamp, so the update must move it forward
+        lists:foreach(
+            fun(Round) ->
+                Before = backdate_activity(MetaPid),
+                ok = beamtalk_workspace_meta:update_activity(),
+                {ok, After} = beamtalk_workspace_meta:get_last_activity(),
+                ?assert(After > Before, {update_did_not_advance_activity, Round})
+            end,
+            [1, 2, 3]
+        )
     after
         gen_server:stop(MetaPid)
     end.
@@ -168,11 +152,9 @@ mark_activity_delegates_to_workspace_meta_test() ->
     }),
 
     try
-        %% Get initial activity time
-        {ok, InitialTime} = beamtalk_workspace_meta:get_last_activity(),
-
-        %% Wait for the second-resolution clock to tick past the initial time
-        ok = wait_clock_after(InitialTime),
+        %% Back-date the stamp so the next update is strictly newer without
+        %% waiting for the second-resolution clock to roll over
+        InitialTime = backdate_activity(MetaPid),
 
         %% Use the convenience function
         ok = beamtalk_idle_monitor:mark_activity(),
@@ -184,7 +166,18 @@ mark_activity_delegates_to_workspace_meta_test() ->
         gen_server:stop(MetaPid)
     end.
 
-%% Block until the wall clock (second resolution, as workspace_meta stamps
-%% activity) has passed `Time`, so the next update gets a strictly larger value.
-wait_clock_after(Time) ->
-    beamtalk_test_wait:until(fun() -> erlang:system_time(second) > Time end, 2000).
+%% Move workspace_meta's last-activity stamp (second resolution) 10 s into the
+%% past and return it, so the next update gets a strictly larger value with no
+%% wait for the wall clock to tick. Test-only state edit via sys:replace_state/2.
+backdate_activity(MetaPid) ->
+    {ok, Now} = beamtalk_workspace_meta:get_last_activity(),
+    Aged = Now - 10,
+    %% #state.last_activity is element 6 (record tag, workspace_id,
+    %% project_path, package_name, created_at, last_activity); the guard fails
+    %% loudly if the record layout ever shifts.
+    _ = sys:replace_state(MetaPid, fun(State) ->
+        Now = element(6, State),
+        setelement(6, State, Aged)
+    end),
+    {ok, Aged} = beamtalk_workspace_meta:get_last_activity(),
+    Aged.

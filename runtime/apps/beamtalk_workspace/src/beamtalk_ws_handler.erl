@@ -174,11 +174,13 @@ websocket_info({eval_error, _, _, _}, State = #ws_state{pending_eval = undefined
 websocket_info({eval_script_exit, _, _, _}, State = #ws_state{pending_eval = undefined}) ->
     {ok, State};
 %% Transcript push — forwarded from beamtalk_transcript_stream subscriber (ADR 0017)
+%% `Text` can carry invalid UTF-8 (`show:` of an `asStringUnchecked` string), on
+%% which `json:encode/1` raises and the connection dies: BT-5018.
 websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true}) ->
     Push = iolist_to_binary(
         json:encode(#{
             <<"push">> => <<"transcript">>,
-            <<"text">> => Text
+            <<"text">> => beamtalk_transcript_stream:ensure_utf8(Text)
         })
     ),
     {[{text, Push}], State};
@@ -303,16 +305,18 @@ websocket_info(
 websocket_info({log_event, _EventData}, State) ->
     %% Not subscribed or not authenticated — drop silently
     {ok, State};
-%% Session process died — clean up ETS entry and close WebSocket
+%% Session process ended — clean up ETS entry and close WebSocket. A `normal`
+%% exit is a deliberate stop (the client's `close` op, idle shutdown): close
+%% with 1000. Anything else is an unexpected session death: 1011.
 websocket_info(
-    {'DOWN', MonRef, process, _Pid, _Reason},
+    {'DOWN', MonRef, process, _Pid, Reason},
     State = #ws_state{session_mon = MonRef, session_id = SessionId}
 ) ->
     ?LOG_INFO("Session process terminated, closing WebSocket", #{
         session => SessionId, domain => [beamtalk, runtime]
     }),
     beamtalk_session_table:delete(SessionId),
-    {[{close, 1011, <<"Session terminated">>}], State#ws_state{
+    {[{close, session_close_code(Reason), <<"Session terminated">>}], State#ws_state{
         authenticated = false,
         session_id = undefined,
         session_pid = undefined,
@@ -320,6 +324,11 @@ websocket_info(
     }};
 websocket_info(_Info, State) ->
     {ok, State}.
+
+-doc "WebSocket close code for a session process exit: 1000 if deliberate, else 1011.".
+-spec session_close_code(term()) -> 1000 | 1011.
+session_close_code(normal) -> 1000;
+session_close_code(_Unexpected) -> 1011.
 
 -doc "Connection terminated — clean up or keep session for resume.".
 terminate(_Reason, _Req, #ws_state{session_id = undefined}) ->
@@ -337,8 +346,12 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
     %% Unsubscribe from log streaming — a separate diagnostic stream,
     %% not part of the workspace push-stream facade.
     beamtalk_ws_log_handler:unsubscribe(),
-    %% Keep session alive for resume — session idle monitor handles cleanup.
-    %% Don't delete from ETS or stop the process here.
+    %% Keep the session alive so the client can resume it, but don't stop it or
+    %% delete its table row here. The shell monitors this connection process
+    %% (`beamtalk_repl_shell:attach/2`), so it notices the disconnect itself: it
+    %% stays resumable for `beamtalk_repl_shell:session_idle_seconds/0`, then
+    %% stops and removes its own row (BT-5012). The idle monitor ignores such
+    %% detached sessions when deciding whether the workspace is idle.
     ok.
 
 %%% Internal — Authentication
@@ -348,7 +361,45 @@ Validate the first WebSocket message as a cookie auth handshake.
 Expected: {"type":"auth","cookie":"<workspace cookie>"}
 """.
 handle_auth(Data, State) ->
-    try json:decode(Data) of
+    case decode_auth_frame(Data) of
+        {ok, Decoded} -> handle_auth_message(Decoded, State);
+        error -> auth_malformed(State)
+    end.
+
+-doc """
+Decode the first, unauthenticated frame.
+
+Any decode failure counts as malformed. OTP's `json:decode/1` raises
+`unexpected_end`, `{invalid_byte, _}`, `{invalid_unicode, _}` and, for an
+unpaired surrogate escape such as `\\ud800\\u0041`, `{unexpected_sequence, _}`;
+enumerating them let the next new reason crash the handler for an
+unauthenticated peer. Nothing about the failure reaches the peer.
+""".
+-spec decode_auth_frame(binary()) -> {ok, term()} | error.
+decode_auth_frame(Data) ->
+    try
+        {ok, json:decode(Data)}
+    catch
+        error:_ -> error
+    end.
+
+-doc "Reject an auth frame that did not parse: one generic reply, then close.".
+-spec auth_malformed(#ws_state{}) -> {list(), #ws_state{}}.
+auth_malformed(State) ->
+    ?LOG_WARNING("WebSocket auth failed: malformed JSON", #{
+        peer => State#ws_state.peer, domain => [beamtalk, runtime]
+    }),
+    Reply = iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"auth_error">>,
+            <<"message">> => <<"Malformed auth message">>
+        })
+    ),
+    {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}.
+
+-spec handle_auth_message(term(), #ws_state{}) -> {list(), #ws_state{}}.
+handle_auth_message(Decoded, State) ->
+    case Decoded of
         #{<<"type">> := <<"auth">>, <<"cookie">> := ProvidedCookie} = AuthMsg when
             is_binary(ProvidedCookie)
         ->
@@ -441,23 +492,6 @@ handle_auth(Data, State) ->
                 json:encode(#{
                     <<"type">> => <<"auth_error">>,
                     <<"message">> => <<"First message must be auth">>
-                })
-            ),
-            {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}
-    catch
-        error:Reason when
-            Reason =:= unexpected_end;
-            is_tuple(Reason) andalso
-                (element(1, Reason) =:= invalid_byte orelse
-                    element(1, Reason) =:= invalid_unicode)
-        ->
-            ?LOG_WARNING("WebSocket auth failed: malformed JSON", #{
-                peer => State#ws_state.peer, domain => [beamtalk, runtime]
-            }),
-            Reply = iolist_to_binary(
-                json:encode(#{
-                    <<"type">> => <<"auth_error">>,
-                    <<"message">> => <<"Malformed auth message">>
                 })
             ),
             {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}
@@ -705,6 +739,7 @@ start_or_resume_session(ResumeId, Meta, State) when is_binary(ResumeId) ->
                             <<"session">> => ResumeId
                         })
                     ),
+                    beamtalk_repl_shell:attach(Pid, self()),
                     {[{text, AuthOk}, {text, SessionMsg}] ++ InitialActors, State#ws_state{
                         authenticated = true,
                         session_id = ResumeId,
@@ -748,6 +783,7 @@ create_session(SessionId, Meta, State) ->
                 peer => State#ws_state.peer,
                 domain => [beamtalk, runtime]
             }),
+            beamtalk_repl_shell:attach(SessionPid, self()),
             beamtalk_workspace_meta:update_activity(),
             %% Subscribe to all live push streams (Transcript, actors,
             %% classes, bindings, flush) via the stable facade. ADR 0082 Phase 3:
@@ -1293,21 +1329,25 @@ extract_compile_error_location(_) ->
 %%% Internal — Log streaming
 
 -doc "Subscribe to live log events. Accepts an optional level parameter.".
-handle_subscribe_logs(Msg, State = #ws_state{log_subscribed = true}) ->
-    %% Already subscribed — unsubscribe first to update the level filter
-    beamtalk_ws_log_handler:unsubscribe(),
-    do_subscribe_logs(Msg, State);
 handle_subscribe_logs(Msg, State) ->
+    %% Already subscribed: `subscribe/1` just updates the level of the existing
+    %% subscription (one monitor process throughout).
     do_subscribe_logs(Msg, State).
 
 do_subscribe_logs(Msg, State) ->
     Params = beamtalk_repl_protocol:get_params(Msg),
-    Level = parse_log_level(maps:get(<<"level">>, Params, undefined)),
-    beamtalk_ws_log_handler:subscribe(Level),
-    Response = beamtalk_repl_protocol:encode_status(
-        ok, Msg, fun beamtalk_repl_json:term_to_json/1
-    ),
-    {[{text, Response}], State#ws_state{log_subscribed = true}}.
+    case parse_log_level(maps:get(<<"level">>, Params, undefined)) of
+        {ok, Level} ->
+            beamtalk_ws_log_handler:subscribe(Level),
+            Response = beamtalk_repl_protocol:encode_status(
+                ok, Msg, fun beamtalk_repl_json:term_to_json/1
+            ),
+            {[{text, Response}], State#ws_state{log_subscribed = true}};
+        {error, Err} ->
+            %% Unknown level: refuse rather than guess, and leave any existing
+            %% subscription as it was (see `handle_subscribe_logs/2`).
+            {[{text, beamtalk_repl_json:encode_error(Err, Msg)}], State}
+    end.
 
 handle_unsubscribe_logs(Msg, State) ->
     beamtalk_ws_log_handler:unsubscribe(),
@@ -1316,18 +1356,44 @@ handle_unsubscribe_logs(Msg, State) ->
     ),
     {[{text, Response}], State#ws_state{log_subscribed = false}}.
 
--doc "Parse a log level from a binary or default to debug.".
--spec parse_log_level(binary() | undefined) -> logger:level().
-parse_log_level(undefined) -> debug;
-parse_log_level(<<"emergency">>) -> emergency;
-parse_log_level(<<"alert">>) -> alert;
-parse_log_level(<<"critical">>) -> critical;
-parse_log_level(<<"error">>) -> error;
-parse_log_level(<<"warning">>) -> warning;
-parse_log_level(<<"notice">>) -> notice;
-parse_log_level(<<"info">>) -> info;
-parse_log_level(<<"debug">>) -> debug;
-parse_log_level(_) -> debug.
+-doc """
+Parse the `level` of a `subscribe-logs` request. An absent level means `debug`
+(everything); a level that is not one of the OTP levels is an
+`invalid_argument` error rather than silently the most verbose stream.
+""".
+-spec parse_log_level(term()) -> {ok, logger:level()} | {error, #beamtalk_error{}}.
+parse_log_level(undefined) ->
+    {ok, debug};
+parse_log_level(Level) when is_binary(Level) ->
+    case
+        lists:member(Level, [
+            <<"emergency">>,
+            <<"alert">>,
+            <<"critical">>,
+            <<"error">>,
+            <<"warning">>,
+            <<"notice">>,
+            <<"info">>,
+            <<"debug">>
+        ])
+    of
+        true -> {ok, binary_to_existing_atom(Level, utf8)};
+        false -> {error, invalid_log_level()}
+    end;
+parse_log_level(_Other) ->
+    {error, invalid_log_level()}.
+
+-spec invalid_log_level() -> #beamtalk_error{}.
+invalid_log_level() ->
+    beamtalk_repl_errors:make(
+        invalid_argument,
+        'REPL',
+        <<"Unknown log level">>,
+        <<
+            "Use one of: emergency, alert, critical, error, warning, notice, info, debug"
+            " (omit `level` for debug)."
+        >>
+    ).
 
 -doc """
 Encode a log event map for JSON push. Converts atom keys to binary keys

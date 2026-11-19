@@ -267,7 +267,7 @@ fn stage_simple_project() -> Option<PathBuf> {
     if !src.exists() {
         return None;
     }
-    let dst = std::env::temp_dir().join("beamtalk-parity-simple");
+    let dst = staging_dir("simple");
     let _ = std::fs::remove_dir_all(&dst);
     beamtalk_workspace::copy_tree(&src, &dst).ok()?;
     Some(dst)
@@ -283,7 +283,7 @@ fn stage_test_runner_project() -> Option<PathBuf> {
     if !src.exists() {
         return None;
     }
-    let dst = std::env::temp_dir().join("beamtalk-parity-test-runner");
+    let dst = staging_dir("test-runner");
     let _ = std::fs::remove_dir_all(&dst);
     beamtalk_workspace::copy_tree(&src, &dst).ok()?;
     Some(dst)
@@ -301,7 +301,7 @@ fn stage_mixed_project() -> Option<PathBuf> {
     if !src.exists() {
         return None;
     }
-    let dst = std::env::temp_dir().join("beamtalk-parity-mixed");
+    let dst = staging_dir("mixed");
     let _ = std::fs::remove_dir_all(&dst);
     beamtalk_workspace::copy_tree(&src, &dst).ok()?;
     Some(dst)
@@ -329,12 +329,19 @@ const TEST_RUNNER_CLASSES: &[(&str, &str)] = &[
 /// fall back to the `simple_project` directory so `CounterTest`
 /// keeps working unchanged.
 fn cli_test_path_for_class(class: &str) -> PathBuf {
-    let runner_root = std::env::temp_dir().join("beamtalk-parity-test-runner");
+    let runner_root = staging_dir("test-runner");
     if let Some((_, file)) = TEST_RUNNER_CLASSES.iter().find(|(c, _)| *c == class) {
         runner_root.join("test").join(file)
     } else {
-        std::env::temp_dir().join("beamtalk-parity-simple")
+        staging_dir("simple")
     }
+}
+
+/// Per-process staging directory (`beamtalk-parity-<name>-<pid>`), so two
+/// concurrent runs of this suite never stage into (and delete) each other's
+/// trees (BT-5035).
+fn staging_dir(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("beamtalk-parity-{name}-{}", std::process::id()))
 }
 
 fn stage_diagnostic_file() -> Option<PathBuf> {
@@ -342,7 +349,7 @@ fn stage_diagnostic_file() -> Option<PathBuf> {
     if !src.exists() {
         return None;
     }
-    let dst_dir = std::env::temp_dir().join("beamtalk-parity-diagnostic");
+    let dst_dir = staging_dir("diagnostic");
     let _ = std::fs::create_dir_all(&dst_dir);
     let dst = dst_dir.join("bad_syntax.bt");
     let _ = std::fs::remove_file(&dst);

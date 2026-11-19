@@ -79,6 +79,68 @@ fn run_script_mode_program_exit_and_system_halt_status() {
     }
 }
 
+/// BT-5028: a BEAM killed by a signal (SIGKILL, OOM kill) must not look like
+/// success to CI: `beamtalk run` exits 128 + signal. The program writes a marker
+/// file once it is running; a watcher thread then finds the project's BEAM
+/// (the only process with the unique temp project as its cwd and `-noshell`
+/// in its command line) and SIGKILLs it. Runs in the default suite: it needs
+/// only the BEAM that `run` always boots. Linux-only for `/proc`.
+#[cfg(target_os = "linux")]
+#[test]
+fn run_exits_128_plus_signal_when_the_beam_is_sigkilled_bt_5028() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Victim.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Victim\n\
+         \n\
+         \x20\x20class run =>\n\
+         \x20\x20\x20\x20handle := (File open: \"bt5028_ready.txt\" mode: #write) unwrap\n\
+         \x20\x20\x20\x20handle close\n\
+         \x20\x20\x20\x20Timer sleep: 600000\n",
+    )
+    .unwrap();
+
+    let root = project.path().canonicalize().unwrap();
+    let marker = root.join("bt5028_ready.txt");
+    let watcher = std::thread::spawn(move || {
+        // Wait for the program to be running (polling for state, no timing claim).
+        while !marker.exists() {
+            std::thread::sleep(std::time::Duration::from_millis(20)); // sleep: poll for the ready marker
+        }
+        let mut killed = 0;
+        for entry in std::fs::read_dir("/proc").unwrap().flatten() {
+            let Ok(pid) = entry.file_name().to_string_lossy().parse::<i32>() else {
+                continue;
+            };
+            let in_project = std::fs::read_link(entry.path().join("cwd")).ok().as_deref()
+                == Some(root.as_path());
+            let is_beam = std::fs::read(entry.path().join("cmdline"))
+                .is_ok_and(|c| c.split(|b| *b == 0).any(|a| a == b"-noshell"));
+            if in_project && is_beam {
+                // SAFETY: kill(2) on a PID we just matched by its unique cwd.
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+                killed += 1;
+            }
+        }
+        killed
+    });
+
+    cli_common::beamtalk_run()
+        .current_dir(project.path())
+        // Hang guard only: the watcher kills the BEAM long before this.
+        .timeout(std::time::Duration::from_mins(5))
+        .args(["Victim", "run"])
+        .assert()
+        .code(128 + libc::SIGKILL);
+    assert!(
+        watcher.join().unwrap() >= 1,
+        "the watcher must have found the BEAM"
+    );
+}
+
 #[test]
 fn run_script_mode_dispatches_subdirectory_class_by_name() {
     // ADR 0119 Phase 3: package-compiler/e2e regression test for the

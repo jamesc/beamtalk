@@ -130,6 +130,10 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
     code_change/3
 ]).
 
+-ifdef(TEST).
+-export([sweep_pending/1]).
+-endif.
+
 %% Atomics slot offsets (per aggregate key: {Class, Selector} or {Pid, Selector})
 -define(SLOT_CALLS, 1).
 -define(SLOT_OK, 2).
@@ -647,6 +651,15 @@ handle_vm_measurements(_EventName, Measurements, _Metadata, _Config) ->
 %% gen_server callbacks
 %%====================================================================
 
+-ifdef(TEST).
+%% Whether a chunked sweep is mid-way. Test-only (BT-5023): tests poll this to
+%% wait a sweep out. Compiled out of release builds, so the running server has
+%% no `sweep_pending` request to answer.
+-spec sweep_pending(pid() | atom()) -> boolean().
+sweep_pending(Server) ->
+    (sys:get_state(Server))#state.sweep_cont =/= undefined.
+-endif.
+
 init([]) ->
     beamtalk_logging_config:set_domain(runtime),
 
@@ -717,10 +730,6 @@ handle_call(clear, _From, State) ->
     do_clear(),
     ?LOG_INFO("Trace store cleared", #{}),
     {reply, ok, drop_sweep(State)};
-handle_call(sweep_pending, _From, State) ->
-    %% Whether a chunked sweep is mid-way. Test-only: tests poll this to wait
-    %% a sweep out; not part of the API.
-    {reply, State#state.sweep_cont =/= undefined, State};
 handle_call({grow_counters, CallerRef}, _From, State) ->
     %% Serialized counters grow to prevent concurrent persistent_term overwrites.
     %% Check if another caller already grew while we were queued.

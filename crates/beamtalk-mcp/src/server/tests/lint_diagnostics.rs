@@ -362,10 +362,7 @@ fn lint_type_registry_extracts_live_on_cold_cache() {
     let Some(registry) = lint_registry(dir) else {
         // OTP `.beam` discovery is environment-dependent (e.g. a sandbox
         // with no OTP install on disk); skip rather than false-fail.
-        eprintln!(
-            "skipping lint_type_registry_extracts_live_on_cold_cache: \
-                 no OTP .beam files discovered in this environment"
-        );
+        beamtalk_core::test_helpers::test_support::skip_or_fail("OTP .beam files");
         return;
     };
     assert!(
@@ -404,10 +401,7 @@ fn run_lint_structured_ffi_call_does_not_warn_dynamic_in_typed_class() {
         .unwrap();
 
     if lint_registry(dir).is_none() {
-        eprintln!(
-            "skipping run_lint_structured_ffi_call_does_not_warn_dynamic_in_typed_class: \
-                 no OTP .beam files discovered in this environment"
-        );
+        beamtalk_core::test_helpers::test_support::skip_or_fail("OTP .beam files");
         return;
     }
 

@@ -172,7 +172,7 @@ async fn resolve_port_and_cookie(
     }
 
     // Try finding any running workspace
-    if let Some((port, cookie, ws_id)) = workspace::discover_any_port_cookie_and_id() {
+    if let Some((port, cookie, ws_id)) = workspace::discover_any_port_cookie_and_id()? {
         if cookie.trim().is_empty() {
             return Err(
                 "Auto-discovered workspace has empty cookie; restart with `beamtalk repl`".into(),

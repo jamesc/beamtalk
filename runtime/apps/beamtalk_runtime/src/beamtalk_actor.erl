@@ -3393,14 +3393,22 @@ a `noconnection` DOWN reason (the actor's node partitioned or was never
 connected — verified empirically, see erlang:monitor/2 docs) rejects with
 `node_down` instead of `actor_dead`, matching the sync/timeout paths'
 exit mapping. The watcher also monitors the future process so it can
-clean up promptly when the future completes normally. Times out after
-30s as a safety net.
+clean up promptly when the future completes normally. There is no time
+cutoff (BT-5020): the watcher ends when either process dies or the future tells it
+it settled, and a pending
+future with no producer is itself capped by beamtalk_future (?PENDING_CAP_MS),
+unless a watcher registers as its producer. This watcher does so, lifting
+that cap while it lives. Every cast handler must settle its `FuturePid`:
+an actor that stays alive without doing so leaves the watcher and the
+future pending.
 """.
 -spec spawn_future_watcher(pid(), pid(), atom()) -> pid().
 spawn_future_watcher(ActorPid, FuturePid, Selector) ->
     spawn(fun() ->
         ActorRef = erlang:monitor(process, ActorPid),
         FutureRef = erlang:monitor(process, FuturePid),
+        %% Tell the future a live producer exists: lifts its orphan cap.
+        FuturePid ! {producer, self()},
         receive
             {'DOWN', ActorRef, process, ActorPid, Reason} ->
                 %% Actor died (or its node went away) — reject future
@@ -3414,11 +3422,11 @@ spawn_future_watcher(ActorPid, FuturePid, Selector) ->
                 erlang:demonitor(FutureRef, [flush]);
             {'DOWN', FutureRef, process, FuturePid, _Reason} ->
                 %% Future completed and its process ended — clean up
-                erlang:demonitor(ActorRef, [flush])
-        after 30000 ->
-            %% Safety cleanup: stop watching after 30s
-            erlang:demonitor(ActorRef, [flush]),
-            erlang:demonitor(FutureRef, [flush])
+                erlang:demonitor(ActorRef, [flush]);
+            {future_settled, FuturePid} ->
+                %% Future settled (resolved/rejected): nothing left to watch
+                erlang:demonitor(ActorRef, [flush]),
+                erlang:demonitor(FutureRef, [flush])
         end
     end).
 

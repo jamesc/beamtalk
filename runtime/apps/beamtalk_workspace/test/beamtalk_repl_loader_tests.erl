@@ -210,15 +210,95 @@ safe_atom_result_error_test() ->
     ?assertEqual(false, beamtalk_repl_loader_support:safe_atom_result({error, badarg})).
 
 %%====================================================================
-%% register_classes/2
+%% register_class_module/1
 %%====================================================================
 
-register_classes_no_function_exported_test() ->
+register_class_module_no_function_exported_test() ->
     %% lists module has no register_class/0 → ok
-    ?assertEqual(ok, beamtalk_repl_loader_activate:register_classes([], lists)).
+    ?assertEqual(ok, beamtalk_repl_loader_activate:register_class_module(lists)).
 
-register_classes_empty_classes_test() ->
-    ?assertEqual(ok, beamtalk_repl_loader_activate:register_classes([], some_nonexistent_module)).
+register_class_module_empty_classes_test() ->
+    ?assertEqual(ok, beamtalk_repl_loader_activate:register_class_module(some_nonexistent_module)).
+
+%%====================================================================
+%% register_class/0 failure (BT-5015)
+%%====================================================================
+
+%% Compile and load a throwaway module (no `on_load`) whose `register_class/0`
+%% is `Body`, so `activate_module/2`'s own registration call is what fails.
+load_registering_module(Name, Body) ->
+    Src =
+        "-module(" ++ atom_to_list(Name) ++
+            ").\n-export([register_class/0]).\n"
+            "register_class() -> " ++ Body ++ ".\n",
+    {ok, Toks, _} = erl_scan:string(Src),
+    Forms = [
+        begin
+            {ok, F} = erl_parse:parse_form(T),
+            F
+        end
+     || T <- split_forms(Toks)
+    ],
+    {ok, Name, Bin} = compile:forms(Forms),
+    {module, Name} = code:load_binary(Name, atom_to_list(Name) ++ ".erl", Bin),
+    Name.
+
+split_forms(Toks) ->
+    {Form, Rest} = lists:splitwith(fun(T) -> element(1, T) =/= dot end, Toks),
+    case Rest of
+        [] -> [];
+        [Dot | More] -> [Form ++ [Dot] | split_forms(More)]
+    end.
+
+activate_module_register_class_raises_returns_error_test_() ->
+    {setup,
+        fun() ->
+            ok = meck:new(beamtalk_workspace_meta, [non_strict]),
+            ok = meck:expect(beamtalk_workspace_meta, register_module, fun(_, _) -> ok end),
+            ok = meck:expect(beamtalk_workspace_meta, update_activity, fun() -> ok end),
+            load_registering_module(bt5015_raises, "erlang:error(bad_superclass)")
+        end,
+        fun(Mod) ->
+            meck:unload(beamtalk_workspace_meta),
+            code:purge(Mod),
+            code:delete(Mod)
+        end,
+        fun(Mod) ->
+            fun() ->
+                {error, Err} = beamtalk_repl_loader_activate:activate_module(Mod, []),
+                ?assertMatch(#beamtalk_error{kind = registration_error}, Err),
+                %% The failed class must not go on to be registered as loaded.
+                ?assertNot(meck:called(beamtalk_workspace_meta, register_module, '_')),
+                ?assertNot(meck:called(beamtalk_workspace_meta, update_activity, '_'))
+            end
+        end}.
+
+register_class_module_error_return_is_registration_error_test_() ->
+    {setup, fun() -> load_registering_module(bt5015_errret, "{error, name_collision}") end,
+        fun(Mod) ->
+            code:purge(Mod),
+            code:delete(Mod)
+        end,
+        fun(Mod) ->
+            fun() ->
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = registration_error}},
+                    beamtalk_repl_loader_activate:register_class_module(Mod)
+                )
+            end
+        end}.
+
+register_class_module_ok_test_() ->
+    {setup, fun() -> load_registering_module(bt5015_ok, "ok") end,
+        fun(Mod) ->
+            code:purge(Mod),
+            code:delete(Mod)
+        end,
+        fun(Mod) ->
+            fun() ->
+                ?assertEqual(ok, beamtalk_repl_loader_activate:register_class_module(Mod))
+            end
+        end}.
 
 %%====================================================================
 %% trigger_hot_reload/2

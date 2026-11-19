@@ -423,26 +423,119 @@ pub mod test_support {
         near_valid_from(NEAR_VALID_BEAMTALK_FRAGMENTS)
     }
 
+    /// Environment variable that makes a missing Erlang toolchain a test
+    /// failure instead of a skip (BT-5034). `CI` being set has the same effect.
+    pub const REQUIRE_ERLANG_VAR: &str = "BEAMTALK_REQUIRE_ERLANG";
+
+    /// Whether a missing `erlc` / `erl` must fail the test run rather than
+    /// skip: `CI` or [`REQUIRE_ERLANG_VAR`] set to anything but empty, `0` or
+    /// `false`. A CI image that lost its Erlang install would otherwise stay
+    /// green with every compile check silently skipped.
+    #[must_use]
+    pub fn erlang_required() -> bool {
+        required_by(|var| std::env::var(var).ok())
+    }
+
+    /// [`erlang_required`] over an injectable environment lookup, so the rule
+    /// is testable without mutating the process environment.
+    pub(super) fn required_by(lookup: impl Fn(&str) -> Option<String>) -> bool {
+        [REQUIRE_ERLANG_VAR, "CI"].iter().any(|var| {
+            lookup(var).is_some_and(|v| {
+                let v = v.trim();
+                !(v.is_empty() || v == "0" || v.eq_ignore_ascii_case("false"))
+            })
+        })
+    }
+
+    /// The one skip-or-fail decision for a missing Erlang tool (BT-5034).
+    ///
+    /// Panics when [`erlang_required`], naming `what` and how to opt out;
+    /// otherwise prints a skip notice. Callers that cannot go through
+    /// [`erlc_available`] / [`erlang_available`] (e.g. OTP discovery) call it
+    /// directly and `return` afterwards.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the Erlang toolchain is required (see [`erlang_required`]).
+    pub fn skip_or_fail(what: &str) {
+        assert!(
+            !erlang_required(),
+            "{what} unavailable, but CI or {REQUIRE_ERLANG_VAR} requires the Erlang toolchain \
+             (install Erlang/OTP, or unset both to skip these tests locally)"
+        );
+        eprintln!("skipping: {what} unavailable");
+    }
+
     /// Whether `erlc` can be invoked. One probe, one flag, for every test that
     /// compiles generated Core Erlang (BT-4678).
     ///
     /// Any error other than "not found" (e.g. a permissions failure) counts as
     /// available, so the failure surfaces in the test's own `erlc` invocation
-    /// instead of silently skipping it.
+    /// instead of silently skipping it. When `erlc` is missing this returns
+    /// `false` (skip) locally and panics under [`erlang_required`] (BT-5034),
+    /// so every `if !erlc_available() { return }` site is skip-or-fail.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `erlc` is missing and the toolchain is required.
     #[must_use]
     pub fn erlc_available() -> bool {
         // `erlc -v` boots the Erlang VM; probe once per test process, not per
         // call (hundreds of tests ask).
         static ERLC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *ERLC.get_or_init(|| tool_available("erlc", "-v"))
+        let found = *ERLC.get_or_init(|| tool_available("erlc", "-v"));
+        if !found {
+            skip_or_fail("`erlc`");
+        }
+        found
     }
 
-    /// Whether both `erlc` and `erl` can be invoked.
+    /// Whether both `erlc` and `erl` can be invoked; skip-or-fail as
+    /// [`erlc_available`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when either tool is missing and the toolchain is required.
     #[must_use]
     pub fn erlang_available() -> bool {
         // Cached like `erlc_available`: `erl -version` boots a VM too.
         static ERL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *ERL.get_or_init(|| erlc_available() && tool_available("erl", "-version"))
+        let found = erlc_available() && *ERL.get_or_init(|| tool_available("erl", "-version"));
+        if !found {
+            skip_or_fail("`erl`");
+        }
+        found
+    }
+
+    /// The installed OTP major release (e.g. `"28"`), or `None` when no working
+    /// `erl` can run here. One probe per test process: every test that gates on
+    /// the OTP release shares it instead of booting its own VM. `None` panics
+    /// under [`erlang_required`], as [`erlc_available`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when no working `erl` exists and the toolchain is required.
+    #[must_use]
+    pub fn installed_otp_release() -> Option<&'static str> {
+        static OTP: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+        let release = OTP
+            .get_or_init(|| {
+                let out = std::process::Command::new("erl")
+                    .args([
+                        "-noshell",
+                        "-eval",
+                        "io:put_chars(erlang:system_info(otp_release)), halt().",
+                    ])
+                    .output()
+                    .ok()?;
+                let release = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                (out.status.success() && !release.is_empty()).then_some(release)
+            })
+            .as_deref();
+        if release.is_none() {
+            skip_or_fail("a working `erl`");
+        }
+        release
     }
 
     /// Modules per `erlc` invocation. Windows caps a command line at ~32K
@@ -455,9 +548,10 @@ pub mod test_support {
     /// `erlc +from_core` into `dir`, in batches of [`ERLC_BATCH`].
     ///
     /// `Ok(())` when `erlc` accepts every module, or when `erlc` is not
-    /// installed (`NotFound` only — any other spawn failure, such as the
-    /// Windows command-line overflow that motivated the batching, is an
-    /// `Err`, never a silent pass). Every batch runs even after one fails, and
+    /// installed and the toolchain is not required (`NotFound` only — any
+    /// other spawn failure, such as the Windows command-line overflow that
+    /// motivated the batching, is an `Err`, never a silent pass). When
+    /// [`erlang_required`] a missing `erlc` is an `Err` too (BT-5034). Every batch runs even after one fails, and
     /// the `Err` carries the output of every failing batch (BT-4379). `erlc`
     /// prefixes each diagnostic with the failing `<module name>.core` path, so
     /// the `Err` names the offending rows. A module name may carry a
@@ -495,7 +589,9 @@ pub mod test_support {
                 .args(chunk)
                 .output();
             match output {
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound && !erlang_required() => {
+                    return Ok(());
+                }
                 Err(e) => errors.push(format!("failed to invoke erlc: {e}")),
                 Ok(o) if o.status.success() => {}
                 Ok(o) => errors.push(format!(
@@ -1350,5 +1446,48 @@ pub mod test_support {
                 other => panic!("expected MessageSend, got {other:?}"),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod erlang_required_tests {
+    use super::test_support::{REQUIRE_ERLANG_VAR, required_by};
+
+    fn env(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
+        move |var| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == var)
+                .map(|(_, v)| (*v).to_string())
+        }
+    }
+
+    #[test]
+    fn neither_variable_set_skips() {
+        assert!(!required_by(env(&[])));
+    }
+
+    #[test]
+    fn ci_or_the_explicit_variable_requires_erlang() {
+        assert!(required_by(env(&[("CI", "true")])));
+        assert!(required_by(env(&[("CI", "1")])));
+        assert!(required_by(env(&[(REQUIRE_ERLANG_VAR, "1")])));
+    }
+
+    #[test]
+    fn empty_zero_and_false_do_not_require_erlang() {
+        for off in ["", "0", "false", "FALSE", "  "] {
+            let pairs: &'static [(&'static str, &'static str)] =
+                Box::leak(Box::new([("CI", off), (REQUIRE_ERLANG_VAR, off)]));
+            assert!(!required_by(env(pairs)), "{off:?} must not require Erlang");
+        }
+    }
+
+    #[test]
+    fn the_explicit_variable_wins_over_a_falsy_ci() {
+        assert!(required_by(env(&[
+            ("CI", "false"),
+            (REQUIRE_ERLANG_VAR, "1")
+        ])));
     }
 }

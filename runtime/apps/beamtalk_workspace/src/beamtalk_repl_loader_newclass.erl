@@ -219,33 +219,40 @@ new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, D
     %% ADR 0107 Phase A: see load_class_binary/4's doc.
     case beamtalk_repl_loader_support:load_class_binary(ModuleName, AbsPath, Binary, ClassNames) of
         {ok, NewlyNonLeafSuperclasses} ->
-            beamtalk_repl_loader_activate:activate_module(
-                ModuleName, ClassNames, AbsPath, NewlyNonLeafSuperclasses
-            ),
-            %% Record class source so subsequent `>>` / compile:source: patches
-            %% against the new class resolve their span (mirrors the file-load path).
-            lists:foreach(
-                fun(#{name := Name}) ->
-                    beamtalk_workspace_meta:set_class_source(
-                        beamtalk_repl_loader_support:normalize_class_source_key(Name), Source
-                    )
-                end,
-                ClassNames
-            ),
-            case Mode of
-                log ->
-                    ?ENTRIES:emit_new_class_entry(
-                        DeclaredName, list_to_binary(Source), list_to_binary(AbsPath)
+            case
+                beamtalk_repl_loader_activate:activate_module(
+                    ModuleName, ClassNames, AbsPath, NewlyNonLeafSuperclasses
+                )
+            of
+                ok ->
+                    %% Record class source so subsequent `>>` / compile:source: patches
+                    %% against the new class resolve their span (mirrors the file-load path).
+                    lists:foreach(
+                        fun(#{name := Name}) ->
+                            beamtalk_workspace_meta:set_class_source(
+                                beamtalk_repl_loader_support:normalize_class_source_key(Name),
+                                Source
+                            )
+                        end,
+                        ClassNames
                     ),
-                    %% ADR 0082 Phase 4: autoflush also covers new-class entries
-                    %% (they are durable + flushable by construction). See the
-                    %% analogous comment in load_recompiled_method/7 for the
-                    %% failure semantics.
-                    beamtalk_repl_loader_methods:maybe_autoflush(durable);
-                no_log ->
-                    ok
-            end,
-            {ok, loaded_class_objects(ClassNames)};
+                    case Mode of
+                        log ->
+                            ?ENTRIES:emit_new_class_entry(
+                                DeclaredName, list_to_binary(Source), list_to_binary(AbsPath)
+                            ),
+                            %% ADR 0082 Phase 4: autoflush also covers new-class entries
+                            %% (they are durable + flushable by construction). See the
+                            %% analogous comment in load_recompiled_method/7 for the
+                            %% failure semantics.
+                            beamtalk_repl_loader_methods:maybe_autoflush(durable);
+                        no_log ->
+                            ok
+                    end,
+                    {ok, loaded_class_objects(ClassNames)};
+                {error, _} = ActivateError ->
+                    ActivateError
+            end;
         {error, LoadReason} ->
             ClassAtoms = beamtalk_repl_loader_support:class_name_atoms(ClassNames),
             case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of

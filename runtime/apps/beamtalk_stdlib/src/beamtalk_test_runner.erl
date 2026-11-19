@@ -415,8 +415,8 @@ format_single_failure(#{name := Name, error := Error} = Entry) ->
     ClassStr = atom_to_list(ClassName),
     ErrorBin =
         case is_binary(Error) of
-            true -> ensure_utf8(Error);
-            false -> ensure_utf8(beamtalk_primitive:print_string(Error))
+            true -> beamtalk_transcript_stream:ensure_utf8(Error);
+            false -> beamtalk_transcript_stream:ensure_utf8(beamtalk_primitive:print_string(Error))
         end,
     [
         "  \xe2\x9c\x97 ",
@@ -513,7 +513,7 @@ degraded_result_json(Result, Reason) ->
             <<"skipped">> => Count(skipped),
             <<"duration">> => Count(duration),
             <<"tests">> => [],
-            <<"encodingError">> => ensure_utf8(Note)
+            <<"encodingError">> => beamtalk_transcript_stream:ensure_utf8(Note)
         })
     ).
 
@@ -562,8 +562,8 @@ when unknown), `line` (null when unknown) and `repeat`. Since ADR 0139
 -spec serialize_frame(map()) -> map().
 serialize_frame(#{class := Class, selector := Selector, block := Block} = Frame) ->
     Base = #{
-        <<"class">> => ensure_utf8(Class),
-        <<"selector">> => ensure_utf8(Selector),
+        <<"class">> => beamtalk_transcript_stream:ensure_utf8(Class),
+        <<"selector">> => beamtalk_transcript_stream:ensure_utf8(Selector),
         <<"class_side">> => maps:get(class_side, Frame, false),
         <<"kind">> => atom_to_binary(maps:get(kind, Frame, beamtalk), utf8),
         <<"block">> => Block,
@@ -576,33 +576,15 @@ serialize_frame(#{class := Class, selector := Selector, block := Block} = Frame)
 
 -spec null_if_nil(term()) -> term().
 null_if_nil(nil) -> null;
-null_if_nil(File) when is_binary(File) -> ensure_utf8(File);
+null_if_nil(File) when is_binary(File) -> beamtalk_transcript_stream:ensure_utf8(File);
 null_if_nil(Other) -> Other.
 
 -doc "A failed test's error as UTF-8 text (a binary as-is, anything else printed).".
 -spec error_text(term()) -> binary().
 error_text(Error) when is_binary(Error) ->
-    ensure_utf8(Error);
+    beamtalk_transcript_stream:ensure_utf8(Error);
 error_text(Error) ->
-    ensure_utf8(beamtalk_primitive:print_string(Error)).
-
--doc """
-Coerce a message binary to valid UTF-8 so `json:encode/1` can never reject it.
-
-Error messages are assembled from arbitrary runtime values, some of
-which are raw non-UTF-8 binaries (crypto output, file reads, hashes). Such a
-message is rendered as `Binary printString` hex instead of being embedded raw.
-""".
--spec ensure_utf8(binary()) -> binary().
-ensure_utf8(Bin) when is_binary(Bin) ->
-    case beamtalk_primitive:is_utf8(Bin) of
-        true ->
-            Bin;
-        false ->
-            %% BT-4170: `print_string/1` answers a `String` — unwrap the
-            %% hex rendering back to raw bytes for `json:encode/1`.
-            beamtalk_primitive:string_to_binary(beamtalk_binary:print_string(Bin))
-    end.
+    beamtalk_transcript_stream:ensure_utf8(beamtalk_primitive:print_string(Error)).
 
 %%====================================================================
 %% Internal: test execution (uses class registry, not module_info)

@@ -138,7 +138,7 @@ mod tests {
     /// concurrently with a `BeamtalkHomeOverride`.
     struct TestWorkspace {
         id: String,
-        _guard: std::sync::RwLockReadGuard<'static, ()>,
+        _guard: crate::commands::test_support::SharedHomeGuard,
     }
 
     impl TestWorkspace {
@@ -165,14 +165,14 @@ mod tests {
 
     #[test]
     fn test_workspace_id_for_explicit_name() {
-        let path = std::env::current_dir().unwrap();
+        let path = crate::commands::test_support::stable_project_dir();
         let id = workspace_id_for(&path, Some("my_workspace-1")).unwrap();
         assert_eq!(id, "my_workspace-1");
     }
 
     #[test]
     fn test_workspace_id_for_invalid_name() {
-        let path = std::env::current_dir().unwrap();
+        let path = crate::commands::test_support::stable_project_dir();
         assert!(workspace_id_for(&path, Some("bad/name")).is_err());
         assert!(workspace_id_for(&path, Some("")).is_err());
         assert!(workspace_id_for(&path, Some("has space")).is_err());
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn test_workspace_id_for_none_uses_hash() {
-        let path = std::env::current_dir().unwrap();
+        let path = crate::commands::test_support::stable_project_dir();
         let id = workspace_id_for(&path, None).unwrap();
         assert_eq!(id.len(), 12, "ID via hash path should be 12 hex chars");
         assert!(
@@ -451,7 +451,7 @@ mod tests {
     #[test]
     fn test_create_workspace_creates_files() {
         let ws = TestWorkspace::new("create_test");
-        let project_path = std::env::current_dir().unwrap();
+        let project_path = crate::commands::test_support::stable_project_dir();
 
         let metadata = create_workspace(&project_path, Some(&ws.id)).unwrap();
         assert_eq!(metadata.workspace_id, ws.id);
@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn test_create_workspace_idempotent() {
         let ws = TestWorkspace::new("create_idem");
-        let project_path = std::env::current_dir().unwrap();
+        let project_path = crate::commands::test_support::stable_project_dir();
 
         let m1 = create_workspace(&project_path, Some(&ws.id)).unwrap();
         let m2 = create_workspace(&project_path, Some(&ws.id)).unwrap();
@@ -693,9 +693,14 @@ mod tests {
 
     #[test]
     fn test_list_workspaces_empty_when_no_workspaces_dir() {
-        // list_workspaces handles missing ~/.beamtalk/workspaces/ gracefully
-        let result = list_workspaces();
-        assert!(result.is_ok());
+        // list_workspaces handles a missing workspaces/ directory gracefully.
+        // BEAMTALK_HOME points at an empty temp dir, never the developer's
+        // real ~/.beamtalk (BT-5034).
+        let home = tempfile::tempdir().unwrap();
+        let _guard = crate::commands::test_support::BeamtalkHomeOverride::new(home.path());
+        assert!(!home.path().join("workspaces").exists());
+        let workspaces = list_workspaces().expect("a missing workspaces dir is not an error");
+        assert!(workspaces.is_empty(), "got {workspaces:?}");
     }
 
     #[test]
@@ -727,6 +732,8 @@ mod tests {
 
     #[test]
     fn test_stop_workspace_fails_for_nonexistent() {
+        // Takes a lockfile under the workspaces dir: keep it off the real home.
+        let _home = crate::commands::test_support::real_home_guard();
         let result = stop_workspace(Some("nonexistent_stop_test_ws"), false);
         assert!(result.is_err());
     }
@@ -827,7 +834,8 @@ mod tests {
         let ws = TestWorkspace::new("find_by_path");
         // Use a unique project path so this test doesn't collide with other
         // tests that also save metadata pointing at current_dir().
-        let project_path = std::env::current_dir().unwrap().join("find_by_path_unique");
+        let project_path =
+            crate::commands::test_support::stable_project_dir().join("find_by_path_unique");
         let metadata = WorkspaceMetadata {
             project_fingerprint: None,
             workspace_id: ws.id.clone(),
@@ -853,7 +861,7 @@ mod tests {
         use std::thread;
 
         let ws = TestWorkspace::new("concurrent_create");
-        let project_path = std::env::current_dir().unwrap();
+        let project_path = crate::commands::test_support::stable_project_dir();
         let ws_id = ws.id.clone();
         let barrier = Arc::new(Barrier::new(10));
 
@@ -965,7 +973,7 @@ mod tests {
 
     impl Drop for NodeGuard {
         fn drop(&mut self) {
-            if let Err(e) = force_kill_process(self.info.pid) {
+            if let Err(e) = force_kill_process(self.info.pid, self.info.start_time) {
                 if std::thread::panicking() {
                     eprintln!("NodeGuard: failed to force-kill pid {}: {e}", self.info.pid);
                 } else {
@@ -1019,7 +1027,7 @@ mod tests {
             info.pid != 0,
             "kill_node_raw called with sentinel PID 0 — node PID unknown"
         );
-        force_kill_process(info.pid)
+        force_kill_process(info.pid, info.start_time)
             .unwrap_or_else(|e| panic!("failed to kill BEAM process with pid {}: {e}", info.pid));
         wait_for_workspace_exit(info.connect_host(), info.port, 15).unwrap_or_else(|e| {
             panic!(
@@ -1112,7 +1120,7 @@ mod tests {
     /// Failed-attempt workspaces are cleaned up automatically via `TestWorkspace::drop`.
     fn start_test_node(prefix: &str) -> (TestWorkspace, NodeInfo, NodeGuard) {
         let paths = beam_dirs_for_tests();
-        let project_path = std::env::current_dir().unwrap();
+        let project_path = crate::commands::test_support::stable_project_dir();
         let config = test_workspace_config();
 
         let mut last_err = None;
@@ -1142,7 +1150,7 @@ mod tests {
                     if let Ok(contents) = fs::read_to_string(&pid_path)
                         && let Ok(pid) = contents.trim().parse::<u32>()
                     {
-                        let _ = force_kill_process(pid);
+                        let _ = force_kill_process(pid, None);
                     }
                     last_err = Some(e);
                     // tw drops here: cleans up workspace dir and lockfile.
@@ -1192,7 +1200,7 @@ mod tests {
                         && let Ok(contents) = fs::read_to_string(ws_dir.join("pid"))
                         && let Ok(pid) = contents.trim().parse::<u32>()
                     {
-                        let _ = force_kill_process(pid);
+                        let _ = force_kill_process(pid, None);
                     }
                     // Clean all stale runtime files (port, pid, node.info, starting
                     // tombstone) so the next attempt starts from a clean slate.
@@ -1256,7 +1264,7 @@ mod tests {
         let _override = crate::commands::test_support::BeamtalkHomeOverride::new(home.path());
 
         let id = format!("integ_home_{}", std::process::id());
-        let project_path = std::env::current_dir().unwrap();
+        let project_path = crate::commands::test_support::stable_project_dir();
         let paths = beam_dirs_for_tests();
         let config = test_workspace_config();
 
@@ -1426,7 +1434,7 @@ mod tests {
     #[serial(workspace_integration)]
     fn test_get_or_start_workspace_lifecycle_integration() {
         let tw = TestWorkspace::new("integ_lifecycle");
-        let project_path = std::env::current_dir().unwrap();
+        let project_path = crate::commands::test_support::stable_project_dir();
 
         let paths = beam_dirs_for_tests();
         let config = test_workspace_config();
@@ -1498,7 +1506,7 @@ mod tests {
         use std::thread;
 
         let tw = TestWorkspace::new("integ_concurrent");
-        let project_path = std::env::current_dir().unwrap();
+        let project_path = crate::commands::test_support::stable_project_dir();
 
         let paths = Arc::new(beam_dirs_for_tests());
 
@@ -1592,7 +1600,7 @@ mod tests {
     #[serial(workspace_integration)]
     fn test_start_detached_node_ignores_stale_port_file_integration() {
         let tw = TestWorkspace::new("integ_stale_port");
-        let project_path = std::env::current_dir().unwrap();
+        let project_path = crate::commands::test_support::stable_project_dir();
         let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
         let paths = beam_dirs_for_tests();
@@ -1657,7 +1665,7 @@ mod tests {
     #[serial(workspace_integration)]
     fn test_start_detached_node_cleans_up_tombstone_integration() {
         let tw = TestWorkspace::new("integ_tombstone");
-        let project_path = std::env::current_dir().unwrap();
+        let project_path = crate::commands::test_support::stable_project_dir();
         let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
         let paths = beam_dirs_for_tests();
@@ -1724,7 +1732,7 @@ mod tests {
     #[serial(workspace_integration)]
     fn test_stop_workspace_not_running_integration() {
         let tw = TestWorkspace::new("integ_stop_notrun");
-        let project_path = std::env::current_dir().unwrap();
+        let project_path = crate::commands::test_support::stable_project_dir();
         let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
         // Workspace exists but no node is running

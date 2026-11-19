@@ -1006,3 +1006,88 @@ pid_extraction_test() ->
     Pid = beamtalk_future:pid(Future),
     ?assert(is_pid(Pid)),
     ?assert(is_process_alive(Pid)).
+
+%%% BT-5020: dead / orphaned futures
+
+await_on_exited_future_fails_immediately_test() ->
+    Future = beamtalk_future:new(),
+    Pid = beamtalk_future:pid(Future),
+    Mon = erlang:monitor(process, Pid),
+    exit(Pid, kill),
+    ?awaitMessage({'DOWN', Mon, process, Pid, _}),
+    %% Both finite and infinite awaits must fail at once, not wait out the timeout.
+    {Micros, _} = timer:tc(fun() ->
+        ?assertThrow(
+            {future_rejected, #beamtalk_error{kind = future_expired}},
+            beamtalk_future:await(Future, 5000)
+        ),
+        ?assertThrow(
+            {future_rejected, #beamtalk_error{kind = future_expired}},
+            beamtalk_future:await_forever(Future)
+        )
+    end),
+    ?assert(Micros < 1000000).
+
+orphaned_pending_future_is_rejected_after_cap_test() ->
+    Future = beamtalk_future:new_with_cap(50),
+    Parent = self(),
+    beamtalk_future:when_rejected(Future, fun(E) -> Parent ! {rejected, E} end),
+    ?awaitMessage({rejected, #beamtalk_error{kind = future_expired}}),
+    ?assertThrow(
+        {future_rejected, #beamtalk_error{kind = future_expired}},
+        beamtalk_future:await_forever(Future)
+    ).
+
+future_with_producer_is_not_capped_test() ->
+    Future = beamtalk_future:new_with_cap(50),
+    beamtalk_future:pid(Future) ! {producer, self()},
+    Pid = beamtalk_future:pid(Future),
+    %% sleep: outlive the 50 ms cap several times over to prove it was lifted
+    timer:sleep(300),
+    ?assert(is_process_alive(Pid)),
+    beamtalk_future:resolve(Future, 7),
+    ?assertEqual(7, beamtalk_future:await(Future, 1000)).
+
+producer_is_told_when_future_settles_test() ->
+    Future = beamtalk_future:new(),
+    Pid = beamtalk_future:pid(Future),
+    Pid ! {producer, self()},
+    beamtalk_future:resolve(Future, 1),
+    ?awaitMessage({future_settled, Pid}).
+
+producer_registering_after_settle_is_told_test() ->
+    Future = beamtalk_future:new(),
+    Pid = beamtalk_future:pid(Future),
+    beamtalk_future:resolve(Future, 1),
+    Pid ! {producer, self()},
+    ?awaitMessage({future_settled, Pid}).
+
+producer_death_restores_orphan_cap_test() ->
+    Future = beamtalk_future:new_with_cap(100),
+    Producer = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    beamtalk_future:pid(Future) ! {producer, Producer},
+    Producer ! stop,
+    ?assertThrow(
+        {future_rejected, #beamtalk_error{kind = future_expired}},
+        beamtalk_future:await_forever(Future)
+    ).
+
+polled_orphan_still_expires_at_absolute_deadline_test() ->
+    Future = beamtalk_future:new_with_cap(150),
+    %% Keep polling the orphan with short awaits; each poll must not extend its life.
+    Result = poll_until_expired(Future, 40),
+    ?assertMatch({future_rejected, #beamtalk_error{kind = future_expired}}, Result).
+
+poll_until_expired(_Future, 0) ->
+    still_pending;
+poll_until_expired(Future, N) ->
+    try beamtalk_future:await(Future, 20) of
+        V -> {resolved, V}
+    catch
+        throw:#beamtalk_error{kind = timeout} -> poll_until_expired(Future, N - 1);
+        throw:{future_rejected, _} = R -> R
+    end.

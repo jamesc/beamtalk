@@ -2132,6 +2132,8 @@ session_codegen_test_() ->
 
 setup_session() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
+    %% show_codegen compiles through the real compiler port (BT-4934).
+    ok = beamtalk_test_boot:compiler(),
     {ok, Pid} = beamtalk_repl_shell:start_link(<<"ops-dev-codegen-session">>),
     Pid.
 
@@ -2145,19 +2147,17 @@ teardown_session(Pid) ->
 
 session_show_codegen_code_path(Pid) ->
     %% A non-empty `code` param with a live session routes handle/4 through the
-    %% code branch and into beamtalk_repl_shell:show_codegen/2. Compiler-port
-    %% availability is environment-dependent in the shared EUnit node: with the
-    %% port up show_codegen returns a codegen result, without it a structured
-    %% error. Either way the response is a well-formed, non-crashing map whose
-    %% status list ends with the done marker.
+    %% code branch and into beamtalk_repl_shell:show_codegen/2, which compiles
+    %% through the real compiler port (started in setup_session/0). The
+    %% response carries the generated Core Erlang and the done marker.
     Msg = beamtalk_test_repl:make_msg(<<"show-codegen">>, <<"scd-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"show-codegen">>, #{<<"code">> => <<"1 + 2">>}, Msg, Pid
     ),
     Decoded = json:decode(Result),
-    ?assert(is_map(Decoded)),
-    Status = maps:get(<<"status">>, Decoded),
-    ?assert(lists:member(<<"done">>, Status)).
+    ?assertNot(maps:is_key(<<"error">>, Decoded)),
+    ?assertMatch(#{<<"core_erlang">> := Core} when byte_size(Core) > 0, Decoded),
+    ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Decoded))).
 
 session_show_codegen_code_error(Pid) ->
     %% A syntactically invalid expression also flows through the code path's

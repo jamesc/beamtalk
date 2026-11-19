@@ -447,29 +447,25 @@ impl Backend {
     /// Runs `erl -noshell -eval 'io:format("~s", [code:lib_dir()]), halt().'`
     /// once and stores the result. Subsequent calls return the cached value.
     pub(in crate::server) async fn resolve_otp_lib_dir(&self) {
+        // `kill_on_drop` makes the timeout actually stop `erl`: dropping the
+        // timed-out future kills the child instead of leaving a blocked
+        // thread and a running process behind (BT-5029).
         let result = match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            tokio::task::spawn_blocking(|| {
-                std::process::Command::new("erl")
-                    .args([
-                        "-noshell",
-                        "-eval",
-                        "io:format(\"~s\", [code:lib_dir()]), halt().",
-                    ])
-                    .output()
-                    .ok()
-                    .and_then(|output| {
-                        if output.status.success() {
-                            String::from_utf8(output.stdout).ok().map(PathBuf::from)
-                        } else {
-                            None
-                        }
-                    })
-            }),
+            tokio::process::Command::new("erl")
+                .args([
+                    "-noshell",
+                    "-eval",
+                    "io:format(\"~s\", [code:lib_dir()]), halt().",
+                ])
+                .kill_on_drop(true)
+                .output(),
         )
         .await
         {
-            Ok(Ok(path)) => path,
+            Ok(Ok(output)) if output.status.success() => {
+                String::from_utf8(output.stdout).ok().map(PathBuf::from)
+            }
             _ => None,
         };
 

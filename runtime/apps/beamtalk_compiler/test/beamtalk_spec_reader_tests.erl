@@ -182,121 +182,67 @@ find_erlang_beam() ->
 %%% map_type/1 — Erlang type to Beamtalk type mapping
 %%% ---------------------------------------------------------------
 
-map_type_integer_test() ->
-    ?assertEqual(<<"Integer">>, beamtalk_spec_reader:map_type({type, 0, integer, []})).
-
-map_type_float_test() ->
-    ?assertEqual(<<"Float">>, beamtalk_spec_reader:map_type({type, 0, float, []})).
-
-map_type_number_test() ->
-    ?assertEqual(<<"Number">>, beamtalk_spec_reader:map_type({type, 0, number, []})).
-
-map_type_binary_test() ->
-    ?assertEqual(<<"String | Binary">>, beamtalk_spec_reader:map_type({type, 0, binary, []})).
-
-map_type_boolean_test() ->
-    ?assertEqual(<<"Boolean">>, beamtalk_spec_reader:map_type({type, 0, boolean, []})).
-
-map_type_atom_test() ->
-    ?assertEqual(<<"Symbol">>, beamtalk_spec_reader:map_type({type, 0, atom, []})).
-
-map_type_list_test() ->
-    ?assertEqual(<<"List">>, beamtalk_spec_reader:map_type({type, 0, list, []})).
-
-%% An informative list element type is carried as `List(T)`.
-map_type_list_with_element_type_test() ->
-    ElemType = {type, 0, integer, []},
-    ?assertEqual(
-        <<"List(Integer)">>, beamtalk_spec_reader:map_type({type, 0, list, [ElemType]})
-    ).
-
-%% An uninformative element type (Dynamic from term()) collapses to
-%% bare `List` — no spurious `List(Dynamic)`.
-map_type_list_dynamic_element_collapses_test() ->
-    ElemType = {type, 0, term, []},
-    ?assertEqual(<<"List">>, beamtalk_spec_reader:map_type({type, 0, list, [ElemType]})).
-
-%% Bare tuple() element is uninformative — `[tuple()]` stays `List`.
-map_type_list_bare_tuple_element_collapses_test() ->
-    ElemType = {type, 0, tuple, any},
-    ?assertEqual(<<"List">>, beamtalk_spec_reader:map_type({type, 0, list, [ElemType]})).
-
-%% nonempty_list carries its element type too.
-map_type_nonempty_list_with_element_type_test() ->
-    ElemType = {type, 0, atom, []},
-    ?assertEqual(
-        <<"List(Symbol)">>, beamtalk_spec_reader:map_type({type, 0, nonempty_list, [ElemType]})
-    ).
-
-%% Untyped tuple() (unknown arity) stays bare Tuple.
-map_type_tuple_test() ->
-    ?assertEqual(<<"Tuple">>, beamtalk_spec_reader:map_type({type, 0, tuple, any})).
-
-%% A typed tuple carries positional element types as `Tuple(T1, ..., Tn)`.
-map_type_tuple_positional_test() ->
-    Elements = [{type, 0, atom, []}, {type, 0, pos_integer, []}, {type, 0, atom, []}],
-    ?assertEqual(
-        <<"Tuple(Symbol, Integer, Symbol)">>,
-        beamtalk_spec_reader:map_type({type, 0, tuple, Elements})
-    ).
-
-%% BT-4510: `{beamtalk_string, binary()}` (`beamtalk_string:t()`) is a
-%% String's representation, so it maps to String, not Tuple — in a union
-%% too, so `{ok, beamtalk_string:t()}` reads as `Result(String, …)`.
-map_type_string_tag_tuple_is_string_test() ->
+%% One row per case: {Name, Expected, ErlangType}. The row name is the EUnit
+%% test title, so a failure names the case.
+map_type_basic_cases() ->
+    Sym = {type, 0, atom, []},
+    PosInt = {type, 0, pos_integer, []},
     StringTag = {type, 0, tuple, [{atom, 0, beamtalk_string}, {type, 0, binary, []}]},
-    ?assertEqual(<<"String">>, beamtalk_spec_reader:map_type(StringTag)),
-    Ok = {type, 0, tuple, [{atom, 0, ok}, StringTag]},
-    ?assertEqual(
-        <<"Result(String, Exception) | Symbol">>,
-        beamtalk_spec_reader:map_type({type, 0, union, [Ok, {atom, 0, not_found}]})
-    ),
-    %% Any other 2-tuple headed by an atom stays a Tuple.
-    ?assertEqual(
-        <<"Tuple(Symbol, String | Binary)">>,
-        beamtalk_spec_reader:map_type(
-            {type, 0, tuple, [{atom, 0, other_tag}, {type, 0, binary, []}]}
-        )
-    ).
+    [
+        {"integer", <<"Integer">>, {type, 0, integer, []}},
+        {"float", <<"Float">>, {type, 0, float, []}},
+        {"number", <<"Number">>, {type, 0, number, []}},
+        {"binary", <<"String | Binary">>, {type, 0, binary, []}},
+        {"boolean", <<"Boolean">>, {type, 0, boolean, []}},
+        {"atom", <<"Symbol">>, Sym},
+        {"list", <<"List">>, {type, 0, list, []}},
+        %% An informative list element type is carried as `List(T)`.
+        {"list with element type", <<"List(Integer)">>, {type, 0, list, [{type, 0, integer, []}]}},
+        %% An uninformative element type (Dynamic from term()) collapses to
+        %% bare `List` — no spurious `List(Dynamic)`.
+        {"list of term collapses to List", <<"List">>, {type, 0, list, [{type, 0, term, []}]}},
+        %% Bare tuple() element is uninformative — `[tuple()]` stays `List`.
+        {"list of bare tuple() collapses to List", <<"List">>,
+            {type, 0, list, [{type, 0, tuple, any}]}},
+        %% nonempty_list carries its element type too.
+        {"nonempty_list with element type", <<"List(Symbol)">>, {type, 0, nonempty_list, [Sym]}},
+        %% Untyped tuple() (unknown arity) stays bare Tuple.
+        {"untyped tuple", <<"Tuple">>, {type, 0, tuple, any}},
+        %% A typed tuple carries positional element types as `Tuple(T1, ..., Tn)`.
+        {"typed tuple is positional", <<"Tuple(Symbol, Integer, Symbol)">>,
+            {type, 0, tuple, [Sym, PosInt, Sym]}},
+        %% BT-4510: `{beamtalk_string, binary()}` (`beamtalk_string:t()`) is a
+        %% String's representation, so it maps to String, not Tuple — in a union
+        %% too, so `{ok, beamtalk_string:t()}` reads as `Result(String, …)`.
+        {"string-tag tuple is String", <<"String">>, StringTag},
+        {"string-tag tuple inside a union reads as Result(String, ...)",
+            <<"Result(String, Exception) | Symbol">>,
+            {type, 0, union, [{type, 0, tuple, [{atom, 0, ok}, StringTag]}, {atom, 0, not_found}]}},
+        %% Any other 2-tuple headed by an atom stays a Tuple.
+        {"atom-headed 2-tuple stays Tuple", <<"Tuple(Symbol, String | Binary)">>,
+            {type, 0, tuple, [{atom, 0, other_tag}, {type, 0, binary, []}]}},
+        %% A tuple whose every element is uninformative collapses to bare Tuple.
+        {"all-uninformative tuple collapses to Tuple", <<"Tuple">>,
+            {type, 0, tuple, [{type, 0, term, []}, {type, 0, any, []}]}},
+        %% A list of typed tuples carries both layers —
+        %% `[{atom(), pos_integer(), atom()}]` → `List(Tuple(Symbol, Integer, Symbol))`.
+        {"list of typed tuples", <<"List(Tuple(Symbol, Integer, Symbol))">>,
+            {type, 0, list, [{type, 0, tuple, [Sym, PosInt, Sym]}]}},
+        {"map", <<"Dictionary">>, {type, 0, map, any}},
+        {"pid", <<"Pid">>, {type, 0, pid, []}},
+        {"fun", <<"Block">>, {type, 0, 'fun', []}},
+        {"true", <<"True">>, {atom, 0, true}},
+        {"false", <<"False">>, {atom, 0, false}},
+        {"nil", <<"Nil">>, {atom, 0, nil}},
+        {"term", <<"Dynamic">>, {type, 0, term, []}},
+        {"any", <<"Dynamic">>, {type, 0, any, []}}
+    ].
 
-%% A tuple whose every element is uninformative collapses to bare Tuple.
-map_type_tuple_all_uninformative_collapses_test() ->
-    Elements = [{type, 0, term, []}, {type, 0, any, []}],
-    ?assertEqual(<<"Tuple">>, beamtalk_spec_reader:map_type({type, 0, tuple, Elements})).
-
-%% A list of typed tuples carries both layers —
-%% `[{atom(), pos_integer(), atom()}]` → `List(Tuple(Symbol, Integer, Symbol))`.
-map_type_list_of_typed_tuples_test() ->
-    Tuple =
-        {type, 0, tuple, [{type, 0, atom, []}, {type, 0, pos_integer, []}, {type, 0, atom, []}]},
-    ?assertEqual(
-        <<"List(Tuple(Symbol, Integer, Symbol))">>,
-        beamtalk_spec_reader:map_type({type, 0, list, [Tuple]})
-    ).
-
-map_type_map_test() ->
-    ?assertEqual(<<"Dictionary">>, beamtalk_spec_reader:map_type({type, 0, map, any})).
-
-map_type_pid_test() ->
-    ?assertEqual(<<"Pid">>, beamtalk_spec_reader:map_type({type, 0, pid, []})).
-
-map_type_fun_test() ->
-    ?assertEqual(<<"Block">>, beamtalk_spec_reader:map_type({type, 0, 'fun', []})).
-
-map_type_true_test() ->
-    ?assertEqual(<<"True">>, beamtalk_spec_reader:map_type({atom, 0, true})).
-
-map_type_false_test() ->
-    ?assertEqual(<<"False">>, beamtalk_spec_reader:map_type({atom, 0, false})).
-
-map_type_nil_test() ->
-    ?assertEqual(<<"Nil">>, beamtalk_spec_reader:map_type({atom, 0, nil})).
-
-map_type_term_test() ->
-    ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:map_type({type, 0, term, []})).
-
-map_type_any_test() ->
-    ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:map_type({type, 0, any, []})).
+map_type_basic_test_() ->
+    [
+        {"map_type: " ++ Name, ?_assertEqual(Expected, beamtalk_spec_reader:map_type(Input))}
+     || {Name, Expected, Input} <- map_type_basic_cases()
+    ].
 
 map_type_non_neg_integer_test() ->
     ?assertEqual(<<"Integer">>, beamtalk_spec_reader:map_type({type, 0, non_neg_integer, []})).
@@ -1988,16 +1934,20 @@ read_types_gen_server_test() ->
     ?assert(is_list(Types)),
     ?assert(length(Types) > 0).
 
-%% Reading types from a preloaded module (erlang) returns no_debug_info.
+%% Reading types from a preloaded module (erlang): no .beam on disk, so a beam_lib error.
 read_types_preloaded_test() ->
     case code:which(erlang) of
         preloaded ->
-            %% Can't read abstract_code from preloaded modules directly
-            ok;
+            %% A preloaded module has no .beam on disk: a structured error,
+            %% never a crash.
+            ?assertMatch({error, {beam_lib, _}}, beamtalk_spec_reader:read_types(preloaded));
         BeamFile ->
-            %% Some test environments may have erlang.beam on disk
-            _Result = beamtalk_spec_reader:read_types(BeamFile),
-            ok
+            %% Some environments keep erlang.beam on disk: either its types
+            %% are read or it carries no debug info.
+            case beamtalk_spec_reader:read_types(BeamFile) of
+                {ok, Types} -> ?assert(is_list(Types) andalso Types =/= []);
+                {error, no_debug_info} -> ok
+            end
     end.
 
 %% Reading types from a nonexistent file returns error.

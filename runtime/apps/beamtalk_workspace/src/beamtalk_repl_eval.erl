@@ -818,6 +818,9 @@ run_self_eval_module(ModuleName, Binary, Bindings) ->
                         FutExObj = beamtalk_exception_handler:ensure_wrapped(FutureReason),
                         {error, beamtalk_repl_errors:ensure_structured_error(FutExObj)};
                     Value ->
+                        %% BT-5019: a block in the result is a value the caller
+                        %% may call later, so its module must stay loaded.
+                        ok = retain_eval_module_if_referenced(ModuleName, Value),
                         {ok, Value}
                 end
             catch
@@ -832,10 +835,11 @@ run_self_eval_module(ModuleName, Binary, Bindings) ->
                     ExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stacktrace),
                     {error, beamtalk_repl_errors:ensure_structured_error(ExObj)}
             after
-                %% `evaluate:` is values-only and stateless, and the module name
-                %% is private to this process (never shared with an actor), so the
-                %% transient module is always fully unloaded.
-                purge_eval_module(ModuleName)
+                %% The module name is private to this process (never shared with
+                %% an actor). Unless the result holds a block of it (retained
+                %% above), unload it, without killing any process that is still
+                %% running its code (BT-5019).
+                release_eval_module(ModuleName)
             end;
         {error, LoadReason} ->
             {error, eval_with_self_error({load_error, LoadReason})}
@@ -862,12 +866,88 @@ eval_module_name() ->
 %% Fully unload a transient `evaluate:` module. `code:delete/1` moves the current
 %% code to old; `code:purge/1` then reclaims it. The order matters: `purge` before
 %% `delete` is a no-op for a module with no *old* code, so a freshly loaded module
-%% would otherwise stay resident forever.
+%% would otherwise stay resident forever. Only for the recycled slot at the start
+%% of a call, where nothing can still reference the module (see
+%% `release_eval_module/1` for the after-eval path).
 -spec purge_eval_module(atom()) -> ok.
 purge_eval_module(ModuleName) ->
     code:delete(ModuleName),
     code:purge(ModuleName),
     ok.
+
+%% BT-5019: a block (fun) of the eval module in the `evaluate:` result is held
+%% by the caller and `check_process_code/2` cannot see fun holders, so deleting
+%% and purging the module would turn the block into a `badfun`. Keep the module
+%% loaded and retire this process's cached module name so the next `evaluate:`
+%% loads a fresh module instead of replacing this one.
+%%
+%% Only the returned value is inspected: a block that escapes some other way
+%% (stored in an actor's state or an ETS table, say) is not detected and can
+%% still hit `badfun` once its module is purged. `evaluate:` is documented as
+%% values-only, so this is the supported boundary.
+%%
+%% The retained module is never released automatically: nothing can tell when
+%% the last holder of the block is gone (the same trade-off `cleanup_module/1`
+%% makes for REPL eval modules). It costs one module and one atom per
+%% `evaluate:` call that returns a block.
+-spec retain_eval_module_if_referenced(atom(), term()) -> ok.
+retain_eval_module_if_referenced(ModuleName, Value) ->
+    case holds_fun_of(Value, ModuleName) of
+        true -> erase('$beamtalk_inspector_eval_module');
+        false -> ok
+    end,
+    ok.
+
+%% Unload the eval module after a call unless `retain_eval_module_if_referenced/2`
+%% retired it. Never kills a process: when one still runs the module's code
+%% (e.g. spawned from the evaluated source) the old code stays until a later
+%% call finds it unused, and this process moves to a fresh module name.
+-spec release_eval_module(atom()) -> ok.
+release_eval_module(ModuleName) ->
+    PendingKey = '$beamtalk_inspector_eval_pending',
+    Pending = [M || M <- get_list(PendingKey), not code:soft_purge(M)],
+    case get('$beamtalk_inspector_eval_module') of
+        ModuleName ->
+            code:delete(ModuleName),
+            case code:soft_purge(ModuleName) of
+                true ->
+                    put(PendingKey, Pending);
+                false ->
+                    erase('$beamtalk_inspector_eval_module'),
+                    put(PendingKey, [ModuleName | Pending])
+            end;
+        _Retired ->
+            put(PendingKey, Pending)
+    end,
+    ok.
+
+-spec get_list(term()) -> [atom()].
+get_list(Key) ->
+    case get(Key) of
+        undefined -> [];
+        L -> L
+    end.
+
+%% Does `Term` contain a fun defined in `Module`, directly or captured in the
+%% environment of another fun?
+-spec holds_fun_of(term(), atom()) -> boolean().
+holds_fun_of(F, Module) when is_function(F) ->
+    case erlang:fun_info(F, module) of
+        {module, Module} ->
+            true;
+        _ ->
+            %% A closure from another module may capture one of ours.
+            {env, Env} = erlang:fun_info(F, env),
+            holds_fun_of(Env, Module)
+    end;
+holds_fun_of([H | T], Module) ->
+    holds_fun_of(H, Module) orelse holds_fun_of(T, Module);
+holds_fun_of(T, Module) when is_tuple(T) ->
+    holds_fun_of(tuple_to_list(T), Module);
+holds_fun_of(M, Module) when is_map(M) ->
+    holds_fun_of(maps:to_list(M), Module);
+holds_fun_of(_, _) ->
+    false.
 
 %% Wrap a compile/load failure from `eval_with_self/2` as a structured error.
 -spec eval_with_self_error(term()) -> #beamtalk_error{}.
@@ -1202,69 +1282,27 @@ handle_protocol_definition(ProtocolInfo, Warnings, State) ->
     %% is drained, instead of a bare `code:load_binary/3` that never sees it.
     case beamtalk_repl_loader:load_protocol_module(ProtocolInfo, undefined, State) of
         {ok, _ProtocolClassNames, NewState} ->
-            %% The loader's activation swallows `register_class/0` failures;
-            %% the REPL surfaces them, so re-run it strictly (idempotent).
-            case maybe_register_protocol_class(ModuleName) of
-                ok ->
-                    ProtocolNames = [binary_to_list(P) || P <- Protocols],
-                    DisplayStr =
-                        case ProtocolNames of
-                            [Single] ->
-                                list_to_binary("Protocol " ++ Single ++ " defined");
-                            Multiple ->
-                                list_to_binary(
-                                    "Protocols " ++ string:join(Multiple, ", ") ++ " defined"
-                                )
-                        end,
-                    {ok, DisplayStr, <<>>, Warnings, NewState};
-                {error, RegError} ->
-                    %% Registration failed — clean up the loaded module to avoid
-                    %% leaving it resident but untracked in State.
-                    cleanup_module(ModuleName),
-                    {error, RegError, <<>>, Warnings, State}
-            end;
+            ProtocolNames = [binary_to_list(P) || P <- Protocols],
+            DisplayStr =
+                case ProtocolNames of
+                    [Single] ->
+                        list_to_binary("Protocol " ++ Single ++ " defined");
+                    Multiple ->
+                        list_to_binary(
+                            "Protocols " ++ string:join(Multiple, ", ") ++ " defined"
+                        )
+                end,
+            {ok, DisplayStr, <<>>, Warnings, NewState};
         {error, Reason, ErrState} ->
             Err = beamtalk_repl_errors:ensure_structured_error(Reason),
+            %% BT-5015: the loader fails the load when `register_class/0` fails
+            %% (kind `registration_error`) but leaves the module resident —
+            %% purge it so it is not resident yet untracked in State.
+            case Err of
+                #beamtalk_error{kind = registration_error} -> cleanup_module(ModuleName);
+                _ -> ok
+            end,
             {error, Err, <<>>, Warnings, ErrState}
-    end.
-
--doc """
-Attempt to call register_class/0 on a protocol module.
-Returns ok if successful or not exported, or {error, #beamtalk_error{}} on failure.
-""".
--spec maybe_register_protocol_class(atom()) -> ok | {error, #beamtalk_error{}}.
-maybe_register_protocol_class(ModuleName) ->
-    case erlang:function_exported(ModuleName, register_class, 0) of
-        true ->
-            %% bt-catcher-audit: not-applicable-no-block - compiled register_class/0, registration
-            %% only
-            try ModuleName:register_class() of
-                {error, RegReason} ->
-                    ?LOG_ERROR(
-                        "Protocol register_class/0 returned error for ~p: ~p",
-                        [ModuleName, RegReason],
-                        #{domain => [beamtalk, runtime]}
-                    ),
-                    Err = beamtalk_repl_errors:ensure_structured_error(
-                        {registration_error, {ModuleName, RegReason}}
-                    ),
-                    {error, Err};
-                _Ok ->
-                    ok
-            catch
-                Class:Reason:Stacktrace ->
-                    ?LOG_ERROR(
-                        "Protocol register_class/0 failed for ~p: ~p:~p~n~p",
-                        [ModuleName, Class, Reason, Stacktrace],
-                        #{domain => [beamtalk, runtime]}
-                    ),
-                    Err = beamtalk_repl_errors:ensure_structured_error(
-                        {registration_error, {ModuleName, Reason}}
-                    ),
-                    {error, Err}
-            end;
-        false ->
-            ok
     end.
 
 -doc "Evaluate a loaded module: capture IO, execute, process result, cleanup.".

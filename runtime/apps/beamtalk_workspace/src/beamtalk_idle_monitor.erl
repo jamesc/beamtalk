@@ -22,7 +22,9 @@ which should be called by:
 ## Cleanup Criteria (from ADR 0004)
 
 A workspace is considered active if:
-- Any REPL session is connected
+- Any REPL session is connected (a session whose client disconnected and has not
+  resumed does not count; it is stopped by the shell after its own idle period)
+- Flushable edits are still pending in the ChangeLog
 - Actor message sent/received in last N seconds
 - Code hot-reloaded recently
 
@@ -38,6 +40,11 @@ enabled: false in the config.
 
 %% Public API
 -export([start_link/1, mark_activity/0]).
+
+%% Exported for white-box tests only.
+-ifdef(TEST).
+-export([should_terminate/1, has_active_sessions/0]).
+-endif.
 
 %% gen_server callbacks
 -export([
@@ -141,40 +148,68 @@ code_change(_OldVsn, State, _Extra) ->
 
 %%% Internal Functions
 
--doc "Determine if the workspace should terminate due to inactivity.".
+-doc """
+Determine if the workspace should terminate due to inactivity.
+
+Auto-shutdown may fire only when ALL of these hold:
+- no session is attached to a client, running an eval, or never-attached (a
+  *detached* session — a client connected and left — does not count);
+- no flushable edit is pending in the ChangeLog (`Workspace flush` would write it);
+- the last activity is older than `MaxIdleSeconds`.
+""".
 -spec should_terminate(integer()) -> boolean().
 should_terminate(MaxIdleSeconds) ->
-    %% Check if there are any active sessions
-    HasSessions = has_active_sessions(),
-
-    %% Check idle time
+    %% Check idle time first: cheap, and avoids polling sessions while active.
     case beamtalk_workspace_meta:get_last_activity() of
         {ok, LastActivity} ->
             Now = erlang:system_time(second),
             IdleTime = Now - LastActivity,
-
-            %% Terminate if no sessions and idle too long
-            (not HasSessions) andalso (IdleTime > MaxIdleSeconds);
+            (IdleTime > MaxIdleSeconds) andalso
+                (not has_active_sessions()) andalso
+                (not has_unflushed_edits());
         {error, _} ->
             %% Can't determine activity, don't terminate
             false
     end.
 
--doc "Check if there are any active REPL sessions connected.".
+-doc "Whether the ChangeLog holds edits that `Workspace flush` has not written yet.".
+-spec has_unflushed_edits() -> boolean().
+has_unflushed_edits() ->
+    try
+        beamtalk_workspace_changelog:flushable_pending() =/= []
+    catch
+        %% If we can't check, assume there are (safe default: don't shut down).
+        _:_ -> true
+    end.
+
+-doc """
+Check if any REPL session keeps the workspace alive: one with a client
+attached, an eval still running, or one that never had a client (explicitly
+stopped by its owner). Sessions whose client has gone (detached) do not count.
+""".
 -spec has_active_sessions() -> boolean().
 has_active_sessions() ->
-    %% Check if beamtalk_session_sup exists and has children
     try
         case whereis(beamtalk_session_sup) of
             undefined ->
                 false;
             SupPid ->
-                Children = supervisor:count_children(SupPid),
-                Active = proplists:get_value(active, Children, 0),
-                Active > 0
+                Pids = [P || {_, P, _, _} <- supervisor:which_children(SupPid), is_pid(P)],
+                lists:any(fun session_keeps_workspace_alive/1, Pids)
         end
     catch
         _:_ ->
             %% If we can't check, assume there are sessions (safe default)
             true
+    end.
+
+-spec session_keeps_workspace_alive(pid()) -> boolean().
+session_keeps_workspace_alive(Pid) ->
+    try
+        beamtalk_repl_shell:lifecycle_state(Pid, 2000) =/= detached
+    catch
+        %% A session that just exited is not active; a slow one is assumed active.
+        exit:{noproc, _} -> false;
+        exit:{normal, _} -> false;
+        _:_ -> true
     end.

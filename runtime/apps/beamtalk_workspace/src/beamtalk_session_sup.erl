@@ -13,15 +13,16 @@ Supervises REPL session shell processes.
 Each REPL connection creates one session process that maintains
 bindings and evaluation state for that specific connection.
 
-Sessions are ephemeral - they start when a REPL connects and
-terminate when the connection closes.
+A session starts when a REPL connects. When the connection drops the session is
+kept so the client can resume it, then stops itself after its idle period
+(`beamtalk_repl_shell:session_idle_seconds/0`); `close` stops it immediately.
 """.
 
 -export([start_link/0, start_session/1, start_session/2, stop_session/1]).
 
 -export([init/1]).
 
-%% Exported for white-box tests only (no production caller).
+%% Exported for white-box tests only.
 -ifdef(TEST).
 -export([
     normalize_kind/1,
@@ -126,12 +127,26 @@ session process does not terminate just because its owner (e.g. a dist-attached
 Phoenix LiveView) exits — the supervisor must be asked to terminate it, or one
 orphaned session leaks per mount/reconnect. Best-effort and non-fatal: a pid
 that was never a child of this supervisor returns `{error, not_found}`, and a
-second stop on a just-terminated child is a harmless `ok` no-op.
+second stop on a just-terminated child is a harmless `ok` no-op. A successful
+stop also removes the session's `beamtalk_session_table` row.
 """.
 -spec stop_session(pid()) -> ok | {error, not_found | simple_one_for_one}.
 stop_session(SessionPid) when is_pid(SessionPid) ->
+    %% Resolve the id first: `terminate_child` kills the shell with `shutdown`
+    %% (it does not trap exits, so its `terminate/2` never runs), so the table
+    %% row must be removed here (BT-5012).
+    SessionId =
+        try beamtalk_repl_shell:get_session_id(SessionPid, 1000) of
+            {ok, Id} -> Id
+        catch
+            exit:_ -> undefined
+        end,
     case supervisor:terminate_child(?MODULE, SessionPid) of
         ok ->
+            case SessionId of
+                undefined -> beamtalk_session_table:delete_pid(SessionPid);
+                _ -> beamtalk_session_table:delete(SessionId, SessionPid)
+            end,
             ok;
         {error, Reason} = Error ->
             ?LOG_DEBUG(
