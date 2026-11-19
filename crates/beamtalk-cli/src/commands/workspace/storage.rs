@@ -174,7 +174,7 @@ pub fn save_workspace_metadata(metadata: &WorkspaceMetadata) -> Result<()> {
 
     let metadata_path = dir.join("metadata.json");
     let content = merged_metadata_json(&metadata_path, metadata)?;
-    fs::write(metadata_path, content).into_diagnostic()?;
+    write_private_atomic(&metadata_path, content.as_bytes())?;
 
     Ok(())
 }
@@ -195,38 +195,16 @@ fn merged_metadata_json(path: &Path, metadata: &WorkspaceMetadata) -> Result<Str
     serde_json::to_string_pretty(&merged).into_diagnostic()
 }
 
-/// Write `content` to `path` with owner-only permissions (0600 on Unix).
+/// Write `content` to `path` atomically with owner-only permissions (0600 on
+/// Unix): stage, fsync, rename (BT-5017). The broker, MCP, LSP and the Erlang
+/// node read these files while the CLI rewrites them, so they must never see
+/// a truncated one. The workspace directory must already exist.
 ///
-/// On Unix: creates the file with mode 0600 and enforces it via `fchmod` to handle
-/// pre-existing files with overly-permissive modes (e.g. from older versions).
-/// On non-Unix: falls back to a plain write without permission enforcement.
-pub(super) fn write_secure_file(path: &Path, content: &[u8]) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .into_diagnostic()?;
-
-        // Enforce 0600 even on overwrite of a pre-existing file (uses fchmod).
-        file.set_permissions(fs::Permissions::from_mode(0o600))
-            .into_diagnostic()?;
-
-        file.write_all(content).into_diagnostic()?;
-    }
-
-    #[cfg(not(unix))]
-    {
-        fs::write(path, content).into_diagnostic()?;
-    }
-
-    Ok(())
+/// On Unix the new file is created 0600, which also tightens a pre-existing
+/// file with overly-permissive modes (e.g. from older versions). On non-Unix
+/// there is no permission enforcement.
+pub(super) fn write_private_atomic(path: &Path, content: &[u8]) -> Result<()> {
+    crate::commands::util::write_atomic_file(path, content, ".beamtalk-ws.", true).into_diagnostic()
 }
 
 /// Generate a unique Erlang cookie for a workspace.
@@ -255,12 +233,10 @@ pub fn generate_cookie() -> String {
 
 /// Save workspace cookie with secure permissions (owner read/write only).
 ///
-/// Delegates to [`write_secure_file`] which creates the file with mode 0600
-/// and enforces it via `fchmod` so pre-existing files with overly-permissive
-/// modes are tightened on overwrite.
+/// Delegates to [`write_private_atomic`] (mode 0600, atomic replace).
 pub fn save_workspace_cookie(workspace_id: &str, cookie: &str) -> Result<()> {
     let cookie_path = workspace_dir(workspace_id)?.join("cookie");
-    write_secure_file(&cookie_path, cookie.as_bytes())
+    write_private_atomic(&cookie_path, cookie.as_bytes())
 }
 
 /// Read the workspace cookie (trimmed) — delegates to
@@ -295,7 +271,7 @@ pub fn get_node_info(workspace_id: &str) -> Result<Option<NodeInfo>> {
 pub fn save_node_info(workspace_id: &str, info: &NodeInfo) -> Result<()> {
     let node_info_path = workspace_dir(workspace_id)?.join("node.info");
     let content = serde_json::to_string_pretty(info).into_diagnostic()?;
-    fs::write(node_info_path, content).into_diagnostic()?;
+    write_private_atomic(&node_info_path, content.as_bytes())?;
     Ok(())
 }
 
@@ -450,6 +426,60 @@ mod tests {
                 assert_eq!(&rewritten[key], value, "key {key} must be preserved");
             }
         }
+    }
+
+    /// BT-5017: `metadata.json` and `node.info` are read by the broker, MCP and
+    /// LSP while the CLI rewrites them. Each rewrite is staged and renamed (a
+    /// new inode, never a truncate-in-place) and owner-only; no staging file
+    /// is left in the workspace directory.
+    #[cfg(unix)]
+    #[test]
+    fn workspace_files_are_replaced_atomically_and_private() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let _guard = crate::commands::test_support::real_home_guard();
+        let ws_id = format!("test_atomic_ws_files_{}", std::process::id());
+        let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
+        fs::create_dir_all(&ws_dir).unwrap();
+
+        let metadata = WorkspaceMetadata {
+            workspace_id: ws_id.clone(),
+            project_path: PathBuf::from("/tmp/atomic-ws"),
+            created_at: 1,
+            project_fingerprint: None,
+        };
+        let info = NodeInfo {
+            node_name: "n@localhost".to_string(),
+            port: 1,
+            pid: 2,
+            start_time: None,
+            nonce: None,
+            bind_addr: None,
+        };
+        for (name, save) in [
+            (
+                "metadata.json",
+                Box::new(|| save_workspace_metadata(&metadata)) as Box<dyn Fn() -> Result<()>>,
+            ),
+            ("node.info", Box::new(|| save_node_info(&ws_id, &info))),
+        ] {
+            let path = ws_dir.join(name);
+            save().unwrap();
+            // A pre-existing file with loose permissions, as an older CLI left it.
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+            let before = fs::metadata(&path).unwrap().ino();
+            save().unwrap();
+            let after = fs::metadata(&path).unwrap();
+            assert_ne!(after.ino(), before, "{name} must be replaced by rename");
+            assert_eq!(after.permissions().mode() & 0o777, 0o600, "{name} mode");
+        }
+        let names: Vec<_> = fs::read_dir(&ws_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(names.len(), 2, "staging file left behind: {names:?}");
+        assert_eq!(get_workspace_metadata(&ws_id).unwrap().created_at, 1);
+
+        let _ = fs::remove_dir_all(&ws_dir);
     }
 
     #[test]

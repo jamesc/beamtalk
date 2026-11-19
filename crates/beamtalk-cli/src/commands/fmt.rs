@@ -27,6 +27,7 @@ use std::collections::HashSet;
 
 use crate::commands::build::collect_formattable_files_from_dir;
 use crate::commands::erlfmt;
+use crate::commands::util::write_atomic;
 use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use beamtalk_core::unparse::format_source;
@@ -164,7 +165,8 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
         if check_only {
             print_unified_diff(file.as_str(), &original, &formatted);
         } else {
-            std::fs::write(file.as_std_path(), &formatted)
+            // Atomic: an interrupted run must not leave a truncated source file.
+            write_atomic(file, &formatted, ".beamtalk-fmt.")
                 .into_diagnostic()
                 .map_err(|e| miette::miette!("Failed to write '{}': {e}", file))?;
         }
@@ -279,6 +281,30 @@ mod tests {
             result.is_ok(),
             "fmt-check should exit 0 on already-formatted file"
         );
+    }
+
+    /// BT-5017: the rewrite is staged and renamed, so an interrupted run cannot
+    /// leave a truncated source. An in-place write kept the file's inode; a
+    /// rename gives it a new one. No staging file is left behind, and a
+    /// rewritten script keeps its mode.
+    #[cfg(unix)]
+    #[test]
+    fn fmt_rewrites_by_rename_and_keeps_mode() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let (dir, path) = write_temp_bt("Object subclass: Foo\n    bar   =>   42\n");
+        std::fs::set_permissions(path.as_std_path(), std::fs::Permissions::from_mode(0o750))
+            .unwrap();
+        let before = std::fs::metadata(path.as_std_path()).unwrap().ino();
+        run_fmt_single(path.as_str(), false).expect("fmt");
+        let meta = std::fs::metadata(path.as_std_path()).unwrap();
+        assert_ne!(
+            meta.ino(),
+            before,
+            "fmt must replace the file, not truncate it"
+        );
+        assert_eq!(meta.permissions().mode() & 0o777, 0o750);
+        let names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(names.len(), 1, "staging file left behind: {names:?}");
     }
 
     #[test]

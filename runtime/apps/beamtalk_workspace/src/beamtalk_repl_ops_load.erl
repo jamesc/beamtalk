@@ -239,15 +239,22 @@ compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
     %% Compile the EDITED buffer against a temp `.erl` in the same directory (so
     %% relative includes resolve identically) — never the real file — so a compile
     %% error leaves the on-disk source untouched.
-    TempPath = ErlPath ++ ".bt_native_save_tmp.erl",
+    %% BT-5017: a unique scratch directory (`.bt-staging.<n>/`) holding a copy
+    %% under the module's own file name. The old fixed `<file>.bt_native_save_tmp.erl`
+    %% sat in native/ where two concurrent saves wrote into one file and a
+    %% crash left a stray `.erl` that the next build compiled. The scratch
+    %% directory is skipped by `find_erl_files/2`, and the real file's
+    %% directory is added to the include path so sibling includes still resolve.
+    StagingDir = beamtalk_workspace_file:staging_dir(ErlPath),
+    TempPath = filename:join(StagingDir, filename:basename(ErlPath)),
     CompileRoot =
         case ProjectRoot of
             undefined -> filename:dirname(filename:dirname(ErlPath));
             Root2 -> Root2
         end,
-    case file:write_file(TempPath, Source) of
+    case write_staged(StagingDir, TempPath, Source) of
         {error, WriteReason} ->
-            _ = file:delete(TempPath),
+            remove_staging(StagingDir, TempPath),
             {value, #{
                 <<"module">> => ModuleBin,
                 <<"source_file">> => SourceFileBin,
@@ -263,9 +270,9 @@ compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
             }};
         ok ->
             {Errors, _Count} = beamtalk_workspace_native_build:compile_native_erl_files(
-                [TempPath], CompileRoot
+                [TempPath], CompileRoot, [filename:dirname(ErlPath)]
             ),
-            _ = file:delete(TempPath),
+            remove_staging(StagingDir, TempPath),
             case Errors of
                 [] ->
                     finish_native_write(
@@ -285,6 +292,19 @@ compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
                     }}
             end
     end.
+
+-spec write_staged(string(), string(), binary()) -> ok | {error, term()}.
+write_staged(StagingDir, TempPath, Source) ->
+    case file:make_dir(StagingDir) of
+        ok -> file:write_file(TempPath, Source);
+        {error, _} = Err -> Err
+    end.
+
+-spec remove_staging(string(), string()) -> ok.
+remove_staging(StagingDir, TempPath) ->
+    _ = file:delete(TempPath),
+    _ = file:del_dir(StagingDir),
+    ok.
 
 -doc """
 The clean-compile tail: atomically write the edited source to the real `.erl`,

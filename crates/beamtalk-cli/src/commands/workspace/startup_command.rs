@@ -33,7 +33,7 @@ use miette::{Result, miette};
 pub(super) fn write_cookie_args_file(workspace_id: &str, cookie: &str) -> Result<PathBuf> {
     let args_file_path = super::storage::workspace_dir(workspace_id)?.join("vm.args");
     let content = format!("-setcookie {cookie}\n");
-    super::storage::write_secure_file(&args_file_path, content.as_bytes())
+    super::storage::write_private_atomic(&args_file_path, content.as_bytes())
         .map_err(|e| miette!("Failed to write cookie args file: {e}"))?;
     Ok(args_file_path)
 }
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn write_cookie_args_file_errors_for_unknown_workspace() {
         // No such workspace directory exists to write `vm.args` into, so the
-        // underlying `write_secure_file` open() must fail rather than
+        // underlying `write_private_atomic` open() must fail rather than
         // silently creating the missing parent directory.
         let _guard = crate::commands::test_support::real_home_guard();
         let result = write_cookie_args_file("__bt3401_nonexistent_ws__", "cookie");

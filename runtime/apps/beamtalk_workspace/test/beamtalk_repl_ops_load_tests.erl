@@ -1862,7 +1862,74 @@ save_native_source_second_save_targets_real_file_test() ->
         ?assertEqual(v3, bt_native_save_twice_mod:go()),
         ?assertEqual({ok, Src3}, file:read_file(ErlPath)),
         %% No orphaned validation-temp file left behind.
-        ?assertEqual(false, filelib:is_regular(ErlPath ++ ".bt_native_save_tmp.erl"))
+        ?assertEqual([ErlPath], filelib:wildcard(filename:join(filename:dirname(ErlPath), "*")))
+    after
+        teardown_project_native(Dir, Mod)
+    end.
+
+%% BT-5017: the validation compile reads a copy staged under a unique
+%% `.bt-staging.*` directory, not a fixed sibling `.erl` in native/ that the
+%% project scan would pick up after a crash. Observed by call-tracing
+%% `compile:file/2` in this process, so there is no timing in it.
+save_native_source_stages_in_unique_scratch_dir_test() ->
+    Mod = bt_native_save_stage_mod,
+    Src = <<
+        "-module(bt_native_save_stage_mod).\n"
+        "-export([go/0]).\n"
+        "go() -> v1.\n"
+    >>,
+    {Dir, ErlPath, _} = setup_project_native(Mod, Src),
+    NewSrc = <<
+        "-module(bt_native_save_stage_mod).\n"
+        "-export([go/0]).\n"
+        "go() -> v2.\n"
+    >>,
+    try
+        {Result, Calls} = beamtalk_test_trace:calls_during(
+            fun() ->
+                beamtalk_repl_ops_load:handle_term(
+                    <<"save-native-source">>,
+                    #{<<"module">> => <<"bt_native_save_stage_mod">>, <<"source">> => NewSrc},
+                    undefined,
+                    self()
+                )
+            end,
+            [{compile, file, 2}]
+        ),
+        ?assertMatch({value, #{<<"ok">> := true}}, Result),
+        Compiled = [Path || {compile, file, [Path, _Opts]} <- Calls],
+        %% First compile reads the staged copy, the second the real file.
+        ?assertMatch([Staged, ErlPath] when Staged =/= ErlPath, Compiled),
+        [Staged | _] = Compiled,
+        ?assertEqual(filename:basename(ErlPath), filename:basename(Staged)),
+        StagingName = filename:basename(filename:dirname(Staged)),
+        ?assert(beamtalk_workspace_file:is_staging_dir_name(StagingName)),
+        %% Nothing is left in native/ after the save.
+        ?assertEqual([ErlPath], filelib:wildcard(filename:join(filename:dirname(ErlPath), "*"))),
+        ?assertEqual(
+            [ErlPath],
+            beamtalk_workspace_project_files:find_erl_files(filename:dirname(ErlPath), false)
+        )
+    after
+        teardown_project_native(Dir, Mod)
+    end.
+
+%% A `.bt-staging.*` directory a crashed save left behind is not a project
+%% module: the load-project scan skips it.
+find_erl_files_skips_staging_dirs_test() ->
+    Mod = bt_native_save_skip_mod,
+    Src = <<"-module(bt_native_save_skip_mod).\n">>,
+    {Dir, ErlPath, _} = setup_project_native(Mod, Src),
+    try
+        Stray = filename:join([
+            filename:dirname(ErlPath), ".bt-staging.42", filename:basename(ErlPath)
+        ]),
+        ok = filelib:ensure_path(filename:dirname(Stray)),
+        ok = file:write_file(Stray, Src),
+        ?assertEqual(
+            [ErlPath],
+            beamtalk_workspace_project_files:find_erl_files(filename:dirname(ErlPath), false)
+        )
     after
         teardown_project_native(Dir, Mod)
     end.

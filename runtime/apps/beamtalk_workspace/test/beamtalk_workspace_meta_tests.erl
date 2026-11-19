@@ -12,6 +12,9 @@ Tests workspace metadata tracking and activity updates.
 -include_lib("kernel/include/file.hrl").
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
+%% logger handler callback (load_corrupt_json_logs_warning_test).
+-export([log/2]).
+
 %%====================================================================
 %% Tests
 %%====================================================================
@@ -721,6 +724,83 @@ load_corrupt_json_falls_back_test() ->
     gen_server:stop(Pid),
     _ = file:delete(MetaFile),
     _ = file:del_dir(MetaDir).
+
+%% BT-5017: a metadata.json that cannot be parsed is logged at WARNING (it used
+%% to fall back to defaults silently, losing created_at / settings).
+load_corrupt_json_logs_warning_test() ->
+    WsId = <<"corrupt_warn_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    MetaDir = filename:dirname(MetaFile),
+    filelib:ensure_dir(MetaFile),
+    ok = file:write_file(MetaFile, <<"{\"created_at\": 12">>),
+    stop_if_running(),
+    HandlerId = beamtalk_test_unique:atom("bt5017_meta_warn"),
+    OldLevel = maps:get(level, logger:get_primary_config()),
+    ok = logger:set_primary_config(level, all),
+    ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{parent => self()}, level => all}),
+    try
+        {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+            workspace_id => WsId,
+            project_path => <<"/bt_test/corrupt_warn">>,
+            created_at => 2000000
+        }),
+        ?awaitMessage({meta_log_event, warning}),
+        gen_server:stop(Pid)
+    after
+        logger:remove_handler(HandlerId),
+        logger:set_primary_config(level, OldLevel),
+        _ = file:delete(MetaFile),
+        _ = file:del_dir(MetaDir)
+    end.
+
+%% logger handler callback for the test above.
+%% Forwards only warning-or-worse events that name metadata.json.
+log(#{level := Level, msg := {Fmt, Args}}, #{config := #{parent := Parent}}) when
+    Level =:= warning; Level =:= error
+->
+    case string:find(lists:flatten(io_lib:format(Fmt, Args)), "metadata.json") of
+        nomatch ->
+            ok;
+        _ ->
+            Parent ! {meta_log_event, Level},
+            ok
+    end;
+log(_LogEvent, _Config) ->
+    ok.
+
+%% BT-5017: persisting goes through a temp file and rename, so the file a
+%% reader sees is always a whole one. A rename gives the path a new inode; the
+%% old in-place `file:write_file/2` kept the same one (inode is 0 off POSIX,
+%% where the check is skipped).
+persist_metadata_replaces_file_by_rename_test() ->
+    WsId = <<"atomic_meta_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    MetaDir = filename:dirname(MetaFile),
+    filelib:ensure_dir(MetaFile),
+    ok = file:write_file(MetaFile, <<"{}">>),
+    {ok, #file_info{inode = Before}} = file:read_file_info(MetaFile),
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => <<"/bt_test/atomic">>,
+        created_at => 2000000
+    }),
+    try
+        %% terminate/2 persists.
+        gen_server:stop(Pid),
+        {ok, #file_info{inode = After}} = file:read_file_info(MetaFile),
+        case Before of
+            0 -> ok;
+            _ -> ?assertNotEqual(Before, After)
+        end,
+        {ok, Bin} = file:read_file(MetaFile),
+        ?assertEqual(2000000, maps:get(<<"created_at">>, json:decode(Bin))),
+        %% No staging file is left behind.
+        ?assertEqual([], filelib:wildcard("*.bt-staging.*", MetaDir))
+    after
+        _ = file:delete(MetaFile),
+        _ = file:del_dir(MetaDir)
+    end.
 
 %%% Class source storage tests
 

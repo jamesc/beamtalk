@@ -51,7 +51,11 @@ find_erl_files(Dir, IncludeTests) ->
         false ->
             [];
         true ->
-            AllErl = filelib:fold_files(Dir, ".*\\.erl$", true, fun(F, Acc) -> [F | Acc] end, []),
+            AllErl0 = filelib:fold_files(Dir, ".*\\.erl$", true, fun(F, Acc) -> [F | Acc] end, []),
+            %% BT-5017: `save-native-source` stages its compile in a
+            %% `.bt-staging.*` directory under native/; a crash can leave one
+            %% behind and it is never a project module.
+            AllErl = [F || F <- AllErl0, not in_staging_dir(Dir, F)],
             case IncludeTests of
                 true ->
                     AllErl;
@@ -59,6 +63,17 @@ find_erl_files(Dir, IncludeTests) ->
                     TestPrefix = filename:join(Dir, "test") ++ "/",
                     [F || F <- AllErl, not lists:prefix(TestPrefix, F)]
             end
+    end.
+
+%% True iff `File` lies under a `.bt-staging.*` directory below `Dir`
+%% (`beamtalk_workspace_file:staging_dir_name/1`'s naming).
+-spec in_staging_dir(string(), string()) -> boolean().
+in_staging_dir(Dir, File) ->
+    case beamtalk_workspace_file:relative_parts(Dir, File) of
+        {ok, Parts} ->
+            lists:any(fun beamtalk_workspace_file:is_staging_dir_name/1, lists:droplast(Parts));
+        false ->
+            false
     end.
 
 -doc """
