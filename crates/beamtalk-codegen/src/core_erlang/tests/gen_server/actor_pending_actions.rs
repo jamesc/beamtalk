@@ -5,7 +5,7 @@
 //! Beamtalk dispatch passes its return value through
 //! `beamtalk_actor:apply_pending_actions/1`, so a `self stopWith: reason` or
 //! `self continueWith: #sel` issued during the dispatch takes effect once the
-//! callback returns — see `gen_server::callbacks::pending_actions_wrap`. The
+//! callback returns — see `gen_server::callbacks::messages::pending_actions_wrap`. The
 //! generated `handle_continue/2` runs a queued continuation through the same
 //! dispatch case as a fire-and-forget cast.
 

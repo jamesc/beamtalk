@@ -890,7 +890,8 @@ pub enum RootMethodKind {
 /// construct in an arm that writes an outer local, or a local the arm itself
 /// defines, and is not such a producer would rebuild the arm's `StateAcc` from
 /// scratch and drop its other keys: the conditional is not a producer then, and
-/// keeps its statement lowering. In a value-type method an arm that writes a
+/// keeps its statement lowering (in a class method codegen has none: no input
+/// reached it, so it reports an internal error, BT-5041). In a value-type method an arm that writes a
 /// field carries a second family the producer's tuple does not. An actor method
 /// has neither restriction: its `State` map is continued, never rebuilt.
 ///

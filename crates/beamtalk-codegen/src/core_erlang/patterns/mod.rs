@@ -19,6 +19,8 @@
 //! Note: block (closure) compilation lives in [`super::blocks`]; other
 //! expression code generation stays in [`super::expressions`].
 
+mod array_patterns;
+pub(in crate::core_erlang) mod binary_patterns;
 mod destructure;
 pub(in crate::core_erlang) mod match_lowering;
 mod type_tests;

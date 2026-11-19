@@ -1078,6 +1078,7 @@ impl CoreErlangGenerator {
 mod body;
 mod conditionals;
 mod dispatch;
+mod open_chains;
 
 #[cfg(test)]
 mod tests;

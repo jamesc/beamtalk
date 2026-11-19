@@ -4,7 +4,7 @@
 //! BT-3596: `init/1` traps exits (`erlang:process_flag(trap_exit, true)`)
 //! only for actors whose effective `terminate:` is overridden somewhere in
 //! the class hierarchy, and `handle_info/2` intercepts a non-parent
-//! `'EXIT'` before dispatch — see `gen_server::callbacks::generate_init_function`
+//! `'EXIT'` before dispatch — see `gen_server::callbacks::init::generate_init_function`
 //! / `generate_handle_info` and their `class_or_ancestor_overrides_terminate`
 //! helper. The no-hierarchy AST-only fallback for that helper is unit-tested
 //! directly in `gen_server::callbacks::tests`; this module covers the full

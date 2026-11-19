@@ -253,7 +253,7 @@ impl CoreErlangGenerator {
     }
 
     /// Generates a non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` with captured
-    /// local mutations as an **open let chain** in value-type or class-method context.
+    /// local mutations as an **open let chain** in value-type context (a class method lowers it through the producer).
     ///
     /// Generates an inline `case` expression where:
     /// - Each branch inlines the block body as sequential let-bindings
@@ -909,7 +909,7 @@ impl CoreErlangGenerator {
     }
 
     /// emits a non-last `on:do:`/`ensure:` that mutates captured
-    /// outer locals, in value-type or class-method context, as an open let
+    /// outer locals, in value-type context (a class method lowers it through the producer), as an open let
     /// chain — binds the construct's own `{Result, StateAcc}` tuple, then
     /// rebinds each mutated outer local from `StateAcc`'s `__local__` keys.
     /// Mirrors `gen_server/methods.rs`'s Actor-context
@@ -931,7 +931,10 @@ impl CoreErlangGenerator {
     /// BT-5041: reached by a value-type method whose non-last `on:do:`/`ensure:` body holds a
     /// field-writing-arm conditional that also writes a local. Codegen then rejects the
     /// source with `FieldAssignmentInUnsupportedBlock`, so the function is live on user code
-    /// but only on the way to that error (the CLI does not reject it earlier). No stdlib,
+    /// but only on the way to that error (the CLI does not reject it earlier). It is kept,
+    /// not replaced by an earlier rejection, because the lowering is what discovers the
+    /// unsupported write: moving that check into the classifier would change which error a
+    /// user sees and when (BT-5041 changes no behaviour). No stdlib,
     /// `BUnit`, bootstrap, example or parity input hits it; `core_erlang/tests/open_reach.rs` pins an
     /// inline source.
     pub(in crate::core_erlang) fn generate_vt_exception_construct_open(

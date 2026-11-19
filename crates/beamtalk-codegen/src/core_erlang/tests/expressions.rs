@@ -2279,7 +2279,7 @@ fn test_binary_pattern_outer_size_stays_inline() {
 #[test]
 fn test_plan_binary_split_chunks() {
     // BT-4096: split planning over `<<n:8, payload:n/binary, rest/binary>>`.
-    use crate::core_erlang::patterns::match_lowering::plan_binary_split;
+    use crate::core_erlang::patterns::binary_patterns::plan_binary_split;
     let segments = vec![
         BinarySegment {
             value: Pattern::Variable(Identifier::new("n", Span::new(0, 1))),
@@ -2326,7 +2326,7 @@ fn test_plan_binary_split_chunks() {
 fn test_plan_binary_split_hoists_size_expressions() {
     // BT-4097: `<<a:(4 - q), b:(4 + q), rest/binary>>` stays one chunk —
     // outer-var expressions hoist without splitting.
-    use crate::core_erlang::patterns::match_lowering::plan_binary_split;
+    use crate::core_erlang::patterns::binary_patterns::plan_binary_split;
     use beamtalk_core::ast::MessageSelector;
     let size_expr = |op: &str| {
         Box::new(Expression::Parenthesized {
