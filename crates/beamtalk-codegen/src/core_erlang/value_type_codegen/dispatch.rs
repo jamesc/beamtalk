@@ -8,10 +8,10 @@
 
 use super::{DISPATCH_PREFIX_SELECTORS, OwnDispatchArm};
 
+use super::super::CoreErlangGenerator;
 use super::super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::super::errors::{BeamtalkErrorChain, ErrorBinding};
 use super::super::value_accessors::{AutoSlotMethods, compute_auto_slot_methods};
-use super::super::CoreErlangGenerator;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form::{self, Layout, case_of, clause, let_in, try_of_catch};
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
