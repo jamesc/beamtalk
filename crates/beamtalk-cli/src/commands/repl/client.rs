@@ -36,7 +36,34 @@ pub(crate) struct ReplClient {
 impl ReplClient {
     /// Connect to the REPL backend.
     pub(crate) fn connect(host: &str, port: u16, cookie: &str) -> Result<Self> {
-        let inner = ProtocolClient::connect(host, port, cookie, None)?;
+        Self::connect_with_handshake_timeout(
+            host,
+            port,
+            cookie,
+            crate::commands::protocol::HANDSHAKE_TIMEOUT,
+        )
+    }
+
+    /// [`connect`](Self::connect) with an explicit handshake deadline (BT-5029).
+    ///
+    /// Bounds the WebSocket upgrade, auth and `describe` exchange so a listener
+    /// that accepts TCP but never answers cannot hang the caller. Once the
+    /// handshake completes the connection has no read timeout (evals can run
+    /// arbitrarily long).
+    pub(crate) fn connect_with_handshake_timeout(
+        host: &str,
+        port: u16,
+        cookie: &str,
+        handshake_timeout: Duration,
+    ) -> Result<Self> {
+        let inner = ProtocolClient::connect_with_handshake_timeout(
+            host,
+            port,
+            cookie,
+            None,
+            None,
+            handshake_timeout,
+        )?;
         let session_id = inner.session_id().map(String::from);
 
         Ok(Self {
@@ -421,6 +448,59 @@ mod tests {
             panic!("expected connect to fail against an unbound port");
         };
         assert!(err.to_string().contains("Failed to connect"), "got: {err}");
+    }
+
+    /// A listener that accepts TCP and then says nothing must produce a
+    /// timeout error, not hang (BT-5029). The 200 ms deadline is injected; the
+    /// test only asserts that the call returns with a timeout error (the
+    /// pre-fix code blocks forever, which the harness reports as a hang).
+    #[test]
+    fn connect_to_silent_listener_times_out() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let server = std::thread::spawn(move || {
+            // Hold the accepted socket open and silent until the test is done.
+            let _conn = listener.accept();
+            let _ = release_rx.recv();
+        });
+        let result = ReplClient::connect_with_handshake_timeout(
+            "127.0.0.1",
+            port,
+            "cookie",
+            Duration::from_millis(200),
+        );
+        let _ = release_tx.send(());
+        server.join().expect("server thread");
+        let Err(err) = result else {
+            panic!("expected a timeout against a silent listener");
+        };
+        assert!(err.to_string().contains("Timed out"), "got: {err}");
+    }
+
+    /// Same, but the upgrade succeeds and the node never sends `auth-required`.
+    #[test]
+    fn connect_to_listener_that_stalls_after_upgrade_times_out() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("accept");
+            let _ws = tungstenite::accept(stream).expect("upgrade");
+            let _ = release_rx.recv();
+        });
+        let result = ReplClient::connect_with_handshake_timeout(
+            "127.0.0.1",
+            port,
+            "cookie",
+            Duration::from_millis(200),
+        );
+        let _ = release_tx.send(());
+        server.join().expect("server thread");
+        let Err(err) = result else {
+            panic!("expected a timeout against a stalled handshake");
+        };
+        assert!(err.to_string().contains("Timed out"), "got: {err}");
     }
 
     #[test]

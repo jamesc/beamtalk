@@ -336,6 +336,17 @@ pub fn workspaces_base_dir() -> Result<PathBuf> {
 /// - The workspace ID contains path traversal components (`..`, `/`, `\`).
 /// - The workspace ID is empty.
 pub fn workspace_dir(workspace_id: &str) -> Result<PathBuf> {
+    workspace_dir_in(&workspaces_base_dir()?, workspace_id)
+}
+
+/// [`workspace_dir`] under an explicit `workspaces_root` (the real
+/// `~/.beamtalk/workspaces` or a temporary directory in tests).
+///
+/// # Errors
+///
+/// Returns an error if the workspace ID is empty or contains path traversal
+/// components (`..`, `/`, `\`).
+pub fn workspace_dir_in(workspaces_root: &Path, workspace_id: &str) -> Result<PathBuf> {
     if workspace_id.is_empty() {
         return Err(miette!("Workspace ID cannot be empty"));
     }
@@ -345,7 +356,7 @@ pub fn workspace_dir(workspace_id: &str) -> Result<PathBuf> {
             workspace_id
         ));
     }
-    Ok(workspaces_base_dir()?.join(workspace_id))
+    Ok(workspaces_root.join(workspace_id))
 }
 
 /// Read the port (and optional nonce) from the port file written by `beamtalk_repl_server`.
@@ -357,7 +368,19 @@ pub fn workspace_dir(workspace_id: &str) -> Result<PathBuf> {
 ///
 /// Returns an error if the file exists but cannot be read.
 pub fn read_port_file(workspace_id: &str) -> Result<Option<(u16, Option<String>)>> {
-    let port_file_path = workspace_dir(workspace_id)?.join("port");
+    read_port_file_under(&workspaces_base_dir()?, workspace_id)
+}
+
+/// [`read_port_file`] under an explicit `workspaces_root`.
+///
+/// # Errors
+///
+/// Returns an error if the ID is invalid or the file exists but cannot be read.
+pub fn read_port_file_under(
+    workspaces_root: &Path,
+    workspace_id: &str,
+) -> Result<Option<(u16, Option<String>)>> {
+    let port_file_path = workspace_dir_in(workspaces_root, workspace_id)?.join("port");
 
     let content = match fs::read_to_string(&port_file_path) {
         Ok(content) => content,
@@ -424,7 +447,19 @@ pub fn read_port_file_nonce_in(workspaces_root: &Path, port: u16) -> Option<Stri
 ///
 /// Returns an error if the file exists but cannot be read.
 pub fn read_cookie_file(workspace_id: &str) -> Result<Option<String>> {
-    let cookie_path = workspace_dir(workspace_id)?.join("cookie");
+    read_cookie_file_under(&workspaces_base_dir()?, workspace_id)
+}
+
+/// [`read_cookie_file`] under an explicit `workspaces_root`.
+///
+/// # Errors
+///
+/// Returns an error if the ID is invalid or the file exists but cannot be read.
+pub fn read_cookie_file_under(
+    workspaces_root: &Path,
+    workspace_id: &str,
+) -> Result<Option<String>> {
+    let cookie_path = workspace_dir_in(workspaces_root, workspace_id)?.join("cookie");
 
     let content = match fs::read_to_string(&cookie_path) {
         Ok(content) => content,

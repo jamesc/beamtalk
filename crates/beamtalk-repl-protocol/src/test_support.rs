@@ -193,6 +193,50 @@ pub async fn spawn_sequence(
     }
 }
 
+/// Like [`spawn`], but accepts any number of *concurrent* connections, each
+/// served on its own task with a fresh responder from `make_responder`
+/// (BT-5029). [`spawn_sequence`] serves its connections one after another, so
+/// a client that opens a second connection while the first is still open
+/// (the MCP client's out-of-band `interrupt`) would never be accepted.
+///
+/// Every handshake is [`HandshakeMode::Ok`]. [`FakeWsServer::seen`] collects
+/// the frames of all connections; `seen_per_connection` is empty and
+/// `disconnected` is `None`.
+pub async fn spawn_concurrent(
+    session_id: &str,
+    make_responder: impl Fn() -> Responder + Send + 'static,
+) -> FakeWsServer {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback");
+    let port = listener.local_addr().expect("local addr").port();
+    let seen: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let log = Arc::new(SeenLog {
+        all: Arc::clone(&seen),
+        per_connection: vec![Arc::new(Mutex::new(Vec::new()))],
+    });
+    let session_id = session_id.to_string();
+    let task = tokio::spawn(async move {
+        while let Ok((stream, _peer)) = listener.accept().await {
+            let responder = make_responder();
+            let (log, session_id) = (Arc::clone(&log), session_id.clone());
+            tokio::spawn(async move {
+                let Ok(ws) = tokio_tungstenite::accept_async(stream).await else {
+                    return;
+                };
+                serve_connection(ws, HandshakeMode::Ok, &session_id, &responder, &log, 0).await;
+            });
+        }
+    });
+    FakeWsServer {
+        port,
+        seen,
+        seen_per_connection: Vec::new(),
+        disconnected: None,
+        task,
+    }
+}
+
 /// Where a connection's received frames are recorded.
 struct SeenLog {
     all: Arc<Mutex<Vec<Value>>>,
