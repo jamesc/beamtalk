@@ -1294,7 +1294,7 @@ handle_info({'EXIT', Port, normal}, #state{port = Port} = State) ->
             }),
             {stop, {port_exit, normal}, State};
         false ->
-            ?LOG_ERROR(#{
+            ?LOG_WARNING(#{
                 domain => [beamtalk, runtime], msg => <<"Compiler port closed; opening a new port">>
             }),
             {noreply, State#state{port = open_port(), port_reopens = [Now | Recent]}}

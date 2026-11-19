@@ -702,8 +702,7 @@ try_change_code_timeout_logs_error_and_stays_suspended_test_() ->
             logger:remove_handler(HandlerId),
             logger:set_primary_config(level, OldLevel),
             unlink(Pid),
-            catch sys:resume(Pid),
-            catch gen_server:stop(Pid)
+            beamtalk_test_proc:stop(Pid)
         end
     end}.
 
