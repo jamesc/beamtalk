@@ -10,6 +10,7 @@ use super::super::convert::{
 use super::super::nav::{
     ast_declarations_for_cursor, merge_locations, runtime_site_to_lsp_location,
 };
+use crate::server::lock::LockRecover;
 use std::collections::HashSet;
 
 use beamtalk_core::source_analysis::Span;
@@ -40,7 +41,7 @@ impl Backend {
 
         // Hold svc lock only for the definition lookup; release before checking stdlib_paths.
         let (resolved, native_delegate, ffi_call) = {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             let Some(source) = svc.file_source(&path) else {
                 return Ok(None);
             };
@@ -123,10 +124,7 @@ impl Backend {
 
         Ok(resolved.and_then(|(file, range)| {
             let is_stdlib = {
-                let stdlib_paths = self
-                    .stdlib_paths
-                    .lock()
-                    .expect("stdlib_paths lock poisoned");
+                let stdlib_paths = self.stdlib_paths.lock_recover();
                 stdlib_paths.contains(&file)
             };
             let target_uri = if is_stdlib {
@@ -184,7 +182,7 @@ impl Backend {
         // released before any async runtime call (delegate_nav_query awaits
         // a runtime round-trip when the flag is on).
         let (pos, runtime_query, incomplete_coverage_warning) = {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             let Some(source) = svc.file_source(&path) else {
                 return Ok(None);
             };
@@ -236,7 +234,7 @@ impl Backend {
         // declarations out when `include_declaration` is false so the
         // cold-file path mirrors the runtime-path behaviour.
         let ast_fallback = || -> Vec<tower_lsp::lsp_types::Location> {
-            let svc = backend_self.service.lock().expect("service lock poisoned");
+            let svc = backend_self.service.lock_recover();
             let refs = svc.find_references(&path_for_ast, pos);
             // When the caller wants senders/uses only, subtract the AST
             // declaration set for this cursor from the merged AST results.
@@ -323,7 +321,7 @@ impl Backend {
         // a runtime round-trip when the flag is on). Mirrors the `references`
         // handler structure.
         let (pos, runtime_query) = {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             let Some(source) = svc.file_source(&path) else {
                 return Ok(None);
             };
@@ -339,7 +337,7 @@ impl Backend {
         let backend_self = self;
         let path_for_ast = path.clone();
         let ast_fallback = || -> Vec<tower_lsp::lsp_types::Location> {
-            let svc = backend_self.service.lock().expect("service lock poisoned");
+            let svc = backend_self.service.lock_recover();
             // Resolve the selector locally so the AST fallback works when
             // the runtime flag is off (in which case `runtime_query` above
             // is `None` and the same `implementors_query_at` classification

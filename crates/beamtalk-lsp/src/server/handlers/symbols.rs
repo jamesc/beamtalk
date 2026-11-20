@@ -8,6 +8,7 @@ use super::super::convert::{path_to_uri, span_to_folding_range, span_to_range, t
 use super::super::nav::{
     class_source_is_stdlib, runtime_class_to_document_symbol, runtime_class_to_workspace_symbol,
 };
+use crate::server::lock::LockRecover;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -61,7 +62,7 @@ impl Backend {
         // runtime returns an error, or the request is for a buffer the
         // runtime can't answer correctly (see the doc comment above).
         let ast_fallback = || -> Vec<tower_lsp::lsp_types::DocumentSymbol> {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             let Some(src) = svc.file_source(&path) else {
                 return Vec::new();
             };
@@ -163,7 +164,7 @@ impl Backend {
         };
 
         let ranges = {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             let Some(src) = svc.file_source(&path) else {
                 return Ok(None);
             };
@@ -210,7 +211,7 @@ impl Backend {
         // regardless of the runtime-delegate flag.
         let query_for_fallback = query_lower.clone();
         let ast_fallback = || -> Vec<SymbolInformation> {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             let mut out: Vec<SymbolInformation> = Vec::new();
             let files: Vec<Utf8PathBuf> = svc
                 .project_index()
@@ -269,10 +270,7 @@ impl Backend {
         // the symbol but a zero-width range; clicking opens the project
         // root (or stays put if the editor declines the navigation).
         let workspace_root_uri = {
-            let roots = self
-                .workspace_roots
-                .lock()
-                .expect("workspace_roots lock poisoned");
+            let roots = self.workspace_roots.lock_recover();
             roots.first().and_then(|p| Url::from_file_path(p).ok())
         };
         // Stdlib paths to exclude from the runtime path — mirrors the
@@ -282,10 +280,7 @@ impl Backend {
         // editor's Ctrl-T picker would balloon with stdlib classes that
         // were not in the cold-file result.
         let stdlib_paths: HashSet<Utf8PathBuf> = {
-            let guard = self
-                .stdlib_paths
-                .lock()
-                .expect("stdlib_paths lock poisoned");
+            let guard = self.stdlib_paths.lock_recover();
             guard.clone()
         };
 
