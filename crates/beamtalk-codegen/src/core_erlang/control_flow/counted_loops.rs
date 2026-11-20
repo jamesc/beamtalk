@@ -206,14 +206,12 @@ impl CoreErlangGenerator {
     /// once in the loop preamble, so the loop body pays nothing.
     fn zero_step_guard_doc(&mut self, recv_var: &str, step_var: &str) -> Document<'static> {
         let msg_var = self.fresh_temp_var("StepMsg");
-        let raise = docvec![
-            "let ",
+        let raise = form::let_in(
             leaf::var(msg_var.clone()),
-            " = ",
             leaf::binary_lit("Interval step cannot be zero"),
-            " in ",
             self.object_error_raise_doc(recv_var, &msg_var),
-        ];
+            Layout::Flat,
+        );
         let is_zero = form::call(
             "erlang",
             "=:=",
