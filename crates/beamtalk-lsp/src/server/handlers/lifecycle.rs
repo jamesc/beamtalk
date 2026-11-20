@@ -466,6 +466,7 @@ impl Backend {
                 return;
             }
             self.clear_dirty(&path);
+            self.pending_interface_change.lock_recover().remove(&path);
             {
                 let mut generations = self.diagnostic_generation.lock_recover();
                 generations.remove(&uri);

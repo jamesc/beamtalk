@@ -1515,7 +1515,11 @@ impl Backend {
             return;
         };
         let _publishing = self.publish_lock.lock().await;
-        if !self.is_open_uri(uri) {
+        // The document may have closed, or moved to a newer version (whose own
+        // publish is now ahead of or behind us), while we analysed. Sending
+        // this older result could overwrite newer diagnostics for a client
+        // that ignores versions, so drop it; the newer edit publishes its own.
+        if !self.is_open_uri(uri) || self.file_version_for_uri(uri) != version {
             return;
         }
         self.client
