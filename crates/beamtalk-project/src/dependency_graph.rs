@@ -12,11 +12,13 @@
 //! dependencies. It never fetches anything: a dependency whose checkout is
 //! not on disk is skipped, and [`DependencyGraph::all_found`] says so.
 //!
-//! The walk lives here, below both `beamtalk-cli` and the LSP, so the
-//! offline dependency scan (MCP lint) and the editor see the same graph
-//! (BT-4611). `beamtalk-cli`'s full resolution (`ensure_deps_resolved`) has
-//! its own walk, because it fetches and reports errors, but it shares the
-//! checkout-path step, [`dep_root_for_source`].
+//! The breadth-first walk, [`walk_dependencies`], lives here, below both
+//! `beamtalk-cli` and the LSP, so the offline dependency scan (MCP lint), the
+//! editor and the CLI's freshness check see the same graph (BT-4611,
+//! BT-5073); callers differ only in their [`WalkPolicy`]. `beamtalk-cli`'s
+//! fetching resolution (`graph.rs`) is a depth-first walk with cycle
+//! detection and in-flight lock updates, so it keeps its own loop but shares
+//! the checkout-path step, [`dep_root_for_source`].
 
 use crate::dependencies::read_manifest_dependencies;
 use beamtalk_core::compilation::{DependencyMap, DependencySource};
@@ -142,6 +144,156 @@ pub struct DependencyGraph {
     pub all_found: bool,
 }
 
+/// One dependency visited by [`walk_dependencies`].
+#[derive(Debug, Clone)]
+pub struct WalkedDependency {
+    /// The name it is declared under.
+    pub name: String,
+    /// Its checkout root.
+    pub root: Utf8PathBuf,
+    /// How its declaring manifest requested it.
+    pub source: DependencySource,
+    /// Whether the root package declares it directly.
+    pub is_direct: bool,
+    /// For a transitive dependency, the chain of intermediate dependency
+    /// names that led to it (empty for a direct one).
+    pub via_chain: Vec<String>,
+    /// Its own dependencies, or `None` when its manifest could not be read.
+    pub own_dependencies: Option<DependencyMap>,
+}
+
+/// The per-caller decisions of the shared breadth-first walk
+/// ([`walk_dependencies`]): what to do with things the walk cannot find or
+/// read, and how to read a dependency's own `[dependencies]`.
+pub trait WalkPolicy {
+    /// The walk's error type; [`WalkPolicy::non_utf8_path`] may return it to
+    /// abort the walk.
+    type Error;
+
+    /// A path dependency whose declared path is not UTF-8. `Ok(())` skips the
+    /// dependency (and marks the walk incomplete); `Err` aborts.
+    ///
+    /// # Errors
+    ///
+    /// The policy's error, to abort the walk.
+    fn non_utf8_path(&mut self, name: &str, path: &std::path::Path) -> Result<(), Self::Error>;
+
+    /// Whether a dependency whose checkout directory does not exist is
+    /// dropped from the result (its own dependencies cannot be discovered
+    /// either) rather than reported with unknown dependencies.
+    fn skip_missing_checkout(&self) -> bool;
+
+    /// Read the `[dependencies]` of the manifest in `root`; `None` when it
+    /// cannot be read.
+    fn read_dependencies(&mut self, name: &str, root: &Utf8Path) -> Option<DependencyMap>;
+}
+
+/// What [`walk_dependencies`] found.
+#[derive(Debug, Clone, Default)]
+pub struct WalkOutcome {
+    /// Every dependency visited, in breadth-first discovery order.
+    pub dependencies: Vec<WalkedDependency>,
+    /// Whether nothing was skipped, missing or unreadable.
+    pub complete: bool,
+}
+
+/// The one breadth-first walk of a package's transitive dependency graph
+/// without network I/O. A dependency reached twice (a diamond) is visited
+/// once, by name, the first time it is seen. Path dependencies resolve
+/// against the package that declared them; git and registry dependencies
+/// against `checkouts_dir`. Callers differ only in their [`WalkPolicy`].
+///
+/// # Errors
+///
+/// Returns the policy's error when [`WalkPolicy::non_utf8_path`] aborts.
+pub fn walk_dependencies<P: WalkPolicy>(
+    project_root: &Utf8Path,
+    direct: DependencyMap,
+    checkouts_dir: &Utf8Path,
+    policy: &mut P,
+) -> Result<WalkOutcome, P::Error> {
+    let mut outcome = WalkOutcome {
+        dependencies: Vec::new(),
+        complete: true,
+    };
+    let mut visited: HashSet<String> = HashSet::new();
+    // (declaring root, its dependencies, via-chain of the declaring package)
+    let mut queue: VecDeque<(Utf8PathBuf, DependencyMap, Vec<String>)> =
+        VecDeque::from([(project_root.to_path_buf(), direct, Vec::new())]);
+
+    while let Some((declaring_root, deps, via_chain)) = queue.pop_front() {
+        for (name, spec) in deps {
+            if !visited.insert(name.clone()) {
+                continue;
+            }
+            let root =
+                match dep_root_for_source(&declaring_root, &name, &spec.source, checkouts_dir) {
+                    Ok(root) => root,
+                    Err(path) => {
+                        policy.non_utf8_path(&name, path)?;
+                        outcome.complete = false;
+                        continue;
+                    }
+                };
+            if policy.skip_missing_checkout() && !root.is_dir() {
+                outcome.complete = false;
+                continue;
+            }
+            let own_dependencies = policy.read_dependencies(&name, &root);
+            if own_dependencies.is_none() || !root.is_dir() {
+                outcome.complete = false;
+            }
+            let is_direct = declaring_root == project_root;
+            if let Some(own) = own_dependencies.as_ref().filter(|own| !own.is_empty()) {
+                let mut child_chain = via_chain.clone();
+                child_chain.push(name.clone());
+                queue.push_back((root.clone(), own.clone(), child_chain));
+            }
+            outcome.dependencies.push(WalkedDependency {
+                name,
+                root,
+                source: spec.source,
+                is_direct,
+                via_chain: if is_direct {
+                    Vec::new()
+                } else {
+                    via_chain.clone()
+                },
+                own_dependencies,
+            });
+        }
+    }
+
+    Ok(outcome)
+}
+
+/// The offline policy: skip what is not on disk, tolerate an unreadable
+/// manifest, never fail.
+struct OfflinePolicy;
+
+impl WalkPolicy for OfflinePolicy {
+    type Error = std::convert::Infallible;
+
+    fn non_utf8_path(&mut self, name: &str, path: &std::path::Path) -> Result<(), Self::Error> {
+        tracing::warn!(dep = %name, path = %path.display(), "Dependency path is not valid UTF-8; skipping");
+        Ok(())
+    }
+
+    fn skip_missing_checkout(&self) -> bool {
+        true
+    }
+
+    fn read_dependencies(&mut self, name: &str, root: &Utf8Path) -> Option<DependencyMap> {
+        match read_manifest_dependencies(&root.join("beamtalk.toml")) {
+            Ok(own) => Some(own),
+            Err(e) => {
+                tracing::debug!(dep = %name, error = %e, "Dependency manifest unreadable; its dependencies are unknown");
+                None
+            }
+        }
+    }
+}
+
 /// Walk the transitive dependency graph of the package at `project_root`,
 /// starting from its direct `[dependencies]` table, without network I/O.
 ///
@@ -157,58 +309,22 @@ pub fn discover_dependency_graph(
     direct: DependencyMap,
 ) -> DependencyGraph {
     let checkouts_dir = dependency_checkouts_dir(project_root);
-    let mut found = Vec::new();
-    let mut all_found = true;
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut queue: VecDeque<(Utf8PathBuf, DependencyMap)> =
-        VecDeque::from([(project_root.to_path_buf(), direct)]);
-
-    while let Some((declaring_root, deps)) = queue.pop_front() {
-        for (name, spec) in deps {
-            if !visited.insert(name.clone()) {
-                continue;
-            }
-            let root = match dep_root_for_source(
-                &declaring_root,
-                &name,
-                &spec.source,
-                &checkouts_dir,
-            ) {
-                Ok(root) => root,
-                Err(path) => {
-                    tracing::warn!(dep = %name, path = %path.display(), "Dependency path is not valid UTF-8; skipping");
-                    all_found = false;
-                    continue;
-                }
-            };
-            if !root.is_dir() {
-                // Not fetched yet (or a path dependency that doesn't exist):
-                // its own dependencies can't be discovered either.
-                all_found = false;
-                continue;
-            }
-            let mut dependencies = Vec::new();
-            match read_manifest_dependencies(&root.join("beamtalk.toml")) {
-                Ok(own) => {
-                    dependencies = own.keys().cloned().collect();
-                    if !own.is_empty() {
-                        queue.push_back((root.clone(), own));
-                    }
-                }
-                Err(e) => {
-                    tracing::debug!(dep = %name, error = %e, "Dependency manifest unreadable; its dependencies are unknown");
-                    all_found = false;
-                }
-            }
-            found.push(DiscoveredDependency {
-                name,
-                root,
-                dependencies,
-            });
-        }
+    let Ok(outcome) = walk_dependencies(project_root, direct, &checkouts_dir, &mut OfflinePolicy);
+    DependencyGraph {
+        found: outcome
+            .dependencies
+            .into_iter()
+            .map(|d| DiscoveredDependency {
+                dependencies: d
+                    .own_dependencies
+                    .map(|own| own.keys().cloned().collect())
+                    .unwrap_or_default(),
+                name: d.name,
+                root: d.root,
+            })
+            .collect(),
+        all_found: outcome.complete,
     }
-
-    DependencyGraph { found, all_found }
 }
 
 #[cfg(test)]

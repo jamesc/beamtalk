@@ -20,7 +20,8 @@ use crate::server::{BeamtalkMcp, InternalErr, ToolTimer};
 impl BeamtalkMcp {
     /// Run lint checks on a `.bt` source file or directory.
     #[tool(
-        description = "Run style and redundancy lint checks on a .bt source file or directory. Returns structured diagnostics with file, line, message, and severity, plus lint_failures/live_recheck_failures gate counts. Use path=. for the current directory; set warnings_as_errors=true to fail where `beamtalk lint --warnings-as-errors` (REPL load-project parity) does."
+        description = "Run style and redundancy lint checks on a .bt source file or directory. Returns structured diagnostics with file, line, message, and severity, plus lint_failures/live_recheck_failures gate counts. Use path=. for the current directory; set warnings_as_errors=true to fail where `beamtalk lint --warnings-as-errors` (REPL load-project parity) does.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn lint(
         &self,
@@ -28,6 +29,10 @@ impl BeamtalkMcp {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start_quiet("lint");
         let path = params.path.unwrap_or_else(|| ".".to_string());
+        let path = match self.confine_path(&path) {
+            Ok(p) => p,
+            Err(e) => return Ok(e),
+        };
         let warnings_as_errors = params.warnings_as_errors.unwrap_or(false);
         tracing::debug!(tool = "lint", path = %path, warnings_as_errors, "tool invoked");
         // Run blocking I/O and CPU-bound parsing off the Tokio worker thread.
@@ -52,7 +57,8 @@ impl BeamtalkMcp {
     #[tool(
         description = "Return a diagnostic summary (counts by category and severity) for a Beamtalk package or file. \
                         Also includes type-coverage statistics. Use this to monitor typing progress \
-                        without parsing full lint output. Works offline — no REPL connection needed."
+                        without parsing full lint output. Works offline — no REPL connection needed.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn diagnostic_summary(
         &self,
@@ -60,6 +66,10 @@ impl BeamtalkMcp {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start_quiet("diagnostic_summary");
         let path = params.path.unwrap_or_else(|| ".".to_string());
+        let path = match self.confine_path(&path) {
+            Ok(p) => p,
+            Err(e) => return Ok(e),
+        };
         tracing::debug!(tool = "diagnostic_summary", path = %path, "tool invoked");
 
         let result = tokio::task::spawn_blocking(move || compute_diagnostic_summary(&path))

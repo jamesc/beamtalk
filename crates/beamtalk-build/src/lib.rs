@@ -112,6 +112,82 @@ pub fn emit_beamtalk_version(workspace_root: &Path) {
     println!("cargo:rustc-env=BEAMTALK_BUILD_ID={id}");
 }
 
+/// Expose `BEAMTALK_DIRTY_TAG` at compile time (BT-5074).
+///
+/// `BEAMTALK_VERSION` is the exact-match identity (handshake, app `vsn`,
+/// release provenance) and carries no dirty marker, so two different
+/// uncommitted compilers share one version string. The provenance stamp also
+/// records this tag, which names the uncommitted compiler sources themselves:
+/// `dirty.<hash>` over the tracked diff plus every untracked, non-ignored file
+/// under the compiler's source paths, empty for a clean tree.
+///
+/// Call it from one crate's build script (the CLI, the only reader): it
+/// watches the sources, so every crate calling it would rebuild on each edit.
+pub fn emit_dirty_tag(workspace_root: &Path) {
+    for path in DIRTY_PATHS {
+        println!(
+            "cargo:rerun-if-changed={}",
+            workspace_root.join(path).display()
+        );
+    }
+    println!(
+        "cargo:rustc-env=BEAMTALK_DIRTY_TAG={}",
+        dirty_tag(workspace_root).unwrap_or_default()
+    );
+}
+
+/// The paths whose uncommitted state makes a compiler "dirty".
+const DIRTY_PATHS: [&str; 4] = ["crates", "Cargo.toml", "Cargo.lock", "VERSION"];
+
+fn dirty_tag(workspace_root: &Path) -> Option<String> {
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .current_dir(workspace_root)
+            .args(args)
+            .args(["--"])
+            .args(DIRTY_PATHS)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| o.stdout)
+            .unwrap_or_default()
+    };
+    // Pin the format so the hash depends only on the tree: `--binary` keeps
+    // binary edits distinct, and the `--no-*` flags ignore machine-local
+    // `diff.external` / `textconv` / colour config.
+    let diff = git(&[
+        "diff",
+        "--binary",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+        "HEAD",
+    ]);
+    let untracked = git(&["ls-files", "--others", "--exclude-standard", "-z"]);
+    let mut input = diff;
+    for rel in untracked.split(|b| *b == 0).filter(|p| !p.is_empty()) {
+        // Delimit each record (NUL-framed path, length-prefixed content) so
+        // different file sets cannot produce the same bytes.
+        input.push(0);
+        input.extend_from_slice(rel);
+        input.push(0);
+        if let Ok(rel) = std::str::from_utf8(rel) {
+            let content = fs::read(workspace_root.join(rel)).unwrap_or_default();
+            input.extend_from_slice(&(content.len() as u64).to_le_bytes());
+            input.extend(content);
+        }
+    }
+    compose_dirty_tag(!input.is_empty(), &input)
+}
+
+/// The marker for `content` (the uncommitted diff and untracked files):
+/// `None` when the tree is clean, otherwise `dirty.<hash of content>` so each
+/// distinct set of uncommitted compiler edits is a distinct provenance.
+#[must_use]
+pub fn compose_dirty_tag(dirty: bool, content: &[u8]) -> Option<String> {
+    dirty.then(|| format!("dirty.{:016x}", fnv1a_64(content)))
+}
+
 /// Env var naming the distribution channel (`edge`, `nightly`) of a CI build.
 /// Set by `edge.yml` / `nightly.yml`; unset for local and release builds.
 const ENV_BUILD_CHANNEL: &str = "BEAMTALK_BUILD_CHANNEL";
@@ -279,6 +355,16 @@ pub fn emit_spec_mapping_stamp(workspace_root: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dirty_tag_is_absent_when_clean_and_tracks_the_content() {
+        assert_eq!(compose_dirty_tag(false, b""), None);
+        let a = compose_dirty_tag(true, b"diff a").unwrap();
+        let b = compose_dirty_tag(true, b"diff b").unwrap();
+        assert!(a.starts_with("dirty."));
+        assert_ne!(a, b);
+        assert_eq!(a, compose_dirty_tag(true, b"diff a").unwrap());
+    }
 
     fn inputs() -> BuildInputs<'static> {
         BuildInputs {

@@ -24,7 +24,8 @@ impl BeamtalkMcp {
     /// `file`, and `kind` filters are mutually exclusive; at most one may be
     /// supplied.
     #[tool(
-        description = "Write pending durable ChangeLog entries to disk via byte-span splice + atomic rename, with external-edit conflict detection. With no arguments, flushes every pending durable Tier-1 change ('Workspace flush'). At most one of 'class', 'file', or 'kind' may be supplied: 'class' scopes to one class ('Workspace flush: ClassName'), 'file' scopes to one source file ('Workspace flush: #{ #file => \"path\" }'), and 'kind' scopes to a ChangeEntry kind such as \"new-class\" ('Workspace flush: #'new-class'). DESTRUCTIVE when 'confirm_destructive' is true: pending 'remove-class' entries (from 'remove_class') delete their .bt file from disk — see 'confirm_destructive's own description for the required-argument gate. Returns a FlushResult summary listing files written and any conflicts; a skipped destructive entry is reported distinctly as 'skipped: destructive', not applied. (ADR 0082 Phase 3 / ADR 0113 Phase 2, BT-2288/BT-3207.)"
+        description = "Write pending durable ChangeLog entries to disk via byte-span splice + atomic rename, with external-edit conflict detection. With no arguments, flushes every pending durable Tier-1 change ('Workspace flush'). At most one of 'class', 'file', or 'kind' may be supplied: 'class' scopes to one class ('Workspace flush: ClassName'), 'file' scopes to one source file ('Workspace flush: #{ #file => \"path\" }'), and 'kind' scopes to a ChangeEntry kind such as \"new-class\" ('Workspace flush: #'new-class'). DESTRUCTIVE when 'confirm_destructive' is true: pending 'remove-class' entries (from 'remove_class') delete their .bt file from disk — see 'confirm_destructive's own description for the required-argument gate. Returns a FlushResult summary listing files written and any conflicts; a skipped destructive entry is reported distinctly as 'skipped: destructive', not applied. (ADR 0082 Phase 3 / ADR 0113 Phase 2, BT-2288/BT-3207.)",
+        annotations(read_only_hint = false, destructive_hint = true)
     )]
     pub(crate) async fn flush(
         &self,
@@ -115,7 +116,8 @@ impl BeamtalkMcp {
     /// Compiles to `Workspace changes` — returns the `ChangeLog` object's
     /// display form. Pair with `dirty_methods` for the per-class breakdown.
     #[tool(
-        description = "Return the workspace ChangeLog — the navigable view of pending in-memory changes against the on-disk source files. Compiles to 'Workspace changes'. Pair with 'dirty_methods' for the per-class breakdown of dirty selectors, or 'flush' to write durable entries to disk. (ADR 0082 Phase 3, BT-2288.)"
+        description = "Return the workspace ChangeLog — the navigable view of pending in-memory changes against the on-disk source files. Compiles to 'Workspace changes'. Pair with 'dirty_methods' for the per-class breakdown of dirty selectors, or 'flush' to write durable entries to disk. (ADR 0082 Phase 3, BT-2288.)",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn list_changes(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start("list_changes");
@@ -145,7 +147,8 @@ impl BeamtalkMcp {
     /// Compiles to `Workspace changes dirtyMethods` — the per-class set of
     /// dirty selectors, the structured "what specifically has changed?" view.
     #[tool(
-        description = "Return the per-class set of dirty selectors in the workspace — the structured 'what specifically has changed?' view. Compiles to 'Workspace changes dirtyMethods'. Pair with 'list_changes' for the full summary or 'flush' to write durable entries to disk. (ADR 0082 Phase 3, BT-2288.)"
+        description = "Return the per-class set of dirty selectors in the workspace — the structured 'what specifically has changed?' view. Compiles to 'Workspace changes dirtyMethods'. Pair with 'list_changes' for the full summary or 'flush' to write durable entries to disk. (ADR 0082 Phase 3, BT-2288.)",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn dirty_methods(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start("dirty_methods");
@@ -177,7 +180,8 @@ impl BeamtalkMcp {
     /// class the workspace has a recorded source for, not just the
     /// xref-filtered dependents of one changed selector.
     #[tool(
-        description = "Re-check every live class in the workspace against the current image, not just the dependents of the last reload. Compiles to 'Workspace recheckImage' — the explicit, on-demand, unbounded sweep (ADR 0105 Phase 3), as opposed to the automatic post-reload check which only re-checks xref-filtered dependents of one changed selector, capped per reload. Returns a report Dictionary (checked/stale/findings). (ADR 0105 Phase 3, BT-2782.)"
+        description = "Re-check every live class in the workspace against the current image, not just the dependents of the last reload. Compiles to 'Workspace recheckImage' — the explicit, on-demand, unbounded sweep (ADR 0105 Phase 3), as opposed to the automatic post-reload check which only re-checks xref-filtered dependents of one changed selector, capped per reload. Returns a report Dictionary (checked/stale/findings). (ADR 0105 Phase 3, BT-2782.)",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn recheck_image(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start("recheck_image");

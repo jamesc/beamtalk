@@ -41,6 +41,29 @@ pub(crate) fn current_beamtalk_version() -> &'static str {
     env!("BEAMTALK_VERSION")
 }
 
+/// BT-5074: names the uncommitted compiler edits this binary was built from
+/// (`dirty.<diff hash>`), or is empty for a clean tree. `BEAMTALK_VERSION` is
+/// the exact-match identity shared with the handshake and release provenance
+/// and carries no such marker, so without this two different uncommitted
+/// compilers would share one provenance and reuse each other's artifacts.
+fn current_dirty_tag() -> &'static str {
+    env!("BEAMTALK_DIRTY_TAG")
+}
+
+/// BT-5074: the build-mode flags that change what the compiler emits or
+/// rejects, in a canonical form for the stamp. Empty for a default build, so
+/// stamps written before this field existed still match a default build.
+pub(crate) fn build_flags(stdlib_mode: bool, allow_primitives: bool) -> String {
+    let mut flags = Vec::new();
+    if allow_primitives {
+        flags.push("allow-primitives");
+    }
+    if stdlib_mode {
+        flags.push("stdlib-mode");
+    }
+    flags.join(",")
+}
+
 /// The running toolchain's compound OTP version (`<release>-<erts>`), probed
 /// once per process.
 ///
@@ -99,7 +122,8 @@ pub(crate) fn otp_build_major(compound: &str) -> Option<u32> {
 
 /// On-disk provenance stamp written into a build scope after a successful build.
 ///
-/// Only `beamtalk_version` and `otp_release` are invalidation inputs; `built_at`
+/// `beamtalk_version`, `otp_release`, `compiler_dirty` and `build_flags` are the
+/// invalidation inputs; `built_at`
 /// is diagnostic and never compared.
 #[derive(Debug, Serialize, Deserialize)]
 struct ProvenanceStamp {
@@ -115,6 +139,12 @@ struct ProvenanceStamp {
     /// ISO-8601 (UTC) build timestamp. Informational only — never an
     /// invalidation input.
     built_at: String,
+    /// `dirty.<hash>` of an uncommitted compiler (BT-5074); empty when clean.
+    #[serde(default)]
+    compiler_dirty: String,
+    /// Canonical build-mode flags (BT-5074); see [`build_flags`].
+    #[serde(default)]
+    build_flags: String,
 }
 
 /// Result of checking a build scope's stamp against the current toolchain.
@@ -135,6 +165,16 @@ pub(crate) enum StampStatus {
 /// (OTP could not be probed) the OTP axis is skipped and only `beamtalk_version`
 /// is compared — an inability to probe never forces a rebuild on its own.
 pub(crate) fn read_stamp_status(stamp_path: &Utf8Path, current_otp: Option<&str>) -> StampStatus {
+    read_stamp_status_with_flags(stamp_path, current_otp, "")
+}
+
+/// [`read_stamp_status`] for a build with non-default mode flags
+/// ([`build_flags`]): a stamp written under different flags is stale.
+pub(crate) fn read_stamp_status_with_flags(
+    stamp_path: &Utf8Path,
+    current_otp: Option<&str>,
+    flags: &str,
+) -> StampStatus {
     let current_version = current_beamtalk_version();
 
     let Ok(data) = fs::read_to_string(stamp_path) else {
@@ -157,6 +197,21 @@ pub(crate) fn read_stamp_status(stamp_path: &Utf8Path, current_otp: Option<&str>
         return StampStatus::Stale(format!(
             "built by beamtalk {}, current is {current_version}",
             stamp.beamtalk_version
+        ));
+    }
+
+    if stamp.compiler_dirty != current_dirty_tag() {
+        return StampStatus::Stale(format!(
+            "built by a different uncommitted compiler ('{}' vs '{}')",
+            stamp.compiler_dirty,
+            current_dirty_tag()
+        ));
+    }
+
+    if stamp.build_flags != flags {
+        return StampStatus::Stale(format!(
+            "built with flags [{}], current flags are [{flags}]",
+            stamp.build_flags
         ));
     }
 
@@ -190,11 +245,22 @@ pub(crate) fn read_stamp_status(stamp_path: &Utf8Path, current_otp: Option<&str>
 /// never fails the build (the next build simply sees a missing stamp and
 /// rebuilds).
 pub(crate) fn write_stamp(stamp_path: &Utf8Path, otp_release: Option<&str>) {
+    write_stamp_with_flags(stamp_path, otp_release, "");
+}
+
+/// [`write_stamp`] recording the build-mode flags ([`build_flags`]).
+pub(crate) fn write_stamp_with_flags(
+    stamp_path: &Utf8Path,
+    otp_release: Option<&str>,
+    flags: &str,
+) {
     let stamp = ProvenanceStamp {
         schema: STAMP_SCHEMA,
         beamtalk_version: current_beamtalk_version().to_string(),
         otp_release: otp_release.map(str::to_string),
         built_at: format_rfc3339_utc(SystemTime::now()),
+        compiler_dirty: current_dirty_tag().to_string(),
+        build_flags: flags.to_string(),
     };
 
     let data = match serde_json::to_string_pretty(&stamp) {
@@ -275,6 +341,8 @@ mod tests {
             beamtalk_version: version.to_string(),
             otp_release: otp.map(str::to_string),
             built_at: "2026-01-01T00:00:00Z".to_string(),
+            compiler_dirty: current_dirty_tag().to_string(),
+            build_flags: String::new(),
         };
         fs::write(path, serde_json::to_string_pretty(&stamp).unwrap()).unwrap();
     }
@@ -286,6 +354,46 @@ mod tests {
         assert!(matches!(
             read_stamp_status(&path, Some("27-15.0.1")),
             StampStatus::Fresh
+        ));
+    }
+
+    #[test]
+    fn build_flags_are_canonical_and_empty_by_default() {
+        assert_eq!(build_flags(false, false), "");
+        assert_eq!(build_flags(false, true), "allow-primitives");
+        assert_eq!(build_flags(true, true), "allow-primitives,stdlib-mode");
+    }
+
+    #[test]
+    fn flag_change_is_stale_in_both_directions() {
+        let (_t, path) = scratch();
+        write_stamp_with_flags(&path, Some("27-15.0.1"), "allow-primitives");
+        assert!(matches!(
+            read_stamp_status_with_flags(&path, Some("27-15.0.1"), "allow-primitives"),
+            StampStatus::Fresh
+        ));
+        assert!(matches!(
+            read_stamp_status_with_flags(&path, Some("27-15.0.1"), ""),
+            StampStatus::Stale(_)
+        ));
+        write_stamp_with_flags(&path, Some("27-15.0.1"), "");
+        assert!(matches!(
+            read_stamp_status_with_flags(&path, Some("27-15.0.1"), "stdlib-mode"),
+            StampStatus::Stale(_)
+        ));
+    }
+
+    #[test]
+    fn stamp_from_a_different_uncommitted_compiler_is_stale() {
+        let (_t, path) = scratch();
+        write_stamp(&path, Some("27-15.0.1"));
+        let data = fs::read_to_string(&path).unwrap();
+        let mut stamp: ProvenanceStamp = serde_json::from_str(&data).unwrap();
+        stamp.compiler_dirty = "dirty.0000000000000000-other".to_string();
+        fs::write(&path, serde_json::to_string(&stamp).unwrap()).unwrap();
+        assert!(matches!(
+            read_stamp_status(&path, Some("27-15.0.1")),
+            StampStatus::Stale(_)
         ));
     }
 

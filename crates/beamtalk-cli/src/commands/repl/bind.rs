@@ -49,6 +49,24 @@ pub fn validate_network_binding(addr: Ipv4Addr, confirm_network: bool) -> Result
     }
 }
 
+/// Warning to print when the workspace listens on a non-loopback address
+/// (BT-5070), `None` for loopback.
+///
+/// The REPL protocol is plain `ws://`: the auth cookie, every evaluated
+/// expression and every result cross the network unencrypted, and anyone who
+/// can read the traffic can take over the workspace. Confirming the binding
+/// (`--confirm-network`) does not change that, so say it every start.
+pub fn cleartext_warning(addr: Ipv4Addr) -> Option<String> {
+    is_non_loopback(addr).then(|| {
+        format!(
+            "warning: binding to {addr} serves the REPL over unencrypted ws://. \
+             The auth cookie and all eval traffic can be read or hijacked by anyone \
+             on the network path. Use a trusted network, a Tailscale/WireGuard/SSH \
+             tunnel, or bind to 127.0.0.1."
+        )
+    })
+}
+
 /// Auto-detect the Tailscale IPv4 address via `tailscale ip -4`.
 fn detect_tailscale_ip() -> Result<Ipv4Addr> {
     detect_tailscale_ip_with(|| Command::new("tailscale").args(["ip", "-4"]).output())
@@ -99,6 +117,16 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cleartext_warning_only_for_non_loopback_and_names_the_risk() {
+        assert!(cleartext_warning(Ipv4Addr::LOCALHOST).is_none());
+        let w = cleartext_warning(Ipv4Addr::new(192, 168, 1, 5)).unwrap();
+        assert!(w.contains("192.168.1.5"));
+        assert!(w.contains("unencrypted"));
+        assert!(w.contains("cookie"));
+        assert!(cleartext_warning(Ipv4Addr::UNSPECIFIED).is_some());
+    }
+
     use super::*;
 
     /// Builds a real `std::process::ExitStatus` for a given exit code without
