@@ -102,6 +102,10 @@ Two consequences:
 - ✅ Tests: `stdlib/test/` BUnit tests for the class
 - ✅ Docs: Updated `stdlib/src/README.md` with class hierarchy
 
+## Updating Erlang Dependencies
+
+`runtime/rebar.lock` is committed and CI fails (`lint` job, "Check runtime/rebar.lock is up to date") when `rebar3 lock` would change it. Dependabot has no rebar3 ecosystem, so nothing bumps it automatically: to update, run `rebar3 upgrade <dep>` (or edit `runtime/rebar.config`) then `rebar3 lock` in `runtime/` and commit both files. The rebar3 plugins (`covertool`, `erlfmt`) are not recorded in the lock; they are pinned to exact versions in `rebar.config` and bumped by hand.
+
 ## Validating Generated Dialyzer Specs
 
 Beamtalk generates `-spec` attributes from type annotations (e.g. `:: Integer`, `-> String`). Since Core Erlang compilation does not preserve specs in BEAM debug_info, a separate validation pipeline verifies that generated specs are well-formed.
