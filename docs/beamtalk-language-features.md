@@ -5444,8 +5444,8 @@ Four runtime-representation nuances (see ADR 0107 Implementation for the full co
 | Negative number | `-1` | Negative integer/float match |
 | Variable | `x` | Binds matched value to name |
 | Tuple | `{a, b}` | Destructure tuple in assignment and match arms (`{a, b}` is also a tuple literal expression — see Tuple Literals) |
-| Array | `#[a, b]` | Match and destructure an Array by exact size; nested arrays supported |
-| Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
+| Array | `#[a, b]` | Match and destructure an Array by exact size; nested arrays supported; element names must be distinct in destructuring (BT-5052) |
+| Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only); the rest name must not repeat an element name (BT-5050) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
 | Binary | `<<n:8, payload:n/binary>>` | Match bytes/bits; sizes may name earlier segments, params/locals, or parenthesized exprs; `bits` for unaligned tails; `utf8`/`utf16`/`utf32` and `unit:N`; integer, float, character and string literal values; a misfit literal warns (BT-663, BT-4096, BT-4097, BT-4143, BT-4376) |
@@ -5567,6 +5567,8 @@ The `...identifier` syntax in array destructuring captures remaining elements:
 ```
 
 The rest element must be the last in the pattern. Rest patterns are supported in destructuring assignment only — they are not yet supported in `match:` arms.
+
+**Duplicate names in destructuring patterns (BT-5052, BT-5050).** Every element and rest name in a destructuring array pattern must be distinct. `#[a, a] := #[1, 2]` and `#[a, ...a] := #[1, 2, 3]` are compile errors ("Variable 'a' is bound multiple times in pattern"). Nested arrays are covered: `#[a, #[b, a]] := ...` is also an error. `match:` arms are unaffected — `#[a, a] -> ...` still matches only when both elements are equal.
 
 > **Note:** Tuple destructuring works in both assignment (`{x, y} := expr`) and `match:` arms. A tuple pattern may end with a trailing comma (`{x, y,} := expr`), like the tuple literal it mirrors. `collect:` with pattern blocks is not yet supported.
 
