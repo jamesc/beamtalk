@@ -195,6 +195,8 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   # ── Eval + session ops ───────────────────────────────────────────────────
 
+  def interrupt(_pid), do: :ok
+
   def eval(_pid, code) do
     case extract_class_name(code) do
       {:ok, class_name} ->

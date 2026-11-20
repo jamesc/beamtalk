@@ -14,9 +14,10 @@
 use super::super::Backend;
 use super::super::convert::{path_to_uri, span_to_range, to_bt_position};
 use crate::server::lock::LockRecover;
-use beamtalk_language_service::{RenameEdit, RenamePlan};
+use beamtalk_language_service::{LanguageService, RenameEdit, RenamePlan};
 use camino::Utf8PathBuf;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fs;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::{
     AnnotatedTextEdit, ChangeAnnotation, DocumentChangeOperation, DocumentChanges, MessageType,
@@ -67,6 +68,37 @@ impl RenameClientCaps {
 pub(in crate::server) struct RenameOutcome {
     pub edit: WorkspaceEdit,
     pub message: Option<String>,
+}
+
+/// Every file a plan edits (confirmed and candidate sites).
+fn plan_files(plan: &RenamePlan) -> HashSet<Utf8PathBuf> {
+    plan.confirmed
+        .iter()
+        .chain(plan.candidates.iter().flatten())
+        .map(|edit| edit.file.clone())
+        .collect()
+}
+
+/// The plan's files that are not open in the editor and whose on-disk text
+/// no longer matches the indexed text (`disk` is `None` when unreadable, e.g.
+/// deleted). Open files are exempt: the editor's buffer is the truth and the
+/// client checks the document version.
+pub(in crate::server) fn stale_closed_files(
+    plan: &RenamePlan,
+    open: &HashSet<Utf8PathBuf>,
+    indexed: &HashMap<Utf8PathBuf, String>,
+    read_disk: &dyn Fn(&Utf8PathBuf) -> Option<String>,
+) -> Vec<(Utf8PathBuf, Option<String>)> {
+    let mut files: Vec<_> = plan_files(plan).into_iter().collect();
+    files.sort();
+    files
+        .into_iter()
+        .filter(|f| !open.contains(f))
+        .filter_map(|f| {
+            let disk = read_disk(&f);
+            (disk.as_deref() != indexed.get(&f).map(String::as_str)).then_some((f, disk))
+        })
+        .collect()
 }
 
 fn refusal(message: impl Into<String>) -> Error {
@@ -306,7 +338,9 @@ impl Backend {
             return Err(refusal("This document cannot be renamed in."));
         };
         let caps = *self.rename_caps.lock_recover();
-        let outcome = {
+        // Plan under the lock, snapshot the text of every file the plan
+        // touches, then release it before any disk I/O.
+        let (plan, sources) = {
             let svc = self.service.lock_recover();
             let Some(source) = svc.file_source(&path) else {
                 return Err(refusal("This document is not open."));
@@ -315,8 +349,46 @@ impl Backend {
             let plan = svc
                 .plan_rename(&path, pos, &params.new_name)
                 .map_err(|refused| refusal(refused.message))?;
+            let sources: HashMap<Utf8PathBuf, String> = plan_files(&plan)
+                .into_iter()
+                .filter_map(|f| svc.file_source(&f).map(|src| (f, src)))
+                .collect();
+            (plan, sources)
+        };
+        // BT-5078: spans are byte offsets into the *indexed* text. For a file
+        // the editor does not have open, that text may be older than what is
+        // on disk (`git pull`, an external edit, a delete), and the client
+        // would apply our ranges to the real file. Refuse rather than write
+        // edits computed from stale text.
+        let open_files: HashSet<Utf8PathBuf> = {
             let versions = self.versions.lock_recover();
-            build_rename_edit(&plan, caps, &|f| svc.file_source(f), &versions)
+            versions.keys().cloned().collect()
+        };
+        let stale = stale_closed_files(&plan, &open_files, &sources, &|f| {
+            fs::read_to_string(f).ok()
+        });
+        if !stale.is_empty() {
+            // Bring the index up to date so the user's retry plans against
+            // the real text.
+            {
+                let mut svc = self.service.lock_recover();
+                for (file, disk) in &stale {
+                    match disk {
+                        Some(text) => svc.update_file(file.clone(), text.clone()),
+                        None => svc.remove_file(file),
+                    }
+                }
+            }
+            let names: Vec<String> = stale.iter().map(|(f, _)| f.to_string()).collect();
+            return Err(refusal(format!(
+                "Rename cancelled: {} changed on disk since it was indexed, so the edits could \
+                 land in the wrong place. The index has been refreshed; run the rename again.",
+                names.join(", ")
+            )));
+        }
+        let outcome = {
+            let versions = self.versions.lock_recover();
+            build_rename_edit(&plan, caps, &|f| sources.get(f).cloned(), &versions)
         };
         if let Some(message) = outcome.message {
             self.client

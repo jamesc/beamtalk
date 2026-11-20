@@ -71,6 +71,13 @@ TestCase subclass: SystemNavigationUnusedTest
     self assert: (rcs includes: #initialize)
     self assert: (rcs includes: #terminate:)
 
+  // BT-5083: Server / Supervisor / Actor / JSON hooks the runtime calls.
+  testRuntimeCalledSelectorsContainsFrameworkHooks =>
+    rcs := SystemNavigation runtimeCalledSelectors
+    #(#handleInfo:, #onLinkedExit:reason:, #asJson, #childSpecs, #strategy, #maxRestarts, #restartWindow, #childClass, #maxChildren, #childShutdown, #supervisionSpec, #equals:, #supervisionPolicy, #isSupervisor, #secretState, #secretSelectors) do: [:s |
+      self assert: (rcs includes: s)
+    ]
+
   testRuntimeCalledSelectorsContainsDisplayAndHash =>
     rcs := SystemNavigation runtimeCalledSelectors
     self assert: (rcs includes: #printString)

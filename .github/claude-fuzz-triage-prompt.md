@@ -48,7 +48,7 @@ A run can fail in several jobs. Triage each failed job separately.
 1. Find the first real error: the panic message and location, the failing input, the seed.
    Quote it exactly in the issue. Beware unrelated noise (cache warnings, deprecation notices).
 2. Reproduce it on the checked-out commit with the narrowest command. For a fuzz artifact:
-   `cargo +nightly fuzz run <target> triage/artifacts/<dir>/<file>` (`cargo fuzz tmin` to
+   `cargo +nightly-2026-11-10 fuzz run <target> triage/artifacts/<dir>/<file>` (`cargo fuzz tmin` to
    minimise). If it does not reproduce, say so; that itself is a finding (flaky, nondeterministic,
    input-dependent or already fixed).
 3. Classify it as exactly one of:

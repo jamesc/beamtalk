@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5083: E2E fixture for `SystemNavigation unusedSelectors`.
+//
+// `UnusedServerHook` overrides `Server>>handleInfo:`, which the runtime calls
+// for raw Erlang messages and nothing in source sends. Only the
+// `runtimeCalledSelectors` exclusion keeps the override out of the report.
+
+Server subclass: UnusedServerHook
+
+  handleInfo: _msg => nil

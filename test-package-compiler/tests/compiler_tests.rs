@@ -24,6 +24,7 @@ use beamtalk_codegen::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::semantic_analysis;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use camino::Utf8PathBuf;
+use std::fmt::Write as _;
 use std::fs;
 
 /// Helper function to read test case source files
@@ -33,12 +34,8 @@ fn read_test_case(case_name: &str) -> String {
         .join("cases")
         .join(case_name)
         .join("main.bt");
-    fs::read_to_string(&path).unwrap_or_else(|e| {
-        panic!(
-            "Failed to read test case '{}' at {}: {}",
-            case_name, path, e
-        )
-    })
+    fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("Failed to read test case '{case_name}' at {path}: {e}"))
 }
 
 /// Sibling `.bt` files in a case directory (everything except `main.bt`),
@@ -60,7 +57,7 @@ fn read_sibling_sources(case_name: &str) -> Vec<(String, String)> {
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name == "main.bt" || !name.ends_with(".bt") {
+            if name == "main.bt" || !name.to_ascii_lowercase().ends_with(".bt") {
                 return None;
             }
             let text = fs::read_to_string(entry.path())
@@ -138,7 +135,7 @@ fn test_parser_check(case_name: &str) {
         if !diagnostics.is_empty() {
             output.push_str("\nDiagnostics:\n");
             for diag in &diagnostics {
-                output.push_str(&format!("{diag:?}\n"));
+                writeln!(output, "{diag:?}").expect("write to String");
             }
         }
         insta::assert_snapshot!(format!("{case_name}_parser"), output);
@@ -192,7 +189,7 @@ fn test_codegen_snapshot(case_name: &str) {
 
 /// Helper function to generate Core Erlang from a test case.
 ///
-/// Returns a tuple of (module_name, core_erlang_code).
+/// Returns a tuple of (`module_name`, `core_erlang_code`).
 ///
 /// Uses workspace mode for code generation.
 fn generate_core_erlang(case_name: &str) -> (String, String) {
@@ -240,7 +237,7 @@ fn generate_core_erlang_uncached(case_name: &str) -> (String, String) {
     let siblings = read_sibling_sources(case_name);
     if siblings.is_empty() {
         let core_erlang = generate_module(&module, options)
-            .unwrap_or_else(|e| panic!("Codegen failed for '{}': {}", case_name, e));
+            .unwrap_or_else(|e| panic!("Codegen failed for '{case_name}': {e}"));
         return (module_name, core_erlang);
     }
 
@@ -261,7 +258,7 @@ fn generate_core_erlang_uncached(case_name: &str) -> (String, String) {
             .with_protocol_sources(protocol_sources)
             .with_analysis(analysis),
     )
-    .unwrap_or_else(|e| panic!("Codegen failed for '{}': {}", case_name, e));
+    .unwrap_or_else(|e| panic!("Codegen failed for '{case_name}': {e}"));
 
     (module_name, core_erlang)
 }
@@ -369,7 +366,7 @@ fn test_diagnostics_snapshot(
 
     let mut output = format!("{} ({}):\n", heading, diagnostics.len());
     for diag in &diagnostics {
-        output.push_str(&format!("  - {}\n", diag.message));
+        writeln!(output, "  - {}", diag.message).expect("write to String");
     }
     insta::assert_snapshot!(snapshot_name, output);
 }
@@ -408,7 +405,7 @@ include!(concat!(env!("OUT_DIR"), "/generated_tests.rs"));
 
 /// BT-490 / ADR 0019 Phase 3: Workspace bindings compile as normal class references.
 /// Transcript, Beamtalk, Workspace are no longer special-cased — they go through
-/// standard class dispatch (class_send) like any other class.
+/// standard class dispatch (`class_send`) like any other class.
 #[test]
 fn test_workspace_binding_compiles_as_normal_class() {
     let source = "Actor subclass: Greeter\n  greet => Transcript show: \"Hello\"";
@@ -480,7 +477,7 @@ fn test_typed_class_warnings_warnings() {
 
 /// BT-2746 / ADR 0102 §4: the advisory, non-exhaustive `match:` warning over
 /// a closed singleton union is pinned end-to-end through the compiler
-/// pipeline here — BUnit cannot observe compiler warnings (BT-2745's
+/// pipeline here — `BUnit` cannot observe compiler warnings (BT-2745's
 /// finding), so this is the one place the warning-*appearing* case (as
 /// opposed to the silence cases, pinned in
 /// `stdlib/test/singleton_match_exhaustiveness_test.bt` and

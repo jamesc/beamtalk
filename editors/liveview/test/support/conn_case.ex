@@ -17,6 +17,23 @@ defmodule BtAttachWeb.ConnCase do
 
   use ExUnit.CaseTemplate
 
+  @doc """
+  Submit `selector`'s form on `view`, then wait for the off-socket work it
+  started (BT-5081: Workspace / REPL evals run in a `start_async` task) and
+  return the settled HTML. Use instead of a bare `render_submit/2` whenever the
+  assertion that follows depends on the eval's result.
+  """
+  def submit_and_settle(view, selector, params) do
+    view |> Phoenix.LiveViewTest.form(selector) |> Phoenix.LiveViewTest.render_submit(params)
+    Phoenix.LiveViewTest.render_async(view, 30_000)
+  end
+
+  @doc "`render_hook/3` for an eval event, settled like `submit_and_settle/3`."
+  def hook_and_settle(view, event, params) do
+    Phoenix.LiveViewTest.render_hook(view, event, params)
+    Phoenix.LiveViewTest.render_async(view, 30_000)
+  end
+
   using do
     quote do
       # The default endpoint for testing

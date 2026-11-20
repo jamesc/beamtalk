@@ -36,6 +36,7 @@
 //!   capability set
 //! - [`panic_resilience`] — a panic in one request leaves the server usable (BT-5078)
 //! - [`panic_resilience`] — a panic in one request leaves the server usable (BT-5078)
+//! - [`index_freshness`] — watched files, cross-file republish, open/close races (BT-5078)
 //! - [`type_hierarchy`] — goto-implementation and
 //!   `prepare_type_hierarchy/supertypes/subtypes`
 //! - [`symbol_unification`] — workspace/document symbol unification
@@ -192,6 +193,7 @@ mod did_close_racing;
 mod flush_and_rename_edits;
 mod formatting_and_paths;
 mod hover_and_stdlib;
+mod index_freshness;
 mod nested_package_root;
 mod package_qualifiers;
 mod panic_resilience;
