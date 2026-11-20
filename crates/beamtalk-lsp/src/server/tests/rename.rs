@@ -214,11 +214,11 @@ async fn selector_rename_annotates_candidates_when_the_client_supports_it() {
 
 fn selector_plan() -> (beamtalk_language_service::RenamePlan, SimpleLanguageService) {
     let mut svc = SimpleLanguageService::new();
-    svc.update_file(Utf8PathBuf::from("/p/Counter.bt"), COUNTER.to_string());
-    svc.update_file(Utf8PathBuf::from("/p/use.bt"), USER.to_string());
+    svc.update_file(absolute_test_path("/p/Counter.bt"), COUNTER.to_string());
+    svc.update_file(absolute_test_path("/p/use.bt"), USER.to_string());
     let plan = svc
         .plan_rename(
-            &Utf8PathBuf::from("/p/Counter.bt"),
+            &absolute_test_path("/p/Counter.bt"),
             beamtalk_language_service::Position::new(1, 4),
             "bump",
         )
@@ -273,10 +273,10 @@ fn client_without_document_changes_gets_a_plain_changes_map() {
 #[test]
 fn class_rename_without_resource_operations_asks_for_a_manual_file_rename() {
     let mut svc = SimpleLanguageService::new();
-    svc.update_file(Utf8PathBuf::from("/p/Counter.bt"), COUNTER.to_string());
+    svc.update_file(absolute_test_path("/p/Counter.bt"), COUNTER.to_string());
     let plan = svc
         .plan_rename(
-            &Utf8PathBuf::from("/p/Counter.bt"),
+            &absolute_test_path("/p/Counter.bt"),
             beamtalk_language_service::Position::new(0, 20),
             "Tally",
         )
