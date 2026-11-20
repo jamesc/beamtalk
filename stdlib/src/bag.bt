@@ -131,8 +131,21 @@ typed Collection(E) subclass: Bag(E)
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Bag new printString                  // => "Bag()"
-  /// (Bag withAll: #(1, 1)) printString   // => "Bag(1, 1)"
+  /// Each distinct element prints once; a count above one is shown as
+  /// `element x count`, so a large count stays short.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Bag new printString                       // => "Bag()"
+  /// (Bag withAll: #(1, 1)) printString        // => "Bag(1 x 2)"
+  /// (Bag withAll: #(1)) printString           // => "Bag(1)"
   /// ```
   printString -> String =>
-    "Bag(" ++ ((self elements collect: [:e | e printString]) join: ", ") ++ ")"
+    parts := self.counts keys
+      collect: [:e |
+        n := self.counts at: e
+        n > 1 ifTrue: [
+          e printString ++ " x " ++ n printString
+        ] ifFalse: [e printString]
+      ]
+    "Bag(" ++ (parts join: ", ") ++ ")"

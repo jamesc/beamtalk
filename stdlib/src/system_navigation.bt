@@ -2425,10 +2425,12 @@ sealed typed Object subclass: SystemNavigation
   /// - `childSpecs` / `strategy` / `maxRestarts` / `restartWindow` /
   ///   `childClass` / `maxChildren` / `childShutdown` — supervisor
   ///   configuration hooks read by the supervisor runtime when it starts.
+  /// - `supervisionSpec` — class-side hook `beamtalk_supervisor_spec` sends.
+  /// - `equals:` — sent by `beamtalk_equality` from `includes:` / `=`.
   /// - `supervisionPolicy` / `isSupervisor` / `secretState` /
   ///   `secretSelectors` — class-side hooks the runtime queries on a class.
   class runtimeCalledSelectors -> List(Symbol) =>
-    #(#initialize, #terminate:, #doesNotUnderstand:args:, #printString, #displayString, #inspect, #hash, #handleInfo:, #onLinkedExit:reason:, #asJson, #childSpecs, #strategy, #maxRestarts, #restartWindow, #childClass, #maxChildren, #childShutdown, #supervisionPolicy, #isSupervisor, #secretState, #secretSelectors)
+    #(#initialize, #terminate:, #doesNotUnderstand:args:, #printString, #displayString, #inspect, #hash, #handleInfo:, #onLinkedExit:reason:, #asJson, #childSpecs, #strategy, #maxRestarts, #restartWindow, #childClass, #maxChildren, #childShutdown, #supervisionSpec, #equals:, #supervisionPolicy, #isSupervisor, #secretState, #secretSelectors)
 
   /// Add every selector *sent* in any method of `aScope` (a class or metaclass)
   /// to the Set `result`, EXCLUDING Erlang-FFI sends. Returns the (possibly

@@ -106,7 +106,10 @@ TestCase subclass: BagTest
 
   testPrintString =>
     self assert: Bag new printString equals: "Bag()"
-    self assert: (Bag withAll: #(1, 1)) printString equals: "Bag(1, 1)"
+    self assert: (Bag withAll: #(1, 1)) printString equals: "Bag(1 x 2)"
+
+  testPrintStringLargeCountStaysShort =>
+    self assert: ((Bag new) add: 7 withCount: 1000000) printString equals: "Bag(7 x 1000000)"
 
   testAddWithCountZeroIsNoop =>
     b := (Bag new) add: 1 withCount: 0
