@@ -42,9 +42,9 @@ runtime.
 %% How long `try_change_code/3` waits for one actor before reporting `timeout`
 %% (the previous `sys` default of 5 s).
 -define(CHANGE_WAIT_MS, 5000).
-%% Bounds the worker's own `sys` calls: the worker, not the caller, owns the
-%% suspension (BT-5084).
--define(SUSPEND_TIMEOUT_MS, 5000).
+%% Bounds the resume after a successful change (BT-5084). The suspend and the
+%% change themselves wait without a bound: the worker, not the caller, owns the
+%% suspension, and a dead actor ends the wait.
 -define(RESUME_TIMEOUT_MS, 60000).
 
 %% Public API
@@ -303,9 +303,10 @@ reported failure.
 runs in a worker process of its own, so the actor is never left suspended by
 anything but a failed migration. If the reloading process dies, or stops
 waiting after 5 s (`{error, timeout}`), the worker carries on: a change that
-finishes late resumes the actor if it succeeded, and a suspend that timed out behind a busy handler
-has its resume queued behind it. Only a migration that returned `{error, _}`
-stays suspended, and the reload reports those pids (`instances_suspended`).
+finishes late resumes the actor only if it succeeded. A second reload that
+starts while the first migration is still running waits behind it, then retries.
+Only a migration that returned `{error, _}` stays suspended; it is logged at
+ERROR by the worker, and the reload reports those pids (`instances_suspended`).
 """.
 -spec try_change_code(pid(), atom(), term()) -> ok | {error, term()}.
 try_change_code(Pid, Module, Extra) ->
@@ -332,13 +333,19 @@ try_change_code(Pid, Module, Extra) ->
             {error, {Other, worker_crashed}}
     after ?CHANGE_WAIT_MS ->
         unalias(Alias),
+        %% A reply that arrived between the timer and `unalias/1` is still in the
+        %% mailbox; drop it.
+        receive
+            {Alias, _} -> ok
+        after 0 -> ok
+        end,
         %% The worker keeps the suspension and resumes the actor once the change
         %% finishes (or logs why it could not). Never silent: ERROR now.
         erlang:demonitor(Mon, [flush]),
         ?LOG_ERROR(
             #{
                 msg =>
-                    <<"code change timed out; the actor is resumed when the change finishes">>,
+                    <<"code change still running; the actor is resumed if it succeeds and left suspended if it fails">>,
                 module => Module,
                 pid => Pid
             },
@@ -349,26 +356,27 @@ try_change_code(Pid, Module, Extra) ->
 
 %% The suspend / change_code / resume sequence for one actor. Runs in the
 %% `try_change_code/3` worker.
+%%
+%% Both `sys` calls wait with `infinity`: the caller's wait is bounded on its own
+%% (?CHANGE_WAIT_MS), and a dead actor exits either call with `noproc`. A timeout
+%% on the suspend must NOT queue a blind resume: when a previous reload's slow
+%% migration is still running, that resume would run after it and resume an actor
+%% whose migration failed (ADR 0123 §3). Waiting lets this worker retry the
+%% migration after the earlier one, and only its own result decides to resume.
 -spec run_change(pid(), atom(), term()) -> ok | {error, term()}.
 run_change(Pid, Module, Extra) ->
     try
-        ok = sys:suspend(Pid, ?SUSPEND_TIMEOUT_MS),
+        ok = sys:suspend(Pid, infinity),
         change_then_resume(Pid, Module, Extra)
     catch
         exit:{noproc, _} ->
             {error, noproc};
-        exit:{timeout, _} ->
-            %% The suspend request is queued behind a busy handler and will take
-            %% effect later with nobody to undo it: queue the resume behind it.
-            _ = resume_quietly(Pid),
-            {error, timeout};
         Class:Error:Stacktrace ->
             ?LOG_DEBUG(
                 "Code change failed for ~p: ~p:~p",
                 [Module, Class, Error],
                 #{stacktrace => Stacktrace, domain => [beamtalk, runtime]}
             ),
-            _ = resume_quietly(Pid),
             {error, {Class, Error}}
     end.
 
@@ -376,16 +384,24 @@ run_change(Pid, Module, Extra) ->
 change_then_resume(Pid, Module, Extra) ->
     %% The worker owns the outcome, so it waits for it: a resume sent before the
     %% change finished would run after it whatever it returned, resuming a failed
-    %% migration onto new code with old-shaped state (ADR 0123 §3). The caller's
-    %% wait is bounded separately (?CHANGE_WAIT_MS), and a dead actor exits this
-    %% call (`noproc`), so the worker cannot outlive the actor.
+    %% migration onto new code with old-shaped state (ADR 0123 §3).
     case sys:change_code(Pid, Module, undefined, Extra, infinity) of
         ok ->
             _ = resume_quietly(Pid),
             ok;
-        {error, _} = ChangeError ->
-            %% ADR 0123 §3: left suspended, state intact. The reload reports the
-            %% pid in its `instances_suspended` finding.
+        {error, Reason} = ChangeError ->
+            %% ADR 0123 §3: left suspended, state intact. Logged here because the
+            %% caller may have stopped waiting; the reload also reports the pid in
+            %% its `instances_suspended` finding when it is still waiting.
+            ?LOG_ERROR(
+                #{
+                    msg => <<"code change failed; the actor is left suspended (ADR 0123 §3)">>,
+                    module => Module,
+                    pid => Pid,
+                    reason => Reason
+                },
+                #{domain => [beamtalk, runtime]}
+            ),
             ChangeError
     end.
 

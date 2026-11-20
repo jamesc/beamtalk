@@ -633,6 +633,11 @@ code_change(_OldVsn, State, {slow_notify, Ms, Parent}) ->
     %% sleep: keeps the migration in flight while the test kills the reloader
     timer:sleep(Ms),
     {ok, State};
+code_change(_OldVsn, _State, {slow_fail_notify, Ms, Parent}) ->
+    Parent ! change_started,
+    %% sleep: keeps the first migration running while a second reload starts
+    timer:sleep(Ms),
+    {error, slow_failure};
 code_change(_OldVsn, _State, {slow_fail, Ms}) ->
     %% sleep: a migration slower than the caller's wait that then fails
     timer:sleep(Ms),
@@ -760,6 +765,38 @@ slow_failing_migration_is_not_resumed_test_() ->
                 beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {slow_fail, 6000}),
             %% `status` is a system message, so it answers only after the failing
             %% migration has finished; the actor must still be suspended then.
+            ?assertEqual(
+                suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
+            )
+        after
+            try
+                sys:resume(Pid)
+            catch
+                _:_ -> ok
+            end,
+            beamtalk_test_proc:stop(Pid)
+        end
+    end}.
+
+%% BT-5084 (review): a second reload that starts while the first one's slow
+%% migration is still running must not resume the actor when the first fails.
+overlapping_reload_does_not_resume_a_failed_migration_test_() ->
+    {timeout, 60, fun() ->
+        {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+        unlink(Pid),
+        Parent = self(),
+        spawn(fun() ->
+            beamtalk_hot_reload:trigger_code_change(
+                ?MODULE, [Pid], {slow_fail_notify, 7000, Parent}
+            )
+        end),
+        try
+            ?awaitMessage(change_started, 5000),
+            %% Reload B queues behind A's migration; its caller gives up at 5 s.
+            {ok, 0, [{Pid, timeout}]} =
+                beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {fail, second}),
+            %% `status` is a system message: it answers only after A has failed and
+            %% B's worker has retried (and failed too).
             ?assertEqual(
                 suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
             )
