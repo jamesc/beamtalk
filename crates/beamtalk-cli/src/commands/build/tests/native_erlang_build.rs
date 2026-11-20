@@ -421,6 +421,51 @@ fn test_no_collision_different_native_modules() {
     );
 }
 
+// ---- BT-5076: native module names vs OTP and the runtime namespace ----
+
+#[test]
+fn test_native_module_named_like_otp_module_is_rejected() {
+    let temp = TempDir::new().unwrap();
+    let project_path = create_test_project(&temp);
+    let native_dir = project_path.join("native");
+    fs::create_dir(&native_dir).unwrap();
+    write_test_file(
+        &native_dir.join("lists.erl"),
+        "-module(lists).\n-export([hello/0]).\nhello() -> ok.\n",
+    );
+
+    let err = check_native_module_collisions(&project_path, "my_pkg", &[]).unwrap_err();
+    let msg = format!("{err:?}")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace("│ ", "");
+    assert!(
+        msg.contains("'lists'") && msg.contains("same name as an"),
+        "{msg}"
+    );
+}
+
+#[test]
+fn test_native_module_in_runtime_namespace_is_rejected() {
+    let temp = TempDir::new().unwrap();
+    let project_path = create_test_project(&temp);
+    let native_dir = project_path.join("native");
+    fs::create_dir(&native_dir).unwrap();
+    write_test_file(
+        &native_dir.join("beamtalk_object.erl"),
+        "-module(beamtalk_object).\n-export([hello/0]).\nhello() -> ok.\n",
+    );
+
+    let err = check_native_module_collisions(&project_path, "my_pkg", &[]).unwrap_err();
+    let msg = format!("{err:?}")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace("│ ", "");
+    assert!(msg.contains("'beamtalk_' namespace"), "{msg}");
+}
+
 /// BT-5074: deleting `native/old.erl` must remove `old.beam` from the native
 /// ebin, including when it was the last native module.
 #[test]

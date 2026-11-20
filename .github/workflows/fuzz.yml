@@ -28,7 +28,7 @@ jobs:
       - name: Install Rust nightly toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # nightly
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-11-10
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -49,7 +49,7 @@ jobs:
           # the two fuzz jobs roughly where they were with one.
           # -rss_limit_mb=4096: Limit memory to 4GB to catch OOM issues faster
           # -max_total_time=300: Run for exactly 5 minutes
-          cargo +nightly fuzz run parse_arbitrary -- \
+          cargo +nightly-2026-11-10 fuzz run parse_arbitrary -- \
             -rss_limit_mb=4096 \
             -max_total_time=300 \
             -print_final_stats=1
@@ -141,7 +141,7 @@ jobs:
       - name: Install Rust nightly toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # nightly
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-11-10
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
@@ -163,7 +163,7 @@ jobs:
           mkdir -p fuzz/corpus/compile_pipeline
           # -rss_limit_mb=4096: Limit memory to 4GB to catch OOM issues faster
           # -max_total_time=300: Run for exactly 5 minutes
-          cargo +nightly fuzz run compile_pipeline \
+          cargo +nightly-2026-11-10 fuzz run compile_pipeline \
             fuzz/corpus/compile_pipeline stdlib/test tests/repl-protocol/cases -- \
             -rss_limit_mb=4096 \
             -max_total_time=300 \

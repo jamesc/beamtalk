@@ -422,8 +422,13 @@ defmodule BtAttachWeb.WorkspaceLive do
       # panel live. Best-effort, same rationale as `subscribe_classes`.
       subscribe_reload_check_best_effort(socket)
 
+      attach_session_best_effort(pid)
+
       socket
       |> assign(:connected, true)
+      |> assign(:workspace_lost, nil)
+      |> assign(:reconnect_error, nil)
+      |> monitor_session(pid)
       |> assign(:node, Workspace.node_name())
       # ADR 0105 Phase 1 (BT-2779): the initial live snapshot of
       # reload-induced findings. A plain synchronous dispatch (unlike
@@ -440,6 +445,10 @@ defmodule BtAttachWeb.WorkspaceLive do
       # fade animation restarts on every eval — the status self-clears visually
       # while staying in the DOM (the value is still assertable in tests).
       |> assign(:eval_seq, 0)
+      # BT-5081: true while a Workspace/REPL eval runs in its `start_async` task.
+      # The tab stays interactive; the dock shows a Stop control meanwhile.
+      |> assign(:eval_running, false)
+      |> assign(:eval_queue, [])
       |> assign(:output, nil)
       |> assign(:eval_warnings, nil)
       |> assign(:error, nil)
@@ -778,6 +787,61 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
+  # BT-5081: attach THIS LiveView pid to the workspace session so the workspace
+  # monitors its client. When the front dies without running `terminate/2` (the
+  # desktop shell's SIGKILL, a VM crash) the session becomes *detached* and the
+  # workspace's idle reaping (BT-5012) covers it, instead of the runtime treating
+  # a never-attached session as permanently active. Best-effort: an older
+  # workspace without the lifecycle API just keeps the previous behaviour.
+  defp attach_session_best_effort(pid) do
+    case ws_client().attach_session(pid, self()) do
+      :ok ->
+        :ok
+
+      other ->
+        Logger.warning(
+          "attach_session failed (idle reaping will not see this front): #{inspect(other)}",
+          domain: [:beamtalk, :liveview]
+        )
+
+        :ok
+    end
+  end
+
+  # The single place the "workspace lost" state is resolved. The banner's
+  # Reconnect control calls it today; an automatic reconnect on `DOWN` would call
+  # the same function, so changing that UX is a one-line change in
+  # `handle_info({:DOWN, …})`.
+  #
+  # Only a successful re-attach clears the lost state. If the workspace is still
+  # down, `attach/1` leaves the socket `connected: false`; keep the previous
+  # socket (and its banner + Reconnect button) and add the failure to the
+  # banner, so the user can retry instead of dead-ending until a page reload.
+  defp reconnect_workspace(socket) do
+    {:ok, attached} = attach(assign(socket, :workspace_lost, nil))
+
+    if attached.assigns[:connected] do
+      attached
+    else
+      assign(socket, :reconnect_error, attached.assigns[:error])
+    end
+  end
+
+  # BT-5081: monitor the session pid from the LiveView. A workspace restart (or
+  # a lost distribution link) kills the monitored remote pid; the `DOWN` is
+  # handled in `handle_info/2` by showing a "workspace lost" banner with a
+  # Reconnect control rather than leaving a dead `session_pid` that errors
+  # every op until a manual page reload. Replaces any previous monitor so a
+  # re-bind (Reconnect) never accumulates stale refs.
+  defp monitor_session(socket, pid) do
+    case socket.assigns[:session_monitor] do
+      ref when is_reference(ref) -> Process.demonitor(ref, [:flush])
+      _ -> :ok
+    end
+
+    assign(socket, :session_monitor, Process.monitor(pid))
+  end
+
   # BT-2598: best-effort subscribe to the class-lifecycle push stream. A failure
   # (an older workspace without the wiring, a transient dist hiccup) is logged but
   # does not fail the mount — the cockpit degrades to the clean-tab re-read on
@@ -855,6 +919,19 @@ defmodule BtAttachWeb.WorkspaceLive do
   # hand-maintained copy of the event names.
   @test_runner_events TestRunner.__test_runner_events__()
 
+  # BT-5081: the "workspace lost" banner's Reconnect control. Re-runs the same
+  # attach path a socket reconnect uses: the registry's session is resumed when
+  # it is still alive (a distribution blip) or a fresh one is started when the
+  # workspace restarted. A restart discards the session's bindings, which is why
+  # this is an explicit, visible action rather than a silent re-attach.
+  @impl true
+  def handle_event("workspace_reconnect", _params, %{assigns: %{workspace_lost: lost}} = socket)
+      when not is_nil(lost) do
+    {:noreply, reconnect_workspace(socket)}
+  end
+
+  def handle_event("workspace_reconnect", _params, socket), do: {:noreply, socket}
+
   @impl true
   def handle_event(event, params, socket) when event in @test_runner_events do
     TestRunner.handle_event(event, params, socket)
@@ -885,7 +962,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     dock_tab eval select_workspace repl_eval repl_history_prev
     repl_history_next repl_inspect git_refresh git_diff git_stage
     git_unstage git_revert git_commit toggle_change_diff revert flush
-    flush_destructive
+    flush_destructive eval_interrupt
   )
 
   @impl true
@@ -1211,6 +1288,20 @@ defmodule BtAttachWeb.WorkspaceLive do
   def handle_info({:do_window_refresh, _pid} = msg, socket),
     do: Inspector.handle_info(msg, socket)
 
+  # BT-5081: the monitored workspace session pid went away (workspace restart,
+  # lost distribution link, or the session was stopped). Flag it so the cockpit
+  # shows the Reconnect banner; the tab itself stays up and usable.
+  def handle_info(
+        {:DOWN, ref, :process, _pid, reason},
+        %{assigns: %{session_monitor: ref}} = socket
+      ) do
+    Logger.warning("workspace session went down: #{inspect(reason)}",
+      domain: [:beamtalk, :liveview]
+    )
+
+    {:noreply, assign(socket, session_monitor: nil, workspace_lost: reason)}
+  end
+
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   # Git panel async load (BT-2590 S1, extracted BT-3295): the off-socket
@@ -1219,6 +1310,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   # `handle_event`/`handle_info` delegation above.
   @impl true
   def handle_async(:git_load, result, socket), do: Dock.handle_async(:git_load, result, socket)
+
+  # BT-5081: a Workspace/REPL eval ran off-socket; fold its outcome via the Dock.
+  def handle_async(:eval, result, socket), do: Dock.handle_async(:eval, result, socket)
 
   # BT-2591: the off-socket mount-time reads (`start_mount_load/2`'s `start_async`)
   # completed. The task returned the four raw `Facade.dispatch` outcomes; we fold
@@ -1933,6 +2027,18 @@ defmodule BtAttachWeb.WorkspaceLive do
   # task and the bindings-changed refresh path share one fold.
   defp assign_bindings(socket, pid), do: apply_bindings(socket, read_bindings(socket, pid))
 
+  # BT-5081: re-read the bindings once an off-socket eval has finished. The
+  # workspace announces `BindingChanged` while the eval is still running, and
+  # the session only commits the new bindings when it ends; when evals blocked
+  # the LiveView, that push was handled after the eval returned, so it read the
+  # committed state. Now that the LiveView stays responsive, the push can be
+  # handled mid-eval and read the old bindings — and no further push follows.
+  @doc false
+  def refresh_bindings(%{assigns: %{session_pid: pid}} = socket) when is_pid(pid),
+    do: assign_bindings(socket, pid)
+
+  def refresh_bindings(socket), do: socket
+
   defp read_bindings(socket, pid),
     do: Facade.dispatch(:bindings, %{session_pid: pid}, RequestContext.build(socket))
 
@@ -1940,11 +2046,14 @@ defmodule BtAttachWeb.WorkspaceLive do
     do: assign(socket, bindings: [], bindings_error: Workspace.render_error(reason))
 
   defp apply_bindings(socket, pairs) when is_list(pairs) do
+    # One batched render RPC for the whole pane (BT-5081), not one per binding.
+    values = Workspace.render_terms(Enum.map(pairs, fn {_name, term} -> term end))
+
     rows =
-      Enum.map(pairs, fn {name, term} ->
+      Enum.zip_with(pairs, values, fn {name, term}, value ->
         %{
           name: name,
-          value: Workspace.render_term(term),
+          value: value,
           inspectable: Workspace.inspectable?(term),
           kind: Inspector.term_kind(term)
         }
@@ -3275,6 +3384,30 @@ defmodule BtAttachWeb.WorkspaceLive do
           <% end %>
         </div>
 
+        <div
+          :if={@connected && @workspace_lost}
+          id="workspace-lost"
+          class="ws-result err"
+          role="alert"
+        >
+          <span class="val">
+            The workspace connection was lost or the workspace restarted. Reconnect to
+            resume this session, or start a fresh one if the workspace restarted (a restart
+            discards the session's bindings).
+          </span>
+          <span :if={@reconnect_error} id="workspace-reconnect-error" class="val">
+            {@reconnect_error}
+          </span>
+          <button
+            id="workspace-reconnect"
+            class="btn primary"
+            type="button"
+            phx-click="workspace_reconnect"
+          >
+            Reconnect
+          </button>
+        </div>
+
         <%= if @connected do %>
           <%!-- ── three-column cockpit grid (BT-2559: collapsible panels) --%>
           <div class={[
@@ -3514,8 +3647,22 @@ defmodule BtAttachWeb.WorkspaceLive do
                           <button class="btn" type="submit" name="action" value="inspect_it">
                             Inspect it <span class="k">⌘I</span>
                           </button>
+                          <button
+                            :if={@eval_running}
+                            id="eval-stop"
+                            class="btn"
+                            type="button"
+                            phx-click="eval_interrupt"
+                          >
+                            Stop
+                          </button>
                           <span class="spacer"></span>
-                          <span class="kbdhint">select an expression, or evaluate all</span>
+                          <span :if={@eval_running} class="kbdhint" id="eval-running">
+                            evaluating…
+                          </span>
+                          <span :if={!@eval_running} class="kbdhint">
+                            select an expression, or evaluate all
+                          </span>
                         </div>
                       </form>
                     <% else %>

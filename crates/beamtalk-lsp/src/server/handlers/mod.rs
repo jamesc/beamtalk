@@ -10,6 +10,7 @@ mod lifecycle;
 mod navigation;
 mod rename;
 mod symbols;
+mod watched_files;
 
 pub(super) use rename::RenameClientCaps;
 #[cfg(test)]

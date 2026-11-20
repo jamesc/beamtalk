@@ -50,6 +50,7 @@ use std::fs;
 
 /// The top-level manifest structure parsed from `beamtalk.toml`.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Manifest {
     /// The `[package]` section of the manifest.
     pub package: PackageManifest,
@@ -132,6 +133,7 @@ pub struct StubsConfig {
 /// `beamtalk run` starts the package as an OTP application rather than calling
 /// an imperative start method.
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct ApplicationConfig {
     /// Beamtalk class name of the root `Supervisor subclass:` for this OTP application
     /// (e.g. `"AppSup"`). The generated `start/2` callback calls its `start_link`.
@@ -363,6 +365,7 @@ pub fn parse_release_config(
 /// Required fields: `name`, `version`.
 /// Optional fields: `description`, `licenses`.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackageManifest {
     /// Package name (used for module naming and OTP application ID).
     pub name: String,
@@ -371,7 +374,8 @@ pub struct PackageManifest {
     /// Optional human-readable package description.
     #[serde(default)]
     pub description: Option<String>,
-    /// Optional SPDX license identifiers (e.g. `["Apache-2.0"]`).
+    /// Optional SPDX license identifiers (e.g. `["Apache-2.0"]`). Written to
+    /// the generated `.app` file and the registry index entry.
     #[serde(default)]
     pub licenses: Option<Vec<String>>,
     /// When `true`, using a class from a transitive dependency is a compile
@@ -393,6 +397,64 @@ pub struct PackageManifest {
 // (including the CLI's tests) use.
 pub use beamtalk_core::compilation::DiagnosticSeverityOverride;
 pub use beamtalk_core::compilation::DiagnosticsTable;
+
+/// Validate a `[package] version`.
+///
+/// The version becomes the `.app` `vsn`, the release directory name and the
+/// `.rel` entry, so it must be a `SemVer` 2.0 version: `major.minor.patch`
+/// (non-negative integers, no leading zeros), optionally followed by
+/// `-prerelease` and/or `+build` (dot-separated `[0-9A-Za-z-]` identifiers).
+///
+/// # Errors
+///
+/// Returns a message naming the accepted form when `version` is not valid.
+pub fn validate_package_version(version: &str) -> std::result::Result<(), String> {
+    const FORM: &str = "expected MAJOR.MINOR.PATCH with an optional -prerelease and +build suffix (e.g. 1.2.3 or 1.2.3-rc.1)";
+    let (rest, build) = match version.split_once('+') {
+        Some((rest, build)) => (rest, Some(build)),
+        None => (version, None),
+    };
+    let (core, pre) = match rest.split_once('-') {
+        Some((core, pre)) => (core, Some(pre)),
+        None => (rest, None),
+    };
+    let segments: Vec<&str> = core.split('.').collect();
+    let core_ok = segments.len() == 3
+        && segments.iter().all(|seg| {
+            !seg.is_empty()
+                && seg.bytes().all(|b| b.is_ascii_digit())
+                && (seg.len() == 1 || !seg.starts_with('0'))
+        });
+    let idents_ok = |part: Option<&str>, numeric_no_leading_zero: bool| {
+        part.is_none_or(|p| {
+            p.split('.').all(|id| {
+                !id.is_empty()
+                    && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                    // SemVer: a numeric prerelease identifier has no leading zero.
+                    && !(numeric_no_leading_zero
+                        && id.len() > 1
+                        && id.starts_with('0')
+                        && id.bytes().all(|b| b.is_ascii_digit()))
+            })
+        })
+    };
+    if core_ok && idents_ok(pre, true) && idents_ok(build, false) {
+        Ok(())
+    } else {
+        Err(format!("'{version}' is not a valid version: {FORM}"))
+    }
+}
+
+/// Validate the `[package]` identity fields shared by every parse entry point.
+fn validate_package_identity(package: &PackageManifest) -> Result<()> {
+    if let Err(e) = validate_package_name(&package.name) {
+        miette::bail!("{}", format_name_error(&package.name, &e));
+    }
+    if let Err(msg) = validate_package_version(&package.version) {
+        miette::bail!("Invalid [package] version: {msg}");
+    }
+    Ok(())
+}
 
 /// Read and deserialize a `beamtalk.toml` file into a raw [`Manifest`].
 ///
@@ -460,9 +522,7 @@ impl ParsedManifest {
 pub fn parse_manifest(path: &Utf8Path) -> Result<PackageManifest> {
     let manifest = parse_manifest_raw(path)?;
 
-    if let Err(e) = validate_package_name(&manifest.package.name) {
-        miette::bail!("{}", format_name_error(&manifest.package.name, &e));
-    }
+    validate_package_identity(&manifest.package)?;
 
     Ok(manifest.package)
 }
@@ -481,15 +541,20 @@ pub fn parse_manifest(path: &Utf8Path) -> Result<PackageManifest> {
 pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
     let manifest = parse_manifest_raw(path)?;
 
-    if let Err(e) = validate_package_name(&manifest.package.name) {
-        miette::bail!("{}", format_name_error(&manifest.package.name, &e));
-    }
+    validate_package_identity(&manifest.package)?;
 
     let dependencies = parse_dependencies(manifest.dependencies.as_ref())
         .wrap_err_with(|| format!("Failed to parse [dependencies] in '{path}'"))?;
 
     let native_dependencies = parse_native_dependencies(manifest.native.as_ref())
         .wrap_err_with(|| format!("Failed to parse [native.dependencies] in '{path}'"))?;
+    if native_dependencies.contains_key(&manifest.package.name) {
+        miette::bail!(
+            "Native dependency '{}' has the same name as this package; the two would \
+             generate colliding .app files",
+            manifest.package.name
+        );
+    }
 
     let native_overrides = parse_native_overrides(manifest.native.as_ref())
         .wrap_err_with(|| format!("Failed to parse [native.overrides] in '{path}'"))?;
@@ -678,9 +743,7 @@ pub fn find_application_config(project_root: &Utf8Path) -> Result<Option<Applica
         return Ok(None);
     }
     let manifest = parse_manifest_raw(&manifest_path)?;
-    if let Err(e) = validate_package_name(&manifest.package.name) {
-        miette::bail!("{}", format_name_error(&manifest.package.name, &e));
-    }
+    validate_package_identity(&manifest.package)?;
     Ok(manifest.application)
 }
 
