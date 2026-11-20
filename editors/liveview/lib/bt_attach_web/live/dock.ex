@@ -92,6 +92,8 @@ defmodule BtAttachWeb.Live.Dock do
   # `@dock_events` here unchanged (same event name, params, socket), so each
   # clause below is exactly the body the LiveView used to run directly.
 
+  @eval_busy_message "An evaluation is already running. Stop it, or wait for it to finish."
+
   # The Workspace dock's three actions (BT-2490) all evaluate the entered code
   # (or the tracked selection, the spike's "evaluates selection vs buffer")
   # and differ only in what they do with the result term — so they ride the
@@ -110,42 +112,29 @@ defmodule BtAttachWeb.Live.Dock do
   # assert on.
   def handle_event("eval", %{"expr" => expr} = params, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) do
-    action = eval_action(params)
-    target = eval_target(expr, socket)
-
-    case Facade.dispatch(:eval, %{session_pid: pid, code: target}, RequestContext.build(socket)) do
-      {:ok, term, output, warnings} ->
-        # eval returns the live term; rendering is display-only and reuses the
-        # workspace's own formatter for surface-consistency with the browser.
-        socket = eval_success(socket, action, term, output, expr)
-        {:noreply, assign(socket, eval_warnings: format_warnings(warnings))}
-
-      {:error, reason, output, warnings} ->
-        {:noreply,
-         assign(socket,
-           result: nil,
-           output: present(output),
-           eval_warnings: format_warnings(warnings),
-           error: Workspace.render_error(reason),
-           expr: expr
-         )}
-
-      # The facade (BT-2420/2421) can short-circuit BEFORE dispatching to the
-      # workspace — an RBAC denial (`:unauthorized`, e.g. an Observer) or an
-      # off-vocabulary op (`:forbidden_op`) — returning a 2-tuple the
-      # workspace eval contract never produces. Render it as an actionable
-      # message rather than crashing the LiveView on an unmatched case clause.
-      {:error, reason} ->
-        {:noreply,
-         assign(socket,
-           result: nil,
-           output: nil,
-           eval_warnings: nil,
-           error: FacadeError.render(reason),
-           expr: expr
-         )}
+    if eval_running?(socket) do
+      {:noreply, assign(socket, error: @eval_busy_message)}
+    else
+      job = %{kind: :eval, action: eval_action(params), expr: expr}
+      {:noreply, start_eval(socket, job, pid, eval_target(expr, socket))}
     end
   end
+
+  # Stop control (BT-5081): interrupt the eval running in this tab's session.
+  # The eval itself runs in a `start_async` task, so the LiveView is free to
+  # receive this event; the interrupted eval's task then returns
+  # `{:error, interrupted}` and `handle_async(:eval, …)` folds it like any other
+  # eval error. The call is bounded (see `BtAttach.Workspace`'s timeout tiers).
+  def handle_event("eval_interrupt", _params, %{assigns: %{session_pid: pid}} = socket)
+      when is_pid(pid) do
+    case Facade.dispatch(:interrupt, %{session_pid: pid}, RequestContext.build(socket)) do
+      :ok -> {:noreply, socket}
+      {:error, reason} -> {:noreply, assign(socket, error: FacadeError.render(reason))}
+      other -> {:noreply, assign(socket, error: FacadeError.render({:unexpected_reply, other}))}
+    end
+  end
+
+  def handle_event("eval_interrupt", _params, socket), do: {:noreply, socket}
 
   # No session (attach failed) — don't crash on a missing assign.
   def handle_event("eval", %{"expr" => expr}, socket) do
@@ -299,28 +288,14 @@ defmodule BtAttachWeb.Live.Dock do
          |> repl_record_history(expr)
          |> repl_clear_input()}
 
+      eval_running?(socket) ->
+        {:noreply, repl_append_error(socket, expr, @eval_busy_message)}
+
       true ->
-        socket =
-          case Facade.dispatch(
-                 :eval,
-                 %{session_pid: pid, code: expr},
-                 RequestContext.build(socket)
-               ) do
-            {:ok, term, _output, _warnings} ->
-              socket |> repl_append_ok(expr, term) |> repl_help_followup(expr)
-
-            # The 2-tuple shape is a facade short-circuit (RBAC denial /
-            # off-vocabulary op) the eval contract never produces on its
-            # own; `render_eval_error/1` renders it as the entry's response
-            # rather than crashing the LiveView.
-            {:error, _, _, _} = err ->
-              repl_append_error(socket, expr, FacadeError.render_eval_error(err))
-
-            {:error, _} = err ->
-              repl_append_error(socket, expr, FacadeError.render_eval_error(err))
-          end
-
-        {:noreply, socket |> repl_record_history(expr) |> repl_clear_input()}
+        # The user's code runs off the LiveView process (BT-5081): the entry is
+        # appended, and history/input are recorded, when the eval returns — see
+        # `handle_async(:eval, …)`'s `:repl` fold.
+        {:noreply, start_eval(socket, %{kind: :repl, expr: expr}, pid, expr)}
     end
   end
 
@@ -552,11 +527,120 @@ defmodule BtAttachWeb.Live.Dock do
      )}
   end
 
+  # Fold a finished eval task (see `start_eval/4`) back into the socket.
+  def handle_async(:eval, {:ok, {job, result}}, socket) do
+    socket = assign(socket, eval_running: false)
+    {:noreply, fold_eval(socket, job, result)}
+  end
+
+  def handle_async(:eval, {:exit, :cancelled}, socket), do: {:noreply, socket}
+
+  # The task crashed (never a workspace error — those come back as values).
+  # Leave the tab usable and say so.
+  def handle_async(:eval, {:exit, reason}, socket) do
+    {:noreply,
+     assign(socket,
+       eval_running: false,
+       error: "The evaluation failed unexpectedly: #{inspect(reason)}"
+     )}
+  end
+
   # ── Workspace dock actions (BT-2490) ────────────────────────────────────────
 
   # Which dock action the eval submit carried. The clicked action button rides
   # the form as `action`; a plain submit (the e2e `render_submit(%{expr: …})`)
   # carries none and defaults to printIt — the historical eval behaviour.
+  defp eval_running?(socket), do: Map.get(socket.assigns, :eval_running, false) == true
+
+  # Run `code` in the session off the LiveView process (BT-5081). A long or
+  # hung eval used to freeze the whole tab, because `Facade.dispatch(:eval, …)`
+  # waited inside `handle_event`. The task takes the request context and pid by
+  # value (it must not touch the socket), evaluates with the long user-code
+  # timeout, and — if the call timed out — interrupts the session so the
+  # runaway worker does not keep running unobserved. A connected socket spawns
+  # a `start_async` task; a disconnected one (only the direct handler unit
+  # tests; a dead render receives no events) runs the same job inline and folds
+  # it through the same `handle_async/3`, mirroring how Phoenix degrades
+  # `start_async` there.
+  defp start_eval(socket, job, pid, code) do
+    ctx = RequestContext.build(socket)
+
+    task = fn ->
+      result =
+        Workspace.with_eval_timeout(fn ->
+          Facade.dispatch(:eval, %{session_pid: pid, code: code}, ctx)
+        end)
+
+      if eval_timed_out?(result), do: Facade.dispatch(:interrupt, %{session_pid: pid}, ctx)
+      {job, result}
+    end
+
+    socket = assign(socket, eval_running: true)
+
+    if Phoenix.LiveView.connected?(socket) do
+      start_async(socket, :eval, task)
+    else
+      {:noreply, socket} = handle_async(:eval, {:ok, task.()}, socket)
+      socket
+    end
+  end
+
+  defp eval_timed_out?({:error, {:unreachable, :timeout}, _output, _warnings}), do: true
+  defp eval_timed_out?(_result), do: false
+
+  defp fold_eval(socket, %{kind: :eval, action: action, expr: expr}, result) do
+    case result do
+      {:ok, term, output, warnings} ->
+        # eval returns the live term; rendering is display-only and reuses the
+        # workspace's own formatter for surface-consistency with the browser.
+        socket = eval_success(socket, action, term, output, expr)
+        assign(socket, eval_warnings: format_warnings(warnings))
+
+      {:error, reason, output, warnings} ->
+        assign(socket,
+          result: nil,
+          output: present(output),
+          eval_warnings: format_warnings(warnings),
+          error: Workspace.render_error(reason),
+          expr: expr
+        )
+
+      # The facade (BT-2420/2421) can short-circuit BEFORE dispatching to the
+      # workspace — an RBAC denial (`:unauthorized`, e.g. an Observer) or an
+      # off-vocabulary op (`:forbidden_op`) — returning a 2-tuple the
+      # workspace eval contract never produces. Render it as an actionable
+      # message rather than crashing the LiveView on an unmatched case clause.
+      {:error, reason} ->
+        assign(socket,
+          result: nil,
+          output: nil,
+          eval_warnings: nil,
+          error: FacadeError.render(reason),
+          expr: expr
+        )
+    end
+  end
+
+  defp fold_eval(socket, %{kind: :repl, expr: expr}, result) do
+    socket =
+      case result do
+        {:ok, term, _output, _warnings} ->
+          socket |> repl_append_ok(expr, term) |> repl_help_followup(expr)
+
+        # The 2-tuple shape is a facade short-circuit (RBAC denial /
+        # off-vocabulary op) the eval contract never produces on its own;
+        # `render_eval_error/1` renders it as the entry's response rather than
+        # crashing the LiveView.
+        {:error, _, _, _} = err ->
+          repl_append_error(socket, expr, FacadeError.render_eval_error(err))
+
+        {:error, _} = err ->
+          repl_append_error(socket, expr, FacadeError.render_eval_error(err))
+      end
+
+    socket |> repl_record_history(expr) |> repl_clear_input()
+  end
+
   defp eval_action(%{"action" => action}) when action in ~w(do_it print_it inspect_it),
     do: action
 

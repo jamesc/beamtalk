@@ -10,7 +10,7 @@ defmodule BtAttach.WorkspaceRpcTest do
   unexpected-reply arms of every `case rpc(...)` in the module go untested
   without a way to script what a "workspace" replies.
 
-  `BtAttach.Workspace.rpc/3` is a thin wrapper over `:rpc.call/4`, so these
+  `BtAttach.Workspace.rpc/4` is a thin wrapper over `:erpc.call/5`, so these
   tests stub that one call with `:meck` (already used for exactly this kind of
   branch-shaping in `workspace_classify_unreachable_hostname_test.exs`) rather
   than standing up a real distributed peer node — booting `:net_kernel`
@@ -22,14 +22,14 @@ defmodule BtAttach.WorkspaceRpcTest do
   rather than silently falling through to a real (and here, meaningless)
   network round-trip. Every scripted `{:badrpc, _}` reply below uses the
   `:mock_scripted` reason, deliberately distinct from the `:nodedown` a real
-  disconnected `:rpc.call/4` produces — a test asserting on `:mock_scripted`
+  disconnected `:erpc.call/5` produces — a test asserting on `:mock_scripted`
   can only pass if `mock_rpc/1` actually intercepted the call, so it can't
   silently degrade into re-testing `workspace_test.exs`'s unreachable-node
   path if the mock is ever deleted or mis-keyed.
 
-  `async: false`: `:meck` globally replaces the `:rpc` module for the whole
+  `async: false`: `:meck` globally replaces the `:erpc` module for the whole
   VM. ExUnit runs every `async: true` module (including `workspace_test.exs`'s
-  real-disconnected-node tests, which also call through `:rpc.call/4`) to
+  real-disconnected-node tests, which also call through `:erpc.call/5`) to
   completion before any `async: false` module starts, so there is no
   interleaving with this file's global patch — the same assumption
   `workspace_classify_unreachable_hostname_test.exs` documents for `:net_adm`.
@@ -41,7 +41,7 @@ defmodule BtAttach.WorkspaceRpcTest do
   that calls the real `Workspace.close_session/1` — bypassing the injectable
   `:workspace_client` other suites stub. If an earlier `async: true` LiveView
   test's reap timer is still pending when this file's global mock is active,
-  that detached process's `:rpc.call/4` lands here too. `@safe_defaults` below
+  that detached process's `:erpc.call/5` lands here too. `@safe_defaults` below
   scripts a harmless reply for that one call so a stray reap can't `flunk/1`
   from a foreign, untracked process (which wouldn't fail the test that
   triggered it anyway — `flunk/1` only fails the test *process* it runs in —
@@ -52,18 +52,18 @@ defmodule BtAttach.WorkspaceRpcTest do
   alias BtAttach.Workspace
 
   # See the moduledoc's "residual hazard" note: a stray SessionRegistry reap
-  # firing while this file's global `:rpc` mock is active must not encounter
+  # firing while this file's global `:erpc` mock is active must not encounter
   # an unscripted call. Merged under every `mock_rpc/1` call's own handlers so
   # a test can override it, though none need to.
   @safe_defaults %{{:beamtalk_session_sup, :stop_session} => :ok}
 
   setup do
-    :meck.new(:rpc, [:unstick, :passthrough])
+    :meck.new(:erpc, [:unstick, :passthrough])
     on_exit(fn -> :meck.unload() end)
     :ok
   end
 
-  # Script `:rpc.call/4`'s reply for each `{module, function}` pair the
+  # Script `:erpc.call/5`'s reply for each `{module, function}` pair the
   # function under test is expected to hit. A value is returned verbatim on
   # EVERY call to that pair (there is no sequencing — two different calls to
   # the same pair get the same scripted reply); a 1-arity function is invoked
@@ -76,7 +76,7 @@ defmodule BtAttach.WorkspaceRpcTest do
   defp mock_rpc(handlers) when is_map(handlers) do
     handlers = Map.merge(@safe_defaults, handlers)
 
-    :meck.expect(:rpc, :call, fn _node, mod, fun, args ->
+    :meck.expect(:erpc, :call, fn _node, mod, fun, args, _timeout ->
       case Map.fetch(handlers, {mod, fun}) do
         {:ok, response} when is_function(response, 1) ->
           response.(args)
@@ -1366,6 +1366,83 @@ defmodule BtAttach.WorkspaceRpcTest do
 
     test "pid_stats/1 rejects a non-pid-backed term" do
       assert Workspace.pid_stats("not a handle") == {:error, :not_inspectable}
+    end
+  end
+
+  describe "bounded rpc (BT-5081)" do
+    test "a timed-out workspace call surfaces as :unreachable, never a hang or crash" do
+      :meck.expect(:erpc, :call, fn _node, _mod, _fun, _args, _timeout ->
+        :erlang.error({:erpc, :timeout})
+      end)
+
+      assert Workspace.session_count() == {:error, {:unreachable, :timeout}}
+      assert Workspace.eval(self(), "1 + 1") == {:error, {:unreachable, :timeout}, "", []}
+      assert Workspace.complete(self(), "Int") == {:error, {:unreachable, :timeout}}
+    end
+
+    test "every call carries a finite timeout, and eval gets the longest one" do
+      test_pid = self()
+
+      :meck.expect(:erpc, :call, fn _node, mod, fun, args, timeout ->
+        send(test_pid, {:rpc_timeout, mod, fun, List.first(args), timeout})
+
+        case {mod, fun} do
+          {:beamtalk_repl_protocol, :decode} -> {:ok, :fake_msg}
+          {:beamtalk_repl_protocol, :get_params} -> %{}
+          {:beamtalk_repl_ops, :dispatch} -> {:ok, 2, "", []}
+        end
+      end)
+
+      assert {:ok, 2, "", []} = Workspace.eval(self(), "1 + 1")
+
+      assert_received {:rpc_timeout, :beamtalk_repl_protocol, :decode, _, default}
+      assert_received {:rpc_timeout, :beamtalk_repl_ops, :dispatch, "eval", eval_timeout}
+      assert is_integer(default) and default > 0
+      assert eval_timeout == Workspace.rpc_eval_timeout()
+      assert eval_timeout > default
+    end
+
+    test "render_terms/1 renders every term with ONE round-trip, in order" do
+      test_pid = self()
+
+      :meck.expect(:erpc, :call, fn _node, :lists, :map, [_fun, terms], _timeout ->
+        send(test_pid, {:round_trip, length(terms)})
+        Enum.map(terms, &Integer.to_string/1)
+      end)
+
+      assert Workspace.render_terms([1, 2, 3]) == ["1", "2", "3"]
+      assert_received {:round_trip, 3}
+      refute_received {:round_trip, _}
+    end
+
+    test "render_terms/1 degrades per term when the batch fails" do
+      :meck.expect(:erpc, :call, fn
+        _node, :lists, :map, _args, _timeout ->
+          :erlang.error({:erpc, :timeout})
+
+        _node, :beamtalk_repl_json, :term_to_json, [2], _timeout ->
+          "two"
+
+        _node, :beamtalk_repl_json, :term_to_json, _args, _timeout ->
+          :erlang.error({:erpc, :timeout})
+      end)
+
+      assert Workspace.render_terms([1, 2]) == ["1", "two"]
+    end
+
+    test "user-code evals get the long timeout, synchronous callers the short one" do
+      sync = Workspace.rpc_eval_timeout()
+      long = Workspace.with_eval_timeout(fn -> Workspace.rpc_eval_timeout() end)
+      assert long > sync
+      assert Workspace.rpc_eval_timeout() == sync
+    end
+
+    test "a remote exception keeps the {:badrpc, {:EXIT, _}} shape" do
+      :meck.expect(:erpc, :call, fn _node, _m, _f, _a, _t ->
+        :erlang.error({:exception, :boom, []})
+      end)
+
+      assert {:error, {:unreachable, {:EXIT, {:boom, []}}}} = Workspace.session_count()
     end
   end
 end

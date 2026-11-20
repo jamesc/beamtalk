@@ -540,17 +540,20 @@ defmodule BtAttachWeb.WorkspaceLivePanesTest do
     test "ok, error and info entries each render their own row shape", %{conn: conn} do
       view = mount_cockpit(conn)
 
-      ok = render_hook(view, "repl_eval", %{"expr" => "3 + 4"})
+      render_hook(view, "repl_eval", %{"expr" => "3 + 4"})
+      ok = render_async(view)
       assert ok =~ ~s(class="repl-expr")
       # An ok entry stashes its term, so it offers the Inspect affordance.
       assert ok =~ ~s(phx-click="repl_inspect")
 
-      errored = render_hook(view, "repl_eval", %{"expr" => "boom"})
+      render_hook(view, "repl_eval", %{"expr" => "boom"})
+      errored = render_async(view)
       assert errored =~ "repl-entry err"
 
       # A `:`-prefixed meta-command never reaches eval: it appends an info
       # entry, and the (multi-line) help text collapses behind a summary.
-      helped = render_hook(view, "repl_eval", %{"expr" => ":help"})
+      render_hook(view, "repl_eval", %{"expr" => ":help"})
+      helped = render_async(view)
       assert helped =~ "repl-entry meta"
       assert helped =~ ~s(class="repl-collapse")
       assert helped =~ ~s(class="repl-summary")

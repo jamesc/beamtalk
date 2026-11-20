@@ -24,6 +24,7 @@ defmodule BtAttachWeb.Live.DockFakeClient do
   use BtAttachWeb.ForcedReplyClient, key: :dock_fake
 
   forceable(eval(pid, code))
+  forceable(interrupt(pid))
   forceable(git_diff(path))
   forceable(git_revert_file(path))
   forceable(symbol_index(scope))
@@ -1011,6 +1012,7 @@ defmodule BtAttachWeb.Live.DockTest do
       params_by_event = %{
         "dock_tab" => %{"tab" => "workspace"},
         "eval" => %{"expr" => "1 + 1"},
+        "eval_interrupt" => %{},
         "select_workspace" => %{"text" => "1"},
         "repl_eval" => %{"expr" => "1 + 1"},
         "repl_history_prev" => %{},
