@@ -292,10 +292,20 @@ defmodule BtAttachWeb.Live.Dock do
         {:noreply, repl_append_error(socket, expr, @eval_busy_message)}
 
       true ->
-        # The user's code runs off the LiveView process (BT-5081): the entry is
-        # appended, and history/input are recorded, when the eval returns — see
-        # `handle_async(:eval, …)`'s `:repl` fold.
-        {:noreply, start_eval(socket, %{kind: :repl, expr: expr}, pid, expr)}
+        # The user's code runs off the LiveView process (BT-5081): the scrollback
+        # entry is appended when the eval returns — see `handle_async(:eval, …)`'s
+        # `:repl` fold.
+        #
+        # History + input are settled at SUBMIT time, not completion: the user
+        # may keep typing the next line while the eval runs, and clearing the
+        # composer when the eval returns would wipe that text.
+        socket =
+          socket
+          |> repl_record_history(expr)
+          |> repl_clear_input()
+          |> start_eval(%{kind: :repl, expr: expr}, pid, expr)
+
+        {:noreply, socket}
     end
   end
 
@@ -638,7 +648,7 @@ defmodule BtAttachWeb.Live.Dock do
           repl_append_error(socket, expr, FacadeError.render_eval_error(err))
       end
 
-    socket |> repl_record_history(expr) |> repl_clear_input()
+    socket
   end
 
   defp eval_action(%{"action" => action}) when action in ~w(do_it print_it inspect_it),

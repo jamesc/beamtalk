@@ -144,4 +144,19 @@ defmodule BtAttachWeb.WorkspaceEvalAsyncTest do
     send(next, {:finish, {:ok, 2, "", []}})
     assert render_async(view, 5_000) =~ "2"
   end
+
+  test "a REPL eval clears the composer at submit, not when it finishes", %{conn: conn} do
+    view = mount_cockpit(conn)
+
+    render_hook(view, "repl_eval", %{"expr" => "1 + 1"})
+    assert_receive {:eval_started, eval_task}, 1_000
+
+    # Already cleared while the eval is still running, so text typed into the
+    # composer meanwhile is not wiped when the result lands.
+    assert_push_event(view, "repl_set_input", %{text: ""})
+
+    send(eval_task, {:finish, {:ok, 2, "", []}})
+    render_async(view, 5_000)
+    refute_push_event(view, "repl_set_input", %{text: ""}, 50)
+  end
 end
