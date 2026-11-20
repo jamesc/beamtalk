@@ -23,7 +23,7 @@ async fn load_type_cache_extracts_live_on_cold_cache() {
     let backend: &Backend = service.inner();
     backend.load_type_cache(std::slice::from_ref(&root)).await;
 
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     let Some(registry) = svc.native_types() else {
         eprintln!(
             "skipping load_type_cache_extracts_live_on_cold_cache: \
@@ -60,7 +60,7 @@ async fn load_type_cache_collects_project_known_erlang_modules() {
     let backend: &Backend = service.inner();
     backend.load_type_cache(std::slice::from_ref(&root)).await;
 
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     let known = svc.known_erlang_modules();
     assert!(
         known.contains("fakelib"),
@@ -96,7 +96,7 @@ async fn load_type_cache_applies_project_stubs() {
     *backend.type_cache_outcome.lock().unwrap() = Some(true);
     backend.load_type_cache(std::slice::from_ref(&root)).await;
 
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     let registry = svc
         .native_types()
         .expect("a stub-declared module installs a registry");
@@ -212,15 +212,12 @@ async fn fetch_content_returns_error_for_ambiguous_stdlib_filename() {
     let content = "Object subclass: Integer".to_string();
 
     {
-        let mut stdlib_paths = backend
-            .stdlib_paths
-            .lock()
-            .expect("stdlib_paths lock poisoned");
+        let mut stdlib_paths = backend.stdlib_paths.lock_recover();
         stdlib_paths.insert(path1.clone());
         stdlib_paths.insert(path2.clone());
     }
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(path1, content.clone());
         svc.update_file(path2, content);
     }
@@ -248,14 +245,11 @@ async fn fetch_content_returns_content_for_registered_stdlib_file() {
     let content = "Object subclass: Integer\n  + other => 0".to_string();
 
     {
-        let mut stdlib_paths = backend
-            .stdlib_paths
-            .lock()
-            .expect("stdlib_paths lock poisoned");
+        let mut stdlib_paths = backend.stdlib_paths.lock_recover();
         stdlib_paths.insert(stdlib_path.clone());
     }
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(stdlib_path, content.clone());
     }
 

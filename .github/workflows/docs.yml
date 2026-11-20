@@ -70,10 +70,9 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          key: ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
           restore-keys: |
-            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
+            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -125,6 +124,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

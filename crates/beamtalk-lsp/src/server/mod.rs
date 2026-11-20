@@ -48,8 +48,10 @@ mod config;
 mod convert;
 mod core;
 mod flush;
+mod guard;
 mod handlers;
 mod hover;
+mod lock;
 mod nav;
 mod reload;
 
@@ -58,7 +60,9 @@ pub(in crate::server) use config::PreloadConfig;
 pub(in crate::server) use convert::{
     offset_to_position, position_to_offset, span_to_range, to_bt_position,
 };
+pub(in crate::server) use guard::{guard_notification, guard_request};
 pub(in crate::server) use hover::{format_hover_documentation, stdlib_hover_policy_note};
+pub(in crate::server) use lock::LockRecover;
 
 // The rest of this file's own code never names these — they exist purely so
 // `tests/`'s `use super::*;` chain (through `tests/mod.rs`'s own
@@ -358,264 +362,334 @@ impl NavCache {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        self.handle_initialize(params).await
+        guard_request(
+            "initialize",
+            async move { self.handle_initialize(params).await },
+        )
+        .await
     }
 
     async fn initialized(&self, params: InitializedParams) {
-        self.handle_initialized(params).await;
+        guard_notification("initialized", async move {
+            self.handle_initialized(params).await;
+        })
+        .await;
     }
 
     async fn shutdown(&self) -> Result<()> {
-        self.handle_shutdown().await
+        guard_request("shutdown", async move { self.handle_shutdown().await }).await
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.handle_did_open(params).await;
+        guard_notification("did_open", async move {
+            self.handle_did_open(params).await;
+        })
+        .await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        self.handle_did_change(params).await;
+        guard_notification("did_change", async move {
+            self.handle_did_change(params).await;
+        })
+        .await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        self.handle_did_close(params).await;
+        guard_notification("did_close", async move {
+            self.handle_did_close(params).await;
+        })
+        .await;
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        self.handle_did_save(params).await;
+        guard_notification("did_save", async move {
+            self.handle_did_save(params).await;
+        })
+        .await;
     }
 
     /// Returns completion items for the cursor position.
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let uri = &params.text_document_position.text_document.uri;
-        let Some(path) = self.resolve_path_for_uri(uri) else {
-            return Ok(None);
-        };
-
-        let items: Vec<CompletionItem> = {
-            let svc = self.service.lock().expect("service lock poisoned");
-            let Some(source) = svc.file_source(&path) else {
+        guard_request("completion", async move {
+            let uri = &params.text_document_position.text_document.uri;
+            let Some(path) = self.resolve_path_for_uri(uri) else {
                 return Ok(None);
             };
-            let pos = to_bt_position(params.text_document_position.position, &source);
-            svc.completions(&path, pos)
-                .into_iter()
-                .map(|c| CompletionItem {
-                    label: c.label.to_string(),
-                    kind: Some(match c.kind {
-                        CompletionKind::Function => CompletionItemKind::FUNCTION,
-                        CompletionKind::Variable => CompletionItemKind::VARIABLE,
-                        CompletionKind::Class => CompletionItemKind::CLASS,
-                        CompletionKind::Module => CompletionItemKind::MODULE,
-                        CompletionKind::Keyword => CompletionItemKind::KEYWORD,
-                        CompletionKind::Field => CompletionItemKind::FIELD,
-                    }),
-                    detail: c.detail.map(|d| d.to_string()),
-                    documentation: c.documentation.map(|d| {
-                        Documentation::MarkupContent(MarkupContent {
-                            kind: MarkupKind::Markdown,
-                            value: d.to_string(),
-                        })
-                    }),
-                    ..Default::default()
-                })
-                .collect()
-        };
 
-        if items.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(CompletionResponse::Array(items)))
-        }
-    }
-
-    /// Returns hover information (type/docs) for the symbol at the cursor.
-    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        let uri = &params.text_document_position_params.text_document.uri;
-        let Some(path) = self.resolve_path_for_uri(uri) else {
-            return Ok(None);
-        };
-
-        let svc = self.service.lock().expect("service lock poisoned");
-        let source = svc.file_source(&path);
-        let Some(src) = source.as_deref() else {
-            return Ok(None);
-        };
-        let pos = to_bt_position(params.text_document_position_params.position, src);
-        let hover = svc.hover(&path, pos);
-
-        Ok(hover.map(|h| {
-            let mut value = h.contents.to_string();
-            if let Some(doc) = h.documentation {
-                value.push_str("\n\n");
-                value.push_str(&format_hover_documentation(&doc));
-            }
-            if let Some(stdlib_note) = stdlib_hover_policy_note(&svc, &value) {
-                value.push_str("\n\n");
-                value.push_str(&stdlib_note);
-            }
-            Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value,
-                }),
-                range: Some(span_to_range(h.span, src)),
-            }
-        }))
-    }
-
-    /// Returns signature help for the method being called at the cursor.
-    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
-        let uri = &params.text_document_position_params.text_document.uri;
-        let Some(path) = self.resolve_path_for_uri(uri) else {
-            return Ok(None);
-        };
-
-        let svc = self.service.lock().expect("service lock poisoned");
-        let Some(source) = svc.file_source(&path) else {
-            return Ok(None);
-        };
-        let pos = to_bt_position(params.text_document_position_params.position, &source);
-        let help = svc.signature_help(&path, pos);
-
-        Ok(help.map(|h| {
-            let signatures = h
-                .signatures
-                .into_iter()
-                .map(|sig| {
-                    let parameters = Some(
-                        sig.parameters
-                            .into_iter()
-                            .map(|p| ParameterInformation {
-                                label: ParameterLabel::Simple(p.label.to_string()),
-                                documentation: p.documentation.map(|d| {
-                                    Documentation::MarkupContent(MarkupContent {
-                                        kind: MarkupKind::Markdown,
-                                        value: d.to_string(),
-                                    })
-                                }),
-                            })
-                            .collect(),
-                    );
-                    SignatureInformation {
-                        label: sig.label.to_string(),
-                        documentation: sig.documentation.map(|d| {
+            let items: Vec<CompletionItem> = {
+                let svc = self.service.lock_recover();
+                let Some(source) = svc.file_source(&path) else {
+                    return Ok(None);
+                };
+                let pos = to_bt_position(params.text_document_position.position, &source);
+                svc.completions(&path, pos)
+                    .into_iter()
+                    .map(|c| CompletionItem {
+                        label: c.label.to_string(),
+                        kind: Some(match c.kind {
+                            CompletionKind::Function => CompletionItemKind::FUNCTION,
+                            CompletionKind::Variable => CompletionItemKind::VARIABLE,
+                            CompletionKind::Class => CompletionItemKind::CLASS,
+                            CompletionKind::Module => CompletionItemKind::MODULE,
+                            CompletionKind::Keyword => CompletionItemKind::KEYWORD,
+                            CompletionKind::Field => CompletionItemKind::FIELD,
+                        }),
+                        detail: c.detail.map(|d| d.to_string()),
+                        documentation: c.documentation.map(|d| {
                             Documentation::MarkupContent(MarkupContent {
                                 kind: MarkupKind::Markdown,
                                 value: d.to_string(),
                             })
                         }),
-                        parameters,
-                        active_parameter: None,
-                    }
-                })
-                .collect();
-            SignatureHelp {
-                signatures,
-                active_signature: Some(h.active_signature),
-                active_parameter: Some(h.active_parameter),
+                        ..Default::default()
+                    })
+                    .collect()
+            };
+
+            if items.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(CompletionResponse::Array(items)))
             }
-        }))
+        })
+        .await
+    }
+
+    /// Returns hover information (type/docs) for the symbol at the cursor.
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        guard_request("hover", async move {
+            let uri = &params.text_document_position_params.text_document.uri;
+            let Some(path) = self.resolve_path_for_uri(uri) else {
+                return Ok(None);
+            };
+
+            let svc = self.service.lock_recover();
+            let source = svc.file_source(&path);
+            let Some(src) = source.as_deref() else {
+                return Ok(None);
+            };
+            let pos = to_bt_position(params.text_document_position_params.position, src);
+            let hover = svc.hover(&path, pos);
+
+            Ok(hover.map(|h| {
+                let mut value = h.contents.to_string();
+                if let Some(doc) = h.documentation {
+                    value.push_str("\n\n");
+                    value.push_str(&format_hover_documentation(&doc));
+                }
+                if let Some(stdlib_note) = stdlib_hover_policy_note(&svc, &value) {
+                    value.push_str("\n\n");
+                    value.push_str(&stdlib_note);
+                }
+                Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value,
+                    }),
+                    range: Some(span_to_range(h.span, src)),
+                }
+            }))
+        })
+        .await
+    }
+
+    /// Returns signature help for the method being called at the cursor.
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        guard_request("signature_help", async move {
+            let uri = &params.text_document_position_params.text_document.uri;
+            let Some(path) = self.resolve_path_for_uri(uri) else {
+                return Ok(None);
+            };
+
+            let svc = self.service.lock_recover();
+            let Some(source) = svc.file_source(&path) else {
+                return Ok(None);
+            };
+            let pos = to_bt_position(params.text_document_position_params.position, &source);
+            let help = svc.signature_help(&path, pos);
+
+            Ok(help.map(|h| {
+                let signatures = h
+                    .signatures
+                    .into_iter()
+                    .map(|sig| {
+                        let parameters = Some(
+                            sig.parameters
+                                .into_iter()
+                                .map(|p| ParameterInformation {
+                                    label: ParameterLabel::Simple(p.label.to_string()),
+                                    documentation: p.documentation.map(|d| {
+                                        Documentation::MarkupContent(MarkupContent {
+                                            kind: MarkupKind::Markdown,
+                                            value: d.to_string(),
+                                        })
+                                    }),
+                                })
+                                .collect(),
+                        );
+                        SignatureInformation {
+                            label: sig.label.to_string(),
+                            documentation: sig.documentation.map(|d| {
+                                Documentation::MarkupContent(MarkupContent {
+                                    kind: MarkupKind::Markdown,
+                                    value: d.to_string(),
+                                })
+                            }),
+                            parameters,
+                            active_parameter: None,
+                        }
+                    })
+                    .collect();
+                SignatureHelp {
+                    signatures,
+                    active_signature: Some(h.active_signature),
+                    active_parameter: Some(h.active_parameter),
+                }
+            }))
+        })
+        .await
     }
 
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        self.handle_goto_definition(params).await
+        guard_request("goto_definition", async move {
+            self.handle_goto_definition(params).await
+        })
+        .await
     }
 
     async fn references(
         &self,
         params: ReferenceParams,
     ) -> Result<Option<Vec<tower_lsp::lsp_types::Location>>> {
-        self.handle_references(params).await
+        guard_request(
+            "references",
+            async move { self.handle_references(params).await },
+        )
+        .await
     }
 
     async fn prepare_rename(
         &self,
         params: tower_lsp::lsp_types::TextDocumentPositionParams,
     ) -> Result<Option<tower_lsp::lsp_types::PrepareRenameResponse>> {
-        self.handle_prepare_rename(params).await
+        guard_request("prepare_rename", async move {
+            self.handle_prepare_rename(params).await
+        })
+        .await
     }
 
     async fn rename(
         &self,
         params: tower_lsp::lsp_types::RenameParams,
     ) -> Result<Option<WorkspaceEdit>> {
-        self.handle_rename(params).await
+        guard_request("rename", async move { self.handle_rename(params).await }).await
     }
 
     async fn goto_implementation(
         &self,
         params: tower_lsp::lsp_types::request::GotoImplementationParams,
     ) -> Result<Option<tower_lsp::lsp_types::request::GotoImplementationResponse>> {
-        self.handle_goto_implementation(params).await
+        guard_request("goto_implementation", async move {
+            self.handle_goto_implementation(params).await
+        })
+        .await
     }
 
     async fn prepare_call_hierarchy(
         &self,
         params: CallHierarchyPrepareParams,
     ) -> Result<Option<Vec<CallHierarchyItem>>> {
-        self.handle_prepare_call_hierarchy(params).await
+        guard_request("prepare_call_hierarchy", async move {
+            self.handle_prepare_call_hierarchy(params).await
+        })
+        .await
     }
 
     async fn prepare_type_hierarchy(
         &self,
         params: TypeHierarchyPrepareParams,
     ) -> Result<Option<Vec<TypeHierarchyItem>>> {
-        self.handle_prepare_type_hierarchy(params).await
+        guard_request("prepare_type_hierarchy", async move {
+            self.handle_prepare_type_hierarchy(params).await
+        })
+        .await
     }
 
     async fn incoming_calls(
         &self,
         params: CallHierarchyIncomingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
-        self.handle_incoming_calls(params).await
+        guard_request("incoming_calls", async move {
+            self.handle_incoming_calls(params).await
+        })
+        .await
     }
 
     async fn outgoing_calls(
         &self,
         params: CallHierarchyOutgoingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
-        self.handle_outgoing_calls(params).await
+        guard_request("outgoing_calls", async move {
+            self.handle_outgoing_calls(params).await
+        })
+        .await
     }
 
     async fn supertypes(
         &self,
         params: TypeHierarchySupertypesParams,
     ) -> Result<Option<Vec<TypeHierarchyItem>>> {
-        self.handle_supertypes(params).await
+        guard_request(
+            "supertypes",
+            async move { self.handle_supertypes(params).await },
+        )
+        .await
     }
 
     async fn subtypes(
         &self,
         params: TypeHierarchySubtypesParams,
     ) -> Result<Option<Vec<TypeHierarchyItem>>> {
-        self.handle_subtypes(params).await
+        guard_request(
+            "subtypes",
+            async move { self.handle_subtypes(params).await },
+        )
+        .await
     }
 
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
-        self.handle_document_symbol(params).await
+        guard_request("document_symbol", async move {
+            self.handle_document_symbol(params).await
+        })
+        .await
     }
 
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
-        self.handle_folding_range(params).await
+        guard_request("folding_range", async move {
+            self.handle_folding_range(params).await
+        })
+        .await
     }
 
     async fn symbol(
         &self,
         params: WorkspaceSymbolParams,
     ) -> Result<Option<Vec<SymbolInformation>>> {
-        self.handle_symbol(params).await
+        guard_request("symbol", async move { self.handle_symbol(params).await }).await
     }
 
     /// Formats the entire document using the Beamtalk unparser.
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        Ok(self.format_document(&params.text_document.uri))
+        guard_request("formatting", async move {
+            Ok(self.format_document(&params.text_document.uri))
+        })
+        .await
     }
 
     /// Formats the document for a selected range.
@@ -628,7 +702,10 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentRangeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
-        Ok(self.format_document(&params.text_document.uri))
+        guard_request("range_formatting", async move {
+            Ok(self.format_document(&params.text_document.uri))
+        })
+        .await
     }
 
     /// Returns code actions available at the requested range.
@@ -643,65 +720,68 @@ impl LanguageServer for Backend {
         reason = "source files over 4GB are not supported"
     )]
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
-        let uri = &params.text_document.uri;
-        let Some(path) = self.resolve_path_for_uri(uri) else {
-            return Ok(None);
-        };
-        // Stdlib files are read-only; no code actions.
-        if uri.scheme() == "beamtalk-stdlib" {
-            return Ok(None);
-        }
-
-        let (source, actions) = {
-            let svc = self.service.lock().expect("service lock poisoned");
-            let Some(source) = svc.file_source(&path) else {
+        guard_request("code_action", async move {
+            let uri = &params.text_document.uri;
+            let Some(path) = self.resolve_path_for_uri(uri) else {
                 return Ok(None);
             };
-            let range = &params.range;
-            let start_offset = position_to_offset(range.start, &source) as u32;
-            let end_offset = position_to_offset(range.end, &source) as u32;
-            let actions = svc.code_actions(&path, start_offset, end_offset);
-            (source, actions)
-        };
+            // Stdlib files are read-only; no code actions.
+            if uri.scheme() == "beamtalk-stdlib" {
+                return Ok(None);
+            }
 
-        if actions.is_empty() {
-            return Ok(Some(vec![]));
-        }
-
-        let lsp_actions: CodeActionResponse = actions
-            .into_iter()
-            .map(|action| {
-                let text_edits = action
-                    .edits
-                    .iter()
-                    .map(|edit| TextEdit {
-                        range: Range {
-                            start: offset_to_position(edit.span.start() as usize, &source),
-                            end: offset_to_position(edit.span.end() as usize, &source),
-                        },
-                        new_text: edit.new_text.to_string(),
-                    })
-                    .collect();
-                let mut changes = HashMap::new();
-                changes.insert(uri.clone(), text_edits);
-                let lsp_action = CodeAction {
-                    title: action.title.to_string(),
-                    kind: Some(CodeActionKind::QUICKFIX),
-                    edit: Some(WorkspaceEdit {
-                        changes: Some(changes),
-                        ..Default::default()
-                    }),
-                    // Never preferred: the ADR 0133 "assign the result"
-                    // fix is right only when the callee answers its block's
-                    // value, which the user must check (no auto-apply).
-                    is_preferred: Some(false),
-                    ..Default::default()
+            let (source, actions) = {
+                let svc = self.service.lock_recover();
+                let Some(source) = svc.file_source(&path) else {
+                    return Ok(None);
                 };
-                CodeActionOrCommand::CodeAction(lsp_action)
-            })
-            .collect();
+                let range = &params.range;
+                let start_offset = position_to_offset(range.start, &source) as u32;
+                let end_offset = position_to_offset(range.end, &source) as u32;
+                let actions = svc.code_actions(&path, start_offset, end_offset);
+                (source, actions)
+            };
 
-        Ok(Some(lsp_actions))
+            if actions.is_empty() {
+                return Ok(Some(vec![]));
+            }
+
+            let lsp_actions: CodeActionResponse = actions
+                .into_iter()
+                .map(|action| {
+                    let text_edits = action
+                        .edits
+                        .iter()
+                        .map(|edit| TextEdit {
+                            range: Range {
+                                start: offset_to_position(edit.span.start() as usize, &source),
+                                end: offset_to_position(edit.span.end() as usize, &source),
+                            },
+                            new_text: edit.new_text.to_string(),
+                        })
+                        .collect();
+                    let mut changes = HashMap::new();
+                    changes.insert(uri.clone(), text_edits);
+                    let lsp_action = CodeAction {
+                        title: action.title.to_string(),
+                        kind: Some(CodeActionKind::QUICKFIX),
+                        edit: Some(WorkspaceEdit {
+                            changes: Some(changes),
+                            ..Default::default()
+                        }),
+                        // Never preferred: the ADR 0133 "assign the result"
+                        // fix is right only when the callee answers its block's
+                        // value, which the user must check (no auto-apply).
+                        is_preferred: Some(false),
+                        ..Default::default()
+                    };
+                    CodeActionOrCommand::CodeAction(lsp_action)
+                })
+                .collect();
+
+            Ok(Some(lsp_actions))
+        })
+        .await
     }
 
     /// ADR 0082 Phase 3: dispatch `workspace/executeCommand`.
@@ -727,79 +807,82 @@ impl LanguageServer for Backend {
         &self,
         params: ExecuteCommandParams,
     ) -> Result<Option<serde_json::Value>> {
-        let expr = match build_command_expression(&params.command, &params.arguments) {
-            Ok(expr) => expr,
-            Err(msg) => {
-                self.client
-                    .log_message(
-                        MessageType::WARNING,
-                        format!("executeCommand {}: {msg}", params.command),
-                    )
-                    .await;
-                return Err(tower_lsp::jsonrpc::Error::invalid_params(msg));
-            }
-        };
-
-        let runtime = match self.ensure_runtime_attached().await {
-            Ok(client) => client,
-            Err(e) => {
-                let detail = format!(
-                    "Beamtalk LSP could not reach a running workspace for executeCommand `{}`. \
-                     Start `beamtalk run .` (or `beamtalk repl`) against this project and retry. \
-                     ({e})",
-                    params.command
-                );
-                self.client.log_message(MessageType::WARNING, &detail).await;
-                let mut err = tower_lsp::jsonrpc::Error::internal_error();
-                err.message = detail.into();
-                return Err(err);
-            }
-        };
-
-        match runtime.evaluate(&expr).await {
-            Ok(response) => {
-                if response.is_error() {
-                    let msg = response
-                        .error_message()
-                        .unwrap_or("workspace evaluator returned an error");
+        guard_request("execute_command", async move {
+            let expr = match build_command_expression(&params.command, &params.arguments) {
+                Ok(expr) => expr,
+                Err(msg) => {
                     self.client
                         .log_message(
                             MessageType::WARNING,
                             format!("executeCommand {}: {msg}", params.command),
                         )
                         .await;
-                    // Forward structured Beamtalk evaluator errors as the
-                    // command result so editors can surface the rich payload
-                    // (matches the docstring above). Reserve JSON-RPC errors
-                    // for transport/parameter failures.
-                    let value = response.value.clone().unwrap_or_else(|| {
-                        serde_json::json!({
-                            "error": msg,
-                            "status": response.status,
-                        })
-                    });
-                    return Ok(Some(value));
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(msg));
                 }
-                let pretty = response.value_string();
-                let value = response.value.unwrap_or(serde_json::Value::Null);
-                if !pretty.is_empty() {
-                    self.client
-                        .log_message(
-                            MessageType::INFO,
-                            format!("executeCommand {}: {pretty}", params.command),
-                        )
-                        .await;
+            };
+
+            let runtime = match self.ensure_runtime_attached().await {
+                Ok(client) => client,
+                Err(e) => {
+                    let detail = format!(
+                        "Beamtalk LSP could not reach a running workspace for executeCommand `{}`. \
+                     Start `beamtalk run .` (or `beamtalk repl`) against this project and retry. \
+                     ({e})",
+                        params.command
+                    );
+                    self.client.log_message(MessageType::WARNING, &detail).await;
+                    let mut err = tower_lsp::jsonrpc::Error::internal_error();
+                    err.message = detail.into();
+                    return Err(err);
                 }
-                Ok(Some(value))
+            };
+
+            match runtime.evaluate(&expr).await {
+                Ok(response) => {
+                    if response.is_error() {
+                        let msg = response
+                            .error_message()
+                            .unwrap_or("workspace evaluator returned an error");
+                        self.client
+                            .log_message(
+                                MessageType::WARNING,
+                                format!("executeCommand {}: {msg}", params.command),
+                            )
+                            .await;
+                        // Forward structured Beamtalk evaluator errors as the
+                        // command result so editors can surface the rich payload
+                        // (matches the docstring above). Reserve JSON-RPC errors
+                        // for transport/parameter failures.
+                        let value = response.value.clone().unwrap_or_else(|| {
+                            serde_json::json!({
+                                "error": msg,
+                                "status": response.status,
+                            })
+                        });
+                        return Ok(Some(value));
+                    }
+                    let pretty = response.value_string();
+                    let value = response.value.unwrap_or(serde_json::Value::Null);
+                    if !pretty.is_empty() {
+                        self.client
+                            .log_message(
+                                MessageType::INFO,
+                                format!("executeCommand {}: {pretty}", params.command),
+                            )
+                            .await;
+                    }
+                    Ok(Some(value))
+                }
+                Err(e) => {
+                    let detail = format!("executeCommand {}: runtime error: {e}", params.command);
+                    self.client.log_message(MessageType::WARNING, &detail).await;
+                    let mut err = tower_lsp::jsonrpc::Error::internal_error();
+                    err.message = detail.into();
+                    Err(err)
+                }
             }
-            Err(e) => {
-                let detail = format!("executeCommand {}: runtime error: {e}", params.command);
-                self.client.log_message(MessageType::WARNING, &detail).await;
-                let mut err = tower_lsp::jsonrpc::Error::internal_error();
-                err.message = detail.into();
-                Err(err)
-            }
-        }
+        })
+        .await
     }
 }
 

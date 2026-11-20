@@ -81,10 +81,9 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          key: ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
           restore-keys: |
-            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
+            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -162,9 +161,9 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: ${{ runner.os }}-x86_64-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          key: ${{ runner.os }}-x86_64-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
           restore-keys: |
-            ${{ runner.os }}-x86_64-erlang-beam-${{ hashFiles('.tool-versions') }}-
+            ${{ runner.os }}-x86_64-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -240,9 +239,9 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: ${{ runner.os }}-arm64-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          key: ${{ runner.os }}-arm64-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
           restore-keys: |
-            ${{ runner.os }}-arm64-erlang-beam-${{ hashFiles('.tool-versions') }}-
+            ${{ runner.os }}-arm64-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -317,9 +316,9 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          key: ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
           restore-keys: |
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
+            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -347,10 +346,28 @@ jobs:
           cd smoke_project && ../target/release/beamtalk.exe run SmokeTest run
           echo "Smoke test passed"
 
+      # package-release.sh installs target/share/ (the MCP example corpus,
+      # BT-4614) into the archive, so it must be built first (BT-5077).
+      - name: Build MCP example corpus
+        shell: bash
+        run: cargo run --release --locked --bin build-corpus --quiet
+
       - name: Package zip
         id: package
         shell: bash
         run: scripts/ci/package-release.sh "${{ steps.version.outputs.version }}" windows-x86_64
+
+      # Windows verification of BT-5077's share/ data. 7z is on the runner
+      # (package-release.sh uses it); the archive is extracted afresh so the
+      # assertion sees exactly what a user installs.
+      - name: Check archive share/ data
+        shell: bash
+        run: |
+          rm -rf archive-check
+          mkdir archive-check
+          7z x -oarchive-check "${{ steps.package.outputs.archive }}" >/dev/null
+          scripts/ci/check-archive-share.sh archive-check/beamtalk-*
+          rm -rf archive-check
 
       - name: Upload release asset
         if: github.event_name == 'release'

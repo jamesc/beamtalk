@@ -8,9 +8,10 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::fmt::Write;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument};
 
 use crate::commands::deps::lockfile::{NativeLockSource, NativePackageLock};
@@ -331,6 +332,37 @@ pub(crate) fn rebar3_path() -> Result<PathBuf> {
          Expected bundled copy at <runtime>/tools/rebar3.\n\
          Install rebar3 or run from the repository root."
     ))
+}
+
+/// The program and leading arguments that run the rebar3 at `path` on a
+/// platform (`windows` selects the Windows rule; a parameter so the Windows
+/// path is testable on Linux).
+///
+/// The bundled `runtime/tools/rebar3` is an escript with a `#!/usr/bin/env
+/// escript` shebang. Unix executes that directly; Windows `CreateProcess`
+/// ignores shebangs, so there it must be run as `escript <path>` (BT-5077).
+/// A Windows system fallback (`rebar3.cmd` / `rebar3.exe`) is itself
+/// launchable and is run directly.
+pub(super) fn rebar3_program_and_prefix(path: &Path, windows: bool) -> (OsString, Vec<OsString>) {
+    let launchable = path.extension().is_some_and(|ext| {
+        ["cmd", "exe", "bat"]
+            .iter()
+            .any(|known| ext.eq_ignore_ascii_case(known))
+    });
+    if windows && !launchable {
+        (OsString::from("escript"), vec![path.as_os_str().to_owned()])
+    } else {
+        (path.as_os_str().to_owned(), Vec::new())
+    }
+}
+
+/// A [`std::process::Command`] that runs the rebar3 at `path`, with no
+/// subcommand yet. See [`rebar3_program_and_prefix`].
+fn rebar3_base_command(path: &Path) -> std::process::Command {
+    let (program, prefix) = rebar3_program_and_prefix(path, cfg!(windows));
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(prefix);
+    cmd
 }
 
 // ── ADR 0072 Phase 2: rebar3 integration ──────────────────────────
@@ -910,7 +942,7 @@ fn compile_with_rebar3(
         .into_diagnostic()
         .wrap_err("Failed to canonicalize rebar base dir")?;
     let rebar3_command = |subcommand: &str| {
-        let mut cmd = std::process::Command::new(&rebar3);
+        let mut cmd = rebar3_base_command(&rebar3);
         apply_rebar3_env(&mut cmd);
         cmd.arg(subcommand);
         // rebar3 reads rebar.config from cwd — run from _build/dev/native/
@@ -1043,7 +1075,12 @@ pub(crate) fn compile_native_erlang_with_deps(
         }
     }
 
+    let build_layout = BuildLayout::new(project_root);
+    let ebin_dir = build_layout.native_ebin_dir();
+
     if erl_files.is_empty() {
+        // BT-5074: the last `native/*.erl` is gone, so its beams must go too.
+        prune_stale_native_beams(&ebin_dir, &erl_files)?;
         return Ok(None);
     }
 
@@ -1051,8 +1088,6 @@ pub(crate) fn compile_native_erlang_with_deps(
     erl_files.sort();
 
     // Create output directory
-    let build_layout = BuildLayout::new(project_root);
-    let ebin_dir = build_layout.native_ebin_dir();
     fs::create_dir_all(&ebin_dir)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create native ebin directory '{ebin_dir}'"))?;
@@ -1078,6 +1113,7 @@ pub(crate) fn compile_native_erlang_with_deps(
     );
 
     invocation.run("Native Erlang compilation")?;
+    prune_stale_native_beams(&ebin_dir, &erl_files)?;
 
     // User-visible output confirming native Erlang compilation.
     let count = erl_files.len();
@@ -1085,6 +1121,21 @@ pub(crate) fn compile_native_erlang_with_deps(
     eprintln!("Compiled {count} native Erlang file{plural}");
 
     Ok(Some(ebin_dir))
+}
+
+/// BT-5074: remove beams in the native ebin that no current `native/*.erl`
+/// produces. `erlc` never deletes the output of a removed source, so without
+/// this `old.beam` stays on the code path, in spec extraction and in the
+/// known-module set after `native/old.erl` is deleted.
+fn prune_stale_native_beams(ebin_dir: &Utf8Path, erl_files: &[Utf8PathBuf]) -> Result<()> {
+    let keep: std::collections::HashSet<String> = erl_files
+        .iter()
+        .filter_map(|f| f.file_stem().map(str::to_owned))
+        .collect();
+    for module in beamtalk_cli::path_util::remove_beams_not_in(ebin_dir, &keep)? {
+        info!(module = %module, "Removed stale native beam (its source is gone)");
+    }
+    Ok(())
 }
 
 /// Collect ebin directories from rebar3's output tree.

@@ -25,6 +25,36 @@ pub(crate) fn write_validated_manifest(manifest_path: &Utf8Path, content: &str) 
         .wrap_err_with(|| format!("Failed to write '{manifest_path}'"))
 }
 
+/// The line ending a document uses: `\r\n` if it contains one, else `\n`.
+///
+/// Surgical manifest edits keep the file's own convention instead of
+/// normalising every line.
+pub(crate) fn line_ending(content: &str) -> &'static str {
+    if content.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
+/// The table name of a `[name]` header line, or `None` if `line` is not a
+/// (single-bracket) table header. A trailing `# comment` is allowed, and
+/// whitespace around the name is ignored, matching what TOML accepts.
+pub(crate) fn table_header_name(line: &str) -> Option<&str> {
+    let rest = line.trim().strip_prefix('[')?;
+    if rest.starts_with('[') {
+        return None; // array-of-tables
+    }
+    let (name, after) = rest.split_once(']')?;
+    let after = after.trim();
+    (after.is_empty() || after.starts_with('#')).then(|| name.trim())
+}
+
+/// Whether `line` starts any table or array-of-tables header.
+pub(crate) fn is_any_header(line: &str) -> bool {
+    line.trim_start().starts_with('[')
+}
+
 /// Escape a value for embedding in a TOML basic string.
 ///
 /// TOML basic strings prohibit unescaped control characters (U+0000–U+001F,
