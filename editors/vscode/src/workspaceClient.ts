@@ -261,6 +261,8 @@ export class WorkspaceClient {
       throw new Error(`Invalid port in ${path.join(wsDir, "port")}: ${JSON.stringify(portStr)}`);
     }
 
+    assertPortFileFresh(wsDir, port, portContent);
+
     const cookie = fs.readFileSync(path.join(wsDir, "cookie"), "utf8").trim();
     if (!cookie) {
       throw new Error(`Empty cookie in ${path.join(wsDir, "cookie")}`);
@@ -311,7 +313,7 @@ export class WorkspaceClient {
    * (e.g. from the inspector), which also avoids a torn keys/values read.
    */
   async bindings(sessionId: string): Promise<BindingsMap> {
-    const code = `(Session withId: ${btString(sessionId)}) ifNil: [#()] ifNotNil: [:s | s bindings keys]`;
+    const code = `(Session withId: ${btString(assertSessionId(sessionId))}) ifNil: [#()] ifNotNil: [:s | s bindings keys]`;
     const resp = (await this._request({ op: "eval", code })) as {
       value?: unknown;
     };
@@ -332,7 +334,7 @@ export class WorkspaceClient {
    * the binding is absent. A single eval, so the value is a consistent snapshot.
    */
   async bindingValue(sessionId: string, name: string): Promise<unknown> {
-    const code = `(Session withId: ${btString(sessionId)}) ifNil: [nil] ifNotNil: [:s | s bindings at: ${btSymbol(name)}]`;
+    const code = `(Session withId: ${btString(assertSessionId(sessionId))}) ifNil: [nil] ifNotNil: [:s | s bindings at: ${btSymbol(name)}]`;
     const resp = (await this._request({ op: "eval", code })) as {
       value?: unknown;
     };
@@ -527,7 +529,7 @@ export class WorkspaceClient {
   async reload(className: string): Promise<{ classes: ClassInfo[]; warnings: string[] }> {
     const resp = (await this._request({
       op: "eval",
-      code: `${className} reload`,
+      code: `${assertClassName(className)} reload`,
     })) as { warnings?: string[] };
     return {
       classes: [{ name: className }],
@@ -883,23 +885,100 @@ export class WorkspaceClient {
   }
 }
 
-// ─── Beamtalk source-literal helpers ────────────────────────────────────────
-
-/**
- * Render a JS string as a Beamtalk double-quoted string literal, escaping
- * backslashes and double quotes. Used when interpolating ids into `eval` code.
- */
-function btString(value: string): string {
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+/** Is a process with this pid alive? (`EPERM` means it exists but is not ours.) */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 /**
- * Render a binding name as a Beamtalk symbol literal (`#name`). Falls back to a
- * quoted symbol (`#"..."`) when the name is not a plain identifier, so names
- * with unusual characters cannot break out of the literal.
+ * Refuse to hand the workspace cookie to a stale port (BT-5069).
+ *
+ * Mirrors the CLI's `is_node_running` rule (`node_state.rs`): the port file is
+ * `PORT\nNONCE`; when `node.info` records a nonce it must equal the port
+ * file's, and the port must match. The CLI relies on its TCP probe for
+ * liveness; the extension cannot learn the server's nonce before
+ * authenticating, so it additionally requires the recorded BEAM pid to be
+ * alive. A killed node whose port was re-bound by another process therefore
+ * never receives the cookie. Old files without a nonce/pid stay accepted.
  */
-function btSymbol(name: string): string {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? `#${name}` : `#${btString(name)}`;
+function assertPortFileFresh(wsDir: string, port: number, portContent: string): void {
+  const fileNonce = portContent.trim().split(/\r?\n/)[1]?.trim() || undefined;
+  let info: { port?: unknown; pid?: unknown; nonce?: unknown };
+  try {
+    info = JSON.parse(fs.readFileSync(path.join(wsDir, "node.info"), "utf8"));
+  } catch {
+    return; // no node.info: nothing to cross-check (CLI trusts the probe here)
+  }
+  if (typeof info.port === "number" && info.port !== port) {
+    throw new Error(`Stale port file in ${wsDir}: node.info port ${info.port} != ${port}`);
+  }
+  if (typeof info.nonce === "string" && fileNonce !== undefined && info.nonce !== fileNonce) {
+    throw new Error(`Stale port file in ${wsDir}: nonce mismatch`);
+  }
+  if (typeof info.pid === "number" && !pidAlive(info.pid)) {
+    throw new Error(`Stale port file in ${wsDir}: node pid ${info.pid} is not running`);
+  }
+}
+
+// ─── Beamtalk source-literal helpers ────────────────────────────────────────
+
+/**
+ * Render a JS string as a Beamtalk double-quoted string literal.
+ *
+ * Neutralises every construct that would otherwise be live code or break out
+ * of the literal: backslash, double quote, `{` / `}` (interpolation, ADR 0138
+ * `\{` / `\}` escapes) and line/NUL control characters.
+ */
+export function btString(value: string): string {
+  const escaped = value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\{/g, "\\{")
+    .replace(/\}/g, "\\}")
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n")
+    .replace(/\t/g, "\\t")
+    .replace(/\0/g, "\\0");
+  return `"${escaped}"`;
+}
+
+/**
+ * Render a binding name as a Beamtalk symbol literal: `#name` for a plain
+ * identifier, else the documented quoted form `#'name'`. Quoted symbols have
+ * no escape handling, so a name that cannot be represented is rejected.
+ */
+export function btSymbol(name: string): string {
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    return `#${name}`;
+  }
+  if (/['\\\p{Cc}]/u.test(name)) {
+    throw new Error(`Unrepresentable symbol name: ${JSON.stringify(name)}`);
+  }
+  return `#'${name}'`;
+}
+
+const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
+const CLASS_NAME_RE = /^[A-Z][A-Za-z0-9_]*$/;
+
+/** Validate a session id scraped from terminal output before it is used in source. */
+export function assertSessionId(sessionId: string): string {
+  if (!SESSION_ID_RE.test(sessionId)) {
+    throw new Error(`Invalid session id: ${JSON.stringify(sessionId)}`);
+  }
+  return sessionId;
+}
+
+/** Validate a class name as a Beamtalk identifier before it is used in source. */
+export function assertClassName(className: string): string {
+  if (!CLASS_NAME_RE.test(className)) {
+    throw new Error(`Invalid class name: ${JSON.stringify(className)}`);
+  }
+  return className;
 }
 
 // ─── Default WebSocket factory (production) ──────────────────────────────────

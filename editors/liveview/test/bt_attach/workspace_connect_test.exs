@@ -249,6 +249,9 @@ defmodule BtAttach.WorkspaceConnectTest do
       assert "bt_attach_" <> _ = Atom.to_string(name)
       assert %{hidden: true, name_domain: :shortnames} = opts
       assert Workspace.dist_start_options() == opts
+
+      # BT-5067: the listener must be loopback-bound, not all interfaces.
+      assert :application.get_env(:kernel, :inet_dist_use_interface) == {:ok, {127, 0, 0, 1}}
     end
 
     test "net_kernel.start/2 racing to :already_started is treated as success" do

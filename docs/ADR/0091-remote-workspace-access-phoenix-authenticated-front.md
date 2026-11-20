@@ -312,6 +312,13 @@ execution vector reachable by Observers. This is a no-privilege-escalation risk
 execution" is not literally true and the read-surface (ADR 0085) implementation
 must respect it.
 
+**Bind policy (BT-5065).** The front listens on loopback unless
+`BT_ATTACH_BIND_IP` is set, and a non-loopback bind **requires OIDC**: with no
+auth gate every request is trusted as Owner, so boot refuses that combination
+(opt-out only via the explicit `BT_IDE_ALLOW_UNAUTHENTICATED=1`, which warns at
+every boot). Remote deployment therefore means setting `BT_ATTACH_BIND_IP` *and*
+configuring OIDC — see `docs/deployment/remote-liveview-ide.md`.
+
 ### Decision 5 — Transport hardening: keep distribution off untrusted networks (co-locate)
 
 The governing invariant: **Erlang distribution must never traverse an untrusted

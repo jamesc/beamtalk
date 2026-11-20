@@ -94,3 +94,24 @@ fn test_cookie_file_round_trip() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// The VS Code extension derives workspace IDs in TypeScript
+/// (`editors/vscode/src/workspaceId.ts`). Both sides read this one fixture of
+/// `(canonical path string, expected id)` pairs — including a Windows drive
+/// letter and a UNC share — so a drift on either side fails a test (BT-5069).
+#[test]
+fn test_workspace_id_fixture_shared_with_vscode_extension() {
+    let raw = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/workspace_id_cases.json"
+    ))
+    .unwrap();
+    let cases: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let cases = cases.as_array().unwrap();
+    assert!(cases.len() >= 5);
+    for case in cases {
+        let canonical = case["canonical"].as_str().unwrap();
+        let id = case["id"].as_str().unwrap();
+        assert_eq!(hash_workspace_path_string(canonical), id, "{canonical}");
+    }
+}

@@ -2248,6 +2248,10 @@ defmodule BtAttach.Workspace do
 
         # Two connected mounts can both pass Node.alive?/0 and race here; the
         # loser sees {:error, {:already_started, _}}, which is fine.
+        # BT-5067: bind the distribution listener to loopback (ADR 0125/0126)
+        # before it opens; the kernel reads this env at listener start.
+        :ok = :application.set_env(:kernel, :inet_dist_use_interface, {127, 0, 0, 1})
+
         case :net_kernel.start(name, dist_start_options()) do
           {:ok, _pid} -> :ok
           {:error, {:already_started, _pid}} -> :ok
