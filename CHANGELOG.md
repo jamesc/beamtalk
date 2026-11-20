@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Added: one spelling per concept across the stdlib; `Array` reads like `List` (BT-5090).** No selector is removed and no existing call changes behaviour.
+  - Added: `Array reversed`, `indexOf:`, `take:`, `drop:`, `sort` and `sort:`, each answering what the `List` selector answers (an Array, or an index). `Array` still has no `add:` or `addFirst:`. They call `beamtalk_array` helpers directly, so no existing send path changes.
+  - Added: `String reversed`, `Duration asDays`, `Logger warning:` and `Logger warning:metadata:`. They are the canonical spellings, matching `List reversed`, `asHours` and the `#warning` level.
+  - Deprecated (still work, same behaviour): `String reverse` (use `reversed`), `Duration totalDays` (use `asDays`), `Logger warn:` and `Logger warn:metadata:` (use `warning:`), `Set fromList:` (use `Set withAll:`). "Deprecated" is a sentence in the doc comment; the compiler does not warn.
+  - Fixed (docs/types): the `Set` class docs describe the real representation (a sorted list of distinct elements, identity `=:=`), not `ordsets`/map keys; `Actor unregisterName` is typed `Result(Nil, Exception)`, the error type the FFI boundary infers; the `dir:` examples for `Subprocess` and `ReactiveSubprocess` pass Strings, which is all the runtime accepts; `File openHandles` is documented with `#[...]` Array syntax.
 - **Breaking: `beamtalk.toml` is validated strictly (BT-5076).**
   - Changed: an unknown key or section in `beamtalk.toml` (top level, `[package]` or `[application]`) is now an error naming the key and listing the valid ones. A misspelt `[dependancies]` or `strict_deps` (for `strict-deps`) used to be dropped without a word, leaving the dependency or strict mode off.
   - Changed: `[package] version` must be a SemVer version (`1.2.3`, optionally `-rc.1` / `+build`). It used to take any text and flow into the `.app` `vsn`, the release directory name and the `.rel`.

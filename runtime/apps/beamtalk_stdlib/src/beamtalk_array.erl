@@ -46,7 +46,13 @@ maps.
     inject_into/3,
     includes/2,
     print_string/1,
-    slice_from/2
+    slice_from/2,
+    reversed/1,
+    'indexOf'/2,
+    take/2,
+    drop/2,
+    sort/1,
+    sort/2
 ]).
 
 %%% ============================================================================
@@ -275,6 +281,76 @@ inject_into(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, Initial, Block) whe
     lists:foldl(fun(Elem, Acc) -> Block(Acc, Elem) end, Initial, data_to_list(Data));
 inject_into(#{?BT_CLASS_TAG_KEY := 'Array'}, _Initial, _Block) ->
     beamtalk_error:raise_type_error('Array', 'inject:into:', <<"Block must be a binary function">>).
+
+%%% ============================================================================
+%%% Order-dependent reads (BT-5090)
+%%%
+%%% Array is an indexed peer of List for reading, not for growing. These are the
+%%% non-growing, order-dependent selectors List has. Each returns a new Array
+%%% (or an index) and mirrors the matching `beamtalk_list` behaviour and error
+%%% shapes, so the two classes agree. The specs use `term()` (not `map()`) because
+%%% `Array` is a tagged map that the FFI type mapping would read as a Dictionary.
+%%% ============================================================================
+
+-doc "Return a new Array with the elements in reverse order.".
+-spec reversed(term()) -> term().
+reversed(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}) ->
+    new(data_from_list(lists:reverse(data_to_list(Data)))).
+
+-doc """
+Return the 1-based index of the first element equal to `Item`, or `nil`.
+
+Equality is `beamtalk_equality:eq/2`, as `List>>indexOf:` uses, so an element
+class's `equals:` override is honoured.
+""".
+-spec 'indexOf'(term(), term()) -> pos_integer() | 'nil'.
+'indexOf'(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, Item) ->
+    index_of(data_to_list(Data), Item, 1).
+
+-spec index_of(list(), term(), pos_integer()) -> pos_integer() | 'nil'.
+index_of([], _Item, _N) ->
+    nil;
+index_of([Elem | Rest], Item, N) ->
+    case beamtalk_equality:eq(Elem, Item) of
+        true -> N;
+        _ -> index_of(Rest, Item, N + 1)
+    end.
+
+-doc "Return a new Array of the first `N` elements (fewer if the Array is shorter).".
+-spec take(term(), term()) -> term().
+take(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, N) when is_integer(N), N >= 0 ->
+    new(data_from_list(lists:sublist(data_to_list(Data), N)));
+take(#{?BT_CLASS_TAG_KEY := 'Array'}, N) ->
+    raise_bad_count('take:', N).
+
+-doc "Return a new Array without the first `N` elements.".
+-spec drop(term(), term()) -> term().
+drop(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, N) when is_integer(N), N >= 0 ->
+    case N >= maps:size(Data) of
+        true -> new(#{});
+        false -> new(data_from_list(lists:nthtail(N, data_to_list(Data))))
+    end;
+drop(#{?BT_CLASS_TAG_KEY := 'Array'}, N) ->
+    raise_bad_count('drop:', N).
+
+-spec raise_bad_count(atom(), term()) -> no_return().
+raise_bad_count(Selector, N) ->
+    Hint = beamtalk_error:chars_to_binary(
+        io_lib:format("Argument must be a non-negative integer, got: ~tp", [N])
+    ),
+    beamtalk_error:raise_type_error('Array', Selector, Hint).
+
+-doc "Return a new Array sorted by Erlang term order.".
+-spec sort(term()) -> term().
+sort(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}) ->
+    new(data_from_list(lists:sort(data_to_list(Data)))).
+
+-doc "Return a new Array sorted by the binary comparator block.".
+-spec sort(term(), term()) -> term().
+sort(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, Block) when is_function(Block, 2) ->
+    new(data_from_list(lists:sort(Block, data_to_list(Data))));
+sort(#{?BT_CLASS_TAG_KEY := 'Array'}, _Block) ->
+    beamtalk_error:raise_type_error('Array', 'sort:', <<"Block must be a binary function">>).
 
 %%% ============================================================================
 %%% Slicing

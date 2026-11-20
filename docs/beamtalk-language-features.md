@@ -8801,7 +8801,7 @@ File open: "data.csv" do: [:handle |
 | `File tempDirectory` | `String` | OS temporary directory path |
 | `File open: path mode: mode` | `FileHandle` | Open a handle the caller must close |
 | `File open: path mode: mode do: block` | block value | Block-scoped handle, closed on exit |
-| `File openHandles` | `Array` | Outstanding `open:mode:` handles: `#(path mode owner)` |
+| `File openHandles` | `Array` | Outstanding `open:mode:` handles: `#[path, mode, owner]` |
 
 ```beamtalk
 File writeAll: "output.txt" contents: "hello"
@@ -8893,7 +8893,7 @@ handles when the owner dies. The rule is the same under the REPL,
 
 The underlying descriptor lives exactly as long as its owner, no longer and no
 shorter. `File openHandles` lists every outstanding handle as
-`#(path mode owner)` for diagnostics. Still, reach for `open:mode:do:`
+`#[path, mode, owner]` for diagnostics. Still, reach for `open:mode:do:`
 whenever a block scope will do — it needs no owner at all.
 
 **Open blocks run in your own process.** `open:do:` and `open:mode:do:` are
