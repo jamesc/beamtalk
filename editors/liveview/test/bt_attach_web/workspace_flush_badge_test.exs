@@ -88,7 +88,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
         value => self.value
       """
 
-      view |> form("#eval-form") |> render_submit(%{expr: class_src})
+      submit_and_settle(view, "#eval-form", %{expr: class_src})
 
       # 2. Remount so the system browser picks up the new class
       {:ok, view, _html} = live(owner_conn(conn), "/")
