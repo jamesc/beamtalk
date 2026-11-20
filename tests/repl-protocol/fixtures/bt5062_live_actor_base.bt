@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5062: actor owner of the live lookup-order chain.
+
+Actor subclass: Bt5062LiveActorBase
+
+  greet -> Symbol => #compiled
