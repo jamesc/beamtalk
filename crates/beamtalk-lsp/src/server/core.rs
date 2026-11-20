@@ -12,7 +12,7 @@ use super::convert::{offset_to_position, path_to_stdlib_uri, path_to_uri, uri_to
 use super::flush::flush_event_listener;
 use super::nav::{bt_locations_to_lsp, runtime_site_to_lsp_location};
 use super::reload::{
-    OpenPathsHandle, class_changed_listener, publish_diagnostics_impl, reload_check_listener,
+    OpenPathsHandle, class_changed_listener, compute_publish_diagnostics, reload_check_listener,
     seed_reload_diagnostics,
 };
 use super::{Backend, FetchContentParams, FetchContentResult, LoadedTypeCache, NavCache};
@@ -43,9 +43,12 @@ impl Backend {
             service: Arc::new(Mutex::new(SimpleLanguageService::new())),
             versions: Arc::new(Mutex::new(HashMap::new())),
             open_generation: Mutex::new(HashMap::new()),
+            text_sync: Mutex::new(()),
+            publish_lock: tokio::sync::Mutex::new(()),
             next_open_generation: std::sync::atomic::AtomicU64::new(0),
             dirty_files: Mutex::new(HashSet::new()),
             diagnostic_generation: Mutex::new(HashMap::new()),
+            pending_interface_change: Mutex::new(HashSet::new()),
             preload_config: Mutex::new(None),
             stdlib_paths: Mutex::new(HashSet::new()),
             rename_caps: Mutex::new(super::handlers::RenameClientCaps::default()),
@@ -317,6 +320,12 @@ impl Backend {
         let path = self.resolve_path_for_uri(uri)?;
         let versions = self.versions.lock_recover();
         versions.get(&path).copied()
+    }
+
+    /// True while the editor has `uri` open (it has a recorded version).
+    pub(in crate::server) fn is_open_uri(&self, uri: &Url) -> bool {
+        self.resolve_path_for_uri(uri)
+            .is_some_and(|path| self.versions.lock_recover().contains_key(&path))
     }
 
     /// Resolves a URI to an internal path key used by the language service.
@@ -1195,9 +1204,25 @@ impl Backend {
     /// `file://`, which would bypass the stdlib early-return and leak
     /// diagnostics for sources the user never opened.
     pub(in crate::server) async fn republish_open_diagnostics(&self) {
+        self.republish_open_diagnostics_except(None).await;
+    }
+
+    /// Re-publishes diagnostics for every open file other than `edited`
+    /// (BT-5078): after a file's class set changes, its dependents elsewhere
+    /// must be re-checked without waiting for them to be edited.
+    pub(in crate::server) async fn republish_other_open_diagnostics(&self, edited: &Url) {
+        self.republish_open_diagnostics_except(self.resolve_path_for_uri(edited))
+            .await;
+    }
+
+    async fn republish_open_diagnostics_except(&self, skip: Option<Utf8PathBuf>) {
         let paths: Vec<Utf8PathBuf> = {
             let versions = self.versions.lock_recover();
-            versions.keys().cloned().collect()
+            versions
+                .keys()
+                .filter(|p| skip.as_ref() != Some(*p))
+                .cloned()
+                .collect()
         };
         for path in paths {
             let is_stdlib = {
@@ -1480,14 +1505,26 @@ impl Backend {
             }
         }
         let version = self.file_version_for_uri(uri);
-        publish_diagnostics_impl(
-            &self.client,
-            &self.service,
-            &self.reload_diagnostics,
-            uri,
-            version,
-        )
-        .await;
+        // BT-5078: analysis runs outside the lock; only the open-check plus
+        // the send is serialised with `did_close`'s clearing publish, so a
+        // publish that raced a close can't resurrect diagnostics on the
+        // closed tab, and a slow analysis never blocks a close.
+        let Some(diagnostics) =
+            compute_publish_diagnostics(&self.service, &self.reload_diagnostics, uri)
+        else {
+            return;
+        };
+        let _publishing = self.publish_lock.lock().await;
+        // The document may have closed, or moved to a newer version (whose own
+        // publish is now ahead of or behind us), while we analysed. Sending
+        // this older result could overwrite newer diagnostics for a client
+        // that ignores versions, so drop it; the newer edit publishes its own.
+        if !self.is_open_uri(uri) || self.file_version_for_uri(uri) != version {
+            return;
+        }
+        self.client
+            .publish_diagnostics(uri.clone(), diagnostics, version)
+            .await;
     }
 }
 

@@ -64,6 +64,10 @@ pub fn build_release(
     no_include_erts: bool,
     upgrade_from: Option<&str>,
 ) -> Result<()> {
+    // The release stages artifacts from `_build/`; keep a concurrent build from
+    // rewriting them mid-assembly (BT-5075). `build` below re-enters this lock.
+    let _project_lock = crate::commands::dir_lock::lock_project_build(project_root)?;
+
     let parsed = load_release_manifest(project_root)?;
 
     // ADR 0125 §3.1: a release is an artifact whose validity the operator

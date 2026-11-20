@@ -138,7 +138,7 @@ defmodule BtAttach.WorkspaceConnectTest do
 
   describe "readiness/0 — connect :ok, readiness_rpc/0 branches" do
     setup do
-      :meck.new(:rpc, [:unstick, :passthrough])
+      :meck.new(:erpc, [:unstick, :passthrough])
       on_exit(fn -> :meck.unload() end)
       :meck.expect(Node, :alive?, fn -> true end)
       :meck.expect(Node, :connect, fn _node -> true end)
@@ -151,9 +151,9 @@ defmodule BtAttach.WorkspaceConnectTest do
     # residual hazard workspace_rpc_test.exs's moduledoc documents) degrades
     # to a harmless real badrpc instead of crashing an unrelated process.
     test "a badrpc version report is :dead_workspace" do
-      :meck.expect(:rpc, :call, fn
-        _node, :beamtalk_version, :get, [] -> {:badrpc, :mock_scripted}
-        node, mod, fun, args -> :meck.passthrough([node, mod, fun, args])
+      :meck.expect(:erpc, :call, fn
+        _node, :beamtalk_version, :get, [], _timeout -> {:badrpc, :mock_scripted}
+        node, mod, fun, args, timeout -> :meck.passthrough([node, mod, fun, args, timeout])
       end)
 
       assert Workspace.readiness() == {:error, :dead_workspace}
@@ -167,18 +167,18 @@ defmodule BtAttach.WorkspaceConnectTest do
         erts_version: "15"
       }
 
-      :meck.expect(:rpc, :call, fn
-        _node, :beamtalk_version, :get, [] -> report
-        node, mod, fun, args -> :meck.passthrough([node, mod, fun, args])
+      :meck.expect(:erpc, :call, fn
+        _node, :beamtalk_version, :get, [], _timeout -> report
+        node, mod, fun, args, timeout -> :meck.passthrough([node, mod, fun, args, timeout])
       end)
 
       assert Workspace.readiness() == {:ok, report}
     end
 
     test "a wholly unrecognised version-report reply degrades to :dead_workspace" do
-      :meck.expect(:rpc, :call, fn
-        _node, :beamtalk_version, :get, [] -> :odd
-        node, mod, fun, args -> :meck.passthrough([node, mod, fun, args])
+      :meck.expect(:erpc, :call, fn
+        _node, :beamtalk_version, :get, [], _timeout -> :odd
+        node, mod, fun, args, timeout -> :meck.passthrough([node, mod, fun, args, timeout])
       end)
 
       assert Workspace.readiness() == {:error, :dead_workspace}

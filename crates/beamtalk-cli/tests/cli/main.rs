@@ -23,6 +23,7 @@ mod cli_common;
 mod cli_adr0131_statement_measure;
 mod cli_attach;
 mod cli_build;
+mod cli_build_lock;
 mod cli_class_var_agreement;
 mod cli_doc;
 mod cli_doctor;

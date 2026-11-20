@@ -16,7 +16,7 @@
 //!
 //! See `../../README.md` for the toolchain this crate needs — not available
 //! in every dev sandbox, including the one this crate was authored in. This
-//! crate could not be built, run, or manually QAed there; treat it as
+//! crate could not be built, run, or manually `QAed` there; treat it as
 //! reviewed-but-unverified until built on a machine with the Tauri
 //! toolchain (`cargo tauri dev`).
 
@@ -24,6 +24,9 @@ mod commands;
 mod dto;
 mod launcher;
 mod logging;
+// The menu is only installed on macOS (see the `cfg(target_os = "macos")`
+// block below), so on other targets its items are unused outside tests.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod menu;
 mod state;
 
@@ -107,7 +110,7 @@ fn main() {
                     Err(err) => tracing::warn!(%err, "orphan sweep failed"),
                 },
                 Err(err) => {
-                    tracing::warn!(%err, "could not resolve broker state dir; skipped orphan sweep")
+                    tracing::warn!(%err, "could not resolve broker state dir; skipped orphan sweep");
                 }
             }
 
@@ -185,7 +188,10 @@ fn main() {
             // (Cmd-Q, taskbar close, SIGTERM, …), which never goes through
             // that command at all.
             if let Some(guard) = app_handle.try_state::<Mutex<LoggingGuard>>() {
-                guard.lock().unwrap_or_else(|e| e.into_inner()).flush();
+                guard
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .flush();
             }
         }
     });

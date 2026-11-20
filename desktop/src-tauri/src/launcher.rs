@@ -54,8 +54,8 @@ pub fn resolve_launcher_path(app: &AppHandle) -> PathBuf {
             return PathBuf::from(override_path);
         }
     }
-    app.path()
-        .resource_dir()
-        .map(|dir| dir.join(BUNDLED_LAUNCHER_RELATIVE_PATH))
-        .unwrap_or_else(|_| PathBuf::from(BUNDLED_LAUNCHER_RELATIVE_PATH))
+    app.path().resource_dir().map_or_else(
+        |_| PathBuf::from(BUNDLED_LAUNCHER_RELATIVE_PATH),
+        |dir| dir.join(BUNDLED_LAUNCHER_RELATIVE_PATH),
+    )
 }

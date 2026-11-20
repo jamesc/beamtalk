@@ -63,6 +63,12 @@ describe("fromFiles stale port file (BT-5069)", () => {
     const base = setup({ ...live, pid: 2147483646 });
     expect(() => WorkspaceClient.fromFiles("ws1", { baseDir: base })).toThrow(/Stale/);
   });
+  it("explains an invisible pid in terms a user can act on", () => {
+    const base = setup({ ...live, pid: 2147483646 });
+    expect(() => WorkspaceClient.fromFiles("ws1", { baseDir: base })).toThrow(
+      /not visible from where the extension runs.*BEAMTALK_HOME is shared across containers/
+    );
+  });
   it("rejects a nonce mismatch", () => {
     const base = setup({ ...live, nonce: "other" });
     expect(() => WorkspaceClient.fromFiles("ws1", { baseDir: base })).toThrow(/nonce/);

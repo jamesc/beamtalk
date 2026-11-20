@@ -187,9 +187,13 @@ fn generate_class_corpus(
     } else {
         let class_json = serde_json::to_string_pretty(&class_entries).into_diagnostic()?;
         let class_corpus_path = corpus_dir.join("class_corpus.json");
-        fs::write(&class_corpus_path, format!("{class_json}\n"))
-            .into_diagnostic()
-            .wrap_err("Failed to write class_corpus.json")?;
+        crate::commands::util::write_atomic_if_changed(
+            &class_corpus_path,
+            &format!("{class_json}\n"),
+            ".beamtalk-corpus.",
+        )
+        .into_diagnostic()
+        .wrap_err("Failed to write class_corpus.json")?;
         info!(
             path = %class_corpus_path,
             count = class_entries.len(),
@@ -289,9 +293,13 @@ fn generate_example_corpus(
         let corpus = serde_json::json!({ "entries": corpus_entries });
         let json = serde_json::to_string_pretty(&corpus).into_diagnostic()?;
         let corpus_path = corpus_dir.join("corpus.json");
-        fs::write(&corpus_path, format!("{json}\n"))
-            .into_diagnostic()
-            .wrap_err("Failed to write corpus.json")?;
+        crate::commands::util::write_atomic_if_changed(
+            &corpus_path,
+            &format!("{json}\n"),
+            ".beamtalk-corpus.",
+        )
+        .into_diagnostic()
+        .wrap_err("Failed to write corpus.json")?;
         info!(
             path = %corpus_path,
             count = corpus_entries.len(),
@@ -385,7 +393,7 @@ fn generate_otp_app_callback(
 
     // Write the .erl source next to the .core files so erlc can pick it up
     let erl_path = build_dir.join(format!("{cb_module_name}.erl"));
-    fs::write(&erl_path, src)
+    crate::commands::util::write_atomic_if_changed(&erl_path, &src, ".beamtalk-erl.")
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to write OTP app callback '{erl_path}'"))?;
 

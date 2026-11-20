@@ -1555,13 +1555,16 @@ mod tests {
     #[test]
     #[serial(cwd)]
     fn test_publish_rejects_non_exact_version_before_tagging() {
-        for version in ["1.0", "1.0.0-rc1"] {
+        // `1.0` is no version at all: the manifest parser rejects it (BT-5076).
+        // `1.0.0-rc1` is valid SemVer, so it parses and publish itself refuses
+        // it, since registry versions must be exactly major.minor.patch.
+        for (version, expected) in [
+            ("1.0", "not a valid version"),
+            ("1.0.0-rc1", "not publishable"),
+        ] {
             let fixture = setup("yaml", version, None);
             let err = with_cwd(utf8(&fixture.library), || run(true)).unwrap_err();
-            assert!(
-                flat_err(&err).contains("not publishable"),
-                "{version}: {err:?}"
-            );
+            assert!(flat_err(&err).contains(expected), "{version}: {err:?}");
         }
     }
 

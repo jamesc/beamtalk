@@ -87,6 +87,16 @@ pub enum DepsCommand {
 /// Run the given deps subcommand.
 pub fn run(command: DepsCommand) -> Result<()> {
     let project_root = find_project_root()?;
+    // `add` and `update` read-modify-write `beamtalk.toml`/`beamtalk.lock` and
+    // clone into `_build/deps/` (BT-5075); `list` only reads, and every write
+    // is an atomic rename, so it needs no lock.
+    let _project_lock = if matches!(command, DepsCommand::List) {
+        None
+    } else {
+        Some(crate::commands::dir_lock::lock_project_build(
+            &project_root,
+        )?)
+    };
     match command {
         DepsCommand::Add {
             name,
