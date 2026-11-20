@@ -1626,6 +1626,34 @@ test-benches-smoke:
     cargo test --bench '*' --quiet
     @echo "✅ Bench smoke complete"
 
+# Perf-script smoke (BT-5059): the parameterised scripts in runtime/perf, run once
+# with tiny iteration counts so they stay runnable. They are not part of `ci`, and
+# the numbers they print mean nothing at this size; a pass says only that the script
+# starts and finishes. `bench_adr0137_gates.escript` hand-lowers the Core Erlang the
+# compiler generates for `runtime/perf/self_send_bench` by regex edits with asserted
+# match counts, so it aborts when codegen changes the shape (the `_Val4` ->
+# `_Val@4` temp rename in BT-4140 broke it for three weeks unnoticed). The
+# argument-free scripts run for 10-90 s each at fixed sizes and are not covered.
+# Nightly only (nightly.yml, macOS job), like `test-benches-smoke`.
+[unix]
+test-perf-smoke: build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{justfile_directory()}}"
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    echo "🧪 Perf-script smoke (tiny iteration counts)..."
+    cp -R "$root/runtime/perf/self_send_bench" "$tmp/bench"
+    (cd "$tmp/bench" && "$root/target/debug/beamtalk" build >/dev/null)
+    export ERL_FLAGS="+S 1 -pa $root/runtime/_build/default/lib/beamtalk_runtime/ebin"
+    TMPDIR="$tmp" escript "$root/runtime/perf/bench_adr0137_gates.escript" "$tmp/bench" 3 200 >/dev/null
+    escript "$root/runtime/perf/bench_telemetry_facade.escript" 3 2000 >/dev/null
+    echo "✅ Perf-script smoke complete"
+
+[windows]
+test-perf-smoke:
+    @echo "test-perf-smoke: skipped on Windows (escript + generated-Core hand-lowering; covered by the unix nightly jobs)"
+
 # Run REPL protocol tests (slow - full pipeline, ~50s)
 test-repl-protocol: build-stdlib
     @echo "🧪 Running REPL protocol tests (slow - ~50s)..."
