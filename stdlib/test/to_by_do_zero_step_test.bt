@@ -1,0 +1,63 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5098: `to:by:do:` with a step of 0 raises on the inlined counted-loop path.
+//
+// A block that writes an outer local is inlined by the compiler as a counted
+// loop and never calls `Integer>>to:by:do:`. The pure-block (real send) cases
+// are added once the stdlib guard from BT-5083 is on main.
+
+TestCase subclass: ToByDoZeroStepTest
+
+  writingLoop: step :: Integer from: from :: Integer to: to :: Integer =>
+    s := 0
+    from
+      to: to
+      by: step
+      do: [:i | s := s + i]
+    s
+
+  writingLiteralZeroUp =>
+    s := 0
+    1
+      to: 10
+      by: 0
+      do: [:i | s := s + i]
+    s
+
+  writingLiteralZeroDown =>
+    s := 0
+    10
+      to: 1
+      by: 0
+      do: [:i | s := s + i]
+    s
+
+  // --- writing block (inlined counted loop) ---
+
+  testWritingLiteralZeroPositiveRange =>
+    self should: [self writingLiteralZeroUp] raise: #user_error
+
+  testWritingLiteralZeroNegativeRange =>
+    self should: [self writingLiteralZeroDown] raise: #user_error
+
+  testWritingRuntimeZeroPositiveRange =>
+    self should: [self writingLoop: 0 from: 1 to: 10] raise: #user_error
+
+  testWritingRuntimeZeroNegativeRange =>
+    self should: [self writingLoop: 0 from: 10 to: 1] raise: #user_error
+
+  testWritingZeroStepMessage =>
+    msg := [self writingLoop: 0 from: 1 to: 10] on: Exception do: [:e | e message]
+    self assert: msg equals: "Interval step cannot be zero"
+
+  // A zero step on an empty range still raises (the check precedes the loop).
+  testWritingZeroStepEmptyRangeRaises =>
+    self should: [self writingLoop: 0 from: 5 to: 1] raise: #user_error
+
+  // --- non-zero steps are unchanged ---
+
+  testWritingNonZeroStepsStillRun =>
+    self assert: (self writingLoop: 3 from: 1 to: 10) equals: 22
+    self assert: (self writingLoop: -3 from: 10 to: 1) equals: 22
+    self assert: (self writingLoop: 1 from: 5 to: 1) equals: 0

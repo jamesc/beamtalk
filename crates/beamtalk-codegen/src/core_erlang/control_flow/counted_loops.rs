@@ -19,6 +19,8 @@ use super::plan::ThreadingPlan;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
+use beamtalk_cerl_doc::form::{self, Layout};
+use super::super::errors::{BeamtalkErrorChain, ErrorBinding};
 use beamtalk_core::ast::{Block, Expression};
 
 // ─── CountedLoopFrame ─────────────────────────────────────────────────────────
@@ -198,6 +200,37 @@ impl CoreErlangGenerator {
         self.generate_counted_stateful_loop(&frame, body, &plan)
     }
 
+    /// BT-5098: `do case Step =:= 0 of 'true' -> raise 'false' -> 'ok' end`,
+    /// raising the same `user_error` ("Interval step cannot be zero") as the
+    /// stdlib `Integer>>to:by:do:` (`self error:`). Emitted once in the loop
+    /// preamble, so the loop body pays nothing.
+    fn zero_step_guard_doc(&mut self, step_var: &str) -> Document<'static> {
+        let err0 = self.fresh_temp_var("StepErr");
+        let err1 = self.fresh_temp_var("StepErr");
+        let raise = docvec![
+            BeamtalkErrorChain::new("user_error", leaf::atom("Integer"))
+                .message(leaf::binary_lit("Interval step cannot be zero"))
+                .build(
+                    vec![ErrorBinding::plain(err0), ErrorBinding::plain(err1.clone())],
+                    Document::Str(" "),
+                ),
+            form::call("beamtalk_error", "raise", [leaf::var(err1)]),
+        ];
+        let is_zero = form::call(
+            "erlang",
+            "=:=",
+            [leaf::var(step_var.to_string()), leaf::int_lit(0)],
+        );
+        form::do_prefix(form::case_of(
+            is_zero,
+            [
+                form::clause([leaf::atom("true")], None, raise, Layout::Flat),
+                form::clause([leaf::atom("false")], None, leaf::atom("ok"), Layout::Flat),
+            ],
+            Layout::Flat,
+        ))
+    }
+
     pub(in crate::core_erlang) fn generate_to_by_do_with_mutations(
         &mut self,
         receiver: &Expression,
@@ -214,6 +247,9 @@ impl CoreErlangGenerator {
         let limit_code = self.expression_doc(limit)?;
         let step_var = self.fresh_temp_var("temp");
         let step_code = self.expression_doc(step)?;
+        // BT-5098: a step of 0 raises, as `Integer>>to:by:do:` does. Checked
+        // once here in the preamble (not per iteration).
+        let zero_step_guard = self.zero_step_guard_doc(&step_var);
         // gensym the loop counter (the block param is aliased to it).
         let counter = self.fresh_temp_var("loopidx");
 
@@ -233,7 +269,8 @@ impl CoreErlangGenerator {
                 leaf::var(step_var.clone()),
                 " = ",
                 step_code,
-                " in",
+                " in ",
+                zero_step_guard,
             ],
             fn_name: threaded_ir::COUNTED_LOOP_FN.to_string(),
             condition_prelude: docvec![
@@ -763,6 +800,28 @@ mod tests {
             code.contains("ExitSA"),
             "timesRepeat: direct-params: exit StateAcc rebuild expected. Got:\n{code}"
         );
+    }
+
+    #[test]
+    fn test_to_by_do_zero_step_guard_is_in_preamble_not_loop() {
+        // BT-5098: the zero-step check runs once, before the letrec, and
+        // raises the same user_error as `Integer>>to:by:do:`.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 10 by: 2 do: [:i | sum := sum + i]\n    self.n := sum\n";
+        let code = codegen(src);
+        let guard = code
+            .find("Interval step cannot be zero")
+            .expect("zero-step guard expected");
+        let loop_fn = code.find("letrec").expect("letrec expected");
+        assert!(
+            guard < loop_fn,
+            "zero-step guard must precede the letrec. Got:\n{code}"
+        );
+        assert_eq!(
+            code.matches("Interval step cannot be zero").count(),
+            1,
+            "exactly one guard. Got:\n{code}"
+        );
+        assert!(code.contains("'user_error'"), "Got:\n{code}");
     }
 
     #[test]
