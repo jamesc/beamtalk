@@ -22,12 +22,15 @@
 //! turns that into a `WorkspaceEdit` (annotating candidates).
 
 use super::{EcoString, MethodDefinition, Position, SimpleLanguageService, Span, Utf8PathBuf};
+use crate::STDLIB_PACKAGE_MARKER;
 use crate::queries::references_provider::{find_class_declarations, find_class_references};
 use crate::queries::selector_rename_query::{
-    SelectorSendSite, SendReceiver, find_definition_selector_spans, find_selector_send_sites,
+    SelectorSendSite, SendReceiver, find_definition_selector_spans, find_selector_send_sites_in,
+    find_symbol_literal_sites,
 };
-use beamtalk_core::ast::ExpressionStatement;
+use beamtalk_core::ast::{Expression, ExpressionStatement};
 use beamtalk_core::build_layout::{BUILD_DIR_NAME, DEPS_DIR_NAME};
+use beamtalk_core::semantic_analysis::CURRENT_PROJECT_PACKAGE_MARKER;
 use beamtalk_core::source_analysis::MethodSide;
 use std::collections::HashSet;
 
@@ -105,7 +108,8 @@ struct BodyCtx<'a> {
     source: &'a str,
     /// Enclosing class and side; `None` for top-level statements.
     owner: Option<(&'a str, MethodSide)>,
-    body: &'a [ExpressionStatement],
+    /// Every root expression of the method / statement list / default.
+    roots: Vec<&'a Expression>,
 }
 
 /// A method definition of the target selector.
@@ -125,6 +129,10 @@ enum Target {
     },
 }
 
+fn stmts(body: &[ExpressionStatement]) -> Vec<&Expression> {
+    body.iter().map(|s| &s.expression).collect()
+}
+
 const fn side_of(is_class_method: bool) -> MethodSide {
     if is_class_method {
         MethodSide::Class
@@ -142,7 +150,7 @@ impl SimpleLanguageService {
                 file,
                 source,
                 owner: None,
-                body: &data.module.expressions,
+                roots: stmts(&data.module.expressions),
             });
             for class in &data.module.classes {
                 for (methods, side) in [
@@ -154,7 +162,7 @@ impl SimpleLanguageService {
                             file,
                             source,
                             owner: Some((class.name.name.as_str(), side)),
-                            body: &m.body,
+                            roots: stmts(&m.body),
                         });
                     }
                 }
@@ -164,7 +172,25 @@ impl SimpleLanguageService {
                     file,
                     source,
                     owner: Some((smd.class_name.name.as_str(), side_of(smd.is_class_method))),
-                    body: &smd.method.body,
+                    roots: stmts(&smd.method.body),
+                });
+            }
+            // State / class-variable defaults and protocol provided methods
+            // (BT-5079): not a method body of any class, so no owner.
+            for expr in data.module.state_default_exprs() {
+                out.push(BodyCtx {
+                    file,
+                    source,
+                    owner: None,
+                    roots: vec![expr],
+                });
+            }
+            for m in data.module.unused_protocol_provided_methods() {
+                out.push(BodyCtx {
+                    file,
+                    source,
+                    owner: None,
+                    roots: stmts(&m.body),
                 });
             }
         }
@@ -294,7 +320,12 @@ impl SimpleLanguageService {
         let mut send_ctx: Option<(Option<(String, MethodSide)>, SendReceiver)> = None;
         if hit.is_none() {
             for ctx in self.body_contexts().into_iter().filter(|c| c.file == file) {
-                for site in find_selector_send_sites(ctx.body, ctx.source, selector, selector) {
+                for site in find_selector_send_sites_in(
+                    ctx.roots.iter().copied(),
+                    ctx.source,
+                    selector,
+                    selector,
+                ) {
                     if let Some(s) = site
                         .spans
                         .iter()
@@ -462,10 +493,22 @@ impl SimpleLanguageService {
             )));
         }
 
+        let own_package = self.declaring_package(old);
         let mut seen = HashSet::new();
         let mut confirmed = Vec::new();
         for loc in find_class_references(old, modules()) {
             if !seen.insert((loc.file.clone(), loc.span.start(), loc.span.end())) {
+                continue;
+            }
+            // `pkg@Name` names `Name` in package `pkg`. It refers to this
+            // class only when `pkg` is the package that declares it; any
+            // other qualifier (`http@Json` when renaming the project's
+            // `Json`) is a different class and stays untouched. When the
+            // declaring package is unknown the qualifier cannot be proven to
+            // match, so it is left alone too.
+            if let Some(qualifier) = self.qualifier_of(&loc, old)
+                && own_package.as_deref() != Some(qualifier)
+            {
                 continue;
             }
             // A site we cannot rewrite would leave a dangling reference that
@@ -521,6 +564,31 @@ impl SimpleLanguageService {
         })
     }
 
+    /// The real package name of the project file that declares `class`, or
+    /// `None` when no workspace root names it (the same-project marker).
+    fn declaring_package(&self, class: &str) -> Option<EcoString> {
+        let decls = find_class_declarations(class, self.files.iter().map(|(p, d)| (p, &d.module)));
+        let package = self
+            .project_index
+            .alias_package_for_file(&decls.first()?.file);
+        (package != CURRENT_PROJECT_PACKAGE_MARKER && package != STDLIB_PACKAGE_MARKER)
+            .then_some(package)
+    }
+
+    /// The `pkg` of a `pkg@Name` reference at `loc`, read from the source text
+    /// just before the name.
+    fn qualifier_of(&self, loc: &crate::Location, name: &str) -> Option<&str> {
+        let text = &self.files.get(&loc.file)?.source;
+        let end = text.get(..loc.span.end() as usize)?;
+        let name_start = end.len().checked_sub(name.len())?;
+        let before = end.get(..name_start)?.strip_suffix('@')?;
+        let start = before
+            .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .map_or(0, |i| i + 1);
+        let q = &before[start..];
+        (!q.is_empty()).then_some(q)
+    }
+
     fn plan_selector_rename(
         &self,
         old: &str,
@@ -530,22 +598,44 @@ impl SimpleLanguageService {
     ) -> Result<RenamePlan, RenameRefusal> {
         validate_new_selector(old, new)?;
         let defs = self.definitions_of(old);
-        if self
-            .definitions_of(new)
-            .iter()
-            .any(|d| d.class == class && d.side == side)
+        let hierarchy = self.project_index.hierarchy();
+        let defines = |c: &str, selector: &str| -> bool {
+            hierarchy.get_class(c).is_some_and(|info| {
+                let methods = match side {
+                    MethodSide::Instance => &info.methods,
+                    MethodSide::Class => &info.class_methods,
+                };
+                methods.iter().any(|m| m.selector == selector)
+            }) || self
+                .definitions_of(selector)
+                .iter()
+                .any(|d| d.class == c && d.side == side)
+        };
+        let ancestors = hierarchy.superclass_chain(class);
+        let descendants = hierarchy.all_subclasses(class);
+
+        // An ancestor already defines `old`: this method overrides it, and a
+        // rename would detach the override (callers still reach the ancestor).
+        if let Some(anc) = ancestors.iter().find(|a| defines(a, old)) {
+            return Err(RenameRefusal::new(format!(
+                "Cannot rename #{old}: {class} overrides #{old} from {anc}, and renaming only \
+                 the override would detach it from {anc}'s callers. Rename it on {anc} instead."
+            )));
+        }
+        // The new name is already taken on this class, an ancestor or a
+        // descendant: the rename would create or hide an override.
+        if let Some(other) = std::iter::once(&EcoString::from(class))
+            .chain(ancestors.iter())
+            .chain(descendants.iter())
+            .find(|c| defines(c, new))
         {
             return Err(RenameRefusal::new(format!(
-                "Cannot rename #{old} to #{new}: {class} already defines #{new}."
+                "Cannot rename #{old} to #{new}: {other} already defines #{new}, so the rename \
+                 would create or hide an override."
             )));
         }
 
-        let hierarchy = self.project_index.hierarchy();
-        let mut subtree: HashSet<String> = hierarchy
-            .all_subclasses(class)
-            .into_iter()
-            .map(|c| c.to_string())
-            .collect();
+        let mut subtree: HashSet<String> = descendants.iter().map(ToString::to_string).collect();
         subtree.insert(class.to_string());
         let overridden = defs
             .iter()
@@ -573,7 +663,7 @@ impl SimpleLanguageService {
         contexts.sort_by(|a, b| a.file.cmp(b.file));
         for ctx in contexts {
             for SelectorSendSite { receiver, spans } in
-                find_selector_send_sites(ctx.body, ctx.source, old, new)
+                find_selector_send_sites_in(ctx.roots.iter().copied(), ctx.source, old, new)
             {
                 let edits: Vec<RenameEdit> = spans
                     .into_iter()
@@ -593,6 +683,17 @@ impl SimpleLanguageService {
                 } else {
                     plan.candidates.push(edits);
                 }
+            }
+        }
+        // `#old` literals (`perform: #old`, `respondsTo: #old`, ...): a dynamic
+        // use cannot be proven to name this method, so candidates only.
+        for ctx in self.body_contexts() {
+            for span in find_symbol_literal_sites(ctx.roots.iter().copied(), ctx.source, old) {
+                plan.candidates.push(vec![RenameEdit {
+                    file: ctx.file.clone(),
+                    span,
+                    new_text: format!("#{new}"),
+                }]);
             }
         }
         plan.confirmed
