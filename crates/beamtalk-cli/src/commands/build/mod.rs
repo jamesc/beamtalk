@@ -134,7 +134,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
         eprintln!("{}", passes.diagnostic_summary);
     }
 
-    post_process_package_artifacts(&env, &dep_ctx, &passes)?;
+    post_process_package_artifacts(&env, &dep_ctx, &passes, options)?;
 
     Ok(())
 }
@@ -314,7 +314,7 @@ fn execute_build_passes(
 ) -> Result<BuildPassesResult> {
     // ADR 0098 Phase 1: gate the project build on provenance before Pass 1, so a
     // toolchain-version mismatch forces a full rebuild regardless of mtime.
-    let force = force || provenance_requires_rebuild(env);
+    let force = force || provenance_requires_rebuild(env, options);
 
     // BT-5074: derive every file's module first, so two files that map to one
     // module fail the build before any pass runs.
@@ -337,11 +337,10 @@ fn execute_build_passes(
         stub_inputs_hash,
     } = pass2_inputs(env, dep_ctx, options);
     let options = &pass2_options;
-    // BT-4485: inline FFI calls the FFI type table proves need no coercion
-    // compile to direct calls, so the set of proved functions shapes the
-    // generated code: fold it into every file's cache key with the stub inputs.
-    let stub_inputs_hash =
-        fold_direct_ffi_proofs(stub_inputs_hash, native_type_registry.as_deref());
+    // BT-4485 / BT-5074: type diagnostics and the inline-FFI proofs both read the
+    // resolved FFI type table, so fold its digest into every file's cache key
+    // with the stub inputs.
+    let stub_inputs_hash = fold_native_registry(stub_inputs_hash, native_type_registry.as_deref());
 
     // ADR 0127 §10a (BT-3591): a class's `uses:` line makes its file's
     // build-graph cache key depend on that protocol's content too — see
@@ -409,6 +408,8 @@ fn execute_build_passes(
     // Only compile files that have changed since last build.
     let mut cached_asts = std::mem::take(&mut index.cached_asts);
     let mut core_files = Vec::new();
+    // Source of every file in the erlc batch, for invalidation if it fails.
+    let mut batch_files: Vec<&str> = Vec::new();
     let mut module_names = Vec::new();
     let compile_ctx = new_compile_context(env, &index, native_type_registry);
 
@@ -473,6 +474,7 @@ fn execute_build_passes(
             new_diagnostics_cache.insert(file.as_str().to_string(), file_diags.clone());
             all_build_diags.extend(file_diags);
             core_files.push(core_file.clone());
+            batch_files.push(file.as_str());
             continue;
         }
 
@@ -540,12 +542,24 @@ fn execute_build_passes(
         new_diagnostics_cache.insert(file.as_str().to_string(), file_diags.clone());
         all_build_diags.extend(file_diags);
         core_files.push(core_file.clone());
+        batch_files.push(file.as_str());
     }
 
     compile_ctx
         .provision_sink
         .flush(&compile_ctx.hierarchy.pre_loaded_protocol_sources, options);
 
+    // BT-5074: the erlc worker writes beams one module at a time, so a batch
+    // that fails - or a build killed mid-batch - can leave a new beam beside a
+    // stored hash that still describes the previous content. Forget the batch's
+    // hashes *before* compiling; success writes them back below. Skipped when
+    // nothing compiles, so a no-change build does no extra sidecar I/O.
+    if !batch_files.is_empty() {
+        crate::commands::build_cache::invalidate_beam_hashes(
+            &env.build_dir,
+            batch_files.iter().copied(),
+        );
+    }
     compile_to_beam(
         &env.build_dir,
         &core_files,
@@ -621,6 +635,11 @@ pub(crate) fn current_otp_major() -> Option<u32> {
         .and_then(beamtalk_cli::otp_support::major_from_version_str)
 }
 
+/// The build-mode flags (BT-5074) that belong in the provenance stamp.
+fn env_build_flags(options: &beamtalk_core::CompilerOptions) -> String {
+    crate::commands::build_stamp::build_flags(options.stdlib_mode, options.allow_primitives)
+}
+
 /// ADR 0098 Phase 1: project provenance gate.
 ///
 /// Returns `true` when the project's build scope was produced by a different
@@ -629,12 +648,19 @@ pub(crate) fn current_otp_major() -> Option<u32> {
 /// regardless of mtime. On a miss the version-sensitive Pass 1 metadata cache is
 /// discarded too (its `ClassInfo` is compiler-derived). No-op (returns `false`)
 /// for single-file builds, which have no `_build/dev/` scope or stamp.
-fn provenance_requires_rebuild(env: &BuildEnvironment) -> bool {
+fn provenance_requires_rebuild(
+    env: &BuildEnvironment,
+    options: &beamtalk_core::CompilerOptions,
+) -> bool {
     if env.pkg_manifest().is_none() {
         return false;
     }
     let current_otp = crate::commands::build_stamp::current_otp_version();
-    match crate::commands::build_stamp::read_stamp_status(&env.layout.stamp_path(), current_otp) {
+    match crate::commands::build_stamp::read_stamp_status_with_flags(
+        &env.layout.stamp_path(),
+        current_otp,
+        &env_build_flags(options),
+    ) {
         crate::commands::build_stamp::StampStatus::Fresh => false,
         crate::commands::build_stamp::StampStatus::Stale(reason) => {
             info!("Build provenance miss ({reason}) — forcing full rebuild");
@@ -650,6 +676,7 @@ fn post_process_package_artifacts(
     env: &BuildEnvironment,
     dep_ctx: &DependencyContext,
     passes: &BuildPassesResult,
+    options: &beamtalk_core::CompilerOptions,
 ) -> Result<()> {
     let Some(pkg) = env.pkg_manifest() else {
         return Ok(());
@@ -699,31 +726,35 @@ fn post_process_package_artifacts(
     // the scope has landed, so a crash mid-build never leaves a stamp claiming
     // freshness for incomplete output. Best-effort (a write failure just means
     // the next build sees no stamp and rebuilds).
-    crate::commands::build_stamp::write_stamp(
+    crate::commands::build_stamp::write_stamp_with_flags(
         &env.layout.stamp_path(),
         crate::commands::build_stamp::current_otp_version(),
+        &env_build_flags(options),
     );
 
     Ok(())
 }
 
-/// Fold the FFI type table's direct-call proofs (BT-4485,
-/// `NativeTypeRegistry::proved_no_coercion_keys`) into the stub-inputs hash
-/// that keys incremental builds. Empty when nothing is proved, so a project
-/// without FFI specs keeps its cache keys.
-fn fold_direct_ffi_proofs(
+/// Fold the resolved native type registry into the stub-inputs hash that keys
+/// incremental builds (BT-5074, superseding the BT-4485 proofs-only fold).
+///
+/// The registry holds the `-spec`s extracted from `native/*.erl`, hex
+/// dependencies and OTP, plus stub declarations. Both type diagnostics and
+/// the inline-FFI codegen of BT-4485 read it, so a changed spec must re-check
+/// the callers. `None` (no registry resolved) leaves the hash untouched. Any
+/// resolved registry, even one holding only auto-extracted OTP specs, changes
+/// the key, so most packages get a one-time full re-check after upgrading.
+fn fold_native_registry(
     stub_inputs_hash: String,
     registry: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
 ) -> String {
-    let proofs = registry
-        .map(beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::proved_no_coercion_keys)
-        .unwrap_or_default();
-    if proofs.is_empty() {
+    let Some(registry) = registry else {
         return stub_inputs_hash;
-    }
-    let proofs_hash = beamtalk_package::content_hash::sha256_hex(proofs.join("\n").as_bytes());
+    };
+    let fp = registry.fingerprint();
+    let registry_hash = beamtalk_package::content_hash::sha256_hex(fp.as_bytes());
     beamtalk_package::content_hash::sha256_hex(
-        format!("{stub_inputs_hash}\n{proofs_hash}").as_bytes(),
+        format!("{stub_inputs_hash}\nregistry:{registry_hash}").as_bytes(),
     )
 }
 
