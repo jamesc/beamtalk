@@ -55,7 +55,16 @@ TestCase subclass: LookupOrderMatrixTest
 
   /// The classes (0 = root) that compile `sel`.
   compiledOn: sel =>
-    table := #{#s0 => #(0), #s02 => #(0, 2), #s1 => #(1), #s2 => #(2), #s03 => #(0, 3), #sAll => #(0, 1, 2, 3), #s13 => #(1, 3), #sNone => #()}
+    table := #{
+      #s0 => #(0),
+      #s02 => #(0, 2),
+      #s1 => #(1),
+      #s2 => #(2),
+      #s03 => #(0, 3),
+      #sAll => #(0, 1, 2, 3),
+      #s13 => #(1, 3),
+      #sNone => #()
+    }
     table at: sel
 
   /// What a send of `sel` answers: the symbol of the class that answers it
@@ -70,11 +79,18 @@ TestCase subclass: LookupOrderMatrixTest
     compiledSym := #(#c0, #c1, #c2, #c3) at: k + 1
     ownWins := (quirk =:= #classOwnExtension) not
     (k =:= receiver and: [compiled and: [ownWins]]) ifTrue: [^compiledSym]
-    (quirk =:= #directOwnerExtension and: [compiled and: [k =:= (receiver - 1)]]) ifTrue: [^compiledSym]
+    (quirk =:= #directOwnerExtension and: [
+      compiled and: [k =:= (receiver - 1)]
+    ]) ifTrue: [^compiledSym]
     ext := exts at: k ifAbsent: [nil]
     ext isNil ifFalse: [^ext]
     compiled ifTrue: [^compiledSym]
-    self resolve: sel from: k - 1 receiver: receiver exts: exts quirk: quirk
+    self
+      resolve: sel
+      from: k - 1
+      receiver: receiver
+      exts: exts
+      quirk: quirk
 
   // === known disagreements ===
   //
@@ -98,7 +114,6 @@ TestCase subclass: LookupOrderMatrixTest
     #none
 
   // === the runtime paths ===
-
   sends =>
     #{
       #s0 => [:o | o s0],
@@ -124,74 +139,122 @@ TestCase subclass: LookupOrderMatrixTest
       #perform => (self try: [o perform: sel]),
       #responds => (o respondsTo: sel)
     }
-    (r > 0 and: [sup isNil not])
-      ifTrue: [paths at: #super put: (self try: [o perform: sup])]
-      ifFalse: [paths]
+    (r > 0 and: [
+      sup isNil not
+    ]) ifTrue: [
+      paths at: #super put: (self try: [o perform: sup])
+    ] ifFalse: [paths]
 
   /// Compare one observation against the reference.
   check: cell observed: observed sel: sel receiver: r exts: exts =>
-    observed keysAndValuesDo: [:path :actual |
-      self record: cell path: path sel: sel receiver: r exts: exts actual: actual
-    ]
+    observed
+      keysAndValuesDo: [:path :actual |
+        self
+          record: cell
+          path: path
+          sel: sel
+          receiver: r
+          exts: exts
+          actual: actual
+      ]
 
   expectedFor: path sel: sel receiver: r exts: exts quirk: quirk =>
     path =:= #super
-      ifTrue: [self resolve: sel from: r - 1 receiver: r exts: exts quirk: quirk]
+      ifTrue: [
+        self
+          resolve: sel
+          from: r - 1
+          receiver: r
+          exts: exts
+          quirk: quirk
+      ]
       ifFalse: [
-        answer := self resolve: sel from: r receiver: r exts: exts quirk: quirk
+        answer := self
+          resolve: sel
+          from: r
+          receiver: r
+          exts: exts
+          quirk: quirk
         path =:= #responds ifTrue: [(answer =:= #dnu) not] ifFalse: [answer]
       ]
 
   record: cell path: path sel: sel receiver: r exts: exts actual: actual =>
-    expected := self expectedFor: path sel: sel receiver: r exts: exts quirk: #none
+    expected := self
+      expectedFor: path
+      sel: sel
+      receiver: r
+      exts: exts
+      quirk: #none
     quirk := self quirkFor: path
-    pinned := self expectedFor: path sel: sel receiver: r exts: exts quirk: quirk
+    pinned := self
+      expectedFor: path
+      sel: sel
+      receiver: r
+      exts: exts
+      quirk: quirk
     (quirk =:= #none or: [pinned =:= expected])
       ifTrue: [
-        actual =:= expected ifFalse: [
-          self.found at: "{cell} path={path}: expected {expected printString}, got {actual printString}" put: true
-        ]
+        actual =:= expected
+          ifFalse: [
+            self.found at: "{cell} path={path}: expected {expected printString}, got {actual printString}" put: true
+          ]
       ]
       ifFalse: [
         self.pinHits at: quirk put: true
-        actual =:= pinned ifFalse: [
-          self.found at: "{cell} path={path}: pinned {pinned printString} ({quirk}), got {actual printString}, reference {expected printString}" put: true
-        ]
+        actual =:= pinned
+          ifFalse: [
+            self.found at: "{cell} path={path}: pinned {pinned printString} ({quirk}), got {actual printString}, reference {expected printString}" put: true
+          ]
       ]
 
   // === the extension sets: none, each single class, each pair ===
-
   extSets =>
     #(#(), #(0), #(1), #(2), #(3), #(0, 1), #(0, 2), #(0, 3), #(1, 2), #(1, 3), #(2, 3))
 
   tagFor: k kind: kind side: side =>
-    name := kind =:= #value ifTrue: [#(#Bt5060ValueC0, #Bt5060ValueC1, #Bt5060ValueC2, #Bt5060ValueC3)] ifFalse: [#(#Bt5060ActorC0, #Bt5060ActorC1, #Bt5060ActorC2, #Bt5060ActorC3)]
+    name := kind =:= #value ifTrue: [
+      #(#Bt5060ValueC0, #Bt5060ValueC1, #Bt5060ValueC2, #Bt5060ValueC3)
+    ] ifFalse: [
+      #(#Bt5060ActorC0, #Bt5060ActorC1, #Bt5060ActorC2, #Bt5060ActorC3)
+    ]
     side =:= #instance
       ifTrue: [name at: k + 1]
       ifFalse: [
         kind =:= #value
-          ifTrue: [#(#'Bt5060ValueC0 class', #'Bt5060ValueC1 class', #'Bt5060ValueC2 class', #'Bt5060ValueC3 class') at: k + 1]
-          ifFalse: [#(#'Bt5060ActorC0 class', #'Bt5060ActorC1 class', #'Bt5060ActorC2 class', #'Bt5060ActorC3 class') at: k + 1]
+          ifTrue: [
+            #(#'Bt5060ValueC0 class', #'Bt5060ValueC1 class', #'Bt5060ValueC2 class', #'Bt5060ValueC3 class') at: k + 1
+          ]
+          ifFalse: [
+            #(#'Bt5060ActorC0 class', #'Bt5060ActorC1 class', #'Bt5060ActorC2 class', #'Bt5060ActorC3 class') at: k + 1
+          ]
       ]
 
   install: set kind: kind side: side sel: sel prefix: prefix =>
-    set do: [:k |
-      answer := #(#e0, #e1, #e2, #e3) at: k + 1
-      answer2 := #(#x0, #x1, #x2, #x3) at: k + 1
-      value := prefix =:= #first ifTrue: [answer] ifFalse: [answer2]
-      Erlang beamtalk_extensions
-        register: (self tagFor: k kind: kind side: side)
-        selector: sel
-        fun: [:args :receiver | value]
-        owner: #bt5060
-    ]
+    set
+      do: [:k |
+        answer := #(#e0, #e1, #e2, #e3) at: k + 1
+        answer2 := #(#x0, #x1, #x2, #x3) at: k + 1
+        value := prefix =:= #first ifTrue: [answer] ifFalse: [answer2]
+        Erlang beamtalk_extensions
+          register: (self
+            tagFor: k
+            kind: kind
+            side: side)
+          selector: sel
+          fun: [:args :receiver | value]
+          owner: #bt5060
+      ]
 
   uninstall: set kind: kind side: side sel: sel =>
-    set do: [:k |
-      Erlang beamtalk_extensions
-        unregister: (self tagFor: k kind: kind side: side)
-        selector: sel
-    ]
+    set
+      do: [:k |
+        Erlang beamtalk_extensions
+          unregister: (self
+            tagFor: k
+            kind: kind
+            side: side)
+          selector: sel
+      ]
 
   extsMap: set values: names =>
     set inject: #{} into: [:acc :k | acc at: k put: (names at: k + 1)]
@@ -200,74 +263,132 @@ TestCase subclass: LookupOrderMatrixTest
   cells: kind side: side receiver: r object: o =>
     self.ctxKind := kind
     self.ctxSide := side
-    #(#s0, #s02, #s1, #s2, #s03, #sAll, #s13, #sNone) do: [:sel |
-      base := "{kind}/{side} r={r} sel={sel}"
-      baseline := self observe: o sel: sel receiver: r
-      self check: "{base} exts=[] phase=cold" observed: baseline sel: sel receiver: r exts: #{}
-      self extSets do: [:set |
-        self install: set kind: kind side: side sel: sel prefix: #first
-        [
-          cell := "{base} exts={set printString}"
-          self
-            check: "{cell} phase=installed"
-            observed: (self observe: o sel: sel receiver: r)
-            sel: sel
-            receiver: r
-            exts: (self extsMap: set values: #(#e0, #e1, #e2, #e3))
-          self install: set kind: kind side: side sel: sel prefix: #second
-          self
-            check: "{cell} phase=replaced"
-            observed: (self observe: o sel: sel receiver: r)
-            sel: sel
-            receiver: r
-            exts: (self extsMap: set values: #(#x0, #x1, #x2, #x3))
-        ] ensure: [self uninstall: set kind: kind side: side sel: sel]
+    #(#s0, #s02, #s1, #s2, #s03, #sAll, #s13, #sNone)
+      do: [:sel |
+        base := "{kind}/{side} r={r} sel={sel}"
+        baseline := self
+          observe: o
+          sel: sel
+          receiver: r
         self
-          check: "{base} exts={set printString} phase=removed"
-          observed: (self observe: o sel: sel receiver: r)
+          check: "{base} exts=[] phase=cold"
+          observed: baseline
           sel: sel
           receiver: r
           exts: #{}
+        self extSets
+          do: [:set |
+            self
+              install: set
+              kind: kind
+              side: side
+              sel: sel
+              prefix: #first
+            [
+              cell := "{base} exts={set printString}"
+              self
+                check: "{cell} phase=installed"
+                observed: (self
+                  observe: o
+                  sel: sel
+                  receiver: r)
+                sel: sel
+                receiver: r
+                exts: (self extsMap: set values: #(#e0, #e1, #e2, #e3))
+              self
+                install: set
+                kind: kind
+                side: side
+                sel: sel
+                prefix: #second
+              self
+                check: "{cell} phase=replaced"
+                observed: (self
+                  observe: o
+                  sel: sel
+                  receiver: r)
+                sel: sel
+                receiver: r
+                exts: (self extsMap: set values: #(#x0, #x1, #x2, #x3))
+            ]
+              ensure: [
+                self
+                  uninstall: set
+                  kind: kind
+                  side: side
+                  sel: sel
+              ]
+            self
+              check: "{base} exts={set printString} phase=removed"
+              observed: (self
+                observe: o
+                sel: sel
+                receiver: r)
+              sel: sel
+              receiver: r
+              exts: #{}
+          ]
       ]
-    ]
 
   /// `rules`: the quirks this matrix must have reached at least once.
   verify: rules =>
-    rules do: [:q |
-      (self.pinHits includesKey: q) ifFalse: [
-        self.found at: "pinned rule {q} applied to no cell: delete it" put: true
+    rules
+      do: [:q |
+        (self.pinHits includesKey: q) ifFalse: [
+          self.found at: "pinned rule {q} applied to no cell: delete it" put: true
+        ]
       ]
-    ]
     lines := self.found keys
     lines isEmpty ifFalse: [self fail: (lines join: "\n")]
 
   // === the matrix ===
-
   testValueInstanceSide =>
-    #(0, 1, 2, 3) do: [:r |
-      o := #(Bt5060ValueC0, Bt5060ValueC1, Bt5060ValueC2, Bt5060ValueC3) at: r + 1
-      self cells: #value side: #instance receiver: r object: o new
-    ]
+    #(0, 1, 2, 3)
+      do: [:r |
+        o := #(Bt5060ValueC0, Bt5060ValueC1, Bt5060ValueC2, Bt5060ValueC3) at: r + 1
+        self
+          cells: #value
+          side: #instance
+          receiver: r
+          object: o new
+      ]
     self verify: #(#directOwnerExtension)
 
   testValueClassSide =>
-    #(0, 1, 2, 3) do: [:r |
-      o := #(Bt5060ValueC0, Bt5060ValueC1, Bt5060ValueC2, Bt5060ValueC3) at: r + 1
-      self cells: #value side: #class receiver: r object: o
-    ]
+    #(0, 1, 2, 3)
+      do: [:r |
+        o := #(Bt5060ValueC0, Bt5060ValueC1, Bt5060ValueC2, Bt5060ValueC3) at: r + 1
+        self
+          cells: #value
+          side: #class
+          receiver: r
+          object: o
+      ]
     self verify: #(#classOwnExtension)
 
   testActorInstanceSide =>
-    #(0, 1, 2, 3) do: [:r |
-      cls := #(Bt5060ActorC0, Bt5060ActorC1, Bt5060ActorC2, Bt5060ActorC3) at: r + 1
-      a := cls spawn
-      [self cells: #actor side: #instance receiver: r object: a] ensure: [a stop]
-    ]
+    #(0, 1, 2, 3)
+      do: [:r |
+        cls := #(Bt5060ActorC0, Bt5060ActorC1, Bt5060ActorC2, Bt5060ActorC3) at: r + 1
+        a := cls spawn
+        [
+          self
+            cells: #actor
+            side: #instance
+            receiver: r
+            object: a
+        ] ensure: [a stop]
+      ]
     self verify: #()
 
   testActorClassSide =>
-    #(0, 1, 2, 3) do: [:r |
-      o := #(Bt5060ActorC0, Bt5060ActorC1, Bt5060ActorC2, Bt5060ActorC3) at: r + 1
-      self cells: #actor side: #class receiver: r object: o
-    ]
+    #(0, 1, 2, 3)
+      do: [:r |
+        o := #(Bt5060ActorC0, Bt5060ActorC1, Bt5060ActorC2, Bt5060ActorC3) at: r + 1
+        self
+          cells: #actor
+          side: #class
+          receiver: r
+          object: o
+      ]
     self verify: #(#classOwnExtension)

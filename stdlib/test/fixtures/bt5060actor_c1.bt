@@ -9,25 +9,24 @@ Bt5060ActorC0 subclass: Bt5060ActorC1
 
   class s1 -> Symbol => #c1
 
-  s1 -> Symbol => #c1
-
   class sAll -> Symbol => #c1
-
-  sAll -> Symbol => #c1
 
   class s13 -> Symbol => #c1
 
-  s13 -> Symbol => #c1
-
   class superS0 -> Symbol => super s0
-
-  superS0 -> Symbol => super s0
 
   class superSAll -> Symbol => super sAll
 
-  superSAll -> Symbol => super sAll
-
   class superS02 -> Symbol => super s02
 
-  superS02 -> Symbol => super s02
+  s1 -> Symbol => #c1
 
+  sAll -> Symbol => #c1
+
+  s13 -> Symbol => #c1
+
+  superS0 -> Symbol => super s0
+
+  superSAll -> Symbol => super sAll
+
+  superS02 -> Symbol => super s02

@@ -9,17 +9,16 @@ Value subclass: Bt5060ValueC0
 
   class s0 -> Symbol => #c0
 
-  s0 -> Symbol => #c0
-
   class s02 -> Symbol => #c0
-
-  s02 -> Symbol => #c0
 
   class s03 -> Symbol => #c0
 
-  s03 -> Symbol => #c0
-
   class sAll -> Symbol => #c0
 
-  sAll -> Symbol => #c0
+  s0 -> Symbol => #c0
 
+  s02 -> Symbol => #c0
+
+  s03 -> Symbol => #c0
+
+  sAll -> Symbol => #c0

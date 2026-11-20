@@ -9,25 +9,24 @@ Bt5060ValueC1 subclass: Bt5060ValueC2
 
   class s02 -> Symbol => #c2
 
-  s02 -> Symbol => #c2
-
   class s2 -> Symbol => #c2
-
-  s2 -> Symbol => #c2
 
   class sAll -> Symbol => #c2
 
-  sAll -> Symbol => #c2
-
   class superS0 -> Symbol => super s0
-
-  superS0 -> Symbol => super s0
 
   class superSAll -> Symbol => super sAll
 
-  superSAll -> Symbol => super sAll
-
   class superS02 -> Symbol => super s02
 
-  superS02 -> Symbol => super s02
+  s02 -> Symbol => #c2
 
+  s2 -> Symbol => #c2
+
+  sAll -> Symbol => #c2
+
+  superS0 -> Symbol => super s0
+
+  superSAll -> Symbol => super sAll
+
+  superS02 -> Symbol => super s02
