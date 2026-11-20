@@ -1299,8 +1299,9 @@ session_down_closes_and_clears_test() ->
     ?assertEqual(undefined, State1#ws_state.session_id),
     ?assert(lists:keymember(close, 1, Frames)).
 
-%% A client-requested `close` (and idle shutdown) stops the session with
-%% `normal`: the connection closes with 1000. A crash or kill keeps 1011.
+%% A client-requested `close` stops the session via its supervisor (`shutdown`),
+%% idle shutdown with `normal`: both close with 1000 (BT-5084). A crash or kill
+%% keeps 1011.
 session_down_close_code_test_() ->
     [
         {iolist_to_binary(io_lib:format("~p", [Reason])), fun() ->
@@ -1316,7 +1317,7 @@ session_down_close_code_test_() ->
      || {Reason, Code} <- [
             {normal, 1000},
             {killed, 1011},
-            {shutdown, 1011},
+            {shutdown, 1000},
             {{badmatch, oops}, 1011}
         ]
     ].
