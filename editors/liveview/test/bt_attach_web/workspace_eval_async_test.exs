@@ -114,18 +114,32 @@ defmodule BtAttachWeb.WorkspaceEvalAsyncTest do
     assert html =~ "ws-result err"
   end
 
-  test "a second eval while one runs is refused, not queued behind it", %{conn: conn} do
+  test "a second eval while one runs is queued and runs after it, in order", %{conn: conn} do
     view = mount_cockpit(conn)
 
     view |> form("#eval-form", %{"expr" => "1"}) |> render_submit()
-    assert_receive {:eval_started, eval_task}, 1_000
+    assert_receive {:eval_started, first}, 1_000
 
-    html = view |> form("#eval-form", %{"expr" => "2"}) |> render_submit()
-    assert html =~ "already running"
+    view |> form("#eval-form", %{"expr" => "2"}) |> render_submit()
     refute_receive {:eval_started, _}, 100
 
-    send(eval_task, {:finish, {:ok, 1, "", []}})
+    send(first, {:finish, {:ok, 1, "", []}})
+    assert_receive {:eval_started, second}, 1_000
+    send(second, {:finish, {:ok, 2, "", []}})
+    assert render_async(view, 5_000) =~ "2"
+  end
+
+  test "Stop also cancels the evals queued behind the running one", %{conn: conn} do
+    view = mount_cockpit(conn)
+
+    view |> form("#eval-form", %{"expr" => "1"}) |> render_submit()
+    assert_receive {:eval_started, first}, 1_000
+    Application.put_env(:bt_attach, :eval_async_eval_pid, first)
+    view |> form("#eval-form", %{"expr" => "2"}) |> render_submit()
+
+    view |> element("#eval-stop") |> render_click()
     render_async(view, 5_000)
+    refute_receive {:eval_started, _}, 200
   end
 
   test "an eval that timed out shows an error, interrupts the runaway, and leaves the tab usable",

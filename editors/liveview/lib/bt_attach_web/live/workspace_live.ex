@@ -443,6 +443,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       # BT-5081: true while a Workspace/REPL eval runs in its `start_async` task.
       # The tab stays interactive; the dock shows a Stop control meanwhile.
       |> assign(:eval_running, false)
+      |> assign(:eval_queue, [])
       |> assign(:output, nil)
       |> assign(:eval_warnings, nil)
       |> assign(:error, nil)

@@ -92,8 +92,6 @@ defmodule BtAttachWeb.Live.Dock do
   # `@dock_events` here unchanged (same event name, params, socket), so each
   # clause below is exactly the body the LiveView used to run directly.
 
-  @eval_busy_message "An evaluation is already running. Stop it, or wait for it to finish."
-
   # The Workspace dock's three actions (BT-2490) all evaluate the entered code
   # (or the tracked selection, the spike's "evaluates selection vs buffer")
   # and differ only in what they do with the result term — so they ride the
@@ -112,12 +110,8 @@ defmodule BtAttachWeb.Live.Dock do
   # assert on.
   def handle_event("eval", %{"expr" => expr} = params, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) do
-    if eval_running?(socket) do
-      {:noreply, assign(socket, error: @eval_busy_message)}
-    else
-      job = %{kind: :eval, action: eval_action(params), expr: expr}
-      {:noreply, start_eval(socket, job, pid, eval_target(expr, socket))}
-    end
+    job = %{kind: :eval, action: eval_action(params), expr: expr}
+    {:noreply, start_eval(socket, job, pid, eval_target(expr, socket))}
   end
 
   # Stop control (BT-5081): interrupt the eval running in this tab's session.
@@ -127,6 +121,9 @@ defmodule BtAttachWeb.Live.Dock do
   # eval error. The call is bounded (see `BtAttach.Workspace`'s timeout tiers).
   def handle_event("eval_interrupt", _params, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) do
+    # Stop cancels what is queued behind the running eval too.
+    socket = assign(socket, eval_queue: [])
+
     case Facade.dispatch(:interrupt, %{session_pid: pid}, RequestContext.build(socket)) do
       :ok -> {:noreply, socket}
       {:error, reason} -> {:noreply, assign(socket, error: FacadeError.render(reason))}
@@ -287,9 +284,6 @@ defmodule BtAttachWeb.Live.Dock do
          |> handle_repl_meta(meta, expr)
          |> repl_record_history(expr)
          |> repl_clear_input()}
-
-      eval_running?(socket) ->
-        {:noreply, repl_append_error(socket, expr, @eval_busy_message)}
 
       true ->
         # The user's code runs off the LiveView process (BT-5081): the scrollback
@@ -540,7 +534,9 @@ defmodule BtAttachWeb.Live.Dock do
   # Fold a finished eval task (see `start_eval/4`) back into the socket.
   def handle_async(:eval, {:ok, {job, result}}, socket) do
     socket = assign(socket, eval_running: false)
-    {:noreply, socket |> fold_eval(job, result) |> WorkspaceLive.refresh_bindings()}
+
+    {:noreply,
+     socket |> fold_eval(job, result) |> WorkspaceLive.refresh_bindings() |> run_next_eval()}
   end
 
   def handle_async(:eval, {:exit, :cancelled}, socket), do: {:noreply, socket}
@@ -551,6 +547,7 @@ defmodule BtAttachWeb.Live.Dock do
     {:noreply,
      assign(socket,
        eval_running: false,
+       eval_queue: [],
        error: "The evaluation failed unexpectedly: #{inspect(reason)}"
      )}
   end
@@ -571,7 +568,30 @@ defmodule BtAttachWeb.Live.Dock do
   # tests; a dead render receives no events) runs the same job inline and folds
   # it through the same `handle_async/3`, mirroring how Phoenix degrades
   # `start_async` there.
+  #
+  # Evals run strictly one at a time, in submit order (the session is a single
+  # gen_server, and the old synchronous handler serialized them through the
+  # LiveView mailbox): one submitted while another runs waits in `eval_queue`.
   defp start_eval(socket, job, pid, code) do
+    if eval_running?(socket) do
+      assign(socket, eval_queue: Map.get(socket.assigns, :eval_queue, []) ++ [{job, pid, code}])
+    else
+      run_eval(socket, job, pid, code)
+    end
+  end
+
+  # Start the next queued eval, if any, once the running one has been folded.
+  defp run_next_eval(socket) do
+    case Map.get(socket.assigns, :eval_queue, []) do
+      [{job, pid, code} | rest] ->
+        run_eval(assign(socket, eval_queue: rest), job, pid, code)
+
+      _ ->
+        socket
+    end
+  end
+
+  defp run_eval(socket, job, pid, code) do
     ctx = RequestContext.build(socket)
 
     task = fn ->
