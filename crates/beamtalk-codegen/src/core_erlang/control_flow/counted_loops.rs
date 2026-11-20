@@ -9,6 +9,7 @@
 //! variants of `timesRepeat:`, `to:do:`, and `to:by:do:`.
 //! Non-mutating cases are handled by the pure-BT tail-recursive Integer methods.
 
+use super::super::errors::{BeamtalkErrorChain, ErrorBinding};
 use super::super::threaded_ir::{
     self, LoopCounter, RenderCtx, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
 };
@@ -18,9 +19,8 @@ use super::loop_scope::{DirectParamsKind, DirectParamsLoopScope};
 use super::plan::ThreadingPlan;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::leaf;
 use beamtalk_cerl_doc::form::{self, Layout};
-use super::super::errors::{BeamtalkErrorChain, ErrorBinding};
+use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
 
 // ─── CountedLoopFrame ─────────────────────────────────────────────────────────
@@ -808,8 +808,9 @@ mod tests {
         // raises the same user_error as `Integer>>to:by:do:`.
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 10 by: 2 do: [:i | sum := sum + i]\n    self.n := sum\n";
         let code = codegen(src);
+        // The message is a Core Erlang binary literal (bytes), so key on the call.
         let guard = code
-            .find("Interval step cannot be zero")
+            .find("'with_message'")
             .expect("zero-step guard expected");
         let loop_fn = code.find("letrec").expect("letrec expected");
         assert!(
@@ -817,7 +818,7 @@ mod tests {
             "zero-step guard must precede the letrec. Got:\n{code}"
         );
         assert_eq!(
-            code.matches("Interval step cannot be zero").count(),
+            code.matches("'with_message'").count(),
             1,
             "exactly one guard. Got:\n{code}"
         );
