@@ -83,7 +83,11 @@ defmodule BtAttach.SessionRegistry do
       :reap_tag,
       :window_stash,
       :doc_stash,
-      :owner_pid
+      :owner_pid,
+      # Monitor on `owner_pid` (BT-5081): a LiveView that dies WITHOUT running
+      # `terminate/2` (a kill, a node crash on a shared VM) never calls
+      # `release`; this monitor arms the same grace reap on its `DOWN`.
+      :owner_ref
     ]
   end
 
@@ -234,7 +238,8 @@ defmodule BtAttach.SessionRegistry do
         # new owner — so a stale `release` from the process being superseded can no
         # longer arm a reap against this now-active session.
         entry = cancel_reap(entry)
-        entry = %Entry{entry | owner_pid: owner_pid}
+        demonitor_owner(entry)
+        entry = %Entry{entry | owner_pid: owner_pid, owner_ref: Process.monitor(owner_pid)}
         state = put_entry(state, token, entry)
         {:reply, {:resumed, session_id, pid}, state}
 
@@ -255,7 +260,8 @@ defmodule BtAttach.SessionRegistry do
       session_id: session_id,
       session_pid: session_pid,
       monitor_ref: ref,
-      owner_pid: owner_pid
+      owner_pid: owner_pid,
+      owner_ref: Process.monitor(owner_pid)
     }
 
     {:reply, :ok, put_entry(state, token, entry)}
@@ -319,12 +325,7 @@ defmodule BtAttach.SessionRegistry do
         # the window) and arm a fresh one. Tag the timer with a unique ref so a
         # stale {:reap, token, _} still in the mailbox (cancel_timer lost the
         # race with an already-fired timer) can't reap this newer window.
-        entry = cancel_reap(entry)
-        reap_tag = make_ref()
-        timer = Process.send_after(self(), {:reap, token, reap_tag}, state.reap_after_ms)
-
-        {:reply, :ok,
-         put_entry(state, token, %Entry{entry | reap_timer: timer, reap_tag: reap_tag})}
+        {:reply, :ok, put_entry(state, token, arm_reap(entry, token, state))}
 
       {:ok, %Entry{}} ->
         # A newer LiveView has since resumed this session and owns it now; this
@@ -354,16 +355,38 @@ defmodule BtAttach.SessionRegistry do
     end
   end
 
-  # A monitored remote session pid died (e.g. the workspace itself terminated the
-  # session). Drop the now-stale entry; a later checkout will miss and the
-  # LiveView will start a fresh session.
+  # A monitored process went down.
+  #
+  #   * The remote **session** pid, reason `:noconnection` (BT-5081): the
+  #     distribution link dropped, which says nothing about the session itself —
+  #     it is very likely alive on a workspace that is still running. Keep the
+  #     entry (clearing the spent monitor); `checkout/1`'s caller already probes
+  #     `Workspace.session_alive?/1` and falls back to a fresh session if the
+  #     workspace really died, so a blip must not discard resumable state.
+  #   * The remote session pid, any other reason: the session is gone (e.g. the
+  #     workspace terminated it). Drop the now-stale entry; a later checkout
+  #     will miss and the LiveView will start a fresh session.
+  #   * The **owner** LiveView (BT-5081): it died without `release/2` (no
+  #     `terminate/2`), so arm the same grace reap a release would have.
   @impl true
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
     state =
-      case Enum.find(state.entries, fn {_t, e} -> e.monitor_ref == ref end) do
-        {token, entry} ->
+      case find_entry(state, ref) do
+        {:session, token, %Entry{} = entry} when reason == :noconnection ->
+          put_entry(state, token, %Entry{entry | monitor_ref: nil})
+
+        {:session, token, entry} ->
           entry = cancel_reap(entry)
           drop_entry(state, token, entry)
+
+        {:owner, token, %Entry{} = entry} ->
+          entry = %Entry{entry | owner_ref: nil}
+
+          if entry.reap_timer == nil do
+            put_entry(state, token, arm_reap(entry, token, state))
+          else
+            put_entry(state, token, entry)
+          end
 
         nil ->
           state
@@ -378,6 +401,32 @@ defmodule BtAttach.SessionRegistry do
 
   defp configured_reap_after do
     Application.get_env(:bt_attach, :session_reap_after_ms, @default_reap_after_ms)
+  end
+
+  defp find_entry(state, ref) do
+    Enum.find_value(state.entries, fn
+      {token, %Entry{monitor_ref: ^ref} = entry} -> {:session, token, entry}
+      {token, %Entry{owner_ref: ^ref} = entry} -> {:owner, token, entry}
+      _ -> nil
+    end)
+  end
+
+  # Replace any existing reap timer and arm a fresh one. The timer carries a
+  # unique tag so a stale `{:reap, token, _}` already in the mailbox
+  # (`cancel_timer` lost the race with a fired timer) can't reap this newer window.
+  defp arm_reap(%Entry{} = entry, token, state) do
+    entry = cancel_reap(entry)
+    demonitor_owner(entry)
+    reap_tag = make_ref()
+    timer = Process.send_after(self(), {:reap, token, reap_tag}, state.reap_after_ms)
+    %Entry{entry | reap_timer: timer, reap_tag: reap_tag, owner_ref: nil}
+  end
+
+  defp demonitor_owner(%Entry{owner_ref: nil}), do: :ok
+
+  defp demonitor_owner(%Entry{owner_ref: ref}) do
+    Process.demonitor(ref, [:flush])
+    :ok
   end
 
   defp put_entry(state, token, entry) do
@@ -414,11 +463,13 @@ defmodule BtAttach.SessionRegistry do
     %Entry{entry | reap_timer: nil, reap_tag: nil}
   end
 
-  defp demonitor(%Entry{monitor_ref: nil}), do: :ok
+  defp demonitor(%Entry{} = entry) do
+    demonitor_owner(entry)
 
-  defp demonitor(%Entry{monitor_ref: ref}) do
-    Process.demonitor(ref, [:flush])
-    :ok
+    case entry.monitor_ref do
+      nil -> :ok
+      ref -> Process.demonitor(ref, [:flush]) && :ok
+    end
   end
 
   # Best-effort close of the workspace-supervised session, performed in a DETACHED

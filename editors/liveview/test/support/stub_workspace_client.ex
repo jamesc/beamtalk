@@ -197,6 +197,8 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   def interrupt(_pid), do: :ok
 
+  def attach_session(_session_pid, _client_pid), do: :ok
+
   def eval(_pid, code) do
     case extract_class_name(code) do
       {:ok, class_name} ->

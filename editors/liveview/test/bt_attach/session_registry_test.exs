@@ -256,4 +256,49 @@ defmodule BtAttach.SessionRegistryTest do
         eventually(fun, retries - 1)
     end
   end
+
+  describe "owner LiveView and distribution blips (BT-5081)" do
+    test "an owner killed without release still arms the grace reap", %{reg: reg} do
+      session = fake_session()
+      owner = spawn_caller()
+      :ok = via(owner, fn -> SessionRegistry.register(reg, "tab-owner", "phoenix-o", session) end)
+
+      # `:kill` skips `terminate/2`, so no `release` ever arrives — the front
+      # being SIGKILLed by the desktop shell looks exactly like this.
+      Process.exit(owner, :kill)
+
+      # Poll the registry's state, not `checkout/2`: a checkout is a resume and
+      # would itself cancel the reap being waited for.
+      eventually(fn -> not Map.has_key?(:sys.get_state(reg).entries, "tab-owner") end)
+    end
+
+    test "a superseded owner's death does not reap the resumed session", %{reg: reg} do
+      session = fake_session()
+      old_owner = spawn_caller()
+      new_owner = spawn_caller()
+
+      :ok =
+        via(old_owner, fn -> SessionRegistry.register(reg, "tab-race", "phoenix-r", session) end)
+
+      assert {:resumed, _, ^session} =
+               via(new_owner, fn -> SessionRegistry.checkout(reg, "tab-race") end)
+
+      Process.exit(old_owner, :kill)
+      # sleep: wait past the reap window to prove nothing fires
+      Process.sleep(@reap_ms * 3)
+
+      assert {:resumed, _, ^session} = SessionRegistry.checkout(reg, "tab-race")
+    end
+
+    test "a :noconnection DOWN keeps the entry (a blip is not a dead session)", %{reg: reg} do
+      session = fake_session()
+      SessionRegistry.register(reg, "tab-blip", "phoenix-b", session)
+
+      %{entries: %{"tab-blip" => %{monitor_ref: ref}}} = :sys.get_state(reg)
+      send(reg, {:DOWN, ref, :process, session, :noconnection})
+      _ = :sys.get_state(reg)
+
+      assert {:resumed, "phoenix-b", ^session} = SessionRegistry.checkout(reg, "tab-blip")
+    end
+  end
 end
