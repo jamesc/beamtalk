@@ -440,6 +440,10 @@ defmodule BtAttachWeb.WorkspaceLive do
       # fade animation restarts on every eval — the status self-clears visually
       # while staying in the DOM (the value is still assertable in tests).
       |> assign(:eval_seq, 0)
+      # BT-5081: true while a Workspace/REPL eval runs in its `start_async` task.
+      # The tab stays interactive; the dock shows a Stop control meanwhile.
+      |> assign(:eval_running, false)
+      |> assign(:eval_queue, [])
       |> assign(:output, nil)
       |> assign(:eval_warnings, nil)
       |> assign(:error, nil)
@@ -885,7 +889,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     dock_tab eval select_workspace repl_eval repl_history_prev
     repl_history_next repl_inspect git_refresh git_diff git_stage
     git_unstage git_revert git_commit toggle_change_diff revert flush
-    flush_destructive
+    flush_destructive eval_interrupt
   )
 
   @impl true
@@ -1219,6 +1223,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   # `handle_event`/`handle_info` delegation above.
   @impl true
   def handle_async(:git_load, result, socket), do: Dock.handle_async(:git_load, result, socket)
+
+  # BT-5081: a Workspace/REPL eval ran off-socket; fold its outcome via the Dock.
+  def handle_async(:eval, result, socket), do: Dock.handle_async(:eval, result, socket)
 
   # BT-2591: the off-socket mount-time reads (`start_mount_load/2`'s `start_async`)
   # completed. The task returned the four raw `Facade.dispatch` outcomes; we fold
@@ -1933,6 +1940,18 @@ defmodule BtAttachWeb.WorkspaceLive do
   # task and the bindings-changed refresh path share one fold.
   defp assign_bindings(socket, pid), do: apply_bindings(socket, read_bindings(socket, pid))
 
+  # BT-5081: re-read the bindings once an off-socket eval has finished. The
+  # workspace announces `BindingChanged` while the eval is still running, and
+  # the session only commits the new bindings when it ends; when evals blocked
+  # the LiveView, that push was handled after the eval returned, so it read the
+  # committed state. Now that the LiveView stays responsive, the push can be
+  # handled mid-eval and read the old bindings — and no further push follows.
+  @doc false
+  def refresh_bindings(%{assigns: %{session_pid: pid}} = socket) when is_pid(pid),
+    do: assign_bindings(socket, pid)
+
+  def refresh_bindings(socket), do: socket
+
   defp read_bindings(socket, pid),
     do: Facade.dispatch(:bindings, %{session_pid: pid}, RequestContext.build(socket))
 
@@ -1940,11 +1959,14 @@ defmodule BtAttachWeb.WorkspaceLive do
     do: assign(socket, bindings: [], bindings_error: Workspace.render_error(reason))
 
   defp apply_bindings(socket, pairs) when is_list(pairs) do
+    # One batched render RPC for the whole pane (BT-5081), not one per binding.
+    values = Workspace.render_terms(Enum.map(pairs, fn {_name, term} -> term end))
+
     rows =
-      Enum.map(pairs, fn {name, term} ->
+      Enum.zip_with(pairs, values, fn {name, term}, value ->
         %{
           name: name,
-          value: Workspace.render_term(term),
+          value: value,
           inspectable: Workspace.inspectable?(term),
           kind: Inspector.term_kind(term)
         }
@@ -3514,8 +3536,22 @@ defmodule BtAttachWeb.WorkspaceLive do
                           <button class="btn" type="submit" name="action" value="inspect_it">
                             Inspect it <span class="k">⌘I</span>
                           </button>
+                          <button
+                            :if={@eval_running}
+                            id="eval-stop"
+                            class="btn"
+                            type="button"
+                            phx-click="eval_interrupt"
+                          >
+                            Stop
+                          </button>
                           <span class="spacer"></span>
-                          <span class="kbdhint">select an expression, or evaluate all</span>
+                          <span :if={@eval_running} class="kbdhint" id="eval-running">
+                            evaluating…
+                          </span>
+                          <span :if={!@eval_running} class="kbdhint">
+                            select an expression, or evaluate all
+                          </span>
                         </div>
                       </form>
                     <% else %>
