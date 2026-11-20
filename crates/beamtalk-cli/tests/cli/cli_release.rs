@@ -1400,3 +1400,144 @@ fn release_upgrade_from_accepts_a_tarball() {
         ))
         .stdout(contains("0 errors, 0 warnings."));
 }
+
+/// BT-5072: a package's own `native/*.erl`, a path dependency's `native/*.erl`
+/// and a dependency's `priv/` file all reach the release. Before the fix the
+/// native beams were never staged (`undef` at the first `(Erlang foo)` call)
+/// and no `priv/` directory was copied for any non-host app.
+#[test]
+#[allow(clippy::too_many_lines)] // one straight-line fixture build plus assertions
+fn release_stages_native_modules_and_dependency_priv_test() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let helper = root.path().join("helper");
+    std::fs::create_dir_all(helper.join("src")).unwrap();
+    std::fs::create_dir_all(helper.join("native")).unwrap();
+    std::fs::create_dir_all(helper.join("priv")).unwrap();
+    std::fs::write(
+        helper.join("beamtalk.toml"),
+        "[package]\nname = \"helper\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        helper.join("src/HelperThing.bt"),
+        "Object subclass: HelperThing\n\n  class one => 1\n",
+    )
+    .unwrap();
+    std::fs::write(helper.join("priv/data.txt"), "from-dep-priv").unwrap();
+    std::fs::write(
+        helper.join("native/helper_native.erl"),
+        "%% Copyright 2026 James Casey\n\
+         %% SPDX-License-Identifier: Apache-2.0\n\
+         -module(helper_native).\n\
+         -moduledoc \"Fixture dependency native module (BT-5072).\".\n\
+         -export([priv_text/0, priv_dir/0]).\n\
+         -doc \"Reads priv/data.txt through code:priv_dir/1.\".\n\
+         priv_text() ->\n\
+         \x20   {ok, Bin} = file:read_file(filename:join(code:priv_dir(helper), \"data.txt\")),\n\
+         \x20   Bin.\n\
+         -doc \"The resolved priv dir.\".\n\
+         priv_dir() -> code:priv_dir(helper).\n",
+    )
+    .unwrap();
+
+    let app = root.path().join("app");
+    std::fs::create_dir_all(app.join("src")).unwrap();
+    std::fs::create_dir_all(app.join("native")).unwrap();
+    std::fs::write(
+        app.join("beamtalk.toml"),
+        "[package]\n\
+         name = \"native_release_fixture\"\n\
+         version = \"0.1.0\"\n\
+         \n\
+         [application]\n\
+         supervisor = \"FixtureSup\"\n\
+         \n\
+         [dependencies]\n\
+         helper = { path = \"../helper\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("src/FixtureSup.bt"),
+        "Supervisor subclass: FixtureSup\n\n  childSpecs => #()\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("native/foo.erl"),
+        "%% Copyright 2026 James Casey\n\
+         %% SPDX-License-Identifier: Apache-2.0\n\
+         -module(foo).\n\
+         -moduledoc \"Fixture project native module (BT-5072).\".\n\
+         -export([answer/0]).\n\
+         -doc \"The answer.\".\n\
+         answer() -> 42.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("src/Smoke.bt"),
+        "Object subclass: Smoke\n\
+         \n\
+         \x20 class own => Program exit: (Erlang foo) answer\n\
+         \x20 class dep => Program exit: (Erlang helper_native) priv_text size\n",
+    )
+    .unwrap();
+
+    let output_dir = root.path().join("dist");
+    cli_common::beamtalk()
+        .current_dir(&app)
+        .args(["release", "--output"])
+        .arg(&output_dir)
+        .timeout(std::time::Duration::from_mins(3))
+        .assert()
+        .success();
+
+    let lib = output_dir.join("lib");
+    let project_ebin = lib.join("native_release_fixture-0.1.0/ebin");
+    assert!(
+        project_ebin.join("foo.beam").is_file(),
+        "project native beam not staged into {}",
+        project_ebin.display()
+    );
+    assert!(
+        project_ebin.join("helper_native.beam").is_file(),
+        "dependency native beam not staged into {}",
+        project_ebin.display()
+    );
+    let dep_priv = std::fs::read_dir(&lib)
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().starts_with("helper-"))
+        .map(|e| e.path().join("priv/data.txt"))
+        .expect("helper app staged");
+    assert_eq!(
+        std::fs::read_to_string(&dep_priv).expect("dep priv/data.txt staged"),
+        "from-dep-priv"
+    );
+    // Only the computed closure is staged: no test-support apps.
+    for entry in std::fs::read_dir(&lib).unwrap().filter_map(Result::ok) {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        assert!(
+            !name.contains("test_support"),
+            "test-only app staged into the release: {name}"
+        );
+    }
+
+    // And it actually runs: both native modules resolve in the booted release.
+    // `eval` adopts `Program exit: N` as its exit code, so each probe reports
+    // its native call's result that way: 42, and the length of priv/data.txt.
+    for (tag, expr, expected) in [
+        ("n1", "Smoke own", 42),
+        ("n2", "Smoke dep", 13), // "from-dep-priv".len()
+    ] {
+        let eval = isolated_launcher(&output_dir, "native_release_fixture", tag)
+            .args(["eval", expr])
+            .output()
+            .expect("spawn bin/<name> eval");
+        let stdout = String::from_utf8_lossy(&eval.stdout);
+        let stderr = String::from_utf8_lossy(&eval.stderr);
+        assert_eq!(
+            eval.status.code(),
+            Some(expected),
+            "eval `{expr}`: stdout={stdout} stderr={stderr}"
+        );
+    }
+}
