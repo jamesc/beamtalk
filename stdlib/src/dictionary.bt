@@ -161,6 +161,38 @@ sealed typed Collection(V) subclass: Dictionary(K, V)
       acc at: k put: (block value: (dict at: k))
     ]
 
+  /// Keep the entries whose value satisfies `block`, answering a Dictionary
+  /// with the keys preserved. `block` receives the value, as in `collect:`.
+  ///
+  /// Known bug (BT-5097): a literal block that writes an outer local or field
+  /// is compiled through the state-threading fold, which answers a List of
+  /// the surviving values and drops the keys. `collect:` and `reject:` have
+  /// the same gap.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1, #b => 2} select: [:v | v > 1]   // => #{#b => 2}
+  /// #{#a => 1} select: [:v | v > 5]            // => #{}
+  /// ```
+  select: block :: Block(V, Boolean) -> Dictionary(K, V) =>
+    dict := self
+    self keys
+      inject: #{}
+      into: [:acc :k |
+        v := dict at: k
+        (block value: v) ifTrue: [acc at: k put: v] ifFalse: [acc]
+      ]
+
+  /// Drop the entries whose value satisfies `block`, answering a Dictionary
+  /// with the keys preserved. The complement of `select:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1, #b => 2} reject: [:v | v > 1]   // => #{#a => 1}
+  /// ```
+  reject: block :: Block(V, Boolean) -> Dictionary(K, V) =>
+    self select: [:v | (block value: v) not]
+
   /// Iterate over each key-value pair, evaluating `block` with key and value.
   ///
   /// ## Examples

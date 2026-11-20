@@ -376,6 +376,36 @@ mod tests {
         );
     }
 
+    /// BT-5077: `launcher.cmd` must reject a `RELEASE_COOKIE` containing
+    /// whitespace, quotes or backslashes, like `launcher.sh` does — otherwise
+    /// a cookie with a space is split into two `ERL_AFLAGS` words. Text
+    /// inspection only: there is no Windows runner for this test, so the
+    /// check itself is exercised only by reading the script.
+    #[test]
+    fn write_launcher_cmd_rejects_unsafe_cookie_characters() {
+        let (root, _temp) = write_scripts(true);
+        let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
+        for stripped in [
+            r#"set "CK_CHECK=!CK_CHECK: =!""#,
+            r#"set "CK_CHECK=!CK_CHECK:"=!""#,
+            r#"set "CK_CHECK=!CK_CHECK:'=!""#,
+            r#"set "CK_CHECK=!CK_CHECK:\=!""#,
+        ] {
+            assert!(cmd.contains(stripped), "launcher.cmd must strip {stripped}");
+        }
+        let reject = cmd
+            .find("RELEASE_COOKIE must not contain whitespace, quotes or backslashes")
+            .expect("launcher.cmd must print a cookie rejection");
+        let verb = cmd.find("set \"VERB=%~1\"").unwrap();
+        let export = cmd.find("\n:export_cookie").unwrap();
+        assert!(
+            reject < verb && verb < export,
+            "the cookie check must run before any verb dispatches"
+        );
+        let sh = std::fs::read_to_string(root.join("bin/orders").as_std_path()).unwrap();
+        assert!(sh.contains("RELEASE_COOKIE must not contain whitespace, quotes or backslashes"));
+    }
+
     /// BT-5067: no verb may put the cookie on the `erl` command line.
     #[test]
     fn write_launcher_scripts_never_pass_setcookie_on_the_command_line() {

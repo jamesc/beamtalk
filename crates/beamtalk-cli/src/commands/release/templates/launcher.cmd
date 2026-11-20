@@ -65,6 +65,28 @@ if defined RELEASE_NODE (
     )
 )
 
+rem BT-5077: reject a RELEASE_COOKIE that erl would split or mis-parse inside
+rem ERL_AFLAGS (see :export_cookie below), exactly as launcher.sh's
+rem `export_cookie` does for whitespace, quotes and backslashes. Delayed
+rem expansion only, for the same reason as the RELEASE_NODE check above: the
+rem value is never expanded where cmd.exe tokenizes operators. Each
+rem character is stripped with a substitution and the result compared with
+rem the original; any difference means the cookie held one. The checks sit
+rem at top level (not in :export_cookie) so `exit /b 2` ends the script
+rem rather than just the subroutine. A literal TAB cannot be written here
+rem reliably, so it is not checked; launcher.sh rejects it.
+if not defined RELEASE_COOKIE goto :cookie_ok
+set "CK_CHECK=!RELEASE_COOKIE!"
+set "CK_CHECK=!CK_CHECK: =!"
+set "CK_CHECK=!CK_CHECK:"=!"
+set "CK_CHECK=!CK_CHECK:'=!"
+set "CK_CHECK=!CK_CHECK:\=!"
+if not "!CK_CHECK!"=="!RELEASE_COOKIE!" (
+    echo error: RELEASE_COOKIE must not contain whitespace, quotes or backslashes 1>&2
+    exit /b 2
+)
+:cookie_ok
+
 set "VERB=%~1"
 if "%VERB%"=="" set "VERB=foreground"
 if not "%VERB%"=="" shift
