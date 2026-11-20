@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5060: owner of the live lookup-order chain, version 2 (hot reload).
+
+Value subclass: Bt5060LiveBase
+
+  greet -> Symbol => #compiledV2
