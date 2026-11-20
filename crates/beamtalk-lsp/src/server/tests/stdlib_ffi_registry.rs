@@ -28,7 +28,7 @@ async fn open_and_diagnose(file: &std::path::Path) -> Vec<String> {
     let uri = Url::from_file_path(file).expect("file uri");
     real_did_open(backend, uri, NEEDED_EXPECT_SOURCE).await;
     let path = Utf8PathBuf::from_path_buf(file.to_path_buf()).expect("utf8 path");
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     svc.diagnostics(&path)
         .into_iter()
         .map(|d| d.message.to_string())
@@ -150,7 +150,7 @@ async fn real_stdlib_test_files_show_no_stale_or_ffi_registry_warnings() {
         let backend: &Backend = service.inner();
         real_did_open(backend, Url::from_file_path(&file).unwrap(), &source).await;
         let path = Utf8PathBuf::from_path_buf(file).unwrap();
-        let svc = backend.service.lock().expect("service lock poisoned");
+        let svc = backend.service.lock_recover();
         let bad: Vec<String> = svc
             .diagnostics(&path)
             .into_iter()

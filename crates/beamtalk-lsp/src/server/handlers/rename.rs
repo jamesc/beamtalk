@@ -13,6 +13,7 @@
 
 use super::super::Backend;
 use super::super::convert::{path_to_uri, span_to_range, to_bt_position};
+use crate::server::lock::LockRecover;
 use beamtalk_language_service::{RenameEdit, RenamePlan};
 use camino::Utf8PathBuf;
 use std::collections::{BTreeMap, HashMap};
@@ -281,7 +282,7 @@ impl Backend {
         let Some(path) = self.resolve_path_for_uri(&params.text_document.uri) else {
             return Err(refusal("This document cannot be renamed in."));
         };
-        let svc = self.service.lock().expect("service lock poisoned");
+        let svc = self.service.lock_recover();
         let Some(source) = svc.file_source(&path) else {
             return Err(refusal("This document is not open."));
         };
@@ -304,9 +305,9 @@ impl Backend {
         let Some(path) = self.resolve_path_for_uri(uri) else {
             return Err(refusal("This document cannot be renamed in."));
         };
-        let caps = *self.rename_caps.lock().expect("rename_caps lock poisoned");
+        let caps = *self.rename_caps.lock_recover();
         let outcome = {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             let Some(source) = svc.file_source(&path) else {
                 return Err(refusal("This document is not open."));
             };
@@ -314,7 +315,7 @@ impl Backend {
             let plan = svc
                 .plan_rename(&path, pos, &params.new_name)
                 .map_err(|refused| refusal(refused.message))?;
-            let versions = self.versions.lock().expect("versions lock poisoned");
+            let versions = self.versions.lock_recover();
             build_rename_edit(&plan, caps, &|f| svc.file_source(f), &versions)
         };
         if let Some(message) = outcome.message {
