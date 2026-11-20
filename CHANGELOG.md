@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Behaviour change: `Dictionary select:` / `reject:` answer a Dictionary (BT-5083).**
+  - Changed: `#{#a => 1, #b => 2} select: [:v | v > 1]` answers `#{#b => 2}` (keys kept, the block receives the value, as in `collect:`). It answered a List of the surviving values before (`#(2)`).
+  - Changed: `"abc" split: ""` answers `#("abc")`, like `splitOn:`, instead of raising a raw `badarg`. `SupervisionTree elements` (so `inject:into:`, `count:`, `anySatisfy:`) now sees the enriched nodes, so `children` / `parent` work. `Bag printString` shows contents (`Bag(1, 1)`). `1 to: 10 by: 0 do:` raises "Interval step cannot be zero" instead of doing nothing. `-0.0 isZero` is true. `SystemNavigation runtimeCalledSelectors` lists the `Server`, supervisor, JSON and class-side hooks, so `unusedSelectors` no longer reports their overrides.
+  - Do: code that relied on the List result of `Dictionary select:` should call `values` on the result.
+
 - **Breaking: a repeated element name in a destructuring array pattern is a compile error (BT-5052).**
   - Changed: `#[a, a] := #[1, 2]` (and a repeat in a nested array, `#[a, #[b, a]] := ...`) now fails with "Variable 'a' is bound multiple times in pattern". It compiled before and silently left `a` as the last element, because destructuring emits no equality guard. `#[a, ...a]` was already an error (BT-5050). `match:` arms are unchanged: `#[a, a] -> ...` still matches only when both elements are equal.
   - Do: give each destructured element its own name. To check equality, compare after destructuring (`a = b`) or use a `match:` arm.

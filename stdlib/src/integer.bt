@@ -342,6 +342,7 @@ sealed typed Number subclass: Integer
   /// 1 to: 10 by: 3 do: [:i | Transcript show: i]
   /// ```
   to: end :: Integer by: step :: Integer do: block :: Block(Integer, Object) -> Nil =>
+    step =:= 0 ifTrue: [self error: "Interval step cannot be zero"]
     cond := (step > 0 and: [self <= end]) or: [step < 0 and: [self >= end]]
     cond
       ifTrue: [

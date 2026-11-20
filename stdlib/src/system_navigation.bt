@@ -2419,8 +2419,16 @@ sealed typed Object subclass: SystemNavigation
   ///   inspect` opens an `Inspector` cursor, which the REPL/MCP surfaces render.
   /// - `hash` — invoked by hashed collections (Set / Dictionary) when storing
   ///   or comparing elements, not via a source-level send.
+  /// - `handleInfo:` / `onLinkedExit:reason:` — `Server` hooks the runtime
+  ///   calls for raw messages and linked-process exits.
+  /// - `asJson` — `JsonRepresentable` hook called by the JSON encoder.
+  /// - `childSpecs` / `strategy` / `maxRestarts` / `restartWindow` /
+  ///   `childClass` / `maxChildren` / `childShutdown` — supervisor
+  ///   configuration hooks read by the supervisor runtime when it starts.
+  /// - `supervisionPolicy` / `isSupervisor` / `secretState` /
+  ///   `secretSelectors` — class-side hooks the runtime queries on a class.
   class runtimeCalledSelectors -> List(Symbol) =>
-    #(#initialize, #terminate:, #doesNotUnderstand:args:, #printString, #displayString, #inspect, #hash)
+    #(#initialize, #terminate:, #doesNotUnderstand:args:, #printString, #displayString, #inspect, #hash, #handleInfo:, #onLinkedExit:reason:, #asJson, #childSpecs, #strategy, #maxRestarts, #restartWindow, #childClass, #maxChildren, #childShutdown, #supervisionPolicy, #isSupervisor, #secretState, #secretSelectors)
 
   /// Add every selector *sent* in any method of `aScope` (a class or metaclass)
   /// to the Set `result`, EXCLUDING Erlang-FFI sends. Returns the (possibly

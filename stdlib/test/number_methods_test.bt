@@ -59,6 +59,19 @@ TestCase subclass: NumberMethodsTest
     self assert: 0.0 isZero
     self deny: 3.14 isZero
 
+  // BT-5083: numeric comparison, so negative zero is zero.
+  testFloatIsZeroNegativeZero => self assert: 0.0 negated isZero
+
+  testToByDoZeroStepRaises =>
+    self
+      should: [
+        1
+          to: 10
+          by: 0
+          do: [:i | i]
+      ]
+      raise: #user_error
+
   testFloatIsPositive =>
     self assert: 3.14 isPositive
     self deny: -2.5 isPositive

@@ -105,8 +105,8 @@ TestCase subclass: BagTest
     self assert: (b2 occurrencesOf: 2) equals: 1
 
   testPrintString =>
-    self assert: Bag new printString equals: "Bag"
-    self assert: (Bag withAll: #(1, 2)) printString equals: "Bag"
+    self assert: Bag new printString equals: "Bag()"
+    self assert: (Bag withAll: #(1, 1)) printString equals: "Bag(1, 1)"
 
   testAddWithCountZeroIsNoop =>
     b := (Bag new) add: 1 withCount: 0

@@ -224,6 +224,21 @@ TestCase subclass: DictionaryTest
   // BT-3027 — Dictionary has no first/last; anyOne is the deliberately
   // non-deterministic single-element accessor. It answers a *value*
   // (consistent with do:), not a key-value pair.
+  testSelectKeepsKeys =>
+    r := #{#a => 1, #b => 2, #c => 3} select: [:v | v > 1]
+    self assert: r equals: #{#b => 2, #c => 3}
+    self assert: r class equals: Dictionary
+
+  testSelectEmptyResult =>
+    self assert: (#{#a => 1} select: [:v | v > 5]) equals: #{}
+    self assert: (#{} select: [:v | true]) equals: #{}
+
+  testRejectKeepsKeys =>
+    r := #{#a => 1, #b => 2, #c => 3} reject: [:v | v > 1]
+    self assert: r equals: #{#a => 1}
+    self assert: r class equals: Dictionary
+    self assert: (#{#a => 1} reject: [:v | true]) equals: #{}
+
   testAnyOne =>
     d := #{#a => 1, #b => 2, #c => 3}
     self assert: (d includes: d anyOne)
