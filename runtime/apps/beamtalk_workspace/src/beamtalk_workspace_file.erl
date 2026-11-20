@@ -42,6 +42,7 @@ A leaf module: it calls only OTP.
 -export([
     path_inside/2,
     relative_parts/2,
+    temp_path/1,
     write_temp/2,
     staging_dir/1,
     is_staging_dir_name/1,
@@ -68,22 +69,77 @@ Compares `filename:split/1` components, so a sibling sharing a string prefix
 separator on either side does not matter. Neither path is made absolute;
 callers pass paths in the same form (normally both from
 `filename:absname/1`).
+
+A path with a `..` component is never inside (BT-5070): `filename:absname/1`
+does not collapse it, so `/proj/src/../../x/Foo.bt` would otherwise pass a
+component-prefix test. Symlinks are resolved on both sides before comparing
+(each existing component is read with `file:read_link_all/1`), so a link
+inside the root that points outside it is not inside either. A component that
+does not exist yet is taken as written, so a file about to be created is
+judged by its real parent.
 """.
 -spec path_inside(file:filename(), file:filename()) -> boolean().
 path_inside(Root, Path) ->
-    relative_parts(Root, Path) =/= false.
+    case has_dotdot(Root) orelse has_dotdot(Path) of
+        true -> false;
+        false -> relative_parts(real_path(Root), real_path(Path)) =/= false
+    end.
 
 -doc """
 `Path`'s components below `Root` (`[]` when `Path` is `Root` itself), or
-`false` when `Path` is not inside `Root`. Same comparison as `path_inside/2`.
+`false` when `Path` is not inside `Root`. A purely lexical comparison like
+`path_inside/2`'s, except that it never resolves symlinks; a `..` component in
+either path gives `false`.
 """.
 -spec relative_parts(file:filename(), file:filename()) -> {ok, [file:filename()]} | false.
 relative_parts(Root, Path) ->
-    RootParts = filename:split(Root),
-    PathParts = filename:split(Path),
-    case lists:prefix(RootParts, PathParts) of
-        true -> {ok, lists:nthtail(length(RootParts), PathParts)};
-        false -> false
+    case has_dotdot(Root) orelse has_dotdot(Path) of
+        true ->
+            false;
+        false ->
+            RootParts = filename:split(Root),
+            PathParts = filename:split(Path),
+            case lists:prefix(RootParts, PathParts) of
+                true -> {ok, lists:nthtail(length(RootParts), PathParts)};
+                false -> false
+            end
+    end.
+
+-spec has_dotdot(file:filename()) -> boolean().
+has_dotdot(Path) ->
+    lists:member("..", [unicode:characters_to_list(C) || C <- filename:split(Path)]).
+
+%% Symlink links followed before giving up and taking the rest as written.
+-define(MAX_LINK_HOPS, 40).
+
+%% `Path` with every existing symlink component replaced by its target.
+-spec real_path(file:filename()) -> file:filename().
+real_path(Path) ->
+    real_path(filename:split(Path), "", 0).
+
+-spec real_path([file:filename()], string(), non_neg_integer()) -> file:filename().
+real_path([], Acc, _Hops) ->
+    Acc;
+real_path(Rest, Acc, Hops) when Hops > ?MAX_LINK_HOPS ->
+    filename:join([Acc | Rest]);
+real_path(["." | Rest], Acc, Hops) ->
+    real_path(Rest, Acc, Hops);
+real_path([".." | Rest], Acc, Hops) ->
+    %% Only reachable from a link target; Acc is already a real path.
+    real_path(Rest, filename:dirname(Acc), Hops);
+real_path([C0 | Rest], Acc, Hops) ->
+    C = unicode:characters_to_list(C0),
+    Cur =
+        case Acc of
+            "" -> C;
+            _ -> filename:join(Acc, C)
+        end,
+    case file:read_link_all(Cur) of
+        {ok, Target} ->
+            Abs = filename:absname(Target, filename:dirname(Cur)),
+            real_path(filename:split(Abs) ++ Rest, "", Hops + 1);
+        {error, _} ->
+            real_path(Rest, Cur, Hops)
     end.
 
 -doc """
