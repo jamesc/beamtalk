@@ -156,9 +156,15 @@ fn dirty_tag(workspace_root: &Path) -> Option<String> {
     let untracked = git(&["ls-files", "--others", "--exclude-standard", "-z"]);
     let mut input = diff;
     for rel in untracked.split(|b| *b == 0).filter(|p| !p.is_empty()) {
+        // Delimit each record (NUL-framed path, length-prefixed content) so
+        // different file sets cannot produce the same bytes.
+        input.push(0);
         input.extend_from_slice(rel);
+        input.push(0);
         if let Ok(rel) = std::str::from_utf8(rel) {
-            input.extend(fs::read(workspace_root.join(rel)).unwrap_or_default());
+            let content = fs::read(workspace_root.join(rel)).unwrap_or_default();
+            input.extend_from_slice(&(content.len() as u64).to_le_bytes());
+            input.extend(content);
         }
     }
     compose_dirty_tag(!input.is_empty(), &input)

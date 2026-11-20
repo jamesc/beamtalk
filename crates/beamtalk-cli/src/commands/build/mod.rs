@@ -547,21 +547,24 @@ fn execute_build_passes(
         .provision_sink
         .flush(&compile_ctx.hierarchy.pre_loaded_protocol_sources, options);
 
-    if let Err(e) = compile_to_beam(
+    // BT-5074: the erlc worker writes beams one module at a time, so a batch
+    // that fails - or a build killed mid-batch - can leave a new beam beside a
+    // stored hash that still describes the previous content. Forget the batch's
+    // hashes *before* compiling; success writes them back below. Skipped when
+    // nothing compiles, so a no-change build does no extra sidecar I/O.
+    if !batch_files.is_empty() {
+        crate::commands::build_cache::invalidate_beam_hashes(
+            &env.build_dir,
+            batch_files.iter().copied(),
+        );
+    }
+    compile_to_beam(
         &env.build_dir,
         &core_files,
         changes.changed_files.len() + diagnostics_cache_miss_recompiles,
         changes.unchanged_files.len() - diagnostics_cache_miss_recompiles,
         file_module_pairs.len(),
-    ) {
-        // BT-5074: the batch may have written some beams before failing, so the
-        // stored hashes of its files no longer describe what is on disk.
-        crate::commands::build_cache::invalidate_beam_hashes(
-            &env.build_dir,
-            batch_files.iter().copied(),
-        );
-        return Err(e);
-    }
+    )?;
 
     // Persist diagnostics before the beam-hash sidecar. If the
     // process dies between these two writes, the hash cache must be the one

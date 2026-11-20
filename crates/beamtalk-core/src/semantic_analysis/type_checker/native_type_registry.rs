@@ -446,9 +446,10 @@ impl NativeTypeRegistry {
     /// Sorted `module:function/arity` keys of every function
     /// [`Self::proves_no_result_coercion`] holds for, and (suffixed `#result`)
     /// every function [`Self::proves_inline_result`] holds for. Generated code
-    /// depends on exactly this set, so `beamtalk build` folds it into each
-    /// file's incremental cache key: a spec change that adds or removes a
-    /// proof recompiles the callers.
+    /// depends on exactly this set. The build's cache key digests the whole
+    /// registry via [`Self::fingerprint`], which covers it, so this is no
+    /// longer folded in separately; it remains for tests and tooling that
+    /// inspect the proofs.
     #[must_use]
     pub fn proved_no_coercion_keys(&self) -> Vec<String> {
         let mut keys: Vec<String> = self

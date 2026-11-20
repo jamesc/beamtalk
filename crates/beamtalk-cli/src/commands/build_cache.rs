@@ -306,9 +306,9 @@ pub(crate) fn load_beam_hash_cache(build_dir: &Utf8Path) -> HashMap<String, Stri
     cache.hashes
 }
 
-/// BT-5074: forget the recorded hash of each of `sources` after a failed erlc
-/// batch. The worker writes beams one module at a time, so a batch that fails
-/// part-way can leave a new beam on disk for a file whose stored hash still
+/// BT-5074: forget the recorded hash of each of `sources` before an erlc
+/// batch compiles them. The worker writes beams one module at a time, so a batch that fails
+/// part-way (or a build killed mid-batch) can leave a new beam on disk for a file whose stored hash still
 /// describes the *previous* content. Editing such a file back to that content
 /// would otherwise look unchanged while the beam on disk is the failed
 /// edit's. A dropped entry makes the next build recompile the file.
