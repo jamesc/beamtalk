@@ -565,8 +565,7 @@ defmodule BtAttachWeb.Live.Dock do
   # Run `code` in the session off the LiveView process (BT-5081). A long or
   # hung eval used to freeze the whole tab, because `Facade.dispatch(:eval, …)`
   # waited inside `handle_event`. The task takes the request context and pid by
-  # value (it must not touch the socket), evaluates with the long user-code
-  # timeout, and — if the call timed out — interrupts the session so the
+  # value (it must not touch the socket), evaluates, and — if the call timed out — interrupts the session so the
   # runaway worker does not keep running unobserved. A connected socket spawns
   # a `start_async` task; a disconnected one (only the direct handler unit
   # tests; a dead render receives no events) runs the same job inline and folds
@@ -576,10 +575,7 @@ defmodule BtAttachWeb.Live.Dock do
     ctx = RequestContext.build(socket)
 
     task = fn ->
-      result =
-        Workspace.with_eval_timeout(fn ->
-          Facade.dispatch(:eval, %{session_pid: pid, code: code}, ctx)
-        end)
+      result = Facade.dispatch(:eval, %{session_pid: pid, code: code}, ctx)
 
       if eval_timed_out?(result), do: Facade.dispatch(:interrupt, %{session_pid: pid}, ctx)
       {job, result}

@@ -1430,11 +1430,20 @@ defmodule BtAttach.WorkspaceRpcTest do
       assert Workspace.render_terms([1, 2]) == ["1", "two"]
     end
 
-    test "user-code evals get the long timeout, synchronous callers the short one" do
-      sync = Workspace.rpc_eval_timeout()
-      long = Workspace.with_eval_timeout(fn -> Workspace.rpc_eval_timeout() end)
-      assert long > sync
-      assert Workspace.rpc_eval_timeout() == sync
+    test "a runtime-side eval timeout (a remote exit) is reported as :timeout" do
+      :meck.expect(:erpc, :call, fn
+        _node, :beamtalk_repl_protocol, :decode, _args, _t ->
+          {:ok, :fake_msg}
+
+        _node, :beamtalk_repl_protocol, :get_params, _args, _t ->
+          %{}
+
+        _node, :beamtalk_repl_ops, :dispatch, _args, _t ->
+          :erlang.exit({:exception, {:timeout, {:gen_server, :call, []}}})
+      end)
+
+      assert Workspace.eval(self(), "[true] whileTrue") ==
+               {:error, {:unreachable, :timeout}, "", []}
     end
 
     test "a remote exception keeps the {:badrpc, {:EXIT, _}} shape" do

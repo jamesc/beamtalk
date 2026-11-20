@@ -90,45 +90,21 @@ defmodule BtAttach.Workspace do
   #   * `@rpc_long_timeout` (60 s)  — compile / load / reload / flush / git /
   #     test-discovery: real work (erlc, file IO, `git`) that is bounded but
   #     slower than a lookup.
-  #   * `@rpc_sync_eval_timeout` (30 s) — an eval a handler awaits *inside* the
-  #     LiveView process (generated one-liners such as a rename flush or a
-  #     class-modal `evaluate`): these are short by construction, and the
-  #     LiveView is blocked for the duration, so the bound is deliberately
-  #     tighter than the user-code one.
-  #   * `@rpc_eval_timeout` (120 s) — evaluating user code typed into the
-  #     Workspace / REPL, which can legitimately run long. It runs off the
-  #     LiveView process (`with_eval_timeout/1`), so the tab stays usable, and
-  #     the user can interrupt it sooner (`interrupt/1`).
+  #   * `@rpc_eval_timeout` (35 s) — evaluating code. The runtime itself caps an
+  #     eval at 30 s (`beamtalk_repl_shell:eval/2` is a
+  #     `gen_server:call(…, 30000)`), so 35 s lets that bound fire first and
+  #     report a timeout, with a little slack for the distribution round-trip;
+  #     a larger value here would never be reached. Evals the user typed run off
+  #     the LiveView process (so the tab stays usable and Stop can interrupt
+  #     them sooner); a timed-out eval is interrupted so the runaway worker does
+  #     not keep the session busy.
   @rpc_timeout 10_000
   @rpc_interactive_timeout 5_000
   @rpc_long_timeout 60_000
-  @rpc_sync_eval_timeout 30_000
-  @rpc_eval_timeout 120_000
+  @rpc_eval_timeout 35_000
 
-  @doc """
-  The timeout (ms) the next `eval/2` issued by this process will use: the
-  short synchronous bound by default, the long user-code bound inside
-  `with_eval_timeout/1`.
-  """
-  def rpc_eval_timeout, do: Process.get(:bt_attach_eval_timeout, @rpc_sync_eval_timeout)
-
-  @doc """
-  Run `fun` with the long user-code eval timeout (BT-5081). For the off-socket
-  `start_async` tasks that evaluate what the user typed: the LiveView is not
-  blocked, so the call may wait up to two minutes. Scoped to the calling
-  (task) process via its process dictionary and restored afterwards.
-  """
-  def with_eval_timeout(fun) when is_function(fun, 0) do
-    previous = Process.put(:bt_attach_eval_timeout, @rpc_eval_timeout)
-
-    try do
-      fun.()
-    after
-      if previous == nil,
-        do: Process.delete(:bt_attach_eval_timeout),
-        else: Process.put(:bt_attach_eval_timeout, previous)
-    end
-  end
+  @doc "The timeout (ms) an eval's workspace call waits."
+  def rpc_eval_timeout, do: @rpc_eval_timeout
 
   @doc """
   Interrupt the evaluation running in `session_pid` (the Workspace dock's Stop
@@ -331,7 +307,7 @@ defmodule BtAttach.Workspace do
         {:error, reason, "", []}
 
       {:badrpc, reason} ->
-        {:error, {:unreachable, reason}, "", []}
+        {:error, {:unreachable, eval_timeout_reason(reason)}, "", []}
 
       # The op contract is a small tagged union; treat anything else as a data
       # error rather than letting a CaseClauseError crash the LiveView.
@@ -339,6 +315,13 @@ defmodule BtAttach.Workspace do
         {:error, {:unexpected_reply, other}, "", []}
     end
   end
+
+  # The runtime's own 30 s eval call times out inside the remote process, which
+  # `:erpc` reports as an exit carrying `{:timeout, _}` rather than its own
+  # `:timeout`. Fold both into `:timeout` so the caller sees one shape and knows
+  # to interrupt the still-running worker.
+  defp eval_timeout_reason({:EXIT, {:timeout, _}}), do: :timeout
+  defp eval_timeout_reason(reason), do: reason
 
   # A workspace warning is a compiler-port `#{message, hint?}` map (BT-4449) or
   # a runtime-raised plain binary; both become one `%{message, hint}` shape.
@@ -1149,7 +1132,7 @@ defmodule BtAttach.Workspace do
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->
         params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-        rpc(:beamtalk_repl_ops, :dispatch, ["eval", params, msg, session_pid], rpc_eval_timeout())
+        rpc(:beamtalk_repl_ops, :dispatch, ["eval", params, msg, session_pid], @rpc_eval_timeout)
 
       other ->
         other
