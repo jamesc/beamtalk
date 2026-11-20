@@ -296,3 +296,86 @@ fn class_rename_without_resource_operations_asks_for_a_manual_file_rename() {
     );
     assert!(outcome.message.expect("message").contains("Tally.bt"));
 }
+
+// ---------------------------------------------------------------------
+// BT-5078: a closed file's indexed text must match disk before edits are
+// computed from it.
+// ---------------------------------------------------------------------
+
+/// Counter.bt open in the editor; use.bt closed, indexed from `indexed_text`
+/// and on disk as `disk_text` (`None` = absent).
+fn closed_user_fixture(
+    name: &str,
+    indexed_text: &str,
+    disk_text: Option<&str>,
+) -> (tower_lsp::LspService<Backend>, Url, Utf8PathBuf) {
+    let dir = Utf8PathBuf::from_path_buf(unique_temp_dir(name)).expect("utf8 temp dir");
+    fs::create_dir_all(&dir).expect("create dir");
+    let counter = dir.join("Counter.bt");
+    let user = dir.join("use.bt");
+    if let Some(text) = disk_text {
+        fs::write(&user, text).expect("write use.bt");
+    }
+    let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+    let uri = {
+        let backend: &Backend = service.inner();
+        let uri = open_test_file(backend, &counter, COUNTER);
+        // Indexed but not open: no `versions` entry, like a preloaded file.
+        backend
+            .service
+            .lock_recover()
+            .update_file(user.clone(), indexed_text.to_string());
+        uri
+    };
+    (service, uri, user)
+}
+
+#[tokio::test]
+async fn rename_refuses_when_a_closed_file_changed_on_disk() {
+    // `git pull` rewrote use.bt after it was indexed.
+    let (service, uri, user) = closed_user_fixture(
+        "bt-5078-rename-stale",
+        USER,
+        Some("-- pulled\n\nx := Counter new increment\n"),
+    );
+    let backend: &Backend = service.inner();
+    let err = backend
+        .rename(rename_params(&uri, 0, 20, "Tally"))
+        .await
+        .expect_err("stale closed file must refuse, not edit at old offsets");
+    assert!(err.message.contains("changed on disk"), "{}", err.message);
+    assert!(err.message.contains("use.bt"), "{}", err.message);
+    // The index was refreshed from disk, so a retry plans against fresh text.
+    assert_eq!(
+        backend.service.lock_recover().file_source(&user).as_deref(),
+        Some("-- pulled\n\nx := Counter new increment\n")
+    );
+    let retry = backend
+        .rename(rename_params(&uri, 0, 20, "Tally"))
+        .await
+        .expect("retry after refresh succeeds");
+    assert!(retry.is_some());
+}
+
+#[tokio::test]
+async fn rename_refuses_when_a_closed_file_was_deleted() {
+    let (service, uri, _user) = closed_user_fixture("bt-5078-rename-deleted", USER, None);
+    let backend: &Backend = service.inner();
+    let err = backend
+        .rename(rename_params(&uri, 0, 20, "Tally"))
+        .await
+        .expect_err("deleted closed file must refuse");
+    assert!(err.message.contains("use.bt"), "{}", err.message);
+}
+
+#[tokio::test]
+async fn rename_proceeds_when_closed_files_match_disk() {
+    let (service, uri, _user) = closed_user_fixture("bt-5078-rename-fresh", USER, Some(USER));
+    let backend: &Backend = service.inner();
+    let edit = backend
+        .rename(rename_params(&uri, 0, 20, "Tally"))
+        .await
+        .expect("fresh closed file renames")
+        .expect("edit");
+    assert!(edit.document_changes.is_some() || edit.changes.is_some());
+}
