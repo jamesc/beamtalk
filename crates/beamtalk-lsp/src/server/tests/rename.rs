@@ -18,13 +18,23 @@ const FULL: RenameClientCaps = RenameClientCaps {
     rename_file: true,
 };
 
+/// `/p/X.bt` is absolute on Unix but has no drive on Windows, where
+/// `Url::from_file_path` rejects it; give it one there.
+fn absolute_test_path(path: &str) -> Utf8PathBuf {
+    if cfg!(windows) {
+        Utf8PathBuf::from(format!("C:{path}"))
+    } else {
+        Utf8PathBuf::from(path)
+    }
+}
+
 fn backend_with(files: &[(&str, &str)]) -> (tower_lsp::LspService<Backend>, Vec<Url>) {
     let (service, _socket) = tower_lsp::LspService::new(Backend::new);
     let uris = {
         let backend: &Backend = service.inner();
         files
             .iter()
-            .map(|(path, text)| open_test_file(backend, &Utf8PathBuf::from(*path), text))
+            .map(|(path, text)| open_test_file(backend, &absolute_test_path(path), text))
             .collect()
     };
     (service, uris)
@@ -204,11 +214,11 @@ async fn selector_rename_annotates_candidates_when_the_client_supports_it() {
 
 fn selector_plan() -> (beamtalk_language_service::RenamePlan, SimpleLanguageService) {
     let mut svc = SimpleLanguageService::new();
-    svc.update_file(Utf8PathBuf::from("/p/Counter.bt"), COUNTER.to_string());
-    svc.update_file(Utf8PathBuf::from("/p/use.bt"), USER.to_string());
+    svc.update_file(absolute_test_path("/p/Counter.bt"), COUNTER.to_string());
+    svc.update_file(absolute_test_path("/p/use.bt"), USER.to_string());
     let plan = svc
         .plan_rename(
-            &Utf8PathBuf::from("/p/Counter.bt"),
+            &absolute_test_path("/p/Counter.bt"),
             beamtalk_language_service::Position::new(1, 4),
             "bump",
         )
@@ -263,10 +273,10 @@ fn client_without_document_changes_gets_a_plain_changes_map() {
 #[test]
 fn class_rename_without_resource_operations_asks_for_a_manual_file_rename() {
     let mut svc = SimpleLanguageService::new();
-    svc.update_file(Utf8PathBuf::from("/p/Counter.bt"), COUNTER.to_string());
+    svc.update_file(absolute_test_path("/p/Counter.bt"), COUNTER.to_string());
     let plan = svc
         .plan_rename(
-            &Utf8PathBuf::from("/p/Counter.bt"),
+            &absolute_test_path("/p/Counter.bt"),
             beamtalk_language_service::Position::new(0, 20),
             "Tally",
         )
