@@ -54,8 +54,7 @@ TestCase subclass: InspectorTest
       value: 3
       kind: #slot
       drillable: false
-    self assert: (f printString startsWith: "#InspectorField<")
-    self assert: (f printString includesSubstring: "x: 3")
+    self assert: f printString equals: "#InspectorField<x: 3>"
 
   // BT-4581: runtime-minted fields carry a String label, so printString's
   // `++` chain works and labels compare equal to String literals.
@@ -64,8 +63,7 @@ TestCase subclass: InspectorTest
 
   testRuntimeFieldPrintStringForDictionary =>
     f := (Inspector on: #{#a => 1}) fields first
-    self assert: (f printString startsWith: "#InspectorField<")
-    self assert: (f printString includesSubstring: ": 1>")
+    self assert: f printString equals: "#InspectorField<a →: 1>"
 
   testRuntimeFieldPrintStringForEts =>
     table := Ets new: #inspectorFieldLabelEts type: #set
