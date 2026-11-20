@@ -59,7 +59,7 @@ pub(crate) fn generate_package_outputs(
         &hierarchy.class_module_index,
         &pkg.name,
     );
-    let alias_metadata = build_alias_metadata(outputs.source_files);
+    let alias_metadata = build_alias_metadata(outputs.source_files, Some(project_root));
 
     // Generate OTP application callback when [application] supervisor is set.
     let application_config = manifest::find_application_config(project_root)?;
@@ -91,6 +91,10 @@ pub(crate) fn generate_package_outputs(
         );
         Some(cb_module_name)
     } else {
+        // BT-5074: `[application]` was dropped, so the callback this package
+        // generated earlier is stale (and is not a `bt@*` module the stale
+        // cleaner owns).
+        remove_stale_app_callback(build_dir, &pkg.name)?;
         None
     };
 
@@ -178,7 +182,9 @@ fn generate_class_corpus(
         })
         .collect();
 
-    if !class_entries.is_empty() {
+    if class_entries.is_empty() {
+        remove_if_present(&corpus_dir.join("class_corpus.json"))?;
+    } else {
         let class_json = serde_json::to_string_pretty(&class_entries).into_diagnostic()?;
         let class_corpus_path = corpus_dir.join("class_corpus.json");
         fs::write(&class_corpus_path, format!("{class_json}\n"))
@@ -272,7 +278,9 @@ fn generate_example_corpus(
         }));
     }
 
-    if !corpus_entries.is_empty() {
+    if corpus_entries.is_empty() {
+        remove_if_present(&corpus_dir.join("corpus.json"))?;
+    } else {
         corpus_entries.sort_by(|a, b| {
             let a_id = a["id"].as_str().unwrap_or("");
             let b_id = b["id"].as_str().unwrap_or("");
@@ -291,6 +299,29 @@ fn generate_example_corpus(
         );
     }
     Ok(())
+}
+
+/// Remove a generated file that this build no longer produces (BT-5074): a
+/// package that loses its last class or source would otherwise keep serving
+/// the previous build's corpus. Absent is fine.
+fn remove_if_present(path: &Utf8Path) -> Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => {
+            info!(path = %path, "Removed stale generated file");
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to remove stale '{path}'")),
+    }
+}
+
+/// Remove the generated `beamtalk_<pkg>_app` callback (`.erl` and `.beam`).
+fn remove_stale_app_callback(build_dir: &Utf8Path, pkg_name: &str) -> Result<()> {
+    let module = format!("beamtalk_{pkg_name}_app");
+    remove_if_present(&build_dir.join(format!("{module}.beam")))?;
+    remove_if_present(&build_dir.join(format!("{module}.erl")))
 }
 
 /// Extract leading doc comments from source, skipping license headers.
@@ -441,7 +472,10 @@ pub(crate) fn build_class_metadata(
 /// Returned in `source_files` order, **not** sorted by name —
 /// [`app_file::format_type_aliases_entry`] owns the sort for deterministic
 /// `.app` output, so sorting here too would be redundant.
-pub(crate) fn build_alias_metadata(source_files: &[Utf8PathBuf]) -> Vec<app_file::AliasMetadata> {
+pub(crate) fn build_alias_metadata(
+    source_files: &[Utf8PathBuf],
+    package_root: Option<&Utf8Path>,
+) -> Vec<app_file::AliasMetadata> {
     let mut result = Vec::new();
     for file in source_files {
         let Ok(source) = fs::read_to_string(file) else {
@@ -456,7 +490,12 @@ pub(crate) fn build_alias_metadata(source_files: &[Utf8PathBuf]) -> Vec<app_file
                     &alias_def.annotation,
                 ),
                 doc: alias_def.doc_comment.clone(),
-                source_file: to_forward_slash(file.as_str()),
+                source_file: to_forward_slash(
+                    package_root
+                        .and_then(|root| file.strip_prefix(root).ok())
+                        .unwrap_or(file)
+                        .as_str(),
+                ),
                 internal: alias_def.is_internal,
             });
         }

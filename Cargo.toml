@@ -119,6 +119,9 @@ terminal_size = "0.4"
 
 # Cryptography
 sha2 = "0.11"
+# why: append manifests to the release tarball in-process; Windows has no gzip (BT-5077)
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+tar = { version = "0.4", default-features = false }
 rand = "0.10"
 base64 = "0.23"
 

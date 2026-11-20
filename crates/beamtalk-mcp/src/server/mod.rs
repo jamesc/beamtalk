@@ -278,6 +278,26 @@ fn validate_selector(sel: &str) -> Result<(), rmcp::ErrorData> {
         .map_err(|e| rmcp::ErrorData::invalid_params(e, None))
 }
 
+/// Splits `code` at a client-supplied byte `cursor` for `complete`.
+///
+/// A missing cursor means "end of code" and one past the end is clamped. A
+/// cursor inside a multi-byte UTF-8 character is rejected with
+/// `invalid_params` rather than slicing there (which panics).
+fn code_up_to_cursor(code: &str, cursor: Option<usize>) -> Result<(&str, usize), rmcp::ErrorData> {
+    let cursor = cursor.unwrap_or(code.len()).min(code.len());
+    code.get(..cursor)
+        .map(|prefix| (prefix, cursor))
+        .ok_or_else(|| {
+            rmcp::ErrorData::invalid_params(
+                format!(
+                    "Invalid cursor: {cursor} is not on a character boundary. \
+                     The cursor is a byte offset into `code`."
+                ),
+                None,
+            )
+        })
+}
+
 /// Pretty-print a JSON value, falling back to `Display` on serialization error.
 fn pretty_json(value: &serde_json::Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())

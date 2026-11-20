@@ -22,7 +22,23 @@ print(d.get('tool_input', {}).get('file_path', ''))
 
 case "$FILE_PATH" in
   *.rs)
-    OUTPUT=$(cargo check --quiet 2>&1)
+    # Scope the check to the edited file's crate (nearest enclosing Cargo.toml):
+    # pointing --manifest-path at a workspace member checks that package only,
+    # not the whole workspace. Fall back to an unscoped check when none is found.
+    MANIFEST=""
+    DIR=$(dirname "$FILE_PATH")
+    while [[ "$DIR" != "/" && "$DIR" != "." && -n "$DIR" ]]; do
+      if [[ -f "$DIR/Cargo.toml" ]]; then
+        MANIFEST="$DIR/Cargo.toml"
+        break
+      fi
+      DIR=$(dirname "$DIR")
+    done
+    if [[ -n "$MANIFEST" ]]; then
+      OUTPUT=$(cargo check --quiet --manifest-path "$MANIFEST" 2>&1)
+    else
+      OUTPUT=$(cargo check --quiet 2>&1)
+    fi
     RC=$?
     if [[ $RC -ne 0 ]]; then
       echo "cargo check failed after editing $(basename "$FILE_PATH"):"
@@ -39,7 +55,14 @@ case "$FILE_PATH" in
 
   *.erl|*.hrl)
     RUNTIME_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}/runtime"
-    OUTPUT=$(cd "$RUNTIME_DIR" && rebar3 compile 2>&1)
+    # Same lock as the Justfile's `build-erlang` and the SessionStart warmer
+    # (rebar3 has no guard against two writers to one runtime/_build). flock is
+    # Linux-only; without it (macOS) compile unguarded, as the Justfile does.
+    if command -v flock >/dev/null 2>&1; then
+      OUTPUT=$(cd "$RUNTIME_DIR" && flock .rebar3-compile.lock rebar3 compile 2>&1)
+    else
+      OUTPUT=$(cd "$RUNTIME_DIR" && rebar3 compile 2>&1)
+    fi
     RC=$?
 
     if [[ $RC -ne 0 ]]; then

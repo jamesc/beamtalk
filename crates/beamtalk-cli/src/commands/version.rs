@@ -166,11 +166,12 @@ pub(crate) fn set_version_in_manifest(manifest_path: &Utf8Path, new_version: &st
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to read '{manifest_path}'"))?;
 
-    let lines: Vec<&str> = content.lines().collect();
+    // Keep each line's own terminator so a CRLF manifest stays CRLF.
+    let lines: Vec<&str> = content.split_inclusive('\n').collect();
 
     let package_idx = lines
         .iter()
-        .position(|l| l.trim() == "[package]")
+        .position(|l| super::toml_utils::table_header_name(l) == Some("package"))
         .ok_or_else(|| miette::miette!("No [package] section found in '{manifest_path}'"))?;
 
     let section_end = lines
@@ -195,15 +196,15 @@ pub(crate) fn set_version_in_manifest(manifest_path: &Utf8Path, new_version: &st
             )
         })?;
 
-    let new_line = replace_version_value(lines[version_idx], new_version, manifest_path)?;
+    // `replace_version_value` works on the line without its terminator.
+    let raw = lines[version_idx];
+    let body = raw.trim_end_matches(['\r', '\n']);
+    let terminator = &raw[body.len()..];
+    let new_line = replace_version_value(body, new_version, manifest_path)?;
 
     let mut new_lines: Vec<String> = lines.iter().map(|l| (*l).to_string()).collect();
-    new_lines[version_idx] = new_line;
-
-    let mut new_content = new_lines.join("\n");
-    if content.ends_with('\n') {
-        new_content.push('\n');
-    }
+    new_lines[version_idx] = format!("{new_line}{terminator}");
+    let new_content = new_lines.concat();
 
     super::toml_utils::write_validated_manifest(manifest_path, &new_content)
 }
@@ -457,6 +458,18 @@ mod tests {
     // -----------------------------------------------------------------------
     // set_version_in_manifest — formatting preservation
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_set_version_preserves_crlf_and_commented_header() {
+        let temp = TempDir::new().unwrap();
+        let content = "[package] # identity\r\nname = \"my_app\"\r\nversion = \"0.1.0\"\r\n\r\n[dependencies]\r\n";
+        let manifest_path = write_manifest(&temp, content);
+
+        set_version_in_manifest(&manifest_path, "0.2.0").unwrap();
+
+        let new_content = std::fs::read_to_string(&manifest_path).unwrap();
+        assert_eq!(new_content, content.replace("0.1.0", "0.2.0"));
+    }
 
     #[test]
     fn test_set_version_preserves_surrounding_formatting() {

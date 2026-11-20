@@ -89,7 +89,7 @@ use display::format_value;
 use display::{format_error, history_path, output_mode};
 use helper::ReplHelper;
 use process::{
-    BeamChildGuard, connect_with_retries, drain_child_stderr, read_port_from_child,
+    BeamChildGuard, ForegroundNode, connect_with_retries, drain_child_stderr, read_port_from_child,
     resolve_node_name, resolve_port, start_beam_node,
 };
 
@@ -169,22 +169,6 @@ fn collect_hex_dep_names_for_project(project_root: &std::path::Path) -> Result<V
         return Ok(Vec::new());
     };
     crate::commands::deps::lockfile::Lockfile::collect_hex_dep_names(root)
-}
-
-/// Read the Erlang default cookie from ~/.erlang.cookie.
-/// Used for foreground mode where no workspace cookie exists.
-fn read_erlang_cookie() -> Option<String> {
-    let home = dirs::home_dir()?;
-    let cookie_path = home.join(".erlang.cookie");
-    let cookie = std::fs::read_to_string(cookie_path)
-        .ok()?
-        .trim()
-        .to_string();
-    if cookie.is_empty() {
-        None
-    } else {
-        Some(cookie)
-    }
 }
 
 /// Decide whether ephemeral cleanup should stop a workspace node.
@@ -355,7 +339,11 @@ pub fn run(
             hex_dep_names: &hex_dep_names,
         };
 
-        let mut child = start_beam_node(
+        let ForegroundNode {
+            mut child,
+            cookie: fg_cookie,
+            cookie_dir,
+        } = start_beam_node(
             node_name.as_ref(),
             &project_root,
             &extra_code_paths,
@@ -374,9 +362,6 @@ pub fn run(
         // and capture OTP logger/VM diagnostic output.
         let _stderr_drain = drain_child_stderr(&mut child);
 
-        // Foreground mode: use Erlang cookie, or "nocookie" for nodes without -setcookie
-        let fg_cookie = read_erlang_cookie().unwrap_or_else(|| "nocookie".to_string());
-
         // Foreground: compute connect host from bind_addr
         let fg_host = if bind_addr == std::net::Ipv4Addr::UNSPECIFIED {
             "127.0.0.1".to_string()
@@ -385,7 +370,10 @@ pub fn run(
         };
 
         (
-            Some(BeamChildGuard { child }),
+            Some(BeamChildGuard {
+                child,
+                _cookie_dir: Some(cookie_dir),
+            }),
             true,
             None,
             fg_host,
@@ -1048,7 +1036,10 @@ mod tests {
 
         // Wrap in guard and drop it
         {
-            let _guard = BeamChildGuard { child };
+            let _guard = BeamChildGuard {
+                child,
+                _cookie_dir: None,
+            };
             // Guard is dropped here
         }
 

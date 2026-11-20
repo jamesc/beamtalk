@@ -75,7 +75,7 @@ async fn diagnostics_for_main(app: &Path, main_source: &str) -> Vec<String> {
         .await;
     let utf8 = Utf8PathBuf::from_path_buf(main_path).expect("temp path is UTF-8");
     open_test_file(backend, &utf8, main_source);
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     svc.diagnostics(&utf8)
         .into_iter()
         .map(|d| d.message.to_string())
@@ -287,7 +287,7 @@ async fn path_dependency_files_are_stamped_with_their_own_package() {
         .expect("temp path is UTF-8");
     let app_file =
         Utf8PathBuf::from_path_buf(app.join("src").join("main.bt")).expect("temp path is UTF-8");
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     assert_eq!(
         svc.project_index()
             .alias_package_for_file(&dep_file)

@@ -53,6 +53,7 @@ mod consulted_surface;
 mod cross_file_resolution;
 mod flattened_provision_reporting;
 mod incremental_build;
+mod module_collisions;
 mod module_naming;
 mod native_deps_and_headers;
 mod native_erlang_build;
