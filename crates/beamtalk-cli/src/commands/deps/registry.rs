@@ -150,9 +150,15 @@ impl RegistryEntry {
 
 // Unknown fields are deliberately *accepted* here, unlike in `beamtalk.toml`.
 // The index is a separately versioned artifact served to clients this binary
-// does not control: the day it starts carrying `checksum`, `yanked`, or
-// `licenses`, every already-released beamtalk must keep reading it rather than
-// hard-failing on every package that adopts the new key.
+// does not control: the day it starts carrying `yanked` or `licenses`, every
+// already-released beamtalk must keep reading it rather than hard-failing on
+// every package that adopts the new key.
+//
+// The index format has no `checksum` field (BT-5068). Integrity of a registry
+// dependency is the commit SHA pinned in `beamtalk.lock` on first resolution
+// and enforced on every later fresh clone, so an unverified checksum here
+// would only imply a guarantee nothing provides. A `checksum` key an index
+// happens to carry is ignored like any other unknown key.
 #[derive(Debug, Deserialize)]
 struct TomlIndexEntry {
     name: String,
@@ -693,6 +699,17 @@ pub fn resolve_release(
     name: &str,
     version: &str,
 ) -> Result<RegistryRelease> {
+    let release = lookup_release(project_root, location, name, version)?;
+    check_release_url(location, name, &release)?;
+    Ok(release)
+}
+
+fn lookup_release(
+    project_root: &Utf8Path,
+    location: &RegistryLocation,
+    name: &str,
+    version: &str,
+) -> Result<RegistryRelease> {
     // First attempt: whatever index is already on disk.
     let index_root = ensure_index(location, project_root, false)?;
     if let Some(entry) = read_entry(&index_root, name)?
@@ -744,6 +761,29 @@ pub fn resolve_release(
     );
 }
 
+/// Whether the registry itself is local, so a `file://` release URL is
+/// something its operator chose rather than something a remote index smuggled in.
+pub(crate) fn is_local_registry(location: &RegistryLocation) -> bool {
+    match location {
+        RegistryLocation::LocalDir(_) => true,
+        RegistryLocation::Git(url) => url.starts_with("file://"),
+    }
+}
+
+/// Screen a release's git URL. The index is third-party data, so only
+/// `https://` and `ssh://` are accepted (`file://` for a local registry).
+fn check_release_url(
+    location: &RegistryLocation,
+    name: &str,
+    release: &RegistryRelease,
+) -> Result<()> {
+    beamtalk_package::manifest::validate_registry_release_url(
+        name,
+        &release.git,
+        is_local_registry(location),
+    )
+}
+
 /// Resolve a package name to its highest published release.
 ///
 /// Used by `deps add NAME` when no `--version` is given. Follows the same
@@ -756,6 +796,16 @@ pub fn resolve_release(
 /// the package has no published releases. The error lists what packages the
 /// index does have.
 pub fn resolve_latest_release(
+    project_root: &Utf8Path,
+    location: &RegistryLocation,
+    name: &str,
+) -> Result<RegistryRelease> {
+    let release = lookup_latest_release(project_root, location, name)?;
+    check_release_url(location, name, &release)?;
+    Ok(release)
+}
+
+fn lookup_latest_release(
     project_root: &Utf8Path,
     location: &RegistryLocation,
     name: &str,
@@ -1769,6 +1819,30 @@ git = "g"
         assert_eq!(release.version, "0.2.1");
         assert_eq!(release.git, "https://example.test/yaml");
         assert_eq!(release.tag, "release-0.2.1");
+    }
+
+    #[test]
+    fn test_resolve_release_rejects_insecure_and_local_urls_from_index() {
+        let project = TempDir::new().unwrap();
+        for (url, why) in [
+            ("http://example.test/yaml", "http"),
+            ("git://example.test/yaml", "git"),
+            ("file:///etc/some-repo", "file"),
+        ] {
+            let entry =
+                format!("name = \"yaml\"\n\n[[versions]]\nversion = \"0.1.0\"\ngit = \"{url}\"\n");
+            let (_dir, root) = make_index(&[("yaml", &entry)]);
+            // A local-dir registry may use file://; a remote one may not.
+            let local = RegistryLocation::LocalDir(root.clone());
+            let remote_like = RegistryLocation::Git("https://example.test/index".to_string());
+            assert!(is_local_registry(&local));
+            assert!(!is_local_registry(&remote_like));
+
+            let err = resolve_release(&utf8(&project), &local, "yaml", "0.1.0");
+            assert_eq!(err.is_ok(), why == "file", "{url}: {err:?}");
+            let err = resolve_latest_release(&utf8(&project), &local, "yaml");
+            assert_eq!(err.is_ok(), why == "file", "{url}: {err:?}");
+        }
     }
 
     #[test]

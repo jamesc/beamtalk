@@ -428,6 +428,8 @@ web-remote name:
     export PHX_SERVER=true
     export MIX_ENV=prod
     export PORT="${PORT:-8443}"
+    # Remote recipe: listen beyond loopback. Boot refuses this without OIDC (BT-5065).
+    export BT_ATTACH_BIND_IP="${BT_ATTACH_BIND_IP:-::}"
     echo "🔒 Remote LiveView IDE → ${node}  (https://${PHX_HOST}:${PORT}, OIDC)"
     echo "   Dist link is internal infrastructure; keep it off untrusted networks (ADR 0091)."
     cd editors/liveview
