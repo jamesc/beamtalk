@@ -21,7 +21,16 @@ if [ "${EVENT_NAME}" = "release" ] && [ -n "${RELEASE_TAG}" ]; then
 elif [ -n "${INPUT_TAG}" ]; then
     TAG="${INPUT_TAG}"
 else
-    TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev")
+    # Only release tags count: rolling tags such as `edge` and `nightly` are
+    # reachable from main and would otherwise win (BT-5094).
+    TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "dev")
+fi
+
+# Reject anything that is not a version (`edge`, `nightly`, the `dev`
+# fallback, a typo in the dispatch input) before it names release artifacts.
+if ! [[ "${TAG}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+    echo "error: '${TAG}' is not a release version (expected e.g. v0.5.0)" >&2
+    exit 1
 fi
 
 VERSION="${TAG#v}"
