@@ -408,11 +408,11 @@ pub(crate) fn write_atomic(
     write_atomic_file(path.as_std_path(), contents.as_bytes(), tmp_prefix, false)
 }
 
-/// [`write_atomic`], skipped when `path` already holds exactly `contents`.
-///
-/// For build outputs (cache sidecars, `.app`, corpus files) that most builds
-/// regenerate byte-for-byte: an unchanged file costs one read instead of a
-/// staged write and two `fsync`s, and its mtime does not move (BT-5075).
+/// Atomic (temp file + rename, no `fsync`) write of a regenerable build output
+/// (cache sidecar, `.app`, corpus file), skipped when `path` already holds
+/// exactly `contents`. A concurrent reader sees the whole old or new file; after
+/// a power loss the next build simply regenerates it, so the two `fsync`s
+/// [`write_atomic`] pays would only slow every build (BT-5075).
 pub(crate) fn write_atomic_if_changed(
     path: &Utf8Path,
     contents: &str,
@@ -421,7 +421,16 @@ pub(crate) fn write_atomic_if_changed(
     if fs::read(path).is_ok_and(|existing| existing == contents.as_bytes()) {
         return Ok(());
     }
-    write_atomic(path, contents, tmp_prefix)
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    write_atomic_impl(
+        path.as_std_path(),
+        contents.as_bytes(),
+        tmp_prefix,
+        false,
+        false,
+    )
 }
 
 /// The one atomic file write for the CLI (BT-5017): stage the bytes in a
@@ -448,6 +457,19 @@ pub(crate) fn write_atomic_file(
     contents: &[u8],
     tmp_prefix: &str,
     private: bool,
+) -> std::io::Result<()> {
+    write_atomic_impl(path, contents, tmp_prefix, private, true)
+}
+
+/// [`write_atomic_file`] with `durable` choosing whether to `fsync` the file
+/// and its directory. Without it a reader still sees the whole old or new file,
+/// but a power loss may leave the old content or an empty file.
+fn write_atomic_impl(
+    path: &std::path::Path,
+    contents: &[u8],
+    tmp_prefix: &str,
+    private: bool,
+    durable: bool,
 ) -> std::io::Result<()> {
     use std::io::Write as _;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -477,7 +499,9 @@ pub(crate) fn write_atomic_file(
         if !private && let Ok(existing) = fs::metadata(&target) {
             file.set_permissions(existing.permissions())?;
         }
-        file.sync_all()?;
+        if durable {
+            file.sync_all()?;
+        }
         drop(file);
         fs::rename(&tmp, &target)
     })();
@@ -486,7 +510,7 @@ pub(crate) fn write_atomic_file(
         return Err(e);
     }
     #[cfg(unix)]
-    if let Some(dir) = target.parent() {
+    if durable && let Some(dir) = target.parent() {
         // Best effort: the data is already durable; this only persists the rename.
         let _ = fs::File::open(dir).and_then(|d| d.sync_all());
     }
