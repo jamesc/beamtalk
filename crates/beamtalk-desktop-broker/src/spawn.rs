@@ -250,6 +250,39 @@ impl SpawnedFront {
     pub fn port_file(&self) -> &Path {
         &self.port_file
     }
+
+    /// Stop the front and reap it: a graceful signal first, a forced kill only
+    /// if it has not exited within `grace` (BT-5081).
+    ///
+    /// A bare [`Child::kill`] is `SIGKILL`, which gives the front's BEAM no
+    /// chance to shut down — so the LiveView's `terminate/2` never ran and its
+    /// workspace sessions were abandoned. On Unix this sends `SIGTERM` (the
+    /// BEAM turns it into `init:stop/0`, which terminates the Phoenix views and so
+    /// runs their cleanup), polls for exit up to `grace`, then falls back to
+    /// `SIGKILL`. On Windows there is no graceful-signal equivalent for an
+    /// arbitrary child, so it is the forced kill (the Job Object then takes the
+    /// rest of the process tree down).
+    pub fn stop(&mut self, grace: Duration) {
+        #[cfg(unix)]
+        if let Ok(pid) = i32::try_from(self.child.id()) {
+            // SAFETY: kill(2) on the PID of our own, still-unreaped child.
+            unsafe { libc::kill(pid, libc::SIGTERM) };
+            let deadline = std::time::Instant::now() + grace;
+            loop {
+                match self.child.try_wait() {
+                    Ok(Some(_)) => return,
+                    Ok(None) if std::time::Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(25));
+                    }
+                    _ => break,
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = grace;
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 impl std::ops::Deref for SpawnedFront {
@@ -853,6 +886,80 @@ fn detach(_cmd: &mut Command) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `SpawnedFront` around an arbitrary shell script, for `stop` tests.
+    #[cfg(unix)]
+    fn script_front(script: &str) -> SpawnedFront {
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn sh");
+        SpawnedFront {
+            child,
+            instance_id: "test".to_string(),
+            port_file: PathBuf::from("unused"),
+        }
+    }
+
+    /// BT-5081: `stop` must deliver `SIGTERM` first so a front that traps it can
+    /// run its cleanup (the BEAM's `init:stop`, the LiveView's `terminate/2`).
+    #[cfg(unix)]
+    #[test]
+    fn stop_sends_sigterm_so_the_front_can_clean_up() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let marker = dir.path().join("cleaned-up");
+        // `sleep` in the foreground would defer the trap until it ends, so wait on
+        // a backgrounded sleep. Signal readiness so the trap is installed first.
+        let ready = dir.path().join("ready");
+        let script = format!(
+            "trap 'touch \"{}\"; exit 0' TERM; touch \"{}\"; while :; do sleep 0.05; done",
+            marker.display(),
+            ready.display()
+        );
+        let mut front = script_front(&script);
+        for _ in 0..200 {
+            if ready.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(ready.exists(), "script never installed its trap");
+
+        front.stop(Duration::from_secs(5));
+        assert!(marker.exists(), "SIGTERM handler did not run before exit");
+    }
+
+    /// A front that ignores `SIGTERM` is force-killed once the grace elapses, and
+    /// `stop` still returns (it never hangs on a wedged front).
+    #[cfg(unix)]
+    #[test]
+    fn stop_force_kills_a_front_that_ignores_sigterm_after_the_grace() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let ready = dir.path().join("ready");
+        let script = format!(
+            "trap '' TERM; touch \"{}\"; while :; do sleep 0.05; done",
+            ready.display()
+        );
+        let mut front = script_front(&script);
+        for _ in 0..200 {
+            if ready.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(ready.exists(), "script never installed its trap");
+
+        let started = std::time::Instant::now();
+        front.stop(Duration::from_millis(200));
+        assert!(started.elapsed() >= Duration::from_millis(200));
+        assert!(
+            matches!(front.child.try_wait(), Ok(Some(_))),
+            "front still running"
+        );
+    }
 
     #[test]
     fn build_env_sets_the_required_vars() {

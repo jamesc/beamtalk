@@ -217,6 +217,25 @@ defmodule BtAttach.Workspace do
   end
 
   @doc """
+  Attach `client_pid` (the LiveView process) to `session_pid` on the workspace
+  (BT-5081, BT-5012 lifecycle).
+
+  The workspace session monitors the client: while one is attached it never
+  idles out, and when the last goes away (the front crashed, or was SIGKILLed
+  by the desktop shell and so never ran `terminate/2`) the session counts as
+  *detached* and the workspace's idle reaping covers it. Without this the
+  runtime treats a never-attached session as permanently active, so a killed
+  front's sessions leaked and could block workspace idle shutdown.
+  """
+  def attach_session(session_pid, client_pid) when is_pid(session_pid) and is_pid(client_pid) do
+    case rpc(:beamtalk_repl_shell, :attach, [session_pid, client_pid]) do
+      :ok -> :ok
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc """
   Stop a workspace-supervised session started by `start_session/1`.
 
   The session is owned by the workspace's `beamtalk_session_sup`, so it does not

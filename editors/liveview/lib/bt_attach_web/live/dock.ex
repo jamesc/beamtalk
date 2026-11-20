@@ -557,6 +557,8 @@ defmodule BtAttachWeb.Live.Dock do
   # Which dock action the eval submit carried. The clicked action button rides
   # the form as `action`; a plain submit (the e2e `render_submit(%{expr: …})`)
   # carries none and defaults to printIt — the historical eval behaviour.
+  @workspace_lost_message "The workspace connection was lost. Reconnect first."
+
   defp eval_running?(socket), do: Map.get(socket.assigns, :eval_running, false) == true
 
   # Run `code` in the session off the LiveView process (BT-5081). A long or
@@ -573,11 +575,24 @@ defmodule BtAttachWeb.Live.Dock do
   # gen_server, and the old synchronous handler serialized them through the
   # LiveView mailbox): one submitted while another runs waits in `eval_queue`.
   defp start_eval(socket, job, pid, code) do
-    if eval_running?(socket) do
-      assign(socket, eval_queue: Map.get(socket.assigns, :eval_queue, []) ++ [{job, pid, code}])
-    else
-      run_eval(socket, job, pid, code)
+    cond do
+      workspace_lost?(socket) -> reject_eval(socket, job, @workspace_lost_message)
+      eval_running?(socket) -> enqueue_eval(socket, job, pid, code)
+      true -> run_eval(socket, job, pid, code)
     end
+  end
+
+  # The session is gone (workspace restart / lost link, BT-5081): evals are
+  # disabled until the user clicks Reconnect.
+  defp workspace_lost?(socket), do: Map.get(socket.assigns, :workspace_lost) != nil
+
+  defp reject_eval(socket, %{kind: :repl, expr: expr}, message),
+    do: repl_append_error(socket, expr, message)
+
+  defp reject_eval(socket, _job, message), do: assign(socket, error: message)
+
+  defp enqueue_eval(socket, job, pid, code) do
+    assign(socket, eval_queue: Map.get(socket.assigns, :eval_queue, []) ++ [{job, pid, code}])
   end
 
   # Start the next queued eval, if any, once the running one has been folded.
