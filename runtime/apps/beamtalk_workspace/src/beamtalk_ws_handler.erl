@@ -25,23 +25,115 @@ accepting any protocol operations.
     terminate/3
 ]).
 
+-export([check_upgrade_headers/3]).
+
 -ifdef(TEST).
 -export([actor_snapshot_frames/0]).
 -endif.
 
--doc "HTTP upgrade to WebSocket.".
-init(Req, _Opts) ->
+%% BT-5066: an unauthenticated connection is dropped after this long, and may
+%% only send a frame this big (an `auth` message is a few hundred bytes).
+-define(AUTH_DEADLINE_MS, 10000).
+-define(PRE_AUTH_MAX_FRAME, 4096).
+-define(POST_AUTH_MAX_FRAME, 1048576).
+
+-doc """
+HTTP upgrade to WebSocket.
+
+Rejects the upgrade with 403 when the `Origin` or `Host` header is not
+loopback (ADR 0020 DNS-rebinding mitigation); see `check_upgrade_headers/3`.
+""".
+init(Req, Opts) ->
+    BindAddr =
+        case Opts of
+            #{bind_addr := B} -> B;
+            _ -> {127, 0, 0, 1}
+        end,
+    Origin = cowboy_req:header(<<"origin">>, Req, undefined),
+    Host = cowboy_req:header(<<"host">>, Req, undefined),
     Peer = cowboy_req:peer(Req),
-    {cowboy_websocket, Req,
-        #ws_state{
-            authenticated = false,
-            peer = Peer,
-            pending_eval = undefined,
-            io_capture_pid = undefined,
-            stdin_ref = undefined,
-            log_subscribed = false
-        },
-        #{idle_timeout => infinity, max_frame_size => 1048576}}.
+    case check_upgrade_headers(Origin, Host, BindAddr) of
+        ok ->
+            {cowboy_websocket, Req,
+                #ws_state{
+                    authenticated = false,
+                    peer = Peer,
+                    pending_eval = undefined,
+                    io_capture_pid = undefined,
+                    stdin_ref = undefined,
+                    log_subscribed = false
+                },
+                #{idle_timeout => ?AUTH_DEADLINE_MS, max_frame_size => ?PRE_AUTH_MAX_FRAME}};
+        {error, Reason} ->
+            ?LOG_WARNING("WebSocket upgrade rejected", #{
+                reason => Reason, peer => Peer, domain => [beamtalk, runtime]
+            }),
+            {ok, cowboy_req:reply(403, #{}, <<"Forbidden">>, Req), []}
+    end.
+
+-doc """
+Validate the `Origin` and `Host` upgrade headers (ADR 0020).
+
+* `Origin`, when present, must name a loopback host. Non-browser clients (CLI,
+  MCP, LSP, VS Code's Node client) send none and are unaffected; a web page
+  in the user's browser always sends one.
+* `Host` must be a loopback name, the address the listener is bound to, or —
+  for a wildcard bind — any IP literal. A DNS-rebinding page reaches the port
+  under an attacker-controlled *name*, which this refuses.
+""".
+-spec check_upgrade_headers(binary() | undefined, binary() | undefined, inet:ip_address()) ->
+    ok | {error, bad_origin | bad_host}.
+check_upgrade_headers(Origin, Host, BindAddr) ->
+    case origin_ok(Origin) of
+        false ->
+            {error, bad_origin};
+        true ->
+            case host_ok(Host, BindAddr) of
+                true -> ok;
+                false -> {error, bad_host}
+            end
+    end.
+
+origin_ok(undefined) ->
+    true;
+origin_ok(Origin) ->
+    case uri_string:parse(Origin) of
+        #{host := H} -> is_loopback_host(H);
+        _ -> false
+    end.
+
+host_ok(undefined, _BindAddr) ->
+    %% HTTP/1.0-style upgrade without Host: nothing to rebind.
+    true;
+host_ok(HostHeader, BindAddr) ->
+    case uri_string:parse(<<"//", HostHeader/binary>>) of
+        #{host := H} ->
+            is_loopback_host(H) orelse is_bound_host(H, BindAddr);
+        _ ->
+            false
+    end.
+
+is_loopback_host(H0) ->
+    H = string:lowercase(H0),
+    case H of
+        <<"localhost">> ->
+            true;
+        _ ->
+            case inet:parse_address(binary_to_list(H)) of
+                {ok, {127, _, _, _}} -> true;
+                {ok, {0, 0, 0, 0, 0, 0, 0, 1}} -> true;
+                _ -> false
+            end
+    end.
+
+is_bound_host(H, BindAddr) ->
+    case inet:parse_address(binary_to_list(H)) of
+        {ok, Addr} ->
+            Addr =:= BindAddr orelse BindAddr =:= {0, 0, 0, 0} orelse
+                BindAddr =:= {0, 0, 0, 0, 0, 0, 0, 0};
+        _ ->
+            false
+    end.
 
 -doc """
 WebSocket connection initialized — send auth challenge.
@@ -51,6 +143,10 @@ websocket_init(State) ->
     %% Send a minimal welcome so clients know the connection is alive.
     %% Session details are sent after successful authentication.
     Welcome = iolist_to_binary(json:encode(#{<<"op">> => <<"auth-required">>})),
+    %% Hard deadline (BT-5066): `idle_timeout` is an inactivity timer that any
+    %% received frame (ping included) resets, so it cannot bound a stalling
+    %% client on its own.
+    erlang:send_after(?AUTH_DEADLINE_MS, self(), auth_deadline),
     {[{text, Welcome}], State}.
 
 -doc """
@@ -58,7 +154,15 @@ Handle incoming WebSocket text frame.
 First message must be auth; subsequent messages are protocol ops.
 """.
 websocket_handle({text, Data}, State = #ws_state{authenticated = false}) ->
-    handle_auth(Data, State);
+    case handle_auth(Data, State) of
+        {Cmds, NewState = #ws_state{authenticated = true}} ->
+            %% Lift the pre-auth deadline and frame cap (BT-5066).
+            Lift =
+                {set_options, #{idle_timeout => infinity, max_frame_size => ?POST_AUTH_MAX_FRAME}},
+            {[Lift | Cmds], NewState};
+        Other ->
+            Other
+    end;
 websocket_handle({text, Data}, State = #ws_state{authenticated = true, session_pid = SessionPid}) ->
     handle_protocol(Data, SessionPid, State);
 websocket_handle(_Frame, State) ->
@@ -68,6 +172,13 @@ websocket_handle(_Frame, State) ->
 Handle Erlang messages sent to the handler process.
 Streaming stdout chunk from eval
 """.
+websocket_info(auth_deadline, State = #ws_state{authenticated = false}) ->
+    ?LOG_WARNING("WebSocket closed: auth deadline", #{
+        peer => State#ws_state.peer, domain => [beamtalk, runtime]
+    }),
+    {[{close, 1008, <<"Authentication timeout">>}], State};
+websocket_info(auth_deadline, State) ->
+    {ok, State};
 websocket_info(
     {eval_out, Chunk},
     State = #ws_state{
@@ -403,13 +514,8 @@ handle_auth_message(Decoded, State) ->
         #{<<"type">> := <<"auth">>, <<"cookie">> := ProvidedCookie} = AuthMsg when
             is_binary(ProvidedCookie)
         ->
-            NodeCookie = atom_to_binary(erlang:get_cookie(), utf8),
-            %% Timing-safe comparison to prevent side-channel attacks.
-            %% crypto:hash_equals/2 raises badarg on length mismatch,
-            %% so we guard with byte_size check first.
-            CookieValid =
-                byte_size(ProvidedCookie) =:= byte_size(NodeCookie) andalso
-                    crypto:hash_equals(ProvidedCookie, NodeCookie),
+            %% Timing-safe comparison; never accepts `nocookie` (BT-5066).
+            CookieValid = beamtalk_ws_cookie:valid(ProvidedCookie),
             case CookieValid of
                 true ->
                     %% Version lock (BT-4327): the client must have been built
@@ -730,7 +836,7 @@ start_or_resume_session(ResumeId, Meta, State) when is_binary(ResumeId) ->
                     %% actors, classes, bindings, flush) via the stable facade.
                     %% ADR 0082 Phase 3: the flush stream lets LSP
                     %% clients emit `workspace/applyEdit` per touched file.
-                    beamtalk_repl_subscriptions:subscribe_all(),
+                    maybe_subscribe_all(State),
                     {InitialActors, ActorFeed} = actor_snapshot_frames(),
                     AuthOk = iolist_to_binary(json:encode(#{<<"type">> => <<"auth_ok">>})),
                     SessionMsg = iolist_to_binary(
@@ -771,6 +877,13 @@ start_or_resume_session(_Invalid, Meta, State) ->
     SessionId = beamtalk_repl_server:generate_session_id(),
     create_session(SessionId, Meta, State).
 
+-doc """
+Subscribe to the push streams unless this is a shutdown-only connection
+(`workspace stop`), which needs none of them (BT-5066).
+""".
+maybe_subscribe_all(#ws_state{shutdown_only = true}) -> ok;
+maybe_subscribe_all(_State) -> beamtalk_repl_subscriptions:subscribe_all().
+
 -doc "Create a fresh session and send auth_ok + session-started messages.".
 create_session(SessionId, Meta, State) ->
     case beamtalk_session_sup:start_session(SessionId, Meta) of
@@ -789,7 +902,7 @@ create_session(SessionId, Meta, State) ->
             %% classes, bindings, flush) via the stable facade. ADR 0082 Phase 3:
             %% the flush stream lets LSP clients emit
             %% `workspace/applyEdit` on flush.
-            beamtalk_repl_subscriptions:subscribe_all(),
+            maybe_subscribe_all(State),
             {InitialActors, ActorFeed} = actor_snapshot_frames(),
             AuthOk = iolist_to_binary(json:encode(#{<<"type">> => <<"auth_ok">>})),
             SessionMsg = iolist_to_binary(
@@ -976,10 +1089,7 @@ handle_shutdown(Msg, State) ->
             ErrorJson = beamtalk_repl_json:format_error(<<"Shutdown requires cookie">>),
             {[{text, ErrorJson}], State};
         ProvidedCookie when is_binary(ProvidedCookie) ->
-            NodeCookie = atom_to_binary(erlang:get_cookie(), utf8),
-            CookieValid =
-                byte_size(ProvidedCookie) =:= byte_size(NodeCookie) andalso
-                    crypto:hash_equals(ProvidedCookie, NodeCookie),
+            CookieValid = beamtalk_ws_cookie:valid(ProvidedCookie),
             case CookieValid of
                 true ->
                     ?LOG_INFO("Shutdown requested via WebSocket protocol", #{

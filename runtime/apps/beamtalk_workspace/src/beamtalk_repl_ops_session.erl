@@ -89,11 +89,7 @@ handle_term(<<"health">>, _Params, _Msg, _SessionPid) ->
     {health, WorkspaceId, Nonce};
 handle_term(<<"shutdown">>, Params, _Msg, _SessionPid) ->
     ProvidedCookie = maps:get(<<"cookie">>, Params, <<>>),
-    NodeCookie = atom_to_binary(erlang:get_cookie(), utf8),
-    ValidCookie =
-        is_binary(ProvidedCookie) andalso
-            byte_size(ProvidedCookie) =:= byte_size(NodeCookie) andalso
-            crypto:hash_equals(ProvidedCookie, NodeCookie),
+    ValidCookie = beamtalk_ws_cookie:valid(ProvidedCookie),
     case ValidCookie of
         true ->
             ?LOG_INFO("Shutdown requested via protocol", #{domain => [beamtalk, runtime]}),
