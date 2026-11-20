@@ -67,6 +67,12 @@ struct Args {
     /// by `beamtalk new`.
     #[arg(long)]
     start: bool,
+
+    /// Let path arguments (`lint`, `diagnostic_summary`, `load_file`,
+    /// `load_project`, `test`, `export_traces`) name files outside the project
+    /// root. By default they are confined to the project root (BT-5070).
+    #[arg(long)]
+    allow_outside_project: bool,
 }
 
 /// Entry point: parse CLI args, connect to the REPL, and start the MCP server.
@@ -123,7 +129,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Create MCP server and serve on stdio
-    let mcp_server = server::BeamtalkMcp::new(Arc::new(repl_client));
+    let path_policy = if args.allow_outside_project {
+        server::PathPolicy::Unconfined
+    } else {
+        server::PathPolicy::project_root_of_cwd()?
+    };
+    let mcp_server = server::BeamtalkMcp::new(Arc::new(repl_client), path_policy);
     let service = mcp_server.serve(stdio()).await.inspect_err(|e| {
         tracing::error!(error = ?e, "MCP server error");
     })?;
@@ -641,6 +652,7 @@ mod tests {
             port: Some(9999),
             workspace_id: None,
             start: false,
+            allow_outside_project: false,
         };
         let result = resolve_port_and_cookie(&args).await;
         match std::env::var("BEAMTALK_COOKIE") {

@@ -30,7 +30,8 @@ use crate::server::{code_up_to_cursor, pretty_json, validate_class_name};
 impl BeamtalkMcp {
     /// Evaluate a beamtalk expression in the live REPL.
     #[tool(
-        description = "Evaluate a beamtalk expression in the live REPL. Returns the result value and any stdout output. Use this to interact with beamtalk objects, call methods, spawn actors, and explore the live system. Set trace=true to get per-statement step values instead of a single result."
+        description = "Evaluate a beamtalk expression in the live REPL. Returns the result value and any stdout output. Use this to interact with beamtalk objects, call methods, spawn actors, and explore the live system. Set trace=true to get per-statement step values instead of a single result.",
+        annotations(read_only_hint = false, destructive_hint = false)
     )]
     pub(crate) async fn evaluate(
         &self,
@@ -127,7 +128,8 @@ impl BeamtalkMcp {
 
     /// Get autocompletion suggestions for partial beamtalk input.
     #[tool(
-        description = "Get autocompletion suggestions for partial beamtalk input. Returns a list of possible completions."
+        description = "Get autocompletion suggestions for partial beamtalk input. Returns a list of possible completions.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn complete(
         &self,
@@ -160,7 +162,8 @@ impl BeamtalkMcp {
 
     /// Load all `.bt` source files from a project in dependency order.
     #[tool(
-        description = "Load all .bt source files from a beamtalk project (identified by beamtalk.toml) in dependency order. Reads the src/ directory and loads files so superclasses are loaded before subclasses. Returns the list of loaded classes and any per-file errors."
+        description = "Load all .bt source files from a beamtalk project (identified by beamtalk.toml) in dependency order. Reads the src/ directory and loads files so superclasses are loaded before subclasses. Returns the list of loaded classes and any per-file errors.",
+        annotations(read_only_hint = false, destructive_hint = false)
     )]
     pub(crate) async fn load_project(
         &self,
@@ -170,9 +173,13 @@ impl BeamtalkMcp {
         let include_tests = params.include_tests.unwrap_or(false);
         let force = params.force.unwrap_or(false);
         tracing::debug!(tool = "load_project", path = %params.path, include_tests, force, "tool invoked");
+        let path = match self.confine_path(&params.path) {
+            Ok(p) => p,
+            Err(e) => return Ok(e),
+        };
         let response = self
             .client
-            .load_project(&params.path, include_tests, force)
+            .load_project(&path, include_tests, force)
             .await
             .internal_err()?;
 
@@ -274,7 +281,8 @@ impl BeamtalkMcp {
 
     /// Load a `.bt` source file into the workspace.
     #[tool(
-        description = "Load a .bt source file into the workspace. Compiles the file and makes its classes available. Returns the list of loaded classes."
+        description = "Load a .bt source file into the workspace. Compiles the file and makes its classes available. Returns the list of loaded classes.",
+        annotations(read_only_hint = false, destructive_hint = false)
     )]
     pub(crate) async fn load_file(
         &self,
@@ -282,11 +290,12 @@ impl BeamtalkMcp {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start_quiet("load_file");
         tracing::debug!(tool = "load_file", path = %params.path, "tool invoked");
+        let path = match self.confine_path(&params.path) {
+            Ok(p) => p,
+            Err(e) => return Ok(e),
+        };
         // Use native Beamtalk API: Workspace load: "path"
-        let expr = format!(
-            "Workspace load: \"{}\"",
-            escape_string_literal(&params.path)
-        );
+        let expr = format!("Workspace load: \"{}\"", escape_string_literal(&path));
         let response = self
             .client
             .evaluate_with_options(&expr, false)
@@ -314,7 +323,8 @@ impl BeamtalkMcp {
 
     /// Unload a class from the workspace.
     #[tool(
-        description = "Unload a class from the workspace. Removes the class. Does not affect running actors."
+        description = "Unload a class from the workspace. Removes the class. Does not affect running actors.",
+        annotations(read_only_hint = false, destructive_hint = true)
     )]
     pub(crate) async fn unload(
         &self,
@@ -332,7 +342,8 @@ impl BeamtalkMcp {
 
     /// Interrupt a running evaluation.
     #[tool(
-        description = "Interrupt a running evaluation in the REPL. Use this to cancel long-running or stuck evaluations."
+        description = "Interrupt a running evaluation in the REPL. Use this to cancel long-running or stuck evaluations.",
+        annotations(read_only_hint = false, destructive_hint = false)
     )]
     pub(crate) async fn interrupt(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start("interrupt");
@@ -345,7 +356,8 @@ impl BeamtalkMcp {
 
     /// Inspect a running actor's state by PID.
     #[tool(
-        description = "Inspect a running actor's state. Provide the actor's PID (e.g. \"<0.123.0>\") to see its current state as structured data."
+        description = "Inspect a running actor's state. Provide the actor's PID (e.g. \"<0.123.0>\") to see its current state as structured data.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn inspect(
         &self,
@@ -368,7 +380,8 @@ impl BeamtalkMcp {
 
     /// Inspect the generated Core Erlang code for a beamtalk expression or loaded class.
     #[tool(
-        description = "Show the generated Core Erlang code for a beamtalk expression or loaded class. Use 'code' to compile an expression snippet, or 'class' (+ optional 'selector') to inspect a class already loaded in the session. Useful for debugging codegen and understanding compilation."
+        description = "Show the generated Core Erlang code for a beamtalk expression or loaded class. Use 'code' to compile an expression snippet, or 'class' (+ optional 'selector') to inspect a class already loaded in the session. Useful for debugging codegen and understanding compilation.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn show_codegen(
         &self,
@@ -421,7 +434,8 @@ impl BeamtalkMcp {
 
     /// Run `BUnit` tests.
     #[tool(
-        description = "Run BUnit tests. Provide a class name or a file path to scope the run, or omit both to run all tests. 'class' and 'file' are mutually exclusive. Returns structured results with pass/fail counts."
+        description = "Run BUnit tests. Provide a class name or a file path to scope the run, or omit both to run all tests. 'class' and 'file' are mutually exclusive. Returns structured results with pass/fail counts.",
+        annotations(read_only_hint = false, destructive_hint = false)
     )]
     pub(crate) async fn test(
         &self,
@@ -434,7 +448,12 @@ impl BeamtalkMcp {
                 "ERROR: 'class' and 'file' parameters are mutually exclusive".to_string(),
             ));
         }
-        let response = match (&params.class, &params.file) {
+        let file = match params.file.as_deref().map(|f| self.confine_path(f)) {
+            Some(Err(e)) => return Ok(e),
+            Some(Ok(f)) => Some(f),
+            None => None,
+        };
+        let response = match (&params.class, &file) {
             (Some(class), _) => self.client.test_class(class).await,
             (_, Some(file)) => self.client.test_file(file).await,
             _ => self.client.test_all().await,

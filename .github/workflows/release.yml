@@ -52,7 +52,11 @@ jobs:
 
       - name: Determine version
         id: version
-        run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: scripts/ci/determine-version.sh "$EVENT_NAME" "$RELEASE_TAG" "$INPUT_TAG"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -130,7 +134,11 @@ jobs:
 
       - name: Determine version
         id: version
-        run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: scripts/ci/determine-version.sh "$EVENT_NAME" "$RELEASE_TAG" "$INPUT_TAG"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -205,7 +213,11 @@ jobs:
 
       - name: Determine version
         id: version
-        run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: scripts/ci/determine-version.sh "$EVENT_NAME" "$RELEASE_TAG" "$INPUT_TAG"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -282,7 +294,11 @@ jobs:
       - name: Determine version
         id: version
         shell: bash
-        run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: scripts/ci/determine-version.sh "$EVENT_NAME" "$RELEASE_TAG" "$INPUT_TAG"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -384,7 +400,11 @@ jobs:
       # runner; this is a separate job, so derive them the same way).
       - name: Determine version
         id: version
-        run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: scripts/ci/determine-version.sh "$EVENT_NAME" "$RELEASE_TAG" "$INPUT_TAG"
 
       - name: Dispatch UAT gate
         uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1

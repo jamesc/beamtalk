@@ -121,6 +121,120 @@ defmodule BtAttachWeb.SessionLifecycleTest do
     end
   end
 
+  describe "dev-auth is refused behind a reverse proxy (BT-5070)" do
+    setup do
+      System.put_env("BT_IDE_DEV_AUTH", "1")
+      :ok
+    end
+
+    for header <- ["x-forwarded-for", "forwarded", "x-real-ip", "x-forwarded-host"] do
+      test "a loopback request carrying #{header} is refused (403)", %{conn: conn} do
+        conn =
+          %{conn | remote_ip: {127, 0, 0, 1}}
+          |> put_req_header(unquote(header), "203.0.113.9")
+          |> get(~p"/")
+
+        assert response(conn, 403) =~ "loopback-only"
+      end
+    end
+
+    test "forwarded?/1 spots proxy headers case-insensitively" do
+      assert Auth.forwarded?([{"X-Forwarded-For", "1.2.3.4"}])
+      assert Auth.forwarded?([{"host", "x"}, {"via", "1.1 proxy"}])
+      refute Auth.forwarded?([{"host", "localhost"}, {"accept", "text/html"}])
+    end
+
+    test "the /live socket declares :x_headers so the socket can refuse proxied dev-auth" do
+      {_path, _module, opts} =
+        Enum.find(BtAttachWeb.Endpoint.__sockets__(), fn {path, _, _} -> path == "/live" end)
+
+      assert :x_headers in get_in(opts, [:websocket, :connect_info])
+      assert :x_headers in get_in(opts, [:longpoll, :connect_info])
+    end
+
+    test "a connected mount whose upgrade carried x-forwarded-for is refused", %{conn: conn} do
+      conn =
+        conn
+        |> authed_conn(0)
+        |> with_connect_info(%{
+          peer_data: %{address: {127, 0, 0, 1}, port: 0, ssl_cert: nil},
+          x_headers: [{"x-forwarded-for", "203.0.113.9"}]
+        })
+
+      assert {:error, {:redirect, _}} = live_probe(conn)
+    end
+  end
+
+  describe "logout and cookie confidentiality (BT-5070)" do
+    test "DELETE /logout clears the session and redirects", %{conn: conn} do
+      conn = conn |> authed_conn(0) |> init_csrf() |> delete(~p"/logout")
+      assert redirected_to(conn) == "/"
+      refute get_session(conn, "bt_user")
+      refute get_session(conn, "bt_logged_in_at")
+    end
+
+    test "logout broadcasts a disconnect to the session's live sockets", %{conn: conn} do
+      id = "bt_session:test-logout"
+      BtAttachWeb.Endpoint.subscribe(id)
+
+      conn =
+        conn
+        |> authed_conn(0)
+        |> Plug.Conn.put_session("live_socket_id", id)
+        |> init_csrf()
+        |> Plug.Conn.put_session("live_socket_id", id)
+        |> delete(~p"/logout")
+
+      assert redirected_to(conn) == "/"
+      assert_receive %Phoenix.Socket.Broadcast{topic: ^id, event: "disconnect"}
+    end
+
+    test "a login mints a live_socket_id so logout can reach its sockets", %{conn: conn} do
+      System.put_env("BT_IDE_DEV_AUTH", "1")
+      conn = %{conn | remote_ip: {127, 0, 0, 1}} |> get(~p"/")
+      assert "bt_session:" <> _ = get_session(conn, "live_socket_id")
+    end
+
+    test "GET /logout is not a route (logout needs the CSRF-protected DELETE)", %{conn: conn} do
+      assert get(conn, "/logout").status == 404
+    end
+
+    test "the session cookie is encrypted, not merely signed" do
+      opts = BtAttachWeb.Endpoint.session_options()
+      assert is_binary(opts[:encryption_salt])
+      assert is_binary(opts[:signing_salt])
+    end
+
+    test "claims written to the session cookie are not readable from the cookie value", %{
+      conn: conn
+    } do
+      System.put_env("BT_IDE_DEV_AUTH", "1")
+      conn = %{conn | remote_ip: {127, 0, 0, 1}} |> get(~p"/")
+      cookie = conn.resp_cookies["_bt_attach_key"].value
+      refute cookie =~ "bt_user"
+
+      refute Enum.any?(
+               [cookie, safe_decode(cookie)],
+               &String.contains?(&1, "bt_logged_in_at")
+             )
+    end
+
+    defp safe_decode(cookie) do
+      case cookie |> String.split(".") |> hd() |> Base.url_decode64(padding: false) do
+        {:ok, bin} -> bin
+        _ -> ""
+      end
+    end
+
+    defp init_csrf(conn) do
+      Plug.Test.init_test_session(conn, %{
+        "bt_user" => %{"sub" => "alice", "groups" => ["beamtalk-owners"]},
+        "bt_logged_in_at" => System.system_time(:second)
+      })
+      |> put_req_header("x-csrf-token", Plug.CSRFProtection.get_csrf_token())
+    end
+  end
+
   describe "dev-auth connected mount requires :peer_data in connect_info (BT-3228)" do
     setup do
       System.put_env("BT_IDE_DEV_AUTH", "1")

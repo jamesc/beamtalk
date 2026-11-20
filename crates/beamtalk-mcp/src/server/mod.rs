@@ -129,12 +129,95 @@ impl Drop for ToolTimer {
 pub struct BeamtalkMcp {
     /// Shared REPL client used by all tool handlers.
     client: Arc<ReplClient>,
+    /// Which filesystem paths the path-taking tools may name (BT-5070).
+    path_policy: PathPolicy,
+}
+
+/// Which filesystem paths tool arguments may name (BT-5070).
+///
+/// `lint`, `diagnostic_summary`, `load_file`, `load_project`, `test` and
+/// `export_traces` take paths from the MCP client. By default they must lie
+/// inside the project root, so a prompt-injected agent cannot point them at
+/// `~/.ssh` or write an export over an arbitrary file. The server is still
+/// an authenticated local client running code through `evaluate` (ADR 0020);
+/// this closes the gap between the typed file tools and that, not the
+/// `evaluate` tool itself. `--allow-outside-project` opts out.
+#[derive(Debug, Clone)]
+pub enum PathPolicy {
+    /// Paths must resolve (symlinks and `..` included) inside this root.
+    Confined(std::path::PathBuf),
+    /// No confinement.
+    Unconfined,
+}
+
+impl PathPolicy {
+    /// Confine to the project root discovered from the current directory.
+    pub fn project_root_of_cwd() -> std::io::Result<Self> {
+        let cwd = std::env::current_dir()?;
+        let root = beamtalk_project::discover_project_root(&cwd);
+        Ok(Self::Confined(root.canonicalize()?))
+    }
+
+    /// Resolve `path` (relative paths against the current directory) to a
+    /// canonical path and check it against the policy. A path that does not
+    /// exist yet (an export target) is judged by its canonical parent.
+    pub fn check(&self, path: &str) -> Result<std::path::PathBuf, String> {
+        use std::path::{Path, PathBuf};
+        let raw = Path::new(path);
+        let abs: PathBuf = if raw.is_absolute() {
+            raw.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|e| format!("cannot resolve '{path}': {e}"))?
+                .join(raw)
+        };
+        // Canonicalize the longest existing prefix (resolving symlinks and
+        // `..`), then append the not-yet-existing tail, which may not contain
+        // `..`. So an export target or a mistyped path is judged by where it
+        // would land, not refused for not existing.
+        let mut existing = abs.as_path();
+        let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
+        let mut resolved = loop {
+            if let Ok(real) = existing.canonicalize() {
+                break real;
+            }
+            let name = existing
+                .file_name()
+                .ok_or_else(|| format!("cannot resolve '{path}'"))?;
+            tail.push(name);
+            existing = existing
+                .parent()
+                .ok_or_else(|| format!("cannot resolve '{path}'"))?;
+        };
+        resolved.extend(tail.iter().rev());
+        match self {
+            Self::Unconfined => Ok(resolved),
+            Self::Confined(root) if resolved.starts_with(root) => Ok(resolved),
+            Self::Confined(root) => Err(format!(
+                "path '{path}' is outside the project root ({}). Start beamtalk-mcp with \
+                 --allow-outside-project to allow other locations.",
+                root.display()
+            )),
+        }
+    }
 }
 
 impl BeamtalkMcp {
     /// Create a new MCP server backed by the provided REPL client.
-    pub fn new(client: Arc<ReplClient>) -> Self {
-        Self { client }
+    pub fn new(client: Arc<ReplClient>, path_policy: PathPolicy) -> Self {
+        Self {
+            client,
+            path_policy,
+        }
+    }
+
+    /// Check a client-supplied path against the path policy, answering the
+    /// canonical path or a tool error result to return as-is.
+    pub(crate) fn confine_path(&self, path: &str) -> Result<String, CallToolResult> {
+        self.path_policy
+            .check(path)
+            .map(|p| p.to_string_lossy().into_owned())
+            .map_err(error_result)
     }
 
     /// The combined tool router: every tool family's router, unioned.

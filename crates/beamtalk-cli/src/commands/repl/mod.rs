@@ -266,6 +266,9 @@ pub fn run(
     // Resolve bind address: --bind flag → IP address (ADR 0020)
     let bind_addr = resolve_bind_addr(bind)?;
     validate_network_binding(bind_addr, confirm_network)?;
+    if let Some(warning) = bind::cleartext_warning(bind_addr) {
+        eprintln!("{warning}");
+    }
 
     // Resolve port and node name using priority logic
     let port = resolve_port(port_arg)?;
