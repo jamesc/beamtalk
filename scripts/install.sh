@@ -10,6 +10,9 @@
 #   curl ... | sh -s -- --nightly                # latest nightly build
 #   curl ... | sh -s -- --edge                   # latest main (linux-x86_64 only)
 #   curl ... | sh -s -- --prefix /usr/local       # custom install location
+#   curl ... | sh -s -- --uninstall               # remove an installed copy
+#   curl ... | sh -s -- --insecure-skip-checksum  # install without verifying
+#                                                 # the archive's SHA-256
 #
 # Environment variables:
 #   BEAMTALK_VERSION   - version to install (default: latest)
@@ -33,6 +36,8 @@ VERSION="${BEAMTALK_VERSION:-}"
 NIGHTLY="${BEAMTALK_NIGHTLY:-}"
 EDGE="${BEAMTALK_EDGE:-}"
 PREFIX="${BEAMTALK_PREFIX:-${DEFAULT_PREFIX}}"
+SKIP_CHECKSUM=""
+UNINSTALL=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -46,8 +51,13 @@ while [ $# -gt 0 ]; do
         --prefix)
             if [ $# -lt 2 ]; then echo "Error: --prefix requires a value"; exit 1; fi
             PREFIX="$2"; shift 2 ;;
+        --insecure-skip-checksum)
+            SKIP_CHECKSUM=1; shift ;;
+        --uninstall)
+            UNINSTALL=1; shift ;;
         --help)
             echo "Usage: install.sh [--version VERSION] [--nightly | --edge] [--prefix PATH]"
+            echo "                  [--insecure-skip-checksum] | --uninstall"
             echo ""
             echo "Options:"
             echo "  --version VERSION   Install a specific version (e.g., v0.1.0)"
@@ -55,6 +65,10 @@ while [ $# -gt 0 ]; do
             echo "  --edge              Install the build of the latest main commit"
             echo "                      (linux-x86_64 only; for CI of downstream packages)"
             echo "  --prefix PATH       Install to PATH (default: ~/.beamtalk)"
+            echo "  --insecure-skip-checksum"
+            echo "                      Install even if the archive's SHA-256 cannot be fetched"
+            echo "                      or verified (by default that is an error)"
+            echo "  --uninstall         Remove beamtalk from PATH's prefix and exit"
             echo ""
             echo "Environment variables:"
             echo "  BEAMTALK_VERSION    Same as --version"
@@ -202,9 +216,16 @@ verify_checksum() {
     ARCHIVE="$1"
     CHECKSUM_FILE="$2"
 
-    if [ ! -f "${CHECKSUM_FILE}" ]; then
-        echo "Warning: No checksum file found, skipping verification"
+    if [ "${SKIP_CHECKSUM}" = "1" ]; then
+        echo "Warning: --insecure-skip-checksum given, NOT verifying the archive"
         return 0
+    fi
+
+    if [ ! -s "${CHECKSUM_FILE}" ]; then
+        echo "Error: Could not fetch the checksum file (${CHECKSUM_URL})."
+        echo "  Refusing to install an unverified archive."
+        echo "  Retry, or pass --insecure-skip-checksum to install without verification."
+        exit 1
     fi
 
     EXPECTED=$(awk '{print $1}' "${CHECKSUM_FILE}")
@@ -214,8 +235,9 @@ verify_checksum() {
     elif command -v shasum >/dev/null 2>&1; then
         ACTUAL=$(shasum -a 256 "${ARCHIVE}" | awk '{print $1}')
     else
-        echo "Warning: sha256sum/shasum not found, skipping verification"
-        return 0
+        echo "Error: sha256sum/shasum not found, cannot verify the archive."
+        echo "  Install one, or pass --insecure-skip-checksum to install without verification."
+        exit 1
     fi
 
     if [ "${EXPECTED}" != "${ACTUAL}" ]; then
@@ -241,34 +263,87 @@ install_beamtalk() {
 
     echo "Downloading beamtalk ${VERSION} for ${PLATFORM}..."
     download "${ARCHIVE_URL}" "${TMPDIR}/${ARCHIVE_NAME}"
-    download "${CHECKSUM_URL}" "${TMPDIR}/${ARCHIVE_NAME}.sha256" 2>/dev/null || true
+    if [ "${SKIP_CHECKSUM}" != "1" ]; then
+        download "${CHECKSUM_URL}" "${TMPDIR}/${ARCHIVE_NAME}.sha256" 2>/dev/null || true
+    fi
 
     verify_checksum "${TMPDIR}/${ARCHIVE_NAME}" "${TMPDIR}/${ARCHIVE_NAME}.sha256"
 
     echo "Installing to ${PREFIX}..."
     mkdir -p "${PREFIX}"
 
-    # Archives contain a top-level beamtalk-{version}/ directory;
-    # strip it so contents go directly into PREFIX.
+    # Extract into a fresh staging directory inside PREFIX (same filesystem, so
+    # the swaps below are renames), never over the existing install: files a
+    # newer release dropped must not linger.
+    STAGE=$(mktemp -d "${PREFIX}/.beamtalk-stage.XXXXXX")
+    trap 'rm -rf "${TMPDIR}" "${STAGE}"' EXIT
+
+    # Archives contain a top-level beamtalk-{version}/ directory.
     case "${EXT}" in
         tar.gz)
-            tar -xzf "${TMPDIR}/${ARCHIVE_NAME}" -C "${PREFIX}" --strip-components=1
+            tar -xzf "${TMPDIR}/${ARCHIVE_NAME}" -C "${STAGE}" --strip-components=1
             ;;
         zip)
             if command -v unzip >/dev/null 2>&1; then
                 unzip -qo "${TMPDIR}/${ARCHIVE_NAME}" -d "${TMPDIR}/extract"
-                cp -r "${TMPDIR}/extract/beamtalk-${VERSION}/"* "${PREFIX}/"
             elif command -v 7z >/dev/null 2>&1; then
                 7z x -o"${TMPDIR}/extract" -y "${TMPDIR}/${ARCHIVE_NAME}" >/dev/null
-                cp -r "${TMPDIR}/extract/beamtalk-${VERSION}/"* "${PREFIX}/"
             else
                 echo "Error: unzip or 7z required to extract .zip archives"
                 exit 1
             fi
+            cp -r "${TMPDIR}/extract/beamtalk-${VERSION}/"* "${STAGE}/"
             ;;
     esac
 
+    swap_into_prefix
+
     write_build_marker
+}
+
+# Subtrees beamtalk owns outright. They are replaced wholesale so stale files
+# from a previous install vanish; PREFIX itself may be shared (/usr/local), so
+# it is never replaced, and everything else in the archive (bin/*) is copied
+# over the existing files.
+OWNED_DIRS="lib/beamtalk share/beamtalk"
+OWNED_BINS="beamtalk beamtalk-compiler-port beamtalk-lsp beamtalk-mcp beamtalk-exec"
+
+swap_into_prefix() {
+    for d in ${OWNED_DIRS}; do
+        [ -d "${STAGE}/${d}" ] || continue
+        mkdir -p "${PREFIX}/$(dirname "${d}")"
+        if [ -e "${PREFIX}/${d}" ]; then
+            mv "${PREFIX}/${d}" "${STAGE}/.old-$(echo "${d}" | tr / _)"
+        fi
+        mv "${STAGE}/${d}" "${PREFIX}/${d}"
+    done
+    # Remaining entries (bin/...) are merged; replacing a binary is an
+    # overwrite-by-rename so a running beamtalk is not truncated in place.
+    if [ -d "${STAGE}/bin" ]; then
+        mkdir -p "${PREFIX}/bin"
+        for f in "${STAGE}/bin/"*; do
+            [ -e "${f}" ] || continue
+            mv -f "${f}" "${PREFIX}/bin/$(basename "${f}")"
+        done
+    fi
+}
+
+uninstall_beamtalk() {
+    echo "Removing beamtalk from ${PREFIX}..."
+    for b in ${OWNED_BINS}; do
+        rm -f "${PREFIX}/bin/${b}" "${PREFIX}/bin/${b}.exe"
+    done
+    for d in ${OWNED_DIRS}; do
+        rm -rf "${PREFIX:?}/${d}"
+    done
+    rm -f "${PREFIX}/.beamtalk-build.sha256"
+    # Tidy up now-empty directories; rmdir refuses non-empty ones, so a shared
+    # prefix keeps whatever else lives in it.
+    for d in bin lib share; do
+        rmdir "${PREFIX}/${d}" 2>/dev/null || true
+    done
+    rmdir "${PREFIX}" 2>/dev/null || true
+    echo "✅ beamtalk removed. Remove the PATH entry from your shell profile if you added one."
 }
 
 # Record which rolling build is installed (BT-4813) so scripts/refresh-edge.sh
@@ -344,6 +419,11 @@ print_build_identity() {
 # ─── Main ────────────────────────────────────────────────────────────────
 
 main() {
+    if [ "${UNINSTALL}" = "1" ]; then
+        uninstall_beamtalk
+        return
+    fi
+
     detect_platform
     resolve_version
 
