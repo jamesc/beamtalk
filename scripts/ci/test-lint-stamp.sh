@@ -87,6 +87,40 @@ expect_same "editors/vscode, relative GIT_DIR=.git" "$SUBDIR" \
 expect_same "repo root, hook GIT_DIR" "$REPO_ROOT" \
   "GIT_DIR=$GIT_DIR_ABS"
 
+# BT-5086: a dependency manifest anywhere in the tree changes the stamp of the
+# language it builds, so a dependency bump cannot reuse a stale "lint passed".
+# Runs against a throwaway repo (the script finds its repo from its own path).
+SCRATCH="$(mktemp -d)"
+trap 'restore; rm -rf "$SCRATCH"' EXIT
+mkdir -p "$SCRATCH/scripts" "$SCRATCH/crates/x" "$SCRATCH/runtime"
+cp "$LINT_STAMP" "$SCRATCH/scripts/lint-stamp.sh"
+(
+  cd "$SCRATCH"
+  git init -q .
+  printf 'a\n' >Cargo.toml
+  printf 'a\n' >crates/x/Cargo.toml
+  printf 'a\n' >runtime/rebar.config
+  printf 'a\n' >runtime/rebar.lock
+  git add -A
+)
+scratch_stamp() { (cd "$SCRATCH" && scripts/lint-stamp.sh write "$1" && cat ".lint-$1-stamp"); }
+expect_manifest_changes_stamp() {
+  local lang="$1" file="$2" before after
+  before="$(scratch_stamp "$lang")"
+  printf 'b\n' >"$SCRATCH/$file"
+  after="$(scratch_stamp "$lang")"
+  printf 'a\n' >"$SCRATCH/$file"
+  if [[ "$before" == "$after" ]]; then
+    echo "FAIL: editing $file does not change the $lang stamp" >&2
+    failures=$((failures + 1))
+  else
+    echo "ok: $file is part of the $lang stamp"
+  fi
+}
+expect_manifest_changes_stamp rust crates/x/Cargo.toml
+expect_manifest_changes_stamp erlang runtime/rebar.config
+expect_manifest_changes_stamp erlang runtime/rebar.lock
+
 if ((failures > 0)); then
   echo "❌ test-lint-stamp: $failures case(s) disagree with the repo-root stamp" >&2
   exit 1
