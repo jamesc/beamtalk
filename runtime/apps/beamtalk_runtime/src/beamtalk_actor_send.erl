@@ -55,12 +55,13 @@ them, so the send path costs the same number of calls as before the split.
     ]}
 ).
 
-%% Lifecycle selectors answered locally with a plain value or error, shared by
-%% async_send_impl/5 and sync_send_pid/4. Each selector is matched with its
-%% exact arity so a wrong-arity send falls through to normal dispatch.
 %% Longest a future watcher outlives an unsettled send (BT-5084); same hour as the
 %% future's own orphan cap. `future_watcher_cap_ms` (application env) overrides it.
 -define(FUTURE_WATCHER_CAP_MS, 3600000).
+
+%% Lifecycle selectors answered locally with a plain value or error, shared by
+%% async_send_impl/5 and sync_send_pid/4. Each selector is matched with its
+%% exact arity so a wrong-arity send falls through to normal dispatch.
 -define(IS_LOCAL_LIFECYCLE(S, A),
     ((A =:= [] andalso
         (S =:= isAlive orelse S =:= kill orelse S =:= delegate orelse S =:= pid orelse

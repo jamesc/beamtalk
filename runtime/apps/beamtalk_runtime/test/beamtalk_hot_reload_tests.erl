@@ -633,6 +633,10 @@ code_change(_OldVsn, State, {slow_notify, Ms, Parent}) ->
     %% sleep: keeps the migration in flight while the test kills the reloader
     timer:sleep(Ms),
     {ok, State};
+code_change(_OldVsn, _State, {slow_fail, Ms}) ->
+    %% sleep: a migration slower than the caller's wait that then fails
+    timer:sleep(Ms),
+    {error, slow_failure};
 code_change(_OldVsn, State, {slow, Ms}) ->
     %% sleep: simulates a migration slower than sys:change_code's 5 s timeout
     timer:sleep(Ms),
@@ -745,6 +749,30 @@ reloader_killed_mid_change_still_resumes_actor_test_() ->
         end
     end}.
 
+%% BT-5084 (review): a migration that outlasts the caller's wait and THEN FAILS
+%% must not be resumed onto new code with old-shaped state (ADR 0123 §3).
+slow_failing_migration_is_not_resumed_test_() ->
+    {timeout, 30, fun() ->
+        {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+        unlink(Pid),
+        try
+            {ok, 0, [{Pid, timeout}]} =
+                beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {slow_fail, 6000}),
+            %% `status` is a system message, so it answers only after the failing
+            %% migration has finished; the actor must still be suspended then.
+            ?assertEqual(
+                suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
+            )
+        after
+            try
+                sys:resume(Pid)
+            catch
+                _:_ -> ok
+            end,
+            beamtalk_test_proc:stop(Pid)
+        end
+    end}.
+
 %% BT-5084: a migration that returns an error still leaves the actor suspended
 %% (ADR 0123 §3, state integrity); that is the one deliberate case.
 failed_migration_stays_suspended_test() ->
@@ -755,7 +783,11 @@ failed_migration_stays_suspended_test() ->
         ?assertEqual(suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid)))
     after
         unlink(Pid),
-        _ = catch sys:resume(Pid),
+        try
+            sys:resume(Pid)
+        catch
+            _:_ -> ok
+        end,
         beamtalk_test_proc:stop(Pid)
     end.
 

@@ -45,7 +45,7 @@ runtime.
 %% Bounds the worker's own `sys` calls: the worker, not the caller, owns the
 %% suspension (BT-5084).
 -define(SUSPEND_TIMEOUT_MS, 5000).
--define(CHANGE_TIMEOUT_MS, 60000).
+-define(RESUME_TIMEOUT_MS, 60000).
 
 %% Public API
 -export([code_change/3, trigger_code_change/2, trigger_code_change/3]).
@@ -303,8 +303,7 @@ reported failure.
 runs in a worker process of its own, so the actor is never left suspended by
 anything but a failed migration. If the reloading process dies, or stops
 waiting after 5 s (`{error, timeout}`), the worker carries on: a change that
-finishes late resumes the actor, one that never finishes within 60 s is
-resumed with an ERROR log, and a suspend that timed out behind a busy handler
+finishes late resumes the actor if it succeeded, and a suspend that timed out behind a busy handler
 has its resume queued behind it. Only a migration that returned `{error, _}`
 stays suspended, and the reload reports those pids (`instances_suspended`).
 """.
@@ -314,22 +313,25 @@ try_change_code(Pid, Module, Extra) ->
     %% so the suspension has an owner that outlives the caller's wait. If the
     %% reloading process dies or stops waiting (timeout), the worker still
     %% resumes the actor as soon as the change is confirmed finished.
-    Caller = self(),
-    Tag = make_ref(),
+    %% A reply alias: once we stop waiting, the worker's late result is dropped
+    %% at the source instead of sitting in this (possibly long-lived) mailbox.
+    Alias = alias([reply]),
     {Worker, Mon} = spawn_monitor(fun() ->
-        Caller ! {Tag, run_change(Pid, Module, Extra)}
+        Alias ! {Alias, run_change(Pid, Module, Extra)}
     end),
     receive
-        {Tag, Result} ->
+        {Alias, Result} ->
             erlang:demonitor(Mon, [flush]),
             Result;
         {'DOWN', Mon, process, Worker, Other} ->
+            unalias(Alias),
             ?LOG_ERROR(
                 #{msg => <<"code change worker crashed">>, module => Module, pid => Pid},
                 #{reason => Other, domain => [beamtalk, runtime]}
             ),
             {error, {Other, worker_crashed}}
     after ?CHANGE_WAIT_MS ->
+        unalias(Alias),
         %% The worker keeps the suspension and resumes the actor once the change
         %% finishes (or logs why it could not). Never silent: ERROR now.
         erlang:demonitor(Mon, [flush]),
@@ -372,7 +374,12 @@ run_change(Pid, Module, Extra) ->
 
 -spec change_then_resume(pid(), atom(), term()) -> ok | {error, term()}.
 change_then_resume(Pid, Module, Extra) ->
-    try sys:change_code(Pid, Module, undefined, Extra, ?CHANGE_TIMEOUT_MS) of
+    %% The worker owns the outcome, so it waits for it: a resume sent before the
+    %% change finished would run after it whatever it returned, resuming a failed
+    %% migration onto new code with old-shaped state (ADR 0123 §3). The caller's
+    %% wait is bounded separately (?CHANGE_WAIT_MS), and a dead actor exits this
+    %% call (`noproc`), so the worker cannot outlive the actor.
+    case sys:change_code(Pid, Module, undefined, Extra, infinity) of
         ok ->
             _ = resume_quietly(Pid),
             ok;
@@ -380,21 +387,6 @@ change_then_resume(Pid, Module, Extra) ->
             %% ADR 0123 §3: left suspended, state intact. The reload reports the
             %% pid in its `instances_suspended` finding.
             ChangeError
-    catch
-        exit:{timeout, _} ->
-            %% Still running after the long wait: outcome unknown. Resume
-            %% (queued behind the change) rather than leave the actor
-            %% unresponsive indefinitely, and say so.
-            ?LOG_ERROR(
-                #{
-                    msg => <<"code change did not finish; resuming actor with unknown outcome">>,
-                    module => Module,
-                    pid => Pid
-                },
-                #{domain => [beamtalk, runtime]}
-            ),
-            _ = resume_quietly(Pid),
-            {error, timeout}
     end.
 
 %% Resume, swallowing a failure (the actor may have exited): a resume failure
@@ -402,7 +394,7 @@ change_then_resume(Pid, Module, Extra) ->
 -spec resume_quietly(pid()) -> ok.
 resume_quietly(Pid) ->
     try
-        ok = sys:resume(Pid, ?CHANGE_TIMEOUT_MS)
+        ok = sys:resume(Pid, ?RESUME_TIMEOUT_MS)
     catch
         _:_ -> ok
     end.
