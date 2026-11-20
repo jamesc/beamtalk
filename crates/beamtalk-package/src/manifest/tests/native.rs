@@ -305,6 +305,21 @@ const NATIVE_REJECTIONS: &[(&str, &str, &str)] = &[
         "[native.overrides]\nJose = { erl_opts = [] }\n",
         "must start with a lowercase letter",
     ),
+    (
+        "git_ext_transport",
+        "[native.dependencies]\nevil = { git = \"ext::sh -c id\", tag = \"1\" }\n",
+        "unsupported git URL",
+    ),
+    (
+        "git_option_lookalike",
+        "[native.dependencies]\nevil = { git = \"--upload-pack=x\", tag = \"1\" }\n",
+        "invalid git URL",
+    ),
+    (
+        "git_unknown_scheme",
+        "[native.dependencies]\nevil = { git = \"badscheme://h/r\", tag = \"1\" }\n",
+        "unsupported git URL",
+    ),
 ];
 
 #[test]

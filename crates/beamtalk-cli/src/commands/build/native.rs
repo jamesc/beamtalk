@@ -490,6 +490,102 @@ pub(crate) fn aggregate_native_dependencies(
     aggregated
 }
 
+/// Environment variables rebar3 (and the git, erlc and C toolchains it drives)
+/// legitimately needs. Everything else — `AWS_*`, `DATABASE_URL`, tokens — is
+/// withheld: native dependencies run arbitrary build code (`pre_hooks`,
+/// port compilers), so a transitive dependency must not see the user's secrets
+/// (BT-5068). Matches the clear-then-allowlist approach of the workspace node
+/// (`startup_command`).
+const REBAR3_ENV_ALLOWLIST: &[&str] = &[
+    // Process basics and locale.
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TERM",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "TZ",
+    // Windows equivalents needed to locate tools and caches.
+    "SystemRoot",
+    "SYSTEMROOT",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PATHEXT",
+    "COMSPEC",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    // Network reach for hex.pm and git fetches.
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "all_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CURL_CA_BUNDLE",
+    "GIT_SSL_CAINFO",
+    // ssh-based git dependencies authenticate through the agent.
+    "SSH_AUTH_SOCK",
+    // Non-secret git configuration (paths and commands), so private git
+    // dependencies behave the same under rebar3 as under `beamtalk deps`.
+    // `GIT_SSL_NO_VERIFY` is deliberately not forwarded.
+    "GIT_SSH",
+    "GIT_SSH_COMMAND",
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_EXEC_PATH",
+    // rebar3, hex and Erlang configuration.
+    "REBAR_CACHE_DIR",
+    "REBAR_CONFIG",
+    "REBAR_GLOBAL_CONFIG_DIR",
+    "REBAR_COLOR",
+    "REBAR_PROFILE",
+    "HEX_HOME",
+    "HEX_MIRROR",
+    "HEX_CDN",
+    "HEX_API_URL",
+    "HEX_HTTP_TIMEOUT",
+    "HEX_HTTP_CONCURRENCY",
+    "ERL_LIBS",
+    "ERL_FLAGS",
+    "ERL_AFLAGS",
+    "ERL_ZFLAGS",
+    // C/C++ toolchain for NIF and port compilation.
+    "CC",
+    "CXX",
+    "CFLAGS",
+    "CXXFLAGS",
+    "LDFLAGS",
+    "CPPFLAGS",
+    "AR",
+    "MAKE",
+    "PKG_CONFIG_PATH",
+];
+
+/// Clear the inherited environment of a rebar3 command, then re-add only the
+/// [`REBAR3_ENV_ALLOWLIST`] entries that are set.
+fn apply_rebar3_env(cmd: &mut std::process::Command) {
+    cmd.env_clear();
+    for var in REBAR3_ENV_ALLOWLIST {
+        if let Some(value) = std::env::var_os(var) {
+            cmd.env(var, value);
+        }
+    }
+}
+
 /// Render one `{deps, [...]}` entry for `rebar.config` from the manifest.
 ///
 /// Pinning to locked versions and commits is done by the generated
@@ -504,6 +600,13 @@ fn rebar_dep_entry(dep: &NativeDependency) -> String {
             format!("    {{{name}, \"{}\"}}", escape_erlang_string(constraint))
         }
         NativeSource::Git { url, reference } => {
+            if manifest::is_plaintext_git_url(url) {
+                tracing::warn!(
+                    dependency = %name,
+                    url = %url,
+                    "Native git dependency uses an insecure plaintext URL; prefer https:// or ssh://"
+                );
+            }
             let (kind, value) = match reference {
                 GitReference::Tag(tag) => ("tag", tag),
                 GitReference::Branch(branch) => ("branch", branch),
@@ -840,6 +943,7 @@ fn compile_with_rebar3(
         .wrap_err("Failed to canonicalize rebar base dir")?;
     let rebar3_command = |subcommand: &str| {
         let mut cmd = rebar3_base_command(&rebar3);
+        apply_rebar3_env(&mut cmd);
         cmd.arg(subcommand);
         // rebar3 reads rebar.config from cwd — run from _build/dev/native/
         cmd.current_dir(rebar_base_dir.as_std_path());
@@ -1124,4 +1228,49 @@ pub(crate) fn check_native_module_collisions(
     );
 
     miette::bail!("{msg}")
+}
+
+#[cfg(test)]
+mod rebar3_env_tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    fn envs(cmd: &std::process::Command) -> Vec<(OsString, Option<OsString>)> {
+        cmd.get_envs()
+            .map(|(k, v)| (k.to_os_string(), v.map(std::ffi::OsStr::to_os_string)))
+            .collect()
+    }
+
+    #[test]
+    fn rebar3_env_is_cleared_and_limited_to_the_allowlist() {
+        let mut cmd = std::process::Command::new("rebar3");
+        // A secret set on the command before the call must not survive.
+        cmd.env("AWS_SECRET_ACCESS_KEY", "leak");
+        apply_rebar3_env(&mut cmd);
+
+        let vars = envs(&cmd);
+        assert!(
+            vars.iter().all(|(k, _)| REBAR3_ENV_ALLOWLIST
+                .iter()
+                .any(|a| k == std::ffi::OsStr::new(a))),
+            "unexpected variables forwarded: {vars:?}"
+        );
+        assert!(
+            !vars.iter().any(|(k, _)| k == "AWS_SECRET_ACCESS_KEY"),
+            "{vars:?}"
+        );
+    }
+
+    #[test]
+    fn allowlist_has_no_secret_looking_names() {
+        for var in REBAR3_ENV_ALLOWLIST {
+            let upper = var.to_ascii_uppercase();
+            assert!(
+                !["TOKEN", "SECRET", "PASSWORD", "KEY", "AWS", "DATABASE"]
+                    .iter()
+                    .any(|bad| upper.contains(bad)),
+                "{var}"
+            );
+        }
+    }
 }
