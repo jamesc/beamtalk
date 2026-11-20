@@ -26,9 +26,10 @@ pub use beamtalk_core::method_source_walker::{
     SelectorSendSpan, find_definition_selector_spans, find_selector_send_spans,
 };
 
-use beamtalk_core::ast::{ExpressionStatement, MessageSelector};
+use beamtalk_core::ast::{Expression, ExpressionStatement, Literal, MessageSelector};
 use beamtalk_core::ast_walker::{SendSite, walk_sends};
 use beamtalk_core::method_source_walker::first_token_span_after;
+use beamtalk_core::source_analysis::Span;
 
 /// How a send's receiver is written, as far as a static rename can tell
 /// (ADR 0114's `recv_kind`, minus the FFI case which is just `Other` here).
@@ -69,14 +70,31 @@ pub fn find_selector_send_sites(
     old_selector: &str,
     new_selector: &str,
 ) -> Vec<SelectorSendSite> {
+    find_selector_send_sites_in(
+        body.iter().map(|s| &s.expression),
+        source,
+        old_selector,
+        new_selector,
+    )
+}
+
+/// [`find_selector_send_sites`] over arbitrary root expressions (state and
+/// class-variable defaults are single expressions, not statement lists).
+#[must_use]
+pub fn find_selector_send_sites_in<'a>(
+    roots: impl IntoIterator<Item = &'a Expression>,
+    source: &str,
+    old_selector: &str,
+    new_selector: &str,
+) -> Vec<SelectorSendSite> {
     let new_parts: Vec<String> = new_selector
         .split(':')
         .filter(|part| !part.is_empty())
         .map(|part| format!("{part}:"))
         .collect();
     let mut sites = Vec::new();
-    for stmt in body {
-        walk_sends(&stmt.expression, &mut |send| {
+    for root in roots {
+        walk_sends(root, &mut |send| {
             if send.selector.name() != old_selector {
                 return;
             }
@@ -118,4 +136,32 @@ pub fn find_selector_send_sites(
         });
     }
     sites
+}
+
+/// Spans of every symbol literal `#old_selector` under `roots`.
+///
+/// A symbol equal to a selector is a dynamic use of it (`perform: #go`,
+/// `respondsTo: #go`) or an unrelated atom; either way a static rename cannot
+/// prove it names the renamed method, so callers report these as candidates.
+/// Only literals whose source text is exactly `#old_selector` are returned,
+/// so a quoted or otherwise respelled symbol is never spliced blindly.
+#[must_use]
+pub fn find_symbol_literal_sites<'a>(
+    roots: impl IntoIterator<Item = &'a Expression>,
+    source: &str,
+    old_selector: &str,
+) -> Vec<Span> {
+    let spelled = format!("#{old_selector}");
+    let mut out = Vec::new();
+    for root in roots {
+        beamtalk_core::ast_walker::walk_expression(root, &mut |expr| {
+            if let Expression::Literal(Literal::Symbol(name), span) = expr
+                && name.as_str() == old_selector
+                && source.get(span.start() as usize..span.end() as usize) == Some(spelled.as_str())
+            {
+                out.push(*span);
+            }
+        });
+    }
+    out
 }

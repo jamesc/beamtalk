@@ -981,7 +981,7 @@ lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-repo
 # The repo-wide lint-* recipes and script tests that need only the toolchain CI's
 # lint job has. `lint` runs this group and ci.yml's lint job runs it by name, so
 # the two cannot diverge (BT-5032). Add a new lint here, not to either list.
-lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns check-lint-parity check-pins test-lint-stamp test-refresh-edge test-determine-version test-publish-rolling-release test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly test-workflow-paths test-cache-keys test-ci-ok
+lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns check-lint-parity check-pins test-lint-stamp test-refresh-edge test-install-script test-determine-version test-publish-rolling-release test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly test-workflow-paths test-cache-keys test-ci-ok
 
 # Test (BT-5032): every repo path literal in a workflow's `paths:` filter or the
 # ci.yml `changes` job's `matches` gate names something that exists, so a renamed
@@ -1044,6 +1044,16 @@ test-publish-rolling-release:
 [windows]
 test-publish-rolling-release:
     @echo "test-publish-rolling-release: skipped on Windows (covered by Linux CI)"
+
+# Test (BT-5087): scripts/install.sh needs a verified checksum unless
+# --insecure-skip-checksum, replaces rather than overlays, and --uninstall works.
+[unix]
+test-install-script:
+    @bash scripts/ci/test-install.sh
+
+[windows]
+test-install-script:
+    @echo "test-install-script: skipped on Windows (covered by Linux CI)"
 
 # Test (BT-4925): the `test-install` class-beam guard passes on a populated
 # ebin dir every time (no `find | grep -q` SIGPIPE under pipefail) and fails

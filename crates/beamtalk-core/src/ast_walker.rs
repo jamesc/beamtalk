@@ -82,6 +82,34 @@ where
     }
 }
 
+/// Calls `f` once for every root expression in the module: top-level
+/// statements, every method body statement, every state and class-variable
+/// default (BT-5026), and the bodies of protocol provided methods that no
+/// class carries a copy of.
+///
+/// The one enumeration the IDE layer (rename, references, hover, definition)
+/// uses so a traversal cannot cover method bodies and forget state defaults
+/// (BT-5079). Block bodies are not separate roots; they sit inside these trees.
+pub fn for_each_root_expr<'a, F>(module: &'a Module, mut f: F)
+where
+    F: FnMut(&'a Expression),
+{
+    for stmt in &module.expressions {
+        f(&stmt.expression);
+    }
+    for method in module
+        .all_methods()
+        .chain(module.unused_protocol_provided_methods())
+    {
+        for stmt in &method.body {
+            f(&stmt.expression);
+        }
+    }
+    for expr in module.state_default_exprs() {
+        f(expr);
+    }
+}
+
 // ── Expression walker ─────────────────────────────────────────────────────────
 
 /// Returns `true` if `expr`'s tree contains an [`Expression::Block`] literal
