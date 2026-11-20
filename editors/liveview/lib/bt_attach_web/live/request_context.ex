@@ -15,8 +15,15 @@ defmodule BtAttachWeb.Live.RequestContext do
 
   @type t :: %{user: term(), role: atom()}
 
-  @doc "The facade context for `socket`: its authenticated user + RBAC role."
+  @doc """
+  The facade context for `socket`: its authenticated user + RBAC role.
+
+  A socket with no `:role` assign gets the least-privileged role
+  (`:observer`), never `:owner` (BT-5070): `Auth.on_mount/4` always assigns
+  one, so a missing role means something skipped the gate, and that must fail
+  closed rather than hand out the highest privilege.
+  """
   @spec build(Phoenix.LiveView.Socket.t()) :: t()
   def build(socket),
-    do: %{user: socket.assigns[:current_user], role: socket.assigns[:role] || :owner}
+    do: %{user: socket.assigns[:current_user], role: socket.assigns[:role] || :observer}
 end

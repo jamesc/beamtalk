@@ -977,7 +977,7 @@ lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-repo
 # The repo-wide lint-* recipes and script tests that need only the toolchain CI's
 # lint job has. `lint` runs this group and ci.yml's lint job runs it by name, so
 # the two cannot diverge (BT-5032). Add a new lint here, not to either list.
-lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns test-lint-stamp test-refresh-edge test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly test-workflow-paths
+lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns test-lint-stamp test-refresh-edge test-determine-version test-publish-rolling-release test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly test-workflow-paths
 
 # Test (BT-5032): every repo path literal in a workflow's `paths:` filter or the
 # ci.yml `changes` job's `matches` gate names something that exists, so a renamed
@@ -1008,6 +1008,26 @@ test-refresh-edge:
 [windows]
 test-refresh-edge:
     @echo "test-refresh-edge: skipped on Windows (covered by Linux CI)"
+
+# Test (BT-5094): determine-version.sh ignores rolling tags and rejects
+# non-version tags.
+[unix]
+test-determine-version:
+    @bash scripts/ci/test-determine-version.sh
+
+[windows]
+test-determine-version:
+    @echo "test-determine-version: skipped on Windows (covered by Linux CI)"
+
+# Test (BT-5094): publish-rolling-release.sh updates the release in place and
+# never deletes it first.
+[unix]
+test-publish-rolling-release:
+    @bash scripts/ci/test-publish-rolling-release.sh
+
+[windows]
+test-publish-rolling-release:
+    @echo "test-publish-rolling-release: skipped on Windows (covered by Linux CI)"
 
 # Test (BT-4925): the `test-install` class-beam guard passes on a populated
 # ebin dir every time (no `find | grep -q` SIGPIPE under pipefail) and fails
@@ -3002,8 +3022,11 @@ dist-vscode-platform target:
     Push-Location editors\vscode; try { npx --yes @vscode/vsce package --target "{{target}}" --out "..\..\beamtalk-{{target}}.vsix"; if ($LASTEXITCODE -ne 0) { throw "vsce package failed" } } finally { Pop-Location }
     @echo "✅ VS Code extension: beamtalk-{{target}}.vsix"
 
-# Unix-only: depends on Unix-only install and dist-vscode recipes
-# Create a distributable install in dist/
+# Unix-only: depends on the Unix-only install recipe
+# Create a distributable install in dist/. It does not build the VS Code
+# extension: nothing consumed the platform .vsix it produced, and the published
+# one is the universal package from release-vscode.yml (BT-5094). Run
+# `just dist-vscode` for a local .vsix.
 [unix]
 dist: build-release build-stdlib
     #!/usr/bin/env bash
@@ -3011,10 +3034,8 @@ dist: build-release build-stdlib
     echo "📦 Creating distribution in dist/..."
     rm -rf dist
     just install dist
-    just dist-vscode
     echo "✅ Distribution ready in dist/"
     echo "   Run: dist/bin/beamtalk repl"
-    echo "   VS Code extension: beamtalk-*.vsix"
 
 # Create a distributable install in dist/ (Windows)
 # Needs Git for Windows' `bash` on PATH (as the Windows release job has) for
@@ -3033,10 +3054,8 @@ dist: build-release build-stdlib build-corpus
     bash scripts/install-otp-apps.sh dist/lib/beamtalk/lib; if ($LASTEXITCODE -ne 0) { Write-Error "Installing OTP apps into dist/ failed."; exit 1 }
     if (!(Test-Path "runtime/tools/rebar3")) { Write-Error "Bundled rebar3 not found at runtime/tools/rebar3."; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/tools" | Out-Null; Copy-Item "runtime/tools/rebar3" "dist/lib/beamtalk/tools/rebar3"
     bash scripts/install-share.sh dist/share; if ($LASTEXITCODE -ne 0) { Write-Error "Installing share/ into dist/ failed."; exit 1 }
-    just dist-vscode
     @echo "✅ Distribution ready in dist/"
     @echo "   Run: dist\bin\beamtalk.exe repl"
-    @echo "   VS Code extension: beamtalk-*.vsix"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Documentation

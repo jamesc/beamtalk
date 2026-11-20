@@ -174,7 +174,7 @@ pub fn get_workspace_metadata(workspace_id: &str) -> Result<WorkspaceMetadata> {
 /// is alive it is the only writer of the file.
 pub fn save_workspace_metadata(metadata: &WorkspaceMetadata) -> Result<()> {
     let dir = workspace_dir(&metadata.workspace_id)?;
-    fs::create_dir_all(&dir).into_diagnostic()?;
+    create_private_dir_all(&dir)?;
 
     let metadata_path = dir.join("metadata.json");
     let content = merged_metadata_json(&metadata_path, metadata)?;
@@ -209,6 +209,31 @@ fn merged_metadata_json(path: &Path, metadata: &WorkspaceMetadata) -> Result<Str
 /// there is no permission enforcement.
 pub(super) fn write_private_atomic(path: &Path, content: &[u8]) -> Result<()> {
     crate::commands::util::write_atomic_file(path, content, ".beamtalk-ws.", true).into_diagnostic()
+}
+
+/// Create `dir` (and missing parents) owner-only, mode 0700 on Unix (BT-5070).
+///
+/// A workspace directory holds the `port`, `pid` and project path next to the
+/// 0600 secret files; under the default umask (typically 0755) another local
+/// user could list them. An existing directory is tightened too, so a
+/// workspace created by an older CLI is fixed on its next start. No-op mode
+/// change on non-Unix platforms.
+pub(crate) fn create_private_dir_all(dir: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+            .into_diagnostic()?;
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).into_diagnostic()?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(dir).into_diagnostic()
+    }
 }
 
 /// Generate a unique Erlang cookie for a workspace.
@@ -367,6 +392,22 @@ pub(super) fn acquire_workspace_lock(workspace_id: &str) -> Result<fs::File> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn create_private_dir_all_is_0700_and_tightens_existing() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("a").join("ws");
+        create_private_dir_all(&dir).unwrap();
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(dir.parent().unwrap()), 0o700);
+        // A directory an older CLI made under the default umask is tightened.
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        create_private_dir_all(&dir).unwrap();
+        assert_eq!(mode(&dir), 0o700);
+    }
 
     /// Shared Rust/Erlang/broker schema fixture for `metadata.json` (BT-5014);
     /// Erlang half: `beamtalk_workspace_meta_tests`, broker half:
