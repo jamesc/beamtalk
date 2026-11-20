@@ -122,12 +122,15 @@ init(Config) ->
     %% (`/`, `/static/[...]`) have been removed (ADR 0017 Phase 3).
     Dispatch = cowboy_router:compile([
         {'_', [
-            {"/ws", beamtalk_ws_handler, []}
+            {"/ws", beamtalk_ws_handler, #{bind_addr => BindAddr}}
         ]}
     ]),
     TransportOpts = #{
         socket_opts => [{ip, BindAddr}, {port, Port}],
-        num_acceptors => 10
+        num_acceptors => 10,
+        %% BT-5066: bounded; connection slots are cheap but not free, and an
+        %% unauthenticated socket is dropped after the auth deadline.
+        max_connections => 256
     },
     ProtocolOpts = #{env => #{dispatch => Dispatch}},
     case cowboy:start_clear(?LISTENER_REF, TransportOpts, ProtocolOpts) of
