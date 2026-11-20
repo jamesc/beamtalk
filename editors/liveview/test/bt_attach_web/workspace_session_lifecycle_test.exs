@@ -31,6 +31,13 @@ defmodule BtAttachWeb.WorkspaceSessionLifecycleTest do
     end
   end
 
+  defmodule DownClient do
+    @moduledoc false
+    use BtAttachWeb.StubClientOverrides
+
+    def connect, do: {:error, {:connect_failed, :ws@down, false}}
+  end
+
   setup do
     {:ok, _} = SessionProbe.start_link()
     {:ok, _} = StubWorkspaceClient.start_state()
@@ -130,5 +137,26 @@ defmodule BtAttachWeb.WorkspaceSessionLifecycleTest do
     view |> element("#workspace-reconnect") |> render_click()
     html = submit_and_settle(view, "#eval-form", %{expr: "1 + 1"})
     refute html =~ "connection was lost"
+  end
+
+  test "a failed Reconnect keeps the banner and the button so the user can retry", %{conn: conn} do
+    view = mount_cockpit(conn)
+    [%{pid: session_pid}] = SessionProbe.sessions()
+    Process.exit(session_pid, :kill)
+    wait_for_banner(view)
+
+    # The workspace is still down: connecting fails.
+    Application.put_env(:bt_attach, :workspace_client, DownClient)
+    html = view |> element("#workspace-reconnect") |> render_click()
+
+    assert html =~ ~s(id="workspace-lost")
+    assert html =~ ~s(id="workspace-reconnect")
+    assert html =~ "workspace-reconnect-error"
+    assert html =~ "attach failed"
+
+    # And it recovers once the workspace is back.
+    Application.put_env(:bt_attach, :workspace_client, AttachClient)
+    html = view |> element("#workspace-reconnect") |> render_click()
+    refute html =~ ~s(id="workspace-lost")
   end
 end

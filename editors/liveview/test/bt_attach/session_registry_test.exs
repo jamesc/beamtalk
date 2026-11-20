@@ -300,5 +300,17 @@ defmodule BtAttach.SessionRegistryTest do
 
       assert {:resumed, "phoenix-b", ^session} = SessionRegistry.checkout(reg, "tab-blip")
     end
+
+    test "resuming after a blip re-monitors, so a later real death is observed", %{reg: reg} do
+      session = fake_session()
+      SessionRegistry.register(reg, "tab-remon", "phoenix-m", session)
+      %{entries: %{"tab-remon" => %{monitor_ref: ref}}} = :sys.get_state(reg)
+      send(reg, {:DOWN, ref, :process, session, :noconnection})
+
+      assert {:resumed, _, ^session} = SessionRegistry.checkout(reg, "tab-remon")
+      send(session, :stop)
+
+      eventually(fn -> not Map.has_key?(:sys.get_state(reg).entries, "tab-remon") end)
+    end
   end
 end

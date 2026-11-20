@@ -240,6 +240,7 @@ defmodule BtAttach.SessionRegistry do
         entry = cancel_reap(entry)
         demonitor_owner(entry)
         entry = %Entry{entry | owner_pid: owner_pid, owner_ref: Process.monitor(owner_pid)}
+        entry = remonitor_session(entry)
         state = put_entry(state, token, entry)
         {:reply, {:resumed, session_id, pid}, state}
 
@@ -421,6 +422,15 @@ defmodule BtAttach.SessionRegistry do
     timer = Process.send_after(self(), {:reap, token, reap_tag}, state.reap_after_ms)
     %Entry{entry | reap_timer: timer, reap_tag: reap_tag, owner_ref: nil}
   end
+
+  # After a `:noconnection` DOWN the session monitor is spent; re-establish it on
+  # resume so a later real session death is observed. (If the node is still
+  # unreachable the fresh monitor just fires `:noconnection` again, which keeps
+  # the entry.)
+  defp remonitor_session(%Entry{monitor_ref: nil, session_pid: pid} = entry) when is_pid(pid),
+    do: %Entry{entry | monitor_ref: Process.monitor(pid)}
+
+  defp remonitor_session(entry), do: entry
 
   defp demonitor_owner(%Entry{owner_ref: nil}), do: :ok
 

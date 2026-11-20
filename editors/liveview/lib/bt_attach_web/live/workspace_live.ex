@@ -427,6 +427,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       socket
       |> assign(:connected, true)
       |> assign(:workspace_lost, nil)
+      |> assign(:reconnect_error, nil)
       |> monitor_session(pid)
       |> assign(:node, Workspace.node_name())
       # ADR 0105 Phase 1 (BT-2779): the initial live snapshot of
@@ -811,9 +812,19 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Reconnect control calls it today; an automatic reconnect on `DOWN` would call
   # the same function, so changing that UX is a one-line change in
   # `handle_info({:DOWN, …})`.
+  #
+  # Only a successful re-attach clears the lost state. If the workspace is still
+  # down, `attach/1` leaves the socket `connected: false`; keep the previous
+  # socket (and its banner + Reconnect button) and add the failure to the
+  # banner, so the user can retry instead of dead-ending until a page reload.
   defp reconnect_workspace(socket) do
-    {:ok, socket} = attach(assign(socket, :workspace_lost, nil))
-    socket
+    {:ok, attached} = attach(assign(socket, :workspace_lost, nil))
+
+    if attached.assigns[:connected] do
+      attached
+    else
+      assign(socket, :reconnect_error, attached.assigns[:error])
+    end
   end
 
   # BT-5081: monitor the session pid from the LiveView. A workspace restart (or
@@ -3380,8 +3391,12 @@ defmodule BtAttachWeb.WorkspaceLive do
           role="alert"
         >
           <span class="val">
-            The workspace connection was lost or the workspace restarted. This session's
-            bindings are gone. Reconnect to start a fresh session.
+            The workspace connection was lost or the workspace restarted. Reconnect to
+            resume this session, or start a fresh one if the workspace restarted (a restart
+            discards the session's bindings).
+          </span>
+          <span :if={@reconnect_error} id="workspace-reconnect-error" class="val">
+            {@reconnect_error}
           </span>
           <button
             id="workspace-reconnect"
