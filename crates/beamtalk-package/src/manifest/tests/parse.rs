@@ -630,3 +630,22 @@ fn every_real_package_name_and_version_loads() {
         assert_eq!(m.package.name, name);
     }
 }
+
+/// The exact `oauth` and `yaml` manifests: a string-version `[dependencies]`
+/// entry and string-version `[native.dependencies]` entries.
+#[test]
+fn shape_oauth_and_yaml_exact_manifests_load() {
+    let oauth = parses(
+        "[package]\nname = \"oauth\"\nversion = \"0.2.1\"\n\n\
+         [dependencies]\nhttp = \"0.3.6\"\n\n[native.dependencies]\noidcc = \"3.9.2\"\n",
+    );
+    assert_eq!(oauth.dependencies.len(), 1);
+    assert!(oauth.native_dependencies.contains_key("oidcc"));
+
+    let yaml = parses(
+        "[package]\nname = \"yaml\"\nversion = \"0.2.0\"\n\n\
+         [dependencies]\n\n[native.dependencies]\nyamerl = \"0.10.0\"\n",
+    );
+    assert!(yaml.dependencies.is_empty());
+    assert!(yaml.native_dependencies.contains_key("yamerl"));
+}
