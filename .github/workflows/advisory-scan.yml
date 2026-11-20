@@ -44,7 +44,7 @@ jobs:
           persist-credentials: false
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@789fcf404486ad49a9a91ceb1acfb43caac96664 # v2
+        uses: taiki-e/install-action@789fcf404486ad49a9a91ceb1acfb43caac96664 # same pin as coverage.yml
         with:
           tool: cargo-audit@0.23.0
 
