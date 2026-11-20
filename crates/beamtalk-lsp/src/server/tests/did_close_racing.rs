@@ -71,7 +71,7 @@ async fn did_close_keeps_preloaded_file_indexed_from_disk() {
         .await;
 
     let engine_utf8 = Utf8PathBuf::from_path_buf(engine_path).expect("temp path is UTF-8");
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     assert!(
         svc.project_index()
             .hierarchy()
@@ -121,7 +121,7 @@ async fn did_close_removes_file_outside_preload_coverage() {
     let scratch_uri = Url::from_file_path(&scratch_path).expect("path -> uri");
     real_did_open(backend, scratch_uri.clone(), scratch_source).await;
     {
-        let svc = backend.service.lock().expect("service lock poisoned");
+        let svc = backend.service.lock_recover();
         assert!(svc.project_index().hierarchy().has_class("Scratch"));
     }
 
@@ -131,7 +131,7 @@ async fn did_close_removes_file_outside_preload_coverage() {
         })
         .await;
 
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     assert!(
         !svc.project_index().hierarchy().has_class("Scratch"),
         "a file outside preload coverage must still be dropped on close"
@@ -247,7 +247,7 @@ async fn did_close_racing_reopen_does_not_clobber_reopened_content() {
     });
 
     let engine_utf8 = Utf8PathBuf::from_path_buf(target_path.clone()).expect("utf8 path");
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     assert!(
         svc.project_index().hierarchy().has_class("Reopened"),
         "the racing reopen's content must survive"
@@ -262,7 +262,7 @@ async fn did_close_racing_reopen_does_not_clobber_reopened_content() {
     );
     drop(svc);
 
-    let versions = backend.versions.lock().expect("versions lock poisoned");
+    let versions = backend.versions.lock_recover();
     assert_eq!(
         versions.get(&engine_utf8).copied(),
         Some(2),
@@ -365,7 +365,7 @@ async fn did_close_racing_did_change_still_reverts_to_disk() {
     });
 
     let target_utf8 = Utf8PathBuf::from_path_buf(target_path.clone()).expect("utf8 path");
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     assert!(
         svc.project_index().hierarchy().has_class("FromDisk"),
         "a racing did_change (not a reopen) must not stop did_close from \
@@ -377,7 +377,7 @@ async fn did_close_racing_did_change_still_reverts_to_disk() {
     );
     drop(svc);
 
-    let versions = backend.versions.lock().expect("versions lock poisoned");
+    let versions = backend.versions.lock_recover();
     assert!(
         !versions.contains_key(&target_utf8),
         "a genuinely closing document's version entry must still be removed, \

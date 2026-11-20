@@ -240,7 +240,7 @@ async fn references_on_type_alias_is_silent_when_workspace_preload_complete() {
             .expect("temp path is UTF-8");
     let uri = open_test_file(backend, &path, ALIAS_REFERENCES_SOURCE);
     {
-        let mut svc = backend.service.lock().expect("service lock");
+        let mut svc = backend.service.lock_recover();
         svc.set_project_complete(true);
     }
 

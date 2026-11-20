@@ -24,7 +24,7 @@ use crate::server::params::{
 use crate::server::{
     BeamtalkMcp, InternalErr, MCP_OUTPUT_MODE, ToolTimer, check_response, error_result,
 };
-use crate::server::{pretty_json, validate_class_name};
+use crate::server::{code_up_to_cursor, pretty_json, validate_class_name};
 
 #[tool_router(router = evaluate_tool_router, vis = "pub(crate)")]
 impl BeamtalkMcp {
@@ -138,10 +138,10 @@ impl BeamtalkMcp {
         let mut timer = ToolTimer::start_quiet("complete");
         let code_len = params.code.len();
         tracing::debug!(tool = "complete", code_len, cursor = ?params.cursor, "tool invoked");
-        let cursor = params.cursor.unwrap_or(code_len).min(code_len);
         // Truncate code to cursor: the REPL uses the code string as-is for
         // completions, so only the text up to the cursor should be sent.
-        let code_up_to_cursor = &params.code[..cursor];
+        // A cursor inside a UTF-8 character is `invalid_params` (BT-5078).
+        let (code_up_to_cursor, cursor) = code_up_to_cursor(&params.code, params.cursor)?;
         let response = self
             .client
             .complete(code_up_to_cursor, cursor)

@@ -423,11 +423,11 @@ async fn document_symbol_uses_ast_for_untitled_uri() {
     let path = Utf8PathBuf::from("__untitled__/scratch.bt");
     let source = "Object subclass: Counter\n  increment => 1\n  value => 2";
     {
-        let mut svc = backend.service.lock().expect("service lock");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(path.clone(), source.to_string());
     }
     {
-        let mut versions = backend.versions.lock().expect("versions lock");
+        let mut versions = backend.versions.lock_recover();
         versions.insert(path.clone(), 1);
     }
     // Flip the flag on so the bypass guard is the *only* reason the

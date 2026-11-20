@@ -148,6 +148,7 @@ pub fn run(dry_run: bool) -> Result<()> {
     let new_entry_content = render_index_entry_content(
         name,
         manifest.package.description.as_deref(),
+        manifest.package.licenses.as_deref().unwrap_or_default(),
         version,
         &origin_url,
         &tag,
@@ -542,6 +543,7 @@ fn create_and_push_tag(project_root: &Utf8Path, tag: &str, version: &str) -> Res
 fn render_index_entry_content(
     name: &str,
     description: Option<&str>,
+    licenses: &[String],
     version: &str,
     git_url: &str,
     tag: &str,
@@ -554,7 +556,7 @@ fn render_index_entry_content(
             .wrap_err_with(|| format!("Failed to read existing index entry '{entry_path}'"))?;
         append_version_block(&existing_content, version, git_url, tag)
     } else {
-        render_new_index_entry(name, description, version, git_url, tag)
+        render_new_index_entry_with_licenses(name, description, licenses, version, git_url, tag)
     };
 
     // Validate it round-trips through the same parser dependency resolution
@@ -566,9 +568,21 @@ fn render_index_entry_content(
     Ok(content)
 }
 
+#[cfg(test)]
 fn render_new_index_entry(
     name: &str,
     description: Option<&str>,
+    version: &str,
+    git_url: &str,
+    tag: &str,
+) -> String {
+    render_new_index_entry_with_licenses(name, description, &[], version, git_url, tag)
+}
+
+fn render_new_index_entry_with_licenses(
+    name: &str,
+    description: Option<&str>,
+    licenses: &[String],
     version: &str,
     git_url: &str,
     tag: &str,
@@ -578,6 +592,13 @@ fn render_new_index_entry(
     let mut out = format!("name = \"{}\"\n", escape_toml_string(name));
     if let Some(desc) = description {
         let _ = writeln!(out, "description = \"{}\"", escape_toml_string(desc));
+    }
+    if !licenses.is_empty() {
+        let items: Vec<String> = licenses
+            .iter()
+            .map(|l| format!("\"{}\"", escape_toml_string(l)))
+            .collect();
+        let _ = writeln!(out, "licenses = [{}]", items.join(", "));
     }
     out.push('\n');
     out.push_str(&render_version_block(version, git_url, tag));
@@ -1048,6 +1069,21 @@ mod tests {
     // -----------------------------------------------------------------------
     // Index rendering
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_render_new_index_entry_includes_licenses() {
+        let content = render_new_index_entry_with_licenses(
+            "yaml",
+            None,
+            &["Apache-2.0".to_string(), "MIT".to_string()],
+            "0.1.0",
+            "https://example.test/yaml",
+            "v0.1.0",
+        );
+        let parsed: toml::Value = toml::from_str(&content).unwrap();
+        assert_eq!(parsed["licenses"].as_array().unwrap().len(), 2, "{content}");
+        registry::parse_index_entry("yaml", &content).unwrap();
+    }
 
     #[test]
     fn test_render_new_index_entry_includes_description() {
