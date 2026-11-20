@@ -316,6 +316,10 @@ fn execute_build_passes(
     // toolchain-version mismatch forces a full rebuild regardless of mtime.
     let force = force || provenance_requires_rebuild(env, options);
 
+    // BT-5074: derive every file's module first, so two files that map to one
+    // module fail the build before any pass runs.
+    let file_module_pairs = compute_file_module_pairs(env)?;
+
     let mut index = build_class_index(env, dep_ctx, options, force)?;
     let force = if index.force_pass2 { true } else { force };
 
@@ -337,8 +341,6 @@ fn execute_build_passes(
     // resolved FFI type table, so fold its digest into every file's cache key
     // with the stub inputs.
     let stub_inputs_hash = fold_native_registry(stub_inputs_hash, native_type_registry.as_deref());
-
-    let file_module_pairs = compute_file_module_pairs(env)?;
 
     // ADR 0127 §10a (BT-3591): a class's `uses:` line makes its file's
     // build-graph cache key depend on that protocol's content too — see
