@@ -35,6 +35,10 @@ defmodule BtAttach.Facade do
   # the read ops trigger no user code; `kill`/`rotate_cookie` are admin.
   @ops %{
     eval: :execute,
+    # BT-5081: stop the eval running in the caller's own session (the dock's
+    # Stop control). Same capability as `eval` — whoever may start code may
+    # stop it, and an Observer has nothing running to stop.
+    interrupt: :execute,
     load_source: :execute,
     save: :execute,
     # ADR 0082 Phase 5 (BT-2293): the System Browser save/flush affordances.
@@ -280,6 +284,7 @@ defmodule BtAttach.Facade do
   # Route the ops the IDE drives today to the workspace client. Catalog ops with
   # no UI binding yet return `:unsupported_op` rather than silently no-op'ing.
   defp invoke(:eval, %{session_pid: pid, code: code}, _ctx), do: client().eval(pid, code)
+  defp invoke(:interrupt, %{session_pid: pid}, _ctx), do: client().interrupt(pid)
   defp invoke(:inspect, %{term: term}, _ctx), do: client().inspect_value(term)
   defp invoke(:bindings, %{session_pid: pid}, _ctx), do: client().list_bindings(pid)
   defp invoke(:changes, _params, _ctx), do: client().change_history()

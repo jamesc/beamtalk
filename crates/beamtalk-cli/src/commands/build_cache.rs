@@ -223,7 +223,9 @@ fn save_cache(
         }
     };
 
-    if let Err(e) = fs::write(&cache_path, &data) {
+    if let Err(e) =
+        crate::commands::util::write_atomic_if_changed(&cache_path, &data, ".beamtalk-cache.")
+    {
         warn!(error = %e, "Failed to write Pass 1 cache to {cache_path}");
         return;
     }
@@ -344,7 +346,9 @@ pub(crate) fn save_beam_hash_cache(build_dir: &Utf8Path, hashes: &HashMap<String
         }
     };
 
-    if let Err(e) = fs::write(&cache_path, &data) {
+    if let Err(e) =
+        crate::commands::util::write_atomic_if_changed(&cache_path, &data, ".beamtalk-cache.")
+    {
         warn!(error = %e, "Failed to write beam-hash cache to {cache_path}");
         return;
     }
@@ -447,7 +451,9 @@ pub(crate) fn save_diagnostics_cache(
         }
     };
 
-    if let Err(e) = fs::write(&cache_path, &data) {
+    if let Err(e) =
+        crate::commands::util::write_atomic_if_changed(&cache_path, &data, ".beamtalk-cache.")
+    {
         warn!(error = %e, "Failed to write diagnostics cache to {cache_path}");
         return;
     }

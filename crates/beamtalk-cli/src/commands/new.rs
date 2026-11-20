@@ -3,6 +3,7 @@
 
 //! Create new beamtalk projects.
 
+use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::unparse::format_source;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -24,6 +25,18 @@ pub fn new_project(name: &str, app: bool) -> Result<()> {
         miette::bail!("{}", format_name_error(name, &e));
     }
 
+    // The package name becomes a class name; one that shadows a stdlib class
+    // (`set`, `list`, `object`, `string`, ...) yields a project that does not build.
+    for suffix in ["", "AppSup"] {
+        let class_name = to_class_name(name, suffix);
+        if ClassHierarchy::is_builtin_class(&class_name) {
+            miette::bail!(
+                "Package name '{name}' would generate the class '{class_name}', which shadows \
+                 a built-in class. Choose a different name (e.g. '{name}_app' or 'my_{name}')."
+            );
+        }
+    }
+
     let project_path = Utf8PathBuf::from(name);
 
     // Check if directory already exists
@@ -38,8 +51,11 @@ pub fn new_project(name: &str, app: bool) -> Result<()> {
     };
 
     // Create project directory structure
-    create_project_structure(&project_path, name, kind)
-        .wrap_err_with(|| format!("Failed to create project '{name}'"))?;
+    cleanup_failed_project(
+        &project_path,
+        create_project_structure(&project_path, name, kind),
+    )
+    .wrap_err_with(|| format!("Failed to create project '{name}'"))?;
 
     let kind_label = match kind {
         ProjectKind::Library => "library",
@@ -56,6 +72,18 @@ pub fn new_project(name: &str, app: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Remove `path` if `result` is an error, then pass `result` through.
+///
+/// `new_project` only calls this for a directory it just created (it refuses
+/// an existing one), so removing it cannot destroy user data; a half-created
+/// project is worse than none.
+fn cleanup_failed_project(path: &Utf8Path, result: Result<()>) -> Result<()> {
+    if result.is_err() {
+        let _ = fs::remove_dir_all(path);
+    }
+    result
 }
 
 /// Create the project directory structure with template files.
@@ -414,6 +442,36 @@ mod tests {
 
         let project_path = temp.path().join(project_name);
         (temp, project_path)
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_new_refuses_name_whose_class_shadows_a_stdlib_class() {
+        let temp = TempDir::new().unwrap();
+        for name in ["set", "list", "object", "string"] {
+            let err = beamtalk_workspace::test_cwd::with_cwd(temp.path(), || {
+                new_project(name, false).unwrap_err()
+            });
+            assert!(format!("{err:?}").contains("shadows"), "{name}: {err:?}");
+            assert!(!temp.path().join(name).exists(), "{name} left a directory");
+        }
+    }
+
+    #[test]
+    fn test_failed_creation_removes_the_half_made_directory() {
+        let temp = TempDir::new().unwrap();
+        let path = Utf8PathBuf::from_path_buf(temp.path().join("half_made")).unwrap();
+        fs::create_dir_all(path.join("src")).unwrap();
+        fs::write(path.join("beamtalk.toml"), "x").unwrap();
+
+        let err = cleanup_failed_project(&path, Err(miette::miette!("boom"))).unwrap_err();
+        assert!(format!("{err:?}").contains("boom"));
+        assert!(!path.exists(), "half-created project must be removed");
+
+        // A successful creation is left alone.
+        fs::create_dir_all(&path).unwrap();
+        cleanup_failed_project(&path, Ok(())).unwrap();
+        assert!(path.exists());
     }
 
     #[test]

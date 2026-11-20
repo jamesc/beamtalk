@@ -12,7 +12,7 @@
 //! `editors/liveview/assets/js/hooks/keyboard_shortcuts.js`). On macOS,
 //! Tauri's default menu claims ⌘W in the OS menu bar for
 //! `PredefinedMenuItem::close_window`, a *native* menu item — the OS handles
-//! it before WKWebView ever sees a keydown, so the cockpit's own binding
+//! it before `WKWebView` ever sees a keydown, so the cockpit's own binding
 //! never fires and ⌘W closes the whole window instead of just the tab.
 //! [`PredefinedMenuItem`] has no accelerator-override API (only its label is
 //! customizable), so the only way to free ⌘W is to not use it at all: build
@@ -34,7 +34,7 @@
 //! unconditionally applying this on Windows/Linux would be a scope-creeping
 //! regression (a menu bar those platforms never had before), not a fix.
 //! Whether WebView2/WebKitGTK would even deliver a freed Ctrl+W keydown
-//! through to the page the way WKWebView does is separately **unverified**
+//! through to the page the way `WKWebView` does is separately **unverified**
 //! either way — this crate has never been run on a real Windows or Linux
 //! desktop (see `../README.md`'s "What was and wasn't verified").
 //!
@@ -224,11 +224,10 @@ pub fn handle_event<R: Runtime>(app_handle: &AppHandle<R>, event: &tauri::menu::
         .webview_windows()
         .into_values()
         .find(|window| window.is_focused().unwrap_or(false));
-    match focused {
-        Some(window) => {
-            let _ = window.close();
-        }
-        None => tracing::debug!("Close Window menu item activated with no focused window"),
+    if let Some(window) = focused {
+        let _ = window.close();
+    } else {
+        tracing::debug!("Close Window menu item activated with no focused window");
     }
 }
 

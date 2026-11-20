@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Breaking: `beamtalk.toml` is validated strictly (BT-5076).**
+  - Changed: an unknown key or section in `beamtalk.toml` (top level, `[package]` or `[application]`) is now an error naming the key and listing the valid ones. A misspelt `[dependancies]` or `strict_deps` (for `strict-deps`) used to be dropped without a word, leaving the dependency or strict mode off.
+  - Changed: `[package] version` must be a SemVer version (`1.2.3`, optionally `-rc.1` / `+build`). It used to take any text and flow into the `.app` `vsn`, the release directory name and the `.rel`.
+  - Changed: the beamtalk runtime apps (`beamtalk_runtime`, `beamtalk_stdlib`, `beamtalk_workspace`, `beamtalk_compiler`, `beamtalk_test_support`) and the full OTP application set (`erts`, `asn1`, `wx`, ...) are reserved package names, and `[native.dependencies]` may not use a reserved name or the package's own name. A `native/*.erl` module named like an OTP module (`lists`) or in the `beamtalk_` namespace is rejected at build time. The OTP half is best-effort: it reads the module list from the installed `erl` and logs a warning and skips the check if `erl` cannot run.
+  - Added: `[package] licenses` is written to the generated `.app` file as `{licenses, [...]}`.
+  - Changed: the long-removed `[package] start` key is now reported as an unknown key too.
+  - Changed: `beamtalk new` refuses a name whose class form shadows a built-in class (`set`, `list`, `object`, `string`, ...), and removes a half-created directory if scaffolding fails.
+  - Do: fix the typo, give the package a `major.minor.patch` version, or rename the package, dependency or native module.
+- **Behaviour change: `Dictionary select:` / `reject:` answer a Dictionary (BT-5083).**
+  - Changed: `#{#a => 1, #b => 2} select: [:v | v > 1]` answers `#{#b => 2}` (keys kept, the block receives the value, as in `collect:`). It answered a List of the surviving values before (`#(2)`).
+  - Changed: `"abc" split: ""` answers `#("abc")`, like `splitOn:`, instead of raising a raw `badarg`. `SupervisionTree elements` (so `inject:into:`, `count:`, `anySatisfy:`) now sees the enriched nodes, so `children` / `parent` work. `Bag printString` shows contents (`Bag(1 x 2)`; a count above one prints as `element x count`). `1 to: 10 by: 0 do: [:i | ...]` raises "Interval step cannot be zero" instead of doing nothing (when the block writes no outer variable; see below). `-0.0 isZero` is true. `SystemNavigation runtimeCalledSelectors` lists the `Server`, supervisor, JSON and class-side hooks, so `unusedSelectors` no longer reports their overrides.
+  - Known bug: a block that writes an outer local or field still answers a List of values for `select:`, `reject:` and `collect:` (BT-5097), and `to:by:do:` with step 0 and such a block is still a no-op (BT-5098). Both are pinned by `PIN-BUG` tests.
+  - Do: code that relied on the List result of `Dictionary select:` should call `values` on the result.
 - **Fix: manifest and lockfile writers escape every string and keep line endings (BT-5076).**
   - Fixed: `beamtalk.lock` escapes `name`, `url`, `reference` and `sha`; a `"` or `\` in a git URL or ref no longer breaks the file for every later read.
   - Fixed: `beamtalk deps add` escapes the path, URL and ref it writes, so a Windows path such as `..\lib\foo` works. It edits `beamtalk.toml` before writing `beamtalk.lock` and restores the manifest if the lock write fails, so a failed add leaves no orphan lock entry.

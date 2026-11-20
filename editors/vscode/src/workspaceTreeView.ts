@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { type StdlibDocumentOpener, resolveClassDocument } from "./documentResolution";
+import { resolveClassDocument, type StdlibDocumentOpener } from "./documentResolution";
 import { GenerationTracker } from "./generationTracker";
 import {
   type DeclarationRef,
@@ -331,6 +331,7 @@ export class WorkspaceTreeDataProvider
     const disposeConn = client.onConnectionChange((state) => {
       this.connectionState = state;
       if (state === "connected") {
+        this._invalidateCaches();
         void this._fetchInitialData(client);
       } else if (state === "disconnected") {
         this._resetState("disconnected");
@@ -412,15 +413,7 @@ export class WorkspaceTreeDataProvider
     if (!this.client || this.connectionState !== "connected") {
       return;
     }
-    this.inspectCache.clear();
-    this.methodsCache.clear();
-    this.inheritedMethodsCache.clear();
-    // Discard any per-item fetch (actor inspect / class methods) still in
-    // flight from before this wholesale clear — without this, one resolving
-    // afterward would repopulate the cache with a pre-refresh result.
-    this.inspectGen.bumpAll();
-    this.methodsGen.bumpAll();
-    this.inheritedMethodsGen.bumpAll();
+    this._invalidateCaches();
     await this._fetchInitialData(this.client);
   }
 
@@ -1309,13 +1302,32 @@ export class WorkspaceTreeDataProvider
     this.actors = [];
     this.classes = [];
     this.typeAliases = [];
+    this._invalidateCaches();
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  /**
+   * Drop every lazily-fetched per-item cache and discard any fetch still in
+   * flight (without the generation bump, one resolving afterwards would
+   * repopulate a cache with a pre-clear result). Used on refresh, reset, and
+   * on every transition back to `connected`, where push events missed during
+   * the gap may have made cached methods / inspect data stale (BT-5082).
+   */
+  private _invalidateCaches(): void {
     this.inspectCache.clear();
     this.methodsCache.clear();
     this.inheritedMethodsCache.clear();
     this.inspectGen.bumpAll();
     this.methodsGen.bumpAll();
     this.inheritedMethodsGen.bumpAll();
-    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  /** Adjust a class's cached `actor_count` by `delta` (floored at 0) and refresh the Classes section. */
+  private _adjustActorCount(className: string, delta: number): void {
+    const cls = this.classes.find((c) => c.name === className);
+    if (!cls) return;
+    cls.actor_count = Math.max(0, (cls.actor_count ?? 0) + delta);
+    this._onDidChangeTreeData.fire(CLASSES_SECTION);
   }
 
   /** Fetch bindings, actors, classes, and type aliases from a newly-connected client. */
@@ -1375,12 +1387,15 @@ export class WorkspaceTreeDataProvider
         // Guard against duplicate spawned events
         if (!this.actors.some((a) => a.pid === event.data.pid)) {
           this.actors.push(event.data);
+          this._adjustActorCount(event.data.class, 1);
         }
         this.inspectCache.delete(`actor:${event.data.pid}`);
         this.inspectGen.bump(`actor:${event.data.pid}`);
         this._onDidChangeTreeData.fire(ACTORS_SECTION);
       } else if (event.event === "stopped") {
+        const known = this.actors.find((a) => a.pid === event.data.pid);
         this.actors = this.actors.filter((a) => a.pid !== event.data.pid);
+        if (known) this._adjustActorCount(known.class, -1);
         this.inspectCache.delete(`actor:${event.data.pid}`);
         this.inspectGen.bump(`actor:${event.data.pid}`);
         this._onDidChangeTreeData.fire(ACTORS_SECTION);
@@ -1389,13 +1404,12 @@ export class WorkspaceTreeDataProvider
       // Invalidate cached methods for the reloaded class — its methods may have changed.
       this.methodsCache.delete(event.data.class);
       this.methodsGen.bump(event.data.class);
-      // BT-3478: also invalidate its own inherited-methods entry. Known gap
-      // (shared with the local-methods cache above): reloading an ancestor
-      // does not invalidate a subclass's cached inherited view — a full
-      // hierarchy walk on every reload wasn't justified for this op's
-      // initial ship; `refresh()` / reconnect always sees the current state.
-      this.inheritedMethodsCache.delete(event.data.class);
-      this.inheritedMethodsGen.bump(event.data.class);
+      // BT-3478: inherited views depend on ancestors, and `ClassInfo` carries
+      // no hierarchy to find the descendants of a reloaded class, so drop every
+      // cached inherited view (BT-5082). They refetch lazily, only for groups
+      // that are expanded again.
+      this.inheritedMethodsCache.clear();
+      this.inheritedMethodsGen.bumpAll();
       // Re-fetch the full class list — the event only carries the new class name,
       // not the complete list with actor_count metadata.
       // Use a generation counter to discard stale responses when multiple
@@ -1425,8 +1439,8 @@ export class WorkspaceTreeDataProvider
       this.classes = this.classes.filter((c) => c.name !== event.data.class);
       this.methodsCache.delete(event.data.class);
       this.methodsGen.bump(event.data.class);
-      this.inheritedMethodsCache.delete(event.data.class);
-      this.inheritedMethodsGen.bump(event.data.class);
+      this.inheritedMethodsCache.clear();
+      this.inheritedMethodsGen.bumpAll();
       this._onDidChangeTreeData.fire(CLASSES_SECTION);
     }
   }

@@ -259,8 +259,9 @@ impl<W: io::Write> io::Write for RechmodOnRollover<W> {
 fn days_since_unix_epoch() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| (d.as_secs() / 86_400) as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| {
+            i64::try_from(d.as_secs() / 86_400).unwrap_or(i64::MAX)
+        })
 }
 
 /// Initialize the launcher's `tracing` subscriber: a file layer rotating

@@ -1098,9 +1098,10 @@ mod tests {
 
     #[test]
     #[serial(cwd)]
-    fn test_run_old_package_start_field_ignored() {
-        // Old [package] start = "module" manifests should parse without error
-        // (TOML ignores unknown fields); `run "."` then fails with no-entry-point error.
+    fn test_run_old_package_start_field_rejected() {
+        // The old [package] start = "module" key is gone. Unknown keys are an
+        // error (BT-5076), so the manifest fails to parse and names the key
+        // instead of silently ignoring it.
         let temp = TempDir::new().unwrap();
         create_test_project_with_manifest(
             &temp,
@@ -1111,8 +1112,8 @@ mod tests {
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
-            err.contains("No entry point defined"),
-            "Old [package] start should not be used: {err}"
+            err.contains("unknown field `start`"),
+            "Old [package] start should be reported as an unknown key: {err}"
         );
     }
 

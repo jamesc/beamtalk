@@ -620,6 +620,8 @@ test-desktop:
     set -euo pipefail
     mkdir -p dist-liveview
     cd desktop/src-tauri
+    # desktop/src-tauri is outside the workspace, so `just clippy` skips it (BT-5087).
+    cargo clippy --locked --all-targets -- -D warnings
     cargo test --locked
 
 [windows]
@@ -628,6 +630,8 @@ test-desktop:
     $ErrorActionPreference = "Stop"
     New-Item -ItemType Directory -Force -Path dist-liveview | Out-Null
     Set-Location desktop/src-tauri
+    cargo clippy --locked --all-targets -- -D warnings
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     cargo test --locked
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -977,7 +981,7 @@ lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-repo
 # The repo-wide lint-* recipes and script tests that need only the toolchain CI's
 # lint job has. `lint` runs this group and ci.yml's lint job runs it by name, so
 # the two cannot diverge (BT-5032). Add a new lint here, not to either list.
-lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns test-lint-stamp test-refresh-edge test-determine-version test-publish-rolling-release test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly test-workflow-paths test-cache-keys test-ci-ok
+lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns check-lint-parity check-pins test-lint-stamp test-refresh-edge test-determine-version test-publish-rolling-release test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly test-workflow-paths test-cache-keys test-ci-ok
 
 # Test (BT-5032): every repo path literal in a workflow's `paths:` filter or the
 # ci.yml `changes` job's `matches` gate names something that exists, so a renamed
@@ -1363,7 +1367,17 @@ test-github-extension:
 clippy:
     @echo "🔍 Running clippy..."
     @cargo clippy --all-targets --quiet -- -D warnings
+    @# fuzz/ is not a workspace member (BT-5087); it carries a copy of the lint levels.
+    @cargo clippy --manifest-path fuzz/Cargo.toml --all-targets --quiet -- -D warnings
     @echo "✅ Clippy passed"
+
+# Fail if a downloaded build tool is floating, or a pin repeated across CI / setup disagrees (BT-5087)
+check-pins:
+    @python3 scripts/ci/check-pins.py
+
+# Fail if fuzz/ or desktop/src-tauri/ drift from the root [workspace.lints] (BT-5087)
+check-lint-parity:
+    @python3 scripts/ci/check-lint-parity.py
 
 # Check Rust code formatting
 fmt-check-rust:

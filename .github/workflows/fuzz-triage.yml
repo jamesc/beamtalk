@@ -84,7 +84,7 @@ jobs:
       - name: Install Rust nightly toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # nightly
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-11-10
 
       - name: Install Rust stable toolchain
         # The channel and components come from rust-toolchain.toml alone (BT-5086).
@@ -151,7 +151,7 @@ jobs:
           github-token: ${{ github.token }}
           prompt: ${{ steps.load_prompt.outputs.prompt }}
           artifact-name: fuzz-triage-execution-${{ github.run_id }}
-          allowed-tools: "Read,Grep,Glob,Bash(cargo +nightly fuzz:*),Bash(cargo fuzz:*),Bash(cargo test:*),Bash(bash .triage-config/.github/scripts/repro-class-var.sh:*),Bash(cargo build:*),Bash(just test-class-var-corpus:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(ls:*),mcp__linear__list_issues,mcp__linear__get_issue,mcp__linear__list_comments,mcp__linear__save_issue,mcp__linear__save_comment,mcp__linear__list_issue_labels,mcp__linear__list_issue_statuses,mcp__linear__list_teams"
+          allowed-tools: "Read,Grep,Glob,Bash(cargo +nightly-2026-11-10 fuzz:*),Bash(cargo fuzz:*),Bash(cargo test:*),Bash(bash .triage-config/.github/scripts/repro-class-var.sh:*),Bash(cargo build:*),Bash(just test-class-var-corpus:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(ls:*),mcp__linear__list_issues,mcp__linear__get_issue,mcp__linear__list_comments,mcp__linear__save_issue,mcp__linear__save_comment,mcp__linear__list_issue_labels,mcp__linear__list_issue_statuses,mcp__linear__list_teams"
 
       - name: Add to job summary
         if: always()

@@ -42,9 +42,40 @@ updates:
           - "minor"
           - "patch"
 
-  # GitHub Actions
+  # Cargo projects outside the root workspace (BT-5087): the `/` entry above does not see their Cargo.lock files.
+  - package-ecosystem: "cargo"
+    directories:
+      - "/desktop/src-tauri"
+      - "/fuzz"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "jamesc"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      rust-outside-workspace-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions: workflows live under .github/workflows (found from `/`); the composite actions under .github/actions are separate directories (BT-5087).
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/claude-triage"
+      - "/.github/actions/install-nextest"
+      - "/.github/actions/test-desktop"
+      - "/.github/actions/vs-elixir-bench"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -59,3 +90,87 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
+    groups:
+      github-actions-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # npm: VS Code extension, GitHub Chrome extension, LiveView assets (BT-5087).
+  - package-ecosystem: "npm"
+    directories:
+      - "/editors/vscode"
+      - "/editors/github-chrome"
+      - "/editors/liveview/assets"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "jamesc"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      npm-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Elixir/Mix: LiveView IDE (BT-5087).
+  - package-ecosystem: "mix"
+    directory: "/editors/liveview"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "jamesc"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      elixir-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Docker base images: LiveView IDE image and the devcontainer (BT-5087).
+  - package-ecosystem: "docker"
+    directories:
+      - "/editors/liveview"
+      - "/.devcontainer"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "jamesc"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      docker-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

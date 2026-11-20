@@ -152,7 +152,7 @@ defmodule BtAttachWeb.WorkspaceDismissNoticeTest do
         value => self.value
       """
 
-      view |> form("#eval-form") |> render_submit(%{expr: class_src})
+      submit_and_settle(view, "#eval-form", %{expr: class_src})
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
       render_async(view, 2_000)

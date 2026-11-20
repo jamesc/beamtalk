@@ -402,13 +402,28 @@ pub(in crate::server) async fn publish_diagnostics_impl(
     uri: &Url,
     version: Option<i32>,
 ) {
-    // Stdlib virtual documents have no user-facing diagnostics.
-    if uri.scheme() == "beamtalk-stdlib" {
-        return;
-    }
-    let Some(path) = uri_to_path(uri) else {
+    let Some(diagnostics) = compute_publish_diagnostics(service, reload_diagnostics, uri) else {
         return;
     };
+    client
+        .publish_diagnostics(uri.clone(), diagnostics, version)
+        .await;
+}
+
+/// The diagnostics [`publish_diagnostics_impl`] would send for `uri`: the
+/// analysis diagnostics plus every reload-induced one. `None` for URIs with
+/// no user-facing diagnostics (stdlib virtual documents, non-file URIs).
+/// Split out so callers can run the analysis outside any send-ordering lock.
+pub(in crate::server) fn compute_publish_diagnostics(
+    service: &Mutex<SimpleLanguageService>,
+    reload_diagnostics: &std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>,
+    uri: &Url,
+) -> Option<Vec<tower_lsp::lsp_types::Diagnostic>> {
+    // Stdlib virtual documents have no user-facing diagnostics.
+    if uri.scheme() == "beamtalk-stdlib" {
+        return None;
+    }
+    let path = uri_to_path(uri)?;
     let mut diagnostics: Vec<tower_lsp::lsp_types::Diagnostic> = {
         let svc = service.lock_recover();
         let source = svc.file_source(&path);
@@ -427,9 +442,7 @@ pub(in crate::server) async fn publish_diagnostics_impl(
             diagnostics.extend(by_owner.values().flatten().cloned());
         }
     }
-    client
-        .publish_diagnostics(uri.clone(), diagnostics, version)
-        .await;
+    Some(diagnostics)
 }
 /// True if publishing diagnostics for `uri` right now
 /// would risk the same startup-preload notification race

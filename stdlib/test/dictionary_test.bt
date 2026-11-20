@@ -224,6 +224,51 @@ TestCase subclass: DictionaryTest
   // BT-3027 — Dictionary has no first/last; anyOne is the deliberately
   // non-deterministic single-element accessor. It answers a *value*
   // (consistent with do:), not a key-value pair.
+  testSelectKeepsKeys =>
+    r := #{#a => 1, #b => 2, #c => 3} select: [:v | v > 1]
+    self assert: r equals: #{#b => 2, #c => 3}
+    self assert: r class equals: Dictionary
+
+  testSelectEmptyResult =>
+    self assert: (#{#a => 1} select: [:v | v > 5]) equals: #{}
+    self assert: (#{} select: [:v | true]) equals: #{}
+
+  testRejectKeepsKeys =>
+    r := #{#a => 1, #b => 2, #c => 3} reject: [:v | v > 1]
+    self assert: r equals: #{#a => 1}
+    self assert: r class equals: Dictionary
+    self assert: (#{#a => 1} reject: [:v | true]) equals: #{}
+
+  // PIN-BUG BT-5097: a block that writes an outer local goes through the
+  // state-threading fold, which answers a List of values and drops the keys.
+  // The fix deletes these pins (and expects a Dictionary, or a raise).
+  testPinBugSelectWritingBlockAnswersList =>
+    n := 0
+    r := #{#a => 1, #b => 2}
+      select: [:v |
+        n := n + 1
+        v > 1
+      ]
+    self assert: r equals: #(2)
+
+  testPinBugRejectWritingBlockAnswersList =>
+    n := 0
+    r := #{#a => 1, #b => 2}
+      reject: [:v |
+        n := n + 1
+        v > 1
+      ]
+    self assert: r equals: #(1)
+
+  testPinBugCollectWritingBlockAnswersList =>
+    n := 0
+    r := #{#a => 1}
+      collect: [:v |
+        n := n + 1
+        v * 10
+      ]
+    self assert: r equals: #(10)
+
   testAnyOne =>
     d := #{#a => 1, #b => 2, #c => 3}
     self assert: (d includes: d anyOne)
