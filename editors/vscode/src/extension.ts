@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { execFile } from "node:child_process";
-import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
@@ -25,6 +24,7 @@ import { classNameToStdlibFilename } from "./textUtils";
 import { TranscriptViewProvider } from "./transcriptView";
 import type { ClassInfo, ClassOrigin, LogEntry, TypeAliasInfo } from "./workspaceClient";
 import { WorkspaceClient } from "./workspaceClient";
+import { computeWorkspaceId } from "./workspaceId";
 import type {
   ActorItemNode,
   BindingItemNode,
@@ -538,29 +538,6 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
 // ─── Workspace ID derivation ─────────────────────────────────────────────────
 
 /**
- * Compute the workspace ID for a project root directory.
- *
- * Replicates the Rust implementation in `beamtalk-workspace`:
- * SHA256 of the canonicalized absolute path, first 12 hex characters.
- */
-function computeWorkspaceId(projectRoot: string): string | null {
-  try {
-    let canonical = fs.realpathSync(projectRoot);
-    // On Windows, fs.realpathSync() returns plain paths (e.g. "C:\foo") while
-    // Rust's std::fs::canonicalize() prepends the UNC extended-path prefix
-    // "\\?\" (e.g. "\\?\C:\foo"). Add the prefix here so both sides hash the
-    // same string and auto-connect works on Windows.
-    if (process.platform === "win32" && !canonical.startsWith("\\\\?\\")) {
-      canonical = `\\\\?\\${canonical}`;
-    }
-    const hash = crypto.createHash("sha256").update(canonical).digest("hex");
-    return hash.slice(0, 12);
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Find the project root for the current VS Code workspace.
  * Prefers a workspace folder containing `beamtalk.toml`; falls back to the
  * first workspace folder so the Workspace Explorer connects even in projects
@@ -820,7 +797,7 @@ function setupAutoConnect(context: vscode.ExtensionContext): void {
 
 // ─── Start REPL command ───────────────────────────────────────────────────────
 
-const SESSION_ID_PATTERN = /\[beamtalk\] session: (\S+)/;
+const SESSION_ID_PATTERN = /\[beamtalk\] session: ([A-Za-z0-9_-]+)(?![^\s])/;
 
 /**
  * Read chunks from a shell execution until the session ID is found.
