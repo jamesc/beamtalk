@@ -408,6 +408,22 @@ pub(crate) fn write_atomic(
     write_atomic_file(path.as_std_path(), contents.as_bytes(), tmp_prefix, false)
 }
 
+/// [`write_atomic`], skipped when `path` already holds exactly `contents`.
+///
+/// For build outputs (cache sidecars, `.app`, corpus files) that most builds
+/// regenerate byte-for-byte: an unchanged file costs one read instead of a
+/// staged write and two `fsync`s, and its mtime does not move (BT-5075).
+pub(crate) fn write_atomic_if_changed(
+    path: &Utf8Path,
+    contents: &str,
+    tmp_prefix: &str,
+) -> std::io::Result<()> {
+    if fs::read(path).is_ok_and(|existing| existing == contents.as_bytes()) {
+        return Ok(());
+    }
+    write_atomic(path, contents, tmp_prefix)
+}
+
 /// The one atomic file write for the CLI (BT-5017): stage the bytes in a
 /// unique sibling temp file, `fsync` it, rename it over `path`, then
 /// best-effort `fsync` the directory so the rename itself survives a power

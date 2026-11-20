@@ -60,7 +60,52 @@ pub fn run(deps: bool, all: bool, dry_run: bool) -> Result<()> {
     let project_root = find_project_root()?;
     let layout = BuildLayout::new(&project_root);
     let scope = CleanScope::from_flags(deps, all);
-    clean_with_layout(&layout, scope, dry_run)
+    if dry_run || !std::fs::metadata(layout.build_root()).is_ok_and(|m| m.is_dir()) {
+        // Nothing is deleted (or there is nothing to delete or to lock).
+        return clean_with_layout(&layout, scope, dry_run);
+    }
+
+    // Do not delete `_build/` out from under a running build (BT-5075).
+    let lock = super::dir_lock::lock_project_build(&project_root)?;
+    // A symlinked `_build` is unlinked itself, never emptied through the link.
+    if scope != CleanScope::All || is_symlink(&layout.build_root())? {
+        return clean_with_layout(&layout, scope, dry_run);
+    }
+    // `--all` removes the whole of `_build/`, the lock file included — which
+    // Windows refuses while it is open, and which on Unix would let a waiter
+    // lock a file nobody else will ever open. So empty `_build/` while holding
+    // the lock, then release it and remove the lock file and directory.
+    let build_root = layout.build_root();
+    let keep = super::dir_lock::project_build_lock_path(&project_root);
+    let mut first_error: Option<miette::Report> = None;
+    for entry in std::fs::read_dir(&build_root)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read '{build_root}'"))?
+    {
+        let entry = entry.into_diagnostic()?;
+        let path = Utf8PathBuf::from_path_buf(entry.path())
+            .map_err(|p| miette::miette!("non-UTF-8 path in _build: {}", p.display()))?;
+        if path == keep {
+            continue;
+        }
+        match remove_path(&path) {
+            Ok(()) => println!("Removed {path}"),
+            Err(e) => {
+                eprintln!("Warning: failed to remove {path}: {e}");
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    lock.release();
+    if first_error.is_none() {
+        // Best effort: a build that raced in after the release keeps its lock
+        // file, and `_build/` then simply stays.
+        let _ = std::fs::remove_file(&keep);
+        if std::fs::remove_dir(&build_root).is_ok() {
+            println!("Removed {build_root}");
+        }
+    }
+    first_error.map_or(Ok(()), Err)
 }
 
 /// Resolve the artifact paths for `scope` and remove (or, when `dry_run`,
