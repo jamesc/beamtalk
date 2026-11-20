@@ -408,6 +408,8 @@ jobs:
     uses: ./.github/workflows/release-vscode.yml
     with:
       publish: ${{ github.event_name == 'release' }}
+      attach_to_release: ${{ github.event_name == 'release' }}
+      tag: ${{ github.event.release.tag_name }}
     secrets:
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
 

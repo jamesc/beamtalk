@@ -19,6 +19,11 @@
 #   - workflow_dispatch: Manual trigger for independent extension releases
 #     (e.g., LSP-only bugfix without a full compiler release)
 #
+# Inside a called workflow `github.event_name` is the CALLER's event, so no
+# condition here may test for 'workflow_call' (BT-5094). What the job does is
+# decided by its inputs: `publish` gates the whole publish job, and
+# `attach_to_release` + `tag` say which GitHub Release gets the .vsix.
+#
 # Related: release.yml (compiler/runtime distribution)
 # Issue: BT-1013
 
@@ -32,6 +37,16 @@ on:
         required: false
         type: boolean
         default: false
+      attach_to_release:
+        description: 'Also attach the .vsix to the GitHub Release named by `tag`'
+        required: false
+        type: boolean
+        default: false
+      tag:
+        description: 'Release tag to attach the .vsix to (required with attach_to_release)'
+        required: false
+        type: string
+        default: ''
   workflow_call:
     inputs:
       publish:
@@ -39,6 +54,16 @@ on:
         required: false
         type: boolean
         default: true
+      attach_to_release:
+        description: 'Also attach the .vsix to the GitHub Release named by `tag`'
+        required: false
+        type: boolean
+        default: false
+      tag:
+        description: 'Release tag to attach the .vsix to (required with attach_to_release)'
+        required: false
+        type: string
+        default: ''
     secrets:
       VSCE_PAT:
         required: false
@@ -98,9 +123,13 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
-    if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.publish) ||
-      (github.event_name == 'workflow_call' && inputs.publish)
+    if: inputs.publish
+    # Mapped at job level: a step's `if:` is evaluated before that step's own
+    # `env:` is applied, so a secret mapped only on the step is always empty
+    # in the condition (BT-5094).
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      VSIX_NAME: ${{ needs.package-vscode.outputs.vsix_name }}
     steps:
       - name: Download VSIX
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -108,14 +137,17 @@ jobs:
           name: beamtalk-vscode-${{ needs.package-vscode.outputs.version }}
 
       - name: Upload VSIX to GitHub Release
-        if: github.event_name == 'workflow_call'
+        if: inputs.attach_to_release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          gh release upload "$TAG" \
-            "${{ needs.package-vscode.outputs.vsix_name }}" \
-            --repo "${{ github.repository }}" \
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::attach_to_release is set but no tag was given"
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "$VSIX_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
             --clobber
 
       - name: Setup Node.js
@@ -123,8 +155,12 @@ jobs:
         with:
           node-version: '20'
 
+      # Runs whenever the job does (`publish` is true). A missing token fails
+      # the run loudly instead of skipping the step and reporting green.
       - name: Publish to VS Code Marketplace
-        if: env.VSCE_PAT != ''
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx --yes @vscode/vsce publish --packagePath "${{ needs.package-vscode.outputs.vsix_name }}"
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::error::publish was requested but the VSCE_PAT secret is not set (or was not passed to this workflow)"
+            exit 1
+          fi
+          npx --yes @vscode/vsce publish --packagePath "$VSIX_NAME"

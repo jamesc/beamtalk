@@ -15,9 +15,10 @@
 #   * No extra test matrix — every push to `main` already passed ci.yml. This
 #     job only builds, smoke-tests the install, packages, and publishes.
 #
-# The `edge` release/tag is deleted and recreated each run, so it always points
-# at the latest `main` commit. `nightly` (cross-platform, daily) and tagged
-# releases are untouched.
+# The `edge` release is updated in place each run (assets first, then the tag is
+# moved), so it always points at the latest `main` commit and a failed publish
+# leaves the previous release. `nightly` (cross-platform, daily) and tagged
+# releases are untouched. Only runs on `main` publish.
 
 name: Edge
 
@@ -98,16 +99,21 @@ jobs:
         id: package
         run: scripts/ci/package-release.sh edge linux-x86_64
 
+      # workflow_dispatch can start this from any branch; only main may become
+      # `edge` (BT-5094). The build above still runs, so a branch can be timed.
+      - name: Skip publishing from a branch other than main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::warning::Not publishing, ${GITHUB_REF} is not refs/heads/main, so this run must not replace the edge release."
+
       - name: Publish rolling edge release
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
         run: |
           SHORT_SHA="$(git rev-parse --short HEAD)"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-          # Delete the previous edge release + tag so it always points at the
-          # latest main commit (rolling). --cleanup-tag removes the git tag too.
-          gh release delete edge --yes --cleanup-tag 2>/dev/null || true
 
           # Publish the installer from this commit next to the tarball, with a
           # checksum, so scripts/refresh-edge.sh can verify it before running
@@ -116,21 +122,22 @@ jobs:
           cp scripts/install.sh dist-installer/install.sh
           (cd dist-installer && sha256sum install.sh > install.sh.sha256)
 
-          gh release create edge \
-            --title "Edge Build (${SHORT_SHA})" \
-            --notes "Rolling per-merge build from \`main\` at ${DATE}.
+          cat > edge-notes.md <<NOTES
+          Rolling per-merge build from \`main\` at ${DATE}.
 
           **Commit:** ${SHORT_SHA}
-          **Full SHA:** $(git rev-parse HEAD)
+          **Full SHA:** ${GITHUB_SHA}
 
           > [!WARNING]
           > Edge builds track the development tip. They are consumed by the
           > beamtalk-uat acceptance gate and by downstream package CI via
           > \`install.sh --edge\` (linux-x86_64 only). For general use, prefer
-          > a tagged release or \`--nightly\`." \
-            --prerelease \
-            --target "${GITHUB_SHA}" \
-            "${{ steps.package.outputs.archive }}" \
-            "${{ steps.package.outputs.archive }}.sha256" \
-            dist-installer/install.sh \
-            dist-installer/install.sh.sha256
+          > a tagged release or \`--nightly\`.
+          NOTES
+
+          # Update in place so a failed publish leaves the previous edge release
+          # (scripts/ci/publish-rolling-release.sh, BT-5094).
+          scripts/ci/publish-rolling-release.sh edge "${GITHUB_SHA}" \
+            "Edge Build (${SHORT_SHA})" edge-notes.md \
+            "${ARCHIVE}" "${ARCHIVE}.sha256" \
+            dist-installer/install.sh dist-installer/install.sh.sha256
