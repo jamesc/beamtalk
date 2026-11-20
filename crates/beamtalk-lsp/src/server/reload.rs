@@ -7,6 +7,7 @@
 
 use super::convert::{LineIndex, path_to_uri, to_lsp_diagnostic, uri_to_path};
 use super::{NavCache, ReloadDiagnosticsByUriAndOrigin};
+use crate::server::lock::LockRecover;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -35,7 +36,7 @@ impl OpenPathsHandle {
     /// released before the caller awaits, so no deadlock risk against the
     /// LSP's `std::sync::Mutex`.
     pub(in crate::server) fn contains(&self, path: &Utf8PathBuf) -> bool {
-        let guard = self.versions.lock().expect("versions lock poisoned");
+        let guard = self.versions.lock_recover();
         guard.contains_key(path)
     }
 }
@@ -63,7 +64,7 @@ pub(in crate::server) async fn class_changed_listener(
             class_name = %event.class_name,
             "class_changed_listener: invalidating nav cache"
         );
-        let mut guard = nav_cache.lock().expect("nav_cache lock poisoned");
+        let mut guard = nav_cache.lock_recover();
         guard.invalidate();
     }
     tracing::debug!("class_changed_listener: channel closed, exiting");
@@ -161,9 +162,7 @@ pub(in crate::server) async fn reload_check_listener(
                 .flat_map(reload_finding_to_lsp_diagnostics)
                 .collect();
             {
-                let mut guard = reload_diagnostics
-                    .lock()
-                    .expect("reload_diagnostics lock poisoned");
+                let mut guard = reload_diagnostics.lock_recover();
                 // `owner == changed_class` means this owner's OWN source
                 // just changed — the server unconditionally full-wipes it
                 // (`beamtalk_workspace_findings_store:clear_owner/1`) before
@@ -364,9 +363,7 @@ pub(in crate::server) async fn seed_reload_diagnostics(
             continue;
         }
         {
-            let mut guard = reload_diagnostics
-                .lock()
-                .expect("reload_diagnostics lock poisoned");
+            let mut guard = reload_diagnostics.lock_recover();
             guard
                 .entry(uri.clone())
                 .or_default()
@@ -413,7 +410,7 @@ pub(in crate::server) async fn publish_diagnostics_impl(
         return;
     };
     let mut diagnostics: Vec<tower_lsp::lsp_types::Diagnostic> = {
-        let svc = service.lock().expect("service lock poisoned");
+        let svc = service.lock_recover();
         let source = svc.file_source(&path);
         let index = source.as_deref().map(LineIndex::new);
         svc.diagnostics(&path)
@@ -422,9 +419,7 @@ pub(in crate::server) async fn publish_diagnostics_impl(
             .collect()
     };
     {
-        let reload = reload_diagnostics
-            .lock()
-            .expect("reload_diagnostics lock poisoned");
+        let reload = reload_diagnostics.lock_recover();
         // Flatten every owner's diagnostics for this URI — a file can
         // define more than one class (see `ReloadDiagnosticsByUriAndOrigin`'s
         // doc), each with its own independently clearing entry.
@@ -459,7 +454,7 @@ pub(in crate::server) fn should_defer_reload_publish_for_preload(
     if !open_paths.contains(&path) {
         return false;
     }
-    let svc = service.lock().expect("service lock poisoned");
+    let svc = service.lock_recover();
     svc.is_preload_in_progress()
 }
 /// Group a flat findings snapshot by `(owner, changed_class)` — the same

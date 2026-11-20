@@ -47,10 +47,7 @@ fn resolve_path_for_uri_stdlib_uri_resolves_to_real_path() {
 
     let real_path = Utf8PathBuf::from("/fake/stdlib/integer.bt");
     {
-        let mut stdlib_paths = backend
-            .stdlib_paths
-            .lock()
-            .expect("stdlib_paths lock poisoned");
+        let mut stdlib_paths = backend.stdlib_paths.lock_recover();
         stdlib_paths.insert(real_path.clone());
     }
 
@@ -76,10 +73,7 @@ fn resolve_path_for_uri_invalid_stdlib_form_returns_none() {
 
     let real_path = Utf8PathBuf::from("/fake/stdlib/integer.bt");
     {
-        let mut stdlib_paths = backend
-            .stdlib_paths
-            .lock()
-            .expect("stdlib_paths lock poisoned");
+        let mut stdlib_paths = backend.stdlib_paths.lock_recover();
         stdlib_paths.insert(real_path);
     }
 
@@ -103,10 +97,7 @@ fn resolve_path_for_uri_ambiguous_stdlib_returns_none() {
     let backend: &Backend = service.inner();
 
     {
-        let mut stdlib_paths = backend
-            .stdlib_paths
-            .lock()
-            .expect("stdlib_paths lock poisoned");
+        let mut stdlib_paths = backend.stdlib_paths.lock_recover();
         stdlib_paths.insert(Utf8PathBuf::from("/fake/stdlib/a/integer.bt"));
         stdlib_paths.insert(Utf8PathBuf::from("/fake/stdlib/b/integer.bt"));
     }

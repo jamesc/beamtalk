@@ -9,6 +9,7 @@ use super::super::nav::{
     SerializedCallTarget, collect_hierarchy_items, format_class_detail, outgoing_calls_for_body,
     target_to_lsp_item, type_hierarchy_item,
 };
+use crate::server::lock::LockRecover;
 use std::path::PathBuf;
 
 use beamtalk_language_service::{NavQuery, NavSite, nav_site_to_location};
@@ -50,7 +51,7 @@ impl Backend {
         };
 
         let item = {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             let Some(source) = svc.file_source(&path) else {
                 return Ok(None);
             };
@@ -99,7 +100,7 @@ impl Backend {
         };
 
         let prepared = {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             let Some(source) = svc.file_source(&path) else {
                 return Ok(None);
             };
@@ -145,7 +146,7 @@ impl Backend {
         let backend_self = self;
         let display_name = serialized.selector.clone();
         let ast_fallback = move || -> Vec<CallHierarchyIncomingCall> {
-            let svc = backend_self.service.lock().expect("service lock poisoned");
+            let svc = backend_self.service.lock_recover();
             // Sender sites only — `find_selector_send_sites_across_files`
             // intentionally excludes method-definition headers (see its
             // docstring) so the editor doesn't list the method itself as
@@ -251,7 +252,7 @@ impl Backend {
         };
 
         let calls = {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             let Some(source) = svc.file_source(&path) else {
                 return Ok(None);
             };
@@ -301,7 +302,7 @@ impl Backend {
         let parent_uri = params.item.uri.clone();
         let class_name = params.item.name.clone();
         let items = {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             collect_hierarchy_items(svc.supertypes_of(class_name.as_str()), &svc, &parent_uri)
         };
         Ok(Some(items))
@@ -326,7 +327,7 @@ impl Backend {
         let parent_uri = params.item.uri.clone();
         let class_name = params.item.name.clone();
         let items = {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             collect_hierarchy_items(svc.subtypes_of(class_name.as_str()), &svc, &parent_uri)
         };
         Ok(Some(items))

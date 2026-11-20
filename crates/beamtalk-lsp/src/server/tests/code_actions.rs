@@ -25,8 +25,7 @@ async fn code_actions_at(source: &str, name: &str, at: Position) -> Vec<CodeActi
     // action is the provider's decision, not a missing diagnostic.
     let escaping = backend
         .service
-        .lock()
-        .expect("service lock")
+        .lock_recover()
         .diagnostics(&path)
         .iter()
         .filter(|d| {

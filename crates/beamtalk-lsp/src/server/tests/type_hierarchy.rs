@@ -76,7 +76,7 @@ async fn goto_implementation_returns_all_implementors_via_ast_fallback() {
                       Object subclass: User\n  \
                       go => self bar\n";
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(path.clone(), source.to_string());
     }
 
@@ -146,7 +146,7 @@ async fn goto_implementation_returns_none_for_non_selector_cursor() {
                       state: counter = 0\n  \
                       bar => 1\n";
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(path.clone(), source.to_string());
     }
 
@@ -223,7 +223,7 @@ async fn prepare_type_hierarchy_resolves_class_under_cursor() {
                       \n\
                       Foo subclass: Bar\n";
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(path.clone(), source.to_string());
     }
     let uri = Url::from_file_path(path.as_std_path()).expect("file URI");
@@ -273,7 +273,7 @@ async fn prepare_type_hierarchy_returns_none_for_non_class_cursor() {
     let source = "Object subclass: Foo\n  \
                       bar => 42\n";
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(path.clone(), source.to_string());
     }
 
@@ -315,7 +315,7 @@ async fn supertypes_returns_chain_in_inheritance_order() {
     let source = "Object subclass: Foo\n\
                       Foo subclass: Bar\n";
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(path.clone(), source.to_string());
     }
 
@@ -380,7 +380,7 @@ async fn subtypes_returns_transitive_descendants_in_bfs_order() {
                       Foo subclass: Baz\n\
                       Bar subclass: Qux\n";
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(path.clone(), source.to_string());
     }
 

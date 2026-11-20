@@ -34,6 +34,8 @@
 //! - [`rename`] — `textDocument/prepareRename` + `rename` (BT-5007):
 //!   capabilities, refusals, and the `WorkspaceEdit` shape per client
 //!   capability set
+//! - [`panic_resilience`] — a panic in one request leaves the server usable (BT-5078)
+//! - [`panic_resilience`] — a panic in one request leaves the server usable (BT-5078)
 //! - [`type_hierarchy`] — goto-implementation and
 //!   `prepare_type_hierarchy/supertypes/subtypes`
 //! - [`symbol_unification`] — workspace/document symbol unification
@@ -77,11 +79,11 @@ pub(crate) fn write_manifest_with_git_deps(root: &std::path::Path, name: &str, d
 /// should target.
 pub(crate) fn open_test_file(backend: &Backend, path: &Utf8PathBuf, source: &str) -> Url {
     {
-        let mut svc = backend.service.lock().expect("service lock");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(path.clone(), source.to_string());
     }
     {
-        let mut versions = backend.versions.lock().expect("versions lock");
+        let mut versions = backend.versions.lock_recover();
         versions.insert(path.clone(), 1);
     }
     Url::from_file_path(path.as_std_path()).expect("path → uri")
@@ -192,6 +194,7 @@ mod formatting_and_paths;
 mod hover_and_stdlib;
 mod nested_package_root;
 mod package_qualifiers;
+mod panic_resilience;
 mod preload_files;
 mod preload_racing;
 mod references;

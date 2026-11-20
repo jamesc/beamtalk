@@ -9,7 +9,7 @@ use super::*;
 const QUALIFIED_REF_SOURCE: &str = "Object subclass: Foo\n  make => xml@Parser new\n";
 
 fn unknown_package_messages(backend: &Backend, file: &Utf8PathBuf) -> Vec<String> {
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     svc.diagnostics(file)
         .into_iter()
         .map(|d| d.message.to_string())
@@ -26,8 +26,7 @@ async fn diagnose_qualified_ref(root: &Path) -> Vec<String> {
     let file = Utf8PathBuf::from_path_buf(root.join("src").join("Foo.bt")).unwrap();
     backend
         .service
-        .lock()
-        .expect("service lock poisoned")
+        .lock_recover()
         .update_file(file.clone(), QUALIFIED_REF_SOURCE.to_string());
     unknown_package_messages(backend, &file)
 }
@@ -93,7 +92,7 @@ fn unknown_package_diagnostics(
     file: &Utf8PathBuf,
     source: &str,
 ) -> Vec<(String, String)> {
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     svc.diagnostics(file)
         .into_iter()
         .filter(|d| d.message.contains("Unknown package"))
@@ -129,7 +128,7 @@ async fn protocol_body_and_uses_qualifiers_are_each_reported_once_in_the_right_f
         })
         .collect();
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         for (path, (_, source)) in paths.iter().zip(files) {
             svc.update_file(path.clone(), source.to_string());
         }
@@ -159,7 +158,7 @@ async fn protocol_body_and_uses_qualifiers_are_each_reported_once_in_the_right_f
     );
     assert_eq!(uses[0].1, "nosuchpkg", "{uses:?}");
     let all_messages: Vec<String> = {
-        let svc = backend.service.lock().expect("service lock poisoned");
+        let svc = backend.service.lock_recover();
         svc.diagnostics(&paths[3])
             .into_iter()
             .map(|d| d.message.to_string())
