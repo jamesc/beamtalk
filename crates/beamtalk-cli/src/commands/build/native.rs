@@ -601,7 +601,7 @@ const REBAR3_ENV_ALLOWLIST: &[&str] = &[
 /// [`REBAR3_ENV_ALLOWLIST`] entries that are set. Returns the names passed
 /// (never values), for the `-v` log and the failure hint (BT-5103).
 fn apply_rebar3_env(cmd: &mut std::process::Command) -> Vec<&'static str> {
-    apply_rebar3_env_from(cmd, std::env::var_os)
+    apply_rebar3_env_from(cmd, |k| std::env::var_os(k))
 }
 
 fn apply_rebar3_env_from(
@@ -1402,8 +1402,7 @@ mod rebar3_env_tests {
         let lookup = |k: &str| match k {
             "CARGO_HOME" => Some(OsString::from("/c")),
             "GOPATH" => Some(OsString::from("/g")),
-            "HEX_API_KEY" => Some(OsString::from("secret")),
-            "AWS_X" => Some(OsString::from("secret")),
+            "HEX_API_KEY" | "AWS_X" => Some(OsString::from("secret")),
             "PATH" => Some(OsString::from("/usr/bin:/bin")),
             _ => None,
         };
