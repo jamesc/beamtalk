@@ -148,7 +148,7 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
 
     // Create workspace directory
     let dir = workspace_dir(workspace_id)?;
-    fs::create_dir_all(&dir).into_diagnostic()?;
+    super::storage::create_private_dir_all(&dir)?;
 
     // Only generate a new cookie when one doesn't already exist. Preserving the
     // existing cookie is important when recovering from corrupt metadata: a live
