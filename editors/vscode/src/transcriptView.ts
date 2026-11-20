@@ -11,12 +11,14 @@ const TRIM_TO = Math.floor(MAX_LINES * 0.9);
  * TranscriptViewProvider implements a sidebar WebviewView that streams live
  * Transcript output from the Beamtalk workspace (ADR 0046).
  *
- * Uses webview.html reassignment instead of postMessage to work correctly with
- * workspace extensions in remote (WSL) environments where postMessage from the
- * extension host to the webview is not bridged.
+ * Output bursts are coalesced (50 ms) and appended to the page with a single
+ * postMessage, so a burst costs O(new text) and keeps the scroll position
+ * (BT-5082). In remote WSL environments postMessage from the extension host
+ * to the webview is not bridged, so there (`fullReload: true`) the provider
+ * falls back to reassigning webview.html with the whole retained buffer.
  *
  * Usage:
- *   const provider = new TranscriptViewProvider();
+ *   const provider = new TranscriptViewProvider({ fullReload: vscode.env.remoteName === "wsl" });
  *   vscode.window.registerWebviewViewProvider(TranscriptViewProvider.viewType, provider);
  *   provider.setClient(client); // called by auto-connect logic (BT-1024)
  */
@@ -31,6 +33,15 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
   private readonly disposeHandlers: Array<() => void> = [];
   private disposed = false;
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Text received since the last flush (append mode only). */
+  private pendingText = "";
+  /** The buffer was trimmed since the last flush, so the page needs a full replace. */
+  private needsReplace = false;
+  private readonly fullReload: boolean;
+
+  constructor(options?: { fullReload?: boolean }) {
+    this.fullReload = options?.fullReload ?? false;
+  }
 
   // ─── WebviewViewProvider ─────────────────────────────────────────────────
 
@@ -41,6 +52,9 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
   ): void {
     this.view = webviewView;
     webviewView.webview.options = { enableScripts: true };
+    // The page is built from the full buffer, so anything pending is included.
+    this.pendingText = "";
+    this.needsReplace = false;
     webviewView.webview.html = this._buildHtml();
 
     webviewView.onDidDispose(() => {
@@ -71,6 +85,8 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
     }
     this.accumText = "";
     this.lineCount = 0;
+    this.pendingText = "";
+    this.needsReplace = false;
     if (this.view) {
       this.view.webview.html = this._buildHtml();
     }
@@ -91,6 +107,7 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
 
   private _appendText(text: string): void {
     this.accumText += text;
+    this.pendingText += text;
     this.lineCount += (text.match(/\n/g) ?? []).length;
 
     if (this.lineCount > MAX_LINES) {
@@ -99,6 +116,7 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
       const kept = lines.slice(start);
       this.accumText = kept.join("\n");
       this.lineCount = kept.length - 1;
+      this.needsReplace = true;
     }
 
     if (!this.view) return;
@@ -106,11 +124,23 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
     if (this.debounceTimer === undefined) {
       this.debounceTimer = setTimeout(() => {
         this.debounceTimer = undefined;
-        if (this.view) {
-          this.view.webview.html = this._buildHtml();
-        }
+        this._flush();
       }, TranscriptViewProvider.DEBOUNCE_MS);
     }
+  }
+
+  private _flush(): void {
+    const view = this.view;
+    if (!view) return;
+    if (this.fullReload) {
+      view.webview.html = this._buildHtml();
+    } else if (this.needsReplace) {
+      void view.webview.postMessage({ type: "replace", text: this.accumText });
+    } else if (this.pendingText.length > 0) {
+      void view.webview.postMessage({ type: "append", text: this.pendingText });
+    }
+    this.pendingText = "";
+    this.needsReplace = false;
   }
 
   private _escapeHtml(text: string): string {
@@ -163,6 +193,19 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
       if (atBottom) {
         el.scrollTop = el.scrollHeight;
       }
+      // Append mode: the extension posts new text instead of reloading the page.
+      window.addEventListener('message', (event) => {
+        const msg = event.data;
+        if (!msg || typeof msg.text !== 'string') return;
+        const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 20;
+        if (msg.type === 'replace') {
+          el.textContent = msg.text;
+        } else if (msg.type === 'append') {
+          if (el.querySelector('.empty')) el.textContent = '';
+          el.appendChild(document.createTextNode(msg.text));
+        }
+        if (wasAtBottom) el.scrollTop = el.scrollHeight;
+      });
       el.addEventListener('scroll', () => {
         const near = el.scrollHeight - el.scrollTop - el.clientHeight < 20;
         sessionStorage.setItem('scrollAtBottom', near ? 'true' : 'false');

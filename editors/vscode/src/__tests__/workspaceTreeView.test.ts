@@ -934,3 +934,140 @@ describe("WorkspaceTreeDataProvider — inherited methods (BT-3478)", () => {
     client.dispose();
   });
 });
+
+// ─── BT-5082: caches survive neither a reconnect nor an ancestor reload ─────────
+
+describe("WorkspaceTreeDataProvider — BT-5082 stale state", () => {
+  let provider: InstanceType<typeof WorkspaceTreeDataProvider>;
+
+  beforeEach(() => {
+    provider = new WorkspaceTreeDataProvider();
+  });
+
+  it("clears cached methods and inspect state when the client returns to connected after a reconnect", async () => {
+    vi.useFakeTimers();
+    try {
+      const sockets: MockWebSocket[] = [];
+      const factory: WebSocketFactory = (_url, callbacks) => {
+        const s = new MockWebSocket(callbacks);
+        sockets.push(s);
+        return s;
+      };
+      const client = new WorkspaceClient("test-ws-id", 9999, "test-cookie", factory);
+      const open = (ws: MockWebSocket): void => {
+        ws.receive({ op: "auth-required" });
+        ws.receive({ type: "auth_ok" });
+        ws.receive({ op: "session-started", session: "sess-abc" });
+      };
+      client.connect();
+      open(sockets[0]);
+      provider.setClient(client);
+      await respondToInitialFetchWithClasses(sockets[0], [
+        { name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 },
+      ]);
+
+      const [classItem] = await provider.getChildren({ kind: "classes-section" });
+      const first = provider.getChildren(classItem);
+      respondToOp(sockets[0], "methods", {
+        methods: [{ name: "old", selector: "old", side: "instance" }],
+        state_vars: [],
+      });
+      expect(methodGroup(await first, "instance").map((m) => m.method.selector)).toEqual(["old"]);
+
+      // Connection drops and comes back; pushes were missed during the gap.
+      sockets[0].close();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(sockets.length).toBeGreaterThan(1);
+      const ws2 = sockets[sockets.length - 1];
+      open(ws2);
+      await respondToInitialFetchWithClasses(ws2, [
+        { name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 },
+      ]);
+
+      // The cache must have been dropped, so this refetches (and sees the new data).
+      const [classItem2] = await provider.getChildren({ kind: "classes-section" });
+      const second = provider.getChildren(classItem2);
+      respondToOp(ws2, "methods", {
+        methods: [{ name: "new", selector: "new", side: "instance" }],
+        state_vars: [],
+      });
+      expect(methodGroup(await second, "instance").map((m) => m.method.selector)).toEqual(["new"]);
+
+      client.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a class's actor_count in step with actors spawning and stopping", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, [
+      { name: "Foo", source_file: "/proj/Foo.bt", actor_count: 0 },
+    ]);
+    const count = async (): Promise<number | undefined> => {
+      const [item] = await provider.getChildren({ kind: "classes-section" });
+      return (item as { info: { actor_count?: number } }).info.actor_count;
+    };
+
+    ws.receive({
+      type: "push",
+      channel: "actors",
+      event: "spawned",
+      data: { pid: "<0.1.0>", class: "Foo" },
+    });
+    expect(await count()).toBe(1);
+    // A duplicate spawned frame must not double count.
+    ws.receive({
+      type: "push",
+      channel: "actors",
+      event: "spawned",
+      data: { pid: "<0.1.0>", class: "Foo" },
+    });
+    expect(await count()).toBe(1);
+
+    ws.receive({
+      type: "push",
+      channel: "actors",
+      event: "stopped",
+      data: { pid: "<0.1.0>", class: "Foo", reason: "normal" },
+    });
+    expect(await count()).toBe(0);
+
+    client.dispose();
+  });
+
+  it("reloading an ancestor invalidates a subclass's cached inherited methods", async () => {
+    const { client, ws } = makeConnectedClient();
+    provider.setClient(client);
+    await respondToInitialFetchWithClasses(ws, [
+      { name: "Parent", source_file: "/proj/Parent.bt" },
+      { name: "Child", source_file: "/proj/Child.bt" },
+    ]);
+    const items = await provider.getChildren({ kind: "classes-section" });
+    const child = items.find((i) => (i as { info: { name: string } }).info.name === "Child");
+    if (!child) throw new Error("Child missing");
+    const kids = provider.getChildren(child);
+    respondToOp(ws, "methods", { methods: [], state_vars: [] });
+    const group = inheritedGroup(await kids, "instance");
+
+    const first = provider.getChildren(group);
+    respondToOp(ws, "inherited-methods", {
+      methods: [{ name: "a", selector: "a", side: "instance", defining_class: "Parent" }],
+    });
+    await first;
+
+    ws.receive({ type: "push", channel: "classes", event: "loaded", data: { class: "Parent" } });
+    respondToOp(ws, "list-classes", { class_list: [] });
+    await Promise.resolve();
+
+    const second = provider.getChildren(group);
+    respondToOp(ws, "inherited-methods", {
+      methods: [{ name: "b", selector: "b", side: "instance", defining_class: "Parent" }],
+    });
+    const out = (await second) as Array<{ method: { selector: string } }>;
+    expect(out.map((m) => m.method.selector)).toEqual(["b"]);
+
+    client.dispose();
+  });
+});

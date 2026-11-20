@@ -16,7 +16,9 @@
   "categories": [
     "Programming Languages"
   ],
-  "extensionKind": ["workspace"],
+  "extensionKind": [
+    "workspace"
+  ],
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:beamtalk",
@@ -80,11 +82,6 @@
         "command": "beamtalk.clearClassFilter",
         "title": "Clear Class Filter",
         "icon": "$(close)"
-      },
-      {
-        "command": "beamtalk.killActor",
-        "title": "Kill Actor",
-        "icon": "$(stop)"
       },
       {
         "command": "beamtalk.inspectBinding",
@@ -171,19 +168,9 @@
       ],
       "view/item/context": [
         {
-          "command": "beamtalk.killActor",
-          "when": "view == beamtalk.workspaceExplorer && viewItem == actor-item",
-          "group": "inline"
-        },
-        {
           "command": "beamtalk.inspectActor",
           "when": "view == beamtalk.workspaceExplorer && viewItem == actor-item",
           "group": "inline"
-        },
-        {
-          "command": "beamtalk.killActor",
-          "when": "view == beamtalk.workspaceExplorer && viewItem == actor-item",
-          "group": "beamtalk@1"
         },
         {
           "command": "beamtalk.inspectActor",

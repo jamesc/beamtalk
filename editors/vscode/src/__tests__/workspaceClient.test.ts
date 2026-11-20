@@ -3,7 +3,7 @@
 
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WebSocketCallbacks, WebSocketFactory } from "../workspaceClient";
 import { WORKSPACE_PROTOCOL_VERSION, WorkspaceClient } from "../workspaceClient";
 
@@ -662,5 +662,111 @@ describe("WorkspaceClient push events", () => {
 
     expect(spawned).toEqual(["<0.42.0>"]);
     client.dispose();
+  });
+});
+
+// ─── Reconnect, timeout and pending rejection (BT-5082) ──────────────────────
+
+describe("WorkspaceClient reconnect, timeout and close handling", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0); // no jitter: deterministic delays
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function makeMultiClient() {
+    const sockets: MockWebSocket[] = [];
+    const factory: WebSocketFactory = (_url, callbacks) => {
+      const s = new MockWebSocket(callbacks);
+      sockets.push(s);
+      return s;
+    };
+    const client = new WorkspaceClient("test-ws-id", 9999, "test-cookie", factory);
+    const states: string[] = [];
+    client.onConnectionChange((s) => states.push(s));
+    client.connect();
+    const handshake = (ws: MockWebSocket) => {
+      ws.receive({ op: "auth-required" });
+      ws.receive({ type: "auth_ok" });
+      ws.receive({ op: "session-started", session: "sess-abc" });
+    };
+    return { client, sockets, states, handshake };
+  }
+
+  it("reconnects with exponentially growing delays, capped at 30s", async () => {
+    const { client, sockets, handshake } = makeMultiClient();
+    handshake(sockets[0]);
+
+    sockets[0].drop();
+    const expected = [1000, 2000, 4000, 8000, 16000, 30000, 30000];
+    for (let i = 0; i < expected.length; i++) {
+      const before = sockets.length;
+      await vi.advanceTimersByTimeAsync(expected[i] - 1);
+      expect(sockets.length).toBe(before); // not yet
+      await vi.advanceTimersByTimeAsync(1);
+      expect(sockets.length).toBe(before + 1); // fired exactly at the delay
+      sockets[sockets.length - 1].drop(); // attempt fails, back off further
+    }
+    client.dispose();
+  });
+
+  it("resets the backoff after a successful reconnect", async () => {
+    const { client, sockets, states, handshake } = makeMultiClient();
+    handshake(sockets[0]);
+    sockets[0].drop();
+    await vi.advanceTimersByTimeAsync(1000);
+    sockets[1].drop();
+    await vi.advanceTimersByTimeAsync(2000);
+    handshake(sockets[2]);
+    expect(states.at(-1)).toBe("connected");
+
+    sockets[2].drop();
+    const before = sockets.length;
+    await vi.advanceTimersByTimeAsync(1000); // back to the base delay
+    expect(sockets.length).toBe(before + 1);
+    client.dispose();
+  });
+
+  it("stops reconnecting once disposed", async () => {
+    const { client, sockets, handshake } = makeMultiClient();
+    handshake(sockets[0]);
+    sockets[0].drop();
+    client.dispose();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sockets).toHaveLength(1);
+  });
+
+  it("rejects a request that gets no response within the timeout", async () => {
+    const { client, sockets, handshake } = makeMultiClient();
+    handshake(sockets[0]);
+    const p = client.subscribeLogs("info");
+    const assertion = expect(p).rejects.toThrow(/timed out after 30000ms: op=subscribe-logs/);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await assertion;
+    client.dispose();
+  });
+
+  it("rejects every in-flight request when the connection drops", async () => {
+    const { client, sockets, handshake } = makeMultiClient();
+    handshake(sockets[0]);
+    const a = client.subscribeLogs("info");
+    const b = client.actors();
+    const rejected = Promise.allSettled([a, b]);
+    sockets[0].drop();
+    const results = await rejected;
+    expect(results.map((r) => r.status)).toEqual(["rejected", "rejected"]);
+    client.dispose();
+  });
+
+  it("rejects in-flight requests on dispose", async () => {
+    const { client, sockets, handshake } = makeMultiClient();
+    handshake(sockets[0]);
+    const p = client.actors();
+    const assertion = expect(p).rejects.toThrow(/WebSocket closed|WorkspaceClient disposed/);
+    client.dispose();
+    await assertion;
   });
 });
