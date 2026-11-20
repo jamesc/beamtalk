@@ -44,7 +44,9 @@ mod surface_key;
 // Re-exports so `crate::commands::build::X` paths used by `build_stdlib.rs`,
 // `test.rs`, `lint.rs`, `fmt.rs`, `type_coverage.rs`, `beam_compiler.rs`, and
 // `deps/path.rs` keep working unchanged.
-pub(crate) use changes::{BuildGraphEdges, clean_stale_artifacts, detect_changes};
+pub(crate) use changes::{
+    BuildGraphEdges, clean_stale_artifacts, clean_stale_bt_artifacts, detect_changes,
+};
 pub(crate) use class_index::{
     CachedAst, FileIndex, Pass1Index, build_class_index, build_class_module_index,
     collect_all_alias_infos, collect_all_class_infos, collect_project_alias_infos,

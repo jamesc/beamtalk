@@ -432,6 +432,14 @@ fn compile_dependency_with_context(
         .compile_batch(&core_files)
         .wrap_err_with(|| format!("Failed to compile dependency '{dep_name}' to BEAM bytecode"))?;
 
+    // BT-5074: `compile_batch` never removes the beam of a module whose source
+    // was deleted, and the release stages this whole directory.
+    let produced: Vec<Utf8PathBuf> = module_names
+        .iter()
+        .map(|m| ebin_path.join(format!("{m}.beam")))
+        .collect();
+    crate::commands::build::clean_stale_bt_artifacts(&ebin_path, &produced)?;
+
     // BT-4940: the dependency's modules embed paths relative to its own
     // package root, but its beams live under the consumer's `_build/deps/`,
     // outside any package. Record where the sources are, beside (not inside)
@@ -1639,6 +1647,46 @@ mod tests {
         assert!(
             registry.lookup("bt4311_stale_nif", "ping", 0).is_none(),
             "a native module left in _build/ must not reach the dependency's registry"
+        );
+    }
+
+    /// BT-5074: recompiling a dependency must drop the beam of a module whose
+    /// source was deleted, or the release stages it.
+    #[test]
+    #[ignore = "requires erlc"]
+    fn recompiling_a_dependency_removes_beams_of_deleted_sources() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().join("app")).unwrap();
+        let dep_root = Utf8PathBuf::from_path_buf(temp.path().join("dep")).unwrap();
+        fs::create_dir_all(dep_root.join("src")).unwrap();
+        fs::create_dir_all(&project_root).unwrap();
+        fs::write(
+            dep_root.join("beamtalk.toml"),
+            "[package]\nname = \"dep\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(dep_root.join("src/keep.bt"), "Object subclass: Keep\n").unwrap();
+        fs::write(dep_root.join("src/gone.bt"), "Object subclass: Gone\n").unwrap();
+        let compile = || {
+            compile_dependency_at(
+                &project_root,
+                &dep_root,
+                "dep",
+                &beamtalk_core::CompilerOptions::default(),
+                &[],
+                &OtpTypeSpecs::default(),
+            )
+            .unwrap()
+        };
+        let dep = compile();
+        assert!(dep.ebin_path.join("bt@dep@gone.beam").exists());
+
+        fs::remove_file(dep_root.join("src/gone.bt")).unwrap();
+        let dep = compile();
+        assert!(dep.ebin_path.join("bt@dep@keep.beam").exists());
+        assert!(
+            !dep.ebin_path.join("bt@dep@gone.beam").exists(),
+            "beam of a deleted dependency module must be removed"
         );
     }
 }

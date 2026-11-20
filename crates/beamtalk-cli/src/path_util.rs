@@ -112,6 +112,46 @@ pub fn erl_module_names_in(dir: &Utf8Path) -> Result<Vec<String>> {
         .collect())
 }
 
+/// Delete every `.beam` directly in `ebin` whose module is not in `keep`, and
+/// return the modules removed (BT-5074).
+///
+/// `erlc` writes beams but never removes one whose source is gone, so a
+/// deleted `native/old.erl` would otherwise stay on the code path, in spec
+/// extraction and in the known-module set. A missing `ebin` is a no-op.
+///
+/// # Errors
+///
+/// Returns an error if the directory cannot be read or a beam cannot be removed.
+pub fn remove_beams_not_in<S: std::hash::BuildHasher>(
+    ebin: &Utf8Path,
+    keep: &std::collections::HashSet<String, S>,
+) -> Result<Vec<String>> {
+    let Ok(entries) = std::fs::read_dir(ebin) else {
+        return Ok(Vec::new());
+    };
+    let mut removed = Vec::new();
+    for entry in entries {
+        let path = entry
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to list '{ebin}'"))?
+            .path();
+        if path.extension().and_then(|e| e.to_str()) != Some("beam") {
+            continue;
+        }
+        let Some(module) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if !keep.contains(module) {
+            std::fs::remove_file(&path)
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to remove stale beam '{}'", path.display()))?;
+            removed.push(module.to_string());
+        }
+    }
+    removed.sort();
+    Ok(removed)
+}
+
 #[cfg(test)]
 mod erl_listing_tests {
     use super::*;

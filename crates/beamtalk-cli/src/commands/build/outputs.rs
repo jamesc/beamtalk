@@ -91,6 +91,10 @@ pub(crate) fn generate_package_outputs(
         );
         Some(cb_module_name)
     } else {
+        // BT-5074: `[application]` was dropped, so the callback this package
+        // generated earlier is stale (and is not a `bt@*` module the stale
+        // cleaner owns).
+        remove_stale_app_callback(build_dir, &pkg.name)?;
         None
     };
 
@@ -178,7 +182,9 @@ fn generate_class_corpus(
         })
         .collect();
 
-    if !class_entries.is_empty() {
+    if class_entries.is_empty() {
+        remove_if_present(&corpus_dir.join("class_corpus.json"))?;
+    } else {
         let class_json = serde_json::to_string_pretty(&class_entries).into_diagnostic()?;
         let class_corpus_path = corpus_dir.join("class_corpus.json");
         fs::write(&class_corpus_path, format!("{class_json}\n"))
@@ -272,7 +278,9 @@ fn generate_example_corpus(
         }));
     }
 
-    if !corpus_entries.is_empty() {
+    if corpus_entries.is_empty() {
+        remove_if_present(&corpus_dir.join("corpus.json"))?;
+    } else {
         corpus_entries.sort_by(|a, b| {
             let a_id = a["id"].as_str().unwrap_or("");
             let b_id = b["id"].as_str().unwrap_or("");
@@ -291,6 +299,29 @@ fn generate_example_corpus(
         );
     }
     Ok(())
+}
+
+/// Remove a generated file that this build no longer produces (BT-5074): a
+/// package that loses its last class or source would otherwise keep serving
+/// the previous build's corpus. Absent is fine.
+fn remove_if_present(path: &Utf8Path) -> Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => {
+            info!(path = %path, "Removed stale generated file");
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to remove stale '{path}'")),
+    }
+}
+
+/// Remove the generated `beamtalk_<pkg>_app` callback (`.erl` and `.beam`).
+fn remove_stale_app_callback(build_dir: &Utf8Path, pkg_name: &str) -> Result<()> {
+    let module = format!("beamtalk_{pkg_name}_app");
+    remove_if_present(&build_dir.join(format!("{module}.beam")))?;
+    remove_if_present(&build_dir.join(format!("{module}.erl")))
 }
 
 /// Extract leading doc comments from source, skipping license headers.
