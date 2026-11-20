@@ -308,17 +308,19 @@ warn_one_hop_children(Class, Selector) ->
         Children ->
             ?LOG_WARNING(
                 "Extension '~p' on '~p' replaces a compiled method, but its direct value "
-                "subclasses ~p still answer the compiled method (or their own catch-all): their sends will not see "
+                "subclasses ~p still answer the compiled method: their sends will not see "
                 "the extension (BT-5060)",
                 [Selector, Class, Children],
                 #{domain => [beamtalk, runtime]}
             ),
             ok
     catch
+        error:badarg ->
+            %% Bootstrap: the registry or class tables do not exist yet.
+            ok;
         Kind:Reason ->
-            %% Bootstrap (no registry or class tables yet) lands here; so would
-            %% a bug in the predicate, so leave a trace instead of nothing.
-            ?LOG_DEBUG(
+            %% A bug in the predicate: do not lose the warning silently.
+            ?LOG_WARNING(
                 "BT-5060 one-hop warning skipped for '~p' on '~p': ~p:~p",
                 [Selector, Class, Kind, Reason],
                 #{domain => [beamtalk, runtime]}
