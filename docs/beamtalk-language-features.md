@@ -6444,7 +6444,11 @@ A class-side extension is inherited the way a class method is: at each class
 up the chain, its class-side extensions are checked before its own class
 methods, so `Sub banner` answers an extension registered on `Base class`, with
 `Sub` as `self`, and an extension on `Base class` shadows a compiled class
-method of `Base` for `Sub` too (unless `Sub` itself defines the method). An
+method of `Base` for `Sub` too (unless `Sub` itself defines the method). This
+differs from the instance side, where a method written in the class body beats
+an extension on that same class: on the class side an extension on `Sub class`
+also beats `Sub`'s own compiled class method, which is what lets you patch a
+class method of a running class ([ADR 0066](ADR/0066-open-class-extension-methods.md), BT-5061). An
 outside send, a dynamic send, a class-side `self` send, `super`,
 `respondsTo:` and protocol conformance all agree (BT-4307). So does `Sub new:
 aDictionary`: an extension of `new:` on `Base class` answers it, exactly as a
