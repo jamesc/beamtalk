@@ -110,44 +110,66 @@ pub fn emit_beamtalk_version(workspace_root: &Path) {
         date: date.as_deref(),
     });
     println!("cargo:rustc-env=BEAMTALK_BUILD_ID={id}");
+}
 
-    // BT-5074: `BEAMTALK_VERSION` is the exact-match identity (handshake, app
-    // `vsn`, release provenance) and carries no dirty marker, so two different
-    // uncommitted compilers share one version string. The provenance stamp
-    // also records this tag, which names the uncommitted diff itself.
-    // Uncommitted edits do not touch `.git/index`, so watch the sources too:
-    // the tag is recomputed when they change (and only then).
-    println!(
-        "cargo:rerun-if-changed={}",
-        workspace_root.join("crates").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        workspace_root.join("Cargo.lock").display()
-    );
-    let tag = dirty_tag(git_dirty(), git_diff_head);
+/// Expose `BEAMTALK_DIRTY_TAG` at compile time (BT-5074).
+///
+/// `BEAMTALK_VERSION` is the exact-match identity (handshake, app `vsn`,
+/// release provenance) and carries no dirty marker, so two different
+/// uncommitted compilers share one version string. The provenance stamp also
+/// records this tag, which names the uncommitted compiler sources themselves:
+/// `dirty.<hash>` over the tracked diff plus every untracked, non-ignored file
+/// under the compiler's source paths, empty for a clean tree.
+///
+/// Call it from one crate's build script (the CLI, the only reader): it
+/// watches the sources, so every crate calling it would rebuild on each edit.
+pub fn emit_dirty_tag(workspace_root: &Path) {
+    for path in DIRTY_PATHS {
+        println!(
+            "cargo:rerun-if-changed={}",
+            workspace_root.join(path).display()
+        );
+    }
     println!(
         "cargo:rustc-env=BEAMTALK_DIRTY_TAG={}",
-        tag.unwrap_or_default()
+        dirty_tag(workspace_root).unwrap_or_default()
     );
 }
 
-/// The provenance dirty marker: `None` for a clean tree, otherwise
-/// `dirty.<hash of the uncommitted diff>` so each distinct set of uncommitted
-/// compiler edits is a distinct provenance.
-#[must_use]
-pub fn dirty_tag(dirty: bool, diff: impl FnOnce() -> Vec<u8>) -> Option<String> {
-    dirty.then(|| format!("dirty.{:016x}", fnv1a_64(&diff())))
+/// The paths whose uncommitted state makes a compiler "dirty".
+const DIRTY_PATHS: [&str; 4] = ["crates", "Cargo.toml", "Cargo.lock", "VERSION"];
+
+fn dirty_tag(workspace_root: &Path) -> Option<String> {
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .current_dir(workspace_root)
+            .args(args)
+            .args(["--"])
+            .args(DIRTY_PATHS)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| o.stdout)
+            .unwrap_or_default()
+    };
+    let diff = git(&["diff", "HEAD"]);
+    let untracked = git(&["ls-files", "--others", "--exclude-standard", "-z"]);
+    let mut input = diff;
+    for rel in untracked.split(|b| *b == 0).filter(|p| !p.is_empty()) {
+        input.extend_from_slice(rel);
+        if let Ok(rel) = std::str::from_utf8(rel) {
+            input.extend(fs::read(workspace_root.join(rel)).unwrap_or_default());
+        }
+    }
+    compose_dirty_tag(!input.is_empty(), &input)
 }
 
-fn git_diff_head() -> Vec<u8> {
-    Command::new("git")
-        .args(["diff", "HEAD"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| o.stdout)
-        .unwrap_or_default()
+/// The marker for `content` (the uncommitted diff and untracked files):
+/// `None` when the tree is clean, otherwise `dirty.<hash of content>` so each
+/// distinct set of uncommitted compiler edits is a distinct provenance.
+#[must_use]
+pub fn compose_dirty_tag(dirty: bool, content: &[u8]) -> Option<String> {
+    dirty.then(|| format!("dirty.{:016x}", fnv1a_64(content)))
 }
 
 /// Env var naming the distribution channel (`edge`, `nightly`) of a CI build.
@@ -319,16 +341,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dirty_tag_is_absent_when_clean_and_tracks_the_diff() {
-        assert_eq!(
-            dirty_tag(false, || unreachable!("clean tree reads no diff")),
-            None
-        );
-        let a = dirty_tag(true, || b"diff a".to_vec()).unwrap();
-        let b = dirty_tag(true, || b"diff b".to_vec()).unwrap();
+    fn dirty_tag_is_absent_when_clean_and_tracks_the_content() {
+        assert_eq!(compose_dirty_tag(false, b""), None);
+        let a = compose_dirty_tag(true, b"diff a").unwrap();
+        let b = compose_dirty_tag(true, b"diff b").unwrap();
         assert!(a.starts_with("dirty."));
         assert_ne!(a, b);
-        assert_eq!(a, dirty_tag(true, || b"diff a".to_vec()).unwrap());
+        assert_eq!(a, compose_dirty_tag(true, b"diff a").unwrap());
     }
 
     fn inputs() -> BuildInputs<'static> {

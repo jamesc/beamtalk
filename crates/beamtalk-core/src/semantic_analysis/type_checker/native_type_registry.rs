@@ -399,8 +399,10 @@ impl NativeTypeRegistry {
     /// A canonical, order-independent text rendering of everything the type
     /// checker can read from this registry (BT-5074): every signature's
     /// parameters, return type and provenance, the exports without a `-spec`,
-    /// and the trusted-result modules. Source line numbers are left out, since
-    /// moving a function inside its `.erl` file changes no diagnostic.
+    /// and the trusted-result modules. The `-spec` line numbers of extracted
+    /// signatures are left out, since moving a function inside its `.erl` file
+    /// changes no diagnostic; a stub signature's declaration span stays in, which
+    /// can only over-invalidate.
     ///
     /// The build hashes this into every file's incremental cache key, so a
     /// changed `-spec` in `native/*.erl` or a dependency re-checks its callers.
