@@ -395,7 +395,8 @@ change_then_resume(Pid, Module, Extra) ->
             %% its `instances_suspended` finding when it is still waiting.
             ?LOG_ERROR(
                 #{
-                    msg => <<"code change failed; the actor is left suspended (ADR 0123 section 3)">>,
+                    msg =>
+                        <<"code change failed; the actor is left suspended (ADR 0123 section 3)">>,
                     module => Module,
                     pid => Pid,
                     reason => Reason
