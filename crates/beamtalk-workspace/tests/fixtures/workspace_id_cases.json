@@ -1,0 +1,38 @@
+[
+  {
+    "platform": "posix",
+    "input": "/home/user/project",
+    "canonical": "/home/user/project",
+    "id": "9dad1e4e08b0"
+  },
+  {
+    "platform": "win32",
+    "input": "c:\\Users\\dev\\proj",
+    "canonical": "\\\\?\\C:\\Users\\dev\\proj",
+    "id": "5890d93460c1"
+  },
+  {
+    "platform": "win32",
+    "input": "C:\\Users\\dev\\proj",
+    "canonical": "\\\\?\\C:\\Users\\dev\\proj",
+    "id": "5890d93460c1"
+  },
+  {
+    "platform": "win32",
+    "input": "\\\\server\\share\\proj",
+    "canonical": "\\\\?\\UNC\\server\\share\\proj",
+    "id": "08f89a7fee88"
+  },
+  {
+    "platform": "win32",
+    "input": "\\\\?\\C:\\Users\\dev\\proj",
+    "canonical": "\\\\?\\C:\\Users\\dev\\proj",
+    "id": "5890d93460c1"
+  },
+  {
+    "platform": "win32",
+    "input": "\\\\?\\UNC\\server\\share\\proj",
+    "canonical": "\\\\?\\UNC\\server\\share\\proj",
+    "id": "08f89a7fee88"
+  }
+]
