@@ -143,6 +143,17 @@ pub(crate) fn compute_file_module_pairs(
         pairs.push((file.clone(), module_name, core_file));
     }
 
+    // BT-5074: two files mapping to one module would overwrite each other.
+    if let Some((first, second, module)) = crate::commands::util::find_module_collision(
+        pairs.iter().map(|(f, m, _)| (f.as_path(), m.as_str())),
+    ) {
+        miette::bail!(
+            "Source files '{first}' and '{second}' both compile to module '{module}'. \
+             Module names are lower-cased and snake-cased from the file path, so the two \
+             names are the same module. Rename one of the two files."
+        );
+    }
+
     Ok(pairs)
 }
 

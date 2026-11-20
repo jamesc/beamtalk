@@ -204,7 +204,11 @@ pub(crate) fn build_class_index(
                 module = %module_name,
                 "Adding dependency class to index"
             );
-            class_module_index.insert(class_name.clone(), module_name.clone());
+            // BT-5074: first wins, project first - the same precedence
+            // `collect_all_class_infos` applies to the class infos below.
+            class_module_index
+                .entry(class_name.clone())
+                .or_insert_with(|| module_name.clone());
         }
         dep_class_infos.extend(dep.class_infos.clone());
         dep_protocol_infos.extend(dep.protocol_infos.clone());

@@ -244,7 +244,7 @@ fn test_build_alias_metadata_extracts_declared_aliases() {
              internal type ParserState = Integer | String\n",
     );
 
-    let result = build_alias_metadata(&[alias_file]);
+    let result = build_alias_metadata(&[alias_file], None);
 
     assert_eq!(result.len(), 2, "expected two aliases, got: {result:?}");
     let public = result
@@ -269,7 +269,7 @@ fn test_build_alias_metadata_extracts_declared_aliases() {
 #[test]
 fn test_build_alias_metadata_skips_unreadable_file() {
     let nonexistent = Utf8PathBuf::from("/nonexistent/no_such_file.bt");
-    let result = build_alias_metadata(&[nonexistent]);
+    let result = build_alias_metadata(&[nonexistent], None);
     assert!(result.is_empty());
 }
 
@@ -285,7 +285,7 @@ fn test_build_alias_metadata_preserves_declaration_order() {
     let alias_file = src_path.join("aliases.bt");
     write_test_file(&alias_file, "type Zebra = Integer\ntype Alpha = Integer\n");
 
-    let result = build_alias_metadata(&[alias_file]);
+    let result = build_alias_metadata(&[alias_file], None);
     let names: Vec<&str> = result.iter().map(|a| a.name.as_str()).collect();
     assert_eq!(names, vec!["Zebra", "Alpha"]);
 }
@@ -329,7 +329,7 @@ fn test_build_alias_metadata_source_file_uses_forward_slashes() {
     let alias_file = src_path.join("aliases.bt");
     write_test_file(&alias_file, "type Zebra = Integer\n");
 
-    let result = build_alias_metadata(&[alias_file]);
+    let result = build_alias_metadata(&[alias_file], None);
     assert_eq!(result.len(), 1);
     assert!(
         !result[0].source_file.contains('\\'),

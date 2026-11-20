@@ -59,7 +59,7 @@ pub(crate) fn generate_package_outputs(
         &hierarchy.class_module_index,
         &pkg.name,
     );
-    let alias_metadata = build_alias_metadata(outputs.source_files);
+    let alias_metadata = build_alias_metadata(outputs.source_files, Some(project_root));
 
     // Generate OTP application callback when [application] supervisor is set.
     let application_config = manifest::find_application_config(project_root)?;
@@ -441,7 +441,10 @@ pub(crate) fn build_class_metadata(
 /// Returned in `source_files` order, **not** sorted by name —
 /// [`app_file::format_type_aliases_entry`] owns the sort for deterministic
 /// `.app` output, so sorting here too would be redundant.
-pub(crate) fn build_alias_metadata(source_files: &[Utf8PathBuf]) -> Vec<app_file::AliasMetadata> {
+pub(crate) fn build_alias_metadata(
+    source_files: &[Utf8PathBuf],
+    package_root: Option<&Utf8Path>,
+) -> Vec<app_file::AliasMetadata> {
     let mut result = Vec::new();
     for file in source_files {
         let Ok(source) = fs::read_to_string(file) else {
@@ -456,7 +459,12 @@ pub(crate) fn build_alias_metadata(source_files: &[Utf8PathBuf]) -> Vec<app_file
                     &alias_def.annotation,
                 ),
                 doc: alias_def.doc_comment.clone(),
-                source_file: to_forward_slash(file.as_str()),
+                source_file: to_forward_slash(
+                    package_root
+                        .and_then(|root| file.strip_prefix(root).ok())
+                        .unwrap_or(file)
+                        .as_str(),
+                ),
                 internal: alias_def.is_internal,
             });
         }

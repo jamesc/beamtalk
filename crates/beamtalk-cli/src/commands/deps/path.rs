@@ -613,6 +613,16 @@ fn dependency_type_registry(
         .map(std::sync::Arc::new)
 }
 
+/// The Erlang module a dependency's source file compiles to.
+fn dependency_module_name(
+    file: &Utf8Path,
+    source_root: Option<&Utf8Path>,
+    dep_name: &str,
+) -> Result<String> {
+    let relative_module = crate::commands::build::compute_relative_module(file, source_root)?;
+    Ok(format!("bt@{dep_name}@{relative_module}"))
+}
+
 /// Compile each source file in a dependency to Core Erlang.
 ///
 /// Returns the list of `.core` file paths and corresponding BEAM module names.
@@ -626,7 +636,25 @@ fn compile_sources_to_core(
     mut cached_asts: HashMap<Utf8PathBuf, crate::commands::build::CachedAst>,
 ) -> Result<(Vec<Utf8PathBuf>, Vec<String>)> {
     let mut core_files = Vec::new();
-    let mut module_names = Vec::new();
+    let mut module_names: Vec<String> = Vec::new();
+
+    // BT-5074: refuse two sources that derive one module before compiling any.
+    let derived = source_files
+        .iter()
+        .map(|file| dependency_module_name(file, source_root, dep_name))
+        .collect::<Result<Vec<_>>>()?;
+    if let Some((first, second, module)) = crate::commands::util::find_module_collision(
+        source_files
+            .iter()
+            .map(Utf8PathBuf::as_path)
+            .zip(derived.iter().map(String::as_str)),
+    ) {
+        miette::bail!(
+            "Sources '{first}' and '{second}' in dependency '{dep_name}' both compile to \
+             module '{module}'. Module names are lower-cased and snake-cased from the file \
+             path, so the two names are the same module. Rename one of the two files."
+        );
+    }
 
     for file in source_files {
         let stem = file
@@ -642,8 +670,7 @@ fn compile_sources_to_core(
             );
         }
 
-        let relative_module = crate::commands::build::compute_relative_module(file, source_root)?;
-        let module_name = format!("bt@{dep_name}@{relative_module}");
+        let module_name = dependency_module_name(file, source_root, dep_name)?;
         let core_file = ebin_path.join(format!("{module_name}.core"));
 
         let cached = cached_asts.remove(file);
@@ -695,7 +722,7 @@ fn generate_dependency_app_file(
     // trip into its `.app` file the same way the root package's do — the
     // seeding-boundary exclusion of a dependency's internal aliases happens
     // downstream, at browse time (`beamtalk_repl_ops_browse.erl`), not here.
-    let alias_metadata = crate::commands::build::build_alias_metadata(source_files);
+    let alias_metadata = crate::commands::build::build_alias_metadata(source_files, Some(dep_root));
     // Read full manifest to get dependency names for {applications} list
     let full_manifest = manifest::find_manifest_full(dep_root)?;
     let dep_hex_dep_names: Vec<String> = full_manifest
