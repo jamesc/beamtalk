@@ -552,11 +552,6 @@ export class WorkspaceClient {
     await this._request(params);
   }
 
-  /** Unsubscribe from live log streaming. */
-  async unsubscribeLogs(): Promise<void> {
-    await this._request({ op: "unsubscribe-logs" });
-  }
-
   // ─── Events ──────────────────────────────────────────────────────────────
 
   /**

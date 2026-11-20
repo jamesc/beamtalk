@@ -82,11 +82,6 @@
         "icon": "$(close)"
       },
       {
-        "command": "beamtalk.killActor",
-        "title": "Kill Actor",
-        "icon": "$(stop)"
-      },
-      {
         "command": "beamtalk.inspectBinding",
         "title": "Inspect",
         "icon": "$(search)"
@@ -171,19 +166,9 @@
       ],
       "view/item/context": [
         {
-          "command": "beamtalk.killActor",
-          "when": "view == beamtalk.workspaceExplorer && viewItem == actor-item",
-          "group": "inline"
-        },
-        {
           "command": "beamtalk.inspectActor",
           "when": "view == beamtalk.workspaceExplorer && viewItem == actor-item",
           "group": "inline"
-        },
-        {
-          "command": "beamtalk.killActor",
-          "when": "view == beamtalk.workspaceExplorer && viewItem == actor-item",
-          "group": "beamtalk@1"
         },
         {
           "command": "beamtalk.inspectActor",
