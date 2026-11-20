@@ -66,6 +66,10 @@ pub fn ensure_deps_resolved(
         return Ok(Vec::new());
     }
 
+    // Resolution clones into `_build/deps/` and rewrites `beamtalk.lock`; hold
+    // the project build lock (re-entrant under `build`) and read state under it.
+    let _project_lock = crate::commands::dir_lock::lock_project_build(project_root)?;
+
     let parsed = manifest::parse_manifest_full(&manifest_path)?;
     if parsed.dependencies.is_empty() {
         clean_all_stale_deps(project_root)?;

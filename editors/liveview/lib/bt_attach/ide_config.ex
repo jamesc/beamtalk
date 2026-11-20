@@ -54,13 +54,14 @@ defmodule BtAttach.IdeConfig do
         }
 
   @doc """
-  Default config-file path: `$BT_IDE_CONFIG` if set, else `~/.beamtalk/ide.toml`.
+  Default config-file path: `$BT_IDE_CONFIG` if set, else `ide.toml` under the Beamtalk
+  root directory (`~/.beamtalk`, or `$BEAMTALK_HOME` — see `BtAttach.BeamtalkHome`).
   """
   @spec default_path() :: String.t()
   def default_path do
     case System.get_env("BT_IDE_CONFIG") do
       path when is_binary(path) and path != "" -> path
-      _ -> Path.join([System.user_home() || ".", ".beamtalk", "ide.toml"])
+      _ -> Path.join(BtAttach.BeamtalkHome.root_dir() || ".beamtalk", "ide.toml")
     end
   end
 

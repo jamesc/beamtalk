@@ -1,6 +1,15 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+// Tauri's `#[tauri::command]` ABI fixes these signatures: `State`, `AppHandle`
+// and `String` arguments are taken by value, and every command (and the
+// helper `detach_internal` it shares with them) returns `Result<_, String>`
+// for the IPC error contract even when the body cannot fail. Changing either
+// would break the command registration, so the two pedantic lints are allowed
+// for this module only (BT-5087: the crate is now linted with the workspace
+// lint levels).
+#![allow(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
+
 //! Tauri commands wiring the picker frontend to `beamtalk-desktop-broker`
 //! (process supervision) and `beamtalk-desktop-shell` (attach/empty-state
 //! decisions) — ADR 0097 Implementation §3/§4, BT-2986.
@@ -148,6 +157,7 @@ pub fn attach(
 /// through to the recorded [`AttachedFront`] and [`spawn_monitor`] so the
 /// post-attach monitor's stop condition survives ephemeral-port reuse (see
 /// [`beamtalk_desktop_shell::attach::AttachManager::is_current_front`]).
+#[allow(clippy::too_many_lines)] // one linear attach sequence; splitting it would scatter the rollback ordering its comments describe
 fn attach_and_open_window(
     app: &AppHandle,
     state: &AppState,
@@ -259,11 +269,11 @@ fn attach_and_open_window(
                 ),
             });
         }
-        ReadinessState::TimedOut(stage) => {
-            tracing::error!(workspace_id, ?stage, "readiness timed out");
+        ReadinessState::TimedOut(timed_out_stage) => {
+            tracing::error!(workspace_id, ?timed_out_stage, "readiness timed out");
             kill_and_untrack(state, workspace_id, port);
             return Err(format!(
-                "timed out waiting for workspace '{workspace_id}' ({stage:?})"
+                "timed out waiting for workspace '{workspace_id}' ({timed_out_stage:?})"
             ));
         }
         // `wait_ready` only ever returns one of the three arms above — but
@@ -382,6 +392,13 @@ fn attach_and_open_window(
     Ok(AttachOutcome::Opened)
 }
 
+/// How long a front gets to shut down after `SIGTERM` before it is force-killed
+/// (BT-5081). A BEAM `init:stop` that terminates the LiveViews (running their
+/// `terminate/2` session cleanup) normally finishes well inside a second; 3 s
+/// leaves slack for a loaded machine without making a wedged front stall the
+/// UI thread (window close and quit stop fronts inline) for long.
+const FRONT_STOP_GRACE: Duration = Duration::from_secs(3);
+
 /// Kill and untrack `workspace_id`'s child on an attach failure: removes it
 /// from `state.children` (so nothing later mistakes it for still tracked),
 /// kills and reaps the process, and clears its on-disk front record. Used
@@ -391,8 +408,7 @@ fn attach_and_open_window(
 /// map entry for an already-dead process.
 fn kill_and_untrack(state: &AppState, workspace_id: &str, port: u16) {
     if let Some(mut child) = locked(&state.children).remove(workspace_id) {
-        let _ = child.kill();
-        let _ = child.wait();
+        child.stop(FRONT_STOP_GRACE);
     }
     remove_front_record(workspace_id, port);
 }
@@ -441,8 +457,7 @@ pub fn detach_internal<R: tauri::Runtime>(
     let removed = locked(&state.attach).remove(workspace_id);
 
     if let Some(mut child) = locked(&state.children).remove(workspace_id) {
-        let _ = child.kill();
-        let _ = child.wait();
+        child.stop(FRONT_STOP_GRACE);
     }
 
     // Removing the on-disk record — which also removes the front's
@@ -537,7 +552,10 @@ fn quit_cleanup<R: tauri::Runtime>(app: &AppHandle<R>, state: &AppState) {
     // `app.exit()` below re-delivers that event before the process
     // actually tears down.
     if let Some(guard) = app.try_state::<Mutex<crate::logging::LoggingGuard>>() {
-        guard.lock().unwrap_or_else(|e| e.into_inner()).flush();
+        guard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .flush();
     }
 }
 

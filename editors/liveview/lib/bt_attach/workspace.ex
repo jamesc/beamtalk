@@ -74,6 +74,52 @@ defmodule BtAttach.Workspace do
 
   @epmd_port 4369
 
+  # Every call into the workspace is bounded (BT-5081): `:rpc.call/4` waits
+  # forever, so one hung workspace call froze the whole LiveView process.
+  # `:erpc.call/5` takes a timeout; we fold its exceptions back into the
+  # `{:badrpc, reason}` shape every caller already matches on, so a timeout
+  # surfaces as `{:unreachable, :timeout}` like any other unreachable reply.
+  #
+  # Timeout tiers, chosen from what the call does:
+  #   * `@rpc_timeout` (10 s)       — protocol decode, subscribe, pid probes and
+  #     other reads: each is a single in-memory lookup on the workspace; 10 s is
+  #     far above a healthy round-trip yet short enough that a wedged
+  #     workspace shows an error quickly.
+  #   * `@rpc_interactive_timeout` (5 s) — completion / hover: keystroke-driven,
+  #     a late answer is worthless, so fail fast.
+  #   * `@rpc_long_timeout` (60 s)  — compile / load / reload / flush / git /
+  #     test-discovery: real work (erlc, file IO, `git`) that is bounded but
+  #     slower than a lookup.
+  #   * `@rpc_eval_timeout` (35 s) — evaluating code. The runtime itself caps an
+  #     eval at 30 s (`beamtalk_repl_shell:eval/2` is a
+  #     `gen_server:call(…, 30000)`), so 35 s lets that bound fire first and
+  #     report a timeout, with a little slack for the distribution round-trip;
+  #     a larger value here would never be reached. Evals the user typed run off
+  #     the LiveView process (so the tab stays usable and Stop can interrupt
+  #     them sooner); a timed-out eval is interrupted so the runaway worker does
+  #     not keep the session busy.
+  @rpc_timeout 10_000
+  @rpc_interactive_timeout 5_000
+  @rpc_long_timeout 60_000
+  @rpc_eval_timeout 35_000
+
+  @doc "The timeout (ms) an eval's workspace call waits."
+  def rpc_eval_timeout, do: @rpc_eval_timeout
+
+  @doc """
+  Interrupt the evaluation running in `session_pid` (the Workspace dock's Stop
+  control). Idempotent: with no eval running the runtime replies `:ok`. The
+  call goes to the session gen_server, which stays responsive while its eval
+  worker runs, so it works mid-eval.
+  """
+  def interrupt(session_pid) when is_pid(session_pid) do
+    case rpc(:beamtalk_repl_shell, :interrupt, [session_pid]) do
+      :ok -> :ok
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
   @doc "The configured workspace node name as an atom."
   def node_name do
     System.get_env("BT_WORKSPACE_NODE", "beamtalk_workspace_spike@localhost")
@@ -171,6 +217,25 @@ defmodule BtAttach.Workspace do
   end
 
   @doc """
+  Attach `client_pid` (the LiveView process) to `session_pid` on the workspace
+  (BT-5081, BT-5012 lifecycle).
+
+  The workspace session monitors the client: while one is attached it never
+  idles out, and when the last goes away (the front crashed, or was SIGKILLed
+  by the desktop shell and so never ran `terminate/2`) the session counts as
+  *detached* and the workspace's idle reaping covers it. Without this the
+  runtime treats a never-attached session as permanently active, so a killed
+  front's sessions leaked and could block workspace idle shutdown.
+  """
+  def attach_session(session_pid, client_pid) when is_pid(session_pid) and is_pid(client_pid) do
+    case rpc(:beamtalk_repl_shell, :attach, [session_pid, client_pid]) do
+      :ok -> :ok
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc """
   Stop a workspace-supervised session started by `start_session/1`.
 
   The session is owned by the workspace's `beamtalk_session_sup`, so it does not
@@ -261,7 +326,7 @@ defmodule BtAttach.Workspace do
         {:error, reason, "", []}
 
       {:badrpc, reason} ->
-        {:error, {:unreachable, reason}, "", []}
+        {:error, {:unreachable, eval_timeout_reason(reason)}, "", []}
 
       # The op contract is a small tagged union; treat anything else as a data
       # error rather than letting a CaseClauseError crash the LiveView.
@@ -269,6 +334,13 @@ defmodule BtAttach.Workspace do
         {:error, {:unexpected_reply, other}, "", []}
     end
   end
+
+  # The runtime's own 30 s eval call times out inside the remote process, which
+  # `:erpc` reports as an exit carrying `{:timeout, _}` rather than its own
+  # `:timeout`. Fold both into `:timeout` so the caller sees one shape and knows
+  # to interrupt the still-running worker.
+  defp eval_timeout_reason({:EXIT, {:timeout, _}}), do: :timeout
+  defp eval_timeout_reason(reason), do: reason
 
   # A workspace warning is a compiler-port `#{message, hint?}` map (BT-4449) or
   # a runtime-raised plain binary; both become one `%{message, hint}` shape.
@@ -1020,7 +1092,7 @@ defmodule BtAttach.Workspace do
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->
         decoded_params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-        rpc(:beamtalk_repl_ops, :dispatch, [op, decoded_params, msg, self()])
+        rpc(:beamtalk_repl_ops, :dispatch, [op, decoded_params, msg, self()], @rpc_long_timeout)
 
       {:badrpc, reason} ->
         {:error, {:unreachable, reason}}
@@ -1046,7 +1118,12 @@ defmodule BtAttach.Workspace do
       {:ok, msg} ->
         decoded_params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
 
-        case rpc(:beamtalk_repl_ops, :dispatch, [op, decoded_params, msg, self()]) do
+        case rpc(
+               :beamtalk_repl_ops,
+               :dispatch,
+               [op, decoded_params, msg, self()],
+               @rpc_long_timeout
+             ) do
           {:value, value} -> {:value, value}
           {:error, reason} -> {:error, reason}
           {:badrpc, reason} -> {:error, {:unreachable, reason}}
@@ -1074,7 +1151,7 @@ defmodule BtAttach.Workspace do
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->
         params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-        rpc(:beamtalk_repl_ops, :dispatch, ["eval", params, msg, session_pid])
+        rpc(:beamtalk_repl_ops, :dispatch, ["eval", params, msg, session_pid], @rpc_eval_timeout)
 
       other ->
         other
@@ -1094,7 +1171,13 @@ defmodule BtAttach.Workspace do
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->
         params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-        rpc(:beamtalk_repl_ops, :dispatch, ["complete", params, msg, session_pid])
+
+        rpc(
+          :beamtalk_repl_ops,
+          :dispatch,
+          ["complete", params, msg, session_pid],
+          @rpc_interactive_timeout
+        )
 
       other ->
         other
@@ -1132,7 +1215,13 @@ defmodule BtAttach.Workspace do
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->
         params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-        rpc(:beamtalk_repl_ops, :dispatch, ["hover", params, msg, session_pid])
+
+        rpc(
+          :beamtalk_repl_ops,
+          :dispatch,
+          ["hover", params, msg, session_pid],
+          @rpc_interactive_timeout
+        )
 
       other ->
         other
@@ -1185,6 +1274,33 @@ defmodule BtAttach.Workspace do
   end
 
   @doc """
+  Batched `render_term/1` (BT-5081): render every term in `terms` with ONE
+  workspace round-trip, preserving order. The bindings pane used to make one
+  `term_to_json` RPC per binding on every `BindingChanged` push; a session
+  with many bindings meant N sequential distribution round-trips inside the
+  LiveView process.
+
+  The remote side runs `:lists.map/2` over an *external* fun reference
+  (`:erlang.make_fun/3`), which travels as `module:function/arity`
+  and so needs no matching code on the workspace node. If the batch fails
+  (unreachable workspace, or one term the formatter rejects) each term falls
+  back to `render_term/1`, so a single bad term still degrades only itself.
+  """
+  def render_terms([]), do: []
+
+  def render_terms(terms) when is_list(terms) do
+    to_json = :erlang.make_fun(:beamtalk_repl_json, :term_to_json, 1)
+
+    case rpc(:lists, :map, [to_json, terms]) do
+      jsons when is_list(jsons) and length(jsons) == length(terms) ->
+        Enum.map(jsons, &format_value/1)
+
+      _failed ->
+        Enum.map(terms, &render_term/1)
+    end
+  end
+
+  @doc """
   Render a `term_to_json/1` value (the same JSON-ready value the browser
   serialises) to a display string using the canonical, surface-shared rules from
   `beamtalk_repl_protocol::format::format_value` (Rust, BT-2086 — Plain mode), so
@@ -1219,6 +1335,9 @@ defmodule BtAttach.Workspace do
   `beamtalk_repl_json:format_error_message/1` so the message text matches what
   the browser shows; falls back to `inspect/1` for non-structured reasons.
   """
+  def render_error({:unreachable, :timeout}),
+    do: "The workspace did not respond in time. The operation may still be running."
+
   def render_error(reason) do
     case rpc(:beamtalk_repl_json, :format_error_message, [reason]) do
       msg when is_binary(msg) -> msg
@@ -1684,7 +1803,7 @@ defmodule BtAttach.Workspace do
     # selector and body are passed as values — no source-string round-trip.
     args = [class, selector, source, :durable, "liveview", :human]
 
-    case rpc(:beamtalk_repl_eval, :compile_method, args) do
+    case rpc(:beamtalk_repl_eval, :compile_method, args, @rpc_long_timeout) do
       {:ok, class_bin} ->
         {:ok, to_string(class_bin)}
 
@@ -1725,7 +1844,7 @@ defmodule BtAttach.Workspace do
       workspace is gone
   """
   def new_class(source, path) when is_binary(source) and is_binary(path) do
-    case rpc(:beamtalk_repl_loader_newclass, :new_class, [source, path]) do
+    case rpc(:beamtalk_repl_loader_newclass, :new_class, [source, path], @rpc_long_timeout) do
       {:ok, _class_objects} ->
         {:ok, path}
 
@@ -1766,7 +1885,12 @@ defmodule BtAttach.Workspace do
   prior body, or no active entry) / an unreachable workspace.
   """
   def revert(class, selector, side \\ nil) when is_binary(class) and is_binary(selector) do
-    case rpc(:beamtalk_workspace_interface_primitives, :revert_method, [class, selector, side]) do
+    case rpc(
+           :beamtalk_workspace_interface_primitives,
+           :revert_method,
+           [class, selector, side],
+           @rpc_long_timeout
+         ) do
       {:ok, _class_object} ->
         {:ok, class}
 
@@ -1798,7 +1922,7 @@ defmodule BtAttach.Workspace do
   / missing file, or `{:unreachable, _}` if the workspace is gone).
   """
   def reload_file(path) when is_binary(path) do
-    case rpc(:beamtalk_repl_eval, :reload_file, [binary_to_list_path(path)]) do
+    case rpc(:beamtalk_repl_eval, :reload_file, [binary_to_list_path(path)], @rpc_long_timeout) do
       {:ok, class_names} when is_list(class_names) ->
         {:ok, Enum.map(class_names, &to_string/1)}
 
@@ -1833,7 +1957,7 @@ defmodule BtAttach.Workspace do
   Returns `{:ok, summary_map}` or `{:error, reason_term}`.
   """
   def flush do
-    case rpc(:beamtalk_workspace_flush, :flush, []) do
+    case rpc(:beamtalk_workspace_flush, :flush, [], @rpc_long_timeout) do
       {:ok, summary} when is_map(summary) -> {:ok, summary}
       {:error, reason} -> {:error, structure_error(reason)}
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
@@ -1995,7 +2119,7 @@ defmodule BtAttach.Workspace do
   `git` is absent.
   """
   def git_status do
-    case rpc(:beamtalk_git, :git_status, []) do
+    case rpc(:beamtalk_git, :git_status, [], @rpc_long_timeout) do
       {:ok, status} when is_map(status) -> {:ok, status}
       {:error, reason} -> {:error, structure_error(reason)}
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
@@ -2010,7 +2134,7 @@ defmodule BtAttach.Workspace do
   verbatim), or `{:error, reason}`.
   """
   def git_diff(path) when is_binary(path) do
-    case rpc(:beamtalk_git, :git_diff, [path]) do
+    case rpc(:beamtalk_git, :git_diff, [path], @rpc_long_timeout) do
       {:ok, diff} when is_map(diff) -> {:ok, diff}
       {:error, reason} -> {:error, structure_error(reason)}
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
@@ -2023,7 +2147,7 @@ defmodule BtAttach.Workspace do
   author:, ts:}]}`, or `{:error, reason}`.
   """
   def git_log(count) when is_integer(count) and count > 0 do
-    case rpc(:beamtalk_git, :git_log, [count]) do
+    case rpc(:beamtalk_git, :git_log, [count], @rpc_long_timeout) do
       {:ok, commits} when is_list(commits) -> {:ok, commits}
       {:error, reason} -> {:error, structure_error(reason)}
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
@@ -2052,7 +2176,7 @@ defmodule BtAttach.Workspace do
 
   # Shared transport for the mutating git ops, all of which return {ok, nil}.
   defp git_mutate(fun, args) do
-    case rpc(:beamtalk_git, fun, args) do
+    case rpc(:beamtalk_git, fun, args, @rpc_long_timeout) do
       {:ok, _} -> {:ok, nil}
       {:error, reason} -> {:error, structure_error(reason)}
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
@@ -2393,7 +2517,40 @@ defmodule BtAttach.Workspace do
     :erlang.iolist_to_binary(:json.encode(map))
   end
 
-  defp rpc(mod, fun, args) do
-    :rpc.call(node_name(), mod, fun, args)
+  defp rpc(mod, fun, args, timeout \\ @rpc_timeout) do
+    erpc(mod, fun, args, timeout, true)
+  end
+
+  # `:rpc.call/4` set up the distribution connection on demand; `:erpc.call/5`
+  # does not, and answers `{:erpc, :noconnection}` for a node this one has not
+  # connected to yet (the first call of a process that never ran `connect/0`).
+  # Connect once and retry so the bounded call keeps the old call's behaviour.
+  defp erpc(mod, fun, args, timeout, retry?) do
+    :erpc.call(node_name(), mod, fun, args, timeout)
+  catch
+    :error, {:erpc, :noconnection} when retry? ->
+      if Node.alive?() and Node.connect(node_name()) == true do
+        erpc(mod, fun, args, timeout, false)
+      else
+        {:badrpc, :noconnection}
+      end
+
+    :error, {:erpc, reason} ->
+      {:badrpc, reason}
+
+    :error, {:exception, reason, stack} ->
+      {:badrpc, {:EXIT, {reason, stack}}}
+
+    :exit, {:exception, reason} ->
+      {:badrpc, {:EXIT, reason}}
+
+    :exit, {:signal, reason} ->
+      {:badrpc, reason}
+
+    :exit, reason ->
+      {:badrpc, {:EXIT, reason}}
+
+    :throw, value ->
+      value
   end
 end
