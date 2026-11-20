@@ -33,7 +33,7 @@ pub use path::collect_dep_ebin_paths;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{IntoDiagnostic, Result, WrapErr};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use tracing::{debug, info};
 
 use beamtalk_core::build_layout::BuildLayout;
@@ -190,93 +190,88 @@ struct DiscoveredDep {
 /// Used by both `deps_are_fresh` and `collect_fresh_deps` to handle the full
 /// transitive graph rather than just direct deps.
 ///
-/// Note: the offline walk shared by MCP `lint`/`diagnostic_summary` and the
-/// LSP ([`beamtalk_project::dependency_graph::discover_dependency_graph`])
-/// performs a similar BFS, but skips what it cannot find where this one
-/// reports an error, and records stubs and via-chains this one needs. The
-/// checkout-path resolution step — the shared primitive
-/// that determines *where* each dep lives on disk — is extracted into
-/// [`beamtalk_project::dependency_graph::dep_root_for_source`] and called by
-/// both walkers, so that piece cannot drift between them.
+/// Note: this is the shared breadth-first walk
+/// ([`beamtalk_project::dependency_graph::walk_dependencies`]) with the CLI's
+/// policy — the same walk the offline scan used by MCP `lint` /
+/// `diagnostic_summary` and the LSP runs, so the two cannot drift. The
+/// fetching, cycle-checking resolution in `graph.rs` stays a separate
+/// depth-first walk (see its module docs).
 fn discover_all_dep_roots(
     project_root: &Utf8Path,
     manifest: &manifest::ParsedManifest,
 ) -> Result<Vec<DiscoveredDep>> {
     use beamtalk_core::compilation::DependencySource;
-    use beamtalk_project::dependency_graph::dep_root_for_source;
+    use beamtalk_project::dependency_graph::{WalkPolicy, walk_dependencies};
 
-    let layout = BuildLayout::new(project_root);
-    let direct_names: std::collections::HashSet<&str> =
-        manifest.dependencies.keys().map(String::as_str).collect();
+    /// The CLI's policy over the shared walk: a non-UTF-8 path is an error, a
+    /// missing checkout is still reported (with no dependencies of its own),
+    /// and each dependency's full manifest is kept so its package-bundled
+    /// stubs (ADR 0075 layer 2, one hop only — never its own deps' stubs)
+    /// can be recorded alongside it.
+    #[derive(Default)]
+    struct CliPolicy {
+        parsed: BTreeMap<String, manifest::ParsedManifest>,
+    }
 
-    // BFS queue: (parent_root, deps_map, via_chain)
-    let mut queue: VecDeque<(
-        Utf8PathBuf,
-        BTreeMap<String, beamtalk_core::compilation::DependencySpec>,
-        Vec<String>,
-    )> = VecDeque::from([(
-        project_root.to_path_buf(),
-        manifest.dependencies.clone(),
-        Vec::new(),
-    )]);
-    let mut visited = std::collections::HashSet::new();
-    let mut result = Vec::new();
+    impl WalkPolicy for CliPolicy {
+        type Error = miette::Report;
 
-    while let Some((parent_root, deps, via_chain)) = queue.pop_front() {
-        for (dep_name, spec) in &deps {
-            if !visited.insert(dep_name.clone()) {
-                continue; // Already discovered (diamond deps)
-            }
+        fn non_utf8_path(
+            &mut self,
+            name: &str,
+            path: &std::path::Path,
+        ) -> std::result::Result<(), Self::Error> {
+            Err(miette::miette!(
+                "Dependency '{name}' has a non-UTF-8 path: {}",
+                path.display()
+            ))
+        }
 
-            let is_path_dep = matches!(spec.source, DependencySource::Path { .. });
-            let dep_root =
-                dep_root_for_source(&parent_root, dep_name, &spec.source, &layout.deps_dir())
-                    .map_err(|path| {
-                        miette::miette!(
-                            "Dependency '{dep_name}' has a non-UTF-8 path: {}",
-                            path.display()
-                        )
-                    })?;
+        fn skip_missing_checkout(&self) -> bool {
+            false
+        }
 
-            let is_direct = direct_names.contains(dep_name.as_str());
-
-            // Parse this dep's own manifest up front so its package-bundled
-            // stubs (ADR 0075 layer 2, one hop only — never its own deps'
-            // stubs) can be recorded alongside it.
-            let dep_manifest_path = dep_root.join("beamtalk.toml");
-            let dep_parsed = manifest::parse_manifest_full(&dep_manifest_path).ok();
-            let stubs_dir = dep_parsed.as_ref().and_then(|m| m.stubs_dir(&dep_root));
-
-            result.push(DiscoveredDep {
-                name: dep_name.clone(),
-                root: dep_root.clone(),
-                is_direct,
-                is_path_dep,
-                via_chain: if is_direct {
-                    Vec::new()
-                } else {
-                    via_chain.clone()
-                },
-                source: spec.source.clone(),
-                stubs_dir,
-                deps: dep_parsed
-                    .as_ref()
-                    .map(|m| m.dependencies.keys().cloned().collect())
-                    .unwrap_or_default(),
-            });
-
-            // Enqueue this dep's own dependencies for discovery
-            if let Some(dep_parsed) = dep_parsed
-                && !dep_parsed.dependencies.is_empty()
-            {
-                let mut child_chain = via_chain.clone();
-                child_chain.push(dep_name.clone());
-                queue.push_back((dep_root, dep_parsed.dependencies, child_chain));
-            }
+        fn read_dependencies(
+            &mut self,
+            name: &str,
+            root: &Utf8Path,
+        ) -> Option<beamtalk_core::compilation::DependencyMap> {
+            let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).ok()?;
+            let deps = parsed.dependencies.clone();
+            self.parsed.insert(name.to_string(), parsed);
+            Some(deps)
         }
     }
 
-    Ok(result)
+    let layout = BuildLayout::new(project_root);
+    let mut policy = CliPolicy::default();
+    let outcome = walk_dependencies(
+        project_root,
+        manifest.dependencies.clone(),
+        &layout.deps_dir(),
+        &mut policy,
+    )?;
+
+    Ok(outcome
+        .dependencies
+        .into_iter()
+        .map(|dep| DiscoveredDep {
+            is_path_dep: matches!(dep.source, DependencySource::Path { .. }),
+            stubs_dir: policy
+                .parsed
+                .get(&dep.name)
+                .and_then(|m| m.stubs_dir(&dep.root)),
+            deps: dep
+                .own_dependencies
+                .map(|own| own.keys().cloned().collect())
+                .unwrap_or_default(),
+            name: dep.name,
+            root: dep.root,
+            is_direct: dep.is_direct,
+            via_chain: dep.via_chain,
+            source: dep.source,
+        })
+        .collect())
 }
 
 /// Collect `ResolvedDependency` structs for already-compiled dependencies.

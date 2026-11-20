@@ -9,6 +9,14 @@
 //! `beamtalk.toml`, then produces a topologically-sorted compilation order
 //! (leaves first). Detects circular dependencies and enforces the single-version
 //! policy (each package name may appear at most once in the resolved graph).
+//!
+//! This is deliberately a separate walk from the offline breadth-first one
+//! (`beamtalk_project::dependency_graph::walk_dependencies`, shared by the
+//! freshness check, MCP lint and the LSP): it is depth-first so a cycle is
+//! caught on the live discovery stack, and it fetches and records lock
+//! entries mid-walk, with `SourceId` conflict checks that must run before a
+//! fetch. Its visit order is observable (compile order, which requirer a
+//! conflict names), pinned by `walker_differential_tests`.
 
 use beamtalk_core::compilation::{DependencySource, GitReference};
 use camino::{Utf8Path, Utf8PathBuf};
