@@ -91,7 +91,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: '20'
+          node-version-file: .tool-versions
 
       - name: Get extension version
         id: version
@@ -153,7 +153,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: '20'
+          node-version-file: .tool-versions
 
       # Runs whenever the job does (`publish` is true). A missing token fails
       # the run loudly instead of skipping the step and reporting green.

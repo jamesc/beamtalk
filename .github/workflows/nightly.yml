@@ -59,6 +59,7 @@ jobs:
   # ─── Skip if no recent commits ──────────────────────────────────────
   check-activity:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       has_commits: ${{ steps.check.outputs.has_commits }}
       nightly_date: ${{ steps.meta.outputs.date }}
@@ -646,6 +647,7 @@ jobs:
     # tests but must not replace the `nightly` release, which says it is from main.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
