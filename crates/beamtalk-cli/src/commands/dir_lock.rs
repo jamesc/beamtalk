@@ -192,24 +192,52 @@ fn open_and_lock(
     what: &str,
     announce: impl FnOnce(),
 ) -> Result<std::fs::File> {
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(lock_path)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to open {what} lock file '{}'", lock_path.display()))?;
-    if let Err(e) = file.try_lock_exclusive() {
-        // `WouldBlock` is contention; anything else (e.g. an NFS mount without
-        // lock support) fails the same way in the blocking call below, which
-        // then reports it.
-        debug!(error = %e, "{what} lock contended, waiting: {}", lock_path.display());
-        announce();
-        file.lock_exclusive()
+    let mut announce = Some(announce);
+    loop {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(lock_path)
             .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to acquire {what} lock '{}'", lock_path.display()))?;
+            .wrap_err_with(|| {
+                format!("Failed to open {what} lock file '{}'", lock_path.display())
+            })?;
+        if let Err(e) = file.try_lock_exclusive() {
+            // `WouldBlock` is contention; anything else (e.g. an NFS mount
+            // without lock support) fails the same way in the blocking call
+            // below, which then reports it.
+            debug!(error = %e, "{what} lock contended, waiting: {}", lock_path.display());
+            if let Some(announce) = announce.take() {
+                announce();
+            }
+            file.lock_exclusive().into_diagnostic().wrap_err_with(|| {
+                format!("Failed to acquire {what} lock '{}'", lock_path.display())
+            })?;
+        }
+        // `clean --all` unlinks the lock file. A waiter that was blocked on the
+        // old inode now holds a lock nobody else will ever contend, so it must
+        // retry on the file the path names now. (Windows cannot delete an open
+        // file, so the path cannot change under a holder there.)
+        if still_names_locked_file(lock_path, &file) {
+            return Ok(file);
+        }
     }
-    Ok(file)
+}
+
+/// Whether `path` still names the file `locked` was opened from.
+#[cfg(unix)]
+fn still_names_locked_file(path: &std::path::Path, locked: &std::fs::File) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    match (std::fs::metadata(path), locked.metadata()) {
+        (Ok(on_disk), Ok(held)) => on_disk.dev() == held.dev() && on_disk.ino() == held.ino(),
+        _ => false,
+    }
+}
+
+#[cfg(not(unix))]
+fn still_names_locked_file(_path: &std::path::Path, _locked: &std::fs::File) -> bool {
+    true
 }
 
 #[cfg(test)]
@@ -268,6 +296,42 @@ mod tests {
 
     /// A lock file left behind by a crashed process holds nothing: the OS
     /// lock, not the file's existence, is the lock.
+    #[cfg(unix)]
+    #[test]
+    fn waiter_blocked_on_an_unlinked_lock_file_retries_on_the_new_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = root(&dir);
+        let first = lock_project_build(&root).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let waiter = std::thread::spawn({
+            let root = root.clone();
+            move || {
+                let g = lock_project_build(&root).unwrap();
+                tx.send(()).unwrap();
+                g
+            }
+        });
+        // sleep: let the waiter block on the old inode before it is unlinked
+        std::thread::sleep(Duration::from_millis(300));
+        // What `clean --all` does: unlink the lock file, then release.
+        std::fs::remove_file(project_build_lock_path(&root)).unwrap();
+        // A third process takes a fresh file at the same path.
+        let third = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(project_build_lock_path(&root))
+            .unwrap();
+        third.lock_exclusive().unwrap();
+        drop(first);
+        // The waiter must NOT proceed on the dead inode while `third` holds the new file.
+        assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
+        drop(third);
+        rx.recv_timeout(Duration::from_secs(30))
+            .expect("waiter proceeds on the new file");
+        let _g = waiter.join().unwrap();
+    }
+
     #[test]
     fn leftover_lock_file_does_not_block() {
         let dir = tempfile::tempdir().unwrap();

@@ -99,7 +99,9 @@ pub fn run(deps: bool, all: bool, dry_run: bool) -> Result<()> {
     lock.release();
     if first_error.is_none() {
         // Best effort: a build that raced in after the release keeps its lock
-        // file, and `_build/` then simply stays.
+        // file, and `_build/` then simply stays. A process already blocked on
+        // the unlinked file re-checks the path after it wakes (`open_and_lock`)
+        // and retries on the new file.
         let _ = std::fs::remove_file(&keep);
         if std::fs::remove_dir(&build_root).is_ok() {
             println!("Removed {build_root}");
