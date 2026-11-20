@@ -246,7 +246,7 @@ takes only its own:
   with its own extension lookup. An actor arm treats it as `slow`, except for
   the three `Actor` methods `state_free_actor_intrinsic/3` names (BT-4995),
   which are answered `compiled` instead, unless `Actor` itself has an extension
-  for the selector.
+  for the selector (then the verdict is `{ext, 'Actor'}`, below).
 - `{ext, Owner}` (BT-5002): the owner defines `Selector` among its own compiled
   methods, but has an extension for it too, which replaces the compiled method.
   An actor arm treats it as `slow` (the walk invokes the extension); a value-type
@@ -309,8 +309,15 @@ answers, as it did before.
 -spec inherited_value_ext(class_name(), selector(), args(), term(), module()) -> term().
 inherited_value_ext(Owner, Selector, Args, Self, SuperModule) ->
     case check_extension(Owner, Selector) of
-        {ok, Fun} -> apply(Fun, [Args, Self]);
-        not_found -> SuperModule:dispatch(Selector, Args, Self)
+        {ok, Fun} ->
+            %% By arity, as `invoke_extension/6` does: a value-type extension is
+            %% `fun(Args, Self)`, but a hand-registered `fun(Args, Self, State)`
+            %% on a shared ancestor such as `Object` is accepted too (its state is
+            %% dropped: a value has none).
+            {Result, _State} = apply_extension_by_arity(Fun, Args, Self, #{}),
+            Result;
+        not_found ->
+            SuperModule:dispatch(Selector, Args, Self)
     end.
 
 -spec compute_inherited_target(class_name(), selector()) ->
@@ -384,7 +391,8 @@ verdict_for(compiled, Owner, Module, _Selector) ->
 %%     is refused), and an extension or an override on a class below `Actor` is
 %%     seen by `compute_inherited_target/2` before this point. An extension on
 %%     `Actor` itself is checked there too (`check_extension(Owner, ...)`), and
-%%     gives the `slow` verdict, whose walk invokes it (BT-5002).
+%%     gives the `{ext, 'Actor'}` verdict, which the actor arm treats as slow;
+%%     its walk invokes the extension (BT-5002).
 %%
 %% The three are named here, not derived: `actorOnExit` stores a block,
 %% `actorMonitor`, `delegate` and the rest of `Actor`'s intrinsics are left on

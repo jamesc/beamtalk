@@ -70,7 +70,9 @@ dispatch_test_() ->
             {"BT-4995: an extension on Actor itself gives the {ext, Actor} verdict for its intrinsics",
                 fun test_inherited_target_actor_intrinsic_owner_extension/0},
             {"BT-5002: an extension on any owner gives the {ext, Owner} verdict",
-                fun test_inherited_target_owner_extension_is_slow/0},
+                fun test_inherited_target_owner_extension_gives_ext/0},
+            {"BT-5002: inherited_value_ext applies by arity and falls back to the super module",
+                fun test_inherited_value_ext/0},
             {"BT-4260: inherited_target answers value for an Object method sent to a String",
                 fun test_inherited_target_value_owner/0},
             {"BT-4260: an extension anywhere on a value chain flips the verdict",
@@ -2087,7 +2089,7 @@ test_inherited_target_actor_intrinsic_owner_extension() ->
 %% BT-5002: the same holds for any owner, not just `Actor`: an extension on the
 %% owner of a compiled selector turns the `value` verdict into `{ext, Owner}`, and removing
 %% it restores the verdict (the install and removal flush the cache).
-test_inherited_target_owner_extension_is_slow() ->
+test_inherited_target_owner_extension_gives_ext() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
     ok = beamtalk_extensions:init(),
@@ -2105,6 +2107,39 @@ test_inherited_target_owner_extension_is_slow() ->
     after
         try
             beamtalk_extensions:unregister('Object', printString)
+        catch
+            _:_ -> ok
+        end
+    end.
+
+%% BT-5002: `inherited_value_ext/5` runs the owner's extension whatever its arity
+%% (a value has no state: it is dropped), and falls back to the superclass's
+%% `dispatch/3` when the extension is gone since the verdict was read.
+test_inherited_value_ext() ->
+    ok = beamtalk_extensions:init(),
+    Selector = bt5002ValueExtProbe,
+    Two = fun([A], Self) -> {two, A, Self} end,
+    Three = fun([A], Self, St) -> {{three, A, Self}, St} end,
+    try
+        ok = beamtalk_extensions:register('Object', Selector, Two, bt5002_test),
+        ?assertEqual(
+            {two, 1, self},
+            beamtalk_dispatch:inherited_value_ext('Object', Selector, [1], self, 'bt@stdlib@object')
+        ),
+        ok = beamtalk_extensions:register('Object', Selector, Three, bt5002_test),
+        ?assertEqual(
+            {three, 1, self},
+            beamtalk_dispatch:inherited_value_ext('Object', Selector, [1], self, 'bt@stdlib@object')
+        ),
+        ok = beamtalk_extensions:unregister('Object', Selector),
+        %% Gone: the super module answers (here: Object's does-not-understand).
+        ?assertError(
+            _,
+            beamtalk_dispatch:inherited_value_ext('Object', Selector, [1], self, 'bt@stdlib@object')
+        )
+    after
+        try
+            beamtalk_extensions:unregister('Object', Selector)
         catch
             _:_ -> ok
         end
