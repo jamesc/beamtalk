@@ -81,8 +81,9 @@ TestCase subclass: LookupOrderMatrixTest
     compiledSym := #(#c0, #c1, #c2, #c3) at: k + 1
     // Instance side only: on the class side an extension beats the receiver's
     // own compiled class method too (ADR 0066, BT-5061).
-    (k =:= receiver and: [compiled and: [self.ctxSide =:= #instance]])
-      ifTrue: [^compiledSym]
+    (k =:= receiver and: [
+      compiled and: [self.ctxSide =:= #instance]
+    ]) ifTrue: [^compiledSym]
     (quirk =:= #directOwnerExtension and: [
       compiled and: [k =:= (receiver - 1)]
     ]) ifTrue: [^compiledSym]
@@ -109,8 +110,9 @@ TestCase subclass: LookupOrderMatrixTest
   // and never tries an extension on it.
   quirkFor: path =>
     (path =:= #send or: [path =:= #perform]) ifFalse: [^#none]
-    (self.ctxSide =:= #instance and: [self.ctxKind =:= #value])
-      ifTrue: [^#directOwnerExtension]
+    (self.ctxSide =:= #instance and: [
+      self.ctxKind =:= #value
+    ]) ifTrue: [^#directOwnerExtension]
     #none
 
   // === the runtime paths ===
