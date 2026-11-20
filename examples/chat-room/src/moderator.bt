@@ -12,7 +12,7 @@
 ///   > Workspace load: "examples/chat-room/src/message.bt"
 ///   > Workspace load: "examples/chat-room/src/chat_room.bt"
 ///   > Workspace load: "examples/chat-room/src/chat_member.bt"
-///   > Workspace load: "examples/chat-room/moderator.bt"
+///   > Workspace load: "examples/chat-room/src/moderator.bt"
 ///
 /// ## Examples
 /// ```beamtalk
