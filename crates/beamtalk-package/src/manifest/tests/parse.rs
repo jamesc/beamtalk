@@ -413,6 +413,9 @@ fn package_version_accepts_semver_forms() {
         "1.0.0-rc.1",
         "1.0.0+build.5",
         "1.0.0-a-b+c-d",
+        "1.0.0-0",
+        "1.0.0-alpha.0",
+        "1.0.0+001",
     ] {
         assert!(validate_package_version(v).is_ok(), "should accept {v}");
     }
@@ -421,6 +424,8 @@ fn package_version_accepts_semver_forms() {
 #[test]
 fn package_version_rejects_malformed() {
     for v in [
+        "1.0.0-01",
+        "1.0.0-alpha.01",
         "",
         "1",
         "1.0",

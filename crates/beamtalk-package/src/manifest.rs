@@ -425,14 +425,20 @@ pub fn validate_package_version(version: &str) -> std::result::Result<(), String
                 && seg.bytes().all(|b| b.is_ascii_digit())
                 && (seg.len() == 1 || !seg.starts_with('0'))
         });
-    let idents_ok = |part: Option<&str>| {
+    let idents_ok = |part: Option<&str>, numeric_no_leading_zero: bool| {
         part.is_none_or(|p| {
             p.split('.').all(|id| {
-                !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                !id.is_empty()
+                    && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                    // SemVer: a numeric prerelease identifier has no leading zero.
+                    && !(numeric_no_leading_zero
+                        && id.len() > 1
+                        && id.starts_with('0')
+                        && id.bytes().all(|b| b.is_ascii_digit()))
             })
         })
     };
-    if core_ok && idents_ok(pre) && idents_ok(build) {
+    if core_ok && idents_ok(pre, true) && idents_ok(build, false) {
         Ok(())
     } else {
         Err(format!("'{version}' is not a valid version: {FORM}"))
