@@ -63,12 +63,15 @@ move_tag() {
 # download error, not a mismatch); GitHub has no atomic asset replace or rename
 # over an existing name.
 upload_ordered() {
-    local f done_list=$'\n'
+    local f done_list=$'\n' all_list
+    # A here-string match, not `printf | grep -q`: under pipefail grep exiting
+    # early can SIGPIPE printf and report a false "no checksum".
+    all_list="$(printf '%s\n' "$@")"
     for f in "$@"; do
         [[ "${f}" == *.sha256 ]] && continue
         gh release upload "${TAG}" "${f}" --clobber
         done_list+="${f}"$'\n'
-        if printf '%s\n' "$@" | grep -qxF -- "${f}.sha256"; then
+        if grep -qxF -- "${f}.sha256" <<<"${all_list}"; then
             gh release upload "${TAG}" "${f}.sha256" --clobber
             done_list+="${f}.sha256"$'\n'
         fi
