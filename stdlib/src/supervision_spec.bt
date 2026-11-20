@@ -108,12 +108,6 @@ typed Value subclass: SupervisionSpec
   /// `#spawnWith:as:` (when args is present) so the supervisor re-registers the
   /// name on every restart. When nil (default), existing `#spawn` / `#spawnWith:`
   /// behavior is unchanged — naming is purely additive.
-  ///
-  /// NOTE: Named supervised starts require the Phase 3 runtime implementation of
-  /// ADR 0079 (Named Actor Registration). Until that wiring lands, the
-  /// `#spawnAs:` / `#spawnWith:as:` startFns raise a `runtime_error` when the
-  /// supervisor attempts to start the child. Setting `name` on a spec used in a
-  /// live supervisor will therefore currently fail at child start.
   field: name :: Symbol | Nil = nil
   /// Cluster scope for `name` — `#local` (default) or `#global` (ADR 0126
   /// §4, Phase 5).

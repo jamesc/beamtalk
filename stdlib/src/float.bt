@@ -252,14 +252,14 @@ sealed typed Number subclass: Float
   /// ```
   isInfinite -> Boolean => false
 
-  /// Test if the receiver is zero. Uses exact float comparison.
+  /// Test if the receiver is zero. Uses numeric (not exact-term) comparison, so `-0.0 isZero` is true.
   ///
   /// ## Examples
   /// ```beamtalk
   /// 0.0 isZero       // => true
   /// 1.0 isZero       // => false
   /// ```
-  isZero -> Boolean => self =:= 0.0
+  isZero -> Boolean => self == 0.0
 
   // === Conversion ===
 

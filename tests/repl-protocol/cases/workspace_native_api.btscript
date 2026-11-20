@@ -1065,6 +1065,9 @@ unimplSelectors includes: #perform:
 :load tests/repl-protocol/fixtures/unused_testcase.bt
 // => Loaded: UnusedTestCaseFixture
 
+:load tests/repl-protocol/fixtures/unused_server_hook.bt
+// => Loaded: UnusedServerHook
+
 :load tests/repl-protocol/fixtures/unused_perform.bt
 // => Loaded: UnusedPerform
 
@@ -1117,6 +1120,12 @@ unusedSelectors includes: #hash
 // The override's body is real (non-primitive) Beamtalk, confirming the exclusion
 // above is doing the work rather than the primitive heuristic.
 SystemNavigation isPrimitiveMethod: #hash in: UnusedRuntimeCalled
+// => false
+
+// BT-5083: a `Server` subclass overriding `handleInfo:` is NOT flagged — the
+// runtime calls it for raw messages (it is in runtimeCalledSelectors).
+((unused select: [:r | (r at: #selector) == #handleInfo:])
+  collect: [:r | r at: #class]) includes: UnusedServerHook
 // => false
 
 // A TestCase subclass's `testSomething` / `setUp` / `tearDown` are NOT flagged —
