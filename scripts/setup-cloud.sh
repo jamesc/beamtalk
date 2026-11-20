@@ -450,11 +450,18 @@ if [ "${SKIP_RUST_TOOLS:-}" = "1" ]; then
 else
   info "Installing cargo tools..."
 
-  # cargo-binstall for fast binary installs
+  # Pinned tool versions (BT-5087). scripts/ci/check-pins.py keeps the ones
+  # that also appear in CI workflows / the devcontainer in step with them.
+  BINSTALL_PIN="1.27.0"
+  NEXTEST_PIN="0.9.148"
+
+  # cargo-binstall for fast binary installs: the installer script is fetched
+  # from the pinned tag and told which release to download.
   if ! have cargo-binstall; then
     curl -L --proto '=https' --tlsv1.2 -sSf \
       --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
-      https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+      "https://raw.githubusercontent.com/cargo-bins/cargo-binstall/v${BINSTALL_PIN}/install-from-binstall-release.sh" \
+      | BINSTALL_VERSION="${BINSTALL_PIN}" bash
     ok "cargo-binstall installed"
   else
     ok "cargo-binstall already installed"
@@ -472,19 +479,15 @@ else
     _CARGO_BIN="${CARGO_HOME:-$HOME/.cargo}/bin"
     mkdir -p "${_CARGO_BIN}"
     curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
-      https://get.nexte.st/latest/linux | tar -xz -C "${_CARGO_BIN}" cargo-nextest
+      "https://get.nexte.st/${NEXTEST_PIN}/linux" | tar -xz -C "${_CARGO_BIN}" cargo-nextest
     ok "cargo-nextest installed"
   fi
 
-  CARGO_TOOLS="cargo-watch cargo-insta cargo-llvm-cov cargo-fuzz just"
+  CARGO_TOOLS="cargo-watch@8.5.3 cargo-insta@1.49.0 cargo-llvm-cov@0.9.2 cargo-fuzz@0.13.1 just@1.59.0"
   MISSING_TOOLS=""
   for tool in $CARGO_TOOLS; do
-    # just and cargo-watch have matching binary names; the rest match the crate.
-    case "$tool" in
-      just)        bin_name="just" ;;
-      cargo-watch) bin_name="cargo-watch" ;;
-      *)           bin_name="$tool" ;;
-    esac
+    # tool is name@version; the binary is named after the crate.
+    bin_name="${tool%@*}"
     if ! have "$bin_name"; then
       MISSING_TOOLS="$MISSING_TOOLS $tool"
     else
@@ -502,7 +505,7 @@ else
     else
       warn "binstall could not fetch prebuilt binaries — building from source (--locked)"
       for tool in $MISSING_TOOLS; do
-        cargo install --locked "$tool"
+        cargo install --locked "${tool%@*}" --version "${tool#*@}"
       done
       ok "Cargo tools installed (source)"
     fi
