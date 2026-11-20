@@ -556,44 +556,64 @@ compute_owner(ClassName, Selector) ->
     end.
 
 -doc """
-Non-invoking twin of `class_chain_step/6`: run the same probes (registry,
-`has_method_local/2`, dispatchable module, superclass) and report the owner
-instead of invoking. `dispatchable_module/1` is shared so both agree on
+Non-invoking twin of `class_chain_step/6`: run the same probe
+(`probe_class/2`, shared) and the same dispatchable-module test, and report the
+owner instead of invoking. `dispatchable_module/1` is shared so both agree on
 which classes are dispatchable.
 """.
 -spec compute_step(class_name(), selector()) ->
     beamtalk_hierarchy:step_result({owner, class_name(), module()} | miss).
 compute_step(ClassName, Selector) ->
+    case probe_class(ClassName, Selector) of
+        unregistered ->
+            {found, miss};
+        {defines, ClassPid} ->
+            case dispatchable_module(ClassPid) of
+                {ok, Module} ->
+                    {found, {owner, ClassName, Module}};
+                continue ->
+                    %% A module-less class holding the selector as a runtime
+                    %% fun is the owner, but there is no module to cache: miss,
+                    %% so the invoking walk (invoke_runtime_fun/6) resolves it
+                    %% rather than a compiled ancestor's method of the same name.
+                    case
+                        runtime_value_fun(
+                            ClassName,
+                            Selector,
+                            beamtalk_class_builder:selector_arity(Selector)
+                        )
+                    of
+                        {ok, _} -> {found, miss};
+                        none -> {next, beamtalk_object_class_read:superclass_safe(ClassPid)}
+                    end
+            end;
+        {inherits, _ClassPid, none} ->
+            {found, miss};
+        {inherits, _ClassPid, SuperclassName} ->
+            {next, SuperclassName}
+    end.
+
+-doc """
+The one per-class probe of the instance-side chain, shared by the non-invoking
+resolution (`compute_step/2`) and the invoking walk (`class_chain_step/6`) so
+they cannot disagree about where a selector is defined: is `ClassName`
+registered, does this exact class define `Selector` (`has_method_local/2`:
+compiled methods, the reflection arms of its dispatch function and its
+extensions), and if not, who is its superclass. `superclass_safe/1` is only read
+when the class does not define the selector, as before.
+""".
+-spec probe_class(class_name(), selector()) ->
+    unregistered | {defines, pid()} | {inherits, pid(), class_name() | none}.
+probe_class(ClassName, Selector) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
-            {found, miss};
+            unregistered;
         ClassPid ->
             case beamtalk_object_class:has_method_local(ClassPid, Selector) of
                 true ->
-                    case dispatchable_module(ClassPid) of
-                        {ok, Module} ->
-                            {found, {owner, ClassName, Module}};
-                        continue ->
-                            %% A module-less class holding the selector as a runtime
-                            %% fun is the owner, but there is no module to cache: miss,
-                            %% so the invoking walk (invoke_runtime_fun/6) resolves it
-                            %% rather than a compiled ancestor's method of the same name.
-                            case
-                                runtime_value_fun(
-                                    ClassName,
-                                    Selector,
-                                    beamtalk_class_builder:selector_arity(Selector)
-                                )
-                            of
-                                {ok, _} -> {found, miss};
-                                none -> {next, beamtalk_object_class_read:superclass_safe(ClassPid)}
-                            end
-                    end;
+                    {defines, ClassPid};
                 false ->
-                    case beamtalk_object_class_read:superclass_safe(ClassPid) of
-                        none -> {found, miss};
-                        SuperclassName -> {next, SuperclassName}
-                    end
+                    {inherits, ClassPid, beamtalk_object_class_read:superclass_safe(ClassPid)}
             end
     end.
 
@@ -662,32 +682,26 @@ answers the latter, which would make this walk stop at the wrong node and
 -spec class_chain_step(selector(), args(), bt_self(), state(), class_name(), non_neg_integer()) ->
     beamtalk_hierarchy:step_result(dispatch_result()).
 class_chain_step(Selector, Args, Self, State, ClassName, _Depth) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
+    case probe_class(ClassName, Selector) of
+        unregistered ->
             {found, {error, beamtalk_error:new(class_not_found, ClassName, Selector)}};
-        ClassPid ->
-            case beamtalk_object_class:has_method_local(ClassPid, Selector) of
-                true ->
-                    %% Found the method - invoke it
-                    invoke_step(ClassName, ClassPid, Selector, Args, Self, State);
-                false ->
-                    %% Not found in this class - try superclass
-                    case beamtalk_object_class_read:superclass_safe(ClassPid) of
-                        none ->
-                            %% Reached root without finding method
-                            ?LOG_DEBUG("Method not found in hierarchy", #{
-                                selector => Selector,
-                                root => ClassName,
-                                domain => [beamtalk, runtime]
-                            }),
-                            %% Derive class from Self when State is empty (class objects).
-                            ErrorClass = class_name_from(Self, State, ClassName),
-                            Error = beamtalk_error:does_not_understand(ErrorClass, Selector),
-                            {found, {error, Error}};
-                        SuperclassName ->
-                            {next, SuperclassName}
-                    end
-            end
+        {defines, ClassPid} ->
+            %% Found the method - invoke it
+            invoke_step(ClassName, ClassPid, Selector, Args, Self, State);
+        {inherits, _ClassPid, none} ->
+            %% Reached root without finding method
+            ?LOG_DEBUG("Method not found in hierarchy", #{
+                selector => Selector,
+                root => ClassName,
+                domain => [beamtalk, runtime]
+            }),
+            %% Derive class from Self when State is empty (class objects).
+            ErrorClass = class_name_from(Self, State, ClassName),
+            Error = beamtalk_error:does_not_understand(ErrorClass, Selector),
+            {found, {error, Error}};
+        {inherits, _ClassPid, SuperclassName} ->
+            %% Not found in this class - try superclass
+            {next, SuperclassName}
     end.
 
 -doc """
