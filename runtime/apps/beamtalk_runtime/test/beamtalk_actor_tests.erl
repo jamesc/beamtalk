@@ -1439,14 +1439,11 @@ await_initialize_preserves_full_stop_reason_test() ->
     %% that has already stopped by the time we wait still reports its real
     %% reason rather than `noproc` (the BT-3677 race await_initialize/1 has).
     %% Suppress the expected gen_server crash report to avoid EUnit cancellation.
-    logger:set_primary_config(level, none),
-    try
+    beamtalk_test_log:quietly(fun() ->
         {ok, {Pid, MonRef}} = gen_server:start_monitor(test_crashing_init_actor, #{}, []),
         Result = beamtalk_actor_start:await_initialize(Pid, MonRef),
         ?assertMatch({error, {error, function_clause}}, Result)
-    after
-        logger:set_primary_config(level, all)
-    end.
+    end).
 
 await_initialize_monitor_established_before_death_reports_real_reason_test() ->
     %% BT-3677 (deterministic): the actor is guaranteed dead BEFORE the caller
@@ -1454,8 +1451,7 @@ await_initialize_monitor_established_before_death_reports_real_reason_test() ->
     %% intermittently. A monitor created atomically with the spawn
     %% (`gen_server:start_monitor/3`) still reports the real stop reason;
     %% a monitor created after death can only say `noproc`.
-    logger:set_primary_config(level, none),
-    try
+    beamtalk_test_log:quietly(fun() ->
         {ok, {Pid, MonRef}} = gen_server:start_monitor(test_crashing_init_actor, #{}, []),
         Probe = erlang:monitor(process, Pid),
         ?awaitMessage({'DOWN', Probe, process, Pid, _}),
@@ -1465,25 +1461,20 @@ await_initialize_monitor_established_before_death_reports_real_reason_test() ->
         ),
         %% The hazard this guards against: monitoring a dead process loses the reason.
         ?assertEqual({error, noproc}, beamtalk_actor_start:await_initialize(Pid))
-    after
-        logger:set_primary_config(level, all)
-    end.
+    end).
 
 safe_spawn_failing_initialize_always_reports_real_reason_test_() ->
     %% BT-3677 (stress): a fast-failing `initialize` must report its real stop
     %% reason on EVERY spawn, never `noproc`, regardless of scheduling.
     {timeout, 60, fun() ->
-        logger:set_primary_config(level, none),
-        try
+        beamtalk_test_log:quietly(fun() ->
             Results = [
                 beamtalk_actor:safe_spawn(test_crashing_init_actor, #{})
              || _ <- lists:seq(1, 500)
             ],
             Bad = [R || R <- Results, R =/= {error, {error, function_clause}}],
             ?assertEqual([], lists:sublist(Bad, 3))
-        after
-            logger:set_primary_config(level, all)
-        end
+        end)
     end}.
 
 %%% BT-3992: startup ends when `initialize` returns (initialize ack)
@@ -1529,8 +1520,7 @@ spawn_named_for_caller_unlinks_before_continuations_can_kill_caller_test_() ->
     %% right away must not kill a non-trapping caller (the class process for
     %% `self spawnAs:`): the link is gone before trap_exit is restored.
     {timeout, 30, fun() ->
-        logger:set_primary_config(level, none),
-        try
+        beamtalk_test_log:quietly(fun() ->
             Parent = self(),
             Results = [
                 begin
@@ -1562,9 +1552,7 @@ spawn_named_for_caller_unlinks_before_continuations_can_kill_caller_test_() ->
              || I <- lists:seq(1, 50)
             ],
             ?assertEqual([], [R || R <- Results, R =/= {false, none}])
-        after
-            logger:set_primary_config(level, all)
-        end
+        end)
     end}.
 
 safe_spawn_slow_initialize_times_out_and_kills_test_() ->
@@ -1591,8 +1579,7 @@ safe_spawn_failing_initialize_with_ack_reports_real_reason_test_() ->
     %% BT-3677 on the ack path: a failing `initialize` never acks, and the
     %% spawn reports its real stop reason on every spawn, never `noproc`.
     {timeout, 60, fun() ->
-        logger:set_primary_config(level, none),
-        try
+        beamtalk_test_log:quietly(fun() ->
             Results = [
                 beamtalk_actor:safe_spawn(test_init_ack_actor, #{mode => crash})
              || _ <- lists:seq(1, 500)
@@ -1600,9 +1587,7 @@ safe_spawn_failing_initialize_with_ack_reports_real_reason_test_() ->
             Bad = [R || R <- Results, R =/= {error, {error, function_clause}}],
             ?assertEqual([], lists:sublist(Bad, 3)),
             ?assertEqual(no_stray_ack, stray_ack())
-        after
-            logger:set_primary_config(level, all)
-        end
+        end)
     end}.
 
 %%% BT-4104: safe_spawn_monitored/2
@@ -1702,8 +1687,7 @@ safe_spawn_monitored_async_honours_init_actions_test() ->
 safe_spawn_monitored_down_reason_test_() ->
     [
         {Label, fun() ->
-            logger:set_primary_config(level, none),
-            try
+            beamtalk_test_log:quietly(fun() ->
                 {ok, {Pid, MonRef}} = beamtalk_actor:SpawnFun(Module, Args),
                 Reason =
                     receive
@@ -1714,9 +1698,7 @@ safe_spawn_monitored_down_reason_test_() ->
                     true -> ok;
                     false -> error({unexpected_down_reason, Label, Reason})
                 end
-            after
-                logger:set_primary_config(level, all)
-            end
+            end)
         end}
      || {Label, SpawnFun, Module, Args, Matches} <- [
             {"monitored: stop after initialize reports bad_config", safe_spawn_monitored,
@@ -1773,23 +1755,22 @@ safe_spawn_monitored_failed_start_cleans_up_test_() ->
     [
         {Label,
             {timeout, 30, fun() ->
-                logger:set_primary_config(level, none),
-                flush_downs(),
-                try
-                    {monitors, Before} = process_info(self(), monitors),
-                    ?assertEqual(
-                        Expected, beamtalk_actor:safe_spawn_monitored(test_init_ack_actor, Args)
-                    ),
-                    {monitors, After} = process_info(self(), monitors),
-                    ?assertEqual(Before, After),
-                    ?assertEqual(no_stray_ack, stray_ack()),
-                    receive
-                        {'DOWN', _, process, _, _} = Down -> error({stray_down, Down})
-                    after 50 -> ok
+                beamtalk_test_log:quietly(fun() ->
+                    flush_downs(),
+                    begin
+                        {monitors, Before} = process_info(self(), monitors),
+                        ?assertEqual(
+                            Expected, beamtalk_actor:safe_spawn_monitored(test_init_ack_actor, Args)
+                        ),
+                        {monitors, After} = process_info(self(), monitors),
+                        ?assertEqual(Before, After),
+                        ?assertEqual(no_stray_ack, stray_ack()),
+                        receive
+                            {'DOWN', _, process, _, _} = Down -> error({stray_down, Down})
+                        after 50 -> ok
+                        end
                     end
-                after
-                    logger:set_primary_config(level, all)
-                end
+                end)
             end}}
      || {Label, Args, Expected} <- [
             {"initialize crashes", #{mode => crash}, {error, {error, function_clause}}},
@@ -2192,23 +2173,20 @@ safe_spawn_error_from_start_link_test() ->
     %% safe_spawn returns {error, Reason} when gen_server:start_link fails
     %% Use a module that doesn't exist to trigger an error
     %% Suppress the expected crash report to avoid EUnit cancellation.
-    logger:set_primary_config(level, none),
-    try
+    beamtalk_test_log:quietly(fun() ->
         Result = beamtalk_actor:safe_spawn(nonexistent_module_bt1958, #{}),
         ?assertMatch({error, _}, Result)
-    after
-        logger:set_primary_config(level, all)
-    end.
+    end).
 
 safe_spawn_restores_trap_exit_on_error_test() ->
     %% safe_spawn restores the original trap_exit flag even on error
     OldTrap = process_flag(trap_exit, false),
-    logger:set_primary_config(level, none),
     try
-        _Result = beamtalk_actor:safe_spawn(nonexistent_module_bt1958, #{}),
-        ?assertEqual(false, process_flag(trap_exit, false))
+        beamtalk_test_log:quietly(fun() ->
+            _Result = beamtalk_actor:safe_spawn(nonexistent_module_bt1958, #{}),
+            ?assertEqual(false, process_flag(trap_exit, false))
+        end)
     after
-        logger:set_primary_config(level, all),
         process_flag(trap_exit, OldTrap)
     end.
 
