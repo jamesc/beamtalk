@@ -157,11 +157,26 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   end
 
   def start_session(_session_id, _meta) do
-    # Returns a stub pid. Safe only when the caller uses a nil token, which
-    # short-circuits SessionRegistry.register/3 before any monitor is set up.
-    # A non-nil token would cause the immediately-exiting process to trigger a
-    # :DOWN drop — see register/3 guard in session_registry.ex.
-    spawn(fn -> :ok end)
+    # A stand-in session pid that STAYS alive until the per-test state Agent
+    # goes away (BT-5081). The LiveView now monitors its session pid and shows a
+    # "workspace lost" banner (disabling evals) when it dies, so an
+    # immediately-exiting stub pid would put every test into that state. With no
+    # state Agent running it falls back to a short-lived process.
+    case Process.whereis(__MODULE__.State) do
+      nil ->
+        spawn(fn -> :ok end)
+
+      agent ->
+        spawn(fn ->
+          ref = Process.monitor(agent)
+
+          receive do
+            {:DOWN, ^ref, :process, _pid, _reason} -> :ok
+          after
+            60_000 -> :ok
+          end
+        end)
+    end
   end
 
   def session_alive?(_pid), do: true
@@ -196,6 +211,8 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # ── Eval + session ops ───────────────────────────────────────────────────
 
   def interrupt(_pid), do: :ok
+
+  def attach_session(_session_pid, _client_pid), do: :ok
 
   def eval(_pid, code) do
     case extract_class_name(code) do

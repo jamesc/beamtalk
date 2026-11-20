@@ -422,8 +422,13 @@ defmodule BtAttachWeb.WorkspaceLive do
       # panel live. Best-effort, same rationale as `subscribe_classes`.
       subscribe_reload_check_best_effort(socket)
 
+      attach_session_best_effort(pid)
+
       socket
       |> assign(:connected, true)
+      |> assign(:workspace_lost, nil)
+      |> assign(:reconnect_error, nil)
+      |> monitor_session(pid)
       |> assign(:node, Workspace.node_name())
       # ADR 0105 Phase 1 (BT-2779): the initial live snapshot of
       # reload-induced findings. A plain synchronous dispatch (unlike
@@ -782,6 +787,61 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
+  # BT-5081: attach THIS LiveView pid to the workspace session so the workspace
+  # monitors its client. When the front dies without running `terminate/2` (the
+  # desktop shell's SIGKILL, a VM crash) the session becomes *detached* and the
+  # workspace's idle reaping (BT-5012) covers it, instead of the runtime treating
+  # a never-attached session as permanently active. Best-effort: an older
+  # workspace without the lifecycle API just keeps the previous behaviour.
+  defp attach_session_best_effort(pid) do
+    case ws_client().attach_session(pid, self()) do
+      :ok ->
+        :ok
+
+      other ->
+        Logger.warning(
+          "attach_session failed (idle reaping will not see this front): #{inspect(other)}",
+          domain: [:beamtalk, :liveview]
+        )
+
+        :ok
+    end
+  end
+
+  # The single place the "workspace lost" state is resolved. The banner's
+  # Reconnect control calls it today; an automatic reconnect on `DOWN` would call
+  # the same function, so changing that UX is a one-line change in
+  # `handle_info({:DOWN, …})`.
+  #
+  # Only a successful re-attach clears the lost state. If the workspace is still
+  # down, `attach/1` leaves the socket `connected: false`; keep the previous
+  # socket (and its banner + Reconnect button) and add the failure to the
+  # banner, so the user can retry instead of dead-ending until a page reload.
+  defp reconnect_workspace(socket) do
+    {:ok, attached} = attach(assign(socket, :workspace_lost, nil))
+
+    if attached.assigns[:connected] do
+      attached
+    else
+      assign(socket, :reconnect_error, attached.assigns[:error])
+    end
+  end
+
+  # BT-5081: monitor the session pid from the LiveView. A workspace restart (or
+  # a lost distribution link) kills the monitored remote pid; the `DOWN` is
+  # handled in `handle_info/2` by showing a "workspace lost" banner with a
+  # Reconnect control rather than leaving a dead `session_pid` that errors
+  # every op until a manual page reload. Replaces any previous monitor so a
+  # re-bind (Reconnect) never accumulates stale refs.
+  defp monitor_session(socket, pid) do
+    case socket.assigns[:session_monitor] do
+      ref when is_reference(ref) -> Process.demonitor(ref, [:flush])
+      _ -> :ok
+    end
+
+    assign(socket, :session_monitor, Process.monitor(pid))
+  end
+
   # BT-2598: best-effort subscribe to the class-lifecycle push stream. A failure
   # (an older workspace without the wiring, a transient dist hiccup) is logged but
   # does not fail the mount — the cockpit degrades to the clean-tab re-read on
@@ -858,6 +918,19 @@ defmodule BtAttachWeb.WorkspaceLive do
   # mirroring the BT-3301 fix that keeps this list from becoming a second,
   # hand-maintained copy of the event names.
   @test_runner_events TestRunner.__test_runner_events__()
+
+  # BT-5081: the "workspace lost" banner's Reconnect control. Re-runs the same
+  # attach path a socket reconnect uses: the registry's session is resumed when
+  # it is still alive (a distribution blip) or a fresh one is started when the
+  # workspace restarted. A restart discards the session's bindings, which is why
+  # this is an explicit, visible action rather than a silent re-attach.
+  @impl true
+  def handle_event("workspace_reconnect", _params, %{assigns: %{workspace_lost: lost}} = socket)
+      when not is_nil(lost) do
+    {:noreply, reconnect_workspace(socket)}
+  end
+
+  def handle_event("workspace_reconnect", _params, socket), do: {:noreply, socket}
 
   @impl true
   def handle_event(event, params, socket) when event in @test_runner_events do
@@ -1214,6 +1287,20 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_info({:do_window_refresh, _pid} = msg, socket),
     do: Inspector.handle_info(msg, socket)
+
+  # BT-5081: the monitored workspace session pid went away (workspace restart,
+  # lost distribution link, or the session was stopped). Flag it so the cockpit
+  # shows the Reconnect banner; the tab itself stays up and usable.
+  def handle_info(
+        {:DOWN, ref, :process, _pid, reason},
+        %{assigns: %{session_monitor: ref}} = socket
+      ) do
+    Logger.warning("workspace session went down: #{inspect(reason)}",
+      domain: [:beamtalk, :liveview]
+    )
+
+    {:noreply, assign(socket, session_monitor: nil, workspace_lost: reason)}
+  end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
 
@@ -3295,6 +3382,30 @@ defmodule BtAttachWeb.WorkspaceLive do
           <% else %>
             <div class="attach"><span class="att-sess">connecting…</span></div>
           <% end %>
+        </div>
+
+        <div
+          :if={@connected && @workspace_lost}
+          id="workspace-lost"
+          class="ws-result err"
+          role="alert"
+        >
+          <span class="val">
+            The workspace connection was lost or the workspace restarted. Reconnect to
+            resume this session, or start a fresh one if the workspace restarted (a restart
+            discards the session's bindings).
+          </span>
+          <span :if={@reconnect_error} id="workspace-reconnect-error" class="val">
+            {@reconnect_error}
+          </span>
+          <button
+            id="workspace-reconnect"
+            class="btn primary"
+            type="button"
+            phx-click="workspace_reconnect"
+          >
+            Reconnect
+          </button>
         </div>
 
         <%= if @connected do %>

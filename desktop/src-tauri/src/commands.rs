@@ -392,6 +392,13 @@ fn attach_and_open_window(
     Ok(AttachOutcome::Opened)
 }
 
+/// How long a front gets to shut down after `SIGTERM` before it is force-killed
+/// (BT-5081). A BEAM `init:stop` that terminates the LiveViews (running their
+/// `terminate/2` session cleanup) normally finishes well inside a second; 3 s
+/// leaves slack for a loaded machine without making a wedged front stall the
+/// UI thread (window close and quit stop fronts inline) for long.
+const FRONT_STOP_GRACE: Duration = Duration::from_secs(3);
+
 /// Kill and untrack `workspace_id`'s child on an attach failure: removes it
 /// from `state.children` (so nothing later mistakes it for still tracked),
 /// kills and reaps the process, and clears its on-disk front record. Used
@@ -401,8 +408,7 @@ fn attach_and_open_window(
 /// map entry for an already-dead process.
 fn kill_and_untrack(state: &AppState, workspace_id: &str, port: u16) {
     if let Some(mut child) = locked(&state.children).remove(workspace_id) {
-        let _ = child.kill();
-        let _ = child.wait();
+        child.stop(FRONT_STOP_GRACE);
     }
     remove_front_record(workspace_id, port);
 }
@@ -451,8 +457,7 @@ pub fn detach_internal<R: tauri::Runtime>(
     let removed = locked(&state.attach).remove(workspace_id);
 
     if let Some(mut child) = locked(&state.children).remove(workspace_id) {
-        let _ = child.kill();
-        let _ = child.wait();
+        child.stop(FRONT_STOP_GRACE);
     }
 
     // Removing the on-disk record — which also removes the front's
