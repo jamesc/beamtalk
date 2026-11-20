@@ -194,6 +194,12 @@ fn open_and_lock(
 ) -> Result<std::fs::File> {
     let mut announce = Some(announce);
     loop {
+        // `clean --all` may have removed `_build/` itself since the last pass.
+        if let Some(parent) = lock_path.parent() {
+            std::fs::create_dir_all(parent)
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to create {what} lock directory"))?;
+        }
         let file = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -294,8 +300,8 @@ mod tests {
         waiter.join().unwrap();
     }
 
-    /// A lock file left behind by a crashed process holds nothing: the OS
-    /// lock, not the file's existence, is the lock.
+    /// A waiter blocked on a lock file that `clean --all` unlinks must retry on
+    /// the file the path names now, not proceed on the dead inode.
     #[cfg(unix)]
     #[test]
     fn waiter_blocked_on_an_unlinked_lock_file_retries_on_the_new_one() {
@@ -332,6 +338,32 @@ mod tests {
         let _g = waiter.join().unwrap();
     }
 
+    /// `clean --all` also removes `_build/`: the woken waiter recreates it and
+    /// takes the lock rather than failing to reopen the file.
+    #[cfg(unix)]
+    #[test]
+    fn waiter_survives_clean_all_removing_the_build_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = root(&dir);
+        let first = lock_project_build(&root).unwrap();
+        let waiter = std::thread::spawn({
+            let root = root.clone();
+            move || lock_project_build(&root).map(drop)
+        });
+        // sleep: let the waiter block on the old inode before `_build/` goes
+        std::thread::sleep(Duration::from_millis(300));
+        let path = project_build_lock_path(&root);
+        std::fs::remove_file(&path).unwrap();
+        drop(first);
+        std::fs::remove_dir(path.parent().unwrap()).unwrap();
+        waiter
+            .join()
+            .unwrap()
+            .expect("waiter retries after _build/ is removed");
+    }
+
+    /// A lock file left behind by a crashed process holds nothing: the OS
+    /// lock, not the file's existence, is the lock.
     #[test]
     fn leftover_lock_file_does_not_block() {
         let dir = tempfile::tempdir().unwrap();
