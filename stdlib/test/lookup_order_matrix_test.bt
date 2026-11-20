@@ -22,8 +22,10 @@
 //               made from the receiver's own class
 //
 // The reference order (ADR 0066, BT-5002): walk from the receiver's class up.
-// On the receiver's own class a compiled method beats an extension. On every
-// ancestor an extension beats that ancestor's compiled method. The first class
+// On the instance side, on the receiver's own class a compiled method beats an
+// extension; on the class side an extension beats the receiver's own compiled
+// class method too (intentional, ADR 0066: class-side live patching). On every
+// ancestor an extension beats that ancestor's compiled method, on both sides. The first class
 // that has the selector by either route wins; none is does-not-understand.
 //
 // A disagreement between a path and the reference is pinned by a `quirk`
@@ -77,8 +79,10 @@ TestCase subclass: LookupOrderMatrixTest
     k < 0 ifTrue: [^#dnu]
     compiled := (self compiledOn: sel) includes: k
     compiledSym := #(#c0, #c1, #c2, #c3) at: k + 1
-    ownWins := (quirk =:= #classOwnExtension) not
-    (k =:= receiver and: [compiled and: [ownWins]]) ifTrue: [^compiledSym]
+    // Instance side only: on the class side an extension beats the receiver's
+    // own compiled class method too (ADR 0066, BT-5061).
+    (k =:= receiver and: [compiled and: [self.ctxSide =:= #instance]])
+      ifTrue: [^compiledSym]
     (quirk =:= #directOwnerExtension and: [
       compiled and: [k =:= (receiver - 1)]
     ]) ifTrue: [^compiledSym]
@@ -103,14 +107,10 @@ TestCase subclass: LookupOrderMatrixTest
   // PIN-BUG BT-5060: a value receiver whose direct superclass compiles the
   // selector takes the one-hop route to that superclass's compiled `dispatch/3`
   // and never tries an extension on it.
-  //
-  // PIN-BUG BT-5061: on the class side an extension on the receiver's own
-  // class beats the class's compiled class method (the instance side, and ADR
-  // 0066, say the compiled method wins).
   quirkFor: path =>
     (path =:= #send or: [path =:= #perform]) ifFalse: [^#none]
-    self.ctxSide =:= #class ifTrue: [^#classOwnExtension]
-    self.ctxKind =:= #value ifTrue: [^#directOwnerExtension]
+    (self.ctxSide =:= #instance and: [self.ctxKind =:= #value])
+      ifTrue: [^#directOwnerExtension]
     #none
 
   // === the runtime paths ===
@@ -364,7 +364,7 @@ TestCase subclass: LookupOrderMatrixTest
           receiver: r
           object: o
       ]
-    self verify: #(#classOwnExtension)
+    self verify: #()
 
   testActorInstanceSide =>
     #(0, 1, 2, 3)
@@ -391,7 +391,7 @@ TestCase subclass: LookupOrderMatrixTest
           receiver: r
           object: o
       ]
-    self verify: #(#classOwnExtension)
+    self verify: #()
 
   // === the BT-5060 registration warning ===
   //
