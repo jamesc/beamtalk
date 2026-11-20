@@ -13,9 +13,11 @@
 //! `beamtalk_package::manifest` directly. Every item the CLI uses must be
 //! `pub`, not `pub(crate)`.
 
+mod git_url;
 mod hex;
 mod native;
 
+pub use git_url::{is_plaintext_git_url, validate_git_url, validate_registry_release_url};
 pub use hex::hex_constraint_matches;
 pub use native::{
     NativeDependency, NativeDependencyMap, NativeOverride, NativeOverrideMap, NativeSource,
