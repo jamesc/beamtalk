@@ -77,11 +77,11 @@ pub fn hex_constraint_matches(constraint: &str, version: &str) -> bool {
         .all(|part| single_constraint_matches(part.trim(), &version))
 }
 
-/// A hex version for comparison: numeric `major.minor.patch` (missing
-/// segments are 0) plus whether it is a release (pre-releases sort first).
+/// A hex version for comparison: numeric `major.minor.patch[.build]` (missing
+/// segments are 0; hex.pm publishes four-segment versions such as `1.2.3.4`) plus whether it is a release (pre-releases sort first).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct HexVersion {
-    numbers: [u64; 3],
+    numbers: [u64; 4],
     is_release: bool,
 }
 
@@ -94,13 +94,13 @@ impl HexVersion {
             Some((core, pre)) => (core, Some(pre)),
             None => (version, None),
         };
-        let mut numbers = [0; 3];
+        let mut numbers = [0; 4];
         let mut count = 0;
         for (slot, segment) in numbers.iter_mut().zip(core.split('.')) {
             *slot = segment.parse().ok()?;
             count += 1;
         }
-        if count == 0 || core.split('.').count() > 3 {
+        if count == 0 || core.split('.').count() > 4 {
             return None;
         }
         Some(Self {
@@ -109,7 +109,7 @@ impl HexVersion {
         })
     }
 
-    fn release(numbers: [u64; 3]) -> Self {
+    fn release(numbers: [u64; 4]) -> Self {
         Self {
             numbers,
             is_release: true,
@@ -124,13 +124,14 @@ fn single_constraint_matches(s: &str, version: &HexVersion) -> bool {
         let Some(lower) = bound(rest) else {
             return false;
         };
-        let [major, minor, _] = lower.numbers;
-        // `~> X.Y` allows any X.*; `~> X.Y.Z` allows any X.Y.*.
-        let upper = if rest.split('.').count() >= 3 {
-            [major, minor + 1, 0]
-        } else {
-            [major + 1, 0, 0]
-        };
+        // `~> X.Y` allows any X.*; `~> X.Y.Z` any X.Y.*; `~> X.Y.Z.W` any
+        // X.Y.Z.*: bump the segment before the last one given.
+        let bump = rest.split('.').count().clamp(2, 4) - 2;
+        let mut upper = lower.numbers;
+        upper[bump] += 1;
+        for slot in &mut upper[bump + 1..] {
+            *slot = 0;
+        }
         version.is_release && *version >= lower && *version < HexVersion::release(upper)
     } else if let Some(rest) = s.strip_prefix(">=") {
         bound(rest).is_some_and(|b| *version >= b)

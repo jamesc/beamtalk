@@ -34,6 +34,57 @@ path_inside_test_() ->
         ?_assertNot(beamtalk_workspace_file:path_inside("/proj", "/elsewhere/a.bt"))
     ].
 
+%% BT-5070: `filename:absname/1` leaves `..` in place, so a component-prefix
+%% test alone passed `/proj/src/../../x/Foo.bt`.
+path_inside_dotdot_test_() ->
+    [
+        ?_assertNot(beamtalk_workspace_file:path_inside("/proj", "/proj/src/../../x/Foo.bt")),
+        ?_assertNot(beamtalk_workspace_file:path_inside("/proj", "/proj/../proj/a.bt")),
+        ?_assertNot(beamtalk_workspace_file:path_inside("/proj/../proj", "/proj/a.bt")),
+        ?_assertEqual(false, beamtalk_workspace_file:relative_parts("/proj", "/proj/src/../a.bt")),
+        ?_assertNot(
+            beamtalk_workspace_file:path_inside(<<"/proj">>, <<"/proj/src/../../x/Foo.bt">>)
+        ),
+        ?_assert(beamtalk_workspace_file:path_inside(<<"/proj">>, <<"/proj/src/a.bt">>)),
+        %% Invalid UTF-8 cannot be judged: not inside, never a crash.
+        ?_assertNot(beamtalk_workspace_file:path_inside("/proj", <<"/proj/", 255, ".bt">>))
+    ].
+
+%% BT-5070: a symlink under the root that points outside it is not inside.
+path_inside_symlink_test_() ->
+    {setup, fun() -> make_link_fixture() end, fun(Dir) -> beamtalk_test_fs:rm_rf(Dir) end, fun(Dir) ->
+        Root = filename:join(Dir, "proj"),
+        [
+            ?_assert(beamtalk_workspace_file:path_inside(Root, filename:join(Root, "src/a.bt"))),
+            ?_assertNot(
+                beamtalk_workspace_file:path_inside(Root, filename:join(Root, "link/Foo.bt"))
+            ),
+            ?_assertNot(
+                beamtalk_workspace_file:path_inside(Root, filename:join(Root, "link"))
+            ),
+            %% A link that stays inside the root is fine.
+            ?_assert(
+                beamtalk_workspace_file:path_inside(Root, filename:join(Root, "inner/a.bt"))
+            ),
+            %% A root reached through a link compares equal to its target.
+            ?_assert(
+                beamtalk_workspace_file:path_inside(
+                    filename:join(Dir, "rootlink"), filename:join(Root, "src/a.bt")
+                )
+            )
+        ]
+    end}.
+
+make_link_fixture() ->
+    Dir = beamtalk_test_fs:tmp_dir("bt5070_path_inside"),
+    Root = filename:join(Dir, "proj"),
+    ok = filelib:ensure_path(filename:join(Root, "src")),
+    ok = filelib:ensure_path(filename:join(Dir, "outside")),
+    ok = file:make_symlink(filename:join(Dir, "outside"), filename:join(Root, "link")),
+    ok = file:make_symlink("src", filename:join(Root, "inner")),
+    ok = file:make_symlink(Root, filename:join(Dir, "rootlink")),
+    Dir.
+
 relative_parts_test_() ->
     [
         ?_assertEqual(
