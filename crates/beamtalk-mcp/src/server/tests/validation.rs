@@ -123,3 +123,22 @@ fn validate_selector_accepts_and_rejects() {
         &rejected,
     );
 }
+
+#[test]
+fn complete_cursor_must_be_on_a_char_boundary() {
+    // BT-5078: `{"code": "é", "cursor": 1}` used to slice inside the 2-byte
+    // `é` and panic the handler.
+    let err = code_up_to_cursor("é", Some(1)).expect_err("mid-character cursor is rejected");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    assert!(
+        err.message.contains("character boundary"),
+        "{}",
+        err.message
+    );
+
+    assert_eq!(code_up_to_cursor("é", Some(2)).unwrap(), ("é", 2));
+    assert_eq!(code_up_to_cursor("é", Some(0)).unwrap(), ("", 0));
+    // Default is end of code; a cursor past the end is clamped.
+    assert_eq!(code_up_to_cursor("aé", None).unwrap(), ("aé", 3));
+    assert_eq!(code_up_to_cursor("abc", Some(99)).unwrap(), ("abc", 3));
+}

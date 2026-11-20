@@ -11,6 +11,7 @@ use super::super::config::{
     configured_stdlib_source_dirs, preload_covers, workspace_roots,
 };
 use super::super::convert::uri_to_path;
+use crate::server::lock::LockRecover;
 use std::fs;
 
 use beamtalk_language_service::LanguageService;
@@ -39,8 +40,7 @@ impl Backend {
         &self,
         params: InitializeParams,
     ) -> Result<InitializeResult> {
-        *self.rename_caps.lock().expect("rename_caps lock poisoned") =
-            super::rename::RenameClientCaps::from_params(&params);
+        *self.rename_caps.lock_recover() = super::rename::RenameClientCaps::from_params(&params);
         let roots = workspace_roots(&params);
         let configured_stdlib = configured_stdlib_source_dir(&params);
         let stdlib_dirs = configured_stdlib_source_dirs(configured_stdlib.as_deref(), &roots);
@@ -51,17 +51,11 @@ impl Backend {
         let delegate = configured_delegate_to_runtime(&params);
         self.set_delegate_to_runtime(delegate);
         {
-            let mut stored_roots = self
-                .workspace_roots
-                .lock()
-                .expect("workspace_roots lock poisoned");
+            let mut stored_roots = self.workspace_roots.lock_recover();
             (*stored_roots).clone_from(&roots);
         }
         {
-            let mut preload_config = self
-                .preload_config
-                .lock()
-                .expect("preload_config lock poisoned");
+            let mut preload_config = self.preload_config.lock_recover();
             *preload_config = Some(PreloadConfig { roots, stdlib_dirs });
         }
 
@@ -166,10 +160,7 @@ impl Backend {
     /// Called after the client acknowledges initialization.
     pub(in crate::server) async fn handle_initialized(&self, _: InitializedParams) {
         let preload_config = {
-            let mut preload_config = self
-                .preload_config
-                .lock()
-                .expect("preload_config lock poisoned");
+            let mut preload_config = self.preload_config.lock_recover();
             preload_config.take()
         };
         if let Some(ref config) = preload_config {
@@ -186,7 +177,7 @@ impl Backend {
             // self-healing republish below instead of racing it to be the
             // last notification sent — see `is_preload_in_progress`'s doc.
             {
-                let mut svc = self.service.lock().expect("service lock poisoned");
+                let mut svc = self.service.lock_recover();
                 svc.set_preload_in_progress(true);
             }
             // load each workspace root's real beamtalk.toml
@@ -210,7 +201,7 @@ impl Backend {
             // *before* republishing below, so republish's own
             // `publish_diagnostics` calls actually send.
             {
-                let mut svc = self.service.lock().expect("service lock poisoned");
+                let mut svc = self.service.lock_recover();
                 svc.set_preload_in_progress(false);
             }
             drop(root_load_guard);
@@ -269,14 +260,11 @@ impl Backend {
                 let generation = self
                     .next_open_generation
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let mut open_generation = self
-                    .open_generation
-                    .lock()
-                    .expect("open_generation lock poisoned");
+                let mut open_generation = self.open_generation.lock_recover();
                 open_generation.insert(path.clone(), generation);
             }
             {
-                let mut versions = self.versions.lock().expect("versions lock poisoned");
+                let mut versions = self.versions.lock_recover();
                 versions.insert(path.clone(), params.text_document.version);
             }
             if uri.scheme() != "beamtalk-stdlib" {
@@ -285,7 +273,7 @@ impl Backend {
                 self.load_stdlib_file_registry(&path).await;
                 // Stdlib files are pre-loaded at startup; skip re-indexing.
                 {
-                    let mut svc = self.service.lock().expect("service lock poisoned");
+                    let mut svc = self.service.lock_recover();
                     svc.update_file(path.clone(), params.text_document.text);
                 }
                 // BT-4158: resolve this file's own package root (nearest
@@ -308,11 +296,11 @@ impl Backend {
             (uri_to_path(&uri), params.content_changes.into_iter().last())
         {
             {
-                let mut svc = self.service.lock().expect("service lock poisoned");
+                let mut svc = self.service.lock_recover();
                 svc.update_file(path.clone(), change.text);
             }
             {
-                let mut versions = self.versions.lock().expect("versions lock poisoned");
+                let mut versions = self.versions.lock_recover();
                 versions.insert(path.clone(), params.text_document.version);
             }
             // Buffer now diverges from the on-disk bytes (and the
@@ -320,10 +308,7 @@ impl Backend {
             self.mark_dirty(path);
 
             let generation = {
-                let mut generations = self
-                    .diagnostic_generation
-                    .lock()
-                    .expect("diagnostic_generation lock poisoned");
+                let mut generations = self.diagnostic_generation.lock_recover();
                 let entry = generations.entry(uri.clone()).or_insert(0);
                 *entry += 1;
                 *entry
@@ -332,10 +317,7 @@ impl Backend {
             tokio::time::sleep(DIAGNOSTIC_DEBOUNCE_DURATION).await;
 
             let is_latest = {
-                let generations = self
-                    .diagnostic_generation
-                    .lock()
-                    .expect("diagnostic_generation lock poisoned");
+                let generations = self.diagnostic_generation.lock_recover();
                 generations.get(&uri).copied() == Some(generation)
             };
 
@@ -376,10 +358,7 @@ impl Backend {
             // open-generation at the instant we started closing it — not a
             // later one a racing `did_open` on the same path might install.
             let generation_before = {
-                let open_generation = self
-                    .open_generation
-                    .lock()
-                    .expect("open_generation lock poisoned");
+                let open_generation = self.open_generation.lock_recover();
                 open_generation.get(&path).copied()
             };
             let disk_content = if uri.scheme() == "beamtalk-stdlib" {
@@ -397,14 +376,11 @@ impl Backend {
                 // covered — scratch files outside those dirs, untitled
                 // buffers, files deleted from disk — are still removed.
                 let covered = {
-                    let roots = self
-                        .workspace_roots
-                        .lock()
-                        .expect("workspace_roots lock poisoned");
+                    let roots = self.workspace_roots.lock_recover();
                     preload_covers(path.as_std_path(), &roots)
                 };
                 let is_stdlib = {
-                    let svc = self.service.lock().expect("service lock poisoned");
+                    let svc = self.service.lock_recover();
                     svc.project_index().is_stdlib_file(&path)
                 };
                 let keep = covered || is_stdlib;
@@ -427,22 +403,19 @@ impl Backend {
             // our own write below completes), so its own `update_file` call
             // is guaranteed to run after — and therefore win over — ours.
             let reopened = {
-                let mut open_generation = self
-                    .open_generation
-                    .lock()
-                    .expect("open_generation lock poisoned");
+                let mut open_generation = self.open_generation.lock_recover();
                 let reopened = open_generation.get(&path).copied() != generation_before;
                 if !reopened {
                     if uri.scheme() == "beamtalk-stdlib" {
-                        let mut versions = self.versions.lock().expect("versions lock poisoned");
+                        let mut versions = self.versions.lock_recover();
                         versions.remove(&path);
                     } else {
-                        let mut svc = self.service.lock().expect("service lock poisoned");
+                        let mut svc = self.service.lock_recover();
                         match disk_content {
                             Some(content) => svc.update_file(path.clone(), content),
                             None => svc.remove_file(&path),
                         }
-                        let mut versions = self.versions.lock().expect("versions lock poisoned");
+                        let mut versions = self.versions.lock_recover();
                         versions.remove(&path);
                     }
                     open_generation.remove(&path);
@@ -456,10 +429,7 @@ impl Backend {
             }
             self.clear_dirty(&path);
             {
-                let mut generations = self
-                    .diagnostic_generation
-                    .lock()
-                    .expect("diagnostic_generation lock poisoned");
+                let mut generations = self.diagnostic_generation.lock_recover();
                 generations.remove(&uri);
             }
             if uri.scheme() != "beamtalk-stdlib" {

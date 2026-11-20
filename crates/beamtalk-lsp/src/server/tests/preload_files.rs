@@ -206,7 +206,7 @@ async fn preload_workspace_source_files_marks_stdlib_files_in_project_index() {
 
     let utf8_stdlib_direction =
         Utf8PathBuf::from_path_buf(stdlib_direction).expect("temp path is UTF-8");
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     assert!(
         svc.project_index().is_stdlib_file(&utf8_stdlib_direction),
         "a stdlib file walked by the real preload path must be marked \

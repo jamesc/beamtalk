@@ -16,6 +16,7 @@ use super::reload::{
     seed_reload_diagnostics,
 };
 use super::{Backend, FetchContentParams, FetchContentResult, LoadedTypeCache, NavCache};
+use crate::server::lock::LockRecover;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -146,10 +147,7 @@ impl Backend {
             return Vec::new();
         }
         let roots = {
-            let guard = self
-                .workspace_roots
-                .lock()
-                .expect("workspace_roots lock poisoned");
+            let guard = self.workspace_roots.lock_recover();
             guard.clone()
         };
         sites
@@ -222,10 +220,7 @@ impl Backend {
             }
         };
         let roots = {
-            let guard = self
-                .workspace_roots
-                .lock()
-                .expect("workspace_roots lock poisoned");
+            let guard = self.workspace_roots.lock_recover();
             guard.clone()
         };
         to_lsp(classes, &roots)
@@ -259,7 +254,7 @@ impl Backend {
             NavQuery::SendersOf(selector) => {
                 let selector_name = selector.clone();
                 let ast_fallback = || -> Vec<tower_lsp::lsp_types::Location> {
-                    let svc = self.service.lock().expect("service lock poisoned");
+                    let svc = self.service.lock_recover();
                     let locs = svc.find_selector_declarations(selector_name.as_str());
                     bt_locations_to_lsp(&svc, locs)
                 };
@@ -272,7 +267,7 @@ impl Backend {
                 .await
             }
             NavQuery::ReferencesTo(class_name) => {
-                let svc = self.service.lock().expect("service lock poisoned");
+                let svc = self.service.lock_recover();
                 let locs = svc.find_class_declarations(class_name.as_str());
                 bt_locations_to_lsp(&svc, locs)
             }
@@ -299,13 +294,13 @@ impl Backend {
     /// per-file source ordering (notably `document_symbol`) must use the
     /// LSP-side AST for dirty files.
     pub(crate) fn is_dirty(&self, path: &Utf8PathBuf) -> bool {
-        let guard = self.dirty_files.lock().expect("dirty_files lock poisoned");
+        let guard = self.dirty_files.lock_recover();
         guard.contains(path)
     }
 
     /// Mark `path` as having unsaved edits. Called from `did_change`.
     pub(in crate::server) fn mark_dirty(&self, path: Utf8PathBuf) {
-        let mut guard = self.dirty_files.lock().expect("dirty_files lock poisoned");
+        let mut guard = self.dirty_files.lock_recover();
         guard.insert(path);
     }
 
@@ -314,13 +309,13 @@ impl Backend {
     /// editor buffer, `did_close` because the editor no longer owns a
     /// modified copy.
     pub(in crate::server) fn clear_dirty(&self, path: &Utf8PathBuf) {
-        let mut guard = self.dirty_files.lock().expect("dirty_files lock poisoned");
+        let mut guard = self.dirty_files.lock_recover();
         guard.remove(path);
     }
 
     pub(in crate::server) fn file_version_for_uri(&self, uri: &Url) -> Option<i32> {
         let path = self.resolve_path_for_uri(uri)?;
-        let versions = self.versions.lock().expect("versions lock poisoned");
+        let versions = self.versions.lock_recover();
         versions.get(&path).copied()
     }
 
@@ -358,10 +353,7 @@ impl Backend {
             return None;
         }
 
-        let stdlib_paths = self
-            .stdlib_paths
-            .lock()
-            .expect("stdlib_paths lock poisoned");
+        let stdlib_paths = self.stdlib_paths.lock_recover();
         let mut matches = stdlib_paths.iter().filter(|p| p.file_name() == Some(path));
         let first = matches.next()?.clone();
         // Ambiguous: multiple files with the same name → None.
@@ -385,11 +377,7 @@ impl Backend {
             return None;
         }
         let filename = format!("{module_name}.erl");
-        let roots = self
-            .workspace_roots
-            .lock()
-            .expect("workspace_roots lock poisoned")
-            .clone();
+        let roots = self.workspace_roots.lock_recover().clone();
         for root in &roots {
             // Check runtime/apps/*/src/<module>.erl (OTP app layout)
             let runtime_apps = root.join("runtime").join("apps");
@@ -423,11 +411,7 @@ impl Backend {
         }
 
         // Check OTP lib dir (e.g., /usr/lib/erlang/lib/stdlib-6.2/src/lists.erl)
-        let otp_dir = self
-            .otp_lib_dir
-            .lock()
-            .expect("otp_lib_dir lock poisoned")
-            .clone();
+        let otp_dir = self.otp_lib_dir.lock_recover().clone();
         if let Some(lib_dir) = otp_dir
             && let Ok(entries) = std::fs::read_dir(&lib_dir)
         {
@@ -472,7 +456,7 @@ impl Backend {
         if let Some(ref dir) = result {
             debug!("Resolved OTP lib dir: {}", dir.display());
         }
-        *self.otp_lib_dir.lock().expect("otp_lib_dir lock poisoned") = result;
+        *self.otp_lib_dir.lock_recover() = result;
     }
 
     /// dynamically register the type-hierarchy capability so
@@ -546,7 +530,7 @@ impl Backend {
         use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 
         let pending: Vec<PathBuf> = {
-            let cache = self.type_cache.lock().expect("type_cache lock poisoned");
+            let cache = self.type_cache.lock_recover();
             let mut seen = HashSet::new();
             roots
                 .iter()
@@ -559,15 +543,11 @@ impl Backend {
         }
         #[cfg(test)]
         self.type_cache_extractions
-            .lock()
-            .expect("type_cache_extractions lock poisoned")
+            .lock_recover()
             .extend(pending.iter().cloned());
 
         #[cfg(test)]
-        let outcome_override = *self
-            .type_cache_outcome
-            .lock()
-            .expect("type_cache_outcome lock poisoned");
+        let outcome_override = *self.type_cache_outcome.lock_recover();
         #[cfg(not(test))]
         let outcome_override: Option<bool> = None;
 
@@ -611,7 +591,7 @@ impl Backend {
         };
 
         let (registry, known_erlang_modules) = {
-            let mut cache = self.type_cache.lock().expect("type_cache lock poisoned");
+            let mut cache = self.type_cache.lock_recover();
             cache.roots.extend(extracted);
             cache.registry.merge(registry);
             if known_erlang_modules.check_enabled() && !cache.known_erlang_modules.check_enabled() {
@@ -632,7 +612,7 @@ impl Backend {
                 registry.module_count(),
                 registry.function_count()
             );
-            let mut svc = self.service.lock().expect("service lock poisoned");
+            let mut svc = self.service.lock_recover();
             svc.set_native_types(registry);
         }
         if !known_erlang_modules.modules().is_empty() {
@@ -640,7 +620,7 @@ impl Backend {
                 count = known_erlang_modules.modules().len(),
                 "Loaded project-known Erlang modules for unresolved_ffi"
             );
-            let mut svc = self.service.lock().expect("service lock poisoned");
+            let mut svc = self.service.lock_recover();
             svc.set_known_erlang_modules(known_erlang_modules);
         }
     }
@@ -708,7 +688,7 @@ impl Backend {
                 table.len()
             );
         }
-        let mut svc = self.service.lock().expect("service lock poisoned");
+        let mut svc = self.service.lock_recover();
         svc.set_diagnostics_overrides(table);
     }
 
@@ -784,7 +764,7 @@ impl Backend {
                 root_packages.len()
             );
         }
-        let mut svc = self.service.lock().expect("service lock poisoned");
+        let mut svc = self.service.lock_recover();
         svc.set_root_packages(root_packages);
         svc.set_root_qualifier_packages(qualifier_packages);
     }
@@ -828,16 +808,13 @@ impl Backend {
             .filter_map(|(p, _)| Utf8PathBuf::from_path_buf(p.clone()).ok())
             .collect();
         {
-            let mut stdlib_paths = self
-                .stdlib_paths
-                .lock()
-                .expect("stdlib_paths lock poisoned");
+            let mut stdlib_paths = self.stdlib_paths.lock_recover();
             for path in &stdlib_utf8 {
                 stdlib_paths.insert(path.clone());
             }
         }
 
-        let mut svc = self.service.lock().expect("service lock poisoned");
+        let mut svc = self.service.lock_recover();
         // One batch, so a large dependency's package-wide alias expansion
         // runs once, not once per file (BT-4778 review).
         svc.update_files(
@@ -946,10 +923,7 @@ impl Backend {
             // does not wait for that load: it returns here and may publish
             // against a half-loaded index; the `republish_open_diagnostics`
             // at the end of this load corrects it.
-            let mut roots = self
-                .workspace_roots
-                .lock()
-                .expect("workspace_roots lock poisoned");
+            let mut roots = self.workspace_roots.lock_recover();
             if roots.contains(&root) {
                 return;
             }
@@ -961,7 +935,7 @@ impl Backend {
 
         let root_load_guard = self.root_load_lock.lock().await;
         {
-            let mut svc = self.service.lock().expect("service lock poisoned");
+            let mut svc = self.service.lock_recover();
             svc.set_preload_in_progress(true);
         }
         let all_roots = self.workspace_roots_snapshot();
@@ -979,12 +953,9 @@ impl Backend {
                     root = %root.display(),
                     "package root preload walk failed; unregistering it for retry"
                 );
-                self.workspace_roots
-                    .lock()
-                    .expect("workspace_roots lock poisoned")
-                    .retain(|r| r != &root);
+                self.workspace_roots.lock_recover().retain(|r| r != &root);
                 {
-                    let mut svc = self.service.lock().expect("service lock poisoned");
+                    let mut svc = self.service.lock_recover();
                     svc.set_preload_in_progress(false);
                 }
                 drop(root_load_guard);
@@ -994,14 +965,10 @@ impl Backend {
         };
         self.spend_preload_budget(loaded.budget_used, loaded.budget_exhausted);
         {
-            let stdlib_paths = self
-                .stdlib_paths
-                .lock()
-                .expect("stdlib_paths lock poisoned")
-                .clone();
-            let mut svc = self.service.lock().expect("service lock poisoned");
+            let stdlib_paths = self.stdlib_paths.lock_recover().clone();
+            let mut svc = self.service.lock_recover();
             // (Lock order service → versions matches `did_close`.)
-            let versions = self.versions.lock().expect("versions lock poisoned");
+            let versions = self.versions.lock_recover();
             // A stdlib file keeps its stdlib classification (as in
             // `collect_preload_files`), and an open buffer is the source
             // of truth for its file — the on-disk bytes may be stale.
@@ -1023,7 +990,7 @@ impl Backend {
         self.load_type_cache(&all_roots).await;
         self.load_diagnostics_table(&all_roots).await;
         {
-            let mut svc = self.service.lock().expect("service lock poisoned");
+            let mut svc = self.service.lock_recover();
             svc.set_preload_in_progress(false);
         }
         drop(root_load_guard);
@@ -1069,10 +1036,7 @@ impl Backend {
     /// startup preload and [`Self::ensure_package_root_loaded`]) both do it
     /// while holding `root_load_lock`.
     pub(in crate::server) fn preload_budget_remaining(&self) -> usize {
-        *self
-            .preload_budget_remaining
-            .lock()
-            .expect("preload_budget_remaining lock poisoned")
+        *self.preload_budget_remaining.lock_recover()
     }
 
     /// Records a preload walk against the session-wide budget: subtracts the
@@ -1080,10 +1044,7 @@ impl Backend {
     /// of the session (BT-4383).
     fn spend_preload_budget(&self, used: usize, exhausted: bool) {
         {
-            let mut remaining = self
-                .preload_budget_remaining
-                .lock()
-                .expect("preload_budget_remaining lock poisoned");
+            let mut remaining = self.preload_budget_remaining.lock_recover();
             *remaining = remaining.saturating_sub(used);
         }
         if exhausted {
@@ -1102,10 +1063,7 @@ impl Backend {
     /// Clones the current workspace root list (initial roots plus any
     /// package roots registered since by [`Self::ensure_package_root_loaded`]).
     pub(in crate::server) fn workspace_roots_snapshot(&self) -> Vec<PathBuf> {
-        self.workspace_roots
-            .lock()
-            .expect("workspace_roots lock poisoned")
-            .clone()
+        self.workspace_roots.lock_recover().clone()
     }
 
     /// Handles the `beamtalk-lsp/fetchContent` custom request.
@@ -1154,10 +1112,7 @@ impl Backend {
         let filename = path.to_string();
 
         let matching_paths: Vec<Utf8PathBuf> = {
-            let stdlib_paths = self
-                .stdlib_paths
-                .lock()
-                .expect("stdlib_paths lock poisoned");
+            let stdlib_paths = self.stdlib_paths.lock_recover();
             stdlib_paths
                 .iter()
                 .filter(|p| p.file_name() == Some(filename.as_str()))
@@ -1183,7 +1138,7 @@ impl Backend {
         };
 
         let content = {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             svc.file_source(&path)
         };
 
@@ -1204,7 +1159,7 @@ impl Backend {
         }
         let path = uri_to_path(uri)?;
         let source = {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             svc.file_source(&path)?
         };
 
@@ -1241,15 +1196,12 @@ impl Backend {
     /// diagnostics for sources the user never opened.
     pub(in crate::server) async fn republish_open_diagnostics(&self) {
         let paths: Vec<Utf8PathBuf> = {
-            let versions = self.versions.lock().expect("versions lock poisoned");
+            let versions = self.versions.lock_recover();
             versions.keys().cloned().collect()
         };
         for path in paths {
             let is_stdlib = {
-                let stdlib_paths = self
-                    .stdlib_paths
-                    .lock()
-                    .expect("stdlib_paths lock poisoned");
+                let stdlib_paths = self.stdlib_paths.lock_recover();
                 stdlib_paths.contains(&path)
             };
             let uri = if is_stdlib {
@@ -1297,10 +1249,7 @@ impl Backend {
         }
 
         let project_root = {
-            let roots = self
-                .workspace_roots
-                .lock()
-                .expect("workspace_roots lock poisoned");
+            let roots = self.workspace_roots.lock_recover();
             roots
                 .first()
                 .cloned()
@@ -1353,10 +1302,7 @@ impl Backend {
         // workspace roots are fixed at `initialize` and never change.
         let listener_client = self.client.clone();
         let listener_roots = {
-            let roots = self
-                .workspace_roots
-                .lock()
-                .expect("workspace_roots lock poisoned");
+            let roots = self.workspace_roots.lock_recover();
             roots.clone()
         };
         let open_paths_handle = OpenPathsHandle {
@@ -1407,10 +1353,7 @@ impl Backend {
         // above) — same pattern as `spawn_reload_check_listener`'s own
         // fresh clone.
         let seed_roots = {
-            let roots = self
-                .workspace_roots
-                .lock()
-                .expect("workspace_roots lock poisoned");
+            let roots = self.workspace_roots.lock_recover();
             roots.clone()
         };
         seed_reload_diagnostics(
@@ -1441,10 +1384,7 @@ impl Backend {
         open_paths: OpenPathsHandle,
     ) -> tokio::task::JoinHandle<()> {
         let roots = {
-            let roots = self
-                .workspace_roots
-                .lock()
-                .expect("workspace_roots lock poisoned");
+            let roots = self.workspace_roots.lock_recover();
             roots.clone()
         };
         tokio::spawn(reload_check_listener(
@@ -1499,7 +1439,7 @@ impl Backend {
             .await
             .unwrap_or(None)
         };
-        let mut svc = self.service.lock().expect("service lock poisoned");
+        let mut svc = self.service.lock_recover();
         svc.set_file_native_types(path, registry);
     }
 
@@ -1534,7 +1474,7 @@ impl Backend {
         // guarantee this method relies on — `republish_open_diagnostics`
         // resends every open path once preload completes — covers them too.
         {
-            let svc = self.service.lock().expect("service lock poisoned");
+            let svc = self.service.lock_recover();
             if svc.is_preload_in_progress() {
                 return;
             }
