@@ -501,6 +501,20 @@ fn validate_release_path_component(kind: &str, value: &str) -> Result<()> {
              never boot with."
         );
     }
+    // BT-5067: the value is substituted into `RELEASE_NAME="…"` in the generated
+    // `launcher.sh` / `launcher.cmd`, so shell- and cmd-metacharacters (`"`, `$`,
+    // backtick, `%`, `&`, `^`, …) must never reach it. Restrict to the package-name
+    // character set, plus `.` and `+` which a `[package] version` needs.
+    if let Some(bad) = value
+        .chars()
+        .find(|c| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+')))
+    {
+        miette::bail!(
+            "[release] {kind} '{value}' contains '{bad}' — only letters, digits, '-', '_', \
+             '.' and '+' are allowed, because the value is written into the generated \
+             launcher scripts."
+        );
+    }
     Ok(())
 }
 
@@ -721,6 +735,20 @@ mod tests {
             assert!(
                 validate_release_path_component("name", malicious).is_err(),
                 "expected '{malicious}' to be rejected"
+            );
+        }
+    }
+
+    /// BT-5067: shell/cmd metacharacters must not reach the generated launchers'
+    /// `RELEASE_NAME="…"` line.
+    #[test]
+    fn validate_release_path_component_rejects_launcher_metacharacters() {
+        for bad in [
+            "a\"b", "a$b", "a`b", "a%b", "a&b", "a^b", "a;b", "a|b", "a'b", "ünï",
+        ] {
+            assert!(
+                validate_release_path_component("name", bad).is_err(),
+                "expected '{bad}' to be rejected"
             );
         }
     }
