@@ -36,6 +36,7 @@ defmodule BtAttachWeb.Live.DockFakeClient do
   # fixture.
   defdelegate browse_protocols(class, side), to: StubWorkspaceClient
   defdelegate browse_categories(class), to: StubWorkspaceClient
+  defdelegate list_bindings(pid), to: StubWorkspaceClient
 end
 
 defmodule BtAttachWeb.Live.DockTest do

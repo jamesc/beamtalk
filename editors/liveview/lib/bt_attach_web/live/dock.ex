@@ -540,7 +540,7 @@ defmodule BtAttachWeb.Live.Dock do
   # Fold a finished eval task (see `start_eval/4`) back into the socket.
   def handle_async(:eval, {:ok, {job, result}}, socket) do
     socket = assign(socket, eval_running: false)
-    {:noreply, fold_eval(socket, job, result)}
+    {:noreply, socket |> fold_eval(job, result) |> WorkspaceLive.refresh_bindings()}
   end
 
   def handle_async(:eval, {:exit, :cancelled}, socket), do: {:noreply, socket}

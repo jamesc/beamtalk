@@ -36,6 +36,11 @@ defmodule BtAttachWeb.WorkspaceEvalAsyncTest do
       end
     end
 
+    def list_bindings(_pid) do
+      send(Application.fetch_env!(:bt_attach, :eval_async_test_pid), :bindings_read)
+      []
+    end
+
     def interrupt(_pid) do
       test = Application.fetch_env!(:bt_attach, :eval_async_test_pid)
       send(test, :interrupt_called)
@@ -158,5 +163,28 @@ defmodule BtAttachWeb.WorkspaceEvalAsyncTest do
     send(eval_task, {:finish, {:ok, 2, "", []}})
     render_async(view, 5_000)
     refute_push_event(view, "repl_set_input", %{text: ""}, 50)
+  end
+
+  test "bindings are re-read once the eval finishes (a mid-eval push reads stale state)", %{
+    conn: conn
+  } do
+    view = mount_cockpit(conn)
+    flush_bindings_reads()
+
+    view |> form("#eval-form", %{"expr" => "x := 1"}) |> render_submit()
+    assert_receive {:eval_started, eval_task}, 1_000
+    refute_receive :bindings_read, 50
+
+    send(eval_task, {:finish, {:ok, 1, "", []}})
+    render_async(view, 5_000)
+    assert_received :bindings_read
+  end
+
+  defp flush_bindings_reads do
+    receive do
+      :bindings_read -> flush_bindings_reads()
+    after
+      0 -> :ok
+    end
   end
 end

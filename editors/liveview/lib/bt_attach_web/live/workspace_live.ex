@@ -1939,6 +1939,18 @@ defmodule BtAttachWeb.WorkspaceLive do
   # task and the bindings-changed refresh path share one fold.
   defp assign_bindings(socket, pid), do: apply_bindings(socket, read_bindings(socket, pid))
 
+  # BT-5081: re-read the bindings once an off-socket eval has finished. The
+  # workspace announces `BindingChanged` while the eval is still running, and
+  # the session only commits the new bindings when it ends; when evals blocked
+  # the LiveView, that push was handled after the eval returned, so it read the
+  # committed state. Now that the LiveView stays responsive, the push can be
+  # handled mid-eval and read the old bindings — and no further push follows.
+  @doc false
+  def refresh_bindings(%{assigns: %{session_pid: pid}} = socket) when is_pid(pid),
+    do: assign_bindings(socket, pid)
+
+  def refresh_bindings(socket), do: socket
+
   defp read_bindings(socket, pid),
     do: Facade.dispatch(:bindings, %{session_pid: pid}, RequestContext.build(socket))
 

@@ -2516,13 +2516,39 @@ defmodule BtAttach.Workspace do
   end
 
   defp rpc(mod, fun, args, timeout \\ @rpc_timeout) do
+    erpc(mod, fun, args, timeout, true)
+  end
+
+  # `:rpc.call/4` set up the distribution connection on demand; `:erpc.call/5`
+  # does not, and answers `{:erpc, :noconnection}` for a node this one has not
+  # connected to yet (the first call of a process that never ran `connect/0`).
+  # Connect once and retry so the bounded call keeps the old call's behaviour.
+  defp erpc(mod, fun, args, timeout, retry?) do
     :erpc.call(node_name(), mod, fun, args, timeout)
   catch
-    :error, {:erpc, reason} -> {:badrpc, reason}
-    :error, {:exception, reason, stack} -> {:badrpc, {:EXIT, {reason, stack}}}
-    :exit, {:exception, reason} -> {:badrpc, {:EXIT, reason}}
-    :exit, {:signal, reason} -> {:badrpc, reason}
-    :exit, reason -> {:badrpc, {:EXIT, reason}}
-    :throw, value -> value
+    :error, {:erpc, :noconnection} when retry? ->
+      if Node.alive?() and Node.connect(node_name()) == true do
+        erpc(mod, fun, args, timeout, false)
+      else
+        {:badrpc, :noconnection}
+      end
+
+    :error, {:erpc, reason} ->
+      {:badrpc, reason}
+
+    :error, {:exception, reason, stack} ->
+      {:badrpc, {:EXIT, {reason, stack}}}
+
+    :exit, {:exception, reason} ->
+      {:badrpc, {:EXIT, reason}}
+
+    :exit, {:signal, reason} ->
+      {:badrpc, reason}
+
+    :exit, reason ->
+      {:badrpc, {:EXIT, reason}}
+
+    :throw, value ->
+      value
   end
 end
