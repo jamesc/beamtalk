@@ -35,7 +35,13 @@ impl McpDriver {
         let bin =
             beamtalk_binary("beamtalk-mcp").map_err(|e| format!("locate beamtalk-mcp: {e}"))?;
         let mut child = tokio::process::Command::new(&bin)
-            .args(["--workspace-id", &repl.workspace_id])
+            // The cases use fixture directories under the temp dir, outside the
+            // project root the MCP server confines paths to by default (BT-5070).
+            .args([
+                "--workspace-id",
+                &repl.workspace_id,
+                "--allow-outside-project",
+            ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
