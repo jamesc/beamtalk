@@ -354,8 +354,10 @@ mod tests {
         std::thread::sleep(Duration::from_millis(300));
         let path = project_build_lock_path(&root);
         std::fs::remove_file(&path).unwrap();
-        drop(first);
+        // Remove the directory *before* releasing: the waiter is still blocked on
+        // the old inode, so this cannot race its recreate of the lock file.
         std::fs::remove_dir(path.parent().unwrap()).unwrap();
+        drop(first);
         waiter
             .join()
             .unwrap()
