@@ -16,7 +16,7 @@
 # rustfmt puts a top-level module's brace). `rust-any` scans inline test modules
 # too but still skips test files. The `erl` kind scans only */test/*.erl and
 # skips `%` comment lines. The `erl-src` kind (BT-5054) is the opposite: every non-test
-# runtime .erl/.hrl except the generated sentinel header, skipping `%` comment lines and
+# runtime .erl/.hrl/.escript (runtime/apps and the runtime/perf benchmarks) except the generated sentinel header, skipping `%` comment lines and
 # `"""` doc-string blocks.
 #
 # Usage:
@@ -33,7 +33,7 @@ ALLOWLIST="scripts/ci/banned-patterns-allowlist.txt"
 # Fixture lines for --self-test live in scripts/ci/fixtures/banned-patterns/<id>.{rs,erl}.
 PATTERNS=(
   "send-literal|rust|crates/beamtalk-codegen/src/core_erlang|'beamtalk_message_dispatch':'send'\(|runtime_send_call (dispatch_codegen/mod.rs)"
-  "send-form-call|rust-join|crates/beamtalk-codegen/src/core_erlang|form::call\([[:space:]]*\"beamtalk_message_dispatch\",[[:space:]]*\"send\"|runtime_send_call (dispatch_codegen/mod.rs)"
+  "send-form-call|rust-join|crates/beamtalk-codegen/src/core_erlang|\"beamtalk_message_dispatch\",[[:space:]]*\"send\"|runtime_send_doc / runtime_send_call / sequenced_runtime_send (the module literal is matched with any builder: form::call, an imported call, sequenced_runtime_call, a (module, function) tuple)"
   "raw-op-json|rust|crates/beamtalk-cli/src crates/beamtalk-mcp/src crates/beamtalk-lsp/src|\"op\"[[:space:]]*:|RequestBuilder (beamtalk-repl-protocol)"
   "catch-error-map|erl|runtime/apps|error:#\{error[[:space:]]*:=|?assertBtError macro family (beamtalk_test_assert.hrl)"
   "unique-integer|erl|runtime/apps|erlang:unique_integer\(|beamtalk_test_unique:id/0 / atom/1"
@@ -42,7 +42,7 @@ PATTERNS=(
   "boot-compiler|erl|runtime/apps|ensure_all_started\(compiler\)|beamtalk_test_boot:compiler/0"
   "self-name|rust|crates/beamtalk-core/src|\.name == \"self\"|Expression::is_self()"
   "chain-any|rust-any|crates/beamtalk-core/src|superclass_chain\(.*\)\.any\(|is_subclass_of"
-  "sentinel-key-literal|erl-src|runtime/apps|'(\\\$beamtalk_class%OR%__class_mod__%OR%__skip_initialize__)'|?BT_CLASS_TAG_KEY / ?BT_CLASS_MOD_KEY / ?BT_SKIP_INITIALIZE_KEY (beamtalk_sentinel_tags.hrl, generated from sentinel_tags.rs)"
+  "sentinel-key-literal|erl-src|runtime/apps runtime/perf|'(\\\$beamtalk_class%OR%__class_mod__%OR%__skip_initialize__)'|?BT_CLASS_TAG_KEY / ?BT_CLASS_MOD_KEY / ?BT_SKIP_INITIALIZE_KEY (beamtalk_sentinel_tags.hrl, generated from sentinel_tags.rs)"
   "try-stop|erl|runtime/apps|try[[:space:]]+gen_server:stop|beamtalk_test_proc:stop/1 or beamtalk_test_class:stop/1"
 )
 
@@ -73,7 +73,7 @@ scan_files() {
 files_for() { # kind pathspecs...
   local kind="$1"; shift
   local ext='\.rs$'; [[ "$kind" == erl ]] && ext='/test/[^/]*\.erl$'
-  [[ "$kind" == erl-src ]] && ext='\.(erl|hrl)$'
+  [[ "$kind" == erl-src ]] && ext='\.(erl|hrl|escript)$'
   local specs=("$@")
   if [[ "$kind" == erl-src ]]; then
     git ls-files -z -- "${specs[@]}" | { grep -z -E "$ext" || true; } |
@@ -125,6 +125,9 @@ self_test() {
   [[ -n "$(sleep_hits scripts/ci/fixtures/banned-patterns/sleep-bare.erl)" ]] || { echo "❌ bare sleep not flagged"; fail=1; }
   local out
   # erl-src: the doc-string and comment lines in the fixture are skipped, the code line is the one hit.
+  # send-form-call (rust-join): every spelling in the fixture is flagged, whatever builds the call.
+  out="$(printf '%s\0' scripts/ci/fixtures/banned-patterns/send-form-call.rs | match_lines rust-join "\"beamtalk_message_dispatch\",[[:space:]]*\"send\"")"
+  [[ "$(grep -c . <<<"$out")" -eq 5 ]] || { echo "❌ send-form-call must flag all 5 fixture spellings (form::call, imported call, sequenced_runtime_call, tuple, one-line):"; echo "$out"; fail=1; }
   out="$(printf '%s\0' scripts/ci/fixtures/banned-patterns/sentinel-key-literal.erl | match_lines erl-src "'(\\\$beamtalk_class|__class_mod__|__skip_initialize__)'")"
   [[ "$(grep -c . <<<"$out")" -eq 1 ]] || { echo "❌ sentinel-key-literal must flag only the code line (want exactly 1 hit):"; echo "$out"; fail=1; }
   # Test-region and comment filtering for Rust scopes.

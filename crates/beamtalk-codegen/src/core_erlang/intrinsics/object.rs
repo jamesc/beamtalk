@@ -14,7 +14,7 @@ use super::{
     MessageSelector, PERFORM_WITH_ARGS_TIMEOUT, Result, WellKnownSelector, class_var_fn, docvec,
     leaf, nil_test_case, not_nil_apply, primitives, validate_if_not_nil_block,
 };
-use crate::core_erlang::dispatch_codegen::runtime_send_args;
+use crate::core_erlang::dispatch_codegen::{runtime_send_args, runtime_send_doc};
 use crate::core_erlang::errors::{BeamtalkErrorChain, ErrorBinding};
 use beamtalk_cerl_doc::form::{self, Layout};
 
@@ -50,6 +50,15 @@ impl KindOfFn {
     /// Every function above, for the export contract.
     #[cfg(test)]
     pub(in crate::core_erlang) const ALL: &[Self] = &[Self::Builtin, Self::Named];
+}
+
+/// Which call [`CoreErlangGenerator::class_side_error_guard`] sends `error:`
+/// through: a class-method self-send stays in the method's own process, anything
+/// else goes through the runtime `send`.
+#[derive(Clone, Copy)]
+enum ClassSideErrorSend {
+    ClassSelfSend,
+    RuntimeSend,
 }
 
 impl CoreErlangGenerator {
@@ -128,9 +137,7 @@ impl CoreErlangGenerator {
         // self-dispatched into `ProtoObject`'s method body instead. Matched
         // by name, like `asType:`: it is not a `WellKnownSelector`.
         if selector.name() == PERFORM_WITH_ARGS_TIMEOUT && arguments.len() == 3 {
-            return Ok(Some(self.sequenced_runtime_call(
-                "beamtalk_message_dispatch",
-                "send",
+            return Ok(Some(self.sequenced_runtime_send(
                 &[receiver, &arguments[0], &arguments[1], &arguments[2]],
                 "PerfTo",
                 |operands| operands,
@@ -144,9 +151,7 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::PerformWithArgs) => {
                 debug_assert_eq!(arguments.len(), 2);
                 // Hoist open-scope receiver + args (e.g. class method self-sends).
-                self.sequenced_runtime_call(
-                    "beamtalk_message_dispatch",
-                    "send",
+                self.sequenced_runtime_send(
                     &[receiver, &arguments[0], &arguments[1]],
                     "Perf",
                     |operands| operands,
@@ -170,16 +175,10 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::Perform) => {
                 debug_assert_eq!(arguments.len(), 1);
                 // Hoist open-scope receiver + selector arg.
-                self.sequenced_runtime_call(
-                    "beamtalk_message_dispatch",
-                    "send",
-                    &[receiver, &arguments[0]],
-                    "Perf",
-                    |mut operands| {
-                        operands.push(Document::Str("[]"));
-                        operands
-                    },
-                )
+                self.sequenced_runtime_send(&[receiver, &arguments[0]], "Perf", |mut operands| {
+                    operands.push(Document::Str("[]"));
+                    operands
+                })
                 .map(Some)
             }
             _ => Ok(None),
@@ -905,14 +904,14 @@ impl CoreErlangGenerator {
             // A class-method self-send runs where its method runs (ADR 0142),
             // never back through the class process.
             ErrorSignalReceiver::ClassSelf => self.class_side_error_guard(
-                ("beamtalk_class_dispatch", "class_self_send"),
+                ClassSideErrorSend::ClassSelfSend,
                 &recv_var,
                 &msg_var,
                 receiver,
                 raise_doc,
             ),
             ErrorSignalReceiver::Unknown => self.class_side_error_guard(
-                ("beamtalk_message_dispatch", "send"),
+                ClassSideErrorSend::RuntimeSend,
                 &recv_var,
                 &msg_var,
                 receiver,
@@ -968,29 +967,32 @@ impl CoreErlangGenerator {
     }
 
     /// BT-4075: `case class_object_understands(Recv, 'error:') of 'true' ->
-    /// <send_fn>(Recv, 'error:', [Msg]) 'false' -> <raise_doc> end` — the
+    /// <send>(Recv, 'error:', [Msg]) 'false' -> <raise_doc> end` — the
     /// class-side `error:` send when the receiver is a class object that
     /// defines one, the `Object>>error:` raise otherwise.
     fn class_side_error_guard(
         &mut self,
-        send_fn: (&'static str, &'static str),
+        send_fn: ClassSideErrorSend,
         recv_var: &str,
         msg_var: &str,
         receiver: &Expression,
         raise_doc: Document<'static>,
     ) -> Document<'static> {
-        let send_doc = self.annotate_call_node_with_line(
-            form::call(
-                send_fn.0,
-                send_fn.1,
-                [
-                    leaf::var(recv_var.to_string()),
-                    leaf::atom("error:"),
-                    docvec!["[", leaf::var(msg_var.to_string()), "]"],
-                ],
-            ),
-            receiver.span(),
-        );
+        let args = [
+            leaf::var(recv_var.to_string()),
+            leaf::atom("error:"),
+            docvec!["[", leaf::var(msg_var.to_string()), "]"],
+        ];
+        let send_call = match send_fn {
+            ClassSideErrorSend::ClassSelfSend => {
+                form::call("beamtalk_class_dispatch", "class_self_send", args)
+            }
+            ClassSideErrorSend::RuntimeSend => {
+                let [receiver, selector, arg_list] = args;
+                runtime_send_doc(receiver, selector, arg_list, None)
+            }
+        };
+        let send_doc = self.annotate_call_node_with_line(send_call, receiver.span());
         docvec![
             "case call 'beamtalk_class_dispatch':'class_object_understands'(",
             leaf::var(recv_var.to_string()),
@@ -1589,13 +1591,9 @@ impl CoreErlangGenerator {
         // `#beamtalk_object{}` receivers, BT-4148), so
         // `classify_receiver`'s actor/class/value
         // distinction lives in exactly one place.
-        self.sequenced_runtime_call(
-            "beamtalk_message_dispatch",
-            "send",
-            &[receiver, &arguments[0]],
-            "HasF",
-            |operands| runtime_send_args("hasField:", operands),
-        )
+        self.sequenced_runtime_send(&[receiver, &arguments[0]], "HasF", |operands| {
+            runtime_send_args("hasField:", operands)
+        })
         .map(Some)
     }
 
@@ -1675,13 +1673,9 @@ impl CoreErlangGenerator {
         // — see `generate_primitive_dispatch`), so no
         // hand-rolled error construction is needed here
         // either.
-        self.sequenced_runtime_call(
-            "beamtalk_message_dispatch",
-            "send",
-            &[receiver, &arguments[0]],
-            "ClrF",
-            |operands| runtime_send_args("clearField:", operands),
-        )
+        self.sequenced_runtime_send(&[receiver, &arguments[0]], "ClrF", |operands| {
+            runtime_send_args("clearField:", operands)
+        })
         .map(Some)
     }
 }

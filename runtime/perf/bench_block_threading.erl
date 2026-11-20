@@ -18,6 +18,7 @@ All benchmarks reflect current codegen: binary op codegen no longer
 emits maybe_await (ADR-0043: all actor sends are synchronous).
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
 -export([
     %% timesRepeat: equivalents
     sum_native/1,
@@ -525,7 +526,7 @@ mixed_stateacc(N) ->
     %% Realistic actor State has metadata keys ($beamtalk_class, __class_mod__,
     %% __methods__) plus field keys.  A 1-key map is unrealistically small and
     %% hides map-operation overhead behind BEAM's small-map JIT optimisation.
-    BaseState = #{'$beamtalk_class' => 'MyActor', '__class_mod__' => test,
+    BaseState = #{?BT_CLASS_TAG_KEY => 'MyActor', ?BT_CLASS_MOD_KEY => test,
                   '__methods__' => #{}, 'n' => 0},
     InitState = maps:put('__local__sum', 0, BaseState),
     {_, FinalState} = mixed_stateacc_loop(1, N, InitState),
@@ -557,7 +558,7 @@ to direct params. Loop body is pure arithmetic — zero map ops.
 """.
 -spec mixed_full_extract(non_neg_integer()) -> integer().
 mixed_full_extract(N) ->
-    InitState = #{'$beamtalk_class' => 'MyActor', '__class_mod__' => test,
+    InitState = #{?BT_CLASS_TAG_KEY => 'MyActor', ?BT_CLASS_MOD_KEY => test,
                   '__methods__' => #{}, 'n' => 0},
     FieldN0 = maps:get('n', InitState),
     {_, FinalState} = mixed_full_extract_loop(1, N, 0, FieldN0, InitState),
@@ -582,7 +583,7 @@ mixed_full_extract_loop(I, N, Sum, FieldN, State) ->
 %%====================================================================
 
 crossover_base_state(NumFields) ->
-    Base = #{'$beamtalk_class' => 'MyActor', '__class_mod__' => test,
+    Base = #{?BT_CLASS_TAG_KEY => 'MyActor', ?BT_CLASS_MOD_KEY => test,
              '__methods__' => #{}},
     lists:foldl(
         fun(I, Acc) ->
@@ -732,7 +733,7 @@ bigmap_base_state() ->
             Key = list_to_atom("field_" ++ integer_to_list(I)),
             maps:put(Key, 0, Acc)
         end,
-        #{'$beamtalk_class' => 'BigActor', '__class_mod__' => test,
+        #{?BT_CLASS_TAG_KEY => 'BigActor', ?BT_CLASS_MOD_KEY => test,
           '__methods__' => #{}, 'n' => 0},
         lists:seq(1, 30)).
 

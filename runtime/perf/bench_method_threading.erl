@@ -36,6 +36,7 @@ Findings (2026-03-17):
     amplification
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
 -export([
     %% State constructors (called once per benchmark, not per iteration)
     small_state/0,
@@ -70,7 +71,7 @@ Findings (2026-03-17):
 -doc "Small actor state (~13 keys, within BEAM small-map JIT threshold).".
 -spec small_state() -> map().
 small_state() ->
-    #{'$beamtalk_class' => 'MyActor', '__class_mod__' => test,
+    #{?BT_CLASS_TAG_KEY => 'MyActor', ?BT_CLASS_MOD_KEY => test,
       '__methods__' => #{},
       x => 0, y => 0, z => 0, a => 0, b => 0, c => 0,
       d => 0, e => 0, f => 0, g => 0}.
@@ -83,7 +84,7 @@ big_state() ->
             Key = list_to_atom("field_" ++ integer_to_list(I)),
             maps:put(Key, 0, Acc)
         end,
-        #{'$beamtalk_class' => 'BigActor', '__class_mod__' => test,
+        #{?BT_CLASS_TAG_KEY => 'BigActor', ?BT_CLASS_MOD_KEY => test,
           '__methods__' => #{},
           x => 0, y => 0, z => 0, a => 0, b => 0, c => 0,
           d => 0, e => 0, f => 0, g => 0},
