@@ -25,6 +25,8 @@ pub mod registry;
 mod snapshot;
 #[cfg(test)]
 mod update_tests;
+#[cfg(test)]
+mod walker_differential_tests;
 
 // Re-export commonly used items
 pub use path::collect_dep_ebin_paths;
