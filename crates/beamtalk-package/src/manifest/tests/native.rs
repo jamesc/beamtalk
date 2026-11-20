@@ -313,7 +313,7 @@ const NATIVE_REJECTIONS: &[(&str, &str, &str)] = &[
     (
         "git_option_lookalike",
         "[native.dependencies]\nevil = { git = \"--upload-pack=x\", tag = \"1\" }\n",
-        "may not begin with",
+        "invalid git URL",
     ),
     (
         "git_unknown_scheme",
