@@ -11,8 +11,9 @@ name: Advisory Scan
 # the issue is closed again when a later run is clean. Dependabot (see
 # .github/dependabot.yml) is what raises the fix PRs.
 #
-# fuzz/ has no committed lockfile and depends only on workspace crates plus
-# libfuzzer-sys, so the root Cargo.lock covers it.
+# fuzz/ has no committed lockfile, so it is not scanned: its workspace crates
+# are covered by the root Cargo.lock, but its one external dependency
+# (libfuzzer-sys) resolves fresh on each run and is not audited here.
 
 on:
   schedule:
@@ -43,7 +44,7 @@ jobs:
           persist-credentials: false
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@789fcf404486ad49a9a91ceb1acfb43caac96664 # cargo-llvm-cov
+        uses: taiki-e/install-action@789fcf404486ad49a9a91ceb1acfb43caac96664 # v2
         with:
           tool: cargo-audit@0.23.0
 
