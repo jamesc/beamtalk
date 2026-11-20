@@ -301,39 +301,53 @@ install_beamtalk() {
     write_build_marker
 }
 
-# Subtrees beamtalk owns outright. They are replaced wholesale so stale files
-# from a previous install vanish; PREFIX itself may be shared (/usr/local), so
-# it is never replaced, and everything else in the archive (bin/*) is copied
-# over the existing files.
+# What --uninstall removes (the paths a release archive installs).
 OWNED_DIRS="lib/beamtalk share/beamtalk"
 OWNED_BINS="beamtalk beamtalk-compiler-port beamtalk-lsp beamtalk-mcp beamtalk-exec"
 
-swap_into_prefix() {
-    # Old trees wait here (outside STAGE, so the EXIT trap never deletes them)
-    # until the new ones are in place, and are put back if a move fails.
-    OLD=$(mktemp -d "${PREFIX}/.beamtalk-old.XXXXXX")
-    for d in ${OWNED_DIRS}; do
-        [ -d "${STAGE}/${d}" ] || continue
-        mkdir -p "${PREFIX}/$(dirname "${d}")"
-        slot="${OLD}/$(echo "${d}" | tr / _)"
-        if [ -e "${PREFIX}/${d}" ]; then
-            mv "${PREFIX}/${d}" "${slot}"
-        fi
-        if ! mv "${STAGE}/${d}" "${PREFIX}/${d}"; then
-            echo "Error: could not move ${d} into ${PREFIX}; restoring the previous install."
-            if [ -e "${slot}" ] && ! mv "${slot}" "${PREFIX}/${d}"; then
-                echo "  Restore failed too; the previous ${d} is kept in ${slot}."
-                exit 1
+# Every unit the archive supplies is replaced wholesale: each child of bin/,
+# lib/ and share/ (bin/beamtalk, lib/beamtalk, share/beamtalk, ...) and any
+# other top-level entry. PREFIX itself, and anything else in bin/ lib/ share/,
+# is untouched, so a shared prefix such as /usr/local is safe.
+#
+# The swap is journalled: before a unit is replaced its old copy is moved into
+# $OLD and recorded; if any later step fails, rollback_swap undoes every unit
+# done so far (new copy out, old copy back) and only then deletes $OLD.
+rollback_swap() {
+    echo "Error: install failed part-way; restoring the previous install."
+    restore_failed=""
+    if [ -f "${OLD}/journal" ]; then
+        while IFS='|' read -r dest slot; do
+            rm -rf "${dest}"
+            if [ -e "${slot}" ] || [ -L "${slot}" ]; then
+                mv "${slot}" "${dest}" || restore_failed=1
             fi
-            rm -rf "${OLD}"
-            exit 1
-        fi
-    done
-    # Binaries: replaced by rename so a running beamtalk is not truncated in
-    # place. A directory where a binary should go is an error, not a silent
-    # move-into.
+        done < "${OLD}/journal"
+    fi
+    if [ -n "${restore_failed}" ]; then
+        echo "  Restore was incomplete; the previous files are kept in ${OLD}."
+        exit 1
+    fi
+    rm -rf "${OLD}"
+    exit 1
+}
+
+# install_unit SRC DEST: back DEST up into $OLD (journalled), then move SRC in.
+install_unit() {
+    src="$1"; dest="$2"
+    mkdir -p "$(dirname "${dest}")" || rollback_swap
+    UNIT_N=$((UNIT_N + 1))
+    slot="${OLD}/unit.${UNIT_N}"
+    if [ -e "${dest}" ] || [ -L "${dest}" ]; then
+        mv "${dest}" "${slot}" || rollback_swap
+    fi
+    printf '%s|%s\n' "${dest}" "${slot}" >> "${OLD}/journal"
+    mv "${src}" "${dest}" || rollback_swap
+}
+
+swap_into_prefix() {
+    # Checks that need no swap come first, so they fail with nothing changed.
     if [ -d "${STAGE}/bin" ]; then
-        mkdir -p "${PREFIX}/bin"
         for f in "${STAGE}/bin/"*; do
             [ -e "${f}" ] || continue
             dest="${PREFIX}/bin/$(basename "${f}")"
@@ -341,14 +355,28 @@ swap_into_prefix() {
                 echo "Error: ${dest} is a directory; remove it and retry."
                 exit 1
             fi
-            mv -f "${f}" "${dest}"
         done
     fi
-    # Anything else the archive carries is merged over the prefix, as the old
-    # extract-in-place install did, rather than dropped.
-    for f in "${STAGE}/"* "${STAGE}/".[!.]*; do
-        [ -e "${f}" ] || continue
-        cp -R "${f}" "${PREFIX}/"
+
+    # The backups live in a directory outside STAGE, so the EXIT trap never
+    # deletes them.
+    OLD=$(mktemp -d "${PREFIX}/.beamtalk-old.XXXXXX")
+    : > "${OLD}/journal"
+    UNIT_N=0
+    for top in "${STAGE}/"*; do
+        [ -e "${top}" ] || continue
+        name="$(basename "${top}")"
+        case "${name}" in
+            bin|lib|share)
+                for unit in "${top}/"*; do
+                    [ -e "${unit}" ] || continue
+                    install_unit "${unit}" "${PREFIX}/${name}/$(basename "${unit}")"
+                done
+                ;;
+            *)
+                install_unit "${top}" "${PREFIX}/${name}"
+                ;;
+        esac
     done
     rm -rf "${OLD}"
 }

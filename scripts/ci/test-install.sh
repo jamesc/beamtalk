@@ -30,7 +30,8 @@ mkdir -p "$T/stage/beamtalk-9.9.9/bin" "$T/stage/beamtalk-9.9.9/lib/beamtalk/lib
 printf '#!/bin/sh\necho beamtalk\n' > "$T/stage/beamtalk-9.9.9/bin/beamtalk"
 chmod +x "$T/stage/beamtalk-9.9.9/bin/beamtalk"
 echo new > "$T/stage/beamtalk-9.9.9/lib/beamtalk/lib/new.beam"
-mkdir -p "$T/stage/beamtalk-9.9.9/extra"
+mkdir -p "$T/stage/beamtalk-9.9.9/share/beamtalk" "$T/stage/beamtalk-9.9.9/extra"
+echo stub > "$T/stage/beamtalk-9.9.9/share/beamtalk/stub.bt"
 echo x > "$T/stage/beamtalk-9.9.9/extra/file.txt"
 ARCHIVE="beamtalk-9.9.9-${PLAT}.tar.gz"
 (cd "$T/stage" && tar -czf "$T/release/$ARCHIVE" beamtalk-9.9.9)
@@ -100,21 +101,36 @@ check "other top-level archive entries are merged, not dropped" $?
 # --uninstall only removes what beamtalk owns, so drop the fixture's extra entry first
 rm -rf "$P/extra"
 
-# 4c. a failed swap puts the previous install back (a plain file blocks the new tree)
-P="$T/p4c"
-mkdir -p "$P/lib/beamtalk"
-echo old > "$P/lib/beamtalk/old.txt"
+# 4c. a failure part-way through the swap rolls back every unit already swapped
 mkdir -p "$T/mvbin"
 cat > "$T/mvbin/mv" <<'FAKEMV'
 #!/bin/sh
-# fail only the move of the new lib/beamtalk into place
-case "$*" in *.beamtalk-stage*/lib/beamtalk\ *) exit 1 ;; esac
+# fail only the move of the new $FAIL_UNIT into place
+case "$*" in *.beamtalk-stage*/"$FAIL_UNIT"\ *) exit 1 ;; esac
 exec /bin/mv "$@"
 FAKEMV
 chmod +x "$T/mvbin/mv"
-PATH="$T/mvbin:$T/fakebin:$PATH" FAKE_RELEASE_DIR="$T/release" BEAMTALK_PREFIX="$P" sh "$SCRIPT" --version 9.9.9 >"$T/out" 2>&1; rc=$?
-[ $rc -ne 0 ] && [ -f "$P/lib/beamtalk/old.txt" ]
-check "failed swap restores the previous install" $?
+for unit in share/beamtalk bin/beamtalk; do
+    P="$T/p4c-$(echo "$unit" | tr / _)"
+    mkdir -p "$P/lib/beamtalk" "$P/share/beamtalk" "$P/bin"
+    echo old > "$P/lib/beamtalk/old.txt"
+    echo old > "$P/share/beamtalk/old.txt"
+    echo oldbin > "$P/bin/beamtalk"
+    FAIL_UNIT="$unit" PATH="$T/mvbin:$T/fakebin:$PATH" FAKE_RELEASE_DIR="$T/release" BEAMTALK_PREFIX="$P" \
+        sh "$SCRIPT" --version 9.9.9 >"$T/out" 2>&1; rc=$?
+    [ $rc -ne 0 ] && [ -f "$P/lib/beamtalk/old.txt" ] && [ ! -e "$P/lib/beamtalk/lib/new.beam" ] \
+        && [ -f "$P/share/beamtalk/old.txt" ] && [ "$(cat "$P/bin/beamtalk")" = oldbin ] \
+        && [ -z "$(ls -A "$P" | grep '^\.beamtalk-')" ]
+    check "failure while swapping $unit restores the whole previous install" $?
+done
+
+# 4d. a directory where a binary should go fails before anything is changed
+P="$T/p4d"
+mkdir -p "$P/bin/beamtalk" "$P/lib/beamtalk"
+echo old > "$P/lib/beamtalk/old.txt"
+run_install "$P"; rc=$?
+[ $rc -ne 0 ] && [ -f "$P/lib/beamtalk/old.txt" ] && [ -z "$(ls -A "$P" | grep '^\.beamtalk-')" ]
+check "a directory in place of a binary is refused before any change" $?
 
 # 5. uninstall removes beamtalk, keeps unrelated files, needs no network
 P="$P4"
