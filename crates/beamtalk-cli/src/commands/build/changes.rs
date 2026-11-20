@@ -464,10 +464,29 @@ pub(crate) fn clean_stale_artifacts(
     produced_beams: &[Utf8PathBuf],
     pkg_name: &str,
 ) -> Result<()> {
+    prune_build_dir(build_dir, produced_beams, Some(&format!("{pkg_name}.app")))
+}
+
+/// [`clean_stale_artifacts`] for a directory whose `.app` file is not this
+/// build's to manage — a dependency's `_build/deps/<name>/ebin` (BT-5074):
+/// removes the `bt@*` beams and `.core` files of modules `produced_beams` no
+/// longer lists, so a deleted dependency source stops being staged and loaded.
+pub(crate) fn clean_stale_bt_artifacts(
+    dir: &Utf8Path,
+    produced_beams: &[Utf8PathBuf],
+) -> Result<()> {
+    prune_build_dir(dir, produced_beams, None)
+}
+
+/// Shared body of the two cleaners. `current_app_file` is the one `.app` to
+/// keep; `None` leaves every `.app` alone.
+fn prune_build_dir(
+    build_dir: &Utf8Path,
+    produced_beams: &[Utf8PathBuf],
+    current_app_file: Option<&str>,
+) -> Result<()> {
     let produced: std::collections::HashSet<&Utf8Path> =
         produced_beams.iter().map(Utf8PathBuf::as_path).collect();
-
-    let current_app_file = format!("{pkg_name}.app");
 
     let entries = fs::read_dir(build_dir)
         .into_diagnostic()
@@ -483,7 +502,7 @@ pub(crate) fn clean_stale_artifacts(
         let ext = path.extension().and_then(|e| e.to_str());
 
         // Clean stale .app files from package renames
-        if ext == Some("app") && name != current_app_file {
+        if ext == Some("app") && current_app_file.is_some_and(|keep| name != keep) {
             let utf8 = Utf8PathBuf::from_path_buf(path.clone())
                 .map_err(|_| miette::miette!("Non-UTF-8 path in build dir"))?;
             debug!(file = %utf8, "Removing stale .app artifact");

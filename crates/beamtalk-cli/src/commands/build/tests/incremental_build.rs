@@ -1000,3 +1000,24 @@ fn test_incremental_rebuilds_unchanged_caller_when_extension_signature_changes()
         "removing the extension must rebuild the unchanged caller: {changed:?}"
     );
 }
+
+/// BT-5074: `clean_stale_bt_artifacts` (used for dependency ebins) removes
+/// `bt@*` beams and cores nothing produces any more and leaves the `.app`
+/// and non-`bt@` files alone.
+#[test]
+fn test_clean_stale_bt_artifacts_leaves_app_files() {
+    let temp = TempDir::new().unwrap();
+    let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    write_test_file(&dir.join("dep.app"), "app");
+    write_test_file(&dir.join("bt@dep@gone.beam"), "stale");
+    write_test_file(&dir.join("bt@dep@gone.core"), "stale");
+    let keep = dir.join("bt@dep@keep.beam");
+    write_test_file(&keep, "current");
+
+    super::super::clean_stale_bt_artifacts(&dir, std::slice::from_ref(&keep)).unwrap();
+
+    assert!(dir.join("dep.app").exists());
+    assert!(keep.exists());
+    assert!(!dir.join("bt@dep@gone.beam").exists());
+    assert!(!dir.join("bt@dep@gone.core").exists());
+}
