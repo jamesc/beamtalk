@@ -8,9 +8,9 @@
 // accounts have already processed their messages
 //
 // Run in the REPL:
-//   > :load src/account.bt
-//   > :load src/transfer_agent.bt
-//   > :load test/transfer_test.bt
+//   > Workspace load: "src/account.bt"
+//   > Workspace load: "src/transfer_agent.bt"
+//   > Workspace load: "test/transfer_test.bt"
 //   > TransferTest runAll
 
 TestCase subclass: TransferTest

@@ -6,9 +6,9 @@
 // Requires counter.bt loaded first (LoggingCounter extends Counter)
 //
 // Run in the REPL:
-//   > :load src/counter.bt
-//   > :load src/logging_counter.bt
-//   > :load test/logging_counter_test.bt
+//   > Workspace load: "src/counter.bt"
+//   > Workspace load: "src/logging_counter.bt"
+//   > Workspace load: "test/logging_counter_test.bt"
 //   > LoggingCounterTest runAll
 
 TestCase subclass: LoggingCounterTest

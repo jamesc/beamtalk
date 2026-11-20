@@ -54,14 +54,16 @@ live method editing, and a workspace eval pane (the *[LiveView IDE](#liveview-id
 
 ---
 
-## What's New in 0.4
+## What's New in 0.5
 
-- **Type system grows teeth.** `typed` classes flow types through generics, unions, narrowing predicates, FFI calls, and method-local type variables; `beamtalk type-coverage` reports per-file coverage and the LSP shows *why* a chain decayed to `Dynamic`.
-- **Real package manager.** `[dependencies]` in `beamtalk.toml` (path / git / hex), `beamtalk.lock`, `beamtalk deps add`, and qualified `pkg@Class` names — including native `.erl` inside packages, compiled via a vendored `rebar3`.
-- **Result everywhere it counts.** FFI `{ok, T} | {error, R}` coerces to typed `Result(T, E)` at the boundary, and supervisor lifecycle calls return `Result` instead of raising.
-- **Live-edit save model.** Method-level edits patch memory and append to a workspace `ChangeLog`; `Workspace flush` splices the body back into the `.bt` file atomically, with external-edit conflict detection.
+- **Pipelines and value-update safety.** The `|>` pipeline operator and `Object >> then:`, with new warnings for value updates that are thrown away.
+- **Stateless class methods run in the caller; class variables live in the class process.** Locals thread through loops, conditionals, `on:do:`/`ensure:` and `match:`.
+- **Supervisors and actor failure follow OTP.** Several instances of one supervisor class, children by id, and an error in `handleInfo:` or a cast now crashes the actor.
+- **Readable stack traces.** Frames render as `Class>>selector`; `:raw-mfa` in the REPL shows the raw frames.
+- **A stronger type system.** Named type aliases, traits as protocols with provided methods, set-theoretic narrowing and typed OTP opaque handles.
+- **Strict `beamtalk.toml`.** On main since 0.5.0: unknown keys are errors and `version` must be a SemVer version (see "Unreleased" in the changelog).
 
-See [CHANGELOG.md](CHANGELOG.md) for the full list, including named actor registration, the `internal` modifier, auto-chained `initialize`, and class crash recovery.
+See [CHANGELOG.md](CHANGELOG.md) for the full list and the migration notes for each breaking change.
 
 ---
 
@@ -191,7 +193,7 @@ just repl
 # Run tests
 beamtalk test              # Run BUnit TestCase tests
 just test-stdlib           # Run compiled expression tests
-just test-repl-protocol    # Run REPL TCP-protocol tests
+just test-repl-protocol    # Run REPL protocol tests
 
 # Run full CI checks
 just ci
@@ -232,11 +234,11 @@ If your stdlib source files are outside the project root, set:
 
 ```json
 {
-  "beamtalk.stdlib.sourceDir": "/opt/beamtalk/stdlib/lib"
+  "beamtalk.stdlibSourceDir": "/opt/beamtalk/stdlib/src"
 }
 ```
 
-`beamtalk.stdlib.sourceDir` can be absolute (including outside the project) or relative to the Beamtalk project root (directory containing `beamtalk.toml`). See [editors/vscode/README.md](editors/vscode/README.md) for full extension configuration.
+`beamtalk.stdlibSourceDir` can be absolute (including outside the project) or relative to the Beamtalk project root (directory containing `beamtalk.toml`). See [editors/vscode/README.md](editors/vscode/README.md) for full extension configuration.
 
 ### LiveView IDE
 
@@ -278,20 +280,22 @@ Type :help for available commands, :exit to quit.
 > 2 + 3 * 4
 14
 
-> :load "examples/getting-started/src/hello.bt"
-nil
+> Workspace load: "examples/getting-started/src/hello.bt"
+#(Hello)
 
 > Hello new greeting
 │ Hello, World!
-a Hello
+Hello()
 ```
 
 ### Load Files
 
 ```text
-> :load "examples/getting-started/src/counter.bt"
-nil
+> Workspace load: "examples/getting-started/src/counter.bt"
+#(Counter)
 ```
+
+`Workspace load:` takes one file. After editing files on disk, `:sync` (or `Workspace sync`) recompiles every changed file in the project, and `Counter reload` recompiles one class from its source file.
 
 ---
 
@@ -373,7 +377,7 @@ Simple programs demonstrating language features:
 
 ```bash
 cargo run -- repl
-> :load "examples/getting-started/src/hello.bt"
+> Workspace load: "examples/getting-started/src/hello.bt"
 ```
 
 ### Standard Library ([stdlib/src/](stdlib/src/))

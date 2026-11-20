@@ -8,8 +8,8 @@
 // The number of moves for n disks is always 2^n - 1
 //
 // Run in the REPL:
-//   > :load src/hanoi.bt
-//   > :load test/hanoi_test.bt
+//   > Workspace load: "src/hanoi.bt"
+//   > Workspace load: "test/hanoi_test.bt"
 //   > HanoiTest runAll
 
 TestCase subclass: HanoiTest

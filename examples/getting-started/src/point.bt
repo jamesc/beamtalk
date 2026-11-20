@@ -13,7 +13,7 @@
 ///
 /// Try it in the REPL:
 ///   $ beamtalk repl
-///   > :load src/point.bt
+///   > Workspace load: "src/point.bt"
 ///
 /// ## Examples
 /// ```beamtalk

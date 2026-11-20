@@ -336,7 +336,7 @@ In Beamtalk, `Object subclass: Counter` is **parsed as syntax**, not a message s
 Despite being parsed as syntax, the compiler and runtime support dynamic class creation and modification:
 
 - **REPL inline classes** — typing `Actor subclass: Counter ...` at the REPL compiles and hot-loads the class immediately. Redefining it replaces the live class; existing actors pick up new code on next dispatch.
-- **Hot code reload** — `Counter reload` or `:reload Counter` recompiles from source and hot-swaps the module.
+- **Hot code reload** — `Counter reload` recompiles from source and hot-swaps the module.
 - **Live patching** — `Counter >> increment => ...` replaces individual methods without redefining the whole class.
 - **Full metaclass tower** — `Counter class` returns a metaclass object (ADR 0036). Classes are first-class objects with `methods`, `superclass`, `allMethods`, and `respondsTo:`.
 

@@ -106,7 +106,7 @@ enum Command {
         upgrade_from: Option<String>,
     },
 
-    /// Compile the standard library (`lib/*.bt` → `runtime/apps/beamtalk_stdlib/ebin/`)
+    /// Compile the standard library (`stdlib/src/*.bt` → `runtime/apps/beamtalk_stdlib/ebin/`)
     #[command(hide = true)]
     BuildStdlib {
         /// Suppress per-file compilation output
@@ -310,7 +310,7 @@ enum Command {
         warnings_as_errors: bool,
     },
 
-    /// Manage workspaces (list, stop, status, attach, transcript, logs, create)
+    /// Manage workspaces (list, stop, status, attach, transcript, logs, create, prune)
     Workspace {
         #[command(subcommand)]
         action: commands::workspace::cli::WorkspaceCommand,
