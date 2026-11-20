@@ -24,7 +24,8 @@ const NODES_EXPR: &str = "Node connected collect: [:n | #{#name => n name, #skew
 impl BeamtalkMcp {
     /// List all running actors in the workspace.
     #[tool(
-        description = "List all running actors in the workspace. Returns each actor's PID and class."
+        description = "List all running actors in the workspace. Returns each actor's PID and class.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn list_actors(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start("list_actors");
@@ -40,7 +41,8 @@ impl BeamtalkMcp {
 
     /// Snapshot the live supervision tree (ADR 0092).
     #[tool(
-        description = "Snapshot the live OTP supervision tree as a flat list of node records (pid, registeredName, kind, class, childCount, isSupervisor, parentPid for adjacency). scope=\"default\" (the safe view: workspace tree, runtime plumbing filtered) or scope=\"system\" (everything, incl. runtime internals — privileged). Defaults to \"default\"."
+        description = "Snapshot the live OTP supervision tree as a flat list of node records (pid, registeredName, kind, class, childCount, isSupervisor, parentPid for adjacency). scope=\"default\" (the safe view: workspace tree, runtime plumbing filtered) or scope=\"system\" (everything, incl. runtime internals — privileged). Defaults to \"default\".",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn supervision_tree(
         &self,
@@ -82,7 +84,8 @@ impl BeamtalkMcp {
 
     /// List connected cluster nodes with shape-skew counts (ADR 0126 §8/§10).
     #[tool(
-        description = "List every visible connected BEAM node, each with its name and current shape-skew count (classes whose version differs from this node's, ADR 0126 Phase 4). Cluster-scoped — unlike list_actors, which is local-node-only by design."
+        description = "List every visible connected BEAM node, each with its name and current shape-skew count (classes whose version differs from this node's, ADR 0126 Phase 4). Cluster-scoped — unlike list_actors, which is local-node-only by design.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn nodes(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start("nodes");
@@ -115,7 +118,8 @@ impl BeamtalkMcp {
 
     /// Enable actor trace event capture (ADR 0069).
     #[tool(
-        description = "Enable actor trace event capture. Class-level aggregate stats (call counts, durations) are always on; this enables detailed per-event traces and per-actor stats. Call get-traces and actor-stats after running actor code to inspect results. Disable with evaluate(\"Tracing disable\")."
+        description = "Enable actor trace event capture. Class-level aggregate stats (call counts, durations) are always on; this enables detailed per-event traces and per-actor stats. Call get-traces and actor-stats after running actor code to inspect results. Disable with evaluate(\"Tracing disable\").",
+        annotations(read_only_hint = false, destructive_hint = false)
     )]
     pub(crate) async fn enable_tracing(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start("enable_tracing");
@@ -128,7 +132,8 @@ impl BeamtalkMcp {
 
     /// Disable actor trace event capture (ADR 0069).
     #[tool(
-        description = "Disable actor trace event capture. Class-level aggregate stats remain available; per-actor detail is dropped. Use enable-tracing to resume capture."
+        description = "Disable actor trace event capture. Class-level aggregate stats remain available; per-actor detail is dropped. Use enable-tracing to resume capture.",
+        annotations(read_only_hint = false, destructive_hint = false)
     )]
     pub(crate) async fn disable_tracing(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start("disable_tracing");
@@ -141,7 +146,8 @@ impl BeamtalkMcp {
 
     /// Get captured trace events with optional filtering (ADR 0069).
     #[tool(
-        description = "Get captured trace events, newest first. Filter by actor PID, method selector, class name, outcome (ok/error/timeout), minimum duration, or limit the number of results. Returns structured JSON with actor, class, selector, duration, outcome, and timestamp for each event."
+        description = "Get captured trace events, newest first. Filter by actor PID, method selector, class name, outcome (ok/error/timeout), minimum duration, or limit the number of results. Returns structured JSON with actor, class, selector, duration, outcome, and timestamp for each event.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn get_traces(
         &self,
@@ -187,7 +193,8 @@ impl BeamtalkMcp {
 
     /// Export trace events to a JSON file with optional filtering (ADR 0069).
     #[tool(
-        description = "Export captured trace events to a JSON file. Filter by actor PID, method selector, class name, outcome (ok/error/timeout), minimum duration, or limit the number of events. Returns the file path and event count."
+        description = "Export captured trace events to a JSON file. Filter by actor PID, method selector, class name, outcome (ok/error/timeout), minimum duration, or limit the number of events. Returns the file path and event count.",
+        annotations(read_only_hint = false, destructive_hint = true)
     )]
     pub(crate) async fn export_traces(
         &self,
@@ -206,10 +213,15 @@ impl BeamtalkMcp {
             "tool invoked"
         );
 
+        let export_path = match params.path.as_deref().map(|p| self.confine_path(p)) {
+            Some(Err(e)) => return Ok(e),
+            Some(Ok(p)) => Some(p),
+            None => None,
+        };
         let response = self
             .client
             .export_traces(
-                params.path.as_deref(),
+                export_path.as_deref(),
                 params.actor.as_deref(),
                 params.selector.as_deref(),
                 params.class.as_deref(),
@@ -232,7 +244,8 @@ impl BeamtalkMcp {
 
     /// Get aggregate actor statistics (ADR 0069).
     #[tool(
-        description = "Get aggregate call statistics: call count, total/average/min/max duration, error and timeout counts. Per-class, per-method stats are always available even without tracing enabled; per-actor detail requires tracing (enable-tracing first) and is dropped when tracing is disabled. Optionally filter by actor PID."
+        description = "Get aggregate call statistics: call count, total/average/min/max duration, error and timeout counts. Per-class, per-method stats are always available even without tracing enabled; per-actor detail requires tracing (enable-tracing first) and is dropped when tracing is disabled. Optionally filter by actor PID.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn actor_stats(
         &self,

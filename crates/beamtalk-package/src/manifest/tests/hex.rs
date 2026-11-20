@@ -24,6 +24,14 @@ fn test_hex_constraint_matches() {
         ("> 1.0", "1.0.0", false),
         ("<= 3.0", "3.0.0", true),
         ("~> 2.1", "not-a-version", false),
+        // BT-5073: four-segment hex versions (e.g. `1.2.3.4`) are current.
+        ("1.2.3.4", "1.2.3.4", true),
+        ("1.2.3.4", "1.2.3.5", false),
+        ("~> 1.2", "1.2.3.4", true),
+        ("~> 1.2.3", "1.2.3.4", true),
+        ("~> 1.2.3", "1.3.0.0", false),
+        (">= 1.2.3.4", "1.2.3.3", false),
+        (">= 1.2.3.4", "1.2.4", true),
     ];
     for (constraint, version, expected) in cases {
         assert_eq!(

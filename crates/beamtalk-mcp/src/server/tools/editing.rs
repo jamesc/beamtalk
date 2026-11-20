@@ -54,7 +54,8 @@ pub(crate) fn try_method_expr(class: &str, selector: &str, body: &str) -> String
 impl BeamtalkMcp {
     /// Hot-reload a class, migrating running actors to the new code.
     #[tool(
-        description = "Hot-reload a class. Recompiles and reloads the class, migrating any running actors to the new code."
+        description = "Hot-reload a class. Recompiles and reloads the class, migrating any running actors to the new code.",
+        annotations(read_only_hint = false, destructive_hint = false)
     )]
     pub(crate) async fn reload_class(
         &self,
@@ -91,7 +92,8 @@ impl BeamtalkMcp {
     /// in memory and appends a durable `ChangeLog` entry that can be written to
     /// disk by a subsequent `flush`.
     #[tool(
-        description = "Durably install a method on a Beamtalk class. The method patch installs in memory and appends a durable ChangeLog entry that 'flush' will later write to disk (when the class is backed by an in-project .bt file). The 'body' argument is the source on the right-hand side of '=>' and is passed as a String value — no escaping or quoting required from the caller. Use 'try_method' for ephemeral spikes you may discard. (ADR 0082 Phase 3, BT-2288.)"
+        description = "Durably install a method on a Beamtalk class. The method patch installs in memory and appends a durable ChangeLog entry that 'flush' will later write to disk (when the class is backed by an in-project .bt file). The 'body' argument is the source on the right-hand side of '=>' and is passed as a String value — no escaping or quoting required from the caller. Use 'try_method' for ephemeral spikes you may discard. (ADR 0082 Phase 3, BT-2288.)",
+        annotations(read_only_hint = false, destructive_hint = false)
     )]
     pub(crate) async fn save_method(
         &self,
@@ -143,7 +145,8 @@ impl BeamtalkMcp {
     /// auto-prunes on workspace restart. Promote a successful spike by calling
     /// `save_method` with the same source.
     #[tool(
-        description = "Ephemerally install a method on a Beamtalk class for exploration. Installs in memory and logs an ephemeral ChangeLog entry that 'flush' skips and auto-prunes on workspace restart. Use this for spike fixes you may discard; promote a successful spike by calling 'save_method' with the same body to upgrade the intent to durable. The 'body' argument is the source on the right-hand side of '=>' and is passed as a String value — no escaping or quoting required from the caller. (ADR 0082 Phase 3, BT-2288.)"
+        description = "Ephemerally install a method on a Beamtalk class for exploration. Installs in memory and logs an ephemeral ChangeLog entry that 'flush' skips and auto-prunes on workspace restart. Use this for spike fixes you may discard; promote a successful spike by calling 'save_method' with the same body to upgrade the intent to durable. The 'body' argument is the source on the right-hand side of '=>' and is passed as a String value — no escaping or quoting required from the caller. (ADR 0082 Phase 3, BT-2288.)",
+        annotations(read_only_hint = false, destructive_hint = false)
     )]
     pub(crate) async fn try_method(
         &self,
@@ -195,7 +198,8 @@ impl BeamtalkMcp {
     /// memory and logs a durable `kind: #'new-class'` `ChangeLog` entry. The
     /// file is written to disk by a later `flush`.
     #[tool(
-        description = "Create a new Beamtalk class. Compiles 'source' and installs the class in memory, then appends a durable 'kind: new-class' ChangeLog entry; a subsequent 'flush' writes the file to disk at 'path'. The path is typically relative to the project root (e.g. \"src/greeter.bt\") and must lie inside the project source tree; the basename must match the declared class name. Raises a structured error if the target already exists, lies outside the project tree, the class name does not match the basename, or a class with that name is already loaded — use 'save_method' against the existing class in that last case. (ADR 0082 Phase 3, BT-2288.)"
+        description = "Create a new Beamtalk class. Compiles 'source' and installs the class in memory, then appends a durable 'kind: new-class' ChangeLog entry; a subsequent 'flush' writes the file to disk at 'path'. The path is typically relative to the project root (e.g. \"src/greeter.bt\") and must lie inside the project source tree; the basename must match the declared class name. Raises a structured error if the target already exists, lies outside the project tree, the class name does not match the basename, or a class with that name is already loaded — use 'save_method' against the existing class in that last case. (ADR 0082 Phase 3, BT-2288.)",
+        annotations(read_only_hint = false, destructive_hint = false)
     )]
     pub(crate) async fn save_class(
         &self,
@@ -252,7 +256,8 @@ impl BeamtalkMcp {
     /// immediately, no restart needed, and installs unconditionally including
     /// on stdlib classes — flushability, not refusal, same as `save_method`.
     #[tool(
-        description = "Remove a method from a Beamtalk class. Compiles to 'aClass removeSelector: #selector', which raises a selector_not_found error if the selector is not defined locally or as an extension (check first with includesSelector:, or supply 'if_absent'). Removing a locally-defined override re-exposes the inherited implementation immediately, no restart needed; removing an extension that shadows a same-named local method re-exposes that local method. Installs unconditionally, including on stdlib classes — whether the resulting change is flushable to disk (not whether it takes effect in memory) depends on whether the class is backed by an in-project .bt file. 'if_absent', if supplied, is a Beamtalk expression (not a string value) evaluated as a fallback instead of raising. (ADR 0112 Phase 4, BT-3188.)"
+        description = "Remove a method from a Beamtalk class. Compiles to 'aClass removeSelector: #selector', which raises a selector_not_found error if the selector is not defined locally or as an extension (check first with includesSelector:, or supply 'if_absent'). Removing a locally-defined override re-exposes the inherited implementation immediately, no restart needed; removing an extension that shadows a same-named local method re-exposes that local method. Installs unconditionally, including on stdlib classes — whether the resulting change is flushable to disk (not whether it takes effect in memory) depends on whether the class is backed by an in-project .bt file. 'if_absent', if supplied, is a Beamtalk expression (not a string value) evaluated as a fallback instead of raising. (ADR 0112 Phase 4, BT-3188.)",
+        annotations(read_only_hint = false, destructive_hint = true)
     )]
     pub(crate) async fn remove_method(
         &self,
@@ -309,7 +314,8 @@ impl BeamtalkMcp {
     /// already establishes, applied here to memory-removal vs. disk-deletion
     /// instead of ephemeral-vs-durable intent.
     #[tool(
-        description = "Remove a class from the running Beamtalk system. DESTRUCTIVE (eventually): compiles to 'aClass removeFromSystem', which stops any live actors of the class, terminates its gen_server, purges the BEAM module, and appends a durable 'remove-class' ChangeLog entry — but does NOT touch disk. Refuses to remove stdlib/sealed classes or a class with live subclasses (remove those first), raising a structured error. Nothing is written to disk until a separate, later 'flush' tool call with 'confirm_destructive: true' (or 'Workspace flushIncludingDestructive'); until then the pending removal shows as 'skipped: destructive' from 'flush'/'list_changes'. Returns the resulting ChangeEntry, reporting whether it is flushable. (ADR 0113 Phase 4, BT-3210.)"
+        description = "Remove a class from the running Beamtalk system. DESTRUCTIVE (eventually): compiles to 'aClass removeFromSystem', which stops any live actors of the class, terminates its gen_server, purges the BEAM module, and appends a durable 'remove-class' ChangeLog entry — but does NOT touch disk. Refuses to remove stdlib/sealed classes or a class with live subclasses (remove those first), raising a structured error. Nothing is written to disk until a separate, later 'flush' tool call with 'confirm_destructive: true' (or 'Workspace flushIncludingDestructive'); until then the pending removal shows as 'skipped: destructive' from 'flush'/'list_changes'. Returns the resulting ChangeEntry, reporting whether it is flushable. (ADR 0113 Phase 4, BT-3210.)",
+        annotations(read_only_hint = false, destructive_hint = true)
     )]
     pub(crate) async fn remove_class(
         &self,
@@ -360,7 +366,8 @@ impl BeamtalkMcp {
     /// 0114 "Flush" reuses ADR 0113's tier verbatim, extended to genuinely
     /// multi-file staging).
     #[tool(
-        description = "Rename a class in the running Beamtalk system. Compiles to 'aClass renameTo: #NewName', which rewrites every in-project cross-file reference the cross-reference index can find (constructor/message sends, type annotations, superclass declarations, extension declarations) and re-registers the class under the new name immediately — but does NOT touch disk. Refuses a stdlib/dependency class (the xref index only covers in-project source) or a collision with an already-loaded class name, raising a structured error. Appends a durable 'rename-class' ChangeLog entry. Nothing is written to disk until a separate, later 'flush' tool call with 'confirm_destructive: true' (or 'Workspace flushIncludingDestructive'); until then the pending rename shows as 'skipped: destructive' from 'flush'/'list_changes'. Returns the renamed class. (ADR 0114 Phase 5, BT-3276.)"
+        description = "Rename a class in the running Beamtalk system. Compiles to 'aClass renameTo: #NewName', which rewrites every in-project cross-file reference the cross-reference index can find (constructor/message sends, type annotations, superclass declarations, extension declarations) and re-registers the class under the new name immediately — but does NOT touch disk. Refuses a stdlib/dependency class (the xref index only covers in-project source) or a collision with an already-loaded class name, raising a structured error. Appends a durable 'rename-class' ChangeLog entry. Nothing is written to disk until a separate, later 'flush' tool call with 'confirm_destructive: true' (or 'Workspace flushIncludingDestructive'); until then the pending rename shows as 'skipped: destructive' from 'flush'/'list_changes'. Returns the renamed class. (ADR 0114 Phase 5, BT-3276.)",
+        annotations(read_only_hint = false, destructive_hint = true)
     )]
     pub(crate) async fn rename_class(
         &self,
@@ -410,7 +417,8 @@ impl BeamtalkMcp {
     /// review, never auto-rewritten. Memory-mutating only, joining
     /// `rename-class`/`remove-class` in the same Tier 2 flush gate.
     #[tool(
-        description = "Rename a method on a class in the running Beamtalk system. Compiles to 'aClass renameSelector: #old to: #new', which auto-rewrites only the self/super sends the cross-reference index can prove are structurally safe, and raises a selector_not_found error if the selector is not defined locally. Instance-side only (send 'Counter class renameSelector: #old to: #new' directly via 'evaluate' for a class-side rename). Refuses a collision with an already-defined local selector, raising a structured error. Appends a durable 'rename-method' ChangeLog entry recording confirmed 'sites' (auto-rewritten) separately from 'candidate_sites' (reported for review, never auto-rewritten) — does NOT touch disk. Nothing is written to disk until a separate, later 'flush' tool call with 'confirm_destructive: true' (or 'Workspace flushIncludingDestructive'); until then the pending rename shows as 'skipped: destructive' from 'flush'/'list_changes'. Returns the class. (ADR 0114 Phase 5, BT-3276.)"
+        description = "Rename a method on a class in the running Beamtalk system. Compiles to 'aClass renameSelector: #old to: #new', which auto-rewrites only the self/super sends the cross-reference index can prove are structurally safe, and raises a selector_not_found error if the selector is not defined locally. Instance-side only (send 'Counter class renameSelector: #old to: #new' directly via 'evaluate' for a class-side rename). Refuses a collision with an already-defined local selector, raising a structured error. Appends a durable 'rename-method' ChangeLog entry recording confirmed 'sites' (auto-rewritten) separately from 'candidate_sites' (reported for review, never auto-rewritten) — does NOT touch disk. Nothing is written to disk until a separate, later 'flush' tool call with 'confirm_destructive: true' (or 'Workspace flushIncludingDestructive'); until then the pending rename shows as 'skipped: destructive' from 'flush'/'list_changes'. Returns the class. (ADR 0114 Phase 5, BT-3276.)",
+        annotations(read_only_hint = false, destructive_hint = true)
     )]
     pub(crate) async fn rename_method(
         &self,
@@ -459,7 +467,8 @@ impl BeamtalkMcp {
     /// installs and nothing is recorded to the `ChangeLog` — this is a
     /// read-only "check before save" report of would-be-stale callers.
     #[tool(
-        description = "Compile a pending method edit and report would-be-stale dependents, without installing it. Compiles to 'aClass precheckCompile: #selector source: body' — the editor/LSP pre-save advisory (ADR 0105 Phase 3): non-blocking, the post-reload image check that runs automatically on 'save_method' remains the authority. The 'body' argument is the source on the right-hand side of '=>', passed as a String value — no escaping required by the caller. Returns a report Dictionary (findings/checked/totalCandidates/notChecked/capNote/checkedOwners); an edit with no type-relevant signature change reports empty. (ADR 0105 Phase 3, BT-2782.)"
+        description = "Compile a pending method edit and report would-be-stale dependents, without installing it. Compiles to 'aClass precheckCompile: #selector source: body' — the editor/LSP pre-save advisory (ADR 0105 Phase 3): non-blocking, the post-reload image check that runs automatically on 'save_method' remains the authority. The 'body' argument is the source on the right-hand side of '=>', passed as a String value — no escaping required by the caller. Returns a report Dictionary (findings/checked/totalCandidates/notChecked/capNote/checkedOwners); an edit with no type-relevant signature change reports empty. (ADR 0105 Phase 3, BT-2782.)",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn precheck_method(
         &self,

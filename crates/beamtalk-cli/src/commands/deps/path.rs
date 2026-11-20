@@ -192,6 +192,20 @@ pub(crate) fn compile_dependency_at(
         otp_specs,
     )?;
 
+    // Mirror the dependency's `priv/` next to its compiled `ebin/`
+    // (`_build/deps/<name>/priv`) so `code:priv_dir/1` resolves both in the
+    // dev code path and in a release staged from this layout (BT-5072).
+    if let Some(dep_build) = ebin_path.parent() {
+        let src = dep_root.join("priv");
+        let dest = dep_build.join("priv");
+        if src.is_dir() && src != dest {
+            let _ = std::fs::remove_dir_all(&dest);
+            beamtalk_workspace::copy_tree(src.as_std_path(), dest.as_std_path())
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to copy '{src}' to '{dest}'"))?;
+        }
+    }
+
     let (_, class_infos, protocol_infos, protocol_defs, alias_infos, protocol_sources, extensions) =
         build_dep_class_index(dep_root, dep_name, prior_deps).unwrap_or_default();
 

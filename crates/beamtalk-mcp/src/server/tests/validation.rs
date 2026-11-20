@@ -123,3 +123,94 @@ fn validate_selector_accepts_and_rejects() {
         &rejected,
     );
 }
+
+// --- BT-5070: path confinement ---
+
+#[test]
+fn path_policy_confines_to_project_root() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/a.bt"), "").unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("secret.bt"), "").unwrap();
+    let policy = PathPolicy::Confined(root.clone());
+
+    let ok = policy
+        .check(root.join("src/a.bt").to_str().unwrap())
+        .unwrap();
+    assert!(ok.starts_with(&root));
+    // A not-yet-existing export target is judged by its parent.
+    policy
+        .check(root.join("traces.json").to_str().unwrap())
+        .unwrap();
+    // Outside, `..` traversal and a missing parent are all refused.
+    assert!(
+        policy
+            .check(outside.path().join("secret.bt").to_str().unwrap())
+            .is_err()
+    );
+    let traversal = format!("{}/src/../../{}", root.display(), "etc/passwd");
+    assert!(policy.check(&traversal).is_err());
+    // A deeper not-yet-existing target inside the root is fine; `..` in the
+    // not-yet-existing tail is refused.
+    policy
+        .check(root.join("no/such/dir/x.json").to_str().unwrap())
+        .unwrap();
+    assert!(
+        policy
+            .check(&format!("{}/no/../../x.json", root.display()))
+            .is_err()
+    );
+    // PathPolicy::Unconfined lets them through.
+    PathPolicy::Unconfined
+        .check(outside.path().join("secret.bt").to_str().unwrap())
+        .unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn path_policy_refuses_symlink_escaping_the_root() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.join("link")).unwrap();
+    let policy = PathPolicy::Confined(root.clone());
+    assert!(policy.check(root.join("link").to_str().unwrap()).is_err());
+    assert!(
+        policy
+            .check(root.join("link/new.json").to_str().unwrap())
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn confined_tools_refuse_paths_outside_the_project_root() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let (_fake, mut mcp) = fake_mcp(Box::new(|_| serde_json::json!({}))).await;
+    mcp.path_policy = PathPolicy::Confined(root);
+    let outside = tempfile::tempdir().unwrap();
+    let p = outside.path().to_str().unwrap().to_string();
+
+    let r = mcp
+        .lint(Parameters(LintParams {
+            path: Some(p.clone()),
+            warnings_as_errors: None,
+        }))
+        .await
+        .unwrap();
+    assert_eq!(r.is_error, Some(true));
+    let r = mcp
+        .diagnostic_summary(Parameters(DiagnosticSummaryParams {
+            path: Some(p.clone()),
+        }))
+        .await
+        .unwrap();
+    assert_eq!(r.is_error, Some(true));
+    let r = mcp
+        .load_file(Parameters(LoadFileParams { path: p.clone() }))
+        .await
+        .unwrap();
+    assert_eq!(r.is_error, Some(true));
+}
