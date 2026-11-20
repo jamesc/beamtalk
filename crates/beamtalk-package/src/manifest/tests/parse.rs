@@ -535,3 +535,98 @@ fn native_dependency_may_not_share_the_package_name() {
     );
     assert!(err.contains("same name as this package"), "{err}");
 }
+
+// ---- BT-5076: the shapes real external packages use must still load ----
+//
+// One manifest per shape the sibling beamtalk-* packages publish. If one of
+// these fails, strict validation broke a real package.
+
+/// The package names the real external packages use. None may be reserved.
+const REAL_PACKAGE_NAMES: &[&str] = &[
+    "buccaneer",
+    "catalina",
+    "hpack",
+    "http",
+    "agents",
+    "announcements",
+    "oauth",
+    "mint",
+    "yaml",
+    "linear",
+];
+
+#[test]
+fn real_package_names_are_not_reserved() {
+    for name in REAL_PACKAGE_NAMES {
+        assert!(
+            validate_package_name(name).is_ok(),
+            "real package '{name}' must not be a reserved name"
+        );
+    }
+}
+
+fn parses(content: &str) -> ParsedManifest {
+    let temp = TempDir::new().unwrap();
+    let path = write_manifest(&temp, content);
+    parse_manifest_full(&path.join("beamtalk.toml")).unwrap()
+}
+
+#[test]
+fn shape_package_dependencies_and_diagnostics_loads() {
+    let m = parses(
+        "[package]\nname = \"buccaneer\"\nversion = \"0.1.7\"\ndescription = \"d\"\n\n\
+         [dependencies]\nhttp = \"0.3.6\"\n\n[diagnostics]\nunused = \"warn\"\ndnu = \"hint\"\n",
+    );
+    assert_eq!(m.package.name, "buccaneer");
+    assert_eq!(m.dependencies.len(), 1);
+    assert!(!m.diagnostics.is_empty());
+}
+
+#[test]
+fn shape_package_dependencies_and_native_dependencies_loads() {
+    let m = parses(
+        "[package]\nname = \"yaml\"\nversion = \"0.2.0\"\ndescription = \"d\"\n\n\
+         [dependencies]\n\n[native.dependencies]\nyamerl = \"~> 0.10\"\n\
+         jose = { git = \"https://github.com/potatosalad/erlang-jose\", tag = \"1.11.10\" }\n",
+    );
+    assert_eq!(m.native_dependencies.len(), 2);
+}
+
+#[test]
+fn shape_package_with_licenses_loads() {
+    let m = parses(
+        "[package]\nname = \"agents\"\nversion = \"0.1.1\"\ndescription = \"d\"\n\
+         licenses = [\"Apache-2.0\"]\n\n[dependencies]\n",
+    );
+    assert_eq!(
+        m.package.licenses.as_deref(),
+        Some(&["Apache-2.0".to_string()][..])
+    );
+}
+
+#[test]
+fn shape_package_without_description_loads() {
+    let m = parses("[package]\nname = \"oauth\"\nversion = \"0.2.1\"\n\n[dependencies]\n");
+    assert_eq!(m.package.description, None);
+}
+
+#[test]
+fn every_real_package_name_and_version_loads() {
+    for (name, version) in [
+        ("buccaneer", "0.1.7"),
+        ("catalina", "0.2.7"),
+        ("hpack", "0.1.1"),
+        ("http", "0.3.6"),
+        ("agents", "0.1.1"),
+        ("announcements", "0.1.1"),
+        ("oauth", "0.2.1"),
+        ("mint", "0.2.1"),
+        ("yaml", "0.2.0"),
+        ("linear", "0.1.3"),
+    ] {
+        let m = parses(&format!(
+            "[package]\nname = \"{name}\"\nversion = \"{version}\"\n"
+        ));
+        assert_eq!(m.package.name, name);
+    }
+}
