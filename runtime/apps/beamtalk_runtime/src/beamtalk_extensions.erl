@@ -298,8 +298,8 @@ register(Class, Selector, Fun, Owner, Source) when
 
 %% BT-5060: an extension that replaces a method a value class compiles is not
 %% seen by that class's direct value subclasses (ADR 0066, the one-hop route).
-%% Say so, naming them, once per registration. Best effort: the registry or the
-%% class tables may not exist yet during bootstrap.
+%% Say so, naming them, once per registration. Best effort: it never fails the
+%% registration.
 -spec warn_one_hop_children(atom(), atom()) -> ok.
 warn_one_hop_children(Class, Selector) ->
     try beamtalk_dispatch:one_hop_children_missing_extension(Class, Selector) of
@@ -315,11 +315,10 @@ warn_one_hop_children(Class, Selector) ->
             ),
             ok
     catch
-        error:badarg ->
-            %% Bootstrap: the registry or class tables do not exist yet.
-            ok;
         Kind:Reason ->
-            %% A bug in the predicate: do not lose the warning silently.
+            %% The predicate tolerates missing tables itself (bootstrap answers
+            %% `[]`), so anything raised here is a bug: do not lose the warning
+            %% silently.
             ?LOG_WARNING(
                 "BT-5060 one-hop warning skipped for '~p' on '~p': ~p:~p",
                 [Selector, Class, Kind, Reason],
