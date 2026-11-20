@@ -26,8 +26,15 @@ defmodule BtAttach.RuntimeConfigTest do
       "PORT" => System.get_env("PORT"),
       "PHX_HOST" => System.get_env("PHX_HOST"),
       "BT_ATTACH_BIND_IP" => System.get_env("BT_ATTACH_BIND_IP"),
-      "BT_IDE_CONFIG" => System.get_env("BT_IDE_CONFIG")
+      "BT_IDE_CONFIG" => System.get_env("BT_IDE_CONFIG"),
+      "BT_IDE_DEV_AUTH" => System.get_env("BT_IDE_DEV_AUTH"),
+      "BT_IDE_ALLOW_UNAUTHENTICATED" => System.get_env("BT_IDE_ALLOW_UNAUTHENTICATED"),
+      "BT_OIDC_ISSUER" => System.get_env("BT_OIDC_ISSUER")
     }
+
+    System.delete_env("BT_IDE_DEV_AUTH")
+    System.delete_env("BT_IDE_ALLOW_UNAUTHENTICATED")
+    System.delete_env("BT_OIDC_ISSUER")
 
     System.put_env("SECRET_KEY_BASE", String.duplicate("a", 64))
     System.delete_env("PHX_HOST")
@@ -63,16 +70,60 @@ defmodule BtAttach.RuntimeConfigTest do
   end
 
   describe "BT_ATTACH_BIND_IP (ADR 0097 Implementation §1b)" do
-    test "unset keeps today's all-interfaces default" do
+    test "unset binds loopback only (BT-5065)" do
       System.delete_env("BT_ATTACH_BIND_IP")
 
-      assert Keyword.fetch!(read_prod_endpoint_http!(), :ip) == {0, 0, 0, 0, 0, 0, 0, 0}
+      assert Keyword.fetch!(read_prod_endpoint_http!(), :ip) == {127, 0, 0, 1}
     end
 
-    test "empty string keeps today's all-interfaces default" do
+    test "empty string binds loopback only (BT-5065)" do
       System.put_env("BT_ATTACH_BIND_IP", "")
 
-      assert Keyword.fetch!(read_prod_endpoint_http!(), :ip) == {0, 0, 0, 0, 0, 0, 0, 0}
+      assert Keyword.fetch!(read_prod_endpoint_http!(), :ip) == {127, 0, 0, 1}
+    end
+
+    test "a non-loopback bind with no auth gate refuses to boot" do
+      System.put_env("BT_ATTACH_BIND_IP", "0.0.0.0")
+
+      assert_raise RuntimeError, ~r/refusing to start.*BT_IDE_ALLOW_UNAUTHENTICATED/s, fn ->
+        read_prod_endpoint_http!()
+      end
+    end
+
+    test "a non-loopback bind with no gate boots with the explicit opt-in, recorded for a warning" do
+      System.put_env("BT_ATTACH_BIND_IP", "::")
+      System.put_env("BT_IDE_ALLOW_UNAUTHENTICATED", "1")
+
+      config = Config.Reader.read!(@runtime_exs, env: :prod, target: :host)
+
+      assert config[:bt_attach][:unauthenticated_remote_bind] == {0, 0, 0, 0, 0, 0, 0, 0}
+    end
+
+    test "a non-loopback bind with OIDC configured boots" do
+      System.put_env("BT_ATTACH_BIND_IP", "0.0.0.0")
+      System.put_env("BT_OIDC_ISSUER", "https://idp.example.com")
+      System.put_env("BT_OIDC_CLIENT_ID", "id")
+      System.put_env("BT_OIDC_CLIENT_SECRET", "secret")
+      System.put_env("BT_OIDC_REDIRECT_URI", "https://ide.example.com/oidc/callback")
+      System.put_env("BT_OIDC_ROLES_OWNER", "admins")
+
+      on_exit(fn ->
+        for k <-
+              ~w(BT_OIDC_CLIENT_ID BT_OIDC_CLIENT_SECRET BT_OIDC_REDIRECT_URI BT_OIDC_ROLES_OWNER),
+            do: System.delete_env(k)
+      end)
+
+      config = Config.Reader.read!(@runtime_exs, env: :prod, target: :host)
+
+      assert Keyword.fetch!(read_prod_endpoint_http!(), :ip) == {0, 0, 0, 0}
+      refute config[:bt_attach][:unauthenticated_remote_bind]
+    end
+
+    test "a non-loopback bind with dev-auth enabled boots (dev-auth is loopback-gated per request)" do
+      System.put_env("BT_ATTACH_BIND_IP", "0.0.0.0")
+      System.put_env("BT_IDE_DEV_AUTH", "1")
+
+      assert Keyword.fetch!(read_prod_endpoint_http!(), :ip) == {0, 0, 0, 0}
     end
 
     test "127.0.0.1 is accepted for the desktop-attach broker's loopback bind" do
