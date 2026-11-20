@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 use crate::commands::deps::lockfile::{NativeLockSource, NativePackageLock};
 use beamtalk_core::build_layout::BuildLayout;
@@ -1144,9 +1144,10 @@ fn otp_module_names() -> HashSet<String> {
             .map(str::to_string)
             .collect(),
         other => {
-            debug!(
+            warn!(
                 ?other,
-                "Could not list OTP modules; skipping OTP module-name check"
+                "Could not list OTP modules; skipping the check that native modules do not \
+                 shadow OTP modules"
             );
             HashSet::new()
         }
