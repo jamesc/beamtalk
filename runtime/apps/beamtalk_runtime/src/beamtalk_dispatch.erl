@@ -90,6 +90,7 @@ never an `{error, _}` result: it propagates unchanged.
     super_reply/5,
     super_value/4,
     inherited_target/2,
+    inherited_value_walk/5,
     invoke_resolved/6,
     responds_to/2,
     invoke_extension/6,
@@ -245,9 +246,11 @@ takes only its own:
   with its own extension lookup. An actor arm treats it as `slow`, except for
   the three `Actor` methods `state_free_actor_intrinsic/3` names (BT-4995),
   which are answered `compiled` instead, unless `Actor` itself has an extension
-  for the selector (that keeps `value`, so the slow route decides, see BT-5002).
+  for the selector.
 - `slow` for everything else; the arm then takes today's path byte for byte:
-  an extension on `ClassName` or its superclass, an owner that does not define
+  an extension on `ClassName`, its superclass or the owner itself (BT-5002: an
+  extension on a class beats that class's compiled method, at any depth below
+  it, and only the walk invokes it), an owner that does not define
   `Selector` among its own compiled methods (an extension on an ancestor
   between, a runtime-patched standalone method, a catch-all
   `doesNotUnderstand:args:` class), and does-not-understand.
@@ -290,6 +293,47 @@ inherited_target(ClassName, Selector) ->
             Verdict
     end.
 
+-doc """
+BT-5002: the route a value type's `dispatch/3` default arm takes on a `slow`
+`inherited_target/2` verdict.
+
+Lookup walks the superclass chain from `ClassName`; an extension on a class
+beats that class's compiled method, and the first class with `Selector` by
+either route wins. So: an extension on `ClassName` itself; else the owner
+`resolve_owner/2` finds from the superclass, if it has an extension for
+`Selector` (it replaces the owner's compiled method, which a direct call to the
+owner's `dispatch/3` would run); else the superclass's compiled `dispatch/3`
+(`SuperModule`), as before.
+
+Value-type extensions are `fun(Args, Self)`; like the generated arm, this does
+not catch a raise from one.
+""".
+-spec inherited_value_walk(class_name(), selector(), args(), term(), module()) -> term().
+inherited_value_walk(ClassName, Selector, Args, Self, SuperModule) ->
+    case check_extension(ClassName, Selector) of
+        {ok, Fun} ->
+            apply(Fun, [Args, Self]);
+        not_found ->
+            case owner_extension(ClassName, Selector) of
+                {ok, Fun} -> apply(Fun, [Args, Self]);
+                not_found -> SuperModule:dispatch(Selector, Args, Self)
+            end
+    end.
+
+%% The extension on the class `resolve_owner/2` finds from `ClassName`'s
+%% superclass, if any.
+-spec owner_extension(class_name(), selector()) -> {ok, fun()} | not_found.
+owner_extension(ClassName, Selector) ->
+    case beamtalk_class_metadata:lookup_superclass(ClassName) of
+        {ok, Super} when is_atom(Super), Super =/= none, Super =/= nil ->
+            case resolve_owner(Super, Selector) of
+                {owner, Owner, _Module} -> check_extension(Owner, Selector);
+                miss -> not_found
+            end;
+        _ ->
+            not_found
+    end.
+
 -spec compute_inherited_target(class_name(), selector()) ->
     {cache | nocache, {compiled | value, class_name(), module()} | slow}.
 compute_inherited_target(ClassName, Selector) ->
@@ -307,19 +351,20 @@ compute_inherited_target(ClassName, Selector) ->
                         case owner_convention(Module, Selector) of
                             none ->
                                 slow;
-                            value ->
-                                %% BT-4995: an extension on the owner itself keeps today's
-                                %% `value` (slow) verdict, so whatever the slow path does with
-                                %% it (BT-5002) is still what happens.
-                                case
-                                    state_free_actor_intrinsic(Owner, Module, Selector) andalso
-                                        check_extension(Owner, Selector) =:= not_found
-                                of
-                                    true -> {compiled, Owner, Module};
-                                    false -> {value, Owner, Module}
-                                end;
                             Convention ->
-                                {Convention, Owner, Module}
+                                %% BT-5002: an extension on the owner itself replaces the
+                                %% owner's compiled method (the first class with the selector
+                                %% wins, and at each class its extension beats its compiled
+                                %% method), so a direct call to the compiled method would skip
+                                %% it. `slow` takes the walk, which invokes it
+                                %% (`lookup_in_class_chain/5`). Computed once per
+                                %% (class, selector) and cached: the hit stays one lookup.
+                                case check_extension(Owner, Selector) of
+                                    {ok, _} ->
+                                        slow;
+                                    not_found ->
+                                        verdict_for(Convention, Owner, Module, Selector)
+                                end
                         end;
                     _ ->
                         slow
@@ -328,6 +373,19 @@ compute_inherited_target(ClassName, Selector) ->
         {ok, _} ->
             {cache, slow}
     end.
+
+%% The cached verdict for an owner with no extension of its own for `Selector`.
+%% BT-4995: the three state-free `Actor` intrinsics are answered `compiled`
+%% rather than `value`.
+-spec verdict_for(compiled | value, class_name(), module(), selector()) ->
+    {compiled | value, class_name(), module()}.
+verdict_for(value, Owner, Module, Selector) ->
+    case state_free_actor_intrinsic(Owner, Module, Selector) of
+        true -> {compiled, Owner, Module};
+        false -> {value, Owner, Module}
+    end;
+verdict_for(compiled, Owner, Module, _Selector) ->
+    {compiled, Owner, Module}.
 
 %% BT-4995: the Actor methods an actor start runs through its dispatch/4
 %% default arm that provably run no user code and read or write no actor
@@ -346,7 +404,7 @@ compute_inherited_target(ClassName, Selector) ->
 %%     is refused), and an extension or an override on a class below `Actor` is
 %%     seen by `compute_inherited_target/2` before this point. An extension on
 %%     `Actor` itself is checked there too (`check_extension(Owner, ...)`), and
-%%     keeps the `value` verdict: today's slow route, whatever BT-5002 decides.
+%%     gives the `slow` verdict, whose walk invokes it (BT-5002).
 %%
 %% The three are named here, not derived: `actorOnExit` stores a block,
 %% `actorMonitor`, `delegate` and the rest of `Actor`'s intrinsics are left on
@@ -455,8 +513,20 @@ miss so errors keep their exact shape.
     dispatch_result().
 lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
     case resolve_owner(ClassName, Selector) of
+        {owner, ClassName, Module} ->
+            %% The callers (`lookup/5`, `super/5`) already tried the extension
+            %% on `ClassName` itself.
+            invoke_resolved(ClassName, Module, Selector, Args, Self, State);
         {owner, Owner, Module} ->
-            invoke_resolved(Owner, Module, Selector, Args, Self, State);
+            %% BT-5002: the owner is an ancestor. An extension on it beats its
+            %% compiled method (`has_method_local/2` counts both, so it is the
+            %% first class with the selector by either route).
+            case check_extension(Owner, Selector) of
+                {ok, Fun} ->
+                    invoke_extension(Fun, Selector, Owner, Args, Self, State);
+                not_found ->
+                    invoke_resolved(Owner, Module, Selector, Args, Self, State)
+            end;
         miss ->
             walk_in_class_chain(Selector, Args, Self, State, ClassName)
     end.
@@ -640,6 +710,19 @@ classes) to the walker's step protocol.
 -spec invoke_step(class_name(), pid(), selector(), args(), bt_self(), state()) ->
     beamtalk_hierarchy:step_result(dispatch_result()).
 invoke_step(ClassName, ClassPid, Selector, Args, Self, State) ->
+    %% BT-5002: this walk is where `lookup_in_class_chain/5` falls back to, and
+    %% it must pick the same method: an extension on the class beats its
+    %% compiled method.
+    case check_extension(ClassName, Selector) of
+        {ok, Fun} ->
+            {found, invoke_extension(Fun, Selector, ClassName, Args, Self, State)};
+        not_found ->
+            invoke_compiled_step(ClassName, ClassPid, Selector, Args, Self, State)
+    end.
+
+-spec invoke_compiled_step(class_name(), pid(), selector(), args(), bt_self(), state()) ->
+    beamtalk_hierarchy:step_result(dispatch_result()).
+invoke_compiled_step(ClassName, ClassPid, Selector, Args, Self, State) ->
     case invoke_method(ClassName, ClassPid, Selector, Args, Self, State) of
         {continue, none} ->
             %% Reached root without finding a dispatchable method.

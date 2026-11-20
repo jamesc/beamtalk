@@ -49,6 +49,12 @@ fn value_default_arm_asks_the_inherited_verdict_first() {
             && slow.contains("call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)"),
         "every other verdict keeps the extension lookup and superclass delegation. Got:\n{slow}"
     );
+    assert!(
+        arm.contains(
+            "call 'beamtalk_dispatch':'inherited_value_walk'('Bt4260Point', Selector, Args, Self, 'bt@stdlib@value')"
+        ),
+        "BT-5002: the verdict's own slow answer takes the owner-extension walk. Got:\n{arm}"
+    );
     assert_eq!(
         arm.matches("InhModule:'dispatch'").count(),
         1,
@@ -72,7 +78,7 @@ fn selectors_the_superclass_defines_skip_the_verdict() {
     );
     assert!(
         arm.contains(
-            "<_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('Bt4260Sub', Selector)"
+            "<_> when 'true' -> case call 'beamtalk_dispatch':'inherited_target'('Bt4260Sub', Selector) of"
         ),
         "every other selector asks the verdict. Got:\n{arm}"
     );

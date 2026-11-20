@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5002: direct child of Bt5002ValueBase.
+
+Bt5002ValueBase subclass: Bt5002ValueMid

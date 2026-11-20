@@ -102,10 +102,12 @@ let _temp@18 = _coll@17 in let _temp@19 = case call 'erlang':'is_list'(_temp@18)
                 <'subclassResponsibility'> when 'true' -> 'slow'
                 <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
-                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('FoldValueCtr', Selector)
+                <_> when 'true' -> case call 'beamtalk_dispatch':'inherited_target'('FoldValueCtr', Selector) of <'slow'> when 'true' -> 'walk' <InhVerdict> when 'true' -> InhVerdict end
             end of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
+                <'walk'> when 'true' ->
+                    call 'beamtalk_dispatch':'inherited_value_walk'('FoldValueCtr', Selector, Args, Self, 'bt@stdlib@object')
                 <_InhSlow> when 'true' ->
                     case call 'beamtalk_extensions':'lookup'('FoldValueCtr', Selector) of
                         <{'ok', ExtFun, _ExtOwner}> when 'true' ->

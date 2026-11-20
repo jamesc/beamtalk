@@ -93,9 +93,10 @@ plain isAlive
 
 // === Extensions on `Actor` itself (global, so they live in this serial script) ===
 //
-// PIN-BUG BT-5002 (pinned as observed before BT-4995; a fix flips the "ignored"
-// lines): an extension on `Actor` is seen by a direct subclass but ignored by a
-// class below it.
+// BT-5002: an extension on `Actor` is seen by every actor class, whatever its
+// depth: lookup walks the superclass chain from the receiver's class, an
+// extension on a class beats that class's compiled method, and the first class
+// with the selector by either route wins.
 
 IntrinsicReplBase >> go => self continueWith: #bump
 // => "IntrinsicReplBase>>go"
@@ -131,7 +132,10 @@ deep stop
 // => ok
 
 seen lookup: #actorTerminate
-// => cleared
+// => normal
+
+seen put: #actorTerminate value: #cleared
+// => _
 
 // An actor that started before the extension was removed no longer calls it.
 before := IntrinsicReplBase spawn
@@ -171,8 +175,8 @@ IntrinsicReplBase removeSelector: #terminate:
 Actor removeSelector: #terminate:
 // => Actor
 
-// `continueWith:`: the extension runs for the direct subclass (the step does
-// not), and is ignored below it (the step runs).
+// `continueWith:`: the extension runs for the direct subclass and for the class
+// below it (the step does not run for either).
 Erlang beamtalk_extensions register: #Actor selector: #'continueWith:' fun: [:args :receiver | (IntrinsicReplSink named: #bt4995Sink) unwrap put: #actorContinue value: args first] owner: #bt4995
 // => _
 
@@ -188,20 +192,26 @@ seen lookup: #actorContinue
 cont count
 // => 0
 
+seen put: #actorContinue value: #cleared
+// => _
+
 deepCont := IntrinsicReplLeaf spawn
 // => Actor(IntrinsicReplLeaf, _)
 
 deepCont go
 // => _
 
+seen lookup: #actorContinue
+// => bump
+
 deepCont count
-// => 1
+// => 0
 
 Actor removeSelector: #continueWith:
 // => Actor
 
 // `stopWith:` sent to self: the extension intercepts it for the direct subclass
-// (the actor stays alive), and is ignored below it (the actor stops).
+// and for the class below it (the actor stays alive in both).
 Erlang beamtalk_extensions register: #Actor selector: #'stopWith:' fun: [:args :receiver | (IntrinsicReplSink named: #bt4995Sink) unwrap put: #actorStop value: args first] owner: #bt4995
 // => _
 
@@ -227,15 +237,24 @@ deepStopper stopMe
 // => _
 
 deepStopper isAlive
-// => false
+// => true
 
 seen lookup: #actorStop
-// => cleared
+// => why
 
 Actor removeSelector: #stopWith:
 // => Actor
 
 stopper stop
+// => ok
+
+deepStopper stop
+// => ok
+
+deepCont stop
+// => ok
+
+cont stop
 // => ok
 
 seen stop

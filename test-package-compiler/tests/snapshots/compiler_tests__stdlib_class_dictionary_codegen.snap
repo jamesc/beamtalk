@@ -144,10 +144,12 @@ call 'bt@stdlib@dictionary':'dispatch'('keysAndValuesDo:', [_block@9], Self)
                 <'subclassResponsibility'> when 'true' -> 'slow'
                 <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
-                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('Dictionary', Selector)
+                <_> when 'true' -> case call 'beamtalk_dispatch':'inherited_target'('Dictionary', Selector) of <'slow'> when 'true' -> 'walk' <InhVerdict> when 'true' -> InhVerdict end
             end of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
+                <'walk'> when 'true' ->
+                    call 'beamtalk_dispatch':'inherited_value_walk'('Dictionary', Selector, Args, Self, 'bt@stdlib@object')
                 <_InhSlow> when 'true' ->
                     case call 'beamtalk_extensions':'lookup'('Dictionary', Selector) of
                         <{'ok', ExtFun, _ExtOwner}> when 'true' ->

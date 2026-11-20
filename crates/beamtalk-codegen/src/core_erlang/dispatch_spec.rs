@@ -307,10 +307,15 @@ fn value_default_arm(
     one_hop: &[String],
     super_module: &str,
 ) -> Document<'static> {
+    // BT-5002: the verdict's own `slow` (an extension on this class, its
+    // superclass or the owner, an unregistered class, ...) is renamed `walk`
+    // and takes `inherited_value_walk/5`. The one-hop selectors below keep the
+    // unchanged `slow` route, so the common inherited send is byte for byte
+    // what it was.
     let ask = docvec![
-        "call 'beamtalk_dispatch':'inherited_target'(",
+        "case call 'beamtalk_dispatch':'inherited_target'(",
         leaf::atom(class_name.to_string()),
-        ", Selector)",
+        ", Selector) of <'slow'> when 'true' -> 'walk' <InhVerdict> when 'true' -> InhVerdict end",
     ];
     let verdict: Document<'static> = if one_hop.is_empty() {
         ask
@@ -342,6 +347,12 @@ fn value_default_arm(
         " of\n",
         "                <{'value', _InhOwner, InhModule}> when 'true' ->\n",
         "                    call InhModule:'dispatch'(Selector, Args, Self)\n",
+        "                <'walk'> when 'true' ->\n",
+        "                    call 'beamtalk_dispatch':'inherited_value_walk'(",
+        leaf::atom(class_name.to_string()),
+        ", Selector, Args, Self, ",
+        leaf::atom(super_module.to_string()),
+        ")\n",
         "                <_InhSlow> when 'true' ->\n",
         "                    case call 'beamtalk_extensions':'lookup'(",
         leaf::atom(class_name.to_string()),

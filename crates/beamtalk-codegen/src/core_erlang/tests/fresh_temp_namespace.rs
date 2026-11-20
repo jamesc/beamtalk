@@ -402,6 +402,7 @@ const HAND_WRITTEN_CAPITALIZED: &[&str] = &[
     "InfoType",
     "InhModule",
     "InhOwner",
+    "InhVerdict",
     "InheritedOutcome",
     "InheritedResult",
     "InheritedState",

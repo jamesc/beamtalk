@@ -78,10 +78,12 @@ call 'maps':'get'('eventId', Self)
             %% BT-4260: a memoised verdict picks the direct inherited call.
             case case Selector of
                 <'printString'> when 'true' -> 'slow'
-                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('Snapshot', Selector)
+                <_> when 'true' -> case call 'beamtalk_dispatch':'inherited_target'('Snapshot', Selector) of <'slow'> when 'true' -> 'walk' <InhVerdict> when 'true' -> InhVerdict end
             end of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
+                <'walk'> when 'true' ->
+                    call 'beamtalk_dispatch':'inherited_value_walk'('Snapshot', Selector, Args, Self, 'bt@stdlib@value')
                 <_InhSlow> when 'true' ->
                     case call 'beamtalk_extensions':'lookup'('Snapshot', Selector) of
                         <{'ok', ExtFun, _ExtOwner}> when 'true' ->
