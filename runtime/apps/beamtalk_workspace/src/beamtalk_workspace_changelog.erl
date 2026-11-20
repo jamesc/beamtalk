@@ -1342,7 +1342,9 @@ maybe_rotate(State) ->
                             ToArchive, ToKeep, State
                         )
                 end,
-            Stuck = length(Archivable) =< length(ToArchive),
+            %% Only a scan that finds nothing to archive proves the ring is stuck; a
+            %% failed rotation (I/O error) must be retried by the next append.
+            Stuck = ToArchive =:= [],
             warn_active_overflow(Overflow - length(ToArchive), State1#state{rotation_stuck = Stuck})
     end.
 

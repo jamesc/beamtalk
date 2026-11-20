@@ -282,13 +282,23 @@ require_class_capability(Op, ClassName, Suffix) ->
 
 -spec note_changelog_result(term()) -> ok.
 note_changelog_result({warning, Text}) when is_binary(Text) ->
-    Queued =
-        case erlang:get(?CHANGELOG_WARNINGS_KEY) of
-            undefined -> [];
-            List -> List
-        end,
-    _ = erlang:put(?CHANGELOG_WARNINGS_KEY, [Text | Queued]),
-    ok;
+    %% Only an eval worker drains the queue (`beamtalk_session_id` marks one,
+    %% see `beamtalk_repl_shell:seed_session_context/3`). In any other process
+    %% (an actor, a class gen_server) nothing would, so the warning would be lost
+    %% and the queue would grow forever; there the ERROR log `append_entry/3`
+    %% already wrote is the report.
+    case erlang:get(beamtalk_session_id) of
+        undefined ->
+            ok;
+        _ ->
+            Queued =
+                case erlang:get(?CHANGELOG_WARNINGS_KEY) of
+                    undefined -> [];
+                    List -> List
+                end,
+            _ = erlang:put(?CHANGELOG_WARNINGS_KEY, [Text | Queued]),
+            ok
+    end;
 note_changelog_result(_) ->
     ok.
 

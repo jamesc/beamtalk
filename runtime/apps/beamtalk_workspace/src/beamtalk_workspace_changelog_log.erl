@@ -22,6 +22,7 @@ ChangeLog persistence: the `changes.jsonl` append/load path, transactional rotat
     persist_append/4,
     rewrite_log/2,
     rotate_transactional/3,
+    truncate_to/2,
     source_ref_filename/2,
     sweep_stale_temps/1,
     truncate_log/1,
@@ -77,9 +78,35 @@ write_optional_source(SourcesDir, Ref, Body) ->
 append_synced(Path, Data) ->
     case file:open(Path, [append, raw, binary]) of
         {ok, Fd} ->
+            {ok, Before} = file:position(Fd, eof),
             Result =
                 case file:write(Fd, Data) of
                     ok -> file:sync(Fd);
+                    {error, _} = Err -> Err
+                end,
+            _ = file:close(Fd),
+            %% A failed write or fsync may leave a whole line on disk that the
+            %% caller is told was not recorded; the next append would reuse its
+            %% seq and one entry would overwrite the other at load. Cut the file
+            %% back to where it was (BT-5084).
+            case Result of
+                ok ->
+                    ok;
+                {error, _} ->
+                    _ = truncate_to(Path, Before),
+                    Result
+            end;
+        {error, _} = Err ->
+            Err
+    end.
+
+-spec truncate_to(string(), non_neg_integer()) -> ok | {error, term()}.
+truncate_to(Path, Size) ->
+    case file:open(Path, [read, write, raw, binary]) of
+        {ok, Fd} ->
+            Result =
+                case file:position(Fd, Size) of
+                    {ok, _} -> file:truncate(Fd);
                     {error, _} = Err -> Err
                 end,
             _ = file:close(Fd),

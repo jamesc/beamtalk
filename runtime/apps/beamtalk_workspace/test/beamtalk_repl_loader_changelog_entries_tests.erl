@@ -90,19 +90,29 @@ every_emitter_warns_when_append_fails_test_() ->
 %% renameTo:, removeFromSystem, ...) use, since they have no reply to carry one.
 warning_queue_test() ->
     _ = beamtalk_refactor_support:take_changelog_warnings(),
+    %% Outside an eval worker (no session marker) a warning is not queued: nothing
+    %% would drain it.
+    undefined = erlang:put(beamtalk_session_id, undefined),
+    erlang:erase(beamtalk_session_id),
+    ok = beamtalk_refactor_support:note_changelog_result({warning, <<"lost">>}),
+    ?assertEqual([], beamtalk_refactor_support:take_changelog_warnings()),
+    erlang:put(beamtalk_session_id, <<"s">>),
     ok = beamtalk_refactor_support:note_changelog_result(ok),
     ok = beamtalk_refactor_support:note_changelog_result({error, no_workspace}),
     ok = beamtalk_refactor_support:note_changelog_result({warning, <<"a">>}),
     ok = beamtalk_refactor_support:note_changelog_result({warning, <<"b">>}),
     ?assertEqual([<<"a">>, <<"b">>], beamtalk_refactor_support:take_changelog_warnings()),
-    ?assertEqual([], beamtalk_refactor_support:take_changelog_warnings()).
+    ?assertEqual([], beamtalk_refactor_support:take_changelog_warnings()),
+    erlang:erase(beamtalk_session_id).
 
 eval_reply_carries_primitive_changelog_warning_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
+    erlang:put(beamtalk_session_id, <<"s">>),
     Result = beamtalk_repl_eval:with_changelog_warnings(fun() ->
         ok = beamtalk_refactor_support:note_changelog_result({warning, <<"w">>}),
         {ok, 1, <<>>, [<<"existing">>], State}
     end),
+    erlang:erase(beamtalk_session_id),
     ?assertMatch({ok, 1, <<>>, [<<"existing">>, <<"w">>], _}, Result).
 
 %% BT-5084: a stalled server must not hang the caller forever.
@@ -172,6 +182,23 @@ stale_staging_dirs_are_swept_test() ->
         ?assertNot(filelib:is_dir(Old)),
         ?assert(filelib:is_dir(Fresh)),
         ?assert(filelib:is_dir(Other))
+    after
+        beamtalk_test_fs:rm_rf(Dir)
+    end.
+
+%% BT-5084 (review): a failed fsync/write must not leave a whole line behind, or the
+%% next append reuses its seq. `append_synced/2` cuts the file back.
+failed_sync_does_not_leave_a_line_test() ->
+    Dir = beamtalk_test_fs:tmp_dir("bt5084sync"),
+    Path = filename:join(Dir, "changes.jsonl"),
+    try
+        ok = file:write_file(Path, <<"{\"a\":1}\n">>),
+        Size = filelib:file_size(Path),
+        %% Simulate the line having landed, then the cut-back to the recorded size.
+        ok = file:write_file(Path, <<"{\"b\":2}\n">>, [append]),
+        ?assert(filelib:file_size(Path) > Size),
+        ok = beamtalk_workspace_changelog_log:truncate_to(Path, Size),
+        ?assertEqual({ok, <<"{\"a\":1}\n">>}, file:read_file(Path))
     after
         beamtalk_test_fs:rm_rf(Dir)
     end.
