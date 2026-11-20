@@ -309,23 +309,48 @@ OWNED_DIRS="lib/beamtalk share/beamtalk"
 OWNED_BINS="beamtalk beamtalk-compiler-port beamtalk-lsp beamtalk-mcp beamtalk-exec"
 
 swap_into_prefix() {
+    # Old trees wait here (outside STAGE, so the EXIT trap never deletes them)
+    # until the new ones are in place, and are put back if a move fails.
+    OLD=$(mktemp -d "${PREFIX}/.beamtalk-old.XXXXXX")
     for d in ${OWNED_DIRS}; do
         [ -d "${STAGE}/${d}" ] || continue
         mkdir -p "${PREFIX}/$(dirname "${d}")"
+        slot="${OLD}/$(echo "${d}" | tr / _)"
         if [ -e "${PREFIX}/${d}" ]; then
-            mv "${PREFIX}/${d}" "${STAGE}/.old-$(echo "${d}" | tr / _)"
+            mv "${PREFIX}/${d}" "${slot}"
         fi
-        mv "${STAGE}/${d}" "${PREFIX}/${d}"
+        if ! mv "${STAGE}/${d}" "${PREFIX}/${d}"; then
+            echo "Error: could not move ${d} into ${PREFIX}; restoring the previous install."
+            if [ -e "${slot}" ] && ! mv "${slot}" "${PREFIX}/${d}"; then
+                echo "  Restore failed too; the previous ${d} is kept in ${slot}."
+                exit 1
+            fi
+            rm -rf "${OLD}"
+            exit 1
+        fi
     done
-    # Remaining entries (bin/...) are merged; replacing a binary is an
-    # overwrite-by-rename so a running beamtalk is not truncated in place.
+    # Binaries: replaced by rename so a running beamtalk is not truncated in
+    # place. A directory where a binary should go is an error, not a silent
+    # move-into.
     if [ -d "${STAGE}/bin" ]; then
         mkdir -p "${PREFIX}/bin"
         for f in "${STAGE}/bin/"*; do
             [ -e "${f}" ] || continue
-            mv -f "${f}" "${PREFIX}/bin/$(basename "${f}")"
+            dest="${PREFIX}/bin/$(basename "${f}")"
+            if [ -d "${dest}" ] && [ ! -L "${dest}" ]; then
+                echo "Error: ${dest} is a directory; remove it and retry."
+                exit 1
+            fi
+            mv -f "${f}" "${dest}"
         done
     fi
+    # Anything else the archive carries is merged over the prefix, as the old
+    # extract-in-place install did, rather than dropped.
+    for f in "${STAGE}/"* "${STAGE}/".[!.]*; do
+        [ -e "${f}" ] || continue
+        cp -R "${f}" "${PREFIX}/"
+    done
+    rm -rf "${OLD}"
 }
 
 uninstall_beamtalk() {

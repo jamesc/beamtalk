@@ -30,6 +30,8 @@ mkdir -p "$T/stage/beamtalk-9.9.9/bin" "$T/stage/beamtalk-9.9.9/lib/beamtalk/lib
 printf '#!/bin/sh\necho beamtalk\n' > "$T/stage/beamtalk-9.9.9/bin/beamtalk"
 chmod +x "$T/stage/beamtalk-9.9.9/bin/beamtalk"
 echo new > "$T/stage/beamtalk-9.9.9/lib/beamtalk/lib/new.beam"
+mkdir -p "$T/stage/beamtalk-9.9.9/extra"
+echo x > "$T/stage/beamtalk-9.9.9/extra/file.txt"
 ARCHIVE="beamtalk-9.9.9-${PLAT}.tar.gz"
 (cd "$T/stage" && tar -czf "$T/release/$ARCHIVE" beamtalk-9.9.9)
 if command -v sha256sum >/dev/null 2>&1; then SUM="$(sha256sum "$T/release/$ARCHIVE" | awk '{print $1}')"
@@ -91,14 +93,38 @@ run_install "$P"; rc=$?
     && [ -z "$(ls -A "$P" | grep '^\.beamtalk-stage')" ]
 check "good checksum installs, replaces stale files, keeps unrelated ones" $?
 
+P4="$P"
+# 4b. an archive entry outside bin/ lib/beamtalk share/beamtalk is still installed
+[ -f "$P/extra/file.txt" ]
+check "other top-level archive entries are merged, not dropped" $?
+# --uninstall only removes what beamtalk owns, so drop the fixture's extra entry first
+rm -rf "$P/extra"
+
+# 4c. a failed swap puts the previous install back (a plain file blocks the new tree)
+P="$T/p4c"
+mkdir -p "$P/lib/beamtalk"
+echo old > "$P/lib/beamtalk/old.txt"
+mkdir -p "$T/mvbin"
+cat > "$T/mvbin/mv" <<'FAKEMV'
+#!/bin/sh
+# fail only the move of the new lib/beamtalk into place
+case "$*" in *.beamtalk-stage*/lib/beamtalk\ *) exit 1 ;; esac
+exec /bin/mv "$@"
+FAKEMV
+chmod +x "$T/mvbin/mv"
+PATH="$T/mvbin:$T/fakebin:$PATH" FAKE_RELEASE_DIR="$T/release" BEAMTALK_PREFIX="$P" sh "$SCRIPT" --version 9.9.9 >"$T/out" 2>&1; rc=$?
+[ $rc -ne 0 ] && [ -f "$P/lib/beamtalk/old.txt" ]
+check "failed swap restores the previous install" $?
+
 # 5. uninstall removes beamtalk, keeps unrelated files, needs no network
+P="$P4"
 PATH="$T/fakebin:$PATH" FAKE_RELEASE_DIR="$T/none" BEAMTALK_PREFIX="$P" sh "$SCRIPT" --uninstall >"$T/out" 2>&1; rc=$?
 [ $rc -eq 0 ] && [ ! -e "$P/bin/beamtalk" ] && [ ! -e "$P/lib/beamtalk" ] && [ -f "$P/lib/other/keep.txt" ]
 check "--uninstall removes beamtalk and keeps unrelated files" $?
 
 # 6. uninstall of a beamtalk-only prefix removes the prefix
 P="$T/p6"
-run_install "$P"; PATH="$T/fakebin:$PATH" BEAMTALK_PREFIX="$P" sh "$SCRIPT" --uninstall >/dev/null 2>&1
+run_install "$P"; rm -rf "$P/extra"; PATH="$T/fakebin:$PATH" BEAMTALK_PREFIX="$P" sh "$SCRIPT" --uninstall >/dev/null 2>&1
 [ ! -e "$P" ]
 check "--uninstall removes an otherwise empty prefix" $?
 
