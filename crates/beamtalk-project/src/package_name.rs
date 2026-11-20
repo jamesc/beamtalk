@@ -21,6 +21,9 @@ pub fn format_name_error(name: &str, error: &PackageNameError) -> String {
 }
 
 /// Reserved beamtalk package names that conflict with core components.
+///
+/// Includes the `beamtalk_*` OTP applications Beamtalk itself ships: a package
+/// with one of these names would generate a colliding `.app` file.
 pub const RESERVED_NAMES: &[&str] = &[
     "beamtalk",
     "stdlib",
@@ -28,24 +31,69 @@ pub const RESERVED_NAMES: &[&str] = &[
     "runtime",
     "workspace",
     "compiler",
+    "beamtalk_compiler",
+    "beamtalk_runtime",
+    "beamtalk_stdlib",
+    "beamtalk_test_support",
+    "beamtalk_workspace",
 ];
 
-/// Erlang standard application names that would conflict with OTP.
+/// Erlang/OTP application names that would conflict with OTP.
+///
+/// The single source for "is this an OTP application?" — package names,
+/// `[native.dependencies]` names and native module names all consult it
+/// (via [`is_otp_app`]). `kernel`, `stdlib` and `compiler` are also in
+/// [`RESERVED_NAMES`] and report the more specific reserved-name error.
 pub const ERLANG_APPS: &[&str] = &[
+    "asn1",
     "common_test",
     "crypto",
+    "debugger",
     "dialyzer",
+    "diameter",
+    "edoc",
+    "eldap",
+    "erl_docgen",
+    "erl_interface",
+    "erts",
+    "et",
     "eunit",
+    "ftp",
     "inets",
+    "jinterface",
+    "megaco",
     "mnesia",
     "observer",
+    "odbc",
+    "os_mon",
+    "parsetools",
     "public_key",
+    "reltool",
+    "runtime_tools",
     "sasl",
+    "snmp",
     "ssh",
     "ssl",
+    "syntax_tools",
+    "tftp",
     "tools",
+    "wx",
     "xmerl",
 ];
+
+/// Whether `name` is an Erlang/OTP standard application (including
+/// `kernel`, `stdlib` and `compiler`).
+#[must_use]
+pub fn is_otp_app(name: &str) -> bool {
+    ERLANG_APPS.contains(&name) || matches!(name, "kernel" | "stdlib" | "compiler")
+}
+
+/// Whether `name` is an application name a package or native dependency may
+/// not take: a Beamtalk reserved name or an OTP application.
+#[must_use]
+pub fn is_reserved_app_name(name: &str) -> bool {
+    RESERVED_NAMES.contains(&name) || is_otp_app(name)
+}
 
 /// Error returned when a package name is invalid.
 #[derive(Debug, Clone, PartialEq, Eq)]

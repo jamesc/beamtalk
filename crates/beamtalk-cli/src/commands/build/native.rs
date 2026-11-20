@@ -7,7 +7,7 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
@@ -1022,6 +1022,59 @@ pub(crate) fn collect_rebar3_ebin_paths(layout: &BuildLayout) -> Vec<Utf8PathBuf
     paths
 }
 
+/// Module names of the installed Erlang/OTP, taken from its own code path so
+/// the list cannot drift from the OTP release in use. Empty (the check is then
+/// skipped, with a debug log) if `erl` cannot be run.
+fn otp_module_names() -> HashSet<String> {
+    let output = beamtalk_workspace::erl_command()
+        .args([
+            "-noshell",
+            "-eval",
+            "lists:foreach(fun({M,_,_}) -> io:format(\"~s~n\", [M]) end, \
+             code:all_available()), halt().",
+        ])
+        .output();
+    match output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect(),
+        other => {
+            debug!(
+                ?other,
+                "Could not list OTP modules; skipping OTP module-name check"
+            );
+            HashSet::new()
+        }
+    }
+}
+
+/// Reject a package's native module names that would shadow an OTP module
+/// (`native/lists.erl`) or sit in the `beamtalk_*` namespace the runtime owns.
+fn check_native_module_names(
+    package: &str,
+    modules: &[String],
+    otp_modules: &HashSet<String>,
+) -> Result<()> {
+    for module in modules {
+        if otp_modules.contains(module) {
+            miette::bail!(
+                "Native module '{module}' in package '{package}' has the same name as an \
+                 Erlang/OTP module and would replace it at runtime.\n\n  \
+                 Rename it, prefixing with the package name (e.g. '{package}_{module}')."
+            );
+        }
+        if module.starts_with("beamtalk_") {
+            miette::bail!(
+                "Native module '{module}' in package '{package}' is in the 'beamtalk_' \
+                 namespace reserved for the Beamtalk runtime.\n\n  \
+                 Rename it, prefixing with the package name (e.g. '{package}_{module}')."
+            );
+        }
+    }
+    Ok(())
+}
+
 /// ADR 0072 Phase 1: Check for native Erlang module name collisions across
 /// packages in the dependency graph.
 ///
@@ -1039,6 +1092,17 @@ pub(crate) fn check_native_module_collisions(
 
     // Collect native modules from root package
     let root_modules = discover_native_modules(project_root)?;
+    let dep_native_modules = resolved_deps
+        .iter()
+        .map(|dep| Ok((dep.name.as_str(), discover_native_modules(&dep.root)?)))
+        .collect::<Result<Vec<_>>>()?;
+    if !root_modules.is_empty() || dep_native_modules.iter().any(|(_, m)| !m.is_empty()) {
+        let otp = otp_module_names();
+        check_native_module_names(root_package_name, &root_modules, &otp)?;
+        for (dep_name, modules) in &dep_native_modules {
+            check_native_module_names(dep_name, modules, &otp)?;
+        }
+    }
 
     // Collect native modules from each dependency
     let mut module_owners: HashMap<String, Vec<String>> = HashMap::new();

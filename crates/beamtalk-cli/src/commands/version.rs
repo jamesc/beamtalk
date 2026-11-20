@@ -445,7 +445,9 @@ mod tests {
             write_manifest(&temp, "[package]\nname = \"my_app\"\nversion = \"1.2\"\n");
 
         let err = run_bump(&manifest_path, BumpPart::Patch).unwrap_err();
-        assert!(flat_err(&err).contains("Cannot bump"), "{err:?}");
+        // The manifest parser now rejects a non-semver version up front
+        // (BT-5076), before the bump logic sees it.
+        assert!(flat_err(&err).contains("not a valid version"), "{err:?}");
     }
 
     #[test]

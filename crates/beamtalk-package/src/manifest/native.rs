@@ -186,6 +186,14 @@ pub(super) fn parse_native_dependencies(
     let mut result = NativeDependencyMap::new();
     for (name, value) in table {
         validate_native_name(name)?;
+        // A native dependency becomes an OTP application in the release, so
+        // it may not take the name of OTP itself or of a Beamtalk runtime app.
+        if beamtalk_project::package_name::is_reserved_app_name(name) {
+            miette::bail!(
+                "Native dependency '{name}' conflicts with a reserved Beamtalk or \
+                 Erlang/OTP application name"
+            );
+        }
 
         let source = match value {
             toml::Value::String(constraint) => {

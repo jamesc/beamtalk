@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Breaking: `beamtalk.toml` is validated strictly (BT-5076).**
+  - Changed: an unknown key or section in `beamtalk.toml` (top level, `[package]` or `[application]`) is now an error naming the key and listing the valid ones. A misspelt `[dependancies]` or `strict_deps` (for `strict-deps`) used to be dropped without a word, leaving the dependency or strict mode off.
+  - Changed: `[package] version` must be a SemVer version (`1.2.3`, optionally `-rc.1` / `+build`). It used to take any text and flow into the `.app` `vsn`, the release directory name and the `.rel`.
+  - Changed: the beamtalk runtime apps (`beamtalk_runtime`, `beamtalk_stdlib`, `beamtalk_workspace`, `beamtalk_compiler`, `beamtalk_test_support`) and the full OTP application set (`erts`, `asn1`, `wx`, ...) are reserved package names, and `[native.dependencies]` may not use a reserved name or the package's own name. A `native/*.erl` module named like an OTP module (`lists`) or in the `beamtalk_` namespace is rejected at build time.
+  - Added: `[package] licenses` is written to the generated `.app` file as `{licenses, [...]}`.
+  - Changed: the long-removed `[package] start` key is now reported as an unknown key too.
+  - Changed: `beamtalk new` refuses a name whose class form shadows a built-in class (`set`, `list`, `object`, `string`, ...), and removes a half-created directory if scaffolding fails.
+  - Do: fix the typo, give the package a `major.minor.patch` version, or rename the package, dependency or native module.
 - **Breaking: the LiveView IDE front binds loopback by default and refuses a non-loopback bind with no auth (BT-5065).**
   - Changed: with `BT_ATTACH_BIND_IP` unset or empty the front listens on `127.0.0.1` only. It used to listen on all interfaces and trust every request as Owner when OIDC was not configured, which exposed an eval console to the network. A non-loopback `BT_ATTACH_BIND_IP` now fails boot with a clear message unless OIDC (or `BT_IDE_DEV_AUTH`) is configured. The Docker image sets `BT_ATTACH_BIND_IP=::` and so requires OIDC; `just web-remote` defaults the same way. The desktop broker already pinned `127.0.0.1` and is unchanged.
   - Do: for a remote deploy, set `BT_ATTACH_BIND_IP` and configure OIDC (see `docs/deployment/remote-liveview-ide.md`). `BT_IDE_ALLOW_UNAUTHENTICATED=1` opts out on a fully trusted network and logs a warning at every boot.
