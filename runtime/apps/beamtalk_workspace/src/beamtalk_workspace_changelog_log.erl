@@ -78,7 +78,15 @@ write_optional_source(SourcesDir, Ref, Body) ->
 append_synced(Path, Data) ->
     case file:open(Path, [append, raw, binary]) of
         {ok, Fd} ->
-            {ok, Before} = file:position(Fd, eof),
+            append_synced_open(Path, Fd, Data);
+        {error, _} = Err ->
+            Err
+    end.
+
+-spec append_synced_open(string(), file:fd(), iodata()) -> ok | {error, term()}.
+append_synced_open(Path, Fd, Data) ->
+    case file:position(Fd, eof) of
+        {ok, Before} ->
             Result =
                 case file:write(Fd, Data) of
                     ok -> file:sync(Fd);
@@ -97,6 +105,7 @@ append_synced(Path, Data) ->
                     Result
             end;
         {error, _} = Err ->
+            _ = file:close(Fd),
             Err
     end.
 

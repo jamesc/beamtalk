@@ -89,30 +89,38 @@ every_emitter_warns_when_append_fails_test_() ->
 %% BT-5084: the eval-side warning queue the primitive paths (removeSelector:,
 %% renameTo:, removeFromSystem, ...) use, since they have no reply to carry one.
 warning_queue_test() ->
-    _ = beamtalk_refactor_support:take_changelog_warnings(),
-    %% Outside an eval worker (no session marker) a warning is not queued: nothing
-    %% would drain it.
-    undefined = erlang:put(beamtalk_session_id, undefined),
-    erlang:erase(beamtalk_session_id),
+    _ = beamtalk_refactor_support:end_changelog_warnings(),
+    %% Outside `with_changelog_warnings/1` a warning is not queued, even in a process
+    %% that carries a session id (a class gen_server running a class method for a
+    %% session caller is seeded that way, and nothing there would drain the queue).
+    erlang:put(beamtalk_session_id, <<"s">>),
     ok = beamtalk_refactor_support:note_changelog_result({warning, <<"lost">>}),
     ?assertEqual([], beamtalk_refactor_support:take_changelog_warnings()),
-    erlang:put(beamtalk_session_id, <<"s">>),
+    erlang:erase(beamtalk_session_id),
+    ok = beamtalk_refactor_support:begin_changelog_warnings(),
     ok = beamtalk_refactor_support:note_changelog_result(ok),
     ok = beamtalk_refactor_support:note_changelog_result({error, no_workspace}),
     ok = beamtalk_refactor_support:note_changelog_result({warning, <<"a">>}),
     ok = beamtalk_refactor_support:note_changelog_result({warning, <<"b">>}),
-    ?assertEqual([<<"a">>, <<"b">>], beamtalk_refactor_support:take_changelog_warnings()),
-    ?assertEqual([], beamtalk_refactor_support:take_changelog_warnings()),
-    erlang:erase(beamtalk_session_id).
+    ?assertEqual([<<"a">>, <<"b">>], beamtalk_refactor_support:end_changelog_warnings()),
+    %% Collecting is over: later warnings are not queued.
+    ok = beamtalk_refactor_support:note_changelog_result({warning, <<"late">>}),
+    ?assertEqual([], beamtalk_refactor_support:take_changelog_warnings()).
+
+with_changelog_warnings_stops_collecting_on_raise_test() ->
+    ?assertError(
+        boom,
+        beamtalk_repl_eval:with_changelog_warnings(fun() -> erlang:error(boom) end)
+    ),
+    ok = beamtalk_refactor_support:note_changelog_result({warning, <<"late">>}),
+    ?assertEqual([], beamtalk_refactor_support:take_changelog_warnings()).
 
 eval_reply_carries_primitive_changelog_warning_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
-    erlang:put(beamtalk_session_id, <<"s">>),
     Result = beamtalk_repl_eval:with_changelog_warnings(fun() ->
         ok = beamtalk_refactor_support:note_changelog_result({warning, <<"w">>}),
         {ok, 1, <<>>, [<<"existing">>], State}
     end),
-    erlang:erase(beamtalk_session_id),
     ?assertMatch({ok, 1, <<>>, [<<"existing">>, <<"w">>], _}, Result).
 
 %% BT-5084: a stalled server must not hang the caller forever.
@@ -186,9 +194,11 @@ stale_staging_dirs_are_swept_test() ->
         beamtalk_test_fs:rm_rf(Dir)
     end.
 
-%% BT-5084 (review): a failed fsync/write must not leave a whole line behind, or the
-%% next append reuses its seq. `append_synced/2` cuts the file back.
-failed_sync_does_not_leave_a_line_test() ->
+%% BT-5084 (review): after a failed fsync/write `append_synced/2` cuts the log back
+%% with `truncate_to/2`, so no whole line is left under a seq the next append reuses.
+%% This pins `truncate_to/2` itself; the failure branch needs a write that fails
+%% after landing bytes (EIO on fsync), which a unit test cannot provoke portably.
+truncate_to_cuts_the_log_back_to_a_size_test() ->
     Dir = beamtalk_test_fs:tmp_dir("bt5084sync"),
     Path = filename:join(Dir, "changes.jsonl"),
     try

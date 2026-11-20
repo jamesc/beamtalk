@@ -130,9 +130,17 @@ warning in this process (`beamtalk_refactor_support:note_changelog_result/1`).
 -spec with_changelog_warnings(fun(() -> Result)) -> Result when
     Result :: tuple().
 with_changelog_warnings(Fun) ->
-    _ = beamtalk_refactor_support:take_changelog_warnings(),
-    Result = Fun(),
-    case beamtalk_refactor_support:take_changelog_warnings() of
+    ok = beamtalk_refactor_support:begin_changelog_warnings(),
+    Result =
+        try
+            Fun()
+        catch
+            Class:Reason:Stack ->
+                %% A raise must not leave the process marked as collecting.
+                _ = beamtalk_refactor_support:end_changelog_warnings(),
+                erlang:raise(Class, Reason, Stack)
+        end,
+    case beamtalk_refactor_support:end_changelog_warnings() of
         [] -> Result;
         Extra -> setelement(4, Result, element(4, Result) ++ Extra)
     end.

@@ -43,6 +43,8 @@ verbatim.
     current_author_context/0,
     note_changelog_result/1,
     take_changelog_warnings/0,
+    begin_changelog_warnings/0,
+    end_changelog_warnings/0,
     %% Shared by the class-rename and method-rename pipelines (BT-4703).
     raise_if_colliding/2,
     rename_collision_error/3,
@@ -279,28 +281,44 @@ require_class_capability(Op, ClassName, Suffix) ->
 %% where a patch's warning already shows up. `ok` / `{error, no_workspace}` need
 %% nothing.
 -define(CHANGELOG_WARNINGS_KEY, '$beamtalk_changelog_warnings').
+-define(CHANGELOG_EVAL_KEY, '$beamtalk_changelog_eval').
 
 -spec note_changelog_result(term()) -> ok.
 note_changelog_result({warning, Text}) when is_binary(Text) ->
-    %% Only an eval worker drains the queue (`beamtalk_session_id` marks one,
-    %% see `beamtalk_repl_shell:seed_session_context/3`). In any other process
-    %% (an actor, a class gen_server) nothing would, so the warning would be lost
-    %% and the queue would grow forever; there the ERROR log `append_entry/3`
-    %% already wrote is the report.
-    case erlang:get(beamtalk_session_id) of
-        undefined ->
-            ok;
-        _ ->
+    %% Queue only inside `with_changelog_warnings/1`, which marks its process and
+    %% drains the queue. `beamtalk_session_id` is not a safe marker: a class
+    %% gen_server carries it too while it runs a class method for a session caller,
+    %% and nothing there would ever drain the queue. Everywhere else the ERROR log
+    %% `append_entry/3` already wrote is the report.
+    case erlang:get(?CHANGELOG_EVAL_KEY) of
+        true ->
             Queued =
                 case erlang:get(?CHANGELOG_WARNINGS_KEY) of
                     undefined -> [];
                     List -> List
                 end,
             _ = erlang:put(?CHANGELOG_WARNINGS_KEY, [Text | Queued]),
+            ok;
+        _ ->
             ok
     end;
 note_changelog_result(_) ->
     ok.
+
+%% Start collecting in this process (an eval worker): clears any stale queue and
+%% marks the process so `note_changelog_result/1` queues. Pair with
+%% `end_changelog_warnings/0`.
+-spec begin_changelog_warnings() -> ok.
+begin_changelog_warnings() ->
+    _ = erlang:erase(?CHANGELOG_WARNINGS_KEY),
+    _ = erlang:put(?CHANGELOG_EVAL_KEY, true),
+    ok.
+
+%% Stop collecting and return what was queued, oldest first.
+-spec end_changelog_warnings() -> [binary()].
+end_changelog_warnings() ->
+    _ = erlang:erase(?CHANGELOG_EVAL_KEY),
+    take_changelog_warnings().
 
 %% Drain the warnings queued by `note_changelog_result/1`, oldest first.
 -spec take_changelog_warnings() -> [binary()].
