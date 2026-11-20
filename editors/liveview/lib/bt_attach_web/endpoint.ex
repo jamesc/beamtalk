@@ -12,6 +12,11 @@ defmodule BtAttachWeb.Endpoint do
     store: :cookie,
     key: "_bt_attach_key",
     signing_salt: "f7iEj/hj",
+    # Encrypt as well as sign (BT-5070): the cookie carries the full OIDC claims
+    # (subject, email, groups), which a signed-only cookie leaves readable by
+    # the client. `Plug.Session` derives the encryption key from
+    # `secret_key_base` and this salt.
+    encryption_salt: "bt-attach-session-enc",
     same_site: "Strict"
   ]
 
@@ -35,9 +40,17 @@ defmodule BtAttachWeb.Endpoint do
   # dev-auth LiveView sockets to loopback. Without it, get_connect_info(socket,
   # :peer_data) is always nil on every connected mount, so dev-auth always
   # halts+redirects — an infinite full-page reload loop (BT-3228).
+  #
+  # :x_headers lets the socket refuse dev-auth when the upgrade request came
+  # through a reverse proxy (`Auth.forwarded?/1`, BT-5070): behind a same-host
+  # proxy the peer is loopback for every client.
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [:peer_data, session: {__MODULE__, :session_options, []}]],
-    longpoll: [connect_info: [:peer_data, session: {__MODULE__, :session_options, []}]]
+    websocket: [
+      connect_info: [:peer_data, :x_headers, session: {__MODULE__, :session_options, []}]
+    ],
+    longpoll: [
+      connect_info: [:peer_data, :x_headers, session: {__MODULE__, :session_options, []}]
+    ]
 
   # Serve at "/" the static files from "priv/static" directory.
   #
