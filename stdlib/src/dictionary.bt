@@ -15,6 +15,14 @@
 /// between calls), or `asList first` / `asList last` if you specifically
 /// want the order `asList` currently answers in.
 ///
+/// ## Missing keys
+/// `at:` raises `key_error` when the key is absent; use `at:ifAbsent:` or
+/// `at:ifPresent:ifAbsent:` to handle it. `Ets at:` differs on purpose: it
+/// answers `nil`, because an `Ets` table is shared mutable state (the key can
+/// vanish between a check and a read) and the `V | Nil` result type makes the
+/// caller handle the miss. `Ets` has the same `at:ifAbsent:` and
+/// `at:ifPresent:ifAbsent:` as `Dictionary`.
+///
 /// ## Examples
 /// ```beamtalk
 /// #{#name => "Alice"} class                   // => Dictionary

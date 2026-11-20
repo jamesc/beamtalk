@@ -29,6 +29,15 @@ type EtsTableType = #set | #orderedSet | #bag | #duplicateBag
 /// one per actor in `initialize` and keep it in a field typed `:: Ets`. They
 /// are reached only through the `Ets` value, never by `named:`.
 ///
+/// ## Missing keys
+/// `at:` answers `nil` for an absent key (its type is `V | Nil`). This differs
+/// from `Dictionary at:`, which raises `key_error`, on purpose: an `Ets`
+/// table is shared mutable state, so the key can vanish between a check and a
+/// read, and the `V | Nil` type makes the caller handle the miss. A stored
+/// `nil` is indistinguishable from an absent key with `at:`; use
+/// `at:ifPresent:ifAbsent:` (which treats a stored `nil` as present) to tell
+/// them apart.
+///
 /// Using an unnamed table from a process its protection forbids raises
 /// `access_denied`. A private table's contents are also hidden from other
 /// processes' inspection, and printing an `Ets` never shows its contents.
@@ -241,6 +250,27 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
       key: key
       block: block
 
+  /// Look up a key; evaluate `presentBlock` with the value if present, or
+  /// `absentBlock` if absent, and answer the result.
+  ///
+  /// A stored `nil` is present: `presentBlock` runs with `nil`. One table
+  /// lookup decides the branch, so the answer is consistent even if another
+  /// process changes the table concurrently. Same as `Dictionary
+  /// at:ifPresent:ifAbsent:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache at: "n" put: 2
+  /// cache at: "n" ifPresent: [:v | v * 10] ifAbsent: [0]    // => 20
+  /// cache at: "zz" ifPresent: [:v | v * 10] ifAbsent: [0]   // => 0
+  /// ```
+  at: key :: K ifPresent: presentBlock :: Block(V, R) ifAbsent: absentBlock :: Block(T) -> R | T =>
+    (Erlang beamtalk_ets)
+      ifPresent: self
+      key: key
+      present: presentBlock
+      absent: absentBlock
+
   /// Atomically add `n` to the Integer stored at `key` and answer the new
   /// value. A missing key starts at 0, so this creates it.
   ///
@@ -351,6 +381,15 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// cache keysAndValuesDo: [:k :v | Transcript show: k]
   /// ```
   keysAndValuesDo: block :: Block(K, V, Object) -> Nil => self delegate
+
+  /// Evaluate `block` with each key and value of a snapshot, as
+  /// `Dictionary doWithKey:` does. Same as `keysAndValuesDo:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache doWithKey: [:k :v | Transcript show: k]
+  /// ```
+  doWithKey: block :: Block(K, V, Object) -> Nil => self keysAndValuesDo: block
 
   /// Take a point-in-time snapshot as an immutable `Dictionary`.
   ///

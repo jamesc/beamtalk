@@ -39,3 +39,14 @@ TestCase subclass: OSTest
     self.isUnix ifTrue: [
       self should: [OS run: "printf '\\200'"] raise: #parse_error
     ]
+
+  testRunTimeoutAcceptsDuration =>
+    // BT-5090: a Duration is converted to milliseconds once, at the call
+    result := OS run: "echo hello" timeout: (Duration seconds: 5)
+    self assert: result equals: "hello"
+
+  testRunTimeoutDurationExpiryRaisesTimeout =>
+    cmd := self.isUnix ifTrue: ["sleep 60"] ifFalse: ["ping -n 100 127.0.0.1"]
+    self should: [
+      OS run: cmd timeout: (Duration milliseconds: 100)
+    ] raise: #timeout

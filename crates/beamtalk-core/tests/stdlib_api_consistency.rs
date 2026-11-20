@@ -71,21 +71,10 @@ const TIME_GENERATED_SETTERS: &[(&str, &str)] = &[
 /// Rules the stdlib does not yet satisfy. Each entry is
 /// `"<rule>: <Class> <detail>"`; every PR that fixes one deletes it.
 const EXPECTED_FAILURES: &[&str] = &[
-    "enumerable: Enumerable does not provide allSatisfy:",
-    "enumerable: Enumerable does not provide detect:",
-    "enumerable: Enumerable does not provide includes:",
-    "enumerable: Enumerable does not provide noneSatisfy:",
-    "enumerable: Enumerable does not provide reject:",
     "time: Actor stopWith:timeout: parameter for timeout: does not accept Duration",
-    "time: Announcer announceAndWait:timeout: parameter for timeout: does not accept Duration",
-    "time: DynamicSupervisor stopWithin: parameter for stopWithin: does not accept Duration",
-    "time: OS class run:timeout: parameter for timeout: does not accept Duration",
     "time: ProtoObject perform:withArguments:timeout: parameter for timeout: does not accept Duration",
     "time: RetryPolicy withInitialInterval: is a generated setter typed from an Integer field; define it explicitly to accept Duration",
     "time: RetryPolicy withMaximumInterval: is a generated setter typed from an Integer field; define it explicitly to accept Duration",
-    "time: Supervisor stopWithin: parameter for stopWithin: does not accept Duration",
-    "time: SystemAnnouncer announceAndWait:timeout: parameter for timeout: does not accept Duration",
-    "time: TimeoutProxy setTimeoutMs: parameter for setTimeoutMs: does not accept Duration",
 ];
 
 fn stdlib_modules() -> Vec<(String, Module)> {

@@ -666,9 +666,7 @@ Object subclass: Actor
   withTimeout: ms :: Timeout | Duration -> TimeoutProxy =>
     proxy := TimeoutProxy spawn
     proxy setTarget: self
-    (ms isKindOf: Duration) ifTrue: [
-      proxy setTimeoutMs: ms asMilliseconds
-    ] ifFalse: [proxy setTimeoutMs: ms]
+    proxy setTimeoutMs: ms
     proxy
 
   // === Lifecycle hooks ===

@@ -60,3 +60,10 @@ TestCase subclass: TimeoutProxyTest
     result := proxy slowGet: 5200
     self assert: result equals: 42
     proxy stop
+
+  testSetTimeoutMsAcceptsDuration =>
+    // BT-5090: a Duration is stored as milliseconds
+    proxy := self.actor withTimeout: 30000
+    proxy setTimeoutMs: (Duration seconds: 2)
+    self assert: proxy getValue equals: 42
+    proxy stop

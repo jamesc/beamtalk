@@ -180,3 +180,11 @@ TestCase subclass: AnnouncementsTest
     self assert: received value equals: 10
     other unsubscribe: myPid
     received delete
+
+  // --- BT-5090: the timeout may be a Duration ---
+  testAnnounceAndWaitWithDurationTimeoutDelivers =>
+    received := AtomicCounter new: #announcementsTestDurationTimeout
+    self.announcer when: TestEvent do: [:e | received incrementBy: e payload]
+    self.announcer announceAndWait: (TestEvent payload: 7) timeout: (Duration seconds: 5)
+    self assert: received value equals: 7
+    received delete

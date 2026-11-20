@@ -135,3 +135,16 @@ TestCase subclass: SupervisorStopWithinTest
     result := pool stopWithin: 10000
     self assert: (self assertOk: result) equals: nil
     self deny: pool isAlive
+
+  // BT-5090: the wait may be a Duration
+  testStopWithinAcceptsDuration =>
+    sup := (Bt4047PatientSup supervise) unwrap
+    result := sup stopWithin: (Duration seconds: 10)
+    self assert: (self assertOk: result) equals: nil
+    self deny: sup isAlive
+
+  testStopWithinDurationTimeoutKeepsShuttingDownInBackground =>
+    sup := (Bt4047PatientSup supervise) unwrap
+    result := sup stopWithin: (Duration milliseconds: 50)
+    self assert: result error kind equals: #timeout
+    self waitForDeathOf: sup
