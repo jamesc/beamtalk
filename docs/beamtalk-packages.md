@@ -209,6 +209,17 @@ Advances git dependencies to the latest commit matching their spec (the latest t
 
 You can always edit `beamtalk.toml` directly instead of using `beamtalk deps add`. The CLI commands are convenience wrappers — the manifest file is the source of truth.
 
+### Concurrent beamtalk processes
+
+A CLI build, `beamtalk test`, a `deps` command and an editor-triggered build can run against one project at once. They share `_build/` and `beamtalk.lock`, so every operation that writes either takes one exclusive OS file lock, `_build/.build.lock`:
+
+- **Takes the lock:** `build` (and `run`, `repl` startup, `escript`, which build first), `test`, `lint`/`check` dependency resolution, `release`, `clean` (not `--dry-run`), `deps add` and `deps update`.
+- **Reads without it:** `deps list`, the LSP and MCP servers. Every file they read (`beamtalk.lock`, the cache sidecars, the `.app`, the corpus) is replaced by writing a temp file in the same directory and renaming it, so a reader sees the whole old file or the whole new one.
+
+A second process waits and prints `waiting for another beamtalk process in <dir>…`, then proceeds when the lock frees. There is no timeout and no flag. The lock is held by the kernel, so a crashed or killed process never leaves a stale lock; a leftover `.build.lock` file is harmless. `beamtalk repl` holds the lock only while it builds, not for the lifetime of the REPL or its workspace.
+
+Lock order, outermost first: project build lock (`_build/.build.lock`), then the registry cache lock (`~/.beamtalk/registry/<hash>/.lock`), then the native build lock (`_build/dev/native/.lock`). A workspace lock (the single-writer workspace metadata lock) is taken only after a build has returned, never while the build lock is held.
+
 ## Stdlib or Package?
 
 When deciding whether a class belongs in the standard library or in its own package, apply one rule:

@@ -10,7 +10,6 @@
 
 use camino::Utf8Path;
 use miette::{Context, IntoDiagnostic, Result};
-use std::fs;
 
 use crate::beam_compiler::escape_erlang_string;
 use crate::commands::util::format_sorted_atom_list;
@@ -115,7 +114,7 @@ pub fn generate_app_file(
     );
     let app_path = build_dir.join(format!("{}.app", manifest.name));
 
-    fs::write(&app_path, app_content)
+    crate::commands::util::write_atomic_if_changed(&app_path, &app_content, ".beamtalk-app.")
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to write .app file '{app_path}'"))?;
 
