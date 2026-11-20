@@ -57,6 +57,16 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
     this.needsReplace = false;
     webviewView.webview.html = this._buildHtml();
 
+    // A hidden webview (no retainContextWhenHidden) drops postMessage, so lines
+    // printed meanwhile would be lost. Rebuild the page from the buffer on re-show.
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible && this.view === webviewView) {
+        this.pendingText = "";
+        this.needsReplace = false;
+        webviewView.webview.html = this._buildHtml();
+      }
+    });
+
     webviewView.onDidDispose(() => {
       this.view = undefined;
     });
@@ -107,7 +117,7 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
 
   private _appendText(text: string): void {
     this.accumText += text;
-    this.pendingText += text;
+    if (this.view) this.pendingText += text; // no view: resolveWebviewView rebuilds from accumText
     this.lineCount += (text.match(/\n/g) ?? []).length;
 
     if (this.lineCount > MAX_LINES) {
@@ -132,6 +142,12 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
   private _flush(): void {
     const view = this.view;
     if (!view) return;
+    if (!view.visible) {
+      // Hidden: nothing to send; the visibility handler rebuilds the page on re-show.
+      this.pendingText = "";
+      this.needsReplace = false;
+      return;
+    }
     if (this.fullReload) {
       view.webview.html = this._buildHtml();
     } else if (this.needsReplace) {

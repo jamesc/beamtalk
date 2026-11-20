@@ -24,11 +24,17 @@ function setup(options?: { fullReload?: boolean }) {
       return Promise.resolve(true);
     },
   };
-  provider.resolveWebviewView(
-    { webview, onDidDispose: () => ({ dispose() {} }) } as never,
-    {} as never,
-    {} as never
-  );
+  let visibleHandler: () => void = () => {};
+  const view = {
+    webview,
+    visible: true,
+    onDidDispose: () => ({ dispose() {} }),
+    onDidChangeVisibility: (h: () => void) => {
+      visibleHandler = h;
+      return { dispose() {} };
+    },
+  };
+  provider.resolveWebviewView(view as never, {} as never, {} as never);
   let push: (e: PushEvent) => void = () => {};
   provider.setClient({
     onPush: (h: (e: PushEvent) => void) => {
@@ -37,7 +43,11 @@ function setup(options?: { fullReload?: boolean }) {
     },
   } as unknown as WorkspaceClient);
   const emit = (text: string) => push({ channel: "transcript", text } as PushEvent);
-  return { provider, emit, posted, htmlWrites: () => htmlWrites, html: () => html };
+  const setVisible = (v: boolean) => {
+    view.visible = v;
+    visibleHandler();
+  };
+  return { provider, emit, posted, setVisible, htmlWrites: () => htmlWrites, html: () => html };
 }
 
 describe("TranscriptViewProvider (BT-5082)", () => {
@@ -81,5 +91,34 @@ describe("TranscriptViewProvider (BT-5082)", () => {
     expect(t.posted).toHaveLength(0);
     expect(t.htmlWrites()).toBe(2);
     expect(t.html()).toContain("hello");
+  });
+
+  it("does not lose output printed while the view is hidden", () => {
+    const t = setup();
+    t.setVisible(false);
+    t.emit("while hidden\n");
+    vi.advanceTimersByTime(100);
+    expect(t.posted).toHaveLength(0);
+
+    t.setVisible(true);
+    expect(t.html()).toContain("while hidden");
+
+    // Later output appends normally and is not duplicated.
+    t.emit("after\n");
+    vi.advanceTimersByTime(100);
+    expect(t.posted.map((m) => m.text)).toEqual(["after\n"]);
+  });
+
+  it("does not accumulate pending text when no view is attached", () => {
+    const provider = new TranscriptViewProvider();
+    let push: (e: PushEvent) => void = () => {};
+    provider.setClient({
+      onPush: (h: (e: PushEvent) => void) => {
+        push = h;
+        return () => {};
+      },
+    } as unknown as WorkspaceClient);
+    push({ channel: "transcript", text: "x\n" } as PushEvent);
+    expect((provider as unknown as { pendingText: string }).pendingText).toBe("");
   });
 });
