@@ -232,6 +232,25 @@ pub fn compute_hover(
         }
     }
 
+    // State / class-variable defaults and protocol provided-method bodies are
+    // expression roots too (BT-5079).
+    let provided = module
+        .unused_protocol_provided_methods()
+        .flat_map(|m| m.body.iter().map(|s| &s.expression));
+    for expr in module.state_default_exprs().chain(provided) {
+        if let Some(hover) = find_hover_in_expr(
+            expr,
+            offset_val,
+            &class_context,
+            hierarchy,
+            &type_map,
+            native_types,
+            alias_registry,
+        ) {
+            return Some(hover);
+        }
+    }
+
     None
 }
 
