@@ -61,7 +61,7 @@ live method editing, and a workspace eval pane (the *[LiveView IDE](#liveview-id
 - **Supervisors and actor failure follow OTP.** Several instances of one supervisor class, children by id, and an error in `handleInfo:` or a cast now crashes the actor.
 - **Readable stack traces.** Frames render as `Class>>selector`; `:raw-mfa` in the REPL shows the raw frames.
 - **A stronger type system.** Named type aliases, traits as protocols with provided methods, set-theoretic narrowing and typed OTP opaque handles.
-- **Strict `beamtalk.toml`.** On main since 0.5.0: unknown keys are errors and `version` must be a SemVer version (see "Unreleased" in the changelog).
+- **Strict `beamtalk.toml`.** On main since 0.5.0: unknown keys are errors and `version` must be a `major.minor.patch` version (see "Unreleased" in the changelog).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full list and the migration notes for each breaking change.
 
