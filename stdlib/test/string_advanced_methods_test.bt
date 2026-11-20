@@ -68,6 +68,12 @@ TestCase subclass: StringAdvancedMethodsTest
 
   testSplit => self assert: ("a,b,c" split: ",") equals: #("a", "b", "c")
 
+  // BT-5083: an empty separator returns the receiver in a list, for both
+  // `split:` and `splitOn:` (it used to raise a raw badarg from `split:`).
+  testSplitEmptySeparator =>
+    self assert: ("abc" split: "") equals: #("abc")
+    self assert: ("abc" splitOn: "") equals: #("abc")
+
   testAsInteger => self assert: "42" asInteger equals: 42
 
   testAsFloat => self assert: "3.14" asFloat equals: 3.14

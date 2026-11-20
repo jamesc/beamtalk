@@ -66,7 +66,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       # The form is gated away, but a crafted client event must still be refused
       # by the facade/RBAC (BT-2421) and rendered, not crash the LiveView on an
       # unmatched case clause (the BT-2420 facade returns a 2-tuple eval never did).
-      html = render_hook(view, "eval", %{"expr" => "3 + 4"})
+      html = hook_and_settle(view, "eval", %{"expr" => "3 + 4"})
       assert html =~ "Not authorized"
       assert Process.alive?(view.pid)
     end
@@ -132,9 +132,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
       # Define a TestCase subclass in the live image with one passing + one
       # failing test, through the same eval path the Workspace uses.
-      view
-      |> form("#eval-form")
-      |> render_submit(%{
+      submit_and_settle(view, "#eval-form", %{
         expr:
           "TestCase subclass: CockpitRunnerDemoTest\n" <>
             "  testPasses =>\n    self assert: 1 equals: 1\n" <>
@@ -160,9 +158,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     test "run-selection runs a single class", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/")
 
-      view
-      |> form("#eval-form")
-      |> render_submit(%{
+      submit_and_settle(view, "#eval-form", %{
         expr:
           "TestCase subclass: CockpitRunnerSelectTest\n" <>
             "  testOk =>\n    self assert: true"
@@ -181,7 +177,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   test "eval round-trip renders the workspace result term", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    view |> form("#eval-form") |> render_submit(%{expr: "3 + 4"})
+    submit_and_settle(view, "#eval-form", %{expr: "3 + 4"})
     # Scope the assertion to the transient eval-status value element (BT-2542),
     # NOT the whole page: the connected shell renders a session id
     # (`phoenix-<integer>`) whose digits would let a bare `html =~ "7"` pass even
@@ -199,7 +195,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # editor. The insert is a client-side CodeMirror edit driven by a server
     # push, so a server-side render can't observe the buffer — assert the push
     # instead (the browser e2e covers the actual inline DOM + collapse).
-    view |> form("#eval-form") |> render_submit(%{expr: "3 + 4", action: "print_it"})
+    submit_and_settle(view, "#eval-form", %{expr: "3 + 4", action: "print_it"})
     assert_push_event(view, "ws_insert_result", %{text: text})
     assert text =~ "7"
   end
@@ -212,7 +208,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # (wider over a remote distribution node). With no selection the anchor is
     # nil and the client falls back to the live buffer end.
     render_hook(view, "select_workspace", %{"text" => "3 + 4", "start" => 2, "end" => 7})
-    view |> form("#eval-form") |> render_submit(%{expr: "unused-buffer", action: "print_it"})
+    submit_and_settle(view, "#eval-form", %{expr: "unused-buffer", action: "print_it"})
     assert_push_event(view, "ws_insert_result", %{text: text, anchor: 7})
     assert text =~ "7"
   end
@@ -222,7 +218,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # Do it evaluates for side effects only: a subtle `✓ evaluated` status, no
     # result term (ambient output streams to the Transcript instead) and no
     # inline buffer insert.
-    view |> form("#eval-form") |> render_submit(%{expr: "3 + 4", action: "do_it"})
+    submit_and_settle(view, "#eval-form", %{expr: "3 + 4", action: "do_it"})
     status = view |> element(".eval-status .val") |> render()
     assert status =~ "✓ evaluated"
     refute status =~ "7"
@@ -232,8 +228,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     {:ok, view, _html} = live(conn, "/")
 
     # Bind a variable, then read it back in a later eval on the same session.
-    view |> form("#eval-form") |> render_submit(%{expr: "x := 21 * 2"})
-    view |> form("#eval-form") |> render_submit(%{expr: "x"})
+    submit_and_settle(view, "#eval-form", %{expr: "x := 21 * 2"})
+    submit_and_settle(view, "#eval-form", %{expr: "x"})
     # Status-scoped (see "eval round-trip" above) so a session-id digit can't
     # spuriously satisfy the assertion when eval is broken.
     assert view |> element(".eval-status .val") |> render() =~ "42"
@@ -242,7 +238,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   test "Transcript output streams live into the LiveView", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
     marker = "hello-#{System.unique_integer([:positive])}"
-    view |> form("#eval-form") |> render_submit(%{expr: ~s|Transcript show: "#{marker}"|})
+    submit_and_settle(view, "#eval-form", %{expr: ~s|Transcript show: "#{marker}"|})
 
     # The push is delivered asynchronously over distribution; poll the render.
     assert eventually(fn -> render(view) =~ marker end)
@@ -254,7 +250,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     # Defining a binding fires the BT-2399 `bindings` push; the pane re-reads the
     # read-surface and should list the new name and its value live.
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := 123"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} := 123"})
 
     assert eventually(fn ->
              html = render(view)
@@ -279,8 +275,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       count => self.count
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} := #{class} spawn"})
 
     assert eventually(fn -> render(view) =~ name end)
 
@@ -309,8 +305,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       count => self.count
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} := #{class} spawn"})
     assert eventually(fn -> render(view) =~ name end)
 
     # Inspect the binding so the docked Inspector is populated.
@@ -351,12 +347,12 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       value => self.value
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
 
     # Sanity: the original method returns the initial field value.
     name = "ec_#{suffix}"
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
-    html = view |> form("#eval-form") |> render_submit(%{expr: "#{name} value"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} := #{class} spawn"})
+    html = submit_and_settle(view, "#eval-form", %{expr: "#{name} value"})
     assert html =~ "1"
 
     # Save a NEW body for `value` via the write-surface method editor (ADR 0082).
@@ -378,10 +374,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # A subsequent eval on a freshly-spawned actor observes the patched behaviour
     # (compiled + flushed into the live BEAM module on the workspace node).
     name2 = "ec2_#{suffix}"
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name2} := #{class} spawn"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name2} := #{class} spawn"})
 
     assert eventually(fn ->
-             html = view |> form("#eval-form") |> render_submit(%{expr: "#{name2} value"})
+             html = submit_and_settle(view, "#eval-form", %{expr: "#{name2} value"})
              html =~ "101"
            end)
   end
@@ -409,7 +405,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       value => self.value
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
 
     # Open `value` in an editor tab (mirrors "selecting a method opens it in the
     # editor" above) — the race only reproduces with an OPEN, now-clean active
@@ -469,7 +465,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       value => self.value
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
 
     {:ok, view, _html} = live(conn, "/")
     assert eventually(fn -> render(view) =~ class end)
@@ -491,9 +487,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # A genuine out-of-band change: recompile the SAME method via a plain eval
     # `>>` install (mirrors the REPL / MCP / another session's write path),
     # entirely bypassing this LiveView's own save/`compile_clean` bookkeeping.
-    view
-    |> form("#eval-form")
-    |> render_submit(%{expr: "#{class} >> value => self.value + 999"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{class} >> value => self.value + 999"})
 
     send(view.pid, :do_source_refresh)
     refreshed_html = render(view)
@@ -552,7 +546,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       value => self.value
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
 
     # A syntactically broken body fails to compile; the write-surface returns a
     # structured #beamtalk_error{} which the LiveView renders as an actionable
@@ -598,7 +592,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       greeting => "ORIG"
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
 
     # Patch `greeting` via the write-surface editor — records a pending durable
     # ChangeEntry for (class, greeting), so a revert button appears for it.
@@ -644,7 +638,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     # The LiveView is still live and interactive after the revert (no crash /
     # disconnect): a follow-up eval still round-trips.
-    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+    assert submit_and_settle(view, "#eval-form", %{expr: "6 * 7"}) =~ "42"
   end
 
   # ── Remove Method (ADR 0112 Phase 4, BT-3189) ───────────────────────────────
@@ -666,8 +660,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       increment => self.value := self.value + 1
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
-    view |> form("#eval-form") |> render_submit(%{expr: "#{class} >> triple => self.value * 3"})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: "#{class} >> triple => self.value * 3"})
 
     {:ok, view, _html} = live(conn, "/")
     assert eventually(fn -> render(view) =~ class end)
@@ -685,9 +679,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     # Sanity: the method works before removal.
     name = "rm_#{suffix}"
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} increment"})
-    triple_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name} triple"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} := #{class} spawn"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} increment"})
+    triple_html = submit_and_settle(view, "#eval-form", %{expr: "#{name} triple"})
     assert triple_html =~ "3"
 
     # Click "Remove Method": dispatches `#{class} removeSelector: #triple`
@@ -712,14 +706,14 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # superclass) never defined it, so dispatch fails the way any removed
     # local override does (ADR 0032 chain-walk dispatch).
     name2 = "rm2_#{suffix}"
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name2} := #{class} spawn"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name2} := #{class} spawn"})
 
-    dnu_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name2} triple"})
+    dnu_html = submit_and_settle(view, "#eval-form", %{expr: "#{name2} triple"})
     assert dnu_html =~ "does_not_understand" or dnu_html =~ "does not understand"
 
     # The LiveView is still live and interactive after the removal (no crash /
     # disconnect): a follow-up eval still round-trips.
-    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+    assert submit_and_settle(view, "#eval-form", %{expr: "6 * 7"}) =~ "42"
   end
 
   # ── Remove Class (ADR 0113 Phase 4, BT-3210) ────────────────────────────────
@@ -743,7 +737,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     # Sanity: the class exists and is spawnable before removal.
     name = "rc_#{suffix}"
-    spawn_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    spawn_html = submit_and_settle(view, "#eval-form", %{expr: "#{name} := #{class} spawn"})
     refute spawn_html =~ "does_not_understand"
     refute spawn_html =~ "beamtalk_error"
 
@@ -773,7 +767,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # gap is itself a candidate follow-up, not this issue's job to fix). Either
     # way, the class is provably gone — no shape of "it still works" is possible.
     name2 = "rc2_#{suffix}"
-    dnu_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name2} := #{class} spawn"})
+    dnu_html = submit_and_settle(view, "#eval-form", %{expr: "#{name2} := #{class} spawn"})
 
     assert dnu_html =~ "does_not_understand" or dnu_html =~ "does not understand" or
              dnu_html =~ "beamtalk_error" or dnu_html =~ "{:error" or
@@ -781,7 +775,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     # The LiveView is still live and interactive after the removal (no crash /
     # disconnect): a follow-up eval still round-trips.
-    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+    assert submit_and_settle(view, "#eval-form", %{expr: "6 * 7"}) =~ "42"
   end
 
   test "the ChangeLog viewer flags a remove-class entry as destructive and its scoped 'delete file' round-trips (ADR 0113, BT-3210)",
@@ -795,14 +789,14 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       greet => "hi"
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
 
     # `Class removeFromSystem` directly via eval — the same expression the
     # "Remove Class" button and the REPL `:remove-class` meta-command
     # dispatch — logs a `remove-class` ChangeLog entry (ADR 0113 Phase 1,
     # BT-3206).
     remove_html =
-      view |> form("#eval-form") |> render_submit(%{expr: "#{class} removeFromSystem"})
+      submit_and_settle(view, "#eval-form", %{expr: "#{class} removeFromSystem"})
 
     refute remove_html =~ "beamtalk_error"
     refute remove_html =~ "{:error"
@@ -844,7 +838,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     refute flush_html =~ "{:error"
 
     # The LiveView is still live and interactive afterward.
-    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+    assert submit_and_settle(view, "#eval-form", %{expr: "6 * 7"}) =~ "42"
   end
 
   # ── Rename Class / Rename Method (ADR 0114 Phase 5, BT-3277) ────────────────
@@ -869,7 +863,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     # Sanity: the class exists and is spawnable before renaming.
     name = "rncls_#{suffix}"
-    spawn_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    spawn_html = submit_and_settle(view, "#eval-form", %{expr: "#{name} := #{class} spawn"})
     refute spawn_html =~ "does_not_understand"
     refute spawn_html =~ "beamtalk_error"
 
@@ -903,16 +897,16 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     name2 = "rncls2_#{suffix}"
 
     new_spawn_html =
-      view |> form("#eval-form") |> render_submit(%{expr: "#{name2} := #{new_name} spawn"})
+      submit_and_settle(view, "#eval-form", %{expr: "#{name2} := #{new_name} spawn"})
 
     refute new_spawn_html =~ "does_not_understand"
     refute new_spawn_html =~ "beamtalk_error"
 
-    old_html = view |> form("#eval-form") |> render_submit(%{expr: "#{class}"})
+    old_html = submit_and_settle(view, "#eval-form", %{expr: "#{class}"})
     assert old_html =~ "not found" or old_html =~ "does_not_understand"
 
     # The LiveView is still live and interactive after the rename.
-    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+    assert submit_and_settle(view, "#eval-form", %{expr: "6 * 7"}) =~ "42"
   end
 
   test "method editor: Rename Method renames the selector (ADR 0114, BT-3277)",
@@ -928,8 +922,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       increment => self.value := self.value + 1
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
-    view |> form("#eval-form") |> render_submit(%{expr: "#{class} >> triple => self.value * 3"})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: "#{class} >> triple => self.value * 3"})
 
     {:ok, view, _html} = live(conn, "/")
     assert eventually(fn -> render(view) =~ class end)
@@ -947,9 +941,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     # Sanity: the method works, under its original name, before renaming.
     name = "rnmth_#{suffix}"
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} increment"})
-    triple_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name} triple"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} := #{class} spawn"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} increment"})
+    triple_html = submit_and_settle(view, "#eval-form", %{expr: "#{name} triple"})
     assert triple_html =~ "3"
 
     # Click "Rename Method" to open the Rename modal, then submit the new
@@ -976,17 +970,17 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     # A fresh instance understands the new selector and no longer the old one.
     name2 = "rnmth2_#{suffix}"
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name2} := #{class} spawn"})
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name2} increment"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name2} := #{class} spawn"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name2} increment"})
 
-    tripled_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name2} tripled"})
+    tripled_html = submit_and_settle(view, "#eval-form", %{expr: "#{name2} tripled"})
     assert tripled_html =~ "3"
 
-    dnu_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name2} triple"})
+    dnu_html = submit_and_settle(view, "#eval-form", %{expr: "#{name2} triple"})
     assert dnu_html =~ "does_not_understand" or dnu_html =~ "does not understand"
 
     # The LiveView is still live and interactive after the rename.
-    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+    assert submit_and_settle(view, "#eval-form", %{expr: "6 * 7"}) =~ "42"
   end
 
   test "Rename Class with an unrelated class selected in the tree leaves that selection untouched (ADR 0114, BT-3286)",
@@ -1014,8 +1008,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       greetB => "b"
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_a_src})
-    view |> form("#eval-form") |> render_submit(%{expr: class_b_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_a_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_b_src})
 
     # browse-classes is a mount snapshot — remount so the tree includes both.
     {:ok, view, _html} = live(conn, "/")
@@ -1076,7 +1070,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert after_rename.browser_categories == browser_categories_b
 
     # The LiveView is still live and interactive after the rename.
-    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+    assert submit_and_settle(view, "#eval-form", %{expr: "6 * 7"}) =~ "42"
   end
 
   test "the ChangeLog viewer flags a rename-class entry as destructive and its scoped 'apply rename' round-trips (ADR 0114, BT-3277)",
@@ -1091,14 +1085,14 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       greet => "hi"
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
 
     # `Class renameTo: #NewName` directly via eval — the same expression the
     # "Rename Class" button and the REPL `:rename-class` meta-command
     # dispatch — logs a `rename-class` ChangeLog entry (ADR 0114 Phase 2,
     # BT-3278).
     rename_html =
-      view |> form("#eval-form") |> render_submit(%{expr: "#{class} renameTo: ##{new_name}"})
+      submit_and_settle(view, "#eval-form", %{expr: "#{class} renameTo: ##{new_name}"})
 
     refute rename_html =~ "beamtalk_error"
     refute rename_html =~ "{:error"
@@ -1139,7 +1133,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     refute flush_html =~ "{:error"
 
     # The LiveView is still live and interactive afterward.
-    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+    assert submit_and_settle(view, "#eval-form", %{expr: "6 * 7"}) =~ "42"
   end
 
   # ── ChangeLog revert for a removed method (ADR 0112, BT-3194) ───────────────
@@ -1155,22 +1149,22 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       greeting => "ORIG"
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
 
     # `Class removeSelector: #greeting` — the same expr the method editor's
     # "Remove Method" button (BT-3189) and the REPL `:remove-method`
     # meta-command dispatch — records a `remove-method` ChangeLog entry with
     # `side: instance` (ADR 0112, BT-3187).
     remove_html =
-      view |> form("#eval-form") |> render_submit(%{expr: "#{class} removeSelector: #greeting"})
+      submit_and_settle(view, "#eval-form", %{expr: "#{class} removeSelector: #greeting"})
 
     refute remove_html =~ "beamtalk_error"
     refute remove_html =~ "{:error"
 
     # The method is really gone: a fresh instance no longer understands it.
     name = "rrm_#{suffix}"
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
-    dnu_html = view |> form("#eval-form") |> render_submit(%{expr: "#{name} greeting"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} := #{class} spawn"})
+    dnu_html = submit_and_settle(view, "#eval-form", %{expr: "#{name} greeting"})
     assert dnu_html =~ "does_not_understand" or dnu_html =~ "does not understand"
 
     # BT-3194: before this fix, `"remove-method"` was missing from the revert
@@ -1237,7 +1231,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     # The LiveView is still live and interactive after the revert attempt (no
     # crash/disconnect): a follow-up eval still round-trips.
-    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+    assert submit_and_settle(view, "#eval-form", %{expr: "6 * 7"}) =~ "42"
   end
 
   test "the New Class toggle opens a modal with name + superclass fields (BT-2645)", %{conn: conn} do
@@ -1615,7 +1609,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       value => self.value
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
 
     # browse-classes is a live snapshot; re-render the LiveView so the new class
     # appears in the tree, then click it to drive browse-protocols.
@@ -1665,8 +1659,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       instanceOnly => self.value
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
-    view |> form("#eval-form") |> render_submit(%{expr: "#{class} class >> classOnly => 42"})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: "#{class} class >> classOnly => 42"})
 
     {:ok, view, _html} = live(conn, "/")
     assert eventually(fn -> render(view) =~ class end)
@@ -1697,7 +1691,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       value => self.value
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
 
     {:ok, view, _html} = live(conn, "/")
     assert eventually(fn -> render(view) =~ class end)
@@ -1726,7 +1720,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       increment => self.value := self.value + 1
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
 
     {:ok, view, _html} = live(conn, "/")
     assert eventually(fn -> render(view) =~ class end)
@@ -1774,7 +1768,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       increment => self.value := self.value + 1
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
 
     {:ok, view, _html} = live(conn, "/")
     assert eventually(fn -> render(view) =~ class end)
@@ -1826,7 +1820,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       increment => self.value := self.value + 1
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
 
     {:ok, view, _html} = live(conn, "/")
     assert eventually(fn -> render(view) =~ class end)
@@ -1870,8 +1864,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       increment => self.value := self.value + 1
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} := #{class} spawn"})
     assert eventually(fn -> render(view) =~ name end)
 
     view |> element("button[phx-value-name='#{name}']") |> render_click()
@@ -1918,7 +1912,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # bumping data-flash-gen and re-rendering the new value (1). The FieldFlash JS
     # hook turns the gen bump into a visual pulse (covered by the Playwright case);
     # here we assert the server-side signal the hook keys off.
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} increment"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} increment"})
 
     assert eventually(fn ->
              html = render(view)
@@ -1937,7 +1931,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert frozen =~ "frozen"
 
     gen_frozen = flash_gen(view)
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} increment"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} increment"})
     # Give any (incorrectly-still-subscribed) push time to arrive; the gen must NOT
     # move while frozen.
     Process.sleep(300)
@@ -2007,7 +2001,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     view |> element(~s(button[phx-click="freeze_toggle"])) |> render_click()
     gen_frozen = flash_gen(view)
 
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} increment"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} increment"})
     # The write committed (the pane is frozen, so it must NOT reflect it). Poll a
     # few times to let any push land, asserting the gen never moves.
     refute eventually(fn -> flash_gen(view) != gen_frozen end, 10)
@@ -2042,8 +2036,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       increment => self.value := self.value + 1
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    submit_and_settle(view, "#eval-form", %{expr: class_src})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} := #{class} spawn"})
     assert eventually(fn -> render(view) =~ name end)
     name
   end
@@ -2130,20 +2124,18 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     boxx = "WBoxx#{suffix}"
     name = "wbox_#{suffix}"
 
-    view
-    |> form("#eval-form")
-    |> render_submit(%{expr: "Actor subclass: #{leaf}\n  state: n = 99\n\n  n => self.n"})
+    submit_and_settle(view, "#eval-form", %{
+      expr: "Actor subclass: #{leaf}\n  state: n = 99\n\n  n => self.n"
+    })
 
-    view
-    |> form("#eval-form")
-    |> render_submit(%{
+    submit_and_settle(view, "#eval-form", %{
       expr:
         "Actor subclass: #{boxx}\n  state: item = nil\n\n  setItem: x => self.item := x\n  item => self.item"
     })
 
-    view |> form("#eval-form") |> render_submit(%{expr: "wleaf_#{suffix} := #{leaf} spawn"})
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{boxx} spawn"})
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} setItem: wleaf_#{suffix}"})
+    submit_and_settle(view, "#eval-form", %{expr: "wleaf_#{suffix} := #{leaf} spawn"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} := #{boxx} spawn"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} setItem: wleaf_#{suffix}"})
     assert eventually(fn -> render(view) =~ name end)
 
     id = open_float_window(view, name)
@@ -2216,9 +2208,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     # The position survives an unrelated re-render (a bindings re-read from another
     # eval) — positions are not reset on unrelated state changes.
-    view
-    |> form("#eval-form")
-    |> render_submit(%{expr: "unrelated_#{System.unique_integer([:positive])} := 1"})
+    submit_and_settle(view, "#eval-form", %{
+      expr: "unrelated_#{System.unique_integer([:positive])} := 1"
+    })
 
     html = render(view)
     assert html =~ "left:412px"
@@ -2310,7 +2302,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # still reaches window 2 (its flash-gen bumps): proof the subscription was
     # kept, not silently dropped (BT-2527 #5).
     gen2_before = window_flash_gen(view, "win-2")
-    view |> form("#eval-form") |> render_submit(%{expr: "#{name} increment"})
+    submit_and_settle(view, "#eval-form", %{expr: "#{name} increment"})
 
     assert eventually(fn -> window_flash_gen(view, "win-2") > gen2_before end)
   end
@@ -2451,12 +2443,12 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     {:ok, view1, _} = live(tab1, "/")
     {:ok, view2, _} = live(tab2, "/")
 
-    view1 |> form("#eval-form") |> render_submit(%{expr: "x := 100"})
-    view2 |> form("#eval-form") |> render_submit(%{expr: "x := 999"})
+    submit_and_settle(view1, "#eval-form", %{expr: "x := 100"})
+    submit_and_settle(view2, "#eval-form", %{expr: "x := 999"})
 
     # Each tab reads back ITS OWN x — no cross-tab leakage.
-    assert view1 |> form("#eval-form") |> render_submit(%{expr: "x"}) =~ "100"
-    assert view2 |> form("#eval-form") |> render_submit(%{expr: "x"}) =~ "999"
+    assert submit_and_settle(view1, "#eval-form", %{expr: "x"}) =~ "100"
+    assert submit_and_settle(view2, "#eval-form", %{expr: "x"}) =~ "999"
   end
 
   test "a reconnect resumes the same session and retains state (BT-2410)", %{conn: conn} do
@@ -2466,8 +2458,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     conn = with_token(conn, "resume-#{System.unique_integer([:positive])}")
 
     {:ok, view1, _} = live(conn, "/")
-    view1 |> form("#eval-form") |> render_submit(%{expr: "y := 7"})
-    assert view1 |> form("#eval-form") |> render_submit(%{expr: "y"}) =~ "7"
+    submit_and_settle(view1, "#eval-form", %{expr: "y := 7"})
+    assert submit_and_settle(view1, "#eval-form", %{expr: "y"}) =~ "7"
 
     # Disconnect: stopping the LiveView fires terminate/2 → release/1, which opens
     # the grace window (it does NOT close the session). The same-tab reconnect
@@ -2477,7 +2469,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     {:ok, view2, _} = live(conn, "/")
     # Resumed onto the same session: the earlier binding is still there, with no
     # re-eval — state survived the reconnect.
-    assert view2 |> form("#eval-form") |> render_submit(%{expr: "y"}) =~ "7"
+    assert submit_and_settle(view2, "#eval-form", %{expr: "y"}) =~ "7"
     # And the live bindings pane was resubscribed + re-read on resume.
     assert eventually(fn -> render(view2) =~ "y" end)
   end
@@ -2492,7 +2484,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert is_integer(before)
 
     {:ok, view, _} = live(conn, "/")
-    view |> form("#eval-form") |> render_submit(%{expr: "z := 1"})
+    submit_and_settle(view, "#eval-form", %{expr: "z := 1"})
     # One more active session while the tab is open.
     assert eventually(fn -> BtAttach.Workspace.session_count() == before + 1 end)
 
@@ -2534,7 +2526,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   test "submitting appends a › request / → response pair to the scrollback", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    view |> form("#repl-form") |> render_submit(%{expr: "3 + 4"})
+    submit_and_settle(view, "#repl-form", %{expr: "3 + 4"})
     # One entry, carrying both the echoed request and the computed response.
     assert view |> element(".repl-entry .repl-expr") |> render() =~ "3 + 4"
     assert view |> element(".repl-entry .repl-val") |> render() =~ "7"
@@ -2543,8 +2535,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   test "the scrollback accumulates one entry per submit (request→response history)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    view |> form("#repl-form") |> render_submit(%{expr: "1 + 1"})
-    view |> form("#repl-form") |> render_submit(%{expr: "2 + 2"})
+    submit_and_settle(view, "#repl-form", %{expr: "1 + 1"})
+    submit_and_settle(view, "#repl-form", %{expr: "2 + 2"})
     html = render(view)
     assert html =~ "1 + 1"
     assert html =~ "2 + 2"
@@ -2552,23 +2544,23 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   test "submitting clears the REPL input (terminal convention)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    view |> form("#repl-form") |> render_submit(%{expr: "3 + 4"})
+    submit_and_settle(view, "#repl-form", %{expr: "3 + 4"})
     # The input is hook-owned (phx-update=ignore), so the clear is a server push.
     assert_push_event(view, "repl_set_input", %{text: ""})
   end
 
   test "a bare/blank submit is a no-op — no entry, no clear push", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    view |> form("#repl-form") |> render_submit(%{expr: "   "})
+    submit_and_settle(view, "#repl-form", %{expr: "   "})
     refute has_element?(view, ".repl-entry")
   end
 
   test "↑/↓ walk the history ring and push the recalled text", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
 
-    view |> form("#repl-form") |> render_submit(%{expr: "11 * 2"})
+    submit_and_settle(view, "#repl-form", %{expr: "11 * 2"})
     assert_push_event(view, "repl_set_input", %{text: ""})
-    view |> form("#repl-form") |> render_submit(%{expr: "33 + 9"})
+    submit_and_settle(view, "#repl-form", %{expr: "33 + 9"})
     assert_push_event(view, "repl_set_input", %{text: ""})
 
     # History is most-recent-first: ↑ recalls the newest, then older; ↓ walks back
@@ -2587,7 +2579,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     {:ok, view, _html} = live(conn, "/")
     # A malformed expression: the workspace returns an error, which lands as an
     # `err` scrollback entry rather than crashing the LiveView.
-    view |> form("#repl-form") |> render_submit(%{expr: "1 +"})
+    submit_and_settle(view, "#repl-form", %{expr: "1 +"})
     assert has_element?(view, ".repl-entry.err")
     assert Process.alive?(view.pid)
   end
@@ -2599,10 +2591,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     class_src =
       "Actor subclass: #{class}\n  state: n = 7\n\n  n => self.n"
 
-    view |> form("#repl-form") |> render_submit(%{expr: class_src})
+    submit_and_settle(view, "#repl-form", %{expr: class_src})
     # Spawn a live actor IN the REPL; its `→ result` entry carries an Inspect
     # affordance into the cockpit Inspector (object soul preserved in the terminal).
-    view |> form("#repl-form") |> render_submit(%{expr: "#{class} spawn"})
+    submit_and_settle(view, "#repl-form", %{expr: "#{class} spawn"})
 
     button = view |> element(".repl-entry:last-child .repl-inspect")
     assert has_element?(button)
@@ -2621,7 +2613,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   test ":help with no argument prints an info entry, not an eval error", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    html = view |> form("#repl-form") |> render_submit(%{expr: ":help"})
+    html = submit_and_settle(view, "#repl-form", %{expr: ":help"})
     # Routed by the IDE: a muted `:info` entry, NOT an `err` entry, and never
     # round-tripped through eval (which would reject `:help` as a parse error).
     assert has_element?(view, ".repl-entry.meta")
@@ -2633,11 +2625,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     {:ok, view, _html} = live(conn, "/")
     class = "ReplHelp#{System.unique_integer([:positive])}"
     # Define the class in the image so it is in the live symbol index.
-    view
-    |> form("#repl-form")
-    |> render_submit(%{expr: "Object subclass: #{class}\n  greet => 1"})
+    submit_and_settle(view, "#repl-form", %{expr: "Object subclass: #{class}\n  greet => 1"})
 
-    html = view |> form("#repl-form") |> render_submit(%{expr: ":help #{class}"})
+    html = submit_and_settle(view, "#repl-form", %{expr: ":help #{class}"})
     # Confirmation in the scrollback …
     assert html =~ "Opened #{class} in the System Browser"
     refute has_element?(view, ".repl-entry.err")
@@ -2648,13 +2638,13 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   test ":help <Unknown> reports no such class instead of opening the browser", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    html = view |> form("#repl-form") |> render_submit(%{expr: ":help NoSuchClassHere"})
+    html = submit_and_settle(view, "#repl-form", %{expr: ":help NoSuchClassHere"})
     assert html =~ "No class named NoSuchClassHere"
   end
 
   test ":bindings points at the Bindings pane rather than evaluating", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    html = view |> form("#repl-form") |> render_submit(%{expr: ":bindings"})
+    html = submit_and_settle(view, "#repl-form", %{expr: ":bindings"})
     assert has_element?(view, ".repl-entry.meta")
     refute has_element?(view, ".repl-entry.err")
     assert html =~ "Bindings pane"
@@ -2662,7 +2652,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   test "an unrecognised :command gets a friendly note, never a parse error", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    html = view |> form("#repl-form") |> render_submit(%{expr: ":wat"})
+    html = submit_and_settle(view, "#repl-form", %{expr: ":wat"})
     assert has_element?(view, ".repl-entry.meta")
     refute has_element?(view, ".repl-entry.err")
     assert html =~ "Unknown command :wat"
@@ -2672,13 +2662,11 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     {:ok, view, _html} = live(conn, "/")
     class = "ReplHelpSend#{System.unique_integer([:positive])}"
 
-    view
-    |> form("#repl-form")
-    |> render_submit(%{expr: "Object subclass: #{class}\n  greet => 1"})
+    submit_and_settle(view, "#repl-form", %{expr: "Object subclass: #{class}\n  greet => 1"})
 
     # A real `help:` send: its help text still lands as a normal `→ result`
     # entry, and the browser additionally navigates to the subject class.
-    view |> form("#repl-form") |> render_submit(%{expr: "Beamtalk help: #{class}"})
+    submit_and_settle(view, "#repl-form", %{expr: "Beamtalk help: #{class}"})
     refute has_element?(view, ".repl-entry.err")
     assert view |> element(".panel-head", class) |> render() =~ "methods"
   end
@@ -2720,7 +2708,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       {:ok, view, _html} = live(conn, "/")
       # The input is gated away, but a crafted client event must still be refused by
       # the facade/RBAC and surfaced as an error entry, not crash the LiveView.
-      html = render_hook(view, "repl_eval", %{"expr" => "3 + 4"})
+      html = hook_and_settle(view, "repl_eval", %{"expr" => "3 + 4"})
       assert html =~ "Not authorized"
       assert Process.alive?(view.pid)
     end
@@ -2732,7 +2720,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       # (driving the System Browser via the `:read` `:symbols` op), never the `:eval`
       # op. So an Observer who cannot eval can still navigate with it — no 403, no
       # crash — regardless of whether the class is in the symbol index.
-      html = render_hook(view, "repl_eval", %{"expr" => ":help Object"})
+      html = hook_and_settle(view, "repl_eval", %{"expr" => ":help Object"})
       refute html =~ "Not authorized"
       # Routes to an `:info` meta entry (either "Opened Object" or, if the symbol
       # index lacks it, "No class named Object") — never an `:eval` RBAC error.
@@ -2774,9 +2762,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     {:ok, view, _} = live(conn, "/")
 
-    view
-    |> form("#eval-form")
-    |> render_submit(%{
+    submit_and_settle(view, "#eval-form", %{
       expr: "Actor subclass: #{class}\n  state: value = 0\n\n  value => self.value"
     })
 

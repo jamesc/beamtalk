@@ -59,6 +59,30 @@ TestCase subclass: NumberMethodsTest
     self assert: 0.0 isZero
     self deny: 3.14 isZero
 
+  // BT-5083: numeric comparison, so negative zero is zero.
+  testFloatIsZeroNegativeZero => self assert: 0.0 negated isZero
+
+  testToByDoZeroStepRaises =>
+    self
+      should: [
+        1
+          to: 10
+          by: 0
+          do: [:i | i]
+      ]
+      raise: #user_error
+
+  // PIN-BUG BT-5098: a block that writes an outer local is inlined by the
+  // compiler, which skips the stdlib zero-step guard. The fix flips this to
+  // expect `user_error`.
+  testPinBugToByDoZeroStepWritingBlockIsNoop =>
+    s := 0
+    1
+      to: 10
+      by: 0
+      do: [:i | s := s + i]
+    self assert: s equals: 0
+
   testFloatIsPositive =>
     self assert: 3.14 isPositive
     self deny: -2.5 isPositive

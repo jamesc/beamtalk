@@ -42,6 +42,37 @@ TestCase subclass: ProcessNavigationTest
   // === SupervisionTree: shape ===
   testTreeSize => self assert: self sampleTree size equals: 3
 
+  // BT-5083: `elements` is the enriched node list, so Enumerable methods
+  // built on it see `children`. Real pids + a `parent_pid` link make a
+  // parent/child pair the enrichment can navigate.
+  linkedTree =>
+    parentPid := Erlang erlang whereis: #init
+    childPid := Erlang erlang whereis: #kernel_sup
+    parent := SupervisionNode
+      pid: parentPid
+      registeredName: nil
+      kind: #otpSupervisor
+      behaviourClass: nil
+      childCount: 1
+      node: nil
+    child := (SupervisionNode
+      pid: childPid
+      registeredName: nil
+      kind: #otpSupervisor
+      behaviourClass: nil
+      childCount: 0
+      node: nil)
+    linked := Erlang maps
+      put: #parent_pid
+      value: parentPid
+      map: child
+    SupervisionTree flatNodes: #(parent, linked)
+
+  testElementsAreEnriched =>
+    tree := self linkedTree
+    self assert: (tree inject: 0 into: [:a :n | a + n children size]) equals: 1
+    self assert: (tree count: [:n | n children size > 0]) equals: 1
+
   testTreeNodesCount => self assert: self sampleTree nodes size equals: 3
 
   testTreeNodesAreSupervisionNodes =>
@@ -116,10 +147,10 @@ TestCase subclass: ProcessNavigationTest
   // BT-3594 (ADR 0127 §9): `uses: Enumerable(SupervisionNode) excluding:
   // #(#do:)` — `do:`/`select:`/`detect:`/`detect:ifNone:`/`collect:` stay
   // this class's own methods (asserted above; class wins, ADR 0127 §3), and
-  // `elements` (required by Enumerable) is `self flatNodes`. What's new is
+  // `elements` (required by Enumerable) is `self nodes`. What's new is
   // `isNotEmpty`, `inject:into:`, `anySatisfy:`, `count:`.
   testEnumerableElements =>
-    self assert: self sampleTree elements equals: self sampleTree flatNodes
+    self assert: self sampleTree elements equals: self sampleTree nodes
 
   testEnumerableIsNotEmpty =>
     self assert: self sampleTree isNotEmpty

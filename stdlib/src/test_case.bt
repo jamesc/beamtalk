@@ -164,9 +164,7 @@ Value subclass: TestCase
   /// self assert: false              // fails
   /// ```
   assert: condition :: Boolean -> Nil =>
-    condition ifFalse: [
-      self fail: "Assertion failed: expected true, got {condition}"
-    ]
+    condition ifFalse: [self fail: "Assertion failed: expected true, got false"]
     nil
 
   /// Assert that `condition` is false, failing the test if it is true.
@@ -279,7 +277,7 @@ Value subclass: TestCase
     result isError ifFalse: [
       self fail: "Expected Result error: but got {result printString}"
     ]
-    (result error =:= expected)
+    ((Erlang beamtalk_equality) eq: result error with: expected)
       ifFalse: [
         self fail: "Expected Result error: {expected printString}, got Result error: {result error printString}"
       ]

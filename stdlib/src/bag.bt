@@ -80,7 +80,7 @@ typed Collection(E) subclass: Bag(E)
   /// ((Bag new) add: 1 withCount: 3) occurrencesOf: 1   // => 3
   /// ```
   add: element :: E withCount: n :: Integer -> Bag(E) =>
-    n < 0 ifTrue: [self error: "Bag count must be positive"]
+    n < 0 ifTrue: [self error: "Bag count must not be negative"]
     n =:= 0
       ifTrue: [self]
       ifFalse: [
@@ -129,8 +129,21 @@ typed Collection(E) subclass: Bag(E)
 
   /// Return a developer-readable string representation.
   ///
+  /// Each distinct element prints once; a count above one is shown as
+  /// `element x count`, so a large count stays short.
+  ///
   /// ## Examples
   /// ```beamtalk
-  /// Bag new printString   // => "Bag"
+  /// Bag new printString                       // => "Bag()"
+  /// (Bag withAll: #(1, 1)) printString        // => "Bag(1 x 2)"
+  /// (Bag withAll: #(1)) printString           // => "Bag(1)"
   /// ```
-  printString -> String => "Bag"
+  printString -> String =>
+    parts := self.counts keys
+      collect: [:e |
+        n := self.counts at: e
+        n > 1 ifTrue: [
+          e printString ++ " x " ++ n printString
+        ] ifFalse: [e printString]
+      ]
+    "Bag(" ++ (parts join: ", ") ++ ")"

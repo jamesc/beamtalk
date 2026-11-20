@@ -124,6 +124,26 @@ export class InspectorPanel {
     InspectorPanel._panels.get(key)?.dispose();
   }
 
+  /**
+   * Point every open panel at the current client (BT-5082). Without this a
+   * panel keeps the client from its last `show()`, so Refresh after a
+   * workspace restart hits a disposed client. Actor panels belong to the node
+   * they were opened against, so when the client changes (or goes away) they
+   * are closed; binding panels keep their last value and refetch on the new
+   * client.
+   */
+  static setClient(client: WorkspaceClient | null): void {
+    for (const inspector of [...InspectorPanel._panels.values()]) {
+      if (inspector._client === client) continue;
+      if (inspector._target.kind === "actor") {
+        inspector.dispose();
+        continue;
+      }
+      inspector._client = client;
+      if (client) void inspector._refetch();
+    }
+  }
+
   /** Dispose all open inspector panels (called on extension deactivation). */
   static disposeAll(): void {
     for (const inspector of [...InspectorPanel._panels.values()]) {
