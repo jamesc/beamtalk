@@ -670,7 +670,8 @@ entry itself is appended (a site's `source_ref`/`prev_source_ref` must
 already be a written ref by the time `append/1` sees it — see that
 function's doc).
 """.
--spec emit_rewrite_change_entry(map(), beamtalk_repl_loader_rewrite:rewrite_result()) -> emit_result().
+-spec emit_rewrite_change_entry(map(), beamtalk_repl_loader_rewrite:rewrite_result()) ->
+    emit_result().
 emit_rewrite_change_entry(Spec, RewriteResult) ->
     append_entry(
         "Failed to emit ChangeLog entry for multi-site rewrite (rewrite still installed)",
@@ -1323,13 +1324,13 @@ cancel_pending_new_class(ClassNameBin) ->
     catch
         %% BT-5084: any failure (not only an `exit` from a stopped server) falls
         %% back to recording the removal; the caller must never see a raise.
-        Class:Reason:Stack ->
+        ErrClass:ErrReason:Stack ->
             ?LOG_WARNING(
                 "Could not retire pending entries of a removed new class",
                 #{
                     class => ClassNameBin,
-                    error_class => Class,
-                    reason => Reason,
+                    error_class => ErrClass,
+                    reason => ErrReason,
                     stack => Stack,
                     domain => [beamtalk, runtime]
                 }
