@@ -22,6 +22,10 @@
 # fine for a local trial (browser sessions reset on restart); set it
 # explicitly for anything durable or remote (`mix phx.gen.secret`).
 # PHX_HOST and PORT pass through (defaults per config/runtime.exs).
+#
+# BIND: the front listens on loopback (127.0.0.1) unless BT_ATTACH_BIND_IP says
+# otherwise. A non-loopback bind refuses to boot unless OIDC is configured
+# (docs/deployment/remote-liveview-ide.md) or BT_IDE_ALLOW_UNAUTHENTICATED=1.
 set -eu
 
 case "${1:-}" in

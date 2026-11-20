@@ -5,8 +5,20 @@ defmodule BtAttach.Application do
 
   use Application
 
+  require Logger
+
   @impl true
   def start(_type, _args) do
+    # BT-5065: the operator explicitly allowed a non-loopback bind with no auth.
+    # Say so on every boot.
+    if ip = Application.get_env(:bt_attach, :unauthenticated_remote_bind) do
+      Logger.warning(
+        "BT_IDE_ALLOW_UNAUTHENTICATED is set: listening on #{:inet.ntoa(ip)} with NO " <>
+          "authentication — anyone who can reach this port can run code in the workspace",
+        domain: [:beamtalk, :liveview]
+      )
+    end
+
     children = [
       BtAttachWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:bt_attach, :dns_cluster_query) || :ignore},

@@ -6,6 +6,14 @@ production auth/authz topology decided in
 For the security model and trust path, see
 [`docs/security/threat-model.md`](../security/threat-model.md).
 
+> **Secure by default (BT-5065).** The front listens on **loopback only**
+> (`127.0.0.1`) unless `BT_ATTACH_BIND_IP` is set. To serve other machines you
+> must set `BT_ATTACH_BIND_IP` (e.g. `::` or `0.0.0.0`) **and configure OIDC**
+> (below): a non-loopback bind with no OIDC (and no `BT_IDE_DEV_AUTH`) refuses
+> to boot, because the front exposes eval and trusts every request as Owner when
+> no auth gate is active. `BT_IDE_ALLOW_UNAUTHENTICATED=1` overrides the refusal
+> on a network you fully trust; it logs a warning at every boot.
+
 > **Local development is unchanged.** `beamtalk repl --web` and `just web <ws>`
 > on localhost stay zero-config (cookie handshake, no OIDC). Everything here is
 > opt-in and applies only when you expose the IDE beyond the local machine.
@@ -177,7 +185,9 @@ the only network-facing service is Phoenix's HTTP(S) port. Do **not** publish
 epmd/dist ports — keep distribution off untrusted networks (co-located or a
 private interface). The cookie is an infrastructure secret passed via env; it is
 never sent to a browser. Boot fails closed if OIDC is requested but
-misconfigured.
+misconfigured. The image sets `BT_ATTACH_BIND_IP=::` (all interfaces), so it
+**requires OIDC configuration to start**; for a loopback-only trial pass
+`-e BT_ATTACH_BIND_IP=127.0.0.1`.
 
 ### Cookie rotation
 
@@ -193,6 +203,7 @@ restart/reconnect Phoenix), not a live re-key.
 ## Checklist
 
 - [ ] HTTPS terminates at Phoenix; `PHX_HOST` set; `SECRET_KEY_BASE` set.
+- [ ] `BT_ATTACH_BIND_IP` set for remote access (default is loopback) and OIDC configured — boot refuses a non-loopback bind without it.
 - [ ] OIDC `[oidc]` + `[oidc.roles]` configured; secret from env/file, not inline.
 - [ ] Workspace + Phoenix co-located (or dist bound to a private iface, never `0.0.0.0`).
 - [ ] No promiscuous-epmd warning at workspace launch.
