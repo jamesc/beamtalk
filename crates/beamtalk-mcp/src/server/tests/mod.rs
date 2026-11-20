@@ -126,7 +126,10 @@ pub(crate) async fn fake_mcp_with_interrupt_connection(
     let client = ReplClient::connect(fake.port, "test-cookie", None)
         .await
         .expect("fake REPL handshake should succeed");
-    (fake, BeamtalkMcp::new(Arc::new(client)))
+    (
+        fake,
+        BeamtalkMcp::new(Arc::new(client), PathPolicy::Unconfined),
+    )
 }
 
 /// A responder that always answers with `value` in the response's
@@ -171,7 +174,10 @@ pub(crate) async fn fake_mcp(responder: FakeReplResponder) -> (FakeRepl, Beamtal
     let client = ReplClient::connect(fake.port, "test-cookie", None)
         .await
         .expect("fake REPL handshake should succeed");
-    (fake, BeamtalkMcp::new(Arc::new(client)))
+    (
+        fake,
+        BeamtalkMcp::new(Arc::new(client), PathPolicy::Unconfined),
+    )
 }
 
 /// Concatenate a `CallToolResult`'s text content blocks for substring
