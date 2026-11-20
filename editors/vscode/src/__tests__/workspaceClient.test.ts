@@ -460,15 +460,11 @@ describe("WorkspaceClient.bindings()", () => {
     client.dispose();
   });
 
-  it("escapes the session id when building the eval expression", async () => {
+  it("rejects a session id that is not [A-Za-z0-9_-]+ (BT-5069)", async () => {
     const { client, ws } = makeConnectedClient();
-    const promise = client.bindings('a"b\\c');
-    const req = ws.sent[ws.sent.length - 1];
-    expect(req.code).toBe(
-      '(Session withId: "a\\"b\\\\c") ifNil: [#()] ifNotNil: [:s | s bindings keys]'
-    );
-    respondTo(ws, { value: [] });
-    await promise;
+    const sent = ws.sent.length;
+    await expect(client.bindings('a"b\\c{1 + 1}')).rejects.toThrow("Invalid session id");
+    expect(ws.sent.length).toBe(sent);
     client.dispose();
   });
 });
@@ -493,7 +489,7 @@ describe("WorkspaceClient.bindingValue()", () => {
     const promise = client.bindingValue("sess-xyz", "has space");
     const req = ws.sent[ws.sent.length - 1];
     expect(req.code).toBe(
-      '(Session withId: "sess-xyz") ifNil: [nil] ifNotNil: [:s | s bindings at: #"has space"]'
+      `(Session withId: "sess-xyz") ifNil: [nil] ifNotNil: [:s | s bindings at: #'has space']`
     );
     respondTo(ws, { value: null });
     await promise;
@@ -573,7 +569,7 @@ describe("WorkspaceClient.reload()", () => {
     };
     const client = new WorkspaceClient("id", 9999, "cookie", factory);
     // Don't call connect() — client stays in disconnected state
-    await expect(client.reload("/some/file.bt")).rejects.toThrow("Not connected");
+    await expect(client.reload("Counter")).rejects.toThrow("Not connected");
     client.dispose();
   });
 });

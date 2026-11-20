@@ -103,22 +103,7 @@ pub(crate) fn start_beam_node(
 
     // Add node name if specified
     if let Some(name) = node_name {
-        if let Some((local, host)) = name.split_once('@') {
-            // Full node name with host — always use -name
-            if local.is_empty() || host.is_empty() {
-                return Err(miette!(
-                    "Invalid node name '{name}': expected format 'name@host'"
-                ));
-            }
-            args.push(OsString::from("-name"));
-        } else if name.contains('.') {
-            // FQDN without @ — use -name
-            args.push(OsString::from("-name"));
-        } else {
-            // Simple short name — use -sname
-            args.push(OsString::from("-sname"));
-        }
-        args.push(OsString::from(name.as_str()));
+        args.extend(node_name_args(name)?);
     }
 
     args.push(OsString::from("-eval"));
@@ -154,6 +139,34 @@ pub(crate) fn start_beam_node(
         .map_err(|e| miette!("Failed to start BEAM node: {e}\nIs Erlang/OTP installed?"))?;
 
     Ok(child)
+}
+
+/// `erl` flags naming the foreground REPL node, plus the loopback pin on its
+/// distribution listener (BT-5067). Distribution only exists once the node is
+/// named, so the pin travels with the name.
+fn node_name_args(name: &str) -> Result<Vec<OsString>> {
+    let flag = if let Some((local, host)) = name.split_once('@') {
+        // Full node name with host — always use -name
+        if local.is_empty() || host.is_empty() {
+            return Err(miette!(
+                "Invalid node name '{name}': expected format 'name@host'"
+            ));
+        }
+        "-name"
+    } else if name.contains('.') {
+        // FQDN without @ — use -name
+        "-name"
+    } else {
+        // Simple short name — use -sname
+        "-sname"
+    };
+    let mut args = vec![OsString::from(flag), OsString::from(name)];
+    args.extend(
+        beamtalk_workspace::loopback_dist_args()
+            .into_iter()
+            .map(OsString::from),
+    );
+    Ok(args)
 }
 
 /// Connect to REPL backend with retries.
@@ -314,6 +327,33 @@ pub(crate) fn resolve_node_name(node_arg: Option<String>) -> Option<String> {
 
 #[cfg(all(test, unix))]
 mod tests {
+    #[test]
+    fn named_repl_node_pins_distribution_to_loopback() {
+        let args: Vec<String> = node_name_args("repl_node")
+            .unwrap()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        // An operator-exported ERL_EPMD_ADDRESS deliberately opts out.
+        if std::env::var("ERL_EPMD_ADDRESS").is_err() {
+            assert_eq!(
+                args,
+                [
+                    "-sname",
+                    "repl_node",
+                    "-kernel",
+                    "inet_dist_use_interface",
+                    "{127,0,0,1}"
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn node_name_args_rejects_empty_host() {
+        assert!(node_name_args("a@").is_err());
+    }
+
     use super::*;
 
     #[test]
