@@ -91,6 +91,7 @@ never an `{error, _}` result: it propagates unchanged.
     super_value/4,
     inherited_target/2,
     inherited_value_ext/5,
+    one_hop_children_missing_extension/2,
     invoke_resolved/6,
     responds_to/2,
     invoke_extension/6,
@@ -318,6 +319,52 @@ inherited_value_ext(Owner, Selector, Args, Self, SuperModule) ->
             Result;
         not_found ->
             SuperModule:dispatch(Selector, Args, Self)
+    end.
+
+-doc """
+BT-5060: the direct value subclasses of `Class` that will not see an extension
+registered on `Class` for `Selector`.
+
+A value type's `dispatch/3` takes a one-hop route for a selector its direct
+superclass compiles itself: the class's own extension, then the superclass's
+compiled `dispatch/3`, so an extension on that superclass is never tried. The
+exception is documented in ADR 0066. This names the classes it applies to, for
+the warning `beamtalk_extensions:register/5` logs: `Class` is a value class
+whose module compiles `Selector`, and the subclass neither defines `Selector`
+itself nor has an extension for it. Actor classes, class-side tags and a
+selector `Class` does not compile give `[]` (those cases honour the extension).
+""".
+-spec one_hop_children_missing_extension(class_name(), selector()) -> [class_name()].
+one_hop_children_missing_extension(Class, Selector) ->
+    case beamtalk_class_metadata:lookup_module(Class) of
+        {ok, Module} ->
+            case owner_convention(Module, Selector) of
+                value ->
+                    [
+                        Child
+                     || Child <- beamtalk_class_registry:direct_subclasses(Class),
+                        is_value_class(Child),
+                        not defines_locally(Child, Selector),
+                        check_extension(Child, Selector) =:= not_found
+                    ];
+                _ ->
+                    []
+            end;
+        not_found ->
+            []
+    end.
+
+%% A `Value subclass:` class. Built-ins that sit directly under `Object` (the
+%% supervisors, the primitives) have their own dispatch and are not named.
+-spec is_value_class(class_name()) -> boolean().
+is_value_class(Class) ->
+    beamtalk_class_registry:inherits_from(Class, 'Value').
+
+-spec defines_locally(class_name(), selector()) -> boolean().
+defines_locally(Class, Selector) ->
+    case beamtalk_class_metadata:lookup_instance_methods(Class) of
+        {ok, Selectors} -> lists:member(Selector, Selectors);
+        not_found -> false
     end.
 
 -spec compute_inherited_target(class_name(), selector()) ->
