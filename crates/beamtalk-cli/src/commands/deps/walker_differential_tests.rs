@@ -133,14 +133,12 @@ fn offline(f: &Fixture) -> String {
 fn diamond() {
     // root -> a, b ; a -> c ; b -> c
     let f = fixture(&["a", "b"], &[("a", &["c"]), ("b", &["c"]), ("c", &[])]);
-    // `resolve`'s via-chain for `c` is `a` or `b` depending on the run — a
-    // pre-existing nondeterminism in `compute_via_chain`, pinned here as
-    // either answer rather than fixed (out of scope for BT-5073).
-    let resolved = resolve(&f);
-    assert!(
-        resolved == "ok c:a b* a*" || resolved == "ok c:b b* a*",
-        "{resolved}"
-    );
+    // `c` is reachable through both `a` and `b`; the reported chain is the
+    // lexicographically first direct dependency (BT-5073: it used to follow
+    // `HashSet` order and vary from run to run).
+    for _ in 0..20 {
+        assert_eq!(resolve(&f), "ok c:a b* a*");
+    }
     assert_eq!(
         roots(&f),
         "ok a*:via[]:deps[c] b*:via[]:deps[c] c:via[a]:deps[]"

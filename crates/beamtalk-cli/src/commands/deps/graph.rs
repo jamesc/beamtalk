@@ -337,14 +337,20 @@ fn compute_via_chain(
     let mut queue: VecDeque<(&str, Vec<String>)> = VecDeque::new();
     let mut visited: HashSet<&str> = HashSet::new();
 
-    for direct_name in direct_dep_names {
-        if let Some(node) = graph.get(*direct_name) {
+    // Seed in name order, not `HashSet` order, so the chain reported for a
+    // package reachable through several direct dependencies is stable: the
+    // lexicographically first direct dependency that leads to it (shortest
+    // path first, then name order within a level).
+    let mut direct_sorted: Vec<&str> = direct_dep_names.iter().copied().collect();
+    direct_sorted.sort_unstable();
+    for direct_name in direct_sorted {
+        if let Some(node) = graph.get(direct_name) {
             // Check if this direct dep itself depends on the target
             if node.deps.iter().any(|d| d == target) {
                 return vec![direct_name.to_string()];
             }
-            queue.push_back((*direct_name, vec![direct_name.to_string()]));
-            visited.insert(*direct_name);
+            queue.push_back((direct_name, vec![direct_name.to_string()]));
+            visited.insert(direct_name);
         }
     }
 
