@@ -206,3 +206,14 @@ TestCase subclass: ArrayTest
   testArrayDoesNotGrow =>
     self deny: (#[1, 2] respondsTo: #add:)
     self deny: (#[1, 2] respondsTo: #addFirst:)
+
+  // The comparator assigns an outer local, so `sort:` is lowered as an in-place
+  // fold over the receiver (ADR 0133).
+  sortWriting: coll =>
+    n := 0
+    coll sort: [:a :b | n := n + 1. a < b]
+
+  testSortWithWritingComparatorRefusesInsteadOfAnsweringAList =>
+    // BT-5090: the in-place fold would answer a List; `Array sort:` answers an
+    // Array, so it refuses (never a silently wrong class).
+    self should: [self sortWriting: #[3, 1, 2]] raise: #stateful_block_dispatch

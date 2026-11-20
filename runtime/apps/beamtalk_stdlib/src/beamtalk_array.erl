@@ -287,8 +287,8 @@ inject_into(#{?BT_CLASS_TAG_KEY := 'Array'}, _Initial, _Block) ->
 %%%
 %%% Array is an indexed peer of List for reading, not for growing. These are the
 %%% non-growing, order-dependent selectors List has. Each returns a new Array
-%%% (or an index) and mirrors the matching `beamtalk_list` behaviour and error
-%%% shapes, so the two classes agree. The specs use `term()` (not `map()`) because
+%%% (or an index). `take`, `drop` and `sort` run the `beamtalk_list` helpers, so the two
+%%% classes share one implementation and one set of error shapes. The specs use `term()` (not `map()`) because
 %%% `Array` is a tagged map that the FFI type mapping would read as a Dictionary.
 %%% ============================================================================
 
@@ -318,27 +318,13 @@ index_of([Elem | Rest], Item, N) ->
 
 -doc "Return a new Array of the first `N` elements (fewer if the Array is shorter).".
 -spec take(term(), term()) -> term().
-take(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, N) when is_integer(N), N >= 0 ->
-    new(data_from_list(lists:sublist(data_to_list(Data), N)));
-take(#{?BT_CLASS_TAG_KEY := 'Array'}, N) ->
-    raise_bad_count('take:', N).
+take(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, N) ->
+    new(data_from_list(beamtalk_list:take('Array', data_to_list(Data), N))).
 
 -doc "Return a new Array without the first `N` elements.".
 -spec drop(term(), term()) -> term().
-drop(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, N) when is_integer(N), N >= 0 ->
-    case N >= maps:size(Data) of
-        true -> new(#{});
-        false -> new(data_from_list(lists:nthtail(N, data_to_list(Data))))
-    end;
-drop(#{?BT_CLASS_TAG_KEY := 'Array'}, N) ->
-    raise_bad_count('drop:', N).
-
--spec raise_bad_count(atom(), term()) -> no_return().
-raise_bad_count(Selector, N) ->
-    Hint = beamtalk_error:chars_to_binary(
-        io_lib:format("Argument must be a non-negative integer, got: ~tp", [N])
-    ),
-    beamtalk_error:raise_type_error('Array', Selector, Hint).
+drop(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, N) ->
+    new(data_from_list(beamtalk_list:drop('Array', data_to_list(Data), N))).
 
 -doc "Return a new Array sorted by Erlang term order.".
 -spec sort(term()) -> term().
@@ -347,10 +333,8 @@ sort(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}) ->
 
 -doc "Return a new Array sorted by the binary comparator block.".
 -spec sort(term(), term()) -> term().
-sort(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, Block) when is_function(Block, 2) ->
-    new(data_from_list(lists:sort(Block, data_to_list(Data))));
-sort(#{?BT_CLASS_TAG_KEY := 'Array'}, _Block) ->
-    beamtalk_error:raise_type_error('Array', 'sort:', <<"Block must be a binary function">>).
+sort(#{?BT_CLASS_TAG_KEY := 'Array', 'data' := Data}, Block) ->
+    new(data_from_list(beamtalk_list:sort_with('Array', data_to_list(Data), Block))).
 
 %%% ============================================================================
 %%% Slicing
