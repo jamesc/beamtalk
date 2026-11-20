@@ -306,7 +306,6 @@ impl Backend {
         if let (Some(path), Some(change)) =
             (uri_to_path(&uri), params.content_changes.into_iter().last())
         {
-            let interface_changed;
             {
                 let _sync = self.text_sync.lock_recover();
                 {
@@ -323,14 +322,18 @@ impl Backend {
                         .project_index()
                         .classes_in_file(&path)
                         .map(<[_]>::to_vec);
-                    interface_changed = before != after;
+                    if before != after {
+                        self.pending_interface_change
+                            .lock_recover()
+                            .insert(path.clone());
+                    }
                 }
                 let mut versions = self.versions.lock_recover();
                 versions.insert(path.clone(), params.text_document.version);
             }
             // Buffer now diverges from the on-disk bytes (and the
             // runtime's compiled module) until the next `didSave`.
-            self.mark_dirty(path);
+            self.mark_dirty(path.clone());
 
             let generation = {
                 let mut generations = self.diagnostic_generation.lock_recover();
@@ -348,6 +351,10 @@ impl Backend {
 
             if is_latest {
                 self.publish_diagnostics(&uri).await;
+                // Take (and clear) the pending flag here, not per edit: an
+                // earlier edit in this debounce window may have renamed the
+                // class and been superseded by this one.
+                let interface_changed = self.pending_interface_change.lock_recover().remove(&path);
                 if interface_changed {
                     // Already debounced (this is the latest edit) and gated
                     // on the file's class set changing, so ordinary typing

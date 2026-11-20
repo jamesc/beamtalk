@@ -233,6 +233,11 @@ pub struct Backend {
     dirty_files: Mutex<HashSet<Utf8PathBuf>>,
     /// Monotonic generation counter used to debounce `didChange` diagnostics per URI.
     diagnostic_generation: Mutex<HashMap<Url, u64>>,
+    /// Open files whose set of defined classes changed in an edit that has not
+    /// yet been followed by a cross-file republish. Set by every `did_change`;
+    /// consumed by whichever edit wins the debounce, so a superseded rename is
+    /// not lost (BT-5078).
+    pending_interface_change: Mutex<HashSet<Utf8PathBuf>>,
     /// Deferred preload config captured at initialize and consumed after handshake.
     preload_config: Mutex<Option<PreloadConfig>>,
     /// Paths of stdlib files loaded during preload; used to emit `beamtalk-stdlib://` URIs.

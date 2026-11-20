@@ -12,7 +12,7 @@ use super::convert::{offset_to_position, path_to_stdlib_uri, path_to_uri, uri_to
 use super::flush::flush_event_listener;
 use super::nav::{bt_locations_to_lsp, runtime_site_to_lsp_location};
 use super::reload::{
-    OpenPathsHandle, class_changed_listener, publish_diagnostics_impl, reload_check_listener,
+    OpenPathsHandle, class_changed_listener, compute_publish_diagnostics, reload_check_listener,
     seed_reload_diagnostics,
 };
 use super::{Backend, FetchContentParams, FetchContentResult, LoadedTypeCache, NavCache};
@@ -48,6 +48,7 @@ impl Backend {
             next_open_generation: std::sync::atomic::AtomicU64::new(0),
             dirty_files: Mutex::new(HashSet::new()),
             diagnostic_generation: Mutex::new(HashMap::new()),
+            pending_interface_change: Mutex::new(HashSet::new()),
             preload_config: Mutex::new(None),
             stdlib_paths: Mutex::new(HashSet::new()),
             rename_caps: Mutex::new(super::handlers::RenameClientCaps::default()),
@@ -1503,22 +1504,23 @@ impl Backend {
                 return;
             }
         }
-        // BT-5078: serialise with `did_close`'s clearing publish and skip a
-        // document that is no longer open, so a publish that raced a close
-        // can't resurrect diagnostics on the closed tab.
+        let version = self.file_version_for_uri(uri);
+        // BT-5078: analysis runs outside the lock; only the open-check plus
+        // the send is serialised with `did_close`'s clearing publish, so a
+        // publish that raced a close can't resurrect diagnostics on the
+        // closed tab, and a slow analysis never blocks a close.
+        let Some(diagnostics) =
+            compute_publish_diagnostics(&self.service, &self.reload_diagnostics, uri)
+        else {
+            return;
+        };
         let _publishing = self.publish_lock.lock().await;
         if !self.is_open_uri(uri) {
             return;
         }
-        let version = self.file_version_for_uri(uri);
-        publish_diagnostics_impl(
-            &self.client,
-            &self.service,
-            &self.reload_diagnostics,
-            uri,
-            version,
-        )
-        .await;
+        self.client
+            .publish_diagnostics(uri.clone(), diagnostics, version)
+            .await;
     }
 }
 

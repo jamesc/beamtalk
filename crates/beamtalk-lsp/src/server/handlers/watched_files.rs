@@ -10,7 +10,10 @@
 //! editor's buffer is the truth for those, and `did_close` reverts to disk.
 //! Only files the preload would index (or that are already indexed) are
 //! touched, so unrelated `.bt` files elsewhere in the tree never enter the
-//! index. No file watcher is added to the server itself: the client does the
+//! index. A deleted or renamed *directory* is not reported per file (the
+//! `**/*.bt` glob does not match directories), so files under it stay indexed
+//! until rename's on-disk check or a later event catches them.
+//! No file watcher is added to the server itself: the client does the
 //! watching and this only reacts to what it reports.
 
 use crate::server::config::preload_covers;

@@ -271,3 +271,63 @@ async fn publish_after_close_sends_nothing() {
         "no diagnostics may be published for a closed document"
     );
 }
+
+/// Edit 1 renames `Foo` to `Bar`; edit 2 lands inside the debounce window and
+/// only touches a method body. Edit 1 is superseded, so edit 2 (the debounce
+/// winner) must still republish the dependents (review of BT-5078).
+#[tokio::test]
+async fn superseded_class_rename_still_republishes_dependents() {
+    let root = unique_temp_dir("bt-5078-superseded");
+    fs::create_dir_all(root.join("src")).expect("src");
+    let a = root.join("src").join("a.bt");
+    let b = root.join("src").join("b.bt");
+    let b_src = "Object subclass: User\n\n  make => Foo new\n";
+    fs::write(&a, "Object subclass: Foo\n  go => 1\n").expect("a");
+    fs::write(&b, b_src).expect("b");
+    let (a_uri, b_uri) = (
+        Url::from_file_path(&a).expect("uri"),
+        Url::from_file_path(&b).expect("uri"),
+    );
+
+    let (service, mut feed) = service_with_publish_feed(&root).await;
+    let backend: &Backend = service.inner();
+    real_did_open(backend, a_uri.clone(), "Object subclass: Foo\n  go => 1\n").await;
+    real_did_open(backend, b_uri.clone(), b_src).await;
+    // sleep: let the feed task forward the opens' own publishes before draining.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    while feed.try_recv().is_ok() {}
+
+    let change = |version: i32, text: &str| tower_lsp::lsp_types::DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: a_uri.clone(),
+            version,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: text.to_string(),
+        }],
+    };
+    // Both run concurrently, so edit 1 is superseded during its debounce.
+    tokio::join!(
+        backend.did_change(change(2, "Object subclass: Bar\n  go => 1\n")),
+        backend.did_change(change(3, "Object subclass: Bar\n  go => 2\n")),
+    );
+
+    let mut b_saw_foo_unresolved = false;
+    while let Ok(Some(n)) = tokio::time::timeout(Duration::from_secs(2), feed.recv()).await {
+        if let Some(p) = published(&n)
+            && p.uri == b_uri
+            && p.diagnostics
+                .iter()
+                .any(|d| d.message.contains("Unresolved class") && d.message.contains("Foo"))
+        {
+            b_saw_foo_unresolved = true;
+            break;
+        }
+    }
+    assert!(
+        b_saw_foo_unresolved,
+        "the superseded rename must still re-check b.bt"
+    );
+}
