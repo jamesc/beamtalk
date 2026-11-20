@@ -504,6 +504,17 @@ const REBAR3_ENV_ALLOWLIST: &[&str] = &[
     "GIT_SSL_CAINFO",
     // ssh-based git dependencies authenticate through the agent.
     "SSH_AUTH_SOCK",
+    // Non-secret git configuration (paths and commands), so private git
+    // dependencies behave the same under rebar3 as under `beamtalk deps`.
+    // `GIT_SSL_NO_VERIFY` is deliberately not forwarded.
+    "GIT_SSH",
+    "GIT_SSH_COMMAND",
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_EXEC_PATH",
     // rebar3, hex and Erlang configuration.
     "REBAR_CACHE_DIR",
     "REBAR_CONFIG",
