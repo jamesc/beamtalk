@@ -58,6 +58,15 @@ defmodule BtAttachWeb.Router do
     get "/callback", OidcController, :callback
   end
 
+  # Logout (BT-5070): clears the session. DELETE + the :browser pipeline's CSRF
+  # protection, so a cross-site page cannot log a user out. Deliberately not
+  # behind :require_auth: clearing an absent/expired session is harmless.
+  scope "/", BtAttachWeb do
+    pipe_through :browser
+
+    delete "/logout", SessionController, :delete
+  end
+
   # The IDE itself: gated behind authentication when OIDC is enabled. The
   # `live_session` runs `Auth.on_mount/4` so the socket inherits the same gate
   # on (re)connect, not just the initial HTTP render.
