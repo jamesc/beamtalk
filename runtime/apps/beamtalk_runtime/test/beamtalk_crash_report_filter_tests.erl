@@ -222,7 +222,17 @@ await(Match) ->
             end;
         {captured, _} ->
             await(Match)
-    after 5000 -> error(no_report)
+    after 5000 ->
+        %% BT-5051: name what the wait saw, not just that it expired. A primary
+        %% level left at `none` by an earlier cancelled test looks the same as
+        %% a slow logger from here.
+        error(
+            {no_report, [
+                {primary_level, maps:get(level, logger:get_primary_config())},
+                {handler_installed, lists:member(?HANDLER, logger:get_handler_ids())},
+                {mailbox, element(2, process_info(self(), messages))}
+            ]}
+        )
     end.
 
 drain() ->

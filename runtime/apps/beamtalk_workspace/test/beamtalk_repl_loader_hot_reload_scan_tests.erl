@@ -137,97 +137,105 @@ hot_reload_scan_test_() ->
     {timeout, 60,
         {setup, fun setup/0, fun teardown/1, fun(_) ->
             [
-                ?_test(
-                    try
-                        begin
-                            Dir = beamtalk_test_fs:base_dir(),
-                            Id = beamtalk_test_unique:id(),
-                            ParentPath = write(
-                                Dir, io_lib:format("hs_parent_~s.bt", [Id]), parent_src([])
-                            ),
-                            ChildPath = write(
-                                Dir, io_lib:format("hs_child_~s.bt", [Id]), child_src()
-                            ),
-                            {ok, _, S1} = beamtalk_repl_loader:handle_load(ParentPath, state0()),
-                            {ok, _, S2} = beamtalk_repl_loader:handle_load(ChildPath, S1),
+                %% The timeout must wrap the test itself: the `{timeout, 60, ..}`
+                %% around the fixture bounds the group only, and EUnit gives a
+                %% bare `?_test` its own 5 s default. This test compiles and loads
+                %% two .bt files twice (BT-5051), which takes longer than that on a
+                %% loaded runner.
+                {timeout, 60,
+                    ?_test(
+                        try
+                            begin
+                                Dir = beamtalk_test_fs:base_dir(),
+                                Id = beamtalk_test_unique:id(),
+                                ParentPath = write(
+                                    Dir, io_lib:format("hs_parent_~s.bt", [Id]), parent_src([])
+                                ),
+                                ChildPath = write(
+                                    Dir, io_lib:format("hs_child_~s.bt", [Id]), child_src()
+                                ),
+                                {ok, _, S1} = beamtalk_repl_loader:handle_load(
+                                    ParentPath, state0()
+                                ),
+                                {ok, _, S2} = beamtalk_repl_loader:handle_load(ChildPath, S1),
 
-                            %% Instances before the reload: plain, named, and a descendant.
-                            P1 = spawn_instance("HotScanParent"),
-                            ParentMod = beamtalk_runtime_api:module_name(
-                                beamtalk_runtime_api:whereis_class('HotScanParent')
-                            ),
-                            {ok, Named} = beamtalk_actor_registry:'spawnAs'(
-                                hot_scan_named, ParentMod, #{}
-                            ),
-                            C1 = spawn_instance("HotScanChild"),
-                            ?assertNot(migrated(P1, extra)),
-                            ?assertNot(migrated(C1, extra)),
+                                %% Instances before the reload: plain, named, and a descendant.
+                                P1 = spawn_instance("HotScanParent"),
+                                ParentMod = beamtalk_runtime_api:module_name(
+                                    beamtalk_runtime_api:whereis_class('HotScanParent')
+                                ),
+                                {ok, Named} = beamtalk_actor_registry:'spawnAs'(
+                                    hot_scan_named, ParentMod, #{}
+                                ),
+                                C1 = spawn_instance("HotScanChild"),
+                                ?assertNot(migrated(P1, extra)),
+                                ?assertNot(migrated(C1, extra)),
 
-                            %% A `native:` process on the parent's backing module is
-                            %% listed by `allInstances` but a reload leaves it alone.
-                            Native = proc_lib:spawn(?MODULE, init, [x]),
-                            beamtalk_class_registry:ensure_backing_module_index_table(),
-                            ok = beamtalk_test_wait:until(fun() ->
-                                {dictionary, D} = erlang:process_info(Native, dictionary),
-                                lists:keymember('$initial_call', 1, D)
-                            end),
-                            ets:insert(beamtalk_backing_module_index, {
-                                ?MODULE,
-                                'HotScanParent',
-                                beamtalk_runtime_api:whereis_class('HotScanParent')
-                            }),
-                            ?assert(
-                                lists:member(
-                                    Native, beamtalk_runtime_api:all_instances('HotScanParent')
-                                )
-                            ),
+                                %% A `native:` process on the parent's backing module is
+                                %% listed by `allInstances` but a reload leaves it alone.
+                                Native = proc_lib:spawn(?MODULE, init, [x]),
+                                beamtalk_class_registry:ensure_backing_module_index_table(),
+                                ok = beamtalk_test_wait:until(fun() ->
+                                    {dictionary, D} = erlang:process_info(Native, dictionary),
+                                    lists:keymember('$initial_call', 1, D)
+                                end),
+                                ets:insert(beamtalk_backing_module_index, {
+                                    ?MODULE,
+                                    'HotScanParent',
+                                    beamtalk_runtime_api:whereis_class('HotScanParent')
+                                }),
+                                ?assert(
+                                    lists:member(
+                                        Native, beamtalk_runtime_api:all_instances('HotScanParent')
+                                    )
+                                ),
 
-                            %% Reload the parent with a new field: one scan, all migrated.
-                            ok = file:write_file(ParentPath, parent_src(["extra"])),
-                            Calls = trace_scans(['HotScanParent', 'HotScanChild'], fun() ->
-                                {ok, _, _} = beamtalk_repl_loader:handle_load(ParentPath, S2)
-                            end),
-                            ?assertEqual([{scan_marked_classes, 1}], Calls),
-                            ?assert(migrated(P1, extra)),
-                            ?assert(migrated(Named, extra)),
-                            ?assert(migrated(C1, extra)),
-                            %% The native process was neither suspended nor migrated: it is
-                            %% alive and never received a system message.
-                            ?assert(is_process_alive(Native)),
-                            ?assertEqual({messages, []}, erlang:process_info(Native, messages)),
-                            drop_fake_natives(),
+                                %% Reload the parent with a new field: one scan, all migrated.
+                                ok = file:write_file(ParentPath, parent_src(["extra"])),
+                                Calls = trace_scans(['HotScanParent', 'HotScanChild'], fun() ->
+                                    {ok, _, _} = beamtalk_repl_loader:handle_load(ParentPath, S2)
+                                end),
+                                ?assertEqual([{scan_marked_classes, 1}], Calls),
+                                ?assert(migrated(P1, extra)),
+                                ?assert(migrated(Named, extra)),
+                                ?assert(migrated(C1, extra)),
+                                %% The native process was neither suspended nor migrated: it is
+                                %% alive and never received a system message.
+                                ?assert(is_process_alive(Native)),
+                                ?assertEqual({messages, []}, erlang:process_info(Native, messages)),
+                                drop_fake_natives(),
 
-                            %% Owner condition (a): readers re-scan, no stale list. An
-                            %% instance made after the reload is seen immediately...
-                            P2 = spawn_instance("HotScanParent"),
-                            Seen = beamtalk_runtime_api:all_instances('HotScanParent'),
-                            ?assertEqual(lists:sort([P1, Named, P2]), lists:sort(Seen)),
-                            ?assert(migrated(P2, extra)),
+                                %% Owner condition (a): readers re-scan, no stale list. An
+                                %% instance made after the reload is seen immediately...
+                                P2 = spawn_instance("HotScanParent"),
+                                Seen = beamtalk_runtime_api:all_instances('HotScanParent'),
+                                ?assertEqual(lists:sort([P1, Named, P2]), lists:sort(Seen)),
+                                ?assert(migrated(P2, extra)),
 
-                            %% ...and by the next reload, which migrates old and new alike.
-                            ok = file:write_file(ParentPath, parent_src(["extra", "more"])),
-                            Calls2 = trace_scans(['HotScanParent', 'HotScanChild'], fun() ->
-                                {ok, _, _} = beamtalk_repl_loader:handle_load(ParentPath, S2)
-                            end),
-                            ?assertEqual([{scan_marked_classes, 1}], Calls2),
-                            lists:foreach(
-                                fun(P) -> ?assert(migrated(P, more)) end, [P1, Named, P2, C1]
-                            ),
-                            lists:foreach(fun beamtalk_test_proc:stop/1, [P1, Named, P2, C1])
-                        end
-                    after
-                        %% Never leak actors into later tests, whatever failed above.
-                        drop_fake_natives(),
-                        lists:foreach(
-                            fun(C) ->
+                                %% ...and by the next reload, which migrates old and new alike.
+                                ok = file:write_file(ParentPath, parent_src(["extra", "more"])),
+                                Calls2 = trace_scans(['HotScanParent', 'HotScanChild'], fun() ->
+                                    {ok, _, _} = beamtalk_repl_loader:handle_load(ParentPath, S2)
+                                end),
+                                ?assertEqual([{scan_marked_classes, 1}], Calls2),
                                 lists:foreach(
-                                    fun beamtalk_test_proc:stop/1,
-                                    beamtalk_runtime_api:all_instances(C)
-                                )
-                            end,
-                            ['HotScanParent', 'HotScanChild']
-                        )
-                    end
-                )
+                                    fun(P) -> ?assert(migrated(P, more)) end, [P1, Named, P2, C1]
+                                ),
+                                lists:foreach(fun beamtalk_test_proc:stop/1, [P1, Named, P2, C1])
+                            end
+                        after
+                            %% Never leak actors into later tests, whatever failed above.
+                            drop_fake_natives(),
+                            lists:foreach(
+                                fun(C) ->
+                                    lists:foreach(
+                                        fun beamtalk_test_proc:stop/1,
+                                        beamtalk_runtime_api:all_instances(C)
+                                    )
+                                end,
+                                ['HotScanParent', 'HotScanChild']
+                            )
+                        end
+                    )}
             ]
         end}}.

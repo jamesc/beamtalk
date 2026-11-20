@@ -17,6 +17,7 @@ The capture handler forwards every event to the process that installed it, as
 -export([
     with_capture/1,
     with_capture/2,
+    quietly/1,
     start_capture/1,
     stop_capture/1,
     await/2,
@@ -46,6 +47,39 @@ with_capture(Level, Fun) ->
         Fun()
     after
         stop_capture(Handle)
+    end.
+
+-doc """
+Run `Fun/0` with the primary logger level at `none`, to hide the crash report
+of a failure the test provokes on purpose, then put back the level the caller
+had (BT-5051).
+
+The level is global. Restoring it in `try ... after` is not enough: when
+EUnit cancels a test on its timeout it kills the test process, the `after`
+never runs, and the level stays `none` for the rest of the run. Every later
+test that waits for a log event then stalls on its own timeout. So a guard
+process monitors the caller and restores the level if the caller dies first.
+""".
+-spec quietly(fun(() -> Result)) -> Result.
+quietly(Fun) ->
+    #{level := OldLevel} = logger:get_primary_config(),
+    Owner = self(),
+    {Guard, GuardRef} = spawn_monitor(fun() ->
+        OwnerRef = erlang:monitor(process, Owner),
+        receive
+            {done, Owner} -> ok;
+            {'DOWN', OwnerRef, process, Owner, _} -> logger:set_primary_config(level, OldLevel)
+        end
+    end),
+    ok = logger:set_primary_config(level, none),
+    try
+        Fun()
+    after
+        ok = logger:set_primary_config(level, OldLevel),
+        Guard ! {done, Owner},
+        receive
+            {'DOWN', GuardRef, process, Guard, _} -> ok
+        end
     end.
 
 -doc "Install a capture handler for the calling process; see `stop_capture/1`.".
