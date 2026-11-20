@@ -351,10 +351,11 @@ extension_prev_source(EtsClass, Selector) ->
 log_extension_removal(ClassName, Selector, Side, Owner, PrevSource) ->
     ClassNameBin = atom_to_binary(ClassName, utf8),
     {Author, AuthorKind} = beamtalk_refactor_support:current_author_context(),
-    _ = beamtalk_workspace_callback:emit_extension_remove_change_entry(
-        ClassNameBin, Selector, Side, Owner, PrevSource, Author, AuthorKind
-    ),
-    ok.
+    beamtalk_refactor_support:note_changelog_result(
+        beamtalk_workspace_callback:emit_extension_remove_change_entry(
+            ClassNameBin, Selector, Side, Owner, PrevSource, Author, AuthorKind
+        )
+    ).
 
 %% `Self`'s removal side and class pid. A metaclass-tagged receiver
 %% (`Counter class removeSelector: #foo`) is class-side; any other class
@@ -417,10 +418,11 @@ remove_local_method(ClassName, Selector, Side) ->
 -spec log_local_removal(binary(), atom(), instance | class) -> ok.
 log_local_removal(ClassNameBin, Selector, Side) ->
     {Author, AuthorKind} = beamtalk_refactor_support:current_author_context(),
-    _ = beamtalk_workspace_callback:emit_remove_change_entry(
-        ClassNameBin, Selector, Side, Author, AuthorKind
-    ),
-    ok.
+    beamtalk_refactor_support:note_changelog_result(
+        beamtalk_workspace_callback:emit_remove_change_entry(
+            ClassNameBin, Selector, Side, Author, AuthorKind
+        )
+    ).
 
 -doc """
 Rename the receiver class to `NewName`, rewriting every in-project reference

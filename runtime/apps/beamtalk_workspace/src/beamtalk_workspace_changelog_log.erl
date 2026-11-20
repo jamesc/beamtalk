@@ -70,10 +70,28 @@ write_optional_source(SourcesDir, Ref, Body) ->
     Path = filename:join(SourcesDir, binary_to_list(Ref)),
     write_file_atomic(Path, Body).
 
+%% Append `Data` to `Path` and fsync before returning (BT-5084): the entry is only
+%% reported recorded once it is on stable storage, like the atomic temp+rename
+%% writes (`write_file_atomic/2`) used for every other ChangeLog file.
+-spec append_synced(string(), iodata()) -> ok | {error, term()}.
+append_synced(Path, Data) ->
+    case file:open(Path, [append, raw, binary]) of
+        {ok, Fd} ->
+            Result =
+                case file:write(Fd, Data) of
+                    ok -> file:sync(Fd);
+                    {error, _} = Err -> Err
+                end,
+            _ = file:close(Fd),
+            Result;
+        {error, _} = Err ->
+            Err
+    end.
+
 -spec append_metadata_line(#entry{}, #state{}) -> ok | {error, term()}.
 append_metadata_line(Entry, State) ->
     Line = [beamtalk_workspace_changelog_codec:entry_to_json(Entry), $\n],
-    case file:write_file(State#state.log_path, Line, [append]) of
+    case append_synced(State#state.log_path, Line) of
         ok ->
             ok;
         {error, Reason} ->

@@ -61,6 +61,7 @@ module loading to beamtalk_repl_loader.
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
 -export([
+    with_changelog_warnings/1,
     announce_binding_changed/2,
     maybe_await_future/1,
     rebuild_bindings_from_steps/3,
@@ -114,7 +115,26 @@ do_eval(Expression, State, Subscriber) ->
         {ok, HelpText} ->
             {ok, HelpText, <<>>, [], State};
         not_found ->
-            do_eval_expression(Expression, State, Subscriber)
+            with_changelog_warnings(fun() ->
+                do_eval_expression(Expression, State, Subscriber)
+            end)
+    end.
+
+-doc """
+Run `Fun` (an eval) and add to its reply the warnings for any ChangeLog entry
+that could not be recorded for a change the eval made live (BT-5084). The
+primitives that make such changes (`removeSelector:`, `renameTo:`,
+`removeFromSystem`, `newClass:at:`, ...) return a plain value, so they queue the
+warning in this process (`beamtalk_refactor_support:note_changelog_result/1`).
+""".
+-spec with_changelog_warnings(fun(() -> Result)) -> Result when
+    Result :: tuple().
+with_changelog_warnings(Fun) ->
+    _ = beamtalk_refactor_support:take_changelog_warnings(),
+    Result = Fun(),
+    case beamtalk_refactor_support:take_changelog_warnings() of
+        [] -> Result;
+        Extra -> setelement(4, Result, element(4, Result) ++ Extra)
     end.
 
 -spec do_eval_expression(string(), beamtalk_repl_state:state(), pid() | undefined) ->
@@ -520,6 +540,9 @@ or `{error, Reason, Output, Warnings, State}' on failure.
     | {script_exit, non_neg_integer(), binary(), [beamtalk_repl_protocol:warning()],
         beamtalk_repl_state:state()}.
 do_eval_trace(Expression, State) ->
+    with_changelog_warnings(fun() -> do_eval_trace_expression(Expression, State) end).
+
+do_eval_trace_expression(Expression, State) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
     ModuleName = beamtalk_module_name:repl_eval_module(Counter),
     NewState = beamtalk_repl_state:increment_eval_counter(State),

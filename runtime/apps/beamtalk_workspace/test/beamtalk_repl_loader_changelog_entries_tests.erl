@@ -10,6 +10,7 @@ cannot time out while the server still completes it.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 failing_append_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(Ctx) ->
@@ -44,6 +45,136 @@ server_down_test() ->
     ?assertMatch(
         {warning, _}, beamtalk_repl_loader_changelog_entries:emit_change_entry(method_info())
     ).
+
+%% BT-5084: every emitter (not only emit_change_entry/1) must report a failed
+%% append as `{warning, Text}` instead of discarding it. No ChangeLog server is
+%% running, so each append exits `noproc`.
+every_emitter_warns_when_append_fails_test_() ->
+    ?assertEqual(undefined, whereis(beamtalk_workspace_changelog)),
+    E = beamtalk_repl_loader_changelog_entries,
+    Cases = [
+        {"new-class", fun() -> E:emit_new_class_entry(<<"C5084">>, <<"src">>, <<"/p/c.bt">>) end},
+        {"class-def", fun() -> E:emit_class_def_entry(<<"C5084">>, "new", "old") end},
+        {"rewrite", fun() ->
+            E:emit_rewrite_change_entry(
+                #{
+                    kind => 'rename-class',
+                    class => <<"C5084">>,
+                    intent => durable,
+                    author => <<"a">>,
+                    author_kind => human
+                },
+                #{definition => undefined, sites => []}
+            )
+        end},
+        {"remove-method", fun() ->
+            E:emit_remove_change_entry(<<"C5084">>, inc, instance, <<"a">>, human)
+        end},
+        {"extension remove", fun() ->
+            E:emit_extension_remove_change_entry(
+                <<"C5084">>, inc, instance, undefined, undefined, <<"a">>, human
+            )
+        end},
+        {"remove-class", fun() ->
+            E:emit_remove_class_change_entry(<<"C5084">>, #{}, <<"a">>, human)
+        end}
+    ],
+    [
+        {Name, fun() ->
+            ?assertMatch({warning, <<"The change is live", _/binary>>}, Fun())
+        end}
+     || {Name, Fun} <- Cases
+    ].
+
+%% BT-5084: the eval-side warning queue the primitive paths (removeSelector:,
+%% renameTo:, removeFromSystem, ...) use, since they have no reply to carry one.
+warning_queue_test() ->
+    _ = beamtalk_refactor_support:take_changelog_warnings(),
+    ok = beamtalk_refactor_support:note_changelog_result(ok),
+    ok = beamtalk_refactor_support:note_changelog_result({error, no_workspace}),
+    ok = beamtalk_refactor_support:note_changelog_result({warning, <<"a">>}),
+    ok = beamtalk_refactor_support:note_changelog_result({warning, <<"b">>}),
+    ?assertEqual([<<"a">>, <<"b">>], beamtalk_refactor_support:take_changelog_warnings()),
+    ?assertEqual([], beamtalk_refactor_support:take_changelog_warnings()).
+
+eval_reply_carries_primitive_changelog_warning_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_eval:with_changelog_warnings(fun() ->
+        ok = beamtalk_refactor_support:note_changelog_result({warning, <<"w">>}),
+        {ok, 1, <<>>, [<<"existing">>], State}
+    end),
+    ?assertMatch({ok, 1, <<>>, [<<"existing">>, <<"w">>], _}, Result).
+
+%% BT-5084: a stalled server must not hang the caller forever.
+append_timeout_is_an_error_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(#{pid := Pid}) ->
+        {timeout, 30, fun() ->
+            ok = application:set_env(beamtalk_workspace, changelog_append_timeout_ms, 200),
+            ok = sys:suspend(Pid),
+            try
+                Events = beamtalk_test_log:with_capture(error, fun() ->
+                    ?assertMatch(
+                        {error, #beamtalk_error{kind = changelog_write_error}},
+                        beamtalk_workspace_changelog:append(input())
+                    ),
+                    beamtalk_test_log:collect(200)
+                end),
+                ?assertMatch([_ | _], [E || E = #{level := error} <- Events])
+            after
+                ok = sys:resume(Pid),
+                application:unset_env(beamtalk_workspace, changelog_append_timeout_ms)
+            end
+        end}
+    end}.
+
+%% BT-5084 item 9: removing a never-flushed new class retires its entries
+%% without claiming they were flushed.
+cancelled_new_class_is_not_reported_flushed_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Ctx) ->
+        fun() ->
+            E = beamtalk_repl_loader_changelog_entries,
+            ok = E:emit_new_class_entry(<<"C5084">>, <<"src">>, <<"/p/c.bt">>),
+            ?assertMatch([_], beamtalk_workspace_changelog:active_entries()),
+            ok = E:emit_remove_class_change_entry(<<"C5084">>, #{}, <<"a">>, human),
+            ?assertEqual([], beamtalk_workspace_changelog:active_entries()),
+            [Entry] = beamtalk_workspace_changelog:entries(),
+            ?assert(beamtalk_workspace_changelog:entry_cancelled(Entry)),
+            [View] = beamtalk_workspace_changelog_views:change_entries(),
+            ?assertEqual(false, maps:get(flushed, View))
+        end
+    end}.
+
+%% BT-5084 item 10: once every entry is active and the ring is over its bound,
+%% appends stop rescanning the table until a flush/clear changes that.
+rotation_does_not_rescan_when_nothing_is_archivable_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Ctx) ->
+        {timeout, 120, fun() ->
+            [{ok, _} = beamtalk_workspace_changelog:append(input()) || _ <- lists:seq(1, 1001)],
+            ?assert(beamtalk_workspace_changelog:rotation_stuck()),
+            ok = beamtalk_workspace_changelog:mark_flushed([1, 2]),
+            ?assertNot(beamtalk_workspace_changelog:rotation_stuck())
+        end}
+    end}.
+
+%% BT-5084 item 11: a `.bt-staging.*` directory a crash left behind is swept,
+%% a fresh one (a live writer's) is not.
+stale_staging_dirs_are_swept_test() ->
+    Dir = beamtalk_test_fs:tmp_dir("bt5084staging"),
+    ok = filelib:ensure_path(Dir),
+    Old = filename:join(Dir, ".bt-staging.111"),
+    Fresh = filename:join(Dir, ".bt-staging.222"),
+    Other = filename:join(Dir, "keep"),
+    [ok = filelib:ensure_path(P) || P <- [Old, Fresh, Other]],
+    ok = file:write_file(filename:join(Old, "x.erl"), <<"x">>),
+    ok = file:change_time(Old, {{2020, 1, 1}, {0, 0, 0}}),
+    try
+        ?assertEqual([Old], beamtalk_workspace_file:sweep_stale_staging_dirs(Dir)),
+        ?assertNot(filelib:is_dir(Old)),
+        ?assert(filelib:is_dir(Fresh)),
+        ?assert(filelib:is_dir(Other))
+    after
+        beamtalk_test_fs:rm_rf(Dir)
+    end.
 
 successful_append_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Ctx) ->

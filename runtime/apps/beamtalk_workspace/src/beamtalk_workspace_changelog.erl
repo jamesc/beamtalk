@@ -86,6 +86,10 @@ release nodes do not start a workspace, so this code is a no-op there.
 """.
 
 -include_lib("kernel/include/logger.hrl").
+
+%% Upper bound on one `append/1` call (BT-5084); see the comment there.
+%% `changelog_append_timeout_ms` (application env) overrides it; tests lower it.
+-define(DEFAULT_APPEND_TIMEOUT_MS, 60000).
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include("beamtalk_workspace_changelog.hrl").
 -include("beamtalk_workspace_changelog_state.hrl").
@@ -98,6 +102,7 @@ release nodes do not start a workspace, so this code is a no-op there.
     active_entries/0,
     flushable_pending/0,
     mark_flushed/1,
+    retire_entries/1,
     clear/0,
     find_revert_target/2,
     find_revert_target/3,
@@ -161,6 +166,8 @@ release nodes do not start a workspace, so this code is a no-op there.
 %% Exported for tests only (BT-4903): no production caller.
 -ifdef(TEST).
 -export([
+    rotation_stuck/0,
+    entry_cancelled/1,
     size/0,
     epoch/0,
     entry_intent/1,
@@ -250,10 +257,24 @@ interleave sequence numbers or partial writes.
 """.
 -spec append(append_input()) -> {ok, non_neg_integer()} | {error, #beamtalk_error{}}.
 append(Input) when is_map(Input) ->
-    %% `infinity`: the server completes every append it receives (rotation can
-    %% run inside the call), so a caller timeout would report a failure for an
-    %% entry that is then recorded anyway (BT-5013).
-    gen_server:call(?MODULE, {append, Input}, infinity).
+    %% A large finite timeout (BT-5084): the server completes every append it
+    %% receives (rotation can run inside the call), so a caller timeout can report
+    %% a failure for an entry that is then recorded anyway. That is accepted over
+    %% hanging an eval or load forever on a stalled disk; the caller shows the
+    %% "could not be recorded" warning and the cause is logged.
+    Timeout = application:get_env(
+        beamtalk_workspace, changelog_append_timeout_ms, ?DEFAULT_APPEND_TIMEOUT_MS
+    ),
+    try
+        gen_server:call(?MODULE, {append, Input}, Timeout)
+    catch
+        exit:{timeout, _} ->
+            ?LOG_ERROR(
+                "ChangeLog append timed out; the entry may still be recorded",
+                #{timeout_ms => Timeout, domain => [beamtalk, runtime]}
+            ),
+            {error, append_error(timeout)}
+    end.
 
 -doc """
 Return all entries (including prior-epoch and orphan), oldest first.
@@ -327,6 +348,18 @@ mark_flushed([]) ->
 mark_flushed(Seqs) when is_list(Seqs) ->
     gen_server:call(?MODULE, {mark_flushed, Seqs}).
 
+-doc """
+Retire the entries with the given sequence numbers without writing anything to
+disk (BT-5084): like `mark_flushed/1` they drop out of the active view, but they
+are marked `cancelled`, so history does not report them as flushed. Used when a
+class that was created in this session and never flushed is removed.
+""".
+-spec retire_entries([non_neg_integer()]) -> ok | {error, term()}.
+retire_entries([]) ->
+    ok;
+retire_entries(Seqs) when is_list(Seqs) ->
+    gen_server:call(?MODULE, {retire_entries, Seqs}).
+
 -ifdef(TEST).
 -doc """
 Total number of entries in the log (all epochs).
@@ -343,6 +376,14 @@ size() ->
 -endif.
 
 -ifdef(TEST).
+-spec rotation_stuck() -> boolean().
+rotation_stuck() ->
+    #state{rotation_stuck = Stuck} = sys:get_state(?MODULE),
+    Stuck.
+
+-spec entry_cancelled(entry()) -> boolean().
+entry_cancelled(#entry{cancelled = V}) -> V.
+
 -doc "The epoch assigned to entries appended in this session.".
 -spec epoch() -> non_neg_integer().
 epoch() ->
@@ -1104,8 +1145,11 @@ handle_call({append, Input}, _From, State) ->
 handle_call(epoch, _From, State) ->
     {reply, State#state.epoch, State};
 handle_call({mark_flushed, Seqs}, _From, State) ->
-    Reply = do_mark_flushed(Seqs, State),
-    {reply, Reply, State};
+    Reply = do_mark_flushed(Seqs, false, State),
+    {reply, Reply, State#state{rotation_stuck = false}};
+handle_call({retire_entries, Seqs}, _From, State) ->
+    Reply = do_mark_flushed(Seqs, true, State),
+    {reply, Reply, State#state{rotation_stuck = false}};
 handle_call(get_sources_dir, _From, State) ->
     case State#state.changes_dir of
         undefined ->
@@ -1116,7 +1160,7 @@ handle_call(get_sources_dir, _From, State) ->
 handle_call(clear, _From, State) ->
     ets:delete_all_objects(?ETS_TABLE),
     beamtalk_workspace_changelog_log:truncate_log(State),
-    {reply, ok, State};
+    {reply, ok, State#state{rotation_stuck = false}};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -1229,14 +1273,14 @@ normalize_append_input(Input) ->
 %% in-memory ETS still showing entries as flushed while disk does not. To avoid
 %% diverging the live view from disk, we only flip the ETS flag *after* the
 %% log rewrite returns ok.
--spec do_mark_flushed([non_neg_integer()], #state{}) -> ok | {error, term()}.
-do_mark_flushed(Seqs, State) ->
+-spec do_mark_flushed([non_neg_integer()], boolean(), #state{}) -> ok | {error, term()}.
+do_mark_flushed(Seqs, Cancelled, State) ->
     SeqSet = sets:from_list(Seqs, [{version, 2}]),
     All = entries(),
     Updated = lists:map(
         fun(E) ->
             case sets:is_element(E#entry.seq, SeqSet) of
-                true -> E#entry{flushed = true};
+                true -> E#entry{flushed = true, cancelled = Cancelled orelse E#entry.cancelled};
                 false -> E
             end
         end,
@@ -1274,6 +1318,10 @@ do_mark_flushed(Seqs, State) ->
 -spec maybe_rotate(#state{}) -> #state{}.
 maybe_rotate(#state{changes_dir = undefined} = State) ->
     State;
+maybe_rotate(#state{rotation_stuck = true} = State) ->
+    %% Nothing was archivable last time and only a flush / clear can change that
+    %% (BT-5084): do not rescan the whole table on every append.
+    State;
 maybe_rotate(State) ->
     All = entries(),
     Overflow = length(All) - ?MAX_ENTRIES,
@@ -1294,7 +1342,8 @@ maybe_rotate(State) ->
                             ToArchive, ToKeep, State
                         )
                 end,
-            warn_active_overflow(Overflow - length(ToArchive), State1)
+            Stuck = length(Archivable) =< length(ToArchive),
+            warn_active_overflow(Overflow - length(ToArchive), State1#state{rotation_stuck = Stuck})
     end.
 
 %% Warn once per overflow episode that unflushed entries alone exceed the bound.
