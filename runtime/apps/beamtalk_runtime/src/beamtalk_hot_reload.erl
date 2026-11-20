@@ -314,11 +314,14 @@ try_change_code(Pid, Module, Extra) ->
     %% so the suspension has an owner that outlives the caller's wait. If the
     %% reloading process dies or stops waiting (timeout), the worker still
     %% resumes the actor as soon as the change is confirmed finished.
+    Caller = self(),
+    Tag = make_ref(),
     {Worker, Mon} = spawn_monitor(fun() ->
-        exit({change_result, run_change(Pid, Module, Extra)})
+        Caller ! {Tag, run_change(Pid, Module, Extra)}
     end),
     receive
-        {'DOWN', Mon, process, Worker, {change_result, Result}} ->
+        {Tag, Result} ->
+            erlang:demonitor(Mon, [flush]),
             Result;
         {'DOWN', Mon, process, Worker, Other} ->
             ?LOG_ERROR(
