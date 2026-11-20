@@ -981,7 +981,7 @@ lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-repo
 # The repo-wide lint-* recipes and script tests that need only the toolchain CI's
 # lint job has. `lint` runs this group and ci.yml's lint job runs it by name, so
 # the two cannot diverge (BT-5032). Add a new lint here, not to either list.
-lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns check-lint-parity check-pins test-lint-stamp test-refresh-edge test-determine-version test-publish-rolling-release test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly test-workflow-paths
+lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns check-lint-parity check-pins test-lint-stamp test-refresh-edge test-determine-version test-publish-rolling-release test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly test-workflow-paths test-cache-keys
 
 # Test (BT-5032): every repo path literal in a workflow's `paths:` filter or the
 # ci.yml `changes` job's `matches` gate names something that exists, so a renamed
@@ -989,6 +989,12 @@ lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-enc
 test-workflow-paths:
     @python3 scripts/ci/check_workflow_paths.py
     @cd scripts/ci && python3 -m unittest -q test_check_workflow_paths
+
+# Test (BT-5086): every cache `restore-keys` entry in .github/ is a prefix of its
+# step's `key`; one that is not can never match, so a key miss always starts cold.
+test-cache-keys:
+    @python3 scripts/ci/check_cache_keys.py
+    @cd scripts/ci && python3 -m unittest -q test_check_cache_keys
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
@@ -1782,6 +1788,10 @@ test-install: build-release build-stdlib
     # share/beamtalk/corpus.json (beamtalk_examples::BUNDLED_CORPUS_RELPATH).
     test -s "$TMPDIR/share/beamtalk/corpus.json"
     echo "✅ MCP example corpus installed"
+    # Stdlib sources the LSP navigates into (BT-5077: same install logic as the
+    # Windows archives, scripts/install-share.sh).
+    test -s "$TMPDIR/share/beamtalk/stdlib/src/integer.bt"
+    echo "✅ Stdlib sources installed"
 
     # 2b. Verify the installed stdlib class beams (bt@*.beam) are exactly the
     # modules the installed beamtalk_stdlib.app activates. Both come from
@@ -2958,36 +2968,10 @@ install PREFIX="/usr/local": build-release build-stdlib build-corpus
     install -d "${PREFIX}/lib/beamtalk/tools"
     install -m 755 "runtime/tools/rebar3" "${PREFIX}/lib/beamtalk/tools/rebar3"
 
-    # Stdlib sources for LSP/tooling navigation
-    # Mirrors the source tree (including any subdirectories) so LSP
-    # goto-definition resolves to the same relative layout as the repo.
-    STDLIB_SOURCE_SRC="stdlib/src"
-    if [ -d "${STDLIB_SOURCE_SRC}" ]; then
-        find "${STDLIB_SOURCE_SRC}" -type f -name '*.bt' | while read -r bt; do
-            rel="${bt#"${STDLIB_SOURCE_SRC}"/}"
-            install -d "${PREFIX}/share/beamtalk/stdlib/src/$(dirname "${rel}")"
-            install -m 644 "${bt}" "${PREFIX}/share/beamtalk/stdlib/src/${rel}"
-        done
-    fi
-
-    # Curated distribution FFI type stubs (ADR 0075 layer 3), discovered at
-    # runtime via the same sysroot convention as the stdlib sources above.
-    # A no-op until curated stub content exists (BT-1848) — the repo ships
-    # no root-level stubs/ directory yet.
-    DIST_STUBS_SRC="stubs"
-    if [ -d "${DIST_STUBS_SRC}" ]; then
-        find "${DIST_STUBS_SRC}" -type f -name '*.bt' | while read -r bt; do
-            rel="${bt#"${DIST_STUBS_SRC}"/}"
-            install -d "${PREFIX}/share/beamtalk/stubs/$(dirname "${rel}")"
-            install -m 644 "${bt}" "${PREFIX}/share/beamtalk/stubs/${rel}"
-        done
-    fi
-
-    # Generated share/ data (the MCP example corpus, BT-4614): build-corpus
-    # stages it under target/ in the installed layout, so the tree is copied
-    # as is and its file names are defined in one place (the Rust side).
-    install -d "${PREFIX}/share"
-    cp -R target/share/. "${PREFIX}/share/"
+    # share/ data: stdlib sources (LSP navigation), curated FFI stubs
+    # (ADR 0075 layer 3) and the generated MCP example corpus (BT-4614) —
+    # scripts/install-share.sh, the one shared copy of that rule (BT-5077).
+    scripts/install-share.sh "${PREFIX}/share"
 
     echo "✅ Installed beamtalk to ${PREFIX}"
     echo "   Binary:  ${PREFIX}/bin/beamtalk"
@@ -3075,7 +3059,8 @@ dist: build-release build-stdlib
 
 # Create a distributable install in dist/ (Windows)
 # Needs Git for Windows' `bash` on PATH (as the Windows release job has) for
-# scripts/install-otp-apps.sh, the one shared copy of the OTP-app install rule.
+# scripts/install-otp-apps.sh and scripts/install-share.sh, the one shared copy
+# of each install rule.
 [windows]
 dist: build-release build-stdlib build-corpus
     @echo "📦 Creating distribution in dist/..."
@@ -3088,8 +3073,7 @@ dist: build-release build-stdlib build-corpus
     Copy-Item target/release/beamtalk-exec.exe dist/bin/
     bash scripts/install-otp-apps.sh dist/lib/beamtalk/lib; if ($LASTEXITCODE -ne 0) { Write-Error "Installing OTP apps into dist/ failed."; exit 1 }
     if (!(Test-Path "runtime/tools/rebar3")) { Write-Error "Bundled rebar3 not found at runtime/tools/rebar3."; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/tools" | Out-Null; Copy-Item "runtime/tools/rebar3" "dist/lib/beamtalk/tools/rebar3"
-    if (Test-Path "stdlib/src") { $stdlibRoot = (Resolve-Path "stdlib/src").Path; foreach ($bt in (Get-ChildItem -Path "stdlib/src" -Recurse -File -Filter *.bt)) { $rel = $bt.FullName.Substring($stdlibRoot.Length).TrimStart('\', '/'); $dest = Join-Path "dist/share/beamtalk/stdlib/src" $rel; New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent) | Out-Null; Copy-Item $bt.FullName $dest } }
-    New-Item -ItemType Directory -Force -Path "dist/share" | Out-Null; Copy-Item -Path "target/share/*" -Destination "dist/share" -Recurse -Force
+    bash scripts/install-share.sh dist/share; if ($LASTEXITCODE -ne 0) { Write-Error "Installing share/ into dist/ failed."; exit 1 }
     @echo "✅ Distribution ready in dist/"
     @echo "   Run: dist\bin\beamtalk.exe repl"
 

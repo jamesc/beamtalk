@@ -44,7 +44,9 @@ mod surface_key;
 // Re-exports so `crate::commands::build::X` paths used by `build_stdlib.rs`,
 // `test.rs`, `lint.rs`, `fmt.rs`, `type_coverage.rs`, `beam_compiler.rs`, and
 // `deps/path.rs` keep working unchanged.
-pub(crate) use changes::{BuildGraphEdges, clean_stale_artifacts, detect_changes};
+pub(crate) use changes::{
+    BuildGraphEdges, clean_stale_artifacts, clean_stale_bt_artifacts, detect_changes,
+};
 pub(crate) use class_index::{
     CachedAst, FileIndex, Pass1Index, build_class_index, build_class_module_index,
     collect_all_alias_infos, collect_all_class_infos, collect_project_alias_infos,
@@ -316,6 +318,10 @@ fn execute_build_passes(
     // toolchain-version mismatch forces a full rebuild regardless of mtime.
     let force = force || provenance_requires_rebuild(env, options);
 
+    // BT-5074: derive every file's module first, so two files that map to one
+    // module fail the build before any pass runs.
+    let file_module_pairs = compute_file_module_pairs(env)?;
+
     let mut index = build_class_index(env, dep_ctx, options, force)?;
     let force = if index.force_pass2 { true } else { force };
 
@@ -337,8 +343,6 @@ fn execute_build_passes(
     // resolved FFI type table, so fold its digest into every file's cache key
     // with the stub inputs.
     let stub_inputs_hash = fold_native_registry(stub_inputs_hash, native_type_registry.as_deref());
-
-    let file_module_pairs = compute_file_module_pairs(env)?;
 
     // ADR 0127 §10a (BT-3591): a class's `uses:` line makes its file's
     // build-graph cache key depend on that protocol's content too — see

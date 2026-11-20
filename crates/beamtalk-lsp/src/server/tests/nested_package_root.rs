@@ -32,7 +32,7 @@ fn app_source(app_class: &str, dep_class: &str) -> String {
 }
 
 fn unresolved_class_diagnostics(backend: &Backend, path: &Utf8PathBuf) -> Vec<String> {
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     svc.diagnostics(path)
         .into_iter()
         .map(|d| d.message.to_string())
@@ -130,7 +130,7 @@ async fn opening_file_under_parent_workspace_loads_its_package_dependencies() {
 
     // Each package's real `[package]` name was loaded for its files.
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         let alias_a = Utf8PathBuf::from_path_buf(pkg_a.join("src").join("Alias.bt")).unwrap();
         let alias_b = Utf8PathBuf::from_path_buf(pkg_b.join("src").join("Alias.bt")).unwrap();
         svc.update_file(alias_a.clone(), "internal type Foo = Integer".to_string());
@@ -210,35 +210,25 @@ fn dep_class_path(pkg: &Path, dep_class: &str) -> Utf8PathBuf {
 }
 
 fn is_indexed(backend: &Backend, path: &Utf8PathBuf) -> bool {
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     svc.file_source(path).is_some()
 }
 
 fn is_project_complete(backend: &Backend) -> bool {
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     svc.is_project_complete()
 }
 
 fn set_preload_budget(backend: &Backend, budget: usize) {
-    *backend
-        .preload_budget_remaining
-        .lock()
-        .expect("budget lock poisoned") = budget;
+    *backend.preload_budget_remaining.lock_recover() = budget;
 }
 
 fn set_type_cache_outcome(backend: &Backend, outcome: Option<bool>) {
-    *backend
-        .type_cache_outcome
-        .lock()
-        .expect("type_cache_outcome lock poisoned") = outcome;
+    *backend.type_cache_outcome.lock_recover() = outcome;
 }
 
 fn type_cache_extractions(backend: &Backend) -> Vec<PathBuf> {
-    backend
-        .type_cache_extractions
-        .lock()
-        .expect("type_cache_extractions lock poisoned")
-        .clone()
+    backend.type_cache_extractions.lock_recover().clone()
 }
 
 /// BT-4383 #5: when a package root's preload walk task fails, the root is

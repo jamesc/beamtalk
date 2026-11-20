@@ -30,12 +30,12 @@ async fn load_diagnostics_table_promotes_dnu_hint_to_error() {
 
     let source_path = Utf8PathBuf::from_path_buf(temp.join("dnu.bt")).unwrap();
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(source_path.clone(), "\"hello\" frobnicate".to_string());
     }
 
     let diags = {
-        let svc = backend.service.lock().expect("service lock poisoned");
+        let svc = backend.service.lock_recover();
         svc.diagnostics(&source_path)
     };
     assert!(
@@ -66,12 +66,12 @@ async fn load_diagnostics_table_absent_manifest_is_noop() {
 
     let source_path = Utf8PathBuf::from_path_buf(temp.join("dnu.bt")).unwrap();
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(source_path.clone(), "\"hello\" frobnicate".to_string());
     }
 
     let diags = {
-        let svc = backend.service.lock().expect("service lock poisoned");
+        let svc = backend.service.lock_recover();
         svc.diagnostics(&source_path)
     };
     assert!(
@@ -117,12 +117,12 @@ async fn load_diagnostics_table_multi_root_collision_later_root_wins() {
 
     let source_path = Utf8PathBuf::from_path_buf(root_b.join("dnu.bt")).unwrap();
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(source_path.clone(), "\"hello\" frobnicate".to_string());
     }
 
     let diags = {
-        let svc = backend.service.lock().expect("service lock poisoned");
+        let svc = backend.service.lock_recover();
         svc.diagnostics(&source_path)
     };
     assert!(

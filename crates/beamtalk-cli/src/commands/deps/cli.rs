@@ -15,6 +15,9 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::collections::BTreeMap;
 use tracing::info;
 
+use crate::commands::toml_utils::{
+    escape_toml_string, is_any_header, line_ending, table_header_name,
+};
 use crate::commands::util::find_project_root;
 use beamtalk_package::manifest::{self, format_name_error, validate_package_name};
 
@@ -143,9 +146,11 @@ fn run_add(
         );
     }
 
-    // Build the TOML fragment and validate
-    let (toml_fragment, source_display) = if let Some(path_str) = path {
-        let fragment = format!("{name} = {{ path = \"{path_str}\" }}");
+    // Build the TOML fragment and validate. Every user-supplied string is
+    // escaped: a Windows path (`..\lib\foo`) or a ref with a quote must not
+    // produce invalid TOML or inject keys.
+    let (toml_fragment, source_display, lock_entry) = if let Some(path_str) = path {
+        let fragment = format!("{name} = {{ path = \"{}\" }}", escape_toml_string(path_str));
 
         // Validate the path exists
         let resolved = project_root.join(path_str);
@@ -164,7 +169,7 @@ fn run_add(
             );
         }
 
-        (fragment, format!("path: {path_str}"))
+        (fragment, format!("path: {path_str}"), None)
     } else if let Some(url) = git_url {
         let (ref_key, ref_value, ref_display) = if let Some(t) = &tag {
             ("tag", t.as_str(), format!("tag: {t}"))
@@ -178,7 +183,11 @@ fn run_add(
             );
         };
 
-        let fragment = format!("{name} = {{ git = \"{url}\", {ref_key} = \"{ref_value}\" }}");
+        let fragment = format!(
+            "{name} = {{ git = \"{}\", {ref_key} = \"{}\" }}",
+            escape_toml_string(url),
+            escape_toml_string(ref_value)
+        );
 
         // Resolve the git dep to validate URL and ref, and get the SHA
         let reference = build_git_reference(tag, branch, rev)?;
@@ -189,31 +198,52 @@ fn run_add(
             "Resolved git dependency"
         );
 
-        // Update the lockfile
-        let mut lockfile = Lockfile::read(project_root)?.unwrap_or_default();
-        lockfile.insert(LockEntry {
+        let lock_entry = LockEntry {
             name: name.to_string(),
             url: url.to_string(),
             reference,
             resolved_sha: resolved.resolved_sha.clone(),
             registry_version: None,
-        });
-        lockfile.write(project_root)?;
+        };
 
         let display = format!(
             "git: {url} ({ref_display} @ {})",
             &resolved.resolved_sha[..7.min(resolved.resolved_sha.len())]
         );
-        (fragment, display)
+        (fragment, display, Some(lock_entry))
     } else {
         // No --path or --git — resolve the dependency through the package
         // registry: pin to --version if given, else the latest published
         // release.
-        add_registry_dependency(project_root, name, version, manifest.registry.as_ref())?
+        let (fragment, display, entry) =
+            add_registry_dependency(project_root, name, version, manifest.registry.as_ref())?;
+        (fragment, display, Some(entry))
     };
 
-    // Append to beamtalk.toml
+    // Edit the manifest first, then record the lock entry. The other order
+    // left an orphan lock entry (and a checkout) whenever the manifest edit
+    // failed; if the lock write fails now, the manifest edit is undone.
+    let original_manifest = std::fs::read_to_string(&manifest_path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read '{manifest_path}'"))?;
     append_dependency_to_manifest(&manifest_path, &toml_fragment)?;
+    if let Some(entry) = lock_entry {
+        let write_lock = || -> Result<()> {
+            let mut lockfile = Lockfile::read(project_root)?.unwrap_or_default();
+            lockfile.insert(entry);
+            lockfile.write(project_root)
+        };
+        if let Err(err) = write_lock() {
+            let _ = crate::commands::util::write_atomic(
+                &manifest_path,
+                &original_manifest,
+                ".beamtalk-manifest.",
+            );
+            return Err(
+                err.wrap_err("Failed to update beamtalk.lock; beamtalk.toml was left unchanged")
+            );
+        }
+    }
 
     println!("Added dependency '{name}' ({source_display})");
     Ok(())
@@ -230,7 +260,7 @@ fn add_registry_dependency(
     name: &str,
     version: Option<&str>,
     registry_config: Option<&manifest::RegistryConfig>,
-) -> Result<(String, String)> {
+) -> Result<(String, String, LockEntry)> {
     let registry_location = registry::resolve_registry_location(project_root, registry_config);
 
     let release = if let Some(v) = version {
@@ -280,9 +310,7 @@ fn add_registry_dependency(
         "Resolved registry dependency"
     );
 
-    // Update the lockfile
-    let mut lockfile = Lockfile::read(project_root)?.unwrap_or_default();
-    lockfile.insert(LockEntry {
+    let lock_entry = LockEntry {
         name: name.to_string(),
         url: release.git.clone(),
         reference,
@@ -291,8 +319,7 @@ fn add_registry_dependency(
             version: release.version.clone(),
             registry: Some(registry::registry_identity(registry_config)),
         }),
-    });
-    lockfile.write(project_root)?;
+    };
 
     let display = format!(
         "registry: {} (tag: {} @ {})",
@@ -300,7 +327,7 @@ fn add_registry_dependency(
         release.tag,
         &resolved.resolved_sha[..7.min(resolved.resolved_sha.len())]
     );
-    Ok((fragment, display))
+    Ok((fragment, display, lock_entry))
 }
 
 /// Build a `GitReference` from optional tag/branch/rev flags.
@@ -328,47 +355,41 @@ fn append_dependency_to_manifest(manifest_path: &Utf8Path, toml_fragment: &str) 
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to read '{manifest_path}'"))?;
 
-    let new_content = if let Some(deps_idx) = content
-        .lines()
-        .collect::<Vec<&str>>()
-        .iter()
-        .position(|l| l.trim() == "[dependencies]")
-    {
-        // Found the [dependencies] section — append after it
-        let mut lines: Vec<&str> = content.lines().collect();
+    let eol = line_ending(&content);
+    // `split_inclusive` keeps each line's own terminator, so untouched lines
+    // are written back byte-for-byte (CRLF stays CRLF).
+    let mut lines: Vec<String> = content.split_inclusive('\n').map(str::to_string).collect();
+    let with_eol = |text: &str| format!("{text}{eol}");
 
-        // Find the end of the dependencies section (next section header or end of file)
-        let insert_idx = lines
+    let new_content = if let Some(deps_idx) = lines
+        .iter()
+        .position(|l| table_header_name(l) == Some("dependencies"))
+    {
+        // Insert before the next section header, backing up past blank lines.
+        let mut insert_idx = lines
             .iter()
             .enumerate()
             .skip(deps_idx + 1)
-            .find(|(_, l)| l.starts_with('[') && !l.starts_with("[["))
-            .map_or(lines.len(), |(i, _)| {
-                // Back up past any trailing blank lines before the next section
-                let mut idx = i;
-                while idx > deps_idx + 1 && lines[idx - 1].trim().is_empty() {
-                    idx -= 1;
-                }
-                idx
-            });
-
-        lines.insert(insert_idx, toml_fragment);
-
-        let mut result = lines.join("\n");
-        if !result.ends_with('\n') {
-            result.push('\n');
+            .find(|(_, l)| is_any_header(l) && !l.trim_start().starts_with("[["))
+            .map_or(lines.len(), |(i, _)| i);
+        while insert_idx > deps_idx + 1 && lines[insert_idx - 1].trim().is_empty() {
+            insert_idx -= 1;
         }
-        result
+        // The line before the insertion point may be an unterminated last line.
+        if insert_idx > 0 && !lines[insert_idx - 1].ends_with('\n') {
+            lines[insert_idx - 1].push_str(eol);
+        }
+        lines.insert(insert_idx, with_eol(toml_fragment));
+        lines.concat()
     } else {
         // No [dependencies] section — append one
         let mut result = content.clone();
         if !result.ends_with('\n') {
-            result.push('\n');
+            result.push_str(eol);
         }
-        result.push('\n');
-        result.push_str("[dependencies]\n");
-        result.push_str(toml_fragment);
-        result.push('\n');
+        result.push_str(eol);
+        result.push_str(&with_eol("[dependencies]"));
+        result.push_str(&with_eol(toml_fragment));
         result
     };
 
@@ -930,6 +951,112 @@ supervisor = \"AppSup\"
         let content = std::fs::read_to_string(root.join("beamtalk.toml")).unwrap();
         assert!(content.contains("[dependencies]"));
         assert!(content.contains("utils = { path = \"utils\" }"));
+    }
+
+    /// BT-5076: a backslash in the path (a Windows `..\\lib\\foo`) used to produce
+    /// an invalid TOML escape and fail with "this is a bug".
+    #[cfg(unix)] // a literal backslash is a legal directory-name character on Unix
+    #[test]
+    fn test_add_path_dep_with_backslash_is_escaped() {
+        let (_dir, root) = create_project("my_app");
+        create_path_dep(&root, "lib\\foo");
+
+        run_add(&root, "foo", Some("lib\\foo"), None, None, None, None, None).unwrap();
+
+        let content = std::fs::read_to_string(root.join("beamtalk.toml")).unwrap();
+        assert!(
+            content.contains(r#"foo = { path = "lib\\foo" }"#),
+            "{content}"
+        );
+        let parsed: toml::Value = toml::from_str(&content).unwrap();
+        assert_eq!(
+            parsed["dependencies"]["foo"]["path"].as_str(),
+            Some("lib\\foo")
+        );
+    }
+
+    #[test]
+    fn test_append_dependency_preserves_crlf() {
+        let (_dir, root) = create_project("my_app");
+        let manifest_path = root.join("beamtalk.toml");
+        let content = "[package]\r\nname = \"my_app\"\r\nversion = \"0.1.0\"\r\n\r\n[dependencies]\r\nutils = { path = \"../utils\" }\r\n\r\n[stubs]\r\npath = \"stubs/\"\r\n";
+        std::fs::write(&manifest_path, content).unwrap();
+
+        append_dependency_to_manifest(&manifest_path, "json = { path = \"../json\" }").unwrap();
+
+        let new_content = std::fs::read_to_string(&manifest_path).unwrap();
+        assert!(
+            !new_content.replace("\r\n", "").contains('\n'),
+            "bare LF: {new_content:?}"
+        );
+        assert!(new_content.contains("json = { path = \"../json\" }\r\n\r\n[stubs]"));
+        let _: toml::Value = toml::from_str(&new_content).unwrap();
+
+        // No [dependencies] section, no trailing newline.
+        std::fs::write(
+            &manifest_path,
+            "[package]\r\nname = \"my_app\"\r\nversion = \"0.1.0\"",
+        )
+        .unwrap();
+        append_dependency_to_manifest(&manifest_path, "json = { path = \"../json\" }").unwrap();
+        let new_content = std::fs::read_to_string(&manifest_path).unwrap();
+        assert!(
+            !new_content.replace("\r\n", "").contains('\n'),
+            "bare LF: {new_content:?}"
+        );
+    }
+
+    #[test]
+    fn test_append_dependency_to_header_with_trailing_comment() {
+        let (_dir, root) = create_project("my_app");
+        let manifest_path = root.join("beamtalk.toml");
+        let content = "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n\n[dependencies] # runtime deps\nutils = { path = \"../utils\" }\n";
+        std::fs::write(&manifest_path, content).unwrap();
+
+        append_dependency_to_manifest(&manifest_path, "json = { path = \"../json\" }").unwrap();
+
+        let new_content = std::fs::read_to_string(&manifest_path).unwrap();
+        assert_eq!(
+            new_content.matches("[dependencies]").count(),
+            1,
+            "{new_content}"
+        );
+        let parsed: toml::Value = toml::from_str(&new_content).unwrap();
+        assert!(parsed["dependencies"]["json"].is_table());
+        assert!(parsed["dependencies"]["utils"].is_table());
+    }
+
+    /// BT-5076: the lock entry is written after the manifest edit, so a failed
+    /// manifest edit leaves no orphan lock entry.
+    #[test]
+    fn test_add_git_dep_failed_manifest_edit_leaves_no_lock_entry() {
+        let (_dir, root) = create_project("my_app");
+        let (_git_dir, url, _sha) = create_git_dep("jsonlib", "1.0.0");
+        // `[dependencies]` as a non-table makes the edited manifest invalid.
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n\n[dependencies]\n[dependencies.jsonlib]\nbroken = true\n",
+        )
+        .unwrap();
+        let before = std::fs::read_to_string(root.join("beamtalk.toml")).unwrap();
+
+        let result = run_add(
+            &root,
+            "jsonlib",
+            None,
+            Some(&url),
+            None,
+            Some("v1.0.0".into()),
+            None,
+            None,
+        );
+
+        assert!(result.is_err());
+        assert!(!root.join("beamtalk.lock").exists(), "orphan lock entry");
+        assert_eq!(
+            std::fs::read_to_string(root.join("beamtalk.toml")).unwrap(),
+            before
+        );
     }
 
     #[test]

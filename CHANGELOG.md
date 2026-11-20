@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fix: manifest and lockfile writers escape every string and keep line endings (BT-5076).**
+  - Fixed: `beamtalk.lock` escapes `name`, `url`, `reference` and `sha`; a `"` or `\` in a git URL or ref no longer breaks the file for every later read.
+  - Fixed: `beamtalk deps add` escapes the path, URL and ref it writes, so a Windows path such as `..\lib\foo` works. It edits `beamtalk.toml` before writing `beamtalk.lock` and restores the manifest if the lock write fails, so a failed add leaves no orphan lock entry.
+  - Fixed: `deps add` and `beamtalk version` keep a CRLF manifest's line endings, and recognise `[dependencies] # comment` / `[package] # comment` headers instead of adding a second table.
+  - Added: `[package] licenses` is written to the registry index entry on `beamtalk publish`.
 - **Breaking: the LiveView IDE front binds loopback by default and refuses a non-loopback bind with no auth (BT-5065).**
   - Changed: with `BT_ATTACH_BIND_IP` unset or empty the front listens on `127.0.0.1` only. It used to listen on all interfaces and trust every request as Owner when OIDC was not configured, which exposed an eval console to the network. A non-loopback `BT_ATTACH_BIND_IP` now fails boot with a clear message unless OIDC (or `BT_IDE_DEV_AUTH`) is configured. The Docker image sets `BT_ATTACH_BIND_IP=::` and so requires OIDC; `just web-remote` defaults the same way. The desktop broker already pinned `127.0.0.1` and is unchanged.
   - Do: for a remote deploy, set `BT_ATTACH_BIND_IP` and configure OIDC (see `docs/deployment/remote-liveview-ide.md`). `BT_IDE_ALLOW_UNAUTHENTICATED=1` opts out on a fully trusted network and logs a warning at every boot.

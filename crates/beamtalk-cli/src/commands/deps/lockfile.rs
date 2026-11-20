@@ -490,20 +490,26 @@ impl Lockfile {
 
         for entry in self.packages.values() {
             output.push_str("[[package]]\n");
-            let _ = writeln!(output, "name = \"{}\"", entry.name);
+            // Every string is escaped: a URL or ref with `"` or `\` would
+            // otherwise break the file for every later read.
+            let _ = writeln!(output, "name = \"{}\"", escape_toml_string(&entry.name));
             if let Some(rv) = &entry.registry_version {
-                let _ = writeln!(output, "version = \"{}\"", rv.version);
+                let _ = writeln!(output, "version = \"{}\"", escape_toml_string(&rv.version));
                 if let Some(registry) = &rv.registry {
                     let _ = writeln!(output, "registry = \"{}\"", escape_toml_string(registry));
                 }
             }
-            let _ = writeln!(output, "url = \"{}\"", entry.url);
+            let _ = writeln!(output, "url = \"{}\"", escape_toml_string(&entry.url));
             let _ = writeln!(
                 output,
                 "reference = \"{}\"",
-                format_reference(&entry.reference)
+                escape_toml_string(&format_reference(&entry.reference))
             );
-            let _ = writeln!(output, "sha = \"{}\"", entry.resolved_sha);
+            let _ = writeln!(
+                output,
+                "sha = \"{}\"",
+                escape_toml_string(&entry.resolved_sha)
+            );
             output.push('\n');
         }
 
@@ -978,6 +984,27 @@ mod tests {
             content.contains("registry = \"https://github.com/jamesc/beamtalk-registry\""),
             "{content}"
         );
+    }
+
+    /// BT-5076: `name`, `url` and `reference` were written raw.
+    #[test]
+    fn test_url_and_reference_with_quote_and_backslash_roundtrip() {
+        let mut original = Lockfile::new();
+        original.insert(LockEntry {
+            name: "yaml".to_string(),
+            url: r#"file://C:\repos\"odd" name"#.to_string(),
+            reference: GitReference::Branch(r#"feat\"x""#.to_string()),
+            resolved_sha: "abc1234def5678abc1234def5678abc1234def56".to_string(),
+            registry_version: None,
+        });
+
+        let content = original.serialize();
+        let parsed = Lockfile::parse(&content).unwrap_or_else(|e| {
+            panic!("serialized lockfile failed to re-parse: {e}\n\ncontent:\n{content}")
+        });
+        let entry = parsed.get("yaml").unwrap();
+        assert_eq!(entry.url, original.get("yaml").unwrap().url);
+        assert_eq!(entry.reference, original.get("yaml").unwrap().reference);
     }
 
     #[test]

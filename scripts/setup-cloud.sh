@@ -546,11 +546,30 @@ if [ "${SKIP_SKILLS:-}" = "1" ]; then
 else
   info "Setting up Claude Code skills..."
   # init.sh clones the skills repo into .claude/skills-repo and links
-  # skills/agents into .claude/commands/ and .claude/agents/.
-  # It's idempotent — pulls latest if already cloned.
-  curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
-    https://raw.githubusercontent.com/jamesc/skills/main/scripts/init.sh | bash
-  ok "Skills and agents linked"
+  # skills/agents into .claude/commands/ and .claude/agents/. It's idempotent —
+  # pulls latest if already cloned.
+  #
+  # The installer itself is pinned to a commit of jamesc/skills and verified
+  # against a SHA-256 before it runs (never `curl | bash` of a moving branch).
+  # It still tracks the skills repo's `main` for content. Bump both values
+  # together: SKILLS_INIT_SHA256=$(curl -fsSL <url> | sha256sum). The step is
+  # optional tooling: any failure (network, checksum, installer) only warns.
+  SKILLS_INIT_COMMIT="${SKILLS_INIT_COMMIT:-39864d44f382e20d7ea98aceeac7d7fb280f2a6b}"
+  SKILLS_INIT_SHA256="${SKILLS_INIT_SHA256:-0dddee900399e08133092e1a957dc1787970677fff4adbeb262edeb030ce396b}"
+  SKILLS_INIT_URL="https://raw.githubusercontent.com/jamesc/skills/${SKILLS_INIT_COMMIT}/scripts/init.sh"
+  SKILLS_INIT_TMP="$(mktemp)"
+  if curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
+      -o "${SKILLS_INIT_TMP}" "${SKILLS_INIT_URL}" \
+    && echo "${SKILLS_INIT_SHA256}  ${SKILLS_INIT_TMP}" | sha256sum -c --status - 2>/dev/null; then
+    if bash "${SKILLS_INIT_TMP}"; then
+      ok "Skills and agents linked"
+    else
+      warn "Skills installer failed; continuing without skills (re-run later, or SKIP_SKILLS=1)"
+    fi
+  else
+    warn "Could not download a checksum-verified skills installer; continuing without skills"
+  fi
+  rm -f "${SKILLS_INIT_TMP}"
 fi
 
 # --- Verify ---
