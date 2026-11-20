@@ -381,7 +381,7 @@ fn resolve_head_sha(name: &str, repo_path: &Utf8Path) -> Result<String> {
 ///
 /// Returns `true` if the checkout's HEAD matches the expected SHA.
 /// Returns `false` if the SHA cannot be resolved (stale/corrupt checkout).
-fn verify_checkout(name: &str, repo_path: &Utf8Path, expected_sha: &str) -> bool {
+pub(super) fn verify_checkout(name: &str, repo_path: &Utf8Path, expected_sha: &str) -> bool {
     if let Ok(sha) = resolve_head_sha(name, repo_path) {
         sha == expected_sha
     } else {
