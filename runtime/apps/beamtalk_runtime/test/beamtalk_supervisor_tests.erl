@@ -2167,8 +2167,16 @@ start_honours_exit_signals_from_existing_links_test() ->
             end,
         %% Kill the caller's link while the caller is inside the start.
         exit(Helper, boom),
-        %% The link's exit signal has propagated once the helper is dead.
-        ok = beamtalk_test_wait:dead(Helper),
+        %% The helper being dead does not mean the caller has received the link's
+        %% exit signal: signals between processes are asynchronous, and the
+        %% helper's `'DOWN'` can reach this test first. Release the start only
+        %% once the signal is in the caller's mailbox (the caller traps exits
+        %% while inside the start). If the signal were still in flight, the
+        %% start could return and the caller send `survived` before it died.
+        ok = beamtalk_test_wait:until(fun() ->
+            {messages, Msgs} = process_info(Caller, messages),
+            lists:member({'EXIT', Helper, boom}, Msgs)
+        end),
         SupPid ! go,
         try
             begin
