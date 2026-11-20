@@ -2136,6 +2136,13 @@ test_inherited_value_ext() ->
         ?assertError(
             _,
             beamtalk_dispatch:inherited_value_ext('Object', Selector, [1], self, 'bt@stdlib@object')
+        ),
+        %% BT-5060: the extension is removed between the cached `{ext, Owner}`
+        %% verdict and the call. The super module's compiled method answers, as
+        %% if the verdict had been `value`.
+        ?assertEqual(
+            {beamtalk_string, <<"Integer">>},
+            beamtalk_dispatch:inherited_value_ext('Object', printString, [], 42, 'bt@stdlib@object')
         )
     after
         try

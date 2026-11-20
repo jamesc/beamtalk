@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5060: grandchild, loaded after the extension in the live case.
+
+Bt5060LiveMid subclass: Bt5060LiveLeaf

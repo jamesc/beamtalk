@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5060: link 1 of the value chain in lookup_order_matrix_test.bt. Each selector is
+// compiled on a different subset of the chain and answers the symbol naming the
+// class that compiled it (#c0 .. #c3). `superS*` send the named selector to super.
+
+Bt5060ValueC0 subclass: Bt5060ValueC1
+
+  class s1 -> Symbol => #c1
+
+  s1 -> Symbol => #c1
+
+  class sAll -> Symbol => #c1
+
+  sAll -> Symbol => #c1
+
+  class s13 -> Symbol => #c1
+
+  s13 -> Symbol => #c1
+
+  class superS0 -> Symbol => super s0
+
+  superS0 -> Symbol => super s0
+
+  class superSAll -> Symbol => super sAll
+
+  superSAll -> Symbol => super sAll
+
+  class superS02 -> Symbol => super s02
+
+  superS02 -> Symbol => super s02
+

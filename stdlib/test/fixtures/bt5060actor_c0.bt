@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5060: link 0 of the actor chain in lookup_order_matrix_test.bt. Each selector is
+// compiled on a different subset of the chain and answers the symbol naming the
+// class that compiled it (#c0 .. #c3). `superS*` send the named selector to super.
+
+Actor subclass: Bt5060ActorC0
+
+  class s0 -> Symbol => #c0
+
+  s0 -> Symbol => #c0
+
+  class s02 -> Symbol => #c0
+
+  s02 -> Symbol => #c0
+
+  class s03 -> Symbol => #c0
+
+  s03 -> Symbol => #c0
+
+  class sAll -> Symbol => #c0
+
+  sAll -> Symbol => #c0
+
