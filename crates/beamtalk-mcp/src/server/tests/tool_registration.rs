@@ -234,3 +234,35 @@ fn compute_doc_method_categories_class_not_found_is_none() {
 
     assert!(compute_doc_method_categories(file.to_str().unwrap(), "NoSuchClass").is_none());
 }
+
+// --- BT-5070: every tool declares read-only / destructive annotations ---
+
+#[test]
+fn every_tool_declares_read_only_and_destructive_hints() {
+    let tools = BeamtalkMcp::tool_router().list_all();
+    for t in &tools {
+        let a = t
+            .annotations
+            .as_ref()
+            .unwrap_or_else(|| panic!("tool {} has no annotations", t.name));
+        let ro = a
+            .read_only_hint
+            .unwrap_or_else(|| panic!("tool {} has no readOnlyHint", t.name));
+        if !ro {
+            assert!(
+                a.destructive_hint.is_some(),
+                "non-read-only tool {} has no destructiveHint",
+                t.name
+            );
+        }
+    }
+    let hints = |name: &str| {
+        let t = tools.iter().find(|t| t.name == name).unwrap();
+        let a = t.annotations.as_ref().unwrap();
+        (a.read_only_hint, a.destructive_hint)
+    };
+    assert_eq!(hints("lint").0, Some(true));
+    assert_eq!(hints("flush"), (Some(false), Some(true)));
+    assert_eq!(hints("remove_class"), (Some(false), Some(true)));
+    assert_eq!(hints("export_traces"), (Some(false), Some(true)));
+}

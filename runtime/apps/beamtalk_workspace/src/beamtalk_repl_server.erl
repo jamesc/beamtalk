@@ -217,7 +217,7 @@ write_port_file_to_home(WorkspaceId, Port, Nonce) ->
                     %% Write atomically via tmp + rename(2) so the Rust CLI never
                     %% reads a partially-written port file (file:write_file/2 is
                     %% open→write→close, not atomic on its own).
-                    TmpPath = PortFilePath ++ ".tmp",
+                    TmpPath = beamtalk_workspace_file:temp_path(PortFilePath),
                     case file:write_file(TmpPath, Content) of
                         ok ->
                             case file:rename(TmpPath, PortFilePath) of

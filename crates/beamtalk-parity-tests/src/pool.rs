@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 /// Live-workspace handle returned to the harness.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SharedRepl {
     /// REPL WebSocket port.
     pub port: u16,
@@ -21,6 +21,16 @@ pub struct SharedRepl {
     pub cookie: String,
     /// Workspace ID (used by the MCP driver for discovery).
     pub workspace_id: String,
+}
+
+impl std::fmt::Debug for SharedRepl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedRepl")
+            .field("port", &self.port)
+            .field("cookie", &"<redacted>")
+            .field("workspace_id", &self.workspace_id)
+            .finish()
+    }
 }
 
 /// Get-or-start the shared workspace.

@@ -153,6 +153,7 @@ fn discover_dependency_graph(
     let root_name = root_manifest.package.name.clone();
     // Newly resolved git/registry deps are collected so we can update the lockfile.
     let mut ctx = DiscoveryContext {
+        sources: BTreeMap::new(),
         project_root,
         graph: BTreeMap::new(),
         discovery_stack: vec![root_name.clone()],
@@ -357,8 +358,28 @@ fn compute_via_chain(
     Vec::new()
 }
 
+/// Where one resolved package name came from. Two requirers asking for the
+/// same name from different sources would both land in
+/// `_build/deps/<name>`, so the single-version policy compares this, not just
+/// the declared `package.version`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SourceId {
+    Path(Utf8PathBuf),
+    Git(String, GitReference),
+    Registry(String),
+}
+
+/// A package's first-seen source and who asked for it (for error messages).
+struct SeenSource {
+    id: SourceId,
+    requirer: String,
+    description: String,
+}
+
 /// Mutable state accumulated during dependency graph discovery.
 struct DiscoveryContext<'a> {
+    /// First-seen source of each package name.
+    sources: BTreeMap<String, SeenSource>,
     project_root: &'a Utf8Path,
     graph: BTreeMap<String, DepNode>,
     discovery_stack: Vec<String>,
@@ -372,6 +393,55 @@ struct DiscoveryContext<'a> {
     /// and compared against on later builds. Distinct from
     /// `registry_location.to_string()` — see [`registry::registry_identity`].
     registry_identity: String,
+}
+
+/// Record `id` as the source of `dep_name`, or fail if a different source was
+/// already recorded for that name. Runs *before* anything is fetched, so a
+/// conflicting requirer cannot clobber the first one's checkout or lock entry.
+///
+/// Returns `true` when this exact source was already seen (nothing to do).
+fn check_source_conflict(
+    ctx: &mut DiscoveryContext<'_>,
+    dep_name: &str,
+    id: SourceId,
+    description: &str,
+    parent_name: &str,
+) -> Result<bool> {
+    if let Some(seen) = ctx.sources.get(dep_name) {
+        if seen.id == id {
+            return Ok(true);
+        }
+        if let (SourceId::Registry(old), SourceId::Registry(new)) = (&seen.id, &id) {
+            miette::bail!(
+                "Version conflict for dependency '{dep_name}':\n  \
+                 Version '{new}' required (from {description}, by '{parent_name}')\n  \
+                 Version '{old}' already resolved (from {}, by '{}')\n\n  \
+                 Beamtalk enforces a single-version policy: each package name may appear \
+                 at most once in the resolved dependency graph. Align the versions to resolve \
+                 this conflict.",
+                seen.description,
+                seen.requirer,
+            );
+        }
+        miette::bail!(
+            "Source conflict for dependency '{dep_name}':\n  \
+             '{parent_name}' requires it from {description}\n  \
+             '{}' requires it from {}\n\n  \
+             Beamtalk enforces a single-version policy: each package name resolves from \
+             exactly one source. Align the dependency declarations to resolve this conflict.",
+            seen.requirer,
+            seen.description,
+        );
+    }
+    ctx.sources.insert(
+        dep_name.to_string(),
+        SeenSource {
+            id,
+            requirer: parent_name.to_string(),
+            description: description.to_string(),
+        },
+    );
+    Ok(false)
 }
 
 /// Recursively discover dependencies by walking manifests.
@@ -396,18 +466,29 @@ fn discover_deps(
                 })?;
                 let dep_root = canonicalize_dep_path(parent_root, relative_utf8);
 
+                // Path sources are checked inside `discover_single_dep`, after
+                // the version comparison, so differing versions still report
+                // as a version conflict.
                 discover_single_dep(
                     ctx,
                     dep_name,
                     &dep_root,
                     &format!("path: {relative_utf8}"),
                     parent_name,
+                    Some(SourceId::Path(dep_root.clone())),
                 )?;
             }
             DependencySource::Git { url, reference } => {
                 // Always resolve via resolve_git_dep so existing checkouts are
                 // verified against the lockfile SHA / requested ref. The function
                 // already skips re-cloning when verify_checkout matches.
+                check_source_conflict(
+                    ctx,
+                    dep_name,
+                    SourceId::Git(url.clone(), reference.clone()),
+                    &format!("git: {url}"),
+                    parent_name,
+                )?;
                 let lock_entry = ctx.lockfile.get(dep_name);
                 let resolved = super::git::resolve_git_dep(
                     dep_name,
@@ -437,9 +518,17 @@ fn discover_deps(
                     &checkout_root,
                     &format!("git: {url}"),
                     parent_name,
+                    None,
                 )?;
             }
             DependencySource::Registry { version } => {
+                check_source_conflict(
+                    ctx,
+                    dep_name,
+                    SourceId::Registry(version.clone()),
+                    &format!("registry: {version}"),
+                    parent_name,
+                )?;
                 let checkout_root = resolve_registry_dep(ctx, dep_name, version, parent_name)?;
 
                 discover_single_dep(
@@ -448,6 +537,7 @@ fn discover_deps(
                     &checkout_root,
                     &format!("registry: {version}"),
                     parent_name,
+                    None,
                 )?;
             }
         }
@@ -591,6 +681,7 @@ fn discover_single_dep(
     dep_root: &Utf8Path,
     source_description: &str,
     parent_name: &str,
+    source: Option<SourceId>,
 ) -> Result<()> {
     // Validate directory exists
     if !dep_root.exists() {
@@ -654,9 +745,16 @@ fn discover_single_dep(
                 existing.source_description,
             );
         }
+        if let Some(id) = source {
+            check_source_conflict(ctx, dep_name, id, source_description, parent_name)?;
+        }
         // Same version, same package — already discovered, skip
         debug!(dep = %dep_name, "Dependency already discovered with matching version, skipping");
         return Ok(());
+    }
+
+    if let Some(id) = source {
+        check_source_conflict(ctx, dep_name, id, source_description, parent_name)?;
     }
 
     let dep_deps: Vec<String> = dep_manifest.dependencies.keys().cloned().collect();
@@ -1485,6 +1583,66 @@ my_git_dep = {{ git = "{url}", tag = "v1.0.0" }}"#
             lock_content.contains("my_git_dep"),
             "Lockfile should contain the git dep"
         );
+    }
+
+    /// Two path packages `a` and `b` that each require `shared` — `a_spec` and
+    /// `b_spec` are the dependency specs — resolve to an error naming both.
+    fn resolve_two_requirers(a_spec: &str, b_spec: &str) -> String {
+        let ws = TempDir::new().unwrap();
+        let mk = |name: &str, spec: &str| {
+            let dir = ws.path().join(name);
+            fs::create_dir_all(&dir).unwrap();
+            write_manifest(
+                &dir,
+                name,
+                "0.1.0",
+                &format!("[dependencies]\nshared = {spec}"),
+            );
+            to_forward_slash(dir.to_str().unwrap())
+        };
+        let a = mk("pkg_a", a_spec);
+        let b = mk("pkg_b", b_spec);
+        let root = ws.path().join("root");
+        fs::create_dir_all(&root).unwrap();
+        write_manifest(
+            &root,
+            "my_app",
+            "0.1.0",
+            &format!("[dependencies]\npkg_a = {{ path = \"{a}\" }}\npkg_b = {{ path = \"{b}\" }}"),
+        );
+        let root_path = Utf8PathBuf::from_path_buf(root).unwrap();
+        let options = beamtalk_core::CompilerOptions::default();
+        let err = resolve_dependency_graph(&root_path, &options)
+            .expect_err("two sources for one name must be rejected");
+        format!("{err:?}")
+    }
+
+    /// BT-5073: same name + same declared version from two git tags.
+    #[test]
+    fn test_source_conflict_git_vs_git() {
+        let (_d1, url1, _) = create_git_dep_repo("shared", "1.0.0", "");
+        let (_d2, url2, _) = create_marked_git_dep_repo("shared", "1.0.0", "");
+        let err = resolve_two_requirers(
+            &format!("{{ git = \"{url1}\", tag = \"v1.0.0\" }}"),
+            &format!("{{ git = \"{url2}\", tag = \"v1.0.0\" }}"),
+        );
+        assert!(err.contains("Source conflict"), "{err}");
+        assert!(err.contains("pkg_a") && err.contains("pkg_b"), "{err}");
+    }
+
+    /// BT-5073: a path source and a git source for one name.
+    #[test]
+    fn test_source_conflict_path_vs_git() {
+        let (_d1, url1, _) = create_git_dep_repo("shared", "1.0.0", "");
+        let shared = TempDir::new().unwrap();
+        write_manifest(shared.path(), "shared", "1.0.0", "");
+        let shared_str = to_forward_slash(shared.path().to_str().unwrap());
+        let err = resolve_two_requirers(
+            &format!("{{ path = \"{shared_str}\" }}"),
+            &format!("{{ git = \"{url1}\", tag = \"v1.0.0\" }}"),
+        );
+        assert!(err.contains("Source conflict"), "{err}");
+        assert!(err.contains("pkg_a") && err.contains("pkg_b"), "{err}");
     }
 
     #[test]

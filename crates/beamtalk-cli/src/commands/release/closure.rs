@@ -149,7 +149,18 @@ pub fn compute_app_closure(
 
     // The project's own app: the one `.rel` entry whose dependencies (via
     // `{applications, …}`) include everything above.
-    staged.push(read_staged_app(&pkg.name, &[layout.ebin_dir()])?);
+    // `native/*.erl` (the project's own and every BT dependency's, compiled
+    // together by `compile_native_erlang_with_deps`) lands in a separate
+    // `_build/dev/native/ebin`; stage it into this app's `ebin` so
+    // `(Erlang foo)` doesn't `undef` at runtime (BT-5072). Those beams are
+    // not split per originating package at build time, so they ship with the
+    // project app.
+    let mut project_ebins = vec![layout.ebin_dir()];
+    let native_ebin = layout.native_ebin_dir();
+    if native_ebin.is_dir() {
+        project_ebins.push(native_ebin);
+    }
+    staged.push(read_staged_app(&pkg.name, &project_ebins)?);
 
     let mut host_apps = vec![
         "kernel".to_string(),
