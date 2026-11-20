@@ -739,8 +739,9 @@ fn post_process_package_artifacts(
 /// The registry holds the `-spec`s extracted from `native/*.erl`, hex
 /// dependencies and OTP, plus stub declarations. Both type diagnostics and
 /// the inline-FFI codegen of BT-4485 read it, so a changed spec must re-check
-/// the callers. `None` (no registry resolved) leaves the hash untouched, so a
-/// project without FFI specs keeps its cache keys.
+/// the callers. `None` (no registry resolved) leaves the hash untouched. Any
+/// resolved registry, even one holding only auto-extracted OTP specs, changes
+/// the key, so most packages get a one-time full re-check after upgrading.
 fn fold_native_registry(
     stub_inputs_hash: String,
     registry: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,

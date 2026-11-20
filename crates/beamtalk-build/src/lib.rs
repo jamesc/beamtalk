@@ -152,7 +152,17 @@ fn dirty_tag(workspace_root: &Path) -> Option<String> {
             .map(|o| o.stdout)
             .unwrap_or_default()
     };
-    let diff = git(&["diff", "HEAD"]);
+    // Pin the format so the hash depends only on the tree: `--binary` keeps
+    // binary edits distinct, and the `--no-*` flags ignore machine-local
+    // `diff.external` / `textconv` / colour config.
+    let diff = git(&[
+        "diff",
+        "--binary",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+        "HEAD",
+    ]);
     let untracked = git(&["ls-files", "--others", "--exclude-standard", "-z"]);
     let mut input = diff;
     for rel in untracked.split(|b| *b == 0).filter(|p| !p.is_empty()) {
