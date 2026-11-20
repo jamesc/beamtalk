@@ -16,9 +16,7 @@
   "categories": [
     "Programming Languages"
   ],
-  "extensionKind": [
-    "workspace"
-  ],
+  "extensionKind": ["workspace"],
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:beamtalk",
