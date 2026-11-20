@@ -260,11 +260,12 @@ jobs:
       # header comment for why that's flagged as unverified rather than
       # assumed (BT-2988).
       #
-      # No `--locked`: we don't control tauri-cli's own published lockfile,
-      # and pinning purely by `^2.0.0` here is deliberate (matches the `"2"`
-      # tauri-cli/tauri version req in desktop/src-tauri/Cargo.toml).
+      # Exact version + `--locked` (BT-5070): installs build from tauri-cli's own
+      # published lockfile, so a new upstream release or dependency cannot change
+      # what runs in the signing job. Keep the minor in step with the `tauri`
+      # version in desktop/src-tauri/Cargo.lock when bumping.
       - name: Install cargo-tauri CLI
-        run: cargo install tauri-cli --version "^2.0.0"
+        run: cargo install tauri-cli --version "=2.11.5" --locked
 
       # ─── macOS signing setup (no-op without secrets) ─────────────────────
       - name: Import Apple signing certificate
