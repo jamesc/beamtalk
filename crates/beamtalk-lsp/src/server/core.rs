@@ -43,6 +43,8 @@ impl Backend {
             service: Arc::new(Mutex::new(SimpleLanguageService::new())),
             versions: Arc::new(Mutex::new(HashMap::new())),
             open_generation: Mutex::new(HashMap::new()),
+            text_sync: Mutex::new(()),
+            publish_lock: tokio::sync::Mutex::new(()),
             next_open_generation: std::sync::atomic::AtomicU64::new(0),
             dirty_files: Mutex::new(HashSet::new()),
             diagnostic_generation: Mutex::new(HashMap::new()),
@@ -317,6 +319,12 @@ impl Backend {
         let path = self.resolve_path_for_uri(uri)?;
         let versions = self.versions.lock_recover();
         versions.get(&path).copied()
+    }
+
+    /// True while the editor has `uri` open (it has a recorded version).
+    pub(in crate::server) fn is_open_uri(&self, uri: &Url) -> bool {
+        self.resolve_path_for_uri(uri)
+            .is_some_and(|path| self.versions.lock_recover().contains_key(&path))
     }
 
     /// Resolves a URI to an internal path key used by the language service.
@@ -1195,9 +1203,25 @@ impl Backend {
     /// `file://`, which would bypass the stdlib early-return and leak
     /// diagnostics for sources the user never opened.
     pub(in crate::server) async fn republish_open_diagnostics(&self) {
+        self.republish_open_diagnostics_except(None).await;
+    }
+
+    /// Re-publishes diagnostics for every open file other than `edited`
+    /// (BT-5078): after a file's class set changes, its dependents elsewhere
+    /// must be re-checked without waiting for them to be edited.
+    pub(in crate::server) async fn republish_other_open_diagnostics(&self, edited: &Url) {
+        self.republish_open_diagnostics_except(self.resolve_path_for_uri(edited))
+            .await;
+    }
+
+    async fn republish_open_diagnostics_except(&self, skip: Option<Utf8PathBuf>) {
         let paths: Vec<Utf8PathBuf> = {
             let versions = self.versions.lock_recover();
-            versions.keys().cloned().collect()
+            versions
+                .keys()
+                .filter(|p| skip.as_ref() != Some(*p))
+                .cloned()
+                .collect()
         };
         for path in paths {
             let is_stdlib = {
@@ -1478,6 +1502,13 @@ impl Backend {
             if svc.is_preload_in_progress() {
                 return;
             }
+        }
+        // BT-5078: serialise with `did_close`'s clearing publish and skip a
+        // document that is no longer open, so a publish that raced a close
+        // can't resurrect diagnostics on the closed tab.
+        let _publishing = self.publish_lock.lock().await;
+        if !self.is_open_uri(uri) {
+            return;
         }
         let version = self.file_version_for_uri(uri);
         publish_diagnostics_impl(

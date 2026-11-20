@@ -227,6 +227,8 @@ impl Backend {
         // registration entirely, in which case the `experimental` field
         // remains the advertisement channel.
         self.register_type_hierarchy_capability().await;
+        // BT-5078: learn about on-disk changes (git pull, deletes, renames).
+        self.register_file_watchers().await;
 
         debug!("beamtalk-lsp initialized");
         self.client
@@ -273,8 +275,17 @@ impl Backend {
                 self.load_stdlib_file_registry(&path).await;
                 // Stdlib files are pre-loaded at startup; skip re-indexing.
                 {
-                    let mut svc = self.service.lock_recover();
-                    svc.update_file(path.clone(), params.text_document.text);
+                    // BT-5078: the registry load above awaited, so a
+                    // `did_change` (newer text, newer version) or a
+                    // `did_close` may have run in the gap. Only write this
+                    // open's text if it is still the latest we recorded.
+                    let _sync = self.text_sync.lock_recover();
+                    let still_current = self.versions.lock_recover().get(&path).copied()
+                        == Some(params.text_document.version);
+                    if still_current {
+                        let mut svc = self.service.lock_recover();
+                        svc.update_file(path.clone(), params.text_document.text);
+                    }
                 }
                 // BT-4158: resolve this file's own package root (nearest
                 // `beamtalk.toml`) — the workspace folder may be a parent
@@ -295,11 +306,25 @@ impl Backend {
         if let (Some(path), Some(change)) =
             (uri_to_path(&uri), params.content_changes.into_iter().last())
         {
+            let interface_changed;
             {
-                let mut svc = self.service.lock_recover();
-                svc.update_file(path.clone(), change.text);
-            }
-            {
+                let _sync = self.text_sync.lock_recover();
+                {
+                    let mut svc = self.service.lock_recover();
+                    // BT-5078: a changed set of classes defined in this file
+                    // (e.g. `Foo` renamed to `Bar`) changes what other open
+                    // files resolve, so they must be re-checked too.
+                    let before = svc
+                        .project_index()
+                        .classes_in_file(&path)
+                        .map(<[_]>::to_vec);
+                    svc.update_file(path.clone(), change.text);
+                    let after = svc
+                        .project_index()
+                        .classes_in_file(&path)
+                        .map(<[_]>::to_vec);
+                    interface_changed = before != after;
+                }
                 let mut versions = self.versions.lock_recover();
                 versions.insert(path.clone(), params.text_document.version);
             }
@@ -323,6 +348,12 @@ impl Backend {
 
             if is_latest {
                 self.publish_diagnostics(&uri).await;
+                if interface_changed {
+                    // Already debounced (this is the latest edit) and gated
+                    // on the file's class set changing, so ordinary typing
+                    // never re-analyses the other open files.
+                    self.republish_other_open_diagnostics(&uri).await;
+                }
             }
         }
     }
@@ -433,6 +464,10 @@ impl Backend {
                 generations.remove(&uri);
             }
             if uri.scheme() != "beamtalk-stdlib" {
+                // BT-5078: ordered after any in-flight publish (and any
+                // later one sees the document closed), so nothing re-adds
+                // diagnostics after this clear.
+                let _publishing = self.publish_lock.lock().await;
                 self.client.publish_diagnostics(uri, Vec::new(), None).await;
             }
         }
