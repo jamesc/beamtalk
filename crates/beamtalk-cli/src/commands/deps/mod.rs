@@ -417,7 +417,28 @@ fn locked_deps_match(
     // rather than per dependency.
     let current_registry = registry::registry_identity(root_manifest.registry.as_ref());
 
+    let layout = BuildLayout::new(project_root);
+
     for dep in requested {
+        // The lock pins a commit, not just a (url, reference) request. A
+        // lockfile whose `sha` changed while the tag/branch text did not (a
+        // teammate ran `deps update` and committed it) must invalidate the
+        // existing checkout, so require its HEAD to equal the locked SHA. A
+        // missing or unreadable checkout counts as stale too.
+        if let Some(entry) = lock.get(&dep.name)
+            && !git::verify_checkout(
+                &dep.name,
+                &layout.dep_checkout_dir(&dep.name),
+                &entry.resolved_sha,
+            )
+        {
+            debug!(
+                dep = %dep.name,
+                locked_sha = %entry.resolved_sha,
+                "Checkout HEAD differs from locked commit — deps are stale"
+            );
+            return false;
+        }
         match &dep.source {
             DependencySource::Registry { version } => match lock.get(&dep.name) {
                 Some(entry)
@@ -802,12 +823,49 @@ mod tests {
         fs::create_dir_all(&ebin_dir).unwrap();
         // Create a fake .beam file
         fs::write(ebin_dir.join(format!("bt@{dep_name}@helper.beam")), b"BEAM").unwrap();
+        // Git/registry freshness compares the checkout HEAD to the locked SHA.
+        init_checkout_repo(project_root, dep_name);
         // ADR 0098 Phase 2: a compiled dep carries a current-toolchain provenance
         // stamp, mirroring a real build, so the freshness check treats it as fresh.
         crate::commands::build_stamp::write_stamp(
             &layout.dep_stamp_path(dep_name),
             crate::commands::build_stamp::current_otp_version(),
         );
+    }
+
+    /// Turn `_build/deps/<name>` into a real git repo whose HEAD is
+    /// `e6be664b…` (an empty commit with a pinned author/date), so
+    /// the freshness check's locked-commit comparison has something to read.
+    fn init_checkout_repo(project_root: &std::path::Path, dep_name: &str) -> String {
+        let root_utf8 = camino::Utf8PathBuf::from_path_buf(project_root.to_path_buf()).unwrap();
+        let checkout = BuildLayout::new(&root_utf8).dep_checkout_dir(dep_name);
+        fs::create_dir_all(&checkout).unwrap();
+        let run = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&checkout)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
+                .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {out:?}");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        run(&["init", "-q"]);
+        run(&[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ]);
+        run(&["rev-parse", "HEAD"])
     }
 
     #[test]
@@ -1316,7 +1374,7 @@ mod tests {
              name = \"json\"\n\
              url = \"https://example.com/json\"\n\
              reference = \"tag:v1.0\"\n\
-             sha = \"abc123\"\n",
+             sha = \"e6be664b5599c7ac5f3c0e5dbbafac018b6c760c\"\n",
         )
         .unwrap();
 
@@ -1327,6 +1385,42 @@ mod tests {
         assert!(
             deps_are_fresh_with_snapshot(&root, &parsed),
             "Git dep with lockfile and ebin should be fresh"
+        );
+    }
+
+    /// BT-5073: a lockfile whose `sha` alone changed (same url + reference
+    /// text) must invalidate the existing checkout.
+    #[test]
+    fn test_deps_stale_when_only_locked_sha_changes() {
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        create_dep_ebin_with_beam(temp.path(), "json");
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            "[dependencies]\njson = { git = \"https://example.com/json\", branch = \"main\" }",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let write_lock = |sha: &str| {
+            fs::write(
+                temp.path().join("beamtalk.lock"),
+                format!(
+                    "[[package]]\nname = \"json\"\nurl = \"https://example.com/json\"\n\
+                     reference = \"branch:main\"\nsha = \"{sha}\"\n"
+                ),
+            )
+            .unwrap();
+        };
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+
+        write_lock("e6be664b5599c7ac5f3c0e5dbbafac018b6c760c");
+        assert!(deps_are_fresh_with_snapshot(&root, &parsed));
+
+        write_lock("0123456789abcdef0123456789abcdef01234567");
+        assert!(
+            !deps_are_fresh(&root, &parsed),
+            "a new locked sha with unchanged url/reference must be stale"
         );
     }
 
@@ -1357,7 +1451,7 @@ mod tests {
              name = \"json\"\n\
              url = \"https://example.com/json\"\n\
              reference = \"tag:v1.0\"\n\
-             sha = \"abc123\"\n",
+             sha = \"e6be664b5599c7ac5f3c0e5dbbafac018b6c760c\"\n",
         )
         .unwrap();
 
@@ -1591,7 +1685,7 @@ mod tests {
                  registry = \"{}\"\n\
                  url = \"https://example.test/yaml\"\n\
                  reference = \"tag:v{locked_version}\"\n\
-                 sha = \"abc123\"\n",
+                 sha = \"e6be664b5599c7ac5f3c0e5dbbafac018b6c760c\"\n",
                 registry::DEFAULT_REGISTRY_URL
             ),
         )
@@ -1651,7 +1745,7 @@ mod tests {
              name = \"yaml\"\n\
              url = \"https://example.test/yaml\"\n\
              reference = \"tag:v0.2.1\"\n\
-             sha = \"abc123\"\n",
+             sha = \"e6be664b5599c7ac5f3c0e5dbbafac018b6c760c\"\n",
         )
         .unwrap();
 
@@ -1707,7 +1801,7 @@ mod tests {
              registry = \"vendor/registry\"\n\
              url = \"https://example.test/yaml\"\n\
              reference = \"tag:v0.2.1\"\n\
-             sha = \"abc123\"\n",
+             sha = \"e6be664b5599c7ac5f3c0e5dbbafac018b6c760c\"\n",
         )
         .unwrap();
 
@@ -1739,7 +1833,7 @@ mod tests {
              registry = \"https://old-registry.example/registry\"\n\
              url = \"https://example.test/yaml\"\n\
              reference = \"tag:v0.2.1\"\n\
-             sha = \"abc123\"\n",
+             sha = \"e6be664b5599c7ac5f3c0e5dbbafac018b6c760c\"\n",
         )
         .unwrap();
 
@@ -1836,7 +1930,7 @@ mod tests {
                  registry = \"{}\"\n\
                  url = \"https://example.test/yaml\"\n\
                  reference = \"tag:v{locked_version}\"\n\
-                 sha = \"abc123\"\n",
+                 sha = \"e6be664b5599c7ac5f3c0e5dbbafac018b6c760c\"\n",
                 registry::DEFAULT_REGISTRY_URL
             ),
         )
@@ -1944,7 +2038,7 @@ mod tests {
                  name = \"leaf\"\n\
                  url = \"https://example.com/leaf\"\n\
                  reference = \"tag:{locked_tag}\"\n\
-                 sha = \"abc123\"\n"
+                 sha = \"e6be664b5599c7ac5f3c0e5dbbafac018b6c760c\"\n"
             ),
         )
         .unwrap();
