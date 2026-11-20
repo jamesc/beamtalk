@@ -59,6 +59,8 @@ defmodule BtAttachWeb.Auth do
 
   @session_key "bt_user"
   @logged_in_at_key "bt_logged_in_at"
+  # Phoenix.LiveView's well-known session key for a disconnect topic.
+  @live_socket_id_key "live_socket_id"
   @default_ttl_secs 4 * 60 * 60
   @default_revalidate_secs 60
   @revalidate_msg :bt_session_revalidate
@@ -141,6 +143,7 @@ defmodule BtAttachWeb.Auth do
         conn
         |> put_session(@session_key, @dev_claims)
         |> put_session(@logged_in_at_key, now())
+        |> put_live_socket_id()
         |> assign(:current_user, @dev_claims)
         |> assign(:role, :owner)
 
@@ -309,6 +312,7 @@ defmodule BtAttachWeb.Auth do
     |> renew_session()
     |> put_session(@session_key, claims)
     |> put_session(@logged_in_at_key, now())
+    |> put_live_socket_id()
     |> assign(:current_user, claims)
     |> redirect(to: return_to || ~p"/")
   end
@@ -321,9 +325,24 @@ defmodule BtAttachWeb.Auth do
   but cannot invalidate a copy already exfiltrated; that expires at the TTL.
   """
   def log_out(conn) do
+    # Tell this session's mounted LiveViews to close (BT-5070): without it a
+    # tab already open keeps its workspace session until the TTL.
+    if id = get_session(conn, @live_socket_id_key) do
+      BtAttachWeb.Endpoint.broadcast(id, "disconnect", %{})
+    end
+
     conn
     |> renew_session()
     |> redirect(to: ~p"/")
+  end
+
+  # Phoenix.LiveView subscribes every socket it mounts from this session to the
+  # topic stored under the "live_socket_id" session key, so `log_out/1` can
+  # disconnect them with one broadcast. The id is random per login, so a logout
+  # closes only the logged-out session's sockets.
+  defp put_live_socket_id(conn) do
+    id = "bt_session:" <> Base.url_encode64(:crypto.strong_rand_bytes(16), padding: false)
+    put_session(conn, @live_socket_id_key, id)
   end
 
   # Clear the session but preserve nothing — a clean slate on login/logout.
@@ -352,6 +371,12 @@ defmodule BtAttachWeb.Auth do
   # same-host reverse proxy `conn.remote_ip` is loopback for EVERY client, so a
   # loopback peer alone proves nothing; dev-auth is refused for any request that
   # says it was forwarded. Header names are lowercase (Plug/Cowboy/Bandit).
+  #
+  # Known gap: the /live socket only sees `:x_headers` (Phoenix passes just the
+  # `x-*` headers to connect_info), so a proxy that sends ONLY `Forwarded:` or
+  # `Via:` is refused on the HTTP render but not on the socket upgrade. The
+  # render is the gate that mints a dev session, so a proxied client never gets
+  # one; the socket check is defence in depth.
   @spec forwarded?([{String.t(), String.t()}]) :: boolean()
   def forwarded?(headers) when is_list(headers) do
     Enum.any?(headers, fn {name, _} -> String.downcase(name) in @forwarding_headers end)

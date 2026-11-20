@@ -173,6 +173,28 @@ defmodule BtAttachWeb.SessionLifecycleTest do
       refute get_session(conn, "bt_logged_in_at")
     end
 
+    test "logout broadcasts a disconnect to the session's live sockets", %{conn: conn} do
+      id = "bt_session:test-logout"
+      BtAttachWeb.Endpoint.subscribe(id)
+
+      conn =
+        conn
+        |> authed_conn(0)
+        |> Plug.Conn.put_session("live_socket_id", id)
+        |> init_csrf()
+        |> Plug.Conn.put_session("live_socket_id", id)
+        |> delete(~p"/logout")
+
+      assert redirected_to(conn) == "/"
+      assert_receive %Phoenix.Socket.Broadcast{topic: ^id, event: "disconnect"}
+    end
+
+    test "a login mints a live_socket_id so logout can reach its sockets", %{conn: conn} do
+      System.put_env("BT_IDE_DEV_AUTH", "1")
+      conn = %{conn | remote_ip: {127, 0, 0, 1}} |> get(~p"/")
+      assert "bt_session:" <> _ = get_session(conn, "live_socket_id")
+    end
+
     test "GET /logout is not a route (logout needs the CSRF-protected DELETE)", %{conn: conn} do
       assert get(conn, "/logout").status == 404
     end
