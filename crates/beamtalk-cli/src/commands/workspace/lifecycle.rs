@@ -18,7 +18,7 @@ use super::epmd::{
     EPMD_CONFLICT_DEREGISTER_TIMEOUT_SECS, EPMD_CONFLICT_MAX_RETRIES,
     EPMD_CONFLICT_RETRY_INTERVAL_MS, is_epmd_name_conflict, wait_for_epmd_deregistration,
 };
-use super::node_state::is_node_running;
+use super::node_state::{is_node_running, workspace_node_may_be_live};
 use super::process::start_detached_node;
 use super::storage::{
     NodeInfo, WorkspaceMetadata, acquire_workspace_lock, cleanup_stale_node_info, generate_cookie,
@@ -84,11 +84,13 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
             // only ever fires for legacy, not-yet-corrected metadata, so a
             // live, correctly-configured workspace can never have its on-disk
             // `project_path` corrupted invisibly out from under it.
-            let node_is_running = get_node_info(workspace_id)
-                .ok()
-                .flatten()
-                .is_some_and(|info| is_node_running(&info, Some(workspace_id)));
-            if !metadata.project_path.is_absolute() && !node_is_running {
+            //
+            // BT-5055 (single writer): "running" here is
+            // `workspace_node_may_be_live` (PID identity as well as the port
+            // probe), so a hung or still-booting node also defers the heal.
+            // `write_metadata_if_no_workspace` re-checks right before the
+            // write; a heal that loses that race is simply skipped.
+            if !metadata.project_path.is_absolute() && !workspace_node_may_be_live(workspace_id) {
                 let current_fingerprint = project_fingerprint(project_path);
                 // `None` (legacy metadata, or no manifest at the last successful
                 // record) stays fully ungated: a heal that
@@ -128,7 +130,7 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
                     // must not fail workspace creation over a `project_path` that
                     // was already valid and usable — matches this function's
                     // no-error-on-`project_path` contract above.
-                    if save_workspace_metadata(&healed).is_ok() {
+                    if matches!(write_metadata_if_no_workspace(&healed), Ok(true)) {
                         eprintln!(
                             "Updated workspace '{workspace_id}' project_path: '{}' -> '{}' \
                              (run from the wrong directory? re-run from the workspace's \
@@ -196,9 +198,38 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
         project_fingerprint: project_fingerprint(project_path),
     };
 
-    save_workspace_metadata(&metadata)?;
+    if !write_metadata_if_no_workspace(&metadata)? {
+        return Err(miette!(
+            "workspace '{workspace_id}' is running but its metadata.json is missing or \
+             unreadable. The running workspace owns that file and rewrites it itself on \
+             its next change, so the CLI will not write it. Retry in a moment, or run \
+             `beamtalk workspace stop {workspace_id}` and try again."
+        ));
+    }
 
     Ok(metadata)
+}
+
+/// The CLI's only path to `metadata.json` (BT-5055, single writer): write
+/// `metadata` directly **only when no workspace node could be alive**.
+///
+/// While a node is alive it is the sole writer of the file; the CLI never
+/// writes beside it, so there is no read-merge-write overlap and no lock.
+/// Returns `Ok(true)` when written, `Ok(false)` when a node may be alive and
+/// nothing was written (the caller decides: skip a best-effort heal, or
+/// report). Never waits on the node, so a hung node cannot block the CLI.
+///
+/// Callers hold the per-workspace lock, and `get_or_start_workspace`/stop
+/// are the only starters/stoppers and take the same lock, so a CLI-managed
+/// node cannot start or stop between this check and the write. The check is
+/// done as late as possible anyway, and a node that appears regardless
+/// merges the CLI's keys (BT-5014) on its next persist.
+fn write_metadata_if_no_workspace(metadata: &WorkspaceMetadata) -> Result<bool> {
+    if workspace_node_may_be_live(&metadata.workspace_id) {
+        return Ok(false);
+    }
+    save_workspace_metadata(metadata)?;
+    Ok(true)
 }
 
 /// Create a new workspace.
@@ -1239,5 +1270,196 @@ mod tests {
         let report = prune_workspaces(true, Some("prune-release")).unwrap();
         assert_eq!(report.skipped_releases, 1, "release is inside the filter");
         assert!(report.removed.is_empty());
+    }
+    // ---- BT-5055: single writer for metadata.json -------------------------
+
+    /// A fixture workspace whose `node.info` names a node that is alive (this
+    /// test process, with its real start time) but not listening: the
+    /// "hung or still booting" node `is_node_running` alone calls stopped.
+    struct HungNodeWorkspace {
+        id: String,
+        _guard: crate::commands::test_support::SharedHomeGuard,
+    }
+
+    impl HungNodeWorkspace {
+        fn new(label: &str, relative_project_path: bool) -> Self {
+            let guard = crate::commands::test_support::real_home_guard();
+            let id = crate::commands::test_support::unique_ws_id(label);
+            let pid = std::process::id();
+            save_workspace_metadata(&WorkspaceMetadata {
+                workspace_id: id.clone(),
+                project_path: if relative_project_path {
+                    PathBuf::from("legacy-relative")
+                } else {
+                    std::env::temp_dir()
+                },
+                created_at: 1,
+                project_fingerprint: None,
+            })
+            .unwrap();
+            super::super::storage::save_node_info(
+                &id,
+                &NodeInfo {
+                    node_name: format!("{id}@localhost"),
+                    port: crate::commands::test_support::closed_port(),
+                    pid,
+                    start_time: beamtalk_workspace::pid_liveness::proc_start_time(pid),
+                    nonce: None,
+                    bind_addr: None,
+                },
+            )
+            .unwrap();
+            Self { id, _guard: guard }
+        }
+
+        fn metadata_path(&self) -> PathBuf {
+            workspace_dir(&self.id).unwrap().join("metadata.json")
+        }
+    }
+
+    impl Drop for HungNodeWorkspace {
+        fn drop(&mut self) {
+            if let Ok(dir) = workspace_dir(&self.id) {
+                let _ = fs::remove_dir_all(dir);
+            }
+        }
+    }
+
+    /// The heal must not write beside a node that is alive but not answering
+    /// the port probe. Fails before BT-5055 (the heal rewrote the file).
+    #[test]
+    fn heal_defers_to_a_live_but_unresponsive_workspace() {
+        let ws = HungNodeWorkspace::new("bt5055-hung-heal", true);
+        let before = fs::read(ws.metadata_path()).unwrap();
+
+        let metadata = create_workspace_impl(&ws.id, &std::env::temp_dir()).unwrap();
+
+        assert!(!metadata.project_path.is_absolute(), "heal was deferred");
+        assert_eq!(fs::read(ws.metadata_path()).unwrap(), before);
+    }
+
+    /// A node judged live with unreadable metadata: a clear error, no write,
+    /// and no waiting on the node.
+    #[test]
+    fn create_refuses_to_write_beside_a_live_workspace() {
+        let ws = HungNodeWorkspace::new("bt5055-hung-create", false);
+        fs::write(ws.metadata_path(), b"{ truncated").unwrap();
+
+        let started = std::time::Instant::now();
+        let err = create_workspace_impl(&ws.id, &std::env::temp_dir()).unwrap_err();
+
+        assert!(err.to_string().contains("is running"), "{err}");
+        assert_eq!(fs::read(ws.metadata_path()).unwrap(), b"{ truncated");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "a hung workspace must not block the CLI"
+        );
+    }
+
+    /// With no live node the CLI still writes directly (heal and create).
+    #[test]
+    fn cli_writes_directly_when_no_workspace_is_alive() {
+        let ws = HungNodeWorkspace::new("bt5055-stopped", true);
+        let dir = workspace_dir(&ws.id).unwrap();
+        fs::remove_file(dir.join("node.info")).unwrap();
+
+        let healed = create_workspace_impl(&ws.id, &std::env::temp_dir()).unwrap();
+        assert!(healed.project_path.is_absolute());
+        assert!(
+            get_workspace_metadata(&ws.id)
+                .unwrap()
+                .project_path
+                .is_absolute()
+        );
+
+        fs::write(ws.metadata_path(), b"").unwrap();
+        create_workspace_impl(&ws.id, &std::env::temp_dir()).unwrap();
+        assert!(get_workspace_metadata(&ws.id).is_ok());
+    }
+
+    /// A `node.info` left by a node that has since died (PID gone, or reused
+    /// by a different process) does not count as a live writer.
+    #[cfg(unix)]
+    #[test]
+    fn stale_node_info_does_not_block_the_cli() {
+        let ws = HungNodeWorkspace::new("bt5055-stale", true);
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let dead_pid = child.id();
+        child.wait().unwrap();
+        super::super::storage::save_node_info(
+            &ws.id,
+            &NodeInfo {
+                node_name: format!("{}@localhost", ws.id),
+                port: crate::commands::test_support::closed_port(),
+                pid: dead_pid,
+                start_time: Some(1),
+                nonce: None,
+                bind_addr: None,
+            },
+        )
+        .unwrap();
+        assert!(!workspace_node_may_be_live(&ws.id));
+
+        // PID reuse: our own (alive) PID but a start time that is not ours.
+        let own = std::process::id();
+        let real = beamtalk_workspace::pid_liveness::proc_start_time(own);
+        if let Some(real) = real {
+            super::super::storage::save_node_info(
+                &ws.id,
+                &NodeInfo {
+                    node_name: format!("{}@localhost", ws.id),
+                    port: crate::commands::test_support::closed_port(),
+                    pid: own,
+                    start_time: Some(real + 1),
+                    nonce: None,
+                    bind_addr: None,
+                },
+            )
+            .unwrap();
+            assert!(!workspace_node_may_be_live(&ws.id));
+        }
+    }
+
+    /// Both writers at once: a stand-in for the Erlang workspace read-merge-
+    /// writes a counter into `metadata.json` (keeping the legacy relative
+    /// `project_path`, so a heal stays eligible) while the CLI calls
+    /// `create_workspace_impl` in a loop. Each writer round must read back
+    /// exactly what it last wrote; a CLI rewrite from a stale read shows up
+    /// as a lost update. Fails before BT-5055 (checked by reverting the gate).
+    #[test]
+    fn concurrent_cli_and_workspace_writers_lose_no_update() {
+        let ws = HungNodeWorkspace::new("bt5055-concurrent", true);
+        let path = ws.metadata_path();
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let mut lost = 0u32;
+
+        std::thread::scope(|scope| {
+            let writer = scope.spawn(|| {
+                let mut expected = 0u64;
+                let mut lost = 0u32;
+                for _ in 0..1500 {
+                    let mut map: serde_json::Map<String, serde_json::Value> =
+                        serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+                    let seen = map.get("counter").and_then(serde_json::Value::as_u64);
+                    if seen.unwrap_or(0) != expected {
+                        lost += 1;
+                    }
+                    expected += 1;
+                    map.insert("counter".into(), expected.into());
+                    map.insert("project_path".into(), "legacy-relative".into());
+                    let bytes = serde_json::to_vec(&map).unwrap();
+                    crate::commands::util::write_atomic_file(&path, &bytes, ".bt5055.", true)
+                        .unwrap();
+                }
+                stop.store(true, std::sync::atomic::Ordering::SeqCst);
+                lost
+            });
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                let _ = create_workspace_impl(&ws.id, &std::env::temp_dir());
+            }
+            lost = writer.join().unwrap();
+        });
+
+        assert_eq!(lost, 0, "the CLI overwrote the workspace's update");
     }
 }

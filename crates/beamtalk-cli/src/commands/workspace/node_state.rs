@@ -86,6 +86,35 @@ pub fn is_node_running(info: &NodeInfo, workspace_id: Option<&str>) -> bool {
     }
 }
 
+/// Could a BEAM node for `workspace_id` be alive, and so be a writer of
+/// `metadata.json` (BT-5055)?
+///
+/// Deliberately broader than [`is_node_running`], which asks "can I talk to
+/// it": a hung node, or one still booting before it listens, fails the TCP
+/// probe but can still persist `metadata.json` at any moment, and
+/// `terminate/2` of a stopping node persists it one last time. So a node
+/// counts as live when its recorded PID is alive **and** still the process
+/// that was started (`start_time` identity, PID-reuse safe), or when the
+/// port probe succeeds. Never blocks on the node: one bounded TCP connect
+/// plus a PID lookup.
+///
+/// Errs towards "live": an unreadable `node.info` that is not simply absent
+/// is treated as live, because the cost of a wrong "live" is a skipped or
+/// refused CLI write (retried later), while the cost of a wrong "stopped" is
+/// a lost update.
+pub fn workspace_node_may_be_live(workspace_id: &str) -> bool {
+    let info = match super::storage::get_node_info(workspace_id) {
+        Ok(Some(info)) => info,
+        Ok(None) => return false,
+        Err(_) => return true,
+    };
+    if is_node_running(&info, Some(workspace_id)) {
+        return true;
+    }
+    is_process_alive(info.pid)
+        && beamtalk_workspace::pid_liveness::still_same_process(info.pid, info.start_time)
+}
+
 /// Check whether a process is alive by PID.
 ///
 /// Implemented in `beamtalk_workspace::pid_liveness`, which is shared with

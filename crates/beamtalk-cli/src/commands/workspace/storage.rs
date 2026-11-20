@@ -168,6 +168,10 @@ pub fn get_workspace_metadata(workspace_id: &str) -> Result<WorkspaceMetadata> {
 /// `settings`, … (BT-5014). Read-merge-write: only the keys
 /// [`WorkspaceMetadata`] models are replaced; every other key already in the
 /// file is kept. An unreadable or non-object file is replaced outright.
+///
+/// BT-5055 (single writer): this must only be called when no workspace node
+/// can be alive; use `lifecycle::write_metadata_if_no_workspace`. While a node
+/// is alive it is the only writer of the file.
 pub fn save_workspace_metadata(metadata: &WorkspaceMetadata) -> Result<()> {
     let dir = workspace_dir(&metadata.workspace_id)?;
     fs::create_dir_all(&dir).into_diagnostic()?;
