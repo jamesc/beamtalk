@@ -1187,6 +1187,13 @@ restart_class_recovery_test_() ->
             {"kill and restart class", fun() ->
                 OldPid = beamtalk_class_registry:whereis_class('RestartTest1888'),
                 ?assert(is_pid(OldPid)),
+                %% BT-5056: `start/2` registered the class with
+                %% `beamtalk_class_monitor`, whose 'DOWN' handler restarts a
+                %% killed class eagerly (BT-4622) and can re-register it before
+                %% the assertion below runs. Unwatch (synchronous; no-op if
+                %% the monitor is not running) so the manual `restart_class/1`
+                %% path stays the one under test, as in BT-4748.
+                ok = beamtalk_class_monitor:unwatch('RestartTest1888'),
                 %% Kill the class process and wait for it to exit
                 MRef = erlang:monitor(process, OldPid),
                 exit(OldPid, kill),
