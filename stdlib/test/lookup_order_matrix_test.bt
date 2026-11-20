@@ -392,3 +392,22 @@ TestCase subclass: LookupOrderMatrixTest
           object: o
       ]
     self verify: #(#classOwnExtension)
+
+  // === the BT-5060 registration warning ===
+  //
+  // `beamtalk_extensions:register/5` logs a warning naming these classes.
+  affected: cls selector: sel =>
+    Erlang beamtalk_dispatch one_hop_children_missing_extension: cls selector: sel
+
+  testWarningNamesTheAffectedChildren =>
+    // C0 compiles s0; C1 does not define it, so it skips an extension on C0.
+    self assert: (self affected: #Bt5060ValueC0 selector: #s0) equals: #(#Bt5060ValueC1)
+    // C1 defines s13 itself; C2 does not.
+    self assert: (self affected: #Bt5060ValueC1 selector: #s13) equals: #(#Bt5060ValueC2)
+    // C2 defines sAll; its child C3 defines it too, so nobody is affected.
+    self assert: (self affected: #Bt5060ValueC2 selector: #sAll) equals: #()
+    // C1 does not compile s0 (BT-5002 covers its descendants).
+    self assert: (self affected: #Bt5060ValueC1 selector: #s0) equals: #()
+    // Actors and class-side tags honour the extension.
+    self assert: (self affected: #Bt5060ActorC0 selector: #s0) equals: #()
+    self assert: (self affected: #'Bt5060ValueC0 class' selector: #s0) equals: #()

@@ -71,6 +71,8 @@ dispatch_test_() ->
                 fun test_inherited_target_actor_intrinsic_owner_extension/0},
             {"BT-5002: an extension on any owner gives the {ext, Owner} verdict",
                 fun test_inherited_target_owner_extension_gives_ext/0},
+            {"BT-5060: one_hop_children_missing_extension names the direct value subclasses (negative cases)",
+                fun test_one_hop_children_missing_extension/0},
             {"BT-5002: inherited_value_ext applies by arity and falls back to the super module",
                 fun test_inherited_value_ext/0},
             {"BT-4260: inherited_target answers value for an Object method sent to a String",
@@ -2111,6 +2113,20 @@ test_inherited_target_owner_extension_gives_ext() ->
             _:_ -> ok
         end
     end.
+
+%% BT-5060: the registration warning names the direct value subclasses that skip
+%% an extension on a class that compiles the selector, and no one else.
+test_one_hop_children_missing_extension() ->
+    ok = beamtalk_extensions:init(),
+    %% The positive cases need compiled value classes: see
+    %% stdlib/test/lookup_order_matrix_test.bt (`testWarningNamesTheAffectedChildren`).
+    %% A selector the class does not compile, an unknown class and a class-side
+    %% tag have no affected subclass.
+    ?assertEqual([], beamtalk_dispatch:one_hop_children_missing_extension('Object', bt5060NoSuchSel)),
+    ?assertEqual([], beamtalk_dispatch:one_hop_children_missing_extension('NoSuchClass5060', printString)),
+    ?assertEqual([], beamtalk_dispatch:one_hop_children_missing_extension('Object class', printString)),
+    %% An actor owner is honoured by the verdict route, so it has none either.
+    ?assertEqual([], beamtalk_dispatch:one_hop_children_missing_extension('Actor', 'terminate:')).
 
 %% BT-5002: `inherited_value_ext/5` runs the owner's extension whatever its arity
 %% (a value has no state: it is dropped), and falls back to the superclass's

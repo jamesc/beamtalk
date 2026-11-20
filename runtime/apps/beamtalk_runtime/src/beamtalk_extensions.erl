@@ -293,7 +293,30 @@ register(Class, Selector, Fun, Owner, Source) when
     %% indexes at `ClassSide = false`, even for a class-side extension (`Class`
     %% is already the metaclass tag in that case) — see its doc.
     index_extension_xref(Class, Selector, Source),
+    warn_one_hop_children(Class, Selector),
     ok.
+
+%% BT-5060: an extension that replaces a method a value class compiles is not
+%% seen by that class's direct value subclasses (ADR 0066, the one-hop route).
+%% Say so, naming them, once per registration. Best effort: the registry or the
+%% class tables may not exist yet during bootstrap.
+-spec warn_one_hop_children(atom(), atom()) -> ok.
+warn_one_hop_children(Class, Selector) ->
+    try beamtalk_dispatch:one_hop_children_missing_extension(Class, Selector) of
+        [] ->
+            ok;
+        Children ->
+            ?LOG_WARNING(
+                "Extension '~p' on '~p' replaces a compiled method, but its direct value "
+                "subclasses ~p still answer the compiled method: their sends will not see "
+                "the extension (BT-5060)",
+                [Selector, Class, Children],
+                #{domain => [beamtalk, runtime]}
+            ),
+            ok
+    catch
+        _:_ -> ok
+    end.
 
 -doc """
 ADR 0130 §3: a class-side extension fun is `fun(Args, ClassSelf)`, arity 2.
