@@ -4,7 +4,7 @@
 //! Poison-tolerant locking for the LSP server (BT-5078).
 //!
 //! A handler that panics while holding one of the server's mutexes poisons
-//! it. With `.lock_recover()` every later request would then
+//! it. With a plain `.lock().unwrap()` every later request would then
 //! panic too, so one compiler bug reachable from a half-typed buffer would
 //! take the whole server down. The state behind these locks is plain data
 //! (maps, caches, the analysis service) that is re-derived from the editor's
