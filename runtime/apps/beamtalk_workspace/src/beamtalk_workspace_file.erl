@@ -80,9 +80,15 @@ judged by its real parent.
 """.
 -spec path_inside(file:filename(), file:filename()) -> boolean().
 path_inside(Root, Path) ->
-    case has_dotdot(Root) orelse has_dotdot(Path) of
-        true -> false;
-        false -> relative_parts(real_path(Root), real_path(Path)) =/= false
+    case {to_list(Root), to_list(Path)} of
+        {{ok, R}, {ok, P}} ->
+            case has_dotdot(R) orelse has_dotdot(P) of
+                true -> false;
+                false -> relative_parts(real_path(R), real_path(P)) =/= false
+            end;
+        _ ->
+            %% Not valid unicode: cannot be judged, so not inside.
+            false
     end.
 
 -doc """
@@ -107,7 +113,15 @@ relative_parts(Root, Path) ->
 
 -spec has_dotdot(file:filename()) -> boolean().
 has_dotdot(Path) ->
-    lists:member("..", [unicode:characters_to_list(C) || C <- filename:split(Path)]).
+    Parts = filename:split(Path),
+    lists:member("..", Parts) orelse lists:member(<<"..">>, Parts).
+
+-spec to_list(file:filename()) -> {ok, string()} | error.
+to_list(Path) ->
+    case unicode:characters_to_list(Path) of
+        L when is_list(L) -> {ok, L};
+        _ -> error
+    end.
 
 %% Symlink links followed before giving up and taking the rest as written.
 -define(MAX_LINK_HOPS, 40).
@@ -127,8 +141,7 @@ real_path(["." | Rest], Acc, Hops) ->
 real_path([".." | Rest], Acc, Hops) ->
     %% Only reachable from a link target; Acc is already a real path.
     real_path(Rest, filename:dirname(Acc), Hops);
-real_path([C0 | Rest], Acc, Hops) ->
-    C = unicode:characters_to_list(C0),
+real_path([C | Rest], Acc, Hops) ->
     Cur =
         case Acc of
             "" -> C;

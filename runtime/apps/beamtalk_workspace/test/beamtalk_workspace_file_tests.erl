@@ -41,7 +41,11 @@ path_inside_dotdot_test_() ->
         ?_assertNot(beamtalk_workspace_file:path_inside("/proj", "/proj/src/../../x/Foo.bt")),
         ?_assertNot(beamtalk_workspace_file:path_inside("/proj", "/proj/../proj/a.bt")),
         ?_assertNot(beamtalk_workspace_file:path_inside("/proj/../proj", "/proj/a.bt")),
-        ?_assertEqual(false, beamtalk_workspace_file:relative_parts("/proj", "/proj/src/../a.bt"))
+        ?_assertEqual(false, beamtalk_workspace_file:relative_parts("/proj", "/proj/src/../a.bt")),
+        ?_assertNot(beamtalk_workspace_file:path_inside(<<"/proj">>, <<"/proj/src/../../x/Foo.bt">>)),
+        ?_assert(beamtalk_workspace_file:path_inside(<<"/proj">>, <<"/proj/src/a.bt">>)),
+        %% Invalid UTF-8 cannot be judged: not inside, never a crash.
+        ?_assertNot(beamtalk_workspace_file:path_inside("/proj", <<"/proj/", 255, ".bt">>))
     ].
 
 %% BT-5070: a symlink under the root that points outside it is not inside.
