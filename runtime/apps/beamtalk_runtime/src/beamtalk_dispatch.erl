@@ -90,7 +90,7 @@ never an `{error, _}` result: it propagates unchanged.
     super_reply/5,
     super_value/4,
     inherited_target/2,
-    inherited_value_walk/5,
+    inherited_value_ext/5,
     invoke_resolved/6,
     responds_to/2,
     invoke_extension/6,
@@ -247,10 +247,12 @@ takes only its own:
   the three `Actor` methods `state_free_actor_intrinsic/3` names (BT-4995),
   which are answered `compiled` instead, unless `Actor` itself has an extension
   for the selector.
+- `{ext, Owner}` (BT-5002): the owner defines `Selector` among its own compiled
+  methods, but has an extension for it too, which replaces the compiled method.
+  An actor arm treats it as `slow` (the walk invokes the extension); a value-type
+  arm calls it through `inherited_value_ext/5`.
 - `slow` for everything else; the arm then takes today's path byte for byte:
-  an extension on `ClassName`, its superclass or the owner itself (BT-5002: an
-  extension on a class beats that class's compiled method, at any depth below
-  it, and only the walk invokes it), an owner that does not define
+  an extension on `ClassName` or its superclass, an owner that does not define
   `Selector` among its own compiled methods (an extension on an ancestor
   between, a runtime-patched standalone method, a catch-all
   `doesNotUnderstand:args:` class), and does-not-understand.
@@ -271,7 +273,7 @@ module exactly as the superclass chain's own static call to it would. An
 unregistered class is answered `slow` and not cached.
 """.
 -spec inherited_target(class_name(), selector()) ->
-    {compiled | value, class_name(), module()} | slow.
+    {compiled | value, class_name(), module()} | {ext, class_name()} | slow.
 inherited_target(ClassName, Selector) ->
     Key = {inherited_target, ClassName, Selector},
     Compute = fun() -> compute_inherited_target(ClassName, Selector) end,
@@ -294,48 +296,25 @@ inherited_target(ClassName, Selector) ->
     end.
 
 -doc """
-BT-5002: the route a value type's `dispatch/3` default arm takes on a `slow`
-`inherited_target/2` verdict.
-
-Lookup walks the superclass chain from `ClassName`; an extension on a class
-beats that class's compiled method, and the first class with `Selector` by
-either route wins. So: an extension on `ClassName` itself; else the owner
-`resolve_owner/2` finds from the superclass, if it has an extension for
-`Selector` (it replaces the owner's compiled method, which a direct call to the
-owner's `dispatch/3` would run); else the superclass's compiled `dispatch/3`
-(`SuperModule`), as before.
+BT-5002: the route a value type's `dispatch/3` default arm takes on an
+`{ext, Owner}` `inherited_target/2` verdict: the owner of `Selector` has an
+extension, and an extension on a class beats that class's compiled method, so
+a direct call to the owner's `dispatch/3` would skip it.
 
 Value-type extensions are `fun(Args, Self)`; like the generated arm, this does
-not catch a raise from one.
+not catch a raise from one. If the extension is gone by now (removed after the
+verdict was read), the superclass's compiled `dispatch/3` (`SuperModule`)
+answers, as it did before.
 """.
--spec inherited_value_walk(class_name(), selector(), args(), term(), module()) -> term().
-inherited_value_walk(ClassName, Selector, Args, Self, SuperModule) ->
-    case check_extension(ClassName, Selector) of
-        {ok, Fun} ->
-            apply(Fun, [Args, Self]);
-        not_found ->
-            case owner_extension(ClassName, Selector) of
-                {ok, Fun} -> apply(Fun, [Args, Self]);
-                not_found -> SuperModule:dispatch(Selector, Args, Self)
-            end
-    end.
-
-%% The extension on the class `resolve_owner/2` finds from `ClassName`'s
-%% superclass, if any.
--spec owner_extension(class_name(), selector()) -> {ok, fun()} | not_found.
-owner_extension(ClassName, Selector) ->
-    case beamtalk_class_metadata:lookup_superclass(ClassName) of
-        {ok, Super} when is_atom(Super), Super =/= none, Super =/= nil ->
-            case resolve_owner(Super, Selector) of
-                {owner, Owner, _Module} -> check_extension(Owner, Selector);
-                miss -> not_found
-            end;
-        _ ->
-            not_found
+-spec inherited_value_ext(class_name(), selector(), args(), term(), module()) -> term().
+inherited_value_ext(Owner, Selector, Args, Self, SuperModule) ->
+    case check_extension(Owner, Selector) of
+        {ok, Fun} -> apply(Fun, [Args, Self]);
+        not_found -> SuperModule:dispatch(Selector, Args, Self)
     end.
 
 -spec compute_inherited_target(class_name(), selector()) ->
-    {cache | nocache, {compiled | value, class_name(), module()} | slow}.
+    {cache | nocache, {compiled | value, class_name(), module()} | {ext, class_name()} | slow}.
 compute_inherited_target(ClassName, Selector) ->
     case beamtalk_class_metadata:lookup_superclass(ClassName) of
         not_found ->
@@ -356,12 +335,13 @@ compute_inherited_target(ClassName, Selector) ->
                                 %% owner's compiled method (the first class with the selector
                                 %% wins, and at each class its extension beats its compiled
                                 %% method), so a direct call to the compiled method would skip
-                                %% it. `slow` takes the walk, which invokes it
-                                %% (`lookup_in_class_chain/5`). Computed once per
+                                %% it. `{ext, Owner}` takes the walk, which invokes it
+                                %% (`lookup_in_class_chain/5`); a value type's arm calls it
+                                %% through `inherited_value_ext/5`. Computed once per
                                 %% (class, selector) and cached: the hit stays one lookup.
                                 case check_extension(Owner, Selector) of
                                     {ok, _} ->
-                                        slow;
+                                        {ext, Owner};
                                     not_found ->
                                         verdict_for(Convention, Owner, Module, Selector)
                                 end

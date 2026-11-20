@@ -67,9 +67,9 @@ dispatch_test_() ->
                 fun test_inherited_target_actor_intrinsics/0},
             {"BT-4995: an extension on the class or its superclass flips an Actor intrinsic verdict",
                 fun test_inherited_target_actor_intrinsic_extension_flips/0},
-            {"BT-4995: an extension on Actor itself gives the slow verdict for its intrinsics",
+            {"BT-4995: an extension on Actor itself gives the {ext, Actor} verdict for its intrinsics",
                 fun test_inherited_target_actor_intrinsic_owner_extension/0},
-            {"BT-5002: an extension on any owner gives the slow verdict",
+            {"BT-5002: an extension on any owner gives the {ext, Owner} verdict",
                 fun test_inherited_target_owner_extension_is_slow/0},
             {"BT-4260: inherited_target answers value for an Object method sent to a String",
                 fun test_inherited_target_value_owner/0},
@@ -2058,8 +2058,8 @@ test_inherited_target_actor_intrinsic_extension_flips() ->
         ['continueWith:', 'stopWith:', 'terminate:']
     ).
 
-%% BT-4995 / BT-5002: an extension on `Actor` itself (the owner) gives the `slow`
-%% verdict, whatever depth the receiver's class is at, so the walk invokes it
+%% BT-4995 / BT-5002: an extension on `Actor` itself (the owner) gives the
+%% `{ext, Actor}` verdict, whatever depth the receiver's class is at, so the walk invokes it
 %% instead of the owner's compiled method.
 test_inherited_target_actor_intrinsic_owner_extension() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
@@ -2071,7 +2071,9 @@ test_inherited_target_actor_intrinsic_owner_extension() ->
     try
         ?assertEqual(Direct, beamtalk_dispatch:inherited_target('LoggingCounter', 'terminate:')),
         ok = beamtalk_extensions:register('Actor', 'terminate:', Fun, bt4995_test),
-        ?assertEqual(slow, beamtalk_dispatch:inherited_target('LoggingCounter', 'terminate:')),
+        ?assertEqual(
+            {ext, 'Actor'}, beamtalk_dispatch:inherited_target('LoggingCounter', 'terminate:')
+        ),
         ok = beamtalk_extensions:unregister('Actor', 'terminate:'),
         ?assertEqual(Direct, beamtalk_dispatch:inherited_target('LoggingCounter', 'terminate:'))
     after
@@ -2083,7 +2085,7 @@ test_inherited_target_actor_intrinsic_owner_extension() ->
     end.
 
 %% BT-5002: the same holds for any owner, not just `Actor`: an extension on the
-%% owner of a compiled selector turns the `value` verdict into `slow`, and removing
+%% owner of a compiled selector turns the `value` verdict into `{ext, Owner}`, and removing
 %% it restores the verdict (the install and removal flush the cache).
 test_inherited_target_owner_extension_is_slow() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
@@ -2095,7 +2097,9 @@ test_inherited_target_owner_extension_is_slow() ->
     try
         ?assertEqual(Verdict, beamtalk_dispatch:inherited_target('LoggingCounter', printString)),
         ok = beamtalk_extensions:register('Object', printString, Fun, bt5002_test),
-        ?assertEqual(slow, beamtalk_dispatch:inherited_target('LoggingCounter', printString)),
+        ?assertEqual(
+            {ext, 'Object'}, beamtalk_dispatch:inherited_target('LoggingCounter', printString)
+        ),
         ok = beamtalk_extensions:unregister('Object', printString),
         ?assertEqual(Verdict, beamtalk_dispatch:inherited_target('LoggingCounter', printString))
     after

@@ -149,12 +149,12 @@ call 'beamtalk_message_dispatch':'send'(_flag@57, 'ifFalse:ifTrue:', [_falseBloc
             %% BT-4260: a memoised verdict picks the direct inherited call.
             case case Selector of
                 <'printString'> when 'true' -> 'slow'
-                <_> when 'true' -> case call 'beamtalk_dispatch':'inherited_target'('IfFalseIfTrueProbe', Selector) of <'slow'> when 'true' -> 'walk' <InhVerdict> when 'true' -> InhVerdict end
+                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('IfFalseIfTrueProbe', Selector)
             end of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
-                <'walk'> when 'true' ->
-                    call 'beamtalk_dispatch':'inherited_value_walk'('IfFalseIfTrueProbe', Selector, Args, Self, 'bt@stdlib@value')
+                <{'ext', InhExtOwner}> when 'true' ->
+                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@value')
                 <_InhSlow> when 'true' ->
                     case call 'beamtalk_extensions':'lookup'('IfFalseIfTrueProbe', Selector) of
                         <{'ok', ExtFun, _ExtOwner}> when 'true' ->

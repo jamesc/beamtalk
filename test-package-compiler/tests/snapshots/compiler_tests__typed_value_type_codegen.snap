@@ -115,11 +115,11 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
             call 'typed_value_type':'withY:'(Self, DispArg0)
         <_Other> when 'true' ->
             %% BT-4260: a memoised verdict picks the direct inherited call.
-            case case call 'beamtalk_dispatch':'inherited_target'('TypedPoint', Selector) of <'slow'> when 'true' -> 'walk' <InhVerdict> when 'true' -> InhVerdict end of
+            case call 'beamtalk_dispatch':'inherited_target'('TypedPoint', Selector) of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
-                <'walk'> when 'true' ->
-                    call 'beamtalk_dispatch':'inherited_value_walk'('TypedPoint', Selector, Args, Self, 'bt@stdlib@value')
+                <{'ext', InhExtOwner}> when 'true' ->
+                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@value')
                 <_InhSlow> when 'true' ->
                     case call 'beamtalk_extensions':'lookup'('TypedPoint', Selector) of
                         <{'ok', ExtFun, _ExtOwner}> when 'true' ->

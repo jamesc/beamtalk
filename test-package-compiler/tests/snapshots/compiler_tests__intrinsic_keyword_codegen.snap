@@ -97,12 +97,12 @@ call 'bt@stdlib@foo':'dispatch'('size', [], Self)
                 <'subclassResponsibility'> when 'true' -> 'slow'
                 <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
-                <_> when 'true' -> case call 'beamtalk_dispatch':'inherited_target'('Foo', Selector) of <'slow'> when 'true' -> 'walk' <InhVerdict> when 'true' -> InhVerdict end
+                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('Foo', Selector)
             end of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
-                <'walk'> when 'true' ->
-                    call 'beamtalk_dispatch':'inherited_value_walk'('Foo', Selector, Args, Self, 'bt@stdlib@object')
+                <{'ext', InhExtOwner}> when 'true' ->
+                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@object')
                 <_InhSlow> when 'true' ->
                     case call 'beamtalk_extensions':'lookup'('Foo', Selector) of
                         <{'ok', ExtFun, _ExtOwner}> when 'true' ->
