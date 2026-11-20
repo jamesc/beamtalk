@@ -115,4 +115,20 @@ defmodule BtAttachWeb.WorkspaceSessionLifecycleTest do
     Process.exit(second, :kill)
     wait_for_banner(view)
   end
+
+  test "evals are refused while the workspace is lost, and work again after Reconnect", %{
+    conn: conn
+  } do
+    view = mount_cockpit(conn)
+    [%{pid: session_pid}] = SessionProbe.sessions()
+    Process.exit(session_pid, :kill)
+    wait_for_banner(view)
+
+    html = submit_and_settle(view, "#eval-form", %{expr: "1 + 1"})
+    assert html =~ "connection was lost"
+
+    view |> element("#workspace-reconnect") |> render_click()
+    html = submit_and_settle(view, "#eval-form", %{expr: "1 + 1"})
+    refute html =~ "connection was lost"
+  end
 end

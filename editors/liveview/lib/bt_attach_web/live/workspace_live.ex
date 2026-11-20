@@ -807,6 +807,15 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
+  # The single place the "workspace lost" state is resolved. The banner's
+  # Reconnect control calls it today; an automatic reconnect on `DOWN` would call
+  # the same function, so changing that UX is a one-line change in
+  # `handle_info({:DOWN, …})`.
+  defp reconnect_workspace(socket) do
+    {:ok, socket} = attach(assign(socket, :workspace_lost, nil))
+    socket
+  end
+
   # BT-5081: monitor the session pid from the LiveView. A workspace restart (or
   # a lost distribution link) kills the monitored remote pid; the `DOWN` is
   # handled in `handle_info/2` by showing a "workspace lost" banner with a
@@ -907,8 +916,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   @impl true
   def handle_event("workspace_reconnect", _params, %{assigns: %{workspace_lost: lost}} = socket)
       when not is_nil(lost) do
-    {:ok, socket} = attach(assign(socket, :workspace_lost, nil))
-    {:noreply, socket}
+    {:noreply, reconnect_workspace(socket)}
   end
 
   def handle_event("workspace_reconnect", _params, socket), do: {:noreply, socket}
