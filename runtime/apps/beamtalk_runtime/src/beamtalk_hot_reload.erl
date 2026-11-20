@@ -333,25 +333,26 @@ try_change_code(Pid, Module, Extra) ->
             {error, {Other, worker_crashed}}
     after ?CHANGE_WAIT_MS ->
         unalias(Alias),
-        %% A reply that arrived between the timer and `unalias/1` is still in the
-        %% mailbox; drop it.
-        receive
-            {Alias, _} -> ok
-        after 0 -> ok
-        end,
-        %% The worker keeps the suspension and resumes the actor once the change
-        %% finishes (or logs why it could not). Never silent: ERROR now.
         erlang:demonitor(Mon, [flush]),
-        ?LOG_ERROR(
-            #{
-                msg =>
-                    <<"code change still running; the actor is resumed if it succeeds and left suspended if it fails">>,
-                module => Module,
-                pid => Pid
-            },
-            #{domain => [beamtalk, runtime]}
-        ),
-        {error, timeout}
+        %% A reply that arrived between the timer and `unalias/1` is the real
+        %% outcome: report it rather than a timeout.
+        receive
+            {Alias, LateResult} ->
+                LateResult
+        after 0 ->
+            %% The worker keeps the suspension and resumes the actor once the
+            %% change finishes. Never silent: ERROR now.
+            ?LOG_ERROR(
+                #{
+                    msg =>
+                        <<"code change still running; the actor is resumed if it succeeds and left suspended if it fails">>,
+                    module => Module,
+                    pid => Pid
+                },
+                #{domain => [beamtalk, runtime]}
+            ),
+            {error, timeout}
+        end
     end.
 
 %% The suspend / change_code / resume sequence for one actor. Runs in the
@@ -388,6 +389,11 @@ change_then_resume(Pid, Module, Extra) ->
     case sys:change_code(Pid, Module, undefined, Extra, infinity) of
         ok ->
             _ = resume_quietly(Pid),
+            ok;
+        {error, {unknown_system_msg, _}} ->
+            %% An overlapping reload's earlier worker resumed the actor between our
+            %% suspend and this change: it is running and already migrated by that
+            %% reload, so there is nothing left suspended to report.
             ok;
         {error, Reason} = ChangeError ->
             %% ADR 0123 §3: left suspended, state intact. Logged here because the
