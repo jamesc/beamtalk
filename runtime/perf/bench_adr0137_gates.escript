@@ -6,6 +6,9 @@
 %% an escript has no `-include_lib` path to the runtime app unless ERL_LIBS is set.
 -include("../apps/beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
 
+%% Any Core Erlang variable name (hand-written, or a compiler temp with its `@N`).
+-define(VAR, "[A-Za-z0-9_@]+").
+
 %% ADR 0137 Phase 0 (BT-4007): gates 1-3 of the live-state model, measured in
 %% one VM, interleaved, so the gen_server round trip (about 6 us, and the
 %% dominant noise source) is out of the measurement.
@@ -34,8 +37,16 @@
 %%   (cd /path/bench && beamtalk build)
 %%   ERL_FLAGS="+S 1 -pa runtime/_build/default/lib/beamtalk_runtime/ebin" \
 %%     escript runtime/perf/bench_adr0137_gates.escript /path/bench 101 100000
-%% The runtime ebin is needed only for `beamtalk_actor:make_self/1`, which the
-%% sealed self-send calls. Run it on a quiet machine and record `uptime`.
+%% The runtime ebin is needed for `beamtalk_actor:make_self/1`, which the sealed
+%% self-send calls, and `beamtalk_actor_state:store/1`, which generated code calls
+%% on its slow paths. Run it on a quiet machine and record `uptime`.
+%% `just test-perf-smoke` runs it once with tiny counts (BT-5059), so a codegen
+%% change that moves the generated shape aborts there instead of silently.
+%%
+%% The hand-lowering matches compiler temps as `_<Base>@<N>` (see `tmp/1`) and
+%% variables it does not rename as any Core name (`?VAR`). The anchors that stay
+%% literal are the ones the lowering is about: the `'foo'` / `'__sealed_foo'`
+%% callee, the `'__class_mod__'` state key and the `maps:get`/`maps:put` of `n`.
 %%
 %% Assumption of the hand-lowering (single state effect): each self-send site
 %% is `let _SDn = case <dispatch>(.., StateVar) of ... end in let NextState =
@@ -187,12 +198,12 @@ hand_lower_open(Core) ->
     {Foo0, Rest} = split_at(FooOn, "<'top:'> when 'true' ->"),
     {Foo, FooEdits} = lower_callee(Foo0),
     {Callers0, N1} = sub(Rest,
-        "let (_SD[0-9]+) = case let (_SDArgs[0-9]+) = \\[\\] in let (_ClassMod[0-9]+) = "
-        "call 'maps':'get'\\('" ++ ClassModKey ++ "', ([A-Za-z0-9_]+),",
+        "let (" ++ tmp("_SD") ++ ") = case let (" ++ tmp("_SDArgs") ++ ") = \\[\\] in let ("
+        ++ tmp("_ClassMod") ++ ") = call 'maps':'get'\\('" ++ ClassModKey ++ "', (" ++ ?VAR ++ "),",
         "let _CellStore\\1 = call 'erlang':'put'('$bt_actor_state', \\4) in "
         "let \\1 = case let \\2 = [] in let \\3 = call 'maps':'get'('" ++ ClassModKey ++ "', \\4,", 2),
     {Callers1, N2} = sub(Callers0,
-        "let ([A-Za-z0-9_]+) = call 'erlang':'element'\\(2, (_SD[0-9]+)\\) in",
+        "let (" ++ ?VAR ++ ") = call 'erlang':'element'\\(2, (" ++ tmp("_SD") ++ ")\\) in",
         "let \\1 = call 'erlang':'get'('$bt_actor_state') in", 2),
     {list_to_binary(Pre ++ Foo ++ Callers1), FooEdits + N1 + N2}.
 
@@ -205,11 +216,12 @@ hand_lower_sealed(Core) ->
     {Foo, FooEdits} = lower_callee(Foo0),
     All = Pre ++ Foo ++ Rest,
     {Callers0, N1} = sub(All,
-        "let (_SD[0-9]+) = case call '([^']+)':'__sealed_foo'\\((_SealedSelf[0-9]+), ([A-Za-z0-9_]+)\\)",
+        "let (" ++ tmp("_SD") ++ ") = case call '([^']+)':'__sealed_foo'\\((" ++ tmp("_SealedSelf")
+        ++ "), (" ++ ?VAR ++ ")\\)",
         "let _CellStore\\1 = call 'erlang':'put'('$bt_actor_state', \\4) in "
         "let \\1 = case call '\\2':'__sealed_foo'(\\3, \\4)", 4),
     {Callers1, N2} = sub(Callers0,
-        "let ([A-Za-z0-9_]+) = call 'erlang':'element'\\(2, (_SD[0-9]+)\\) in",
+        "let (" ++ ?VAR ++ ") = call 'erlang':'element'\\(2, (" ++ tmp("_SD") ++ ")\\) in",
         "let \\1 = call 'erlang':'get'('$bt_actor_state') in", 4),
     {list_to_binary(Callers1), FooEdits + N1 + N2}.
 
@@ -217,14 +229,19 @@ hand_lower_sealed(Core) ->
 %% loaded copy, the load is the first statement, the store precedes the reply.
 lower_callee(Foo0) ->
     {Foo1, A} = sub(Foo0, "call 'maps':'get'\\('n', State\\)", "call 'maps':'get'('n', _CellIn)", 1),
-    {Foo2, B} = sub(Foo1, "call 'maps':'put'\\('n', (_Val[0-9]+), State\\)",
+    {Foo2, B} = sub(Foo1, "call 'maps':'put'\\('n', (" ++ tmp("_Val") ++ "), State\\)",
                     "call 'maps':'put'('n', \\1, _CellIn)", 1),
-    {Foo3, C} = sub(Foo2, "let (_Val[0-9]+) = ",
+    {Foo3, C} = sub(Foo2, "let (" ++ tmp("_Val") ++ ") = ",
                     "let _CellIn = call 'erlang':'get'('$bt_actor_state') in let \\1 = ", 1),
-    {Foo4, D} = sub(Foo3, "\\{'reply', (_Val[0-9]+), State1\\}",
+    {Foo4, D} = sub(Foo3, "\\{'reply', (" ++ tmp("_Val") ++ "), State1\\}",
                     "let _CellOut = call 'erlang':'put'('$bt_actor_state', State1) in "
                     "{'reply', \\1, State1}", 1),
     {Foo4, A + B + C + D}.
+
+%% Regex for a compiler temp: `_<Base>@<N>` since BT-4140 (#4634), `_<Base><N>` before.
+%% Both spellings are accepted, so a change of the counter separator does not
+%% break the edits again. The counter is required (`_SD` must not match `_SDArgs`).
+tmp(Base) -> Base ++ "@?[0-9]+".
 
 %% Regex substitution that must match exactly `Expected` times.
 sub(S, Re, Repl, Expected) ->
