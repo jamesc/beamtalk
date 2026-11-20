@@ -99,8 +99,20 @@ check_otp_window() {
 # flag is needed there.
 minimal_boot_args() {
     if [ "$INCLUDE_ERTS" = "true" ] && [ -f "$ROOT/erts-$ERTS_VSN/bin/start_clean.boot" ]; then
-        printf -- '-boot %s' "$ROOT/erts-$ERTS_VSN/bin/start_clean"
+        printf -- '-boot '
+        sq "$ROOT/erts-$ERTS_VSN/bin/start_clean"
     fi
+}
+
+# BT-5067: a release root may contain spaces (`/opt/My App/rel`), so the
+# argument helpers below print each word single-quoted (`sq`) and the verbs
+# splice them back with `eval "set -- ..."` — never an unquoted `$(...)`
+# expansion, which word-splits on the space and breaks `-pa`/`-boot`.
+# Prints one single-quoted word followed by a space.
+sq() {
+    printf "'"
+    printf '%s' "$1" | sed "s/'/'\\\\''/g"
+    printf "' "
 }
 
 # Every `lib/*/ebin` directory, as `-pa` flags — needed by `eval` (loads the
@@ -109,7 +121,10 @@ minimal_boot_args() {
 # `beamtalk_release_launcher` and `beamtalk_error` by name.
 lib_pa_args() {
     for d in "$ROOT"/lib/*/ebin; do
-        [ -d "$d" ] && printf ' -pa %s' "$d"
+        if [ -d "$d" ]; then
+            printf -- '-pa '
+            sq "$d"
+        fi
     done
 }
 
@@ -120,10 +135,23 @@ client_sname() {
     printf '%s_%s_%s' "$RELEASE_NAME" "$1" "$$"
 }
 
-cookie_args() {
-    if [ -n "${RELEASE_COOKIE:-}" ]; then
-        printf -- '-setcookie %s' "$RELEASE_COOKIE"
-    fi
+# BT-5067: hand the cookie to erl through `ERL_AFLAGS` (read from the
+# process environment, which is only visible to the same user and root via
+# `/proc/<pid>/environ`) — never `-setcookie` on the command line, which any
+# local user can read from `ps` / `/proc/<pid>/cmdline`. The release cookie is
+# both the distribution and console cookie, so exposing it is code execution
+# as the service user. Mirrors the dev workspace's `-args_file` approach.
+# Must run in the main shell (not a `$(...)` subshell) so the export sticks.
+export_cookie() {
+    [ -n "${RELEASE_COOKIE:-}" ] || return 0
+    case "$RELEASE_COOKIE" in
+        *[[:space:]\"\'\\]*)
+            echo "error: RELEASE_COOKIE must not contain whitespace, quotes or backslashes" >&2
+            exit 2
+            ;;
+    esac
+    ERL_AFLAGS="${ERL_AFLAGS:+$ERL_AFLAGS }-setcookie $RELEASE_COOKIE"
+    export ERL_AFLAGS
 }
 
 # This node's own `-sname`: `RELEASE_NODE` if set, else the release name
@@ -144,6 +172,8 @@ node_sname() {
 
 usage() {
     echo "usage: $0 {foreground|stop|ping|remote_console|eval|rpc|version} [args...]" >&2
+    echo "  eval/rpc take ONE argument, \"ClassName selector [args...]\", split on whitespace;" >&2
+    echo "  an individual argument containing whitespace is not supported." >&2
     exit 2
 }
 
@@ -164,10 +194,10 @@ case "$VERB" in
         # `Console` output (ADR 0099) is unaffected: it still goes to
         # stdout/stderr normally, this only turns off the interactive
         # `1> ` prompt reading from stdin.
-        # shellcheck disable=SC2046,SC2086
+        export_cookie
         exec "$ERL" -noshell -noinput -boot "$CONFIG_DIR/start" -boot_var RELEASE_DIR "$ROOT" \
             -sname "$(node_sname)" \
-            -config "$CONFIG_DIR/sys" -args_file "$CONFIG_DIR/vm.args" $(cookie_args)
+            -config "$CONFIG_DIR/sys" -args_file "$CONFIG_DIR/vm.args"
         ;;
     stop)
         check_otp_window
@@ -176,10 +206,11 @@ case "$VERB" in
         # `RELEASE_NODE`, so `stop` targets whichever instance was started
         # with the same value).
         NODE=$(node_sname)
-        # shellcheck disable=SC2046,SC2086
-        exec "$ERL" -noshell -hidden -sname "$SNAME" $(cookie_args) $(minimal_boot_args) $(lib_pa_args) \
-            -eval "beamtalk_release_launcher:stop_client_main()." \
-            -extra "$NODE"
+        export_cookie
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" $(minimal_boot_args) $(lib_pa_args) \
+            -eval \"beamtalk_release_launcher:stop_client_main().\" \
+            -extra \"\$NODE\""
+        exec "$ERL" "$@"
         ;;
     ping)
         check_otp_window
@@ -188,10 +219,11 @@ case "$VERB" in
         # `RELEASE_NODE`, so `ping` targets whichever instance was started
         # with the same value).
         NODE=$(node_sname)
-        # shellcheck disable=SC2046,SC2086
-        exec "$ERL" -noshell -hidden -sname "$SNAME" $(cookie_args) $(minimal_boot_args) $(lib_pa_args) \
-            -eval "beamtalk_release_launcher:ping_client_main()." \
-            -extra "$NODE"
+        export_cookie
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" $(minimal_boot_args) $(lib_pa_args) \
+            -eval \"beamtalk_release_launcher:ping_client_main().\" \
+            -extra \"\$NODE\""
+        exec "$ERL" "$@"
         ;;
     remote_console)
         check_otp_window
@@ -202,8 +234,9 @@ case "$VERB" in
         NODE=$(node_sname)
         # ADR 0091: same-host attach only — plain loopback distribution, no
         # further authentication beyond the cookie handshake (ADR 0058).
-        # shellcheck disable=SC2046,SC2086
-        exec "$ERL" -hidden -sname "$SNAME" $(cookie_args) $(minimal_boot_args) -remsh "$NODE"
+        export_cookie
+        eval "set -- -hidden -sname \"\$SNAME\" $(minimal_boot_args) -remsh \"\$NODE\""
+        exec "$ERL" "$@"
         ;;
     eval)
         check_otp_window
@@ -220,12 +253,12 @@ case "$VERB" in
         CLASS="$1"
         SELECTOR="$2"
         shift 2
-        # shellcheck disable=SC2046,SC2086
-        exec "$ERL" -noshell $(minimal_boot_args) $(lib_pa_args) \
-            -config "$CONFIG_DIR/sys" \
+        eval "set -- -noshell $(minimal_boot_args) $(lib_pa_args) \
+            -config \"\$CONFIG_DIR/sys\" \
             -beamtalk_workspace console false \
-            -eval "beamtalk_release_launcher:eval_main()." \
-            -extra "$CLASS" "$SELECTOR" "$@"
+            -eval \"beamtalk_release_launcher:eval_main().\" \
+            -extra \"\$CLASS\" \"\$SELECTOR\" \"\$@\""
+        exec "$ERL" "$@"
         ;;
     rpc)
         check_otp_window
@@ -247,10 +280,11 @@ case "$VERB" in
         # `RELEASE_NODE`, so `rpc` targets whichever instance was started
         # with the same value).
         NODE=$(node_sname)
-        # shellcheck disable=SC2046,SC2086
-        exec "$ERL" -noshell -hidden -sname "$SNAME" $(cookie_args) $(minimal_boot_args) $(lib_pa_args) \
-            -eval "beamtalk_release_launcher:rpc_client_main()." \
-            -extra "$NODE" "$CLASS" "$SELECTOR" "$@"
+        export_cookie
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" $(minimal_boot_args) $(lib_pa_args) \
+            -eval \"beamtalk_release_launcher:rpc_client_main().\" \
+            -extra \"\$NODE\" \"\$CLASS\" \"\$SELECTOR\" \"\$@\""
+        exec "$ERL" "$@"
         ;;
     version)
         if [ -f "$PROVENANCE" ]; then

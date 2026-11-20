@@ -98,7 +98,9 @@ pub(super) fn build_detached_node_command(
 
     // Add initial args, then BEAM code paths via the canonical beam_pa_args helper
     // (same ordering as the foreground REPL startup).
-    cmd.args(&initial_args).args(beam_pa_args(beam_paths));
+    cmd.args(&initial_args)
+        .args(beamtalk_workspace::loopback_dist_args())
+        .args(beam_pa_args(beam_paths));
 
     // Add extra code paths (e.g. package ebin from auto-compile)
     cmd.args(pa_args(extra_code_paths));
@@ -386,6 +388,24 @@ mod tests {
             stdlib_erlang_ebin: beam_dir,
         };
         build_detached_node_command(node_name, &cookie_file, &paths, &[], "ok.", &tmp)
+    }
+
+    #[test]
+    fn detached_node_pins_distribution_to_loopback() {
+        let cmd = build_with_node_name("plain_node");
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        // An operator-exported ERL_EPMD_ADDRESS deliberately opts out.
+        if std::env::var("ERL_EPMD_ADDRESS").is_err() {
+            let at = args
+                .iter()
+                .position(|a| a == "inet_dist_use_interface")
+                .expect("inet_dist_use_interface must be set");
+            assert_eq!(args[at - 1], "-kernel");
+            assert_eq!(args[at + 1], "{127,0,0,1}");
+        }
     }
 
     #[test]

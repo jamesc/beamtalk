@@ -376,6 +376,73 @@ mod tests {
         );
     }
 
+    /// BT-5067: no verb may put the cookie on the `erl` command line.
+    #[test]
+    fn write_launcher_scripts_never_pass_setcookie_on_the_command_line() {
+        let (root, _temp) = write_scripts(true);
+        let sh = std::fs::read_to_string(root.join("bin/orders").as_std_path()).unwrap();
+        let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
+        for (name, script) in [("launcher.sh", &sh), ("launcher.cmd", &cmd)] {
+            assert!(
+                !script.contains("COOKIE_ARGS") && !script.contains("cookie_args"),
+                "{name} must not expand the cookie into argv"
+            );
+            assert!(script.contains("ERL_AFLAGS"), "{name} must use ERL_AFLAGS");
+        }
+    }
+
+    /// BT-5067: run each client verb against a fake `erl` from a release root
+    /// containing a space; assert every `-pa` path survives as one argument and
+    /// the cookie is only in `ERL_AFLAGS`, never an argument.
+    #[cfg(unix)]
+    #[test]
+    fn write_launcher_scripts_sh_handles_spaced_root_and_hides_cookie() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = TempDir::new().unwrap();
+        let base = Utf8PathBuf::from_path_buf(temp.path().join("My App")).unwrap();
+        write_launcher_scripts(&base, "orders", "1.0.0", "14.0", false).unwrap();
+        std::fs::create_dir_all(base.join("lib/dep one/ebin").as_std_path()).unwrap();
+        let fake = temp.path().join("fakebin");
+        std::fs::create_dir_all(&fake).unwrap();
+        let erl = fake.join("erl");
+        std::fs::write(
+            &erl,
+            "#!/bin/sh\nfor a; do echo \"ARG[$a]\"; done\necho \"AFLAGS=$ERL_AFLAGS\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&erl, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!("{}:{}", fake.display(), std::env::var("PATH").unwrap());
+
+        for verb in ["ping", "stop"] {
+            let out = std::process::Command::new("sh")
+                .arg(base.join("bin/orders").as_std_path())
+                .arg(verb)
+                .env("PATH", &path)
+                .env("RELEASE_COOKIE", "s3cr3t-cookie")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(out.status.success(), "{verb}: {stdout}");
+            assert!(
+                stdout.contains("ARG[-pa]\nARG[") && stdout.contains("My App/lib/dep one/ebin]"),
+                "{verb}: -pa path split on space: {stdout}"
+            );
+            let args: String = stdout
+                .lines()
+                .filter(|l| l.starts_with("ARG["))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                !args.contains("setcookie") && !args.contains("s3cr3t"),
+                "{verb}: {args}"
+            );
+            assert!(
+                stdout.contains("AFLAGS=-setcookie s3cr3t-cookie"),
+                "{verb}: {stdout}"
+            );
+        }
+    }
+
     #[test]
     fn write_launcher_scripts_cmd_uses_crlf_line_endings() {
         let (root, _temp) = write_scripts(true);

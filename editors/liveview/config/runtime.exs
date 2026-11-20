@@ -28,13 +28,17 @@ end
 # file, no BT_OIDC_* env) this resolves to `nil` and the front runs
 # unauthenticated — the unchanged zero-config localhost story (ADR 0020). Tests
 # set `config :bt_attach, :oidc, ...` directly and are unaffected by this block.
-unless config_env() == :test do
-  oidc = BtAttach.IdeConfig.load!()
-  # Fail closed at boot if OIDC is enabled without a role map (ADR 0091
-  # Decision 4): RBAC must never default to a privileged or silent fallback.
-  if oidc, do: BtAttach.Rbac.validate!(oidc)
-  config :bt_attach, :oidc, oidc
-end
+oidc =
+  if config_env() == :test do
+    nil
+  else
+    oidc = BtAttach.IdeConfig.load!()
+    # Fail closed at boot if OIDC is enabled without a role map (ADR 0091
+    # Decision 4): RBAC must never default to a privileged or silent fallback.
+    if oidc, do: BtAttach.Rbac.validate!(oidc)
+    config :bt_attach, :oidc, oidc
+    oidc
+  end
 
 if config_env() == :prod do
   # The secret key base is used to sign/encrypt cookies and other secrets.
@@ -78,17 +82,18 @@ if config_env() == :prod do
 
   config :bt_attach, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
-  # ADR 0097 Implementation §1b: the desktop-attach broker needs to pin this
-  # front to a loopback bind (`127.0.0.1`/`::1`) so a spawned front is never
-  # reachable from the LAN — the all-interfaces default below is right for the
-  # existing remote-deploy story (ADR 0091) but wrong for a broker-spawned
-  # local instance. Unset/empty keeps today's all-interfaces default so remote
-  # deploys are unchanged; an unparseable value fails closed (raise) rather
-  # than silently falling back to all-interfaces on a typo'd env.
+  # Bind address (ADR 0097 Implementation §1b, BT-5065). Unset/empty binds
+  # loopback only: with no auth gate the front trusts every request as Owner and
+  # exposes eval, so it must not be network-reachable by accident (ADR 0020
+  # principle 1). A remote deploy sets BT_ATTACH_BIND_IP (e.g. `::` or
+  # `0.0.0.0`) *and* configures OIDC. A non-loopback bind with no gate (no OIDC,
+  # no BT_IDE_DEV_AUTH) refuses to boot unless BT_IDE_ALLOW_UNAUTHENTICATED=1,
+  # which BtAttach.Application logs as a warning every boot. An unparseable
+  # value fails closed (raise) rather than silently falling back.
   bind_ip =
     case System.get_env("BT_ATTACH_BIND_IP") do
       unset when unset in [nil, ""] ->
-        {0, 0, 0, 0, 0, 0, 0, 0}
+        BtAttach.BindPolicy.default_ip()
 
       addr ->
         case :inet.parse_address(String.to_charlist(addr)) do
@@ -100,12 +105,20 @@ if config_env() == :prod do
         end
     end
 
+  dev_auth? = String.downcase(System.get_env("BT_IDE_DEV_AUTH", "")) in ~w(1 true yes)
+
+  allow_unauth? =
+    BtAttach.BindPolicy.allow_unauthenticated?(System.get_env("BT_IDE_ALLOW_UNAUTHENTICATED"))
+
+  case BtAttach.BindPolicy.check!(bind_ip, oidc != nil or dev_auth?, allow_unauth?) do
+    :unauthenticated_opt_in -> config :bt_attach, :unauthenticated_remote_bind, bind_ip
+    :ok -> :ok
+  end
+
   config :bt_attach, BtAttachWeb.Endpoint,
     url: [host: url_host, port: url_port, scheme: url_scheme],
     http: [
-      # Enable IPv6 and bind on all interfaces by default (see BT_ATTACH_BIND_IP
-      # above for the desktop-attach broker's loopback override).
-      # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
+      # Loopback by default; see BT_ATTACH_BIND_IP above for remote deploys.
       # See the documentation on https://hexdocs.pm/bandit/Bandit.html#t:options/0
       # for details about using IPv6 vs IPv4 and loopback vs public addresses.
       ip: bind_ip,

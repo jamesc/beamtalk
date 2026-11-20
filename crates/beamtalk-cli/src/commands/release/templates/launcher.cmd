@@ -158,9 +158,17 @@ for /d %%D in ("%ROOT%\lib\*") do (
 )
 exit /b 0
 
-:cookie_args
-set "COOKIE_ARGS="
-if defined RELEASE_COOKIE set "COOKIE_ARGS=-setcookie %RELEASE_COOKIE%"
+:export_cookie
+rem BT-5067: pass the cookie via ERL_AFLAGS (process environment), never as
+rem `-setcookie` on the command line, which other local users can read from
+rem the process list. See launcher.sh's `export_cookie`.
+if defined RELEASE_COOKIE (
+    if defined ERL_AFLAGS (
+        set "ERL_AFLAGS=!ERL_AFLAGS! -setcookie !RELEASE_COOKIE!"
+    ) else (
+        set "ERL_AFLAGS=-setcookie !RELEASE_COOKIE!"
+    )
+)
 exit /b 0
 
 rem This node's own -sname: RELEASE_NODE if set, else the release name
@@ -192,7 +200,7 @@ exit /b 0
 :foreground
 call :check_otp_window
 if errorlevel 1 exit /b 1
-call :cookie_args
+call :export_cookie
 call :node_sname
 rem -noshell -noinput: see launcher.sh's foreground comment — no
 rem interactive shell attaches stdin, so a supervisor with no tty
@@ -200,14 +208,14 @@ rem (a Windows service, a container) does not make the node see EOF
 rem and terminate right after boot. Console output is unaffected.
 "%ERL%" -noshell -noinput -boot "%CONFIG_DIR%\start" -boot_var RELEASE_DIR "%ROOT%" ^
     -sname "%THIS_NODE%" ^
-    -config "%CONFIG_DIR%\sys" -args_file "%CONFIG_DIR%\vm.args" %COOKIE_ARGS%
+    -config "%CONFIG_DIR%\sys" -args_file "%CONFIG_DIR%\vm.args"
 exit /b %errorlevel%
 
 :stop
 call :check_otp_window
 if errorlevel 1 exit /b 1
 call :lib_pa_args
-call :cookie_args
+call :export_cookie
 call :minimal_boot_args
 call :node_sname
 rem `%RANDOM%` three times over: a single 15-bit draw collides often enough
@@ -223,7 +231,7 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so stop targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" %COOKIE_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+"%ERL%" -noshell -hidden -sname "%SNAME%" %BOOT_ARGS% %PA_ARGS% ^
     -eval "beamtalk_release_launcher:stop_client_main()." -extra "%NODE%"
 exit /b %errorlevel%
 
@@ -231,7 +239,7 @@ exit /b %errorlevel%
 call :check_otp_window
 if errorlevel 1 exit /b 1
 call :lib_pa_args
-call :cookie_args
+call :export_cookie
 call :minimal_boot_args
 call :node_sname
 rem See `:stop`'s comment above: three `%RANDOM%` draws, not one, to keep
@@ -241,14 +249,14 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so ping targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" %COOKIE_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+"%ERL%" -noshell -hidden -sname "%SNAME%" %BOOT_ARGS% %PA_ARGS% ^
     -eval "beamtalk_release_launcher:ping_client_main()." -extra "%NODE%"
 exit /b %errorlevel%
 
 :remote_console
 call :check_otp_window
 if errorlevel 1 exit /b 1
-call :cookie_args
+call :export_cookie
 call :minimal_boot_args
 call :node_sname
 rem See `:stop`'s comment above: three `%RANDOM%` draws, not one, to keep
@@ -258,7 +266,7 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so remote_console attaches to whichever instance was
 rem started with the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -hidden -sname "%SNAME%" %COOKIE_ARGS% %BOOT_ARGS% -remsh "%NODE%"
+"%ERL%" -hidden -sname "%SNAME%" %BOOT_ARGS% -remsh "%NODE%"
 exit /b %errorlevel%
 
 :eval
@@ -294,7 +302,7 @@ for /f "tokens=1,2,*" %%A in ("%ENTRY%") do (
 if not defined CLASS goto :usage
 if not defined SELECTOR goto :usage
 call :lib_pa_args
-call :cookie_args
+call :export_cookie
 call :minimal_boot_args
 call :node_sname
 rem See `:stop`'s comment above: three `%RANDOM%` draws, not one, to keep
@@ -304,7 +312,7 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so rpc targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" %COOKIE_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+"%ERL%" -noshell -hidden -sname "%SNAME%" %BOOT_ARGS% %PA_ARGS% ^
     -eval "beamtalk_release_launcher:rpc_client_main()." ^
     -extra "%NODE%" "%CLASS%" "%SELECTOR%" %ENTRY_REST%
 exit /b %errorlevel%
