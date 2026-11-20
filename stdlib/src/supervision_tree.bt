@@ -68,16 +68,16 @@ typed Value subclass: SupervisionTree
 
   // === Enumerable (ADR 0127 §9) ===
 
-  /// Required by `Enumerable(SupervisionNode)` — the flat node list, already
-  /// the receiver's own snapshot (not `nodes`, which is an FFI enrich pass
-  /// adding parent/child navigation; `Enumerable`'s provisions need only the
-  /// flat list).
+  /// Required by `Enumerable(SupervisionNode)` — the enriched node list
+  /// (`nodes`), so `children` / `parent` work on every node an `Enumerable`
+  /// method (`inject:into:`, `count:`, `anySatisfy:`, ...) sees, matching
+  /// `do:` / `select:` / `detect:` / `collect:`.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// tree elements   // => tree flatNodes
+  /// tree elements   // => tree nodes
   /// ```
-  elements -> List(SupervisionNode) => self flatNodes
+  elements -> List(SupervisionNode) => self nodes
 
   // === Querying ===
 

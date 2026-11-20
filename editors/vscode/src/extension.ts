@@ -19,6 +19,7 @@ import {
   resolveClassDocument,
 } from "./documentResolution";
 import { InspectorPanel } from "./inspectorPanel";
+import { registerLogLevelSync } from "./logLevelSync";
 import { resolveDeclarationOffset } from "./symbolLookup";
 import { classNameToStdlibFilename } from "./textUtils";
 import { TranscriptViewProvider } from "./transcriptView";
@@ -626,6 +627,7 @@ function connectWorkspace(workspaceId: string): void {
     workspaceWsClient = undefined;
     workspaceTreeProvider?.setClient(null);
     transcriptViewProvider?.setClient(null);
+    InspectorPanel.setClient(null);
   }
 
   let newClient: WorkspaceClient;
@@ -640,6 +642,7 @@ function connectWorkspace(workspaceId: string): void {
   workspaceWsClient = newClient;
   workspaceTreeProvider?.setClient(newClient);
   transcriptViewProvider?.setClient(newClient);
+  InspectorPanel.setClient(newClient);
 
   // Close inspector panels for actors that have stopped.
   // Stream log events to the Beamtalk Logs output channel (BT-1433).
@@ -687,6 +690,7 @@ function disconnectWorkspace(reason: "port-removed"): void {
   workspaceWsClient = undefined;
   workspaceTreeProvider?.setClient(null);
   transcriptViewProvider?.setClient(null);
+  InspectorPanel.setClient(null);
 
   setReplRunning(false);
   outputChannel?.info(`Disconnected from workspace ${id}: ${reason}`);
@@ -1029,14 +1033,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     updateLogLevelStatusBar(config.get<string>("logs.level", "warning"));
   }
 
-  // Keep the status bar in sync when the setting is changed via Settings UI.
+  // Keep the status bar and the server-side log filter in sync when the
+  // setting is changed via Settings UI (BT-5082).
   context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("beamtalk.logs.level")) {
-        const config = vscode.workspace.getConfiguration("beamtalk");
-        updateLogLevelStatusBar(config.get<string>("logs.level", "warning"));
-      }
-    })
+    registerLogLevelSync(
+      vscode.workspace,
+      () => workspaceWsClient,
+      updateLogLevelStatusBar,
+      (msg) => outputChannel?.warn(msg)
+    )
   );
 
   context.subscriptions.push(
@@ -1053,14 +1058,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!picked) return;
       const newLevel = picked.label as LogLevel;
       await config.update("logs.level", newLevel, vscode.ConfigurationTarget.Global);
-      updateLogLevelStatusBar(newLevel);
-      if (workspaceWsClient) {
-        workspaceWsClient.subscribeLogs(newLevel).catch((err) => {
-          outputChannel?.warn(
-            `Failed to update log subscription: ${err instanceof Error ? err.message : String(err)}`
-          );
-        });
-      }
+      // The onDidChangeConfiguration handler above updates the status bar and re-subscribes.
     })
   );
 
@@ -1104,7 +1102,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ─── Transcript View (BT-1024) ─────────────────────────────────────────────
 
-  transcriptViewProvider = new TranscriptViewProvider();
+  transcriptViewProvider = new TranscriptViewProvider({
+    fullReload: vscode.env.remoteName === "wsl",
+  });
   context.subscriptions.push(transcriptViewProvider);
 
   context.subscriptions.push(
@@ -1163,13 +1163,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       workspaceTreeProvider?.setClassOriginFilter(new Set());
       await context.workspaceState.update(CLASS_FILTER_STATE_KEY, undefined);
       void vscode.commands.executeCommand("setContext", "beamtalk.classFilterActive", false);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("beamtalk.killActor", (_node) => {
-      // Rich actor kill requires Phase 2 (inspector panel).
-      void vscode.window.showInformationMessage("Kill actor: not yet connected to a workspace.");
     })
   );
 

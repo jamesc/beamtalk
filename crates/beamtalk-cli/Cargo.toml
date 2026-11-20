@@ -70,6 +70,9 @@ base64.workspace = true
 fs2.workspace = true
 # why: hash registry URLs into shared-cache directory names (BT-2996)
 sha2.workspace = true
+# why: append manifests to the release tarball without external gzip/tar (BT-5077)
+flate2.workspace = true
+tar.workspace = true
 # why: render markdown doc comments and README to HTML (replaces hand-rolled renderer)
 pulldown-cmark.workspace = true
 # why: temporary files for REPL evaluation and workspace management

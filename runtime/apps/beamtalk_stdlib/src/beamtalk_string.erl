@@ -333,6 +333,8 @@ index_of(Str, _) ->
 
 -doc "Global `binary:split/3`, wrapping each part as a String (backs `split:`).".
 -spec split(t() | binary(), t() | binary()) -> [t()].
+split({beamtalk_string, Str}, {beamtalk_string, <<>>}) when is_binary(Str) ->
+    [beamtalk_primitive:string_from_binary(Str)];
 split({beamtalk_string, Str}, {beamtalk_string, Sep}) when
     is_binary(Str), is_binary(Sep)
 ->

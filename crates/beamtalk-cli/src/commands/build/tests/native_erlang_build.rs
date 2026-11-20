@@ -3,8 +3,11 @@
 
 //! ADR 0072 Phase 1: native Erlang compilation during build, and native-module collision detection across the root package and its dependencies.
 
+use super::native::rebar3_program_and_prefix;
 use super::*;
 use beamtalk_core::build_layout::BuildLayout;
+use std::ffi::OsString;
+use std::path::Path;
 
 #[test]
 fn test_rebar3_path_returns_bundled_when_exists() {
@@ -33,6 +36,32 @@ fn test_rebar3_path_returns_bundled_when_exists() {
         path.is_absolute(),
         "rebar3_path() must return an absolute path, got: {path:?}"
     );
+}
+
+/// BT-5077: the bundled rebar3 is an escript; Windows cannot exec a shebang,
+/// so there it must run as `escript <path>`. Unix runs it directly.
+#[test]
+fn rebar3_bundled_escript_runs_via_escript_on_windows_only() {
+    let bundled = Path::new(r"C:\beamtalk\lib\beamtalk\tools\rebar3");
+    let (program, prefix) = rebar3_program_and_prefix(bundled, true);
+    assert_eq!(program, OsString::from("escript"));
+    assert_eq!(prefix, vec![bundled.as_os_str().to_owned()]);
+
+    let (program, prefix) = rebar3_program_and_prefix(bundled, false);
+    assert_eq!(program, bundled.as_os_str().to_owned());
+    assert!(prefix.is_empty());
+}
+
+/// A Windows system rebar3 (`rebar3.cmd` / `rebar3.exe`) is launchable and
+/// must not be wrapped in `escript`.
+#[test]
+fn rebar3_windows_launchers_run_directly() {
+    for name in ["rebar3.cmd", "rebar3.EXE", "rebar3.bat"] {
+        let path = Path::new(name);
+        let (program, prefix) = rebar3_program_and_prefix(path, true);
+        assert_eq!(program, path.as_os_str().to_owned(), "{name}");
+        assert!(prefix.is_empty(), "{name}");
+    }
 }
 
 // ---- ADR 0072 Phase 1: native Erlang compilation in build ----

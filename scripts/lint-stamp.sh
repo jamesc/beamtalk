@@ -37,8 +37,10 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 patterns() {
   case "$1" in
-    rust)     echo '*.rs' 'Cargo.toml' 'Cargo.lock' 'clippy.toml' 'rustfmt.toml' '.cargo/*' ;;
-    erlang)   echo '*.erl' '*.hrl' 'rebar.config' ;;
+    # A bare name is a pathspec for that one root file; a leading `*` (fnmatch, which
+    # crosses `/` here) also covers crates/*/Cargo.toml and runtime/rebar.config.
+    rust)     echo '*.rs' '*Cargo.toml' '*Cargo.lock' 'rust-toolchain.toml' 'clippy.toml' 'rustfmt.toml' '.cargo/*' ;;
+    erlang)   echo '*.erl' '*.hrl' '*rebar.config' '*rebar.config.script' '*rebar.lock' ;;
     js)       echo '*.js' '*.ts' '*.jsx' '*.tsx' ;;
     beamtalk) echo '*.bt' '*.btscript' ;;
     elixir)   echo 'editors/liveview/*.ex' 'editors/liveview/*.exs' ;;
