@@ -12,7 +12,7 @@
 // Covers actor and value-type hierarchies, instance and class side, an
 // extension installed before and after the receiver's class was first used
 // (the memoised verdict is flushed), removal, and a nearer override. One case
-// is pinned as still wrong (BT-5060): a value class's direct subclass. The
+// is pinned as still wrong (BT-5060): a value receiver whose direct superclass compiles the selector. The
 // `Actor` cases (the three sealed intrinsics) install node-wide extensions, so
 // this class runs serially.
 //
