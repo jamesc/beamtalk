@@ -101,7 +101,18 @@ append_synced_open(Path, Fd, Data) ->
                 ok ->
                     ok;
                 {error, _} ->
-                    _ = truncate_to(Path, Before),
+                    case truncate_to(Path, Before) of
+                        ok ->
+                            ok;
+                        {error, CutReason} ->
+                            %% The whole line stays under a seq the next append
+                            %% reuses; say so rather than fail silently.
+                            ?LOG_ERROR(
+                                "ChangeLog ~ts: could not cut back a failed append",
+                                [Path],
+                                #{reason => CutReason, domain => [beamtalk, runtime]}
+                            )
+                    end,
                     Result
             end;
         {error, _} = Err ->

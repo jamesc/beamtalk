@@ -223,7 +223,7 @@ append_waits_past_default_call_timeout_test_() ->
 
 append_waits_past_default_call_timeout() ->
     %% A server busy longer than gen_server's 5s default (e.g. rotating) must not
-    %% make the caller time out: append/1 uses `infinity`.
+    %% make the caller time out: append/1 waits up to its 60 s timeout.
     {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
     try

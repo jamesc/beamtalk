@@ -131,6 +131,8 @@ warning in this process (`beamtalk_refactor_support:note_changelog_result/1`).
     Result :: tuple().
 with_changelog_warnings(Fun) ->
     ok = beamtalk_refactor_support:begin_changelog_warnings(),
+    %% bt-catcher-audit: not-applicable-reraises - the catch only clears the
+    %% collection marker and re-raises, so the next boundary restores class variables.
     Result =
         try
             Fun()

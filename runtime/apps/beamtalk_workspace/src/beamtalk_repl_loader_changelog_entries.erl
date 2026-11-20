@@ -25,7 +25,7 @@ fails. Each entry kind passes its own span resolver as a fun.
 """.
 
 -export([
-    %% Entry emitters (best effort; always return `ok`).
+    %% Entry emitters (best effort; return `ok` or `{warning, Text}`, never raise).
     emit_class_def_entry/3,
     emit_rewrite_change_entry/2,
     emit_new_class_entry/3,

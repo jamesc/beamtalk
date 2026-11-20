@@ -343,7 +343,8 @@ extension_prev_source(EtsClass, Selector) ->
 %% Best-effort ChangeLog append for an extension removal — mirrors
 %% log_local_removal/3's `no_workspace` handling below: the extension install
 %% already succeeded above, so a missing/unavailable workspace here must
-%% never surface as a caller-visible error.
+%% never surface as a caller-visible error. A failed append becomes an eval
+%% warning (`beamtalk_refactor_support:note_changelog_result/1`).
 -spec log_extension_removal(
     atom(), atom(), instance | class, atom() | undefined, binary() | undefined
 ) ->
@@ -411,10 +412,11 @@ remove_local_method(ClassName, Selector, Side) ->
 
 %% Best-effort ChangeLog append after a successful local-method removal (ADR
 %% 0112 Phase 3) — the install already succeeded above, so a logging
-%% failure must never surface to the caller. `emit_remove_change_entry/5`
-%% already self-swallows every internal failure (mirrors `emit_change_entry/1`
-%% for a patch); a `{error, no_workspace}` answer (the workspace stopped
-%% right after the removal above) is ignored.
+%% failure must never raise to the caller. `emit_remove_change_entry/5`
+%% never raises; it answers `{warning, Text}` for a failed append, which becomes
+%% an eval warning (`beamtalk_refactor_support:note_changelog_result/1`). A
+%% `{error, no_workspace}` answer (the workspace stopped right after the removal
+%% above) is ignored.
 -spec log_local_removal(binary(), atom(), instance | class) -> ok.
 log_local_removal(ClassNameBin, Selector, Side) ->
     {Author, AuthorKind} = beamtalk_refactor_support:current_author_context(),
