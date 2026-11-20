@@ -566,7 +566,7 @@ impl SimpleLanguageService {
 
     /// The real package name of the project file that declares `class`, or
     /// `None` when no workspace root names it (the same-project marker).
-    fn declaring_package(&self, class: &str) -> Option<EcoString> {
+    pub(crate) fn declaring_package(&self, class: &str) -> Option<EcoString> {
         let decls = find_class_declarations(class, self.files.iter().map(|(p, d)| (p, &d.module)));
         let package = self
             .project_index
@@ -577,7 +577,7 @@ impl SimpleLanguageService {
 
     /// The `pkg` of a `pkg@Name` reference at `loc`, read from the source text
     /// just before the name.
-    fn qualifier_of(&self, loc: &crate::Location, name: &str) -> Option<&str> {
+    pub(crate) fn qualifier_of(&self, loc: &crate::Location, name: &str) -> Option<&str> {
         let text = &self.files.get(&loc.file)?.source;
         let end = text.get(..loc.span.end() as usize)?;
         let name_start = end.len().checked_sub(name.len())?;
