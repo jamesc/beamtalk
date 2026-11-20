@@ -647,16 +647,37 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      # persist-credentials kept: the step below pushes a tag delete (`git push origin :refs/tags/nightly`).
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6 # zizmor: ignore[artipacked]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          persist-credentials: true
+          persist-credentials: false
 
-      - name: Download all artifacts
+      # Only the four platform packages: a bare download would also merge in the
+      # benchmark reports and every other artifact of the run (BT-5094).
+      - name: Download platform artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: dist-artifacts
+          pattern: beamtalk-nightly-*
           merge-multiple: true
+
+      - name: Assert the asset list
+        run: |
+          set -euo pipefail
+          expected="$(printf '%s\n' \
+            beamtalk-nightly-linux-x86_64.tar.gz \
+            beamtalk-nightly-linux-x86_64.tar.gz.sha256 \
+            beamtalk-nightly-macos-arm64.tar.gz \
+            beamtalk-nightly-macos-arm64.tar.gz.sha256 \
+            beamtalk-nightly-macos-x86_64.tar.gz \
+            beamtalk-nightly-macos-x86_64.tar.gz.sha256 \
+            beamtalk-nightly-windows-x86_64.zip \
+            beamtalk-nightly-windows-x86_64.zip.sha256 | sort)"
+          actual="$(find dist-artifacts -type f -printf '%f\n' | sort)"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::nightly asset list differs from the expected one"
+            diff <(echo "$expected") <(echo "$actual") || true
+            exit 1
+          fi
 
       - name: Create or update nightly release
         env:
@@ -664,22 +685,20 @@ jobs:
           NIGHTLY_DATE: ${{ needs.check-activity.outputs.nightly_date }}
           NIGHTLY_SHA: ${{ needs.check-activity.outputs.nightly_sha }}
         run: |
-          # Delete existing nightly release if present
-          gh release delete nightly --yes 2>/dev/null || true
-          git push origin :refs/tags/nightly 2>/dev/null || true
-
-          # Create new nightly release
-          gh release create nightly \
-            --title "Nightly Build (${NIGHTLY_DATE}, ${NIGHTLY_SHA})" \
-            --notes "Automated nightly build from \`main\` at ${NIGHTLY_DATE}.
+          # Update in place; the previous release is only replaced once the new
+          # assets are uploaded (scripts/ci/publish-rolling-release.sh, BT-5094).
+          cat > nightly-notes.md <<NOTES
+          Automated nightly build from \`main\` at ${NIGHTLY_DATE}.
 
           **Commit:** ${NIGHTLY_SHA}
-          **Full SHA:** $(git rev-parse HEAD)
+          **Full SHA:** ${GITHUB_SHA}
 
           > [!WARNING]
           > Nightly builds are untested beyond the standard test suite. Use \`--nightly\` with install.sh:
           > \`\`\`sh
           > curl -fsSL https://jamesc.github.io/beamtalk/install.sh | sh -s -- --nightly
-          > \`\`\`" \
-            --prerelease \
+          > \`\`\`
+          NOTES
+          scripts/ci/publish-rolling-release.sh nightly "${GITHUB_SHA}" \
+            "Nightly Build (${NIGHTLY_DATE}, ${NIGHTLY_SHA})" nightly-notes.md \
             dist-artifacts/*
