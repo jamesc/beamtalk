@@ -146,6 +146,9 @@ jobs:
       - name: Bench smoke (criterion benches in test mode, BT-3886)
         run: just test-benches-smoke
 
+      - name: Perf-script smoke (runtime/perf escripts, tiny counts, BT-5059)
+        run: just test-perf-smoke
+
       - name: Test stdlib
         run: just test-stdlib
 
