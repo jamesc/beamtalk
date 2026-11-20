@@ -52,7 +52,6 @@ TestCase subclass: ToByDoZeroStepTest
     s
 
   // --- pure block (real send, not inlined) ---
-
   testPureLiteralZeroPositiveRange =>
     self should: [self pureLiteralZeroUp] raise: #user_error
 
@@ -60,13 +59,26 @@ TestCase subclass: ToByDoZeroStepTest
     self should: [self pureLiteralZeroDown] raise: #user_error
 
   testPureRuntimeZeroPositiveRange =>
-    self should: [self pureLoop: 0 from: 1 to: 10] raise: #user_error
+    self
+      should: [
+        self
+          pureLoop: 0
+          from: 1
+          to: 10
+      ]
+      raise: #user_error
 
   testPureRuntimeZeroNegativeRange =>
-    self should: [self pureLoop: 0 from: 10 to: 1] raise: #user_error
+    self
+      should: [
+        self
+          pureLoop: 0
+          from: 10
+          to: 1
+      ]
+      raise: #user_error
 
   // --- writing block (inlined counted loop) ---
-
   testWritingLiteralZeroPositiveRange =>
     self should: [self writingLiteralZeroUp] raise: #user_error
 
@@ -74,22 +86,62 @@ TestCase subclass: ToByDoZeroStepTest
     self should: [self writingLiteralZeroDown] raise: #user_error
 
   testWritingRuntimeZeroPositiveRange =>
-    self should: [self writingLoop: 0 from: 1 to: 10] raise: #user_error
+    self
+      should: [
+        self
+          writingLoop: 0
+          from: 1
+          to: 10
+      ]
+      raise: #user_error
 
   testWritingRuntimeZeroNegativeRange =>
-    self should: [self writingLoop: 0 from: 10 to: 1] raise: #user_error
+    self
+      should: [
+        self
+          writingLoop: 0
+          from: 10
+          to: 1
+      ]
+      raise: #user_error
 
   testWritingZeroStepMessage =>
-    msg := [self writingLoop: 0 from: 1 to: 10] on: Exception do: [:e | e message]
+    msg := [
+      self
+        writingLoop: 0
+        from: 1
+        to: 10
+    ] on: Exception do: [:e | e message]
     self assert: msg equals: "Interval step cannot be zero"
 
   // A zero step on an empty range still raises (the check precedes the loop).
   testWritingZeroStepEmptyRangeRaises =>
-    self should: [self writingLoop: 0 from: 5 to: 1] raise: #user_error
+    self
+      should: [
+        self
+          writingLoop: 0
+          from: 5
+          to: 1
+      ]
+      raise: #user_error
 
   // --- non-zero steps are unchanged ---
-
   testWritingNonZeroStepsStillRun =>
-    self assert: (self writingLoop: 3 from: 1 to: 10) equals: 22
-    self assert: (self writingLoop: -3 from: 10 to: 1) equals: 22
-    self assert: (self writingLoop: 1 from: 5 to: 1) equals: 0
+    self
+      assert: (self
+        writingLoop: 3
+        from: 1
+        to: 10)
+      equals: 22
+    self
+      assert: (self
+        writingLoop: -3
+        from: 10
+        to: 1)
+      equals: 22
+    self
+      assert: (self
+        writingLoop: 1
+        from: 5
+        to: 1)
+      equals: 0
