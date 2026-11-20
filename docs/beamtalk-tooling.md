@@ -95,6 +95,7 @@ Beamtalk uses content-hash-based change detection to avoid redundant work (BT-31
 - **Pass 1 caching** — The class-module index from Pass 1 is cached in `_build/dev/ebin/.beamtalk-pass1-cache.json`, also keyed by each file's content hash. On subsequent builds, only files whose content hash has changed since the cache was written are re-parsed. Unchanged files reuse their cached class metadata. If the `beamtalk.toml` manifest changes (an mtime check — the manifest itself isn't content-hashed), the entire cache is invalidated and all files are re-parsed.
 - **Force rebuild** — `beamtalk build --force` ignores all caches and recompiles everything. Useful after toolchain upgrades or when build artifacts may be stale (e.g. switching git branches or worktrees).
 - **Orphan detection** — `.beam` files with no corresponding `.bt` source are reported as warnings (the source may have been deleted or renamed).
+- **`--warnings-as-errors` with cached diagnostics** — `build --warnings-as-errors` judges replayed cached diagnostics against the current run's options (BT-5045). A second `build --warnings-as-errors` after a plain `build` of the same sources fails on warnings, even though the files were not recompiled.
 
 ### Diagnostic Summary (BT-2014)
 
@@ -287,7 +288,9 @@ beamtalk check path/to/file.bt  # Check a single file
 
 **FFI caveat:** FFI and native-module checks see only already-built artifacts (from a prior `beamtalk build`). A passing `beamtalk check` does not guarantee `beamtalk build` succeeds.
 
-**Exit codes:** 0 for success, 1 if any file produces an error-severity diagnostic.
+**Warning flags:** `--warnings-as-errors` also fails on `Warning`/`Hint` diagnostics (same exclusions as `build`); `--no-warnings` suppresses warning output. The two are mutually exclusive (BT-5045).
+
+**Exit codes:** 0 for success, 1 if any file produces an error-severity diagnostic (or a warning under `--warnings-as-errors`).
 
 ## Releases (ADR 0125)
 
