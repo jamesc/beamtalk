@@ -129,8 +129,6 @@ typed Collection(E) subclass: Bag(E)
 
   /// Return a developer-readable string representation.
   ///
-  /// ## Examples
-  /// ```beamtalk
   /// Each distinct element prints once; a count above one is shown as
   /// `element x count`, so a large count stays short.
   ///
