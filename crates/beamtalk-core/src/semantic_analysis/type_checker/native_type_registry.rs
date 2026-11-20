@@ -396,6 +396,51 @@ impl NativeTypeRegistry {
             })
     }
 
+    /// A canonical, order-independent text rendering of everything the type
+    /// checker can read from this registry (BT-5074): every signature's
+    /// parameters, return type and provenance, the exports without a `-spec`,
+    /// and the trusted-result modules. Source line numbers are left out, since
+    /// moving a function inside its `.erl` file changes no diagnostic.
+    ///
+    /// The build hashes this into every file's incremental cache key, so a
+    /// changed `-spec` in `native/*.erl` or a dependency re-checks its callers.
+    #[must_use]
+    pub fn fingerprint(&self) -> String {
+        use std::fmt::Write as _;
+        let mut out = String::new();
+        let mut modules: Vec<&String> = self.modules.keys().collect();
+        modules.sort_unstable();
+        for module in modules {
+            let mut sigs: Vec<&FunctionSignature> = self.modules[module].iter().collect();
+            sigs.sort_by(|a, b| (&a.name, a.arity).cmp(&(&b.name, b.arity)));
+            for sig in sigs {
+                let _ = writeln!(
+                    out,
+                    "sig {module}:{}/{} {:?} -> {:?} [{:?}]",
+                    sig.name, sig.arity, sig.params, sig.return_type, sig.provenance
+                );
+            }
+        }
+        let mut unspecced: Vec<String> = self
+            .exports_without_signature
+            .iter()
+            .flat_map(|(module, fns)| {
+                fns.iter()
+                    .map(move |(name, arity)| format!("export {module}:{name}/{arity}"))
+            })
+            .collect();
+        unspecced.sort_unstable();
+        for line in unspecced {
+            let _ = writeln!(out, "{line}");
+        }
+        let mut trusted: Vec<&String> = self.trusted_result_modules.iter().collect();
+        trusted.sort_unstable();
+        for module in trusted {
+            let _ = writeln!(out, "trusted {module}");
+        }
+        out
+    }
+
     /// Sorted `module:function/arity` keys of every function
     /// [`Self::proves_no_result_coercion`] holds for, and (suffixed `#result`)
     /// every function [`Self::proves_inline_result`] holds for. Generated code

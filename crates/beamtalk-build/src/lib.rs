@@ -110,6 +110,44 @@ pub fn emit_beamtalk_version(workspace_root: &Path) {
         date: date.as_deref(),
     });
     println!("cargo:rustc-env=BEAMTALK_BUILD_ID={id}");
+
+    // BT-5074: `BEAMTALK_VERSION` is the exact-match identity (handshake, app
+    // `vsn`, release provenance) and carries no dirty marker, so two different
+    // uncommitted compilers share one version string. The provenance stamp
+    // also records this tag, which names the uncommitted diff itself.
+    // Uncommitted edits do not touch `.git/index`, so watch the sources too:
+    // the tag is recomputed when they change (and only then).
+    println!(
+        "cargo:rerun-if-changed={}",
+        workspace_root.join("crates").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        workspace_root.join("Cargo.lock").display()
+    );
+    let tag = dirty_tag(git_dirty(), git_diff_head);
+    println!(
+        "cargo:rustc-env=BEAMTALK_DIRTY_TAG={}",
+        tag.unwrap_or_default()
+    );
+}
+
+/// The provenance dirty marker: `None` for a clean tree, otherwise
+/// `dirty.<hash of the uncommitted diff>` so each distinct set of uncommitted
+/// compiler edits is a distinct provenance.
+#[must_use]
+pub fn dirty_tag(dirty: bool, diff: impl FnOnce() -> Vec<u8>) -> Option<String> {
+    dirty.then(|| format!("dirty.{:016x}", fnv1a_64(&diff())))
+}
+
+fn git_diff_head() -> Vec<u8> {
+    Command::new("git")
+        .args(["diff", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| o.stdout)
+        .unwrap_or_default()
 }
 
 /// Env var naming the distribution channel (`edge`, `nightly`) of a CI build.
@@ -279,6 +317,19 @@ pub fn emit_spec_mapping_stamp(workspace_root: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dirty_tag_is_absent_when_clean_and_tracks_the_diff() {
+        assert_eq!(
+            dirty_tag(false, || unreachable!("clean tree reads no diff")),
+            None
+        );
+        let a = dirty_tag(true, || b"diff a".to_vec()).unwrap();
+        let b = dirty_tag(true, || b"diff b".to_vec()).unwrap();
+        assert!(a.starts_with("dirty."));
+        assert_ne!(a, b);
+        assert_eq!(a, dirty_tag(true, || b"diff a".to_vec()).unwrap());
+    }
 
     fn inputs() -> BuildInputs<'static> {
         BuildInputs {

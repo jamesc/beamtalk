@@ -306,6 +306,23 @@ pub(crate) fn load_beam_hash_cache(build_dir: &Utf8Path) -> HashMap<String, Stri
     cache.hashes
 }
 
+/// BT-5074: forget the recorded hash of each of `sources` after a failed erlc
+/// batch. The worker writes beams one module at a time, so a batch that fails
+/// part-way can leave a new beam on disk for a file whose stored hash still
+/// describes the *previous* content. Editing such a file back to that content
+/// would otherwise look unchanged while the beam on disk is the failed
+/// edit's. A dropped entry makes the next build recompile the file.
+pub(crate) fn invalidate_beam_hashes<'a>(
+    build_dir: &Utf8Path,
+    sources: impl IntoIterator<Item = &'a str>,
+) {
+    let mut hashes = load_beam_hash_cache(build_dir);
+    for source in sources {
+        hashes.remove(source);
+    }
+    save_beam_hash_cache(build_dir, &hashes);
+}
+
 /// Save the beam-hash sidecar to `build_dir`.
 ///
 /// Call only after a successful `.beam` compile — the saved hashes assert
