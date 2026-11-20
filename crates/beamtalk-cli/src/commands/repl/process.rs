@@ -172,35 +172,51 @@ pub(crate) struct ForegroundNode {
 /// VM flags that make the foreground node distributed under a private cookie:
 /// the node name (generated when the user gave none) and `-args_file`.
 fn foreground_dist_args(node_name: Option<&String>, args_file: &Path) -> Result<Vec<OsString>> {
-    let mut args = Vec::new();
-    if let Some(name) = node_name {
-        if let Some((local, host)) = name.split_once('@') {
-            // Full node name with host — always use -name
-            if local.is_empty() || host.is_empty() {
-                return Err(miette!(
-                    "Invalid node name '{name}': expected format 'name@host'"
-                ));
-            }
-            args.push(OsString::from("-name"));
-        } else if name.contains('.') {
-            // FQDN without @ — use -name
-            args.push(OsString::from("-name"));
-        } else {
-            // Simple short name — use -sname
-            args.push(OsString::from("-sname"));
-        }
-        args.push(OsString::from(name.as_str()));
+    // Distribution must be alive for the cookie to take effect, so an
+    // unnamed node gets a generated name. Naming (and the loopback pin on the
+    // distribution listener, BT-5067) is `node_name_args`'s single rule.
+    let generated;
+    let name = if let Some(name) = node_name {
+        name.as_str()
     } else {
-        // Distribution must be alive for the cookie to take effect.
-        args.push(OsString::from("-sname"));
-        args.push(OsString::from(format!(
+        generated = format!(
             "beamtalk_fg_{}_{}",
             std::process::id(),
             rand::random::<u32>()
-        )));
-    }
+        );
+        generated.as_str()
+    };
+    let mut args = node_name_args(name)?;
     args.push(OsString::from("-args_file"));
     args.push(args_file.as_os_str().to_owned());
+    Ok(args)
+}
+
+/// `erl` flags naming the foreground REPL node, plus the loopback pin on its
+/// distribution listener (BT-5067). Distribution only exists once the node is
+/// named, so the pin travels with the name.
+fn node_name_args(name: &str) -> Result<Vec<OsString>> {
+    let flag = if let Some((local, host)) = name.split_once('@') {
+        // Full node name with host — always use -name
+        if local.is_empty() || host.is_empty() {
+            return Err(miette!(
+                "Invalid node name '{name}': expected format 'name@host'"
+            ));
+        }
+        "-name"
+    } else if name.contains('.') {
+        // FQDN without @ — use -name
+        "-name"
+    } else {
+        // Simple short name — use -sname
+        "-sname"
+    };
+    let mut args = vec![OsString::from(flag), OsString::from(name)];
+    args.extend(
+        beamtalk_workspace::loopback_dist_args()
+            .into_iter()
+            .map(OsString::from),
+    );
     Ok(args)
 }
 
@@ -364,6 +380,33 @@ pub(crate) fn resolve_node_name(node_arg: Option<String>) -> Option<String> {
 
 #[cfg(all(test, unix))]
 mod tests {
+    #[test]
+    fn named_repl_node_pins_distribution_to_loopback() {
+        let args: Vec<String> = node_name_args("repl_node")
+            .unwrap()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        // An operator-exported ERL_EPMD_ADDRESS deliberately opts out.
+        if std::env::var("ERL_EPMD_ADDRESS").is_err() {
+            assert_eq!(
+                args,
+                [
+                    "-sname",
+                    "repl_node",
+                    "-kernel",
+                    "inet_dist_use_interface",
+                    "{127,0,0,1}"
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn node_name_args_rejects_empty_host() {
+        assert!(node_name_args("a@").is_err());
+    }
+
     use super::*;
 
     #[test]
@@ -573,8 +616,11 @@ mod tests {
         let args = foreground_dist_args(None, file).unwrap();
         assert_eq!(args[0], OsString::from("-sname"));
         assert!(args[1].to_string_lossy().starts_with("beamtalk_fg_"));
-        assert_eq!(args[2], OsString::from("-args_file"));
-        assert_eq!(args[3], file.as_os_str());
+        // `-args_file <path>` always closes the list (the loopback pin from
+        // `node_name_args` sits between the name and it).
+        let n = args.len();
+        assert_eq!(args[n - 2], OsString::from("-args_file"));
+        assert_eq!(args[n - 1], file.as_os_str());
         // The cookie itself never appears in argv.
         assert!(!args.iter().any(|a| a == "-setcookie"));
     }

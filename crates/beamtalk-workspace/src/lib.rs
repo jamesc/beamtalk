@@ -316,6 +316,24 @@ pub fn pin_epmd_loopback(cmd: &mut std::process::Command) {
     }
 }
 
+/// `erl` flags that bind this node's Erlang distribution listener to
+/// loopback (BT-5067; ADR 0125 / ADR 0126 state loopback as the posture).
+///
+/// [`pin_epmd_loopback`] only governs epmd; without this the node's own
+/// distribution port listens on every interface, protected by the cookie
+/// alone. Mirrors the release `vm.args` line. Returns no flags when the
+/// operator has deliberately exported a non-loopback `ERL_EPMD_ADDRESS`
+/// (private-network clustering): pinning the listener to loopback would
+/// silently defeat that choice.
+#[must_use]
+pub fn loopback_dist_args() -> Vec<&'static str> {
+    if resolve_epmd_address() == DEFAULT_EPMD_ADDRESS {
+        vec!["-kernel", "inet_dist_use_interface", "{127,0,0,1}"]
+    } else {
+        Vec::new()
+    }
+}
+
 /// `Command::new("erl")` with [`pin_epmd_loopback`] already applied: the
 /// constructor for an `erl` spawn that doesn't clear its environment.
 #[must_use]
