@@ -587,9 +587,9 @@ compute_step(ClassName, Selector) ->
                         none -> {next, beamtalk_object_class_read:superclass_safe(ClassPid)}
                     end
             end;
-        {inherits, _ClassPid, none} ->
+        {inherits, none} ->
             {found, miss};
-        {inherits, _ClassPid, SuperclassName} ->
+        {inherits, SuperclassName} ->
             {next, SuperclassName}
     end.
 
@@ -603,7 +603,7 @@ extensions), and if not, who is its superclass. `superclass_safe/1` is only read
 when the class does not define the selector, as before.
 """.
 -spec probe_class(class_name(), selector()) ->
-    unregistered | {defines, pid()} | {inherits, pid(), class_name() | none}.
+    unregistered | {defines, pid()} | {inherits, class_name() | none}.
 probe_class(ClassName, Selector) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
@@ -613,7 +613,7 @@ probe_class(ClassName, Selector) ->
                 true ->
                     {defines, ClassPid};
                 false ->
-                    {inherits, ClassPid, beamtalk_object_class_read:superclass_safe(ClassPid)}
+                    {inherits, beamtalk_object_class_read:superclass_safe(ClassPid)}
             end
     end.
 
@@ -688,7 +688,7 @@ class_chain_step(Selector, Args, Self, State, ClassName, _Depth) ->
         {defines, ClassPid} ->
             %% Found the method - invoke it
             invoke_step(ClassName, ClassPid, Selector, Args, Self, State);
-        {inherits, _ClassPid, none} ->
+        {inherits, none} ->
             %% Reached root without finding method
             ?LOG_DEBUG("Method not found in hierarchy", #{
                 selector => Selector,
@@ -699,7 +699,7 @@ class_chain_step(Selector, Args, Self, State, ClassName, _Depth) ->
             ErrorClass = class_name_from(Self, State, ClassName),
             Error = beamtalk_error:does_not_understand(ErrorClass, Selector),
             {found, {error, Error}};
-        {inherits, _ClassPid, SuperclassName} ->
+        {inherits, SuperclassName} ->
             %% Not found in this class - try superclass
             {next, SuperclassName}
     end.
