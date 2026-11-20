@@ -20,5 +20,6 @@ fn main() {
         .expect("Cannot find workspace root");
 
     beamtalk_build::emit_beamtalk_version(workspace_root);
+    beamtalk_build::emit_dirty_tag(workspace_root);
     beamtalk_build::emit_spec_mapping_stamp(workspace_root);
 }
