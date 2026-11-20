@@ -916,7 +916,9 @@ function assertPortFileFresh(wsDir: string, port: number, portContent: string): 
     throw new Error(`Stale port file in ${wsDir}: nonce mismatch`);
   }
   if (typeof info.pid === "number" && !pidAlive(info.pid)) {
-    throw new Error(`Stale port file in ${wsDir}: node pid ${info.pid} is not running`);
+    throw new Error(
+      `Stale port file in ${wsDir}: node pid ${info.pid} is not running, or its process is not visible from where the extension runs. If the node is running, this can happen when BEAMTALK_HOME is shared across containers or pid namespaces.`
+    );
   }
 }
 
