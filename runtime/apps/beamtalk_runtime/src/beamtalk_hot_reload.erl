@@ -39,6 +39,14 @@ runtime.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
 
+%% How long `try_change_code/3` waits for one actor before reporting `timeout`
+%% (the previous `sys` default of 5 s).
+-define(CHANGE_WAIT_MS, 5000).
+%% Bounds the worker's own `sys` calls: the worker, not the caller, owns the
+%% suspension (BT-5084).
+-define(SUSPEND_TIMEOUT_MS, 5000).
+-define(CHANGE_TIMEOUT_MS, 60000).
+
 %% Public API
 -export([code_change/3, trigger_code_change/2, trigger_code_change/3]).
 
@@ -290,41 +298,64 @@ from the old version. A `sys:resume/1` failure after a *successful*
 `change_code` (e.g. the pid exits in the gap) is swallowed, same as
 before this change: it must not turn a successful migration into a
 reported failure.
+
+**Who owns the suspension (BT-5084).** The suspend / change / resume sequence
+runs in a worker process of its own, so the actor is never left suspended by
+anything but a failed migration. If the reloading process dies, or stops
+waiting after 5 s (`{error, timeout}`), the worker carries on: a change that
+finishes late resumes the actor, one that never finishes within 60 s is
+resumed with an ERROR log, and a suspend that timed out behind a busy handler
+has its resume queued behind it. Only a migration that returned `{error, _}`
+stays suspended, and the reload reports those pids (`instances_suspended`).
 """.
 -spec try_change_code(pid(), atom(), term()) -> ok | {error, term()}.
 try_change_code(Pid, Module, Extra) ->
+    %% BT-5084: the suspend / change / resume sequence runs in its own process,
+    %% so the suspension has an owner that outlives the caller's wait. If the
+    %% reloading process dies or stops waiting (timeout), the worker still
+    %% resumes the actor as soon as the change is confirmed finished.
+    {Worker, Mon} = spawn_monitor(fun() ->
+        exit({change_result, run_change(Pid, Module, Extra)})
+    end),
+    receive
+        {'DOWN', Mon, process, Worker, {change_result, Result}} ->
+            Result;
+        {'DOWN', Mon, process, Worker, Other} ->
+            ?LOG_ERROR(
+                #{msg => <<"code change worker crashed">>, module => Module, pid => Pid},
+                #{reason => Other, domain => [beamtalk, runtime]}
+            ),
+            {error, {Other, worker_crashed}}
+    after ?CHANGE_WAIT_MS ->
+        %% The worker keeps the suspension and resumes the actor once the change
+        %% finishes (or logs why it could not). Never silent: ERROR now.
+        erlang:demonitor(Mon, [flush]),
+        ?LOG_ERROR(
+            #{
+                msg =>
+                    <<"code change timed out; the actor is resumed when the change finishes">>,
+                module => Module,
+                pid => Pid
+            },
+            #{domain => [beamtalk, runtime]}
+        ),
+        {error, timeout}
+    end.
+
+%% The suspend / change_code / resume sequence for one actor. Runs in the
+%% `try_change_code/3` worker.
+-spec run_change(pid(), atom(), term()) -> ok | {error, term()}.
+run_change(Pid, Module, Extra) ->
     try
-        ok = sys:suspend(Pid),
-        case sys:change_code(Pid, Module, undefined, Extra) of
-            ok ->
-                try
-                    ok = sys:resume(Pid)
-                catch
-                    _:_ -> ok
-                end,
-                ok;
-            {error, _} = ChangeError ->
-                ChangeError
-        end
+        ok = sys:suspend(Pid, ?SUSPEND_TIMEOUT_MS),
+        change_then_resume(Pid, Module, Extra)
     catch
         exit:{noproc, _} ->
             {error, noproc};
         exit:{timeout, _} ->
-            %% BT-5021: `sys:suspend/1` succeeded (or timed out) and
-            %% `sys:change_code/4` did not answer in time. The migration may
-            %% still finish later inside the actor, so resuming here could run
-            %% new code on old-shaped state — the pid is left suspended, as for
-            %% any failed `code_change`, but never silently: the next
-            %% `reload` re-suspends and retries.
-            ?LOG_ERROR(
-                #{
-                    msg =>
-                        <<"code change timed out; actor may be left suspended until the next reload retries">>,
-                    module => Module,
-                    pid => Pid
-                },
-                #{domain => [beamtalk, runtime]}
-            ),
+            %% The suspend request is queued behind a busy handler and will take
+            %% effect later with nobody to undo it: queue the resume behind it.
+            _ = resume_quietly(Pid),
             {error, timeout};
         Class:Error:Stacktrace ->
             ?LOG_DEBUG(
@@ -332,5 +363,43 @@ try_change_code(Pid, Module, Extra) ->
                 [Module, Class, Error],
                 #{stacktrace => Stacktrace, domain => [beamtalk, runtime]}
             ),
+            _ = resume_quietly(Pid),
             {error, {Class, Error}}
+    end.
+
+-spec change_then_resume(pid(), atom(), term()) -> ok | {error, term()}.
+change_then_resume(Pid, Module, Extra) ->
+    try sys:change_code(Pid, Module, undefined, Extra, ?CHANGE_TIMEOUT_MS) of
+        ok ->
+            _ = resume_quietly(Pid),
+            ok;
+        {error, _} = ChangeError ->
+            %% ADR 0123 §3: left suspended, state intact. The reload reports the
+            %% pid in its `instances_suspended` finding.
+            ChangeError
+    catch
+        exit:{timeout, _} ->
+            %% Still running after the long wait: outcome unknown. Resume
+            %% (queued behind the change) rather than leave the actor
+            %% unresponsive indefinitely, and say so.
+            ?LOG_ERROR(
+                #{
+                    msg => <<"code change did not finish; resuming actor with unknown outcome">>,
+                    module => Module,
+                    pid => Pid
+                },
+                #{domain => [beamtalk, runtime]}
+            ),
+            _ = resume_quietly(Pid),
+            {error, timeout}
+    end.
+
+%% Resume, swallowing a failure (the actor may have exited): a resume failure
+%% after a successful change must not turn it into a reported failure.
+-spec resume_quietly(pid()) -> ok.
+resume_quietly(Pid) ->
+    try
+        ok = sys:resume(Pid, ?CHANGE_TIMEOUT_MS)
+    catch
+        _:_ -> ok
     end.

@@ -35,7 +35,7 @@ them, so the send path costs the same number of calls as before the split.
 
 %% Driven directly on a `$bt_nlr` result by the unit tests.
 -ifdef(TEST).
--export([unwrap_dispatch_result/1]).
+-export([unwrap_dispatch_result/1, spawn_future_watcher/3]).
 -endif.
 
 %% BT-4265: the helpers an actor send runs every time are inlined, so a send
@@ -58,6 +58,9 @@ them, so the send path costs the same number of calls as before the split.
 %% Lifecycle selectors answered locally with a plain value or error, shared by
 %% async_send_impl/5 and sync_send_pid/4. Each selector is matched with its
 %% exact arity so a wrong-arity send falls through to normal dispatch.
+%% Longest a future watcher outlives an unsettled send (BT-5084); same hour as the
+%% future's own orphan cap. `future_watcher_cap_ms` (application env) overrides it.
+-define(FUTURE_WATCHER_CAP_MS, 3600000).
 -define(IS_LOCAL_LIFECYCLE(S, A),
     ((A =:= [] andalso
         (S =:= isAlive orelse S =:= kill orelse S =:= delegate orelse S =:= pid orelse
@@ -1036,9 +1039,9 @@ cutoff (BT-5020): the watcher ends when either process dies or the future tells 
 it settled, and a pending
 future with no producer is itself capped by beamtalk_future (?PENDING_CAP_MS),
 unless a watcher registers as its producer. This watcher does so, lifting
-that cap while it lives. Every cast handler must settle its `FuturePid`:
-an actor that stays alive without doing so leaves the watcher and the
-future pending.
+that cap while it lives, so it carries its own cap (?FUTURE_WATCHER_CAP_MS,
+BT-5084): an actor that stays alive without settling the future has the
+future rejected and the watcher ended, with an ERROR log.
 """.
 -spec spawn_future_watcher(pid(), pid(), atom()) -> pid().
 spawn_future_watcher(ActorPid, FuturePid, Selector) ->
@@ -1047,6 +1050,12 @@ spawn_future_watcher(ActorPid, FuturePid, Selector) ->
         FutureRef = erlang:monitor(process, FuturePid),
         %% Tell the future a live producer exists: lifts its orphan cap.
         FuturePid ! {producer, self()},
+        %% BT-5084: a producer lifts the future's own cap, so an actor that stays
+        %% alive and never settles would pin this watcher and the future forever.
+        %% Read in the watcher, not the sender, so a send pays nothing for it.
+        WatcherCap = application:get_env(
+            beamtalk_runtime, future_watcher_cap_ms, ?FUTURE_WATCHER_CAP_MS
+        ),
         receive
             {'DOWN', ActorRef, process, ActorPid, Reason} ->
                 %% Actor died (or its node went away) — reject future
@@ -1065,5 +1074,28 @@ spawn_future_watcher(ActorPid, FuturePid, Selector) ->
                 %% Future settled (resolved/rejected): nothing left to watch
                 erlang:demonitor(ActorRef, [flush]),
                 erlang:demonitor(FutureRef, [flush])
+        after WatcherCap ->
+            ?LOG_ERROR(
+                "Async send still unsettled at the future watcher cap; rejecting its future",
+                #{
+                    actor => ActorPid,
+                    future => FuturePid,
+                    selector => Selector,
+                    cap_ms => WatcherCap,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            beamtalk_future:reject(FuturePid, future_watcher_expired_error(Selector)),
+            erlang:demonitor(ActorRef, [flush]),
+            erlang:demonitor(FutureRef, [flush])
         end
     end).
+
+-doc "Error for a future its actor never settled within the watcher cap (BT-5084).".
+-spec future_watcher_expired_error(atom()) -> #beamtalk_error{}.
+future_watcher_expired_error(Selector) ->
+    Err0 = beamtalk_error:new(future_expired, 'Future', Selector),
+    beamtalk_error:with_message(
+        Err0,
+        <<"The actor did not settle this future within the watcher cap; it was rejected">>
+    ).

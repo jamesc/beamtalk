@@ -122,14 +122,16 @@ repair_tail_binary(LogPath, Bin) ->
                     true ->
                         ?LOG_WARNING(
                             "ChangeLog ~ts: last entry was missing its newline; restored",
-                            [LogPath]
+                            [LogPath],
+                            #{domain => [beamtalk, runtime]}
                         ),
                         <<Whole/binary, Tail/binary, $\n>>;
                     false ->
                         ?LOG_WARNING(
                             "ChangeLog ~ts: dropping a partial last entry (~b bytes) left "
                             "by an interrupted write",
-                            [LogPath, byte_size(Tail)]
+                            [LogPath, byte_size(Tail)],
+                            #{domain => [beamtalk, runtime]}
                         ),
                         Whole
                 end,
@@ -137,9 +139,11 @@ repair_tail_binary(LogPath, Bin) ->
                 ok ->
                     ok;
                 {error, Reason} ->
-                    ?LOG_WARNING("ChangeLog ~ts: could not repair torn tail: ~p", [
-                        LogPath, Reason
-                    ])
+                    ?LOG_WARNING(
+                        "ChangeLog ~ts: could not repair torn tail: ~p",
+                        [LogPath, Reason],
+                        #{domain => [beamtalk, runtime]}
+                    )
             end,
             Repaired
     end.
@@ -189,7 +193,9 @@ load_from_disk(State) ->
         {error, enoent} ->
             State#state{next_seq = 0, epoch = 1};
         {error, Reason} ->
-            ?LOG_WARNING("Failed to read ChangeLog at ~ts: ~p", [LogPath, Reason]),
+            ?LOG_WARNING("Failed to read ChangeLog at ~ts: ~p", [LogPath, Reason], #{
+                domain => [beamtalk, runtime]
+            }),
             State#state{next_seq = 0, epoch = 1}
     end.
 
@@ -230,7 +236,9 @@ parse_log(Bin) ->
                 {true, beamtalk_workspace_changelog_codec:entry_from_json(Line)}
             catch
                 Class:Reason ->
-                    ?LOG_WARNING("Skipping malformed ChangeLog line: ~p:~p", [Class, Reason]),
+                    ?LOG_WARNING("Skipping malformed ChangeLog line: ~p:~p", [Class, Reason], #{
+                        domain => [beamtalk, runtime]
+                    }),
                     false
             end
         end,

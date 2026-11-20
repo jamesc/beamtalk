@@ -889,7 +889,10 @@ purge_eval_module(ModuleName) ->
 %% The retained module is never released automatically: nothing can tell when
 %% the last holder of the block is gone (the same trade-off `cleanup_module/1`
 %% makes for REPL eval modules). It costs one module and one atom per
-%% `evaluate:` call that returns a block.
+%% `evaluate:` call that returns a block. BT-5084 item 12: accepted as is. Any
+%% bound (a cap, a sweep) would turn a block a caller still holds into a
+%% `badfun`, which is worse than the retained module; a leak-free fix needs a
+%% way to know when the last holder is gone, which the VM does not give us.
 -spec retain_eval_module_if_referenced(atom(), term()) -> ok.
 retain_eval_module_if_referenced(ModuleName, Value) ->
     case holds_fun_of(Value, ModuleName) of

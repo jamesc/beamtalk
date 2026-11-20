@@ -624,19 +624,19 @@ log_compiler_diagnostics(Diagnostics, Selector) ->
     %% handler template renders only `msg`, so the full `diagnostics` payload in
     %% metadata is invisible there (it only shows up in structured/JSON logs).
     Summary = summarise_diagnostics(Diagnostics),
-    Meta = #{selector => Selector, diagnostics => Diagnostics, domain => [beamtalk, stdlib]},
+    Meta = #{selector => Selector, diagnostics => Diagnostics},
     case IsPortUnavailable of
         true ->
             ?LOG_ERROR(
                 "Compiler port unavailable in ~p: ~ts — returning [] (per-method fault-tolerance preserved)",
                 [Selector, Summary],
-                Meta
+                Meta#{domain => [beamtalk, stdlib]}
             );
         false ->
             ?LOG_WARNING(
                 "Compiler port returned diagnostics in ~p: ~ts — returning [] (per-method fault-tolerance preserved)",
                 [Selector, Summary],
-                Meta
+                Meta#{domain => [beamtalk, stdlib]}
             )
     end.
 

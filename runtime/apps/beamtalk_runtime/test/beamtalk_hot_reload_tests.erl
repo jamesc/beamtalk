@@ -628,6 +628,11 @@ code_change(_OldVsn, _State, {crash, Reason}) ->
     exit(Reason);
 code_change(_OldVsn, _State, {fail, Reason}) ->
     {error, Reason};
+code_change(_OldVsn, State, {slow_notify, Ms, Parent}) ->
+    Parent ! change_started,
+    %% sleep: keeps the migration in flight while the test kills the reloader
+    timer:sleep(Ms),
+    {ok, State};
 code_change(_OldVsn, State, {slow, Ms}) ->
     %% sleep: simulates a migration slower than sys:change_code's 5 s timeout
     timer:sleep(Ms),
@@ -680,10 +685,10 @@ trigger_code_change_mixed_success_and_failure_test() ->
         gen_server:stop(LivePid)
     end.
 
-%% BT-5021: a `sys:change_code/4` timeout is reported at ERROR (the actor stays
-%% suspended, as for any failed migration, so the next reload retries) rather
-%% than returning `{error, timeout}` silently.
-try_change_code_timeout_logs_error_and_stays_suspended_test_() ->
+%% BT-5021: a `sys:change_code/4` timeout is reported at ERROR rather than
+%% returning `{error, timeout}` silently. BT-5084: the actor is not left
+%% suspended; the change's owner resumes it once the change has finished.
+try_change_code_timeout_logs_error_and_resumes_when_change_finishes_test_() ->
     {timeout, 30, fun() ->
         OldLevel = maps:get(level, logger:get_primary_config()),
         ok = logger:set_primary_config(level, all),
@@ -695,8 +700,16 @@ try_change_code_timeout_logs_error_and_stays_suspended_test_() ->
                 beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {slow, 6500}),
             ?assertEqual([{Pid, timeout}], Failures),
             ?awaitMessage({hot_reload_log_event, #{level := error}}, 1000),
+            %% The slow migration (6.5 s) is still running: suspended for now ...
             ?assertEqual(
                 suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
+            ),
+            %% ... and resumed by the worker once it finishes.
+            ok = beamtalk_test_wait:until(
+                fun() ->
+                    running =:= maps:get(sysState, beamtalk_process_navigation:status(Pid))
+                end,
+                15000
             )
         after
             logger:remove_handler(HandlerId),
@@ -705,6 +718,46 @@ try_change_code_timeout_logs_error_and_stays_suspended_test_() ->
             beamtalk_test_proc:stop(Pid)
         end
     end}.
+
+%% BT-5084: the process doing the reload dies mid-change. The actor must still
+%% be resumed once the change finishes (it was left suspended before).
+reloader_killed_mid_change_still_resumes_actor_test_() ->
+    {timeout, 30, fun() ->
+        {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+        unlink(Pid),
+        Parent = self(),
+        Reloader = spawn(fun() ->
+            beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {slow_notify, 1500, Parent})
+        end),
+        try
+            %% The migration is running inside the actor, which is suspended.
+            ?awaitMessage(change_started, 5000),
+            exit(Reloader, kill),
+            beamtalk_test_wait:dead(Reloader),
+            ok = beamtalk_test_wait:until(
+                fun() ->
+                    running =:= maps:get(sysState, beamtalk_process_navigation:status(Pid))
+                end,
+                15000
+            )
+        after
+            beamtalk_test_proc:stop(Pid)
+        end
+    end}.
+
+%% BT-5084: a migration that returns an error still leaves the actor suspended
+%% (ADR 0123 §3, state integrity); that is the one deliberate case.
+failed_migration_stays_suspended_test() ->
+    {ok, Pid} = gen_server:start_link(?MODULE, #{}, []),
+    try
+        {ok, 0, [{Pid, _}]} =
+            beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {crash, why}),
+        ?assertEqual(suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid)))
+    after
+        unlink(Pid),
+        _ = catch sys:resume(Pid),
+        beamtalk_test_proc:stop(Pid)
+    end.
 
 %% logger handler callback: forward events to the test process.
 log(LogEvent, #{config := #{parent := Parent}}) ->
