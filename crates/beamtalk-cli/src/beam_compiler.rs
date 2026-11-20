@@ -59,6 +59,21 @@ const COMPILE_ESCRIPT: &str = include_str!("../templates/compile.escript");
 /// collisions when multiple compilation processes run in parallel.
 static ESCRIPT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Create `path` exclusively (`O_EXCL`, so an existing file or symlink there is
+/// an error, never followed) with mode 0700 on Unix, and write `content`.
+fn write_private_executable(path: &std::path::Path, content: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o700);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(content)
+}
+
 /// Compiler backend for Core Erlang → BEAM compilation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompilerBackend {
@@ -298,11 +313,19 @@ impl BeamCompiler {
 
         // Output directory is guaranteed to exist (created in compile_batch).
 
-        // Write compile.escript to a temporary file with unique name
-        // Use both process ID and atomic counter to ensure uniqueness when tests run in parallel
+        // BT-5070: the script goes into a private temp directory (random name,
+        // mode 0700, removed on drop) and is created exclusively, so another
+        // local user cannot pre-plant a symlink or file at a predictable path
+        // in the shared temp dir. Pid + counter keep the name unique within
+        // this process for debuggability.
         let temp_dir = std::env::temp_dir();
         let counter = ESCRIPT_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let escript_path = temp_dir.join(format!(
+        let script_dir = tempfile::Builder::new()
+            .prefix("beamtalk_compile_")
+            .tempdir_in(&temp_dir)
+            .into_diagnostic()
+            .wrap_err("Failed to create private directory for compile escript")?;
+        let escript_path = script_dir.path().join(format!(
             "beamtalk_compile_{}_{}.escript",
             std::process::id(),
             counter
@@ -311,20 +334,9 @@ impl BeamCompiler {
             "Writing escript to temporary file: {}",
             escript_path.display()
         );
-        std::fs::write(&escript_path, COMPILE_ESCRIPT)
+        write_private_executable(&escript_path, COMPILE_ESCRIPT.as_bytes())
             .into_diagnostic()
             .wrap_err("Failed to write compile escript")?;
-
-        // Make it executable on Unix
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&escript_path)
-                .into_diagnostic()?
-                .permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&escript_path, perms).into_diagnostic()?;
-        }
 
         // Start the escript process with explicit working directory
         // Use temp_dir as working directory to avoid getcwd() errors
@@ -342,14 +354,8 @@ impl BeamCompiler {
 
         let result = self.drive_compilation_protocol(&mut child, core_files);
 
-        // Clean up temporary escript file
-        if let Err(err) = std::fs::remove_file(&escript_path) {
-            warn!(
-                "Failed to remove temporary escript file '{}': {}",
-                escript_path.display(),
-                err
-            );
-        }
+        // `script_dir` (and the escript inside) is removed on drop.
+        drop(script_dir);
 
         result
     }
@@ -916,6 +922,28 @@ end
         // Special characters
         let result = write_core_erlang(&module, "foo-bar", &output_path);
         assert!(result.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_private_executable_is_exclusive_0700_and_refuses_symlink() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.escript");
+        write_private_executable(&path, b"#!/usr/bin/env escript\n").unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        // An existing file is never overwritten.
+        assert!(write_private_executable(&path, b"x").is_err());
+        // A pre-planted symlink is not followed.
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, b"keep").unwrap();
+        let link = dir.path().join("b.escript");
+        std::os::unix::fs::symlink(&victim, &link).unwrap();
+        assert!(write_private_executable(&link, b"pwned").is_err());
+        assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
     }
 
     #[test]
