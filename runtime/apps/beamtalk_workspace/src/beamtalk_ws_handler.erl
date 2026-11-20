@@ -143,6 +143,10 @@ websocket_init(State) ->
     %% Send a minimal welcome so clients know the connection is alive.
     %% Session details are sent after successful authentication.
     Welcome = iolist_to_binary(json:encode(#{<<"op">> => <<"auth-required">>})),
+    %% Hard deadline (BT-5066): `idle_timeout` is an inactivity timer that any
+    %% received frame (ping included) resets, so it cannot bound a stalling
+    %% client on its own.
+    erlang:send_after(?AUTH_DEADLINE_MS, self(), auth_deadline),
     {[{text, Welcome}], State}.
 
 -doc """
@@ -168,6 +172,13 @@ websocket_handle(_Frame, State) ->
 Handle Erlang messages sent to the handler process.
 Streaming stdout chunk from eval
 """.
+websocket_info(auth_deadline, State = #ws_state{authenticated = false}) ->
+    ?LOG_WARNING("WebSocket closed: auth deadline", #{
+        peer => State#ws_state.peer, domain => [beamtalk, runtime]
+    }),
+    {[{close, 1008, <<"Authentication timeout">>}], State};
+websocket_info(auth_deadline, State) ->
+    {ok, State};
 websocket_info(
     {eval_out, Chunk},
     State = #ws_state{

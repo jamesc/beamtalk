@@ -317,6 +317,16 @@ init_rejects_foreign_origin_with_403_test() ->
     after 1000 -> ?assert(false)
     end.
 
+auth_deadline_closes_unauthenticated_connection_test() ->
+    ?assertMatch(
+        {[{close, 1008, _}], _},
+        beamtalk_ws_handler:websocket_info(auth_deadline, unauth_state())
+    ).
+
+auth_deadline_is_ignored_once_authenticated_test() ->
+    State = (unauth_state())#ws_state{authenticated = true},
+    ?assertMatch({ok, _}, beamtalk_ws_handler:websocket_info(auth_deadline, State)).
+
 %%% BT-5066: `nocookie` is never a valid cookie
 nocookie_is_refused_when_enforced_test() ->
     application:set_env(beamtalk_workspace, allow_nocookie, false),
