@@ -8,7 +8,7 @@
 // method, and removal of a class. The reference order: an extension on an
 // ancestor beats that ancestor's compiled method.
 //
-// PIN-BUG BT-5060 and BT-5062 are marked below. A direct value subclass still answers the owner's compiled
+// PIN-BUG BT-5060 is marked below. A direct value subclass still answers the owner's compiled
 // method (marked below); a grandchild already sees the extension.
 
 :load tests/repl-protocol/fixtures/bt5060_live_base_v1.bt
@@ -87,13 +87,98 @@ Erlang beamtalk_extensions register: #Bt5060LiveBase selector: #greet fun: [:a :
 Bt5060LiveBase removeSelector: #greet
 // => Bt5060LiveBase
 
-// PIN-BUG BT-5062: reference answer is fromExt3; the compiled arm of the
-// owner's module still answers.
+// BT-5062: `removeSelector:` removes the extension first (ADR 0112: the
+// extension registry is checked before the local method table), so the
+// extension is gone and the owner's compiled method answers below it. This is
+// the reference order, not a bug: an extension is the first thing removed.
 Bt5060LiveLeaf new perform: #greet
 // => compiledV2
 
+Bt5060LiveMid new perform: #greet
+// => compiledV2
+
+// The second `removeSelector:` removes the compiled method; no extension is
+// left anywhere, so every receiver below the owner raises does-not-understand.
+Bt5060LiveBase removeSelector: #greet
+// => Bt5060LiveBase
+
+([Bt5060LiveLeaf new perform: #greet] on: Error do: [:e | e kind]) == #does_not_understand
+// => true
+
+([Bt5060LiveMid new perform: #greet] on: Error do: [:e | e kind]) == #does_not_understand
+// => true
+
+// The owner's compiled method gone while an extension stays registered is
+// reached by hot reload (a reload without `greet`), not by `removeSelector:`.
+:load tests/repl-protocol/fixtures/bt5060_live_base_v2.bt
+// => Loaded: Bt5060LiveBase
+
+Erlang beamtalk_extensions register: #Bt5060LiveBase selector: #greet fun: [:a :r | #fromExt4] owner: #live
+// => Result ok: nil
+
+:load tests/repl-protocol/fixtures/bt5060_live_base_v3.bt
+// => Loaded: Bt5060LiveBase
+
+Bt5060LiveLeaf new perform: #greet
+// => fromExt4
+
+Bt5060LiveMid new perform: #greet
+// => fromExt4
+
+Bt5060LiveBase new perform: #greet
+// => fromExt4
+
 Erlang beamtalk_extensions unregister: #Bt5060LiveBase selector: #greet
 // => Result ok: nil
+
+// Actor classes: the same order, direct child and grandchild.
+:load tests/repl-protocol/fixtures/bt5062_live_actor_base.bt
+// => Loaded: Bt5062LiveActorBase
+
+:load tests/repl-protocol/fixtures/bt5062_live_actor_mid.bt
+// => Loaded: Bt5062LiveActorMid
+
+:load tests/repl-protocol/fixtures/bt5062_live_actor_leaf.bt
+// => Loaded: Bt5062LiveActorLeaf
+
+Erlang beamtalk_extensions register: #Bt5062LiveActorBase selector: #greet fun: [:a :r | #fromExt] owner: #live
+// => Result ok: nil
+
+Bt5062LiveActorLeaf spawn perform: #greet
+// => fromExt
+
+Bt5062LiveActorMid spawn perform: #greet
+// => fromExt
+
+Bt5062LiveActorBase spawn perform: #greet
+// => compiled
+
+Bt5062LiveActorBase removeSelector: #greet
+// => Bt5062LiveActorBase
+
+Bt5062LiveActorLeaf spawn perform: #greet
+// => compiled
+
+Bt5062LiveActorMid spawn perform: #greet
+// => compiled
+
+Bt5062LiveActorBase removeSelector: #greet
+// => Bt5062LiveActorBase
+
+([Bt5062LiveActorLeaf spawn perform: #greet] on: Error do: [:e | e kind]) == #does_not_understand
+// => true
+
+([Bt5062LiveActorMid spawn perform: #greet] on: Error do: [:e | e kind]) == #does_not_understand
+// => true
+
+Bt5062LiveActorLeaf removeFromSystem
+// => nil
+
+Bt5062LiveActorMid removeFromSystem
+// => nil
+
+Bt5062LiveActorBase removeFromSystem
+// => nil
 
 // Class removal: the removed class is gone; its owner is unaffected.
 Bt5060LiveLeaf removeFromSystem
