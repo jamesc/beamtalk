@@ -153,8 +153,11 @@ my-laptop.tail12345.ts.net:8443 {
 | **Proxy-level auth** | Remote/team | Caddy handles OAuth/OIDC, mTLS, or basic auth before forwarding to workspace. |
 
 **DNS rebinding mitigation:** The cowboy WebSocket handler in the workspace must:
-1. Validate the `Origin` header on WebSocket upgrade — reject cross-origin connections
+1. Validate the `Origin` and `Host` headers on WebSocket upgrade (implemented, BT-5066) — the upgrade is refused with `403` when an `Origin` is present and not a loopback host, or when `Host` is not a loopback name, the address the listener is bound to, or (for a wildcard bind) an IP literal. Clients that send no `Origin` (CLI, MCP, LSP, VS Code's Node client) are unaffected. **A reverse proxy in front of the workspace must therefore rewrite `Host` to a loopback name; a browser page served from another origin is refused even with a valid cookie.**
 2. Require the cookie handshake before accepting any eval commands
+3. Drop an unauthenticated connection after 10 seconds, cap its frames at 4 KiB until the `auth` frame succeeds (then idle timeout is off and the cap is 1 MiB), and cap the listener at 256 connections.
+
+**The cookie is never `nocookie`.** A non-distributed node's `erlang:get_cookie/0` is the constant `nocookie`, so the handler refuses every auth on such a node. `beamtalk repl --foreground` therefore starts its node distributed (a generated `-sname` unless `--node` is given) under a per-process random cookie handed over through a 0600 `-args_file` (never argv), the same way detached workspaces do. Shutdown-only (`workspace stop`) connections do not subscribe to push streams.
 
 **The workspace always binds to `127.0.0.1` by default.** Network exposure is handled by the reverse proxy, not by changing the workspace bind address. For overlay networks (Tailscale), the workspace can optionally bind to the overlay IP:
 
