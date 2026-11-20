@@ -470,3 +470,63 @@ fn selector_rename_reports_symbols_and_perform_arguments_as_candidates() {
     // Never applied by default.
     assert!(!apply(&svc, "/p/a.bt", &plan.confirmed).contains("#walk"));
 }
+
+#[test]
+fn caret_directly_after_an_identifier_is_outside_it_for_every_request() {
+    // BT-5079 decision: identifier hit tests are half-open `[start, end)` in
+    // rename, prepareRename, definition, hover and references, matching the
+    // pinned definition behaviour. `Foo|` is not on `Foo`; `|Foo` and `Fo|o` are.
+    let mut svc = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("/p/a.bt");
+    svc.update_file(
+        file.clone(),
+        "Object subclass: Foo\n  go => 1\n\nx := Foo\n".to_string(),
+    );
+    let end = Position::new(3, 8); // directly after `Foo`
+    let start = Position::new(3, 5);
+    assert!(svc.prepare_rename(&file, end).is_err());
+    assert!(svc.plan_rename(&file, end, "Bar").is_err());
+    assert!(svc.goto_definition(&file, end).is_none());
+    let h = svc.hover(&file, end);
+    assert!(h.is_none(), "{h:?}");
+    assert!(svc.find_references(&file, end).is_empty());
+    for pos in [start, Position::new(3, 7)] {
+        assert!(svc.prepare_rename(&file, pos).is_ok());
+        assert!(svc.plan_rename(&file, pos, "Bar").is_ok());
+        assert!(svc.goto_definition(&file, pos).is_some());
+        assert!(svc.hover(&file, pos).is_some());
+        assert!(!svc.find_references(&file, pos).is_empty());
+    }
+}
+
+#[test]
+fn find_references_skips_references_qualified_by_another_package() {
+    let mut svc = SimpleLanguageService::new();
+    svc.set_root_packages(vec![(Utf8PathBuf::from("/p"), "mine".into())]);
+    let json = Utf8PathBuf::from("/p/Json.bt");
+    let usage = Utf8PathBuf::from("/p/use.bt");
+    svc.update_file(
+        json.clone(),
+        "Object subclass: Json\n  go => 1\n".to_string(),
+    );
+    svc.update_file(
+        usage.clone(),
+        "Object subclass: Use\n  a => Json new\n  b => http@Json new\n  c => mine@Json new\n"
+            .to_string(),
+    );
+    let refs = svc.find_references(&json, Position::new(0, 20));
+    let in_use: Vec<u32> = refs
+        .iter()
+        .filter(|l| l.file == usage)
+        .map(|l| l.span.start())
+        .collect();
+    let text = svc.file_source(&usage).unwrap();
+    let lines: Vec<&str> = in_use
+        .iter()
+        .map(|s| {
+            let line_start = text[..*s as usize].rfind('\n').map_or(0, |i| i + 1);
+            text[line_start..].lines().next().unwrap().trim()
+        })
+        .collect();
+    assert_eq!(lines, ["a => Json new", "c => mine@Json new"], "{refs:?}");
+}

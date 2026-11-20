@@ -673,7 +673,7 @@ fn parameter_name_span_in_signature(span: Span, source: &str) -> Span {
 /// Computes the selector span inside a method signature.
 ///
 /// For keyword selectors, spans are taken directly from `KeywordPart` metadata.
-/// For unary/binary selectors, we find the selector lexeme in the method header slice.
+/// For unary/binary selectors, the selector token comes from `method_header_selector_span`.
 ///
 /// `pub(crate)` so `document_symbols_provider` can reuse it for `name_span`
 /// instead of falling back to `method.span`'s start — which, for a class-side
@@ -692,35 +692,11 @@ pub(crate) fn selector_span_in_method_signature(
             let last = parts.last()?;
             Some(first.span.merge(last.span))
         }
-        MessageSelector::Unary(name) | MessageSelector::Binary(name) => {
-            let method_start = usize::try_from(method.span.start()).ok()?;
-            let method_end = usize::try_from(method.span.end()).ok()?;
-            if method_start >= source.len()
-                || method_end > source.len()
-                || method_start >= method_end
-            {
-                return None;
-            }
-
-            // Restrict search to header area up to first body expression, when present.
-            let header_end_u32 = method
-                .body
-                .first()
-                .map_or(method.span.end(), |stmt| stmt.expression.span().start());
-            let header_end = usize::try_from(header_end_u32).ok()?.min(source.len());
-            if method_start >= header_end {
-                return None;
-            }
-
-            let header = &source[method_start..header_end];
-            let selector = name.as_str();
-            let rel = header.find(selector)?;
-            let start = method_start + rel;
-            let end = start + selector.len();
-
-            let start_u32 = u32::try_from(start).ok()?;
-            let end_u32 = u32::try_from(end).ok()?;
-            Some(Span::new(start_u32, end_u32))
+        // The exact token the parser treats as the selector (skips modifiers
+        // such as `internal`), not a text search that could match inside an
+        // earlier word (BT-5079).
+        MessageSelector::Unary(_) | MessageSelector::Binary(_) => {
+            crate::SimpleLanguageService::method_header_selector_span(method, source)
         }
     }
 }
@@ -1615,6 +1591,17 @@ mod tests {
     fn pos_at(source: &str, offset: usize) -> Position {
         let offset = u32::try_from(offset).expect("test source under 4GB");
         Position::from_byte_offset(source, ByteOffset::new(offset)).unwrap()
+    }
+
+    #[test]
+    fn selector_span_ignores_the_same_letters_inside_an_earlier_word() {
+        // BT-5079: `in` sits inside the modifier `internal`.
+        let source = "Object subclass: Foo\n  internal in => 1\n";
+        let (module, _) = parse(lex_with_eof(source));
+        let method = &module.classes[0].methods[0];
+        let span = selector_span_in_method_signature(method, source).expect("span");
+        assert_eq!(&source[span.start() as usize..span.end() as usize], "in");
+        assert_eq!(span.start() as usize, source.find(" in =>").unwrap() + 1);
     }
 
     #[test]
