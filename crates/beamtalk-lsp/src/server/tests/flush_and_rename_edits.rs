@@ -519,10 +519,7 @@ fn open_paths_handle_observes_late_inserts() {
     };
     let path = Utf8PathBuf::from("/workspace/counter.bt");
     assert!(!handle.contains(&path));
-    versions
-        .lock()
-        .expect("versions lock")
-        .insert(path.clone(), 1);
+    versions.lock_recover().insert(path.clone(), 1);
     assert!(handle.contains(&path));
 }
 
@@ -535,11 +532,8 @@ fn open_paths_handle_observes_late_removes() {
         versions: Arc::clone(&versions),
     };
     let path = Utf8PathBuf::from("/workspace/counter.bt");
-    versions
-        .lock()
-        .expect("versions lock")
-        .insert(path.clone(), 1);
+    versions.lock_recover().insert(path.clone(), 1);
     assert!(handle.contains(&path));
-    versions.lock().expect("versions lock").remove(&path);
+    versions.lock_recover().remove(&path);
     assert!(!handle.contains(&path));
 }

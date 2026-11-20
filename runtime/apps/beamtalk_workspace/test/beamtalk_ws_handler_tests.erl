@@ -230,12 +230,112 @@ first_text([{text, Bin} | _]) -> json:decode(Bin).
 %%% ===========================================================================
 
 init_returns_cowboy_websocket_with_unauth_state_test() ->
-    Req = #{peer => {{127, 0, 0, 1}, 12345}},
+    Req = #{peer => {{127, 0, 0, 1}, 12345}, headers => #{}},
     {cowboy_websocket, Req, State, Opts} = beamtalk_ws_handler:init(Req, []),
     ?assertEqual(false, State#ws_state.authenticated),
     ?assertEqual({{127, 0, 0, 1}, 12345}, State#ws_state.peer),
-    ?assertEqual(infinity, maps:get(idle_timeout, Opts)),
-    ?assert(maps:is_key(max_frame_size, Opts)).
+    %% BT-5066: pre-auth deadline and a small pre-auth frame cap.
+    ?assert(is_integer(maps:get(idle_timeout, Opts))),
+    ?assert(maps:get(idle_timeout, Opts) =< 10000),
+    ?assert(maps:get(max_frame_size, Opts) =< 4096).
+
+%%% BT-5066: Origin / Host upgrade checks
+upgrade_allows_clients_without_origin_test() ->
+    L = {127, 0, 0, 1},
+    ?assertEqual(ok, beamtalk_ws_handler:check_upgrade_headers(undefined, <<"127.0.0.1:9000">>, L)),
+    ?assertEqual(ok, beamtalk_ws_handler:check_upgrade_headers(undefined, <<"localhost:9000">>, L)),
+    ?assertEqual(ok, beamtalk_ws_handler:check_upgrade_headers(undefined, <<"[::1]:9000">>, L)).
+
+upgrade_allows_loopback_origin_test() ->
+    L = {127, 0, 0, 1},
+    ?assertEqual(
+        ok,
+        beamtalk_ws_handler:check_upgrade_headers(
+            <<"http://localhost:3000">>, <<"127.0.0.1:9000">>, L
+        )
+    ).
+
+upgrade_rejects_foreign_origin_test() ->
+    L = {127, 0, 0, 1},
+    ?assertEqual(
+        {error, bad_origin},
+        beamtalk_ws_handler:check_upgrade_headers(
+            <<"https://evil.example">>, <<"127.0.0.1:9000">>, L
+        )
+    ),
+    ?assertEqual(
+        {error, bad_origin},
+        beamtalk_ws_handler:check_upgrade_headers(<<"null">>, <<"127.0.0.1:9000">>, L)
+    ),
+    ?assertEqual(
+        {error, bad_origin},
+        beamtalk_ws_handler:check_upgrade_headers(
+            <<"http://localhost.evil.example">>, <<"127.0.0.1:9000">>, L
+        )
+    ).
+
+upgrade_rejects_rebound_host_test() ->
+    L = {127, 0, 0, 1},
+    ?assertEqual(
+        {error, bad_host},
+        beamtalk_ws_handler:check_upgrade_headers(undefined, <<"rebind.evil.example:9000">>, L)
+    ).
+
+upgrade_allows_bound_address_host_test() ->
+    Lan = {192, 168, 1, 5},
+    ?assertEqual(
+        ok, beamtalk_ws_handler:check_upgrade_headers(undefined, <<"192.168.1.5:9000">>, Lan)
+    ),
+    ?assertEqual(
+        {error, bad_host},
+        beamtalk_ws_handler:check_upgrade_headers(undefined, <<"192.168.1.6:9000">>, Lan)
+    ),
+    %% wildcard bind: any IP literal, still no names
+    Any = {0, 0, 0, 0},
+    ?assertEqual(
+        ok, beamtalk_ws_handler:check_upgrade_headers(undefined, <<"10.0.0.7:9000">>, Any)
+    ),
+    ?assertEqual(
+        {error, bad_host},
+        beamtalk_ws_handler:check_upgrade_headers(undefined, <<"evil.example">>, Any)
+    ).
+
+init_rejects_foreign_origin_with_403_test() ->
+    Req = #{
+        peer => {{127, 0, 0, 1}, 1},
+        headers => #{<<"origin">> => <<"https://evil.example">>, <<"host">> => <<"127.0.0.1:9">>},
+        ref => x,
+        pid => self(),
+        streamid => 1,
+        method => <<"GET">>,
+        version => 'HTTP/1.1'
+    },
+    {ok, Reply, []} = beamtalk_ws_handler:init(Req, #{bind_addr => {127, 0, 0, 1}}),
+    ?assertMatch(#{has_sent_resp := true}, Reply),
+    receive
+        {{_, 1}, {response, 403, _, _}} -> ok
+    after 1000 -> ?assert(false)
+    end.
+
+auth_deadline_closes_unauthenticated_connection_test() ->
+    ?assertMatch(
+        {[{close, 1008, _}], _},
+        beamtalk_ws_handler:websocket_info(auth_deadline, unauth_state())
+    ).
+
+auth_deadline_is_ignored_once_authenticated_test() ->
+    State = (unauth_state())#ws_state{authenticated = true},
+    ?assertMatch({ok, _}, beamtalk_ws_handler:websocket_info(auth_deadline, State)).
+
+%%% BT-5066: `nocookie` is never a valid cookie
+nocookie_is_refused_when_enforced_test() ->
+    application:set_env(beamtalk_workspace, allow_nocookie, false),
+    try
+        ?assertEqual(false, beamtalk_ws_cookie:valid(<<"nocookie">>)),
+        ?assertEqual(false, beamtalk_ws_cookie:valid(not_a_binary))
+    after
+        application:unset_env(beamtalk_workspace, allow_nocookie)
+    end.
 
 websocket_init_sends_auth_required_test() ->
     {[{text, Bin}], _State} = beamtalk_ws_handler:websocket_init(unauth_state()),

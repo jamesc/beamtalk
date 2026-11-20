@@ -436,3 +436,130 @@ fn test_native_module_in_runtime_namespace_is_rejected() {
         .replace("│ ", "");
     assert!(msg.contains("'beamtalk_' namespace"), "{msg}");
 }
+
+/// BT-5074: deleting `native/old.erl` must remove `old.beam` from the native
+/// ebin, including when it was the last native module.
+#[test]
+#[ignore = "requires erlc"]
+fn test_deleted_native_module_beam_is_removed() {
+    let temp = TempDir::new().unwrap();
+    let project = create_test_project(&temp);
+    write_test_file(
+        &project.join("beamtalk.toml"),
+        "[package]\nname = \"prune_native\"\nversion = \"0.1.0\"\n",
+    );
+    write_test_file(&project.join("src/main.bt"), "main := [42].");
+    let native = project.join("native");
+    fs::create_dir(&native).unwrap();
+    for m in ["keep_mod", "old_mod"] {
+        write_test_file(
+            &native.join(format!("{m}.erl")),
+            &format!("-module({m}).\n-export([f/0]).\nf() -> ok.\n"),
+        );
+    }
+    let ebin = BuildLayout::new(&project).native_ebin_dir();
+    build(project.as_str(), &default_options(), false).unwrap();
+    assert!(ebin.join("old_mod.beam").exists());
+
+    fs::remove_file(native.join("old_mod.erl")).unwrap();
+    build(project.as_str(), &default_options(), false).unwrap();
+    assert!(ebin.join("keep_mod.beam").exists());
+    assert!(!ebin.join("old_mod.beam").exists(), "stale native beam");
+
+    fs::remove_file(native.join("keep_mod.erl")).unwrap();
+    build(project.as_str(), &default_options(), false).unwrap();
+    assert!(!ebin.join("keep_mod.beam").exists(), "last native beam");
+}
+
+/// BT-5074: dropping `[application]` removes the generated callback; an
+/// emptied package removes its corpus files.
+#[test]
+#[ignore = "requires erlc"]
+fn test_dropped_application_and_emptied_corpus_are_pruned() {
+    let temp = TempDir::new().unwrap();
+    let project = create_test_project(&temp);
+    let manifest = project.join("beamtalk.toml");
+    write_test_file(
+        &manifest,
+        "[package]\nname = \"prune_app\"\nversion = \"0.1.0\"\n\n[application]\nsupervisor = \"AppSup\"\n",
+    );
+    write_test_file(
+        &project.join("src/app_sup.bt"),
+        "Supervisor subclass: AppSup\n\n  childSpecs => #()\n",
+    );
+    let layout = BuildLayout::new(&project);
+    let build_dir = layout.ebin_dir();
+    let callback = build_dir.join("beamtalk_prune_app_app.beam");
+    let class_corpus = build_dir.parent().unwrap().join("class_corpus.json");
+    build(project.as_str(), &default_options(), false).unwrap();
+    assert!(callback.exists(), "callback generated");
+    assert!(class_corpus.exists(), "class corpus generated");
+
+    write_test_file(
+        &manifest,
+        "[package]\nname = \"prune_app\"\nversion = \"0.1.0\"\n",
+    );
+    fs::remove_file(project.join("src/app_sup.bt")).unwrap();
+    write_test_file(&project.join("src/main.bt"), "main := [42].");
+    build(project.as_str(), &default_options(), false).unwrap();
+    assert!(!callback.exists(), "stale callback beam removed");
+    assert!(!build_dir.join("beamtalk_prune_app_app.erl").exists());
+    assert!(!class_corpus.exists(), "stale class corpus removed");
+}
+
+/// BT-5074: the native ebin is shared by the project and its path
+/// dependencies (BT-5072), so pruning must keep a dependency's native beams -
+/// on a second build, and after the project's own last native module is gone.
+#[test]
+#[ignore = "requires erlc"]
+fn test_native_prune_keeps_path_dependency_native_beams() {
+    let temp = TempDir::new().unwrap();
+    let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let helper = root.join("helper");
+    fs::create_dir_all(helper.join("src")).unwrap();
+    fs::create_dir_all(helper.join("native")).unwrap();
+    write_test_file(
+        &helper.join("beamtalk.toml"),
+        "[package]\nname = \"helper\"\nversion = \"0.1.0\"\n",
+    );
+    write_test_file(
+        &helper.join("src/helper_thing.bt"),
+        "Object subclass: HelperThing\n",
+    );
+    write_test_file(
+        &helper.join("native/helper_native.erl"),
+        "-module(helper_native).\n-export([f/0]).\nf() -> ok.\n",
+    );
+
+    let app = root.join("app");
+    fs::create_dir_all(app.join("src")).unwrap();
+    fs::create_dir_all(app.join("native")).unwrap();
+    write_test_file(
+        &app.join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nhelper = { path = \"../helper\" }\n",
+    );
+    write_test_file(&app.join("src/main.bt"), "main := [42].");
+    write_test_file(
+        &app.join("native/app_native.erl"),
+        "-module(app_native).\n-export([f/0]).\nf() -> ok.\n",
+    );
+
+    let ebin = BuildLayout::new(&app).native_ebin_dir();
+    build(app.as_str(), &default_options(), false).unwrap();
+    assert!(ebin.join("app_native.beam").exists());
+    assert!(ebin.join("helper_native.beam").exists());
+
+    // Second build prunes against the project's *and* the dependency's modules.
+    build(app.as_str(), &default_options(), false).unwrap();
+    assert!(ebin.join("app_native.beam").exists());
+    assert!(
+        ebin.join("helper_native.beam").exists(),
+        "a path dependency's native beam must survive the prune"
+    );
+
+    // The project drops its last native module; the dependency's stays.
+    fs::remove_file(app.join("native/app_native.erl")).unwrap();
+    build(app.as_str(), &default_options(), false).unwrap();
+    assert!(!ebin.join("app_native.beam").exists());
+    assert!(ebin.join("helper_native.beam").exists());
+}

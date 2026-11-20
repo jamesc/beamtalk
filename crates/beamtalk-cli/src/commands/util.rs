@@ -62,6 +62,26 @@ pub(crate) fn bt_qualified_module_name(pkg: &str, rel: &str) -> String {
     format!("bt@{pkg}@{rel}")
 }
 
+/// The first two sources that derive the same Erlang module (BT-5074), as
+/// `(first, second, module)`, or `None` when every module is unique.
+///
+/// Module names are a lossy function of the path (snake-cased and
+/// case-folded), so `src/FooBar.bt` and `src/foo_bar.bt` both become
+/// `bt@pkg@foo_bar`; the second compile would silently overwrite the first
+/// and a class would vanish. The package build, the dependency build and the
+/// stdlib build each word their own error from this one detection.
+pub(crate) fn find_module_collision<'a>(
+    sources: impl IntoIterator<Item = (&'a Utf8Path, &'a str)>,
+) -> Option<(&'a Utf8Path, &'a Utf8Path, &'a str)> {
+    let mut seen: std::collections::HashMap<&str, &Utf8Path> = std::collections::HashMap::new();
+    for (file, module) in sources {
+        if let Some(first) = seen.insert(module, file) {
+            return Some((first, file, module));
+        }
+    }
+    None
+}
+
 /// What a test assertion expects: a value or an error.
 ///
 /// Shared between stdlib tests (`test_stdlib`) and doc tests (`doc_tests`).

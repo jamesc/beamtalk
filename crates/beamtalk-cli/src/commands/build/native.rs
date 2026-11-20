@@ -1043,7 +1043,12 @@ pub(crate) fn compile_native_erlang_with_deps(
         }
     }
 
+    let build_layout = BuildLayout::new(project_root);
+    let ebin_dir = build_layout.native_ebin_dir();
+
     if erl_files.is_empty() {
+        // BT-5074: the last `native/*.erl` is gone, so its beams must go too.
+        prune_stale_native_beams(&ebin_dir, &erl_files)?;
         return Ok(None);
     }
 
@@ -1051,8 +1056,6 @@ pub(crate) fn compile_native_erlang_with_deps(
     erl_files.sort();
 
     // Create output directory
-    let build_layout = BuildLayout::new(project_root);
-    let ebin_dir = build_layout.native_ebin_dir();
     fs::create_dir_all(&ebin_dir)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create native ebin directory '{ebin_dir}'"))?;
@@ -1078,6 +1081,7 @@ pub(crate) fn compile_native_erlang_with_deps(
     );
 
     invocation.run("Native Erlang compilation")?;
+    prune_stale_native_beams(&ebin_dir, &erl_files)?;
 
     // User-visible output confirming native Erlang compilation.
     let count = erl_files.len();
@@ -1085,6 +1089,21 @@ pub(crate) fn compile_native_erlang_with_deps(
     eprintln!("Compiled {count} native Erlang file{plural}");
 
     Ok(Some(ebin_dir))
+}
+
+/// BT-5074: remove beams in the native ebin that no current `native/*.erl`
+/// produces. `erlc` never deletes the output of a removed source, so without
+/// this `old.beam` stays on the code path, in spec extraction and in the
+/// known-module set after `native/old.erl` is deleted.
+fn prune_stale_native_beams(ebin_dir: &Utf8Path, erl_files: &[Utf8PathBuf]) -> Result<()> {
+    let keep: std::collections::HashSet<String> = erl_files
+        .iter()
+        .filter_map(|f| f.file_stem().map(str::to_owned))
+        .collect();
+    for module in beamtalk_cli::path_util::remove_beams_not_in(ebin_dir, &keep)? {
+        info!(module = %module, "Removed stale native beam (its source is gone)");
+    }
+    Ok(())
 }
 
 /// Collect ebin directories from rebar3's output tree.

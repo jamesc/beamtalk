@@ -40,12 +40,12 @@ async fn load_root_packages_gives_sibling_roots_distinct_alias_package_stamps() 
     let file_a = Utf8PathBuf::from_path_buf(root_a.join("Foo.bt")).unwrap();
     let file_b = Utf8PathBuf::from_path_buf(root_b.join("Foo.bt")).unwrap();
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(file_a.clone(), "internal type Foo = Integer".to_string());
         svc.update_file(file_b.clone(), "internal type Foo = String".to_string());
     }
 
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     assert_eq!(
         svc.project_index().alias_package_for_file(&file_a),
         EcoString::from("pkg_a"),
@@ -84,7 +84,7 @@ async fn did_open_racing_load_root_packages_still_gets_real_package_stamp() {
     // Simulated didOpen arrives first (race): indexed with no roots known.
     let file = Utf8PathBuf::from_path_buf(root.join("Foo.bt")).unwrap();
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(file.clone(), "internal type Foo = Integer".to_string());
     }
 
@@ -93,7 +93,7 @@ async fn did_open_racing_load_root_packages_still_gets_real_package_stamp() {
         .load_root_packages(std::slice::from_ref(&root))
         .await;
 
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     assert_eq!(
         svc.project_index().alias_package_for_file(&file),
         EcoString::from("pkg_a"),
@@ -138,7 +138,7 @@ async fn did_open_racing_preload_still_gets_stdlib_stamp() {
     // before anything marked it stdlib, so it stamps as same-project.
     let stdlib_file = Utf8PathBuf::from_path_buf(stdlib_file_path).unwrap();
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(
             stdlib_file.clone(),
             "internal type Direction = #north | #south".to_string(),
@@ -153,7 +153,7 @@ async fn did_open_racing_preload_still_gets_stdlib_stamp() {
         })
         .await;
 
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     assert!(svc.project_index().is_stdlib_file(&stdlib_file));
     let stamped = svc
         .project_index()
@@ -210,7 +210,7 @@ async fn did_open_racing_preload_resolves_sibling_class() {
     let workflow_context_utf8 =
         Utf8PathBuf::from_path_buf(workflow_context_path).expect("temp path is UTF-8");
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.update_file(
             workflow_context_utf8.clone(),
             workflow_context_source.to_string(),
@@ -225,7 +225,7 @@ async fn did_open_racing_preload_resolves_sibling_class() {
         })
         .await;
 
-    let svc = backend.service.lock().expect("service lock poisoned");
+    let svc = backend.service.lock_recover();
     let diags = svc.diagnostics(&workflow_context_utf8);
     assert!(
         !diags.iter().any(|d| d.message.contains("Unresolved class")),
@@ -315,7 +315,7 @@ async fn did_open_during_preload_defers_to_republish_for_sibling_class() {
     // preload — see that method's doc for why this must be
     // set before any racing didOpen's own `publish_diagnostics` check.
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.set_preload_in_progress(true);
     }
 
@@ -352,7 +352,7 @@ async fn did_open_during_preload_defers_to_republish_for_sibling_class() {
     // Mirrors `initialized()`'s own flip: clear the flag *before*
     // republishing, so republish's `publish_diagnostics` calls send.
     {
-        let mut svc = backend.service.lock().expect("service lock poisoned");
+        let mut svc = backend.service.lock_recover();
         svc.set_preload_in_progress(false);
     }
     backend.republish_open_diagnostics().await;

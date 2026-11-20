@@ -236,7 +236,7 @@ fn write_stdlib_generated_outputs(
     // `beamtalk_repl_state:new/3` (the REPL/workspace session's
     // alias-seeding path) and `browse-type-aliases` read stdlib's own
     // aliases back via `application:get_env(beamtalk_stdlib, type_aliases)`.
-    let alias_metadata = build_alias_metadata(source_files);
+    let alias_metadata = build_alias_metadata(source_files, None);
 
     let app_src_dir = Utf8PathBuf::from(STDLIB_APP_SRC_DIR);
     generate_app_file(
@@ -647,17 +647,21 @@ pub(super) fn find_stdlib_files(lib_dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> 
 /// distinct filenames that both produce `bt@stdlib@beamerror`. Comparing stems
 /// would wave that collision straight through.
 pub(super) fn check_duplicate_module_names(source_files: &[Utf8PathBuf]) -> Result<()> {
-    let mut seen: std::collections::HashMap<String, &Utf8Path> = std::collections::HashMap::new();
-    for file in source_files {
-        let module = module_name_from_path(file)?;
-        if let Some(first) = seen.insert(module.clone(), file.as_path()) {
-            miette::bail!(
-                "Stdlib sources '{first}' and '{file}' both compile to module '{module}'. \
-                 Module names come from the file stem alone (case-folded), and subdirectories \
-                 do not namespace them, so stdlib class file names must be unique across all \
-                 subdirectories. Rename one of the two files."
-            );
-        }
+    let modules = source_files
+        .iter()
+        .map(|file| module_name_from_path(file))
+        .collect::<Result<Vec<_>>>()?;
+    let pairs = source_files
+        .iter()
+        .map(Utf8PathBuf::as_path)
+        .zip(modules.iter().map(String::as_str));
+    if let Some((first, file, module)) = crate::commands::util::find_module_collision(pairs) {
+        miette::bail!(
+            "Stdlib sources '{first}' and '{file}' both compile to module '{module}'. \
+             Module names come from the file stem alone (case-folded), and subdirectories \
+             do not namespace them, so stdlib class file names must be unique across all \
+             subdirectories. Rename one of the two files."
+        );
     }
     Ok(())
 }
