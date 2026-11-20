@@ -26,9 +26,13 @@ release is a long-running service.
 
 The output lands at `_build/release/<name>-<vsn>/` (override with
 `--output`), plus a `<name>-<vsn>.tar.gz` tarball next to it — the artifact
-you `COPY` into a container or copy to a server. `--force-output` deletes a
-pre-existing `--output` directory even if it doesn't look like a prior
-`beamtalk release` output; use it deliberately, not as a default habit.
+you `COPY` into a container or copy to a server. An existing
+`--output` directory is replaced only if it carries the `.beamtalk-release`
+marker the command writes (or an older release's provenance manifest); the
+previous output is kept until the new release is assembled, and restored if
+the build fails. `--force-output` replaces an unmarked directory; use it
+deliberately. The project root, the current directory and their ancestors
+are always refused.
 
 `Beamtalk releaseInfo` is the parity-neutral reflective send that names the
 release, its version and the toolchain OTP release. `rpc`/`eval` resolve `Beamtalk`, `Workspace` and `Transcript` as ordinary

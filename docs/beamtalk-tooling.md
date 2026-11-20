@@ -302,7 +302,7 @@ beamtalk release --output dist/                     # override output directory
 beamtalk release --no-include-erts                  # slim image; requires host OTP
 beamtalk release --upgrade-from prev-release/       # shape-compatibility preflight
 beamtalk release --force                            # force rebuild
-beamtalk release --force-output                     # wipe non-release output dir
+beamtalk release --force-output                     # replace an --output dir lacking the .beamtalk-release marker
 ```
 
 ### Release Configuration
