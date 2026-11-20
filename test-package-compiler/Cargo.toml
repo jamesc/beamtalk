@@ -8,6 +8,9 @@ edition.workspace = true
 publish = false
 description = "Snapshot tests for beamtalk compiler"
 
+[lints]
+workspace = true
+
 [dev-dependencies]
 # why: BT-4678 — the shared `erlc_available` probe lives in `test_support`,
 # which the `test` feature gates.

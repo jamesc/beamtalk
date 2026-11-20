@@ -29,6 +29,25 @@ rust-version = "1.85"
 license = "Apache-2.0"
 publish = false
 
+# Same lint levels as the root `[workspace.lints]`. This crate is outside the
+# workspace (see the comment above), so it cannot inherit them with
+# `workspace = true`; `just check-lint-parity` (scripts/ci/check-lint-parity.py)
+# fails if this table drifts from the root one.
+[lints.rust]
+missing_debug_implementations = "warn"
+trivial_numeric_casts = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_lifetimes = "warn"
+
+[lints.clippy]
+cargo = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+multiple_crate_versions = "allow"
+clone_on_ref_ptr = "warn"
+undocumented_unsafe_blocks = "warn"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+
 [[bin]]
 name = "beamtalk-desktop"
 path = "src/main.rs"

@@ -1,0 +1,98 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+name: Advisory Scan
+
+# Weekly vulnerability scan of the repository's own dependencies (BT-5087):
+# cargo-audit on each committed Cargo.lock, `npm audit --omit=dev` on each npm
+# project, `mix deps.audit` on the LiveView project. Advisory only: it is not a
+# required check and never runs on pull requests, so it cannot block a merge.
+# Findings open (or update) one GitHub issue titled "Advisory scan findings";
+# the issue is closed again when a later run is clean. Dependabot (see
+# .github/dependabot.yml) is what raises the fix PRs.
+#
+# fuzz/ has no committed lockfile and depends only on workspace crates plus
+# libfuzzer-sys, so the root Cargo.lock covers it.
+
+on:
+  schedule:
+    - cron: '23 5 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: advisory-scan
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  scan:
+    name: Scan dependencies for advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@789fcf404486ad49a9a91ceb1acfb43caac96664 # cargo-llvm-cov
+        with:
+          tool: cargo-audit@0.23.0
+
+      - name: Install Erlang/OTP + Elixir
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version-file: .tool-versions
+
+      # `mix deps.audit` comes from the mix_audit archive; installing it as an
+      # archive keeps it out of editors/liveview/mix.exs.
+      - name: Install mix_audit and LiveView deps
+        working-directory: editors/liveview
+        run: |
+          mix local.hex --force
+          mix archive.install hex mix_audit 2.1.5 --force
+          mix deps.get
+
+      - name: Run advisory scans
+        id: scan
+        run: scripts/ci/advisory-scan.sh advisory-report.md
+
+      - name: Open, update or close the findings issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FINDINGS: ${{ steps.scan.outputs.findings }}
+        run: |
+          set -euo pipefail
+          title="Advisory scan findings"
+          number="$(gh issue list --state open --search "\"${title}\" in:title" --json number,title \
+            --jq "map(select(.title == \"${title}\")) | .[0].number // empty")"
+          if [ "${FINDINGS}" = "true" ]; then
+            {
+              echo "The weekly advisory scan ([run ${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})) reported the following."
+              echo "This issue is updated by each run and closed by the first clean one."
+              echo
+              cat advisory-report.md
+            } > issue-body.md
+            if [ -n "${number}" ]; then
+              gh issue edit "${number}" --body-file issue-body.md
+            else
+              gh issue create --title "${title}" --body-file issue-body.md
+            fi
+          elif [ -n "${number}" ]; then
+            gh issue close "${number}" --comment "Clean advisory scan: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          fi

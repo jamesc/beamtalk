@@ -62,8 +62,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
 #RUN rustup component add rustfmt clippy rust-src rust-analyzer
 
 # Install cargo tools for development (using cargo-binstall for faster binary installs)
-RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash \
-    && cargo binstall -y cargo-watch cargo-nextest cargo-insta cargo-llvm-cov cargo-fuzz just
+# Versions are pinned (BT-5087); scripts/ci/check-pins.py keeps them in step with CI.
+ARG BINSTALL_VERSION=1.27.0
+RUN curl -L --proto '=https' --tlsv1.2 -sSf "https://raw.githubusercontent.com/cargo-bins/cargo-binstall/v${BINSTALL_VERSION}/install-from-binstall-release.sh" | BINSTALL_VERSION="${BINSTALL_VERSION}" bash \
+    && cargo binstall -y cargo-watch@8.5.3 cargo-nextest@0.9.148 cargo-insta@1.49.0 cargo-llvm-cov@0.9.2 cargo-fuzz@0.13.1 just@1.59.0
 
 # Linear issue tracking is handled by the Linear MCP server (.vscode/mcp.json),
 # launched on demand via npx — no CLI is baked into the image.
