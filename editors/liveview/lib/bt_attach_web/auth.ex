@@ -7,8 +7,9 @@ defmodule BtAttachWeb.Auth do
   (ADR 0091 Decision 1; BT-2417 flow, BT-2419 hardening).
 
   The browser authenticates to Phoenix via OIDC; on success the user's verified
-  claims are stored in a **server-side session** (the signed, `SameSite=Strict`,
-  `HttpOnly` cookie — no token in the URL) under the `"bt_user"` key, alongside a
+  claims are stored in the **session cookie** (signed *and encrypted*,
+  `SameSite=Strict`, `HttpOnly` — a client-side cookie session, not a server-side
+  store, so it cannot be revoked before its TTL; no token in the URL) under the `"bt_user"` key, alongside a
   `"bt_logged_in_at"` timestamp. This module is the single place that
   reads/writes that session and gates access:
 
@@ -27,7 +28,7 @@ defmodule BtAttachWeb.Auth do
   authorization. We enforce a **maximum session TTL** (`:session_ttl_secs`,
   operator-configurable, default 4h) and **re-validate on a timer**
   (`:revalidate_interval_secs`, default 60s) and on every reconnect. Because
-  server-side sessions do not observe IdP de-provisioning in real time, the
+  sessions do not observe IdP de-provisioning in real time, the
   **maximum enforcement lag** between an IdP revocation/role change and effective
   teardown is bounded by the re-validation interval (default ≤ 60s) plus, for a
   user who never reconnects, the session TTL (default ≤ 4h). Operators tighten
@@ -134,7 +135,8 @@ defmodule BtAttachWeb.Auth do
         |> redirect(to: ~p"/oidc/auth")
         |> halt()
 
-      dev_auth_enabled?() and loopback?(conn.remote_ip) ->
+      dev_auth_enabled?() and loopback?(conn.remote_ip) and
+          not forwarded?(conn.req_headers) ->
         # IdP-less loopback auto-login: same session handling, no URL token.
         conn
         |> put_session(@session_key, @dev_claims)
@@ -144,13 +146,13 @@ defmodule BtAttachWeb.Auth do
 
       dev_auth_enabled?() ->
         Logger.warning(
-          "dev-auth refused for non-loopback client #{:inet.ntoa(conn.remote_ip)}",
+          "dev-auth refused for non-loopback or proxied client #{:inet.ntoa(conn.remote_ip)}",
           domain: [:beamtalk, :liveview]
         )
 
         conn
         |> put_status(:forbidden)
-        |> Phoenix.Controller.text("dev-auth is loopback-only")
+        |> Phoenix.Controller.text("dev-auth is direct-loopback-only")
         |> halt()
 
       true ->
@@ -273,8 +275,10 @@ defmodule BtAttachWeb.Auth do
   # the plug). OIDC / disabled modes don't care about the socket peer here.
   defp dev_connect_ok?(socket) do
     if dev_auth_enabled?() and Phoenix.LiveView.connected?(socket) do
+      proxied? = forwarded?(Phoenix.LiveView.get_connect_info(socket, :x_headers) || [])
+
       case Phoenix.LiveView.get_connect_info(socket, :peer_data) do
-        %{address: ip} -> loopback?(ip)
+        %{address: ip} -> loopback?(ip) and not proxied?
         _ -> false
       end
     else
@@ -291,7 +295,7 @@ defmodule BtAttachWeb.Auth do
   # ── session minting ───────────────────────────────────────────────────────────
 
   @doc """
-  Store the authenticated user's claims in a fresh server-side session.
+  Store the authenticated user's claims in a fresh (cookie) session.
 
   Renews the session id (`renew_session`) on login to defend against session
   fixation, then writes the claims + a login timestamp (for TTL). The claims map
@@ -309,7 +313,13 @@ defmodule BtAttachWeb.Auth do
     |> redirect(to: return_to || ~p"/")
   end
 
-  @doc "Drop the authenticated session (used by logout / lifecycle teardown)."
+  @doc """
+  Drop the authenticated session (the `DELETE /logout` route and lifecycle
+  teardown).
+
+  The session cookie is a client-side store, so this clears the browser's copy
+  but cannot invalidate a copy already exfiltrated; that expires at the TTL.
+  """
   def log_out(conn) do
     conn
     |> renew_session()
@@ -333,6 +343,19 @@ defmodule BtAttachWeb.Auth do
   end
 
   def session_live?(_), do: false
+
+  @forwarding_headers ~w(forwarded x-forwarded-for x-forwarded-host x-forwarded-proto
+                         x-forwarded-port x-real-ip via)
+
+  @doc false
+  # True when the request carries proxy-forwarding headers (BT-5070). Behind a
+  # same-host reverse proxy `conn.remote_ip` is loopback for EVERY client, so a
+  # loopback peer alone proves nothing; dev-auth is refused for any request that
+  # says it was forwarded. Header names are lowercase (Plug/Cowboy/Bandit).
+  @spec forwarded?([{String.t(), String.t()}]) :: boolean()
+  def forwarded?(headers) when is_list(headers) do
+    Enum.any?(headers, fn {name, _} -> String.downcase(name) in @forwarding_headers end)
+  end
 
   @doc false
   # True for loopback IPv4/IPv6 (including IPv4-mapped ::ffff:127.0.0.0/8).
