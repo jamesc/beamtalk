@@ -2122,9 +2122,15 @@ test_one_hop_children_missing_extension() ->
     %% stdlib/test/lookup_order_matrix_test.bt (`testWarningNamesTheAffectedChildren`).
     %% A selector the class does not compile, an unknown class and a class-side
     %% tag have no affected subclass.
-    ?assertEqual([], beamtalk_dispatch:one_hop_children_missing_extension('Object', bt5060NoSuchSel)),
-    ?assertEqual([], beamtalk_dispatch:one_hop_children_missing_extension('NoSuchClass5060', printString)),
-    ?assertEqual([], beamtalk_dispatch:one_hop_children_missing_extension('Object class', printString)),
+    ?assertEqual(
+        [], beamtalk_dispatch:one_hop_children_missing_extension('Object', bt5060NoSuchSel)
+    ),
+    ?assertEqual(
+        [], beamtalk_dispatch:one_hop_children_missing_extension('NoSuchClass5060', printString)
+    ),
+    ?assertEqual(
+        [], beamtalk_dispatch:one_hop_children_missing_extension('Object class', printString)
+    ),
     %% An actor owner is honoured by the verdict route, so it has none either.
     ?assertEqual([], beamtalk_dispatch:one_hop_children_missing_extension('Actor', 'terminate:')).
 
