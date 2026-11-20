@@ -72,16 +72,18 @@ TestCase subclass: NumberMethodsTest
       ]
       raise: #user_error
 
-  // PIN-BUG BT-5098: a block that writes an outer local is inlined by the
-  // compiler, which skips the stdlib zero-step guard. The fix flips this to
-  // expect `user_error`.
-  testPinBugToByDoZeroStepWritingBlockIsNoop =>
+  // BT-5098: a block that writes an outer local is inlined by the compiler;
+  // that path raises like the stdlib method (was a silent no-op).
+  testToByDoZeroStepWritingBlockRaises =>
+    self should: [self zeroStepWriting] raise: #user_error
+
+  zeroStepWriting =>
     s := 0
     1
       to: 10
       by: 0
       do: [:i | s := s + i]
-    self assert: s equals: 0
+    s
 
   testFloatIsPositive =>
     self assert: 3.14 isPositive

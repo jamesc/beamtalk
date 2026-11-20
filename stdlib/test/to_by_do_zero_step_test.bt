@@ -1,13 +1,31 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-5098: `to:by:do:` with a step of 0 raises on the inlined counted-loop path.
+// BT-5098: `to:by:do:` with a step of 0 raises on both code paths.
 //
-// A block that writes an outer local is inlined by the compiler as a counted
-// loop and never calls `Integer>>to:by:do:`. The pure-block (real send) cases
-// are added once the stdlib guard from BT-5083 is on main.
+// A block that writes no outer variable is a real send to `Integer>>to:by:do:`;
+// a block that writes an outer local is inlined by the compiler as a counted
+// loop. Both must raise "Interval step cannot be zero".
 
 TestCase subclass: ToByDoZeroStepTest
+
+  pureLoop: step :: Integer from: from :: Integer to: to :: Integer =>
+    from
+      to: to
+      by: step
+      do: [:i | i]
+
+  pureLiteralZeroUp =>
+    1
+      to: 10
+      by: 0
+      do: [:i | i]
+
+  pureLiteralZeroDown =>
+    10
+      to: 1
+      by: 0
+      do: [:i | i]
 
   writingLoop: step :: Integer from: from :: Integer to: to :: Integer =>
     s := 0
@@ -32,6 +50,20 @@ TestCase subclass: ToByDoZeroStepTest
       by: 0
       do: [:i | s := s + i]
     s
+
+  // --- pure block (real send, not inlined) ---
+
+  testPureLiteralZeroPositiveRange =>
+    self should: [self pureLiteralZeroUp] raise: #user_error
+
+  testPureLiteralZeroNegativeRange =>
+    self should: [self pureLiteralZeroDown] raise: #user_error
+
+  testPureRuntimeZeroPositiveRange =>
+    self should: [self pureLoop: 0 from: 1 to: 10] raise: #user_error
+
+  testPureRuntimeZeroNegativeRange =>
+    self should: [self pureLoop: 0 from: 10 to: 1] raise: #user_error
 
   // --- writing block (inlined counted loop) ---
 
