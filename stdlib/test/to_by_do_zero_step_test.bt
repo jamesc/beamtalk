@@ -105,6 +105,23 @@ TestCase subclass: ToByDoZeroStepTest
       ]
       raise: #user_error
 
+  // The two paths share one message (the stdlib method and the compiler each
+  // spell it), so a rewording of either shows up here.
+  testBothPathsRaiseTheSameMessage =>
+    pureMsg := [
+      self
+        pureLoop: 0
+        from: 1
+        to: 10
+    ] on: Exception do: [:e | e message]
+    writingMsg := [
+      self
+        writingLoop: 0
+        from: 1
+        to: 10
+    ] on: Exception do: [:e | e message]
+    self assert: pureMsg equals: writingMsg
+
   testWritingZeroStepMessage =>
     msg := [
       self

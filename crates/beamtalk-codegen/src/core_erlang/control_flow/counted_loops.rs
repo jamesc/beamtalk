@@ -9,7 +9,6 @@
 //! variants of `timesRepeat:`, `to:do:`, and `to:by:do:`.
 //! Non-mutating cases are handled by the pure-BT tail-recursive Integer methods.
 
-use super::super::errors::{BeamtalkErrorChain, ErrorBinding};
 use super::super::threaded_ir::{
     self, LoopCounter, RenderCtx, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
 };
@@ -200,21 +199,20 @@ impl CoreErlangGenerator {
         self.generate_counted_stateful_loop(&frame, body, &plan)
     }
 
-    /// BT-5098: `do case Step =:= 0 of 'true' -> raise 'false' -> 'ok' end`,
-    /// raising the same `user_error` ("Interval step cannot be zero") as the
-    /// stdlib `Integer>>to:by:do:` (`self error:`). Emitted once in the loop
-    /// preamble, so the loop body pays nothing.
-    fn zero_step_guard_doc(&mut self, step_var: &str) -> Document<'static> {
-        let err0 = self.fresh_temp_var("StepErr");
-        let err1 = self.fresh_temp_var("StepErr");
+    /// BT-5098: `do case Step =:= 0 of 'true' -> raise 'false' -> 'ok' end`.
+    /// The raise is the one `Object>>error:` lowering (`object_error_raise_doc`)
+    /// that the stdlib `Integer>>to:by:do:` reaches through `self error:`, so
+    /// both paths raise the same `user_error` (class from the receiver). Emitted
+    /// once in the loop preamble, so the loop body pays nothing.
+    fn zero_step_guard_doc(&mut self, recv_var: &str, step_var: &str) -> Document<'static> {
+        let msg_var = self.fresh_temp_var("StepMsg");
         let raise = docvec![
-            BeamtalkErrorChain::new("user_error", leaf::atom("Integer"))
-                .message(leaf::binary_lit("Interval step cannot be zero"))
-                .build(
-                    vec![ErrorBinding::plain(err0), ErrorBinding::plain(err1.clone())],
-                    Document::Str(" "),
-                ),
-            form::call("beamtalk_error", "raise", [leaf::var(err1)]),
+            "let ",
+            leaf::var(msg_var.clone()),
+            " = ",
+            leaf::binary_lit("Interval step cannot be zero"),
+            " in ",
+            self.object_error_raise_doc(recv_var, &msg_var),
         ];
         let is_zero = form::call(
             "erlang",
@@ -249,7 +247,7 @@ impl CoreErlangGenerator {
         let step_code = self.expression_doc(step)?;
         // BT-5098: a step of 0 raises, as `Integer>>to:by:do:` does. Checked
         // once here in the preamble (not per iteration).
-        let zero_step_guard = self.zero_step_guard_doc(&step_var);
+        let zero_step_guard = self.zero_step_guard_doc(&start_var, &step_var);
         // gensym the loop counter (the block param is aliased to it).
         let counter = self.fresh_temp_var("loopidx");
 
@@ -823,6 +821,10 @@ mod tests {
             "exactly one guard. Got:\n{code}"
         );
         assert!(code.contains("'user_error'"), "Got:\n{code}");
+        assert!(
+            code.contains("'beamtalk_primitive':'class_of'"),
+            "class comes from the receiver, as `self error:`. Got:\n{code}"
+        );
     }
 
     #[test]
