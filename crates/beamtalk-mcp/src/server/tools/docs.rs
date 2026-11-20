@@ -208,7 +208,8 @@ pub(crate) fn compute_doc_method_categories(
 impl BeamtalkMcp {
     /// Get documentation for a Beamtalk class or Erlang module.
     #[tool(
-        description = "Get documentation for a Beamtalk class or Erlang module. Provide either 'class' (Beamtalk) or 'erlang_module' (Erlang FFI), and optionally a method/function selector."
+        description = "Get documentation for a Beamtalk class or Erlang module. Provide either 'class' (Beamtalk) or 'erlang_module' (Erlang FFI), and optionally a method/function selector.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn docs(
         &self,
@@ -292,7 +293,8 @@ impl BeamtalkMcp {
 
     /// Search the bundled example corpus for Beamtalk code examples.
     #[tool(
-        description = "Search for Beamtalk code examples by keyword or topic. Returns matching examples with source code, explanation, and tags. Use this to find idiomatic patterns, syntax examples, and working code before writing .bt files. Works offline — no REPL connection needed."
+        description = "Search for Beamtalk code examples by keyword or topic. Returns matching examples with source code, explanation, and tags. Use this to find idiomatic patterns, syntax examples, and working code before writing .bt files. Works offline — no REPL connection needed.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn search_examples(
         &self,
@@ -378,7 +380,8 @@ impl BeamtalkMcp {
 
     /// Search for Beamtalk classes by keyword or concept.
     #[tool(
-        description = "Search for Beamtalk classes by keyword, concept, or method name. Returns matching classes with their superclass, description, and key methods. Use this to discover which class provides a capability before using 'docs' for full details. Works offline — no REPL connection needed."
+        description = "Search for Beamtalk classes by keyword, concept, or method name. Returns matching classes with their superclass, description, and key methods. Use this to discover which class provides a capability before using 'docs' for full details. Works offline — no REPL connection needed.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn search_classes(
         &self,
@@ -482,7 +485,8 @@ impl BeamtalkMcp {
 
     /// List all available Beamtalk classes with one-line descriptions.
     #[tool(
-        description = "List all available Beamtalk classes with one-line descriptions. Optionally filter by superclass (e.g. 'Value', 'Actor') or scope ('stdlib' for built-in classes, 'user' for user-defined)."
+        description = "List all available Beamtalk classes with one-line descriptions. Optionally filter by superclass (e.g. 'Value', 'Actor') or scope ('stdlib' for built-in classes, 'user' for user-defined).",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn list_classes(
         &self,
@@ -506,7 +510,8 @@ impl BeamtalkMcp {
 
     /// List all loaded Beamtalk packages with metadata.
     #[tool(
-        description = "List all loaded Beamtalk packages with their versions, class counts, and dependencies. Returns package metadata from the runtime."
+        description = "List all loaded Beamtalk packages with their versions, class counts, and dependencies. Returns package metadata from the runtime.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn list_packages(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start("list_packages");
@@ -551,7 +556,8 @@ impl BeamtalkMcp {
 
     /// List all classes belonging to a named package.
     #[tool(
-        description = "List all classes belonging to a named Beamtalk package (e.g. 'stdlib'). Returns the class names as a list."
+        description = "List all classes belonging to a named Beamtalk package (e.g. 'stdlib'). Returns the class names as a list.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn package_classes(
         &self,
@@ -596,7 +602,8 @@ impl BeamtalkMcp {
 
     /// Discover supported REPL operations and protocol version.
     #[tool(
-        description = "Discover supported REPL operations and protocol version. Returns the list of available ops with their parameters, and version information."
+        description = "Discover supported REPL operations and protocol version. Returns the list of available ops with their parameters, and version information.",
+        annotations(read_only_hint = true)
     )]
     pub(crate) async fn describe(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start("describe");

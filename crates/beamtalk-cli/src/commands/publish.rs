@@ -33,7 +33,7 @@ use std::process::Command;
 use crate::commands::deps::registry::{self, RegistryEntry, RegistryLocation};
 use crate::commands::toml_utils::escape_toml_string;
 use crate::commands::util::find_project_root;
-use beamtalk_package::manifest;
+use beamtalk_package::manifest::{self, validate_exact_version};
 
 /// Run `beamtalk publish`.
 ///
@@ -49,6 +49,16 @@ pub fn run(dry_run: bool) -> Result<()> {
 
     let name = &manifest.package.name;
     let version = &manifest.package.version;
+
+    // The tag and the index entry are permanent and consumers can only depend
+    // on `major.minor.patch`, so a version like `1.0` or `1.0.0-rc1` would be
+    // published and then be unusable. Check before anything is mutated.
+    if let Err(reason) = validate_exact_version(version) {
+        miette::bail!(
+            "Cannot publish '{name}': version '{version}' is not publishable — {reason}.\n\n  \
+             Registry versions must be exactly major.minor.patch, e.g.: beamtalk version 1.0.0"
+        );
+    }
     let tag = format!("v{version}");
 
     // Preflight 1: clean working tree.
@@ -73,6 +83,14 @@ pub fn run(dry_run: bool) -> Result<()> {
     // the index state up front is what lets the tag-absence check tell those
     // two cases apart instead of always blaming the version.
     let location = registry::resolve_registry_location(&project_root, manifest.registry.as_ref());
+    // The index entry's `git` URL is read back by every consumer under the
+    // registry rules (https/ssh; file:// only for a local registry): refuse to
+    // publish an entry nobody could resolve.
+    manifest::validate_registry_release_url(
+        name,
+        &origin_url,
+        registry::is_local_registry(&location),
+    )?;
     let index_root = registry::ensure_index(&location, &project_root, true)?;
     let existing_entry = registry::read_entry(&index_root, name)?;
     let version_recorded = existing_entry
@@ -227,7 +245,40 @@ fn get_origin_remote_url(project_root: &Utf8Path) -> Result<String> {
     if url.is_empty() {
         miette::bail!("The 'origin' remote has an empty URL");
     }
+    let url = strip_url_credentials(&url);
+    manifest::validate_git_url("origin", &url)?;
     Ok(url)
+}
+
+/// Remove credentials from a remote URL before it is written to the public
+/// index. A CI-style `https://user:token@host/repo` remote would otherwise be
+/// committed verbatim.
+///
+/// `http(s)://` and `git://` lose their whole userinfo. For `ssh://` the
+/// username (typically `git`) is kept, since the URL is unusable without it,
+/// but a password is dropped. scp-style `user@host:path` carries no secret and
+/// is returned unchanged.
+fn strip_url_credentials(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    let (authority, path) = match rest.find(['/', '?', '#']) {
+        Some(i) => rest.split_at(i),
+        None => (rest, ""),
+    };
+    let Some((userinfo, host)) = authority.rsplit_once('@') else {
+        return url.to_string();
+    };
+    let kept = if scheme == "ssh" {
+        userinfo.split_once(':').map_or(userinfo, |(user, _)| user)
+    } else {
+        ""
+    };
+    if kept.is_empty() {
+        format!("{scheme}://{host}{path}")
+    } else {
+        format!("{scheme}://{kept}@{host}{path}")
+    }
 }
 
 /// Resolve the git identity (`user.name`, `user.email`) that authored the
@@ -407,7 +458,7 @@ fn ensure_tag_absent(
         let recovery = match location {
             RegistryLocation::Git(_) => format!(
                 "1. Check '{index_root}' for an uncommitted or unpushed change.\n  \
-                 2. If it's uncommitted: (cd {index_root} && git add . && git commit -m \
+                 2. If it's uncommitted: (cd {index_root} && git add packages/<name>.toml && git commit -m \
                  \"registry: {name} v{version}\")\n  \
                  3. Push it: (cd {index_root} && git push)\n  \
                  If the push fails (another author pushed to the registry concurrently): \
@@ -561,7 +612,7 @@ fn write_index_entry(entry_path: &Utf8Path, content: &str) -> Result<()> {
         .wrap_err_with(|| format!("Failed to write registry index entry '{entry_path}'"))
 }
 
-/// Commit the working index tree and push it upstream.
+/// Commit this package's index entry (only that file) and push it upstream.
 fn commit_and_push_index(
     index_root: &Utf8Path,
     name: &str,
@@ -569,8 +620,11 @@ fn commit_and_push_index(
     author_name: &str,
     author_email: &str,
 ) -> Result<()> {
+    // Stage only this package's entry: the index clone is a shared cache and
+    // may hold unrelated files that must not be published.
+    let entry_rel = format!("packages/{name}.toml");
     let add = Command::new("git")
-        .args(["add", "."])
+        .args(["add", "--", &entry_rel])
         .current_dir(index_root)
         .output()
         .into_diagnostic()
@@ -590,6 +644,8 @@ fn commit_and_push_index(
             "commit",
             "-m",
             &commit_message,
+            "--",
+            &entry_rel,
         ])
         .current_dir(index_root)
         .output()
@@ -601,7 +657,7 @@ fn commit_and_push_index(
             "Failed to commit registry index changes:\n{stderr}\n\n  \
              The release tag was already pushed, but no commit was created — 'git commit' \
              itself failed, so there is nothing to push yet. Resolve the issue and stage and \
-             commit the change at '{index_root}' manually (`cd {index_root} && git add . && \
+             commit the change at '{index_root}' manually (`cd {index_root} && git add {entry_rel} && \
              git commit -m \"registry: {name} v{version}\"`), then push it, or contact the \
              registry maintainer."
         );
@@ -1432,6 +1488,13 @@ mod tests {
         run_git(dir.path(), &["init"]);
         configure_git_identity(dir.path());
 
+        // The entry is already committed, so staging it is a no-op and the
+        // commit that follows has nothing to commit.
+        std::fs::create_dir_all(dir.path().join("packages")).unwrap();
+        std::fs::write(dir.path().join("packages/yaml.toml"), "name = \"yaml\"\n").unwrap();
+        run_git(dir.path(), &["add", "."]);
+        run_git(dir.path(), &["commit", "-m", "seed"]);
+
         let index_root = utf8(&dir);
         let err = commit_and_push_index(&index_root, "yaml", "0.1.0", "Test", "test@test.com")
             .unwrap_err();
@@ -1447,5 +1510,93 @@ mod tests {
             !msg.contains("commit exists locally"),
             "must not claim a commit already exists when 'git commit' itself failed: {msg}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // BT-5068: version validation, credential stripping, entry-only staging
+    // -----------------------------------------------------------------------
+
+    #[test]
+    #[serial(cwd)]
+    fn test_publish_rejects_non_exact_version_before_tagging() {
+        for version in ["1.0", "1.0.0-rc1"] {
+            let fixture = setup("yaml", version, None);
+            let err = with_cwd(utf8(&fixture.library), || run(true)).unwrap_err();
+            assert!(
+                flat_err(&err).contains("not publishable"),
+                "{version}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_strip_url_credentials() {
+        for (input, expected) in [
+            (
+                "https://user:token@host.test/o/r.git",
+                "https://host.test/o/r.git",
+            ),
+            (
+                "https://token@host.test/o/r.git",
+                "https://host.test/o/r.git",
+            ),
+            (
+                "ssh://git:secret@host.test/o/r.git",
+                "ssh://git@host.test/o/r.git",
+            ),
+            ("ssh://git@host.test/o/r.git", "ssh://git@host.test/o/r.git"),
+            ("git@host.test:o/r.git", "git@host.test:o/r.git"),
+            ("https://host.test/o/r@v1", "https://host.test/o/r@v1"),
+        ] {
+            assert_eq!(strip_url_credentials(input), expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn test_get_origin_remote_url_strips_credentials() {
+        let dir = TempDir::new().unwrap();
+        run_git(dir.path(), &["init"]);
+        run_git(
+            dir.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://ci:s3cr3t@example.test/repo",
+            ],
+        );
+        let url = get_origin_remote_url(&utf8(&dir)).unwrap();
+        assert_eq!(url, "https://example.test/repo");
+        assert!(!url.contains("s3cr3t"));
+    }
+
+    #[test]
+    fn test_commit_and_push_index_stages_only_the_entry() {
+        let dir = TempDir::new().unwrap();
+        run_git(dir.path(), &["init"]);
+        configure_git_identity(dir.path());
+        let bare = TempDir::new().unwrap();
+        run_git(bare.path(), &["init", "--bare"]);
+        run_git(
+            dir.path(),
+            &["remote", "add", "origin", &file_url(bare.path())],
+        );
+
+        std::fs::create_dir_all(dir.path().join("packages")).unwrap();
+        std::fs::write(dir.path().join("packages/yaml.toml"), "name = \"yaml\"\n").unwrap();
+        std::fs::write(dir.path().join("stray.txt"), "must not be published").unwrap();
+
+        let index_root = utf8(&dir);
+        // The push may fail (no upstream branch); only the commit contents matter.
+        let _ = commit_and_push_index(&index_root, "yaml", "0.1.0", "Test", "test@test.com");
+
+        let shown = Command::new("git")
+            .args(["show", "--name-only", "--format=", "HEAD"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        let files = String::from_utf8_lossy(&shown.stdout);
+        assert!(files.contains("packages/yaml.toml"), "{files}");
+        assert!(!files.contains("stray.txt"), "{files}");
     }
 }

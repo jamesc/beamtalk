@@ -153,25 +153,35 @@ mod tests {
     #[test]
     #[serial(env_var)]
     fn beamtalk_dir_respects_session_env_var() {
+        // BT-5096: `beamtalk_dir()` reads `BEAMTALK_HOME` via `beamtalk_root_dir()`.
+        // Without this guard a concurrent `real_home_guard` holder points it at a
+        // hermetic tempdir (not `.beamtalk`), and a `BeamtalkHomeOverride` at another.
+        let _home_guard = crate::commands::test_support::real_home_guard();
         // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
         let _guard = unsafe { EnvVarGuard::set("BEAMTALK_WORKSPACE", "my-test-session") };
         let dir = beamtalk_dir().expect("Failed to get beamtalk_dir");
-        assert!(dir.ends_with(".beamtalk/sessions/my-test-session"));
+        let root = beamtalk_workspace::beamtalk_root_dir().unwrap();
+        assert_eq!(dir, root.join("sessions").join("my-test-session"));
     }
 
     #[test]
     #[serial(env_var)]
     fn beamtalk_dir_sanitizes_session_names() {
+        // BT-5096: see `beamtalk_dir_respects_session_env_var`.
+        let _home_guard = crate::commands::test_support::real_home_guard();
         // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
         let _guard = unsafe { EnvVarGuard::set("BEAMTALK_WORKSPACE", "my/test\\session:name") };
         let dir = beamtalk_dir().expect("Failed to get beamtalk_dir");
-        // Slashes and colons should be replaced with hyphens
-        assert!(dir.ends_with(".beamtalk/sessions/my-test-session-name"));
+        let root = beamtalk_workspace::beamtalk_root_dir().unwrap();
+        // Slashes, backslashes and colons should be replaced with hyphens
+        assert_eq!(dir, root.join("sessions").join("my-test-session-name"));
     }
 
     #[test]
     #[serial(env_var)]
     fn beamtalk_dir_ignores_empty_session_env() {
+        // BT-5096: see `beamtalk_dir_respects_session_env_var`.
+        let _home_guard = crate::commands::test_support::real_home_guard();
         // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
         let _guard = unsafe { EnvVarGuard::set("BEAMTALK_WORKSPACE", "") };
         let dir = beamtalk_dir().expect("Failed to get beamtalk_dir");

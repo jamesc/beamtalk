@@ -55,6 +55,16 @@ not change op output:
   per-op authorization runs before any dist call, keyed to the OIDC identity
   (`surface-specific`). See [`docs/security/threat-model.md`](../security/threat-model.md).
 
+The **MCP server** adds one access control that does not change op output
+(BT-5070): the path arguments of `lint`, `diagnostic_summary`, `load_file`,
+`load_project`, `test` (`file`) and `export_traces` (`path`) are confined to
+the project root (symlinks and `..` resolved), and `--allow-outside-project`
+lifts it (`surface-specific`: the CLI, REPL and LSP act as the user and take
+any path). The tools hand the REPL the canonical absolute path, so a relative
+path in a tool argument may be echoed back as an absolute one. Every MCP tool
+also declares `readOnlyHint` / `destructiveHint` annotations (MCP-only
+metadata).
+
 The IDE's **REPL tab** (BT-2543) also carries a client-side meta-command layer,
 the GUI analogue of the CLI's `handle_repl_command()` (BT-2543 follow-up): a
 leading-colon submit is recognised in `WorkspaceLive` (`repl_meta_command/1`)

@@ -330,12 +330,24 @@ enum AuthPhase {
 /// [`AuthStep`] says. Sync (`tungstenite`) and async (`tokio-tungstenite`)
 /// clients drive the same machine, so the step order and error wording live
 /// in one place; [`perform_auth_sequence`] is the async closure-style driver.
-#[derive(Debug)]
 pub struct AuthHandshake {
     phase: AuthPhase,
     cookie: String,
     client: String,
     resume: Option<String>,
+}
+
+/// Hand-written so the cookie never reaches a log line or panic message
+/// through `{:?}` (BT-5070). The resume token is a session credential too.
+impl std::fmt::Debug for AuthHandshake {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthHandshake")
+            .field("phase", &self.phase)
+            .field("cookie", &"<redacted>")
+            .field("client", &self.client)
+            .field("resume", &self.resume.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 impl AuthHandshake {
@@ -441,6 +453,16 @@ pub async fn perform_auth_sequence<T>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn auth_handshake_debug_redacts_cookie_and_resume_token() {
+        let hs = super::AuthHandshake::new("s3cret-cookie-value", "repl", Some("resume-tok-123"));
+        let dbg = format!("{hs:?}");
+        assert!(!dbg.contains("s3cret-cookie-value"), "{dbg}");
+        assert!(!dbg.contains("resume-tok-123"), "{dbg}");
+        assert!(dbg.contains("<redacted>"), "{dbg}");
+        assert!(dbg.contains("repl"), "{dbg}");
+    }
+
     use super::*;
 
     #[test]

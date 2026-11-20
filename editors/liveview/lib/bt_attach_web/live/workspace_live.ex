@@ -289,10 +289,26 @@ defmodule BtAttachWeb.WorkspaceLive do
   # gets a fresh, non-resumable session) rather than crashing.
   defp connect_token(socket) do
     case get_connect_params(socket) do
-      %{"workspace_token" => token} when is_binary(token) -> token
-      _ -> nil
+      %{"workspace_token" => token} when is_binary(token) ->
+        scope_token(token, socket.assigns[:current_user])
+
+      _ ->
+        nil
     end
   end
+
+  # Bind the client-held resume token to the logged-in user (BT-5070): the
+  # registry key is a digest of the user's subject and the token, so a token
+  # presented by a different user misses and gets a fresh session instead of
+  # resuming someone else's. With no authenticated subject (auth disabled, or
+  # dev-auth's single fixed identity) there is nobody to bind to and the token
+  # is used as-is.
+  @doc false
+  def scope_token(token, %{"sub" => sub}) when is_binary(sub) and sub != "" do
+    :sha256 |> :crypto.hash([sub, <<0>>, token]) |> Base.url_encode64(padding: false)
+  end
+
+  def scope_token(token, _user), do: token
 
   defp attach(%{assigns: %{token: token}} = socket) do
     socket =
