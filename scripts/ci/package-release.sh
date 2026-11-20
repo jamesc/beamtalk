@@ -11,7 +11,8 @@
 #
 # Expects either:
 #   - dist/ directory (from `just dist` or `just install dist`) for Unix
-#   - Build artifacts in target/release/ and runtime/ for Windows
+#   - Build artifacts in target/release/, runtime/ and target/share/ (the MCP
+#     corpus, `just build-corpus`) for Windows
 #
 # Outputs (to $GITHUB_OUTPUT if set, else stdout):
 #   archive=beamtalk-0.1.0-linux-x86_64.tar.gz
@@ -57,6 +58,11 @@ if [ "${PLATFORM}" = "windows-x86_64" ]; then
     fi
     mkdir -p "${STAGING}/lib/beamtalk/tools"
     cp "runtime/tools/rebar3" "${STAGING}/lib/beamtalk/tools/rebar3"
+
+    # share/ data (stdlib sources for LSP navigation, MCP example corpus) —
+    # the same install logic `just install` and `just dist` use (BT-5077).
+    # Needs `just build-corpus` (target/share/) to have run first.
+    scripts/install-share.sh "${STAGING}/share"
 
     # Create zip
     (cd "beamtalk-staging" && 7z a "../${ARCHIVE}" "${TOPLEVEL}")

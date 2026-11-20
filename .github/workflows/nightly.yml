@@ -268,10 +268,28 @@ jobs:
         shell: bash
         run: ./target/release/beamtalk.exe build-stdlib
 
+      # package-release.sh installs target/share/ (the MCP example corpus,
+      # BT-4614) into the archive, so it must be built first (BT-5077).
+      - name: Build MCP example corpus
+        shell: bash
+        run: cargo run --release --locked --bin build-corpus --quiet
+
       - name: Package zip
         id: package
         shell: bash
         run: scripts/ci/package-release.sh nightly windows-x86_64
+
+      # Windows verification of BT-5077's share/ data. 7z is on the runner
+      # (package-release.sh uses it); the archive is extracted afresh so the
+      # assertion sees exactly what a user installs.
+      - name: Check archive share/ data
+        shell: bash
+        run: |
+          rm -rf archive-check
+          mkdir archive-check
+          7z x -oarchive-check "${{ steps.package.outputs.archive }}" >/dev/null
+          scripts/ci/check-archive-share.sh archive-check/beamtalk-*
+          rm -rf archive-check
 
       - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
