@@ -9,6 +9,7 @@
 //! parser that validates them. Moved out of `manifest.rs` (BT-4700); the public
 //! types are re-exported from `manifest` so existing paths are unchanged.
 
+use super::git_url::validate_git_url;
 use super::hex::validate_hex_constraint;
 use super::{git_reference_from_fields, value_type_name};
 use beamtalk_core::compilation::GitReference;
@@ -260,6 +261,10 @@ fn parse_native_git_source(name: &str, fields: &toml::Table) -> Result<NativeSou
     if url.is_empty() {
         miette::bail!("Native dependency '{name}' has an empty 'git' URL");
     }
+    // The URL is written into `rebar.config` and fetched by rebar3, and a
+    // transitive dependency's manifest reaches here: apply the same screen as a
+    // regular git dependency (BT-5068).
+    validate_git_url(name, url)?;
 
     let reference = git_reference_from_fields(
         &format!("Native dependency '{name}'"),

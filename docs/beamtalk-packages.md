@@ -280,7 +280,7 @@ git = "https://github.com/jamesc/beamtalk-yaml"
 tag = "v0.2.1"
 ```
 
-Unknown top-level or per-version keys are accepted (not rejected) — the index is a separately versioned artifact served to clients this binary doesn't control, so a future index format can add fields like `yanked` or `checksum` without breaking older `beamtalk` binaries reading it.
+Unknown top-level or per-version keys are accepted (not rejected) — the index is a separately versioned artifact served to clients this binary doesn't control, so a future index format can add fields like `yanked` or `licenses` without breaking older `beamtalk` binaries reading it.
 
 ### Browsing the Registry
 
@@ -630,3 +630,11 @@ The package system is specified in these Architecture Decision Records:
 - [ADR 0100](ADR/0100-open-world-diagnostic-policy.md) — Open-world diagnostic policy; the `[diagnostics]` section's severity-override schema (Rule 3)
 
 The [Package Registry](#package-registry) section above (registry dependency resolution, `deps add`/`update` registry support, and the `beamtalk version`/`beamtalk publish` author workflow) implements the registry phase ADR 0070 explicitly deferred ("out of scope for this ADR"; see its Alternatives section, "Registry-Based Dependencies"). It shipped as Linear epic BT-2977 (BT-2978, BT-2979, BT-2980) without a dedicated ADR — the git-repository-as-index design and its module-level rationale are documented in `crates/beamtalk-cli/src/commands/deps/registry.rs`, `publish.rs`, and `version.rs`.
+
+## Security notes (BT-5068)
+
+- **Index integrity.** The index format has no `checksum` field. The integrity check for a registry dependency is the commit SHA recorded in `beamtalk.lock`, which is enforced on every fresh clone. An unknown `checksum` key in an index entry is ignored.
+- **Release URL schemes.** A release's `git` URL comes from the index, which is third-party data. Only `https://`, `ssh://` and scp-style `user@host:path` are accepted; `file://` is accepted only when the registry itself is local. `http://` and `git://` are rejected for registry releases, and produce a warning when written directly in a manifest.
+- **Native git dependencies** (`[native.dependencies]`) are screened with the same rules as `[dependencies]` git URLs at manifest parse time.
+- **`publish`** requires an exact `major.minor.patch` version, strips credentials (`user:token@`) from the `origin` URL before it is written to the index, and stages only `packages/<name>.toml` in the index clone.
+- **`rebar3` environment.** `rebar3` runs with a cleared environment plus an allowlist (PATH, HOME, locale, proxy and CA settings, `SSH_AUTH_SOCK`, non-secret `GIT_*` configuration such as `GIT_SSH_COMMAND` and `GIT_ASKPASS`, rebar/hex/Erlang and C-toolchain variables), so native dependency build code does not see unrelated secrets.

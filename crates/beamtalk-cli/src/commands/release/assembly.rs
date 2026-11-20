@@ -107,6 +107,21 @@ fn stage_one_app(lib_dir: &Utf8Path, app: &StagedApp) -> Result<Utf8PathBuf> {
         }
     }
 
+    // `priv/` (NIF `.so`s, certificates, …) sits beside each source `ebin/`
+    // in an OTP app layout (`<app>/ebin`, `<app>/priv`) — copy it so
+    // `code:priv_dir/1` resolves in the release (BT-5072). Only apps whose
+    // source ebin has a sibling `priv/` get one.
+    let app_dir = lib_dir.join(format!("{}-{}", app.name, app.vsn));
+    for src in &app.source_ebins {
+        let Some(priv_src) = src.parent().map(|p| p.join("priv")) else {
+            continue;
+        };
+        if priv_src.is_dir() {
+            copy_dir_recursive(&priv_src, &app_dir.join("priv"))
+                .wrap_err_with(|| format!("Failed to stage '{priv_src}' into '{app_dir}/priv'"))?;
+        }
+    }
+
     Ok(dest)
 }
 
