@@ -107,6 +107,8 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
             end of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
+                <{'ext', InhExtOwner}> when 'true' ->
+                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@object')
                 <_InhSlow> when 'true' ->
                     case call 'beamtalk_extensions':'lookup'('MultiExprTest', Selector) of
                         <{'ok', ExtFun, _ExtOwner}> when 'true' ->

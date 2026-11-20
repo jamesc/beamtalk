@@ -118,6 +118,8 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
             case call 'beamtalk_dispatch':'inherited_target'('TypedPoint', Selector) of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
+                <{'ext', InhExtOwner}> when 'true' ->
+                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@value')
                 <_InhSlow> when 'true' ->
                     case call 'beamtalk_extensions':'lookup'('TypedPoint', Selector) of
                         <{'ok', ExtFun, _ExtOwner}> when 'true' ->

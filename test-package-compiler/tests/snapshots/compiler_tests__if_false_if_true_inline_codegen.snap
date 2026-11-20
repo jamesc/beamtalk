@@ -153,6 +153,8 @@ call 'beamtalk_message_dispatch':'send'(_flag@57, 'ifFalse:ifTrue:', [_falseBloc
             end of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
+                <{'ext', InhExtOwner}> when 'true' ->
+                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@value')
                 <_InhSlow> when 'true' ->
                     case call 'beamtalk_extensions':'lookup'('IfFalseIfTrueProbe', Selector) of
                         <{'ok', ExtFun, _ExtOwner}> when 'true' ->

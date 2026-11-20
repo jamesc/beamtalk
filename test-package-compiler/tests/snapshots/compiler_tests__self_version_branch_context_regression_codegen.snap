@@ -104,6 +104,8 @@ let _InitMap@2 = call 'maps':'new'() in let _Packed@3 = call 'maps':'put'('__loc
             end of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
+                <{'ext', InhExtOwner}> when 'true' ->
+                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@test_case')
                 <_InhSlow> when 'true' ->
                     case call 'beamtalk_extensions':'lookup'('SelfVersionBranchContextRegressionTest', Selector) of
                         <{'ok', ExtFun, _ExtOwner}> when 'true' ->

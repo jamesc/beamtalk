@@ -130,6 +130,8 @@ This interleaved ordering ensures that:
 
 An extension cannot override a method defined in the class body — it can only add new selectors or override inherited methods.
 
+**Lookup order at any depth (BT-5002):** lookup walks the superclass chain from the receiver's class. On the receiver's own class a compiled method beats an extension (above). On every ancestor, an extension on that ancestor takes precedence over that ancestor's compiled method, and the first class that has the selector by either route wins. So an extension on a class replaces that class's compiled method for every class below it, however deep, for actors, value types (see the exception) and class-side sends alike, whether it was installed before or after the receiver's class was first used; a nearer class's own method or extension beats a farther extension. One known exception (BT-5060): a value receiver whose *direct* superclass compiles the selector takes the one-hop route to that superclass's compiled `dispatch/3` and skips an extension on that superclass, at any depth. Only an extension on the direct superclass itself is skipped; where the direct superclass does not compile the selector, an extension on a farther ancestor is honoured. The one consequence to accept knowingly: an extension on `Actor` can replace the sealed intrinsics `continueWith:`, `stopWith:` and the default `terminate:` for every actor class. Forbidding that would be a separate change (refuse the registration).
+
 ### 4. Compile-Time Analysis: Conflict Detection and Type Metadata
 
 A compile-time analysis pass runs during `just build` to provide static guarantees without changing the runtime:

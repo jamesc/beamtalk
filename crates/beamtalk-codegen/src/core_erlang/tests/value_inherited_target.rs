@@ -49,6 +49,10 @@ fn value_default_arm_asks_the_inherited_verdict_first() {
             && slow.contains("call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)"),
         "every other verdict keeps the extension lookup and superclass delegation. Got:\n{slow}"
     );
+    assert!(
+        arm.contains("<{'ext', InhExtOwner}> when 'true' ->"),
+        "BT-5002: an owner-extension verdict calls the extension. Got:\n{arm}"
+    );
     assert_eq!(
         arm.matches("InhModule:'dispatch'").count(),
         1,

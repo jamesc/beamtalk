@@ -307,6 +307,11 @@ fn value_default_arm(
     one_hop: &[String],
     super_module: &str,
 ) -> Document<'static> {
+    // BT-5002: a `{'ext', Owner}` verdict (the owner of the selector has an
+    // extension, which replaces its compiled method) calls the extension. Every
+    // other verdict, `slow` and the one-hop selectors below included, keeps the
+    // unchanged route, so the common inherited send is byte for byte what it
+    // was.
     let ask = docvec![
         "call 'beamtalk_dispatch':'inherited_target'(",
         leaf::atom(class_name.to_string()),
@@ -342,6 +347,10 @@ fn value_default_arm(
         " of\n",
         "                <{'value', _InhOwner, InhModule}> when 'true' ->\n",
         "                    call InhModule:'dispatch'(Selector, Args, Self)\n",
+        "                <{'ext', InhExtOwner}> when 'true' ->\n",
+        "                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, ",
+        leaf::atom(super_module.to_string()),
+        ")\n",
         "                <_InhSlow> when 'true' ->\n",
         "                    case call 'beamtalk_extensions':'lookup'(",
         leaf::atom(class_name.to_string()),

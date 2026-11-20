@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5002: root of the actor hierarchy in extension_deep_hierarchy_test.bt.
+// It compiles `greet` (and a class-side `kind`), which the test then shadows
+// with an extension registered on this class.
+
+Actor subclass: Bt5002ActorBase
+
+  class kind -> Symbol => #compiledBaseKind
+
+  greet -> Symbol => #compiledBase

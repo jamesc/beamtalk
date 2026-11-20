@@ -109,6 +109,8 @@ let _temp@35 = _coll@33 in let _temp@36 = case call 'erlang':'is_list'(_temp@35)
             end of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
+                <{'ext', InhExtOwner}> when 'true' ->
+                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@value')
                 <_InhSlow> when 'true' ->
                     case call 'beamtalk_extensions':'lookup'('BareVal', Selector) of
                         <{'ok', ExtFun, _ExtOwner}> when 'true' ->
