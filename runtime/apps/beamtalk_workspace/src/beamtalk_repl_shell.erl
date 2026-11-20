@@ -242,9 +242,16 @@ row. Re-attaching (a `resume`) within that period cancels the countdown.
 A cast, so a client that races a dying shell never crashes; ordering with a later
 `lifecycle_state/1` call from the same process is preserved.
 """.
--spec attach(pid(), pid()) -> ok.
+-spec attach(pid(), pid()) -> ok | gone.
 attach(SessionPid, ClientPid) when is_pid(ClientPid) ->
-    gen_server:cast(SessionPid, {attach, ClientPid}).
+    %% A call, not a cast (BT-5084): a shell whose idle timeout is already queued
+    %% stops before it handles the attach, and the caller must learn that instead
+    %% of being told `session-started` for a session that is about to disappear.
+    try
+        gen_server:call(SessionPid, {attach, ClientPid}, 5000)
+    catch
+        exit:_ -> gone
+    end.
 
 -doc """
 How the idle monitor should see this session (BT-5012):
@@ -269,16 +276,28 @@ lifecycle_state(SessionPid, Timeout) ->
 -doc """
 How long a detached session stays resumable before it is stopped, in seconds.
 
-Application env `session_idle_seconds` of `beamtalk_workspace`; defaults to 4 hours
-(the same as the workspace idle timeout).
+Settable (BT-5084), first match wins: application env `session_idle_seconds` of
+`beamtalk_workspace` (`sys.config`), then the `BEAMTALK_SESSION_IDLE_SECONDS`
+environment variable of the workspace node, then the default of 4 hours (the same
+as the workspace idle timeout). A session that has never had a client attached
+(`clone`, a dist-attached LiveView) is bounded the same way, counted from its
+last eval.
 """.
 -spec session_idle_seconds() -> non_neg_integer().
 session_idle_seconds() ->
-    case
-        application:get_env(beamtalk_workspace, session_idle_seconds, ?DEFAULT_SESSION_IDLE_SECONDS)
-    of
-        N when is_integer(N), N >= 0 -> N;
-        _ -> ?DEFAULT_SESSION_IDLE_SECONDS
+    case application:get_env(beamtalk_workspace, session_idle_seconds) of
+        {ok, N} when is_integer(N), N >= 0 ->
+            N;
+        _ ->
+            case os:getenv("BEAMTALK_SESSION_IDLE_SECONDS") of
+                false ->
+                    ?DEFAULT_SESSION_IDLE_SECONDS;
+                Str ->
+                    case string:to_integer(Str) of
+                        {N, ""} when N >= 0 -> N;
+                        _ -> ?DEFAULT_SESSION_IDLE_SECONDS
+                    end
+            end
     end.
 
 -ifdef(TEST).
@@ -365,12 +384,17 @@ init({SessionId, Meta}) when is_map(Meta) ->
     beamtalk_class_registry:ensure_pg_started(),
     pg:join(beamtalk_repl_shells, self()),
 
+    %% BT-5084: trap exits so a supervisor `shutdown` (the `close` op) runs
+    %% terminate/2, which kills a running eval worker instead of orphaning it.
+    process_flag(trap_exit, true),
+    touch_unattached(),
     {ok, {SessionId, State0c, undefined}}.
 
 handle_call({eval, Expression}, From, {SessionId, State, undefined}) ->
     %% Spawn eval in a monitored worker process so it can be interrupted
     Self = self(),
     SessionMeta = beamtalk_repl_state:get_client_meta(State),
+    touch_unattached(),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
         %% ADR 0081: seed the worker process context so primitives that
         %% read it (Session current / Workspace currentSession) see this session.
@@ -382,6 +406,7 @@ handle_call({eval, Expression}, From, {SessionId, State, undefined}) ->
 handle_call({eval_trace, Expression}, From, {SessionId, State, undefined}) ->
     Self = self(),
     SessionMeta = beamtalk_repl_state:get_client_meta(State),
+    touch_unattached(),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
         %% ADR 0081: seed worker process context (same as the eval path).
         seed_session_context(Self, SessionId, SessionMeta),
@@ -445,6 +470,9 @@ handle_call(get_bindings, _From, {SessionId, State, Worker}) ->
 handle_call(get_alias_table, _From, {SessionId, State, Worker}) ->
     AliasTable = beamtalk_repl_state:get_alias_table(State),
     {reply, {ok, AliasTable}, {SessionId, State, Worker}};
+handle_call({attach, ClientPid}, _From, FullState) ->
+    attach_client(ClientPid),
+    {reply, ok, FullState};
 handle_call(get_session_id, _From, {SessionId, State, Worker}) ->
     %% ADR 0081 Phase 7: answered in any worker state so
     %% liveSessions/0 enumeration never blocks on a mid-eval shell.
@@ -556,6 +584,7 @@ handle_call(_Request, _From, State) ->
 handle_cast({eval_async, Expression, Subscriber}, {SessionId, State, undefined}) ->
     Self = self(),
     SessionMeta = beamtalk_repl_state:get_client_meta(State),
+    touch_unattached(),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
         %% ADR 0081: seed worker process context on the streaming path too
         %% so Session current behaves identically to the synchronous eval path.
@@ -586,6 +615,7 @@ handle_cast(
     %% / {script_exit, …} branch) applies unchanged.
     Self = self(),
     SessionMeta = beamtalk_repl_state:get_client_meta(State),
+    touch_unattached(),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
         seed_session_context(Self, SessionId, SessionMeta),
         Result = beamtalk_repl_eval:do_dispatch(
@@ -606,9 +636,6 @@ handle_cast(
         <<"Use Ctrl-C to interrupt the current evaluation.">>
     ),
     Subscriber ! {eval_error, Err, <<>>, []},
-    {noreply, FullState};
-handle_cast({attach, ClientPid}, FullState) ->
-    attach_client(ClientPid),
     {noreply, FullState};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -764,6 +791,20 @@ current_lifecycle_state(Worker) ->
         {false, false, _} -> unattached;
         {false, true, undefined} -> detached;
         {false, true, _} -> busy
+    end.
+
+%% A session no client ever attached to has no detach to start a countdown, so
+%% it would live forever (BT-5084). Give it the same idle bound, counted from its
+%% start and pushed back by each eval so a busy dist-attached session is kept.
+-spec touch_unattached() -> ok.
+touch_unattached() ->
+    case lifecycle() of
+        #{clients := Clients, ever_attached := false} when map_size(Clients) =:= 0 ->
+            Deadline = erlang:monotonic_time(millisecond) + session_idle_seconds() * 1000,
+            put(?LIFECYCLE_KEY, (lifecycle())#{deadline => Deadline}),
+            schedule_idle_timeout();
+        _ ->
+            ok
     end.
 
 -spec attach_client(pid()) -> ok.

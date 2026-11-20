@@ -57,6 +57,16 @@ defmodule BtAttachWeb.WorkspaceLiveLifecycleTest do
     def start_session(_session_id, _meta), do: {:error, {:unreachable, :nodedown}}
   end
 
+  defmodule GoneOnAttachClient do
+    @moduledoc false
+    use BtAttachWeb.StubClientOverrides
+
+    def start_session(session_id, meta), do: SessionProbe.record(session_id, meta)
+
+    # The workspace answers `gone` (BT-5084): the session stopped before the attach.
+    def attach_session(_session_pid, _client_pid), do: {:error, :gone}
+  end
+
   defmodule NoTranscriptClient do
     @moduledoc false
     use BtAttachWeb.StubClientOverrides
@@ -192,6 +202,27 @@ defmodule BtAttachWeb.WorkspaceLiveLifecycleTest do
       assert [%{session_id: ^first_id}, %{session_id: second_id}] = sessions()
       assert second_id != first_id
       # The stale entry was discarded and replaced by the fresh session.
+      assert {:resumed, ^second_id, _pid} = SessionRegistry.checkout(token)
+    end
+
+    test "a resume whose session answers `gone` to the attach starts a fresh session", %{
+      conn: conn
+    } do
+      # BT-5084: the session passed the liveness probe but stopped (idle period
+      # ran out) before the attach; the reconnect must not bind to it.
+      put_workspace_node(to_string(node()))
+      Application.put_env(:bt_attach, :workspace_client, GoneOnAttachClient)
+      on_exit(fn -> Application.delete_env(:bt_attach, :workspace_client) end)
+      token = unique_token()
+
+      {:ok, _first, _html} = conn |> connect_with(token) |> live("/")
+      assert [%{session_id: first_id}] = sessions()
+
+      {:ok, _second, html} = build_conn() |> connect_with(token) |> live("/")
+
+      assert html =~ "Beamtalk Workspace"
+      assert [%{session_id: ^first_id}, %{session_id: second_id}] = sessions()
+      assert second_id != first_id
       assert {:resumed, ^second_id, _pid} = SessionRegistry.checkout(token)
     end
 
