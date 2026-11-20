@@ -61,6 +61,48 @@ fn release_requires_application_supervisor() {
         .stderr(contains("beamtalk build --escript"));
 }
 
+/// BT-5071: a pre-existing `--output` that merely contains `lib/` is not a
+/// previous release; it must be refused and left untouched.
+#[test]
+fn release_output_with_only_lib_dir_is_refused_and_untouched_test() {
+    let project = cli_common::fixture_project();
+    make_releasable(project.path());
+    let out = project.path().join("not-a-release");
+    std::fs::create_dir_all(out.join("lib")).unwrap();
+    std::fs::write(out.join("sentinel.txt"), "keep me").unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--output"])
+        .arg(&out)
+        .timeout(std::time::Duration::from_mins(3))
+        .assert()
+        .failure()
+        .stderr(contains(".beamtalk-release"));
+
+    assert!(out.join("sentinel.txt").is_file(), "sentinel must survive");
+    assert!(out.join("lib").is_dir());
+}
+
+/// BT-5071: `--output .` (the project root) is refused even with
+/// `--force-output`.
+#[test]
+fn release_output_project_root_is_refused_even_with_force_test() {
+    let project = cli_common::fixture_project();
+    make_releasable(project.path());
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--output", ".", "--force-output"])
+        .timeout(std::time::Duration::from_mins(3))
+        .assert()
+        .failure()
+        .stderr(contains("project root"));
+
+    assert!(project.path().join("beamtalk.toml").is_file());
+    assert!(project.path().join("src").is_dir());
+}
+
 #[test]
 #[allow(clippy::too_many_lines)] // one straight-line assertion per staged-tree artifact
 fn release_builds_staged_tree_and_boot_artifacts() {
