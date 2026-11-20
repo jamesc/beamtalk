@@ -15,6 +15,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # The dtolnay action set this for every job; keep it now that rust-toolchain.toml installs the toolchain.
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   fuzz:
@@ -255,9 +257,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
@@ -309,9 +310,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust stable toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
@@ -383,9 +383,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust stable toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2

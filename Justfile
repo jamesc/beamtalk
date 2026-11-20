@@ -977,7 +977,7 @@ lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-repo
 # The repo-wide lint-* recipes and script tests that need only the toolchain CI's
 # lint job has. `lint` runs this group and ci.yml's lint job runs it by name, so
 # the two cannot diverge (BT-5032). Add a new lint here, not to either list.
-lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns test-lint-stamp test-refresh-edge test-determine-version test-publish-rolling-release test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly test-workflow-paths
+lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns test-lint-stamp test-refresh-edge test-determine-version test-publish-rolling-release test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly test-workflow-paths test-ci-ok
 
 # Test (BT-5032): every repo path literal in a workflow's `paths:` filter or the
 # ci.yml `changes` job's `matches` gate names something that exists, so a renamed
@@ -985,6 +985,12 @@ lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-enc
 test-workflow-paths:
     @python3 scripts/ci/check_workflow_paths.py
     @cd scripts/ci && python3 -m unittest -q test_check_workflow_paths
+
+# Test (BT-5086): ci.yml's `ci-ok` aggregate job runs always() and needs every
+# other job, so a job added to ci.yml cannot be left out of the one required check.
+test-ci-ok:
+    @python3 scripts/ci/ci_ok.py check
+    @cd scripts/ci && python3 -m unittest -q test_ci_ok
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
