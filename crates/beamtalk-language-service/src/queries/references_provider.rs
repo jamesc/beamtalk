@@ -36,7 +36,9 @@ use beamtalk_core::ast::{
     ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAliasDefinition,
     TypeAnnotation, TypeParamDecl,
 };
-use beamtalk_core::ast_walker::{WalkNode, walk_expression_and_patterns, walk_sends};
+use beamtalk_core::ast_walker::{
+    WalkNode, for_each_root_expr, walk_expression_and_patterns, walk_sends,
+};
 use beamtalk_core::source_analysis::Span;
 use camino::Utf8PathBuf;
 
@@ -91,26 +93,11 @@ pub fn find_class_references<'a>(
             collect_method_signature_refs(&smd.method, class_name, file_path, &mut results);
         }
 
-        // Expressions: identifiers and class references
-        for stmt in &module.expressions {
-            collect_class_refs(&stmt.expression, class_name, file_path, &mut results);
-        }
-
-        // Class method bodies
-        for class in &module.classes {
-            for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for stmt in &method.body {
-                    collect_class_refs(&stmt.expression, class_name, file_path, &mut results);
-                }
-            }
-        }
-
-        // Standalone method bodies
-        for smd in &module.method_definitions {
-            for stmt in &smd.method.body {
-                collect_class_refs(&stmt.expression, class_name, file_path, &mut results);
-            }
-        }
+        // Every expression root: statements, method bodies, state and
+        // class-variable defaults, protocol provided-method bodies (BT-5079).
+        for_each_root_expr(module, |expr| {
+            collect_class_refs(expr, class_name, file_path, &mut results);
+        });
     }
 
     results

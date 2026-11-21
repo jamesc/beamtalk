@@ -57,9 +57,11 @@ worst case of 290s (`just test-refresh-edge` asserts the sum stays under 300s).
 The small fetches are size-capped (`--max-filesize`), the `Last-Modified` value
 is stripped of control characters before it reaches the status line, and a
 symlinked `<prefix>/.beamtalk-refresh.lock` is refused instead of written
-through. `install.sh` extracts into the prefix in place and writes the marker
-last, so an install that is interrupted leaves the old marker and is retried at
-the next session start; it is self-healing, not atomic.
+through. `install.sh` extracts into a staging directory inside the prefix, swaps the
+beamtalk-owned subtrees (`lib/beamtalk`, `share/beamtalk`) and the binaries into
+place, and writes the marker last, so an install that is interrupted leaves the
+old marker and is retried at the next session start; it is self-healing, not
+atomic. It refuses to install when the checksum is missing or wrong.
 
 Further hardening (BT-4841): every protected fetch pins redirects with
 `--proto-redir '=https'`; `--prefix=PATH` is accepted; `BEAMTALK_INSTALLER`
