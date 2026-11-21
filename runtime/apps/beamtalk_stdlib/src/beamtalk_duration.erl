@@ -55,6 +55,9 @@ Erlang BIFs without dispatching (ADR 0002).
 %% Entry points for (Erlang beamtalk_duration) dispatch
 
 -export([add/2, subtract/2, multiply/2]).
+
+%% Shared call-boundary normaliser for time parameters (BT-5090).
+-export([to_timeout/1]).
 -export([lt/2, gt/2, lte/2, gte/2]).
 
 %% Exported for white-box tests only (no production caller).
@@ -119,6 +122,23 @@ fromString(Str) when is_binary(Str) ->
     end;
 fromString(_) ->
     beamtalk_error:raise_type_error('Duration', 'fromString:', <<"Argument must be a String">>).
+
+%%% ============================================================================
+%%% Time-parameter normaliser
+%%% ============================================================================
+
+-doc """
+Normalise a time parameter once, at the call boundary (BT-5090).
+
+A `Duration` becomes its milliseconds; an Integer and `infinity` pass through
+unchanged, and so does anything else, so the callee's existing validation (and
+its error) is untouched. Every stdlib time parameter typed `Integer | Duration`
+or `Timeout | Duration` converts with this one function rather than repeating
+the `Duration` clause.
+""".
+-spec to_timeout(term()) -> term().
+to_timeout(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) -> Ms;
+to_timeout(Other) -> Other.
 
 %%% ============================================================================
 %%% Instance Methods — Conversions

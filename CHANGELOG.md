@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Added: time parameters accept a `Duration`; `Enumerable` and `Ets` gain the `Collection` / `Dictionary` queries (BT-5090).** No existing call changes behaviour. One source-compatibility case: see the `Enumerable` bullet.
+  - Added: `Duration` is accepted (an Integer still means milliseconds, `#infinity` is still allowed where it was) by `Announcer announceAndWait:timeout:`, `SystemAnnouncer announceAndWait:timeout:`, `OS run:timeout:`, `Supervisor stopWithin:`, `DynamicSupervisor stopWithin:` and `TimeoutProxy setTimeoutMs:`. A `Duration` is converted once at the call; a negative one fails exactly as a negative Integer does.
+  - Added: `Enumerable` provides `reject:`, `allSatisfy:`, `noneSatisfy:`, `includes:` and `detect:`, each forwarded to `elements`. A class that defines one of these itself keeps its own.
+  - **Compile error for one pattern (ADR 0127 §3a):** a class that `uses: Enumerable` and *inherits* one of those five selectors from its superclass (for example `Collection subclass: X` with `uses: Enumerable(E)`) now fails with "Enumerable provides `includes:`, which X would otherwise inherit". Nothing in the stdlib or its tests does this. Do: write `uses: Enumerable overriding: #(#includes:)` to take Enumerable's version, or `excluding: #(#includes:)` to keep the inherited one.
+  - Added: `Ets at:ifPresent:ifAbsent:` (one lookup; a stored `nil` is present) and `Ets doWithKey:` (same as `keysAndValuesDo:`). `Ets do:` already existed through `Enumerable`.
+  - Documented: `Ets at:` answers `nil` for a missing key while `Dictionary at:` raises `key_error`, on purpose; both class docs say so.
+  - Not changed, by design: `perform:withArguments:timeout:` and `Actor stopWith:timeout:` stay `Timeout`-only (send path / lifecycle primitive), and `RetryPolicy`'s generated `withInitialInterval:` / `withMaximumInterval:` stay Integer-only. See `docs/development/stdlib-api-consistency.md`.
 - **Added: one spelling per concept across the stdlib; `Array` reads like `List` (BT-5090).** No selector is removed and no existing call changes behaviour.
   - Added: `Array reversed`, `indexOf:`, `take:`, `drop:`, `sort` and `sort:`, each answering what the `List` selector answers (an Array, or an index). `Array` still has no `add:` or `addFirst:`. They call `beamtalk_array` helpers directly, so no existing send path changes.
   - Added: `String reversed`, `Duration asDays`, `Logger warning:` and `Logger warning:metadata:`. They are the canonical spellings, matching `List reversed`, `asHours` and the `#warning` level.
