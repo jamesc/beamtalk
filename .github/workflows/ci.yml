@@ -254,19 +254,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        # The channel and components come from rust-toolchain.toml alone (BT-5086).
-        run: rustup toolchain install --profile minimal --no-self-update
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+          erlang-cache: 'true'
 
       # Node.js for fmt-check-js
       - name: Setup Node.js
@@ -275,23 +266,6 @@ jobs:
           node-version-file: .tool-versions
           cache: 'npm'
           cache-dependency-path: editors/vscode/package-lock.json
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
 
       - name: Check Cargo.lock is up to date
         # The root Cargo.lock is committed; fail if Cargo.toml changed without it.
@@ -367,40 +341,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        # The channel and components come from rust-toolchain.toml alone (BT-5086).
-        run: rustup toolchain install --profile minimal --no-self-update
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
 
       - name: Install cargo-nextest
         uses: ./.github/actions/install-nextest
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-test
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
 
       # build first: the CLI integration tests exec the real `beamtalk` binary
       # against the built runtime and stdlib.
@@ -506,27 +454,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        # The channel and components come from rust-toolchain.toml alone (BT-5086).
-        run: rustup toolchain install --profile minimal --no-self-update
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-release-check
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          workspaces: ". -> target/release-check"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-shared-key: linux-release-check
+          rust-cache-workspaces: . -> target/release-check
 
       - name: Check release build (warnings denied, no test-only code)
         run: just check-release-build
@@ -584,37 +516,11 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Install Rust toolchain
-        # The channel and components come from rust-toolchain.toml alone (BT-5086).
-        run: rustup toolchain install --profile minimal --no-self-update
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-test
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
 
       - name: Compare snapshot-only and full .core output
         run: just core-diff-modes
@@ -647,18 +553,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        # The channel and components come from rust-toolchain.toml alone (BT-5086).
-        run: rustup toolchain install --profile minimal --no-self-update
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          erlang: 'false'
 
       # A PR gets only the newest OTP in the window (`last` after the numeric
       # sort); a push to main gets the full window. See the comment above
@@ -703,47 +601,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        # The channel and components come from rust-toolchain.toml alone (BT-5086).
-        run: rustup toolchain install --profile minimal --no-self-update
-
-      # erlef/setup-beam errors if both `version-file` (which has its own
-      # `erlang` line) and an explicit `otp-version` are given, so read just
-      # `rebar3`'s pinned version out of .tool-versions and pass both
-      # versions explicitly — `otp-version` varies per matrix leg, `rebar3`
-      # stays the repo's single pinned version on every leg.
-      - name: Read rebar3 version from .tool-versions
-        id: tool-versions
-        run: echo "rebar3=$(awk '/^rebar /{print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
           otp-version: ${{ matrix.otp }}
-          rebar3-version: ${{ steps.tool-versions.outputs.rebar3 }}
-          version-type: loose
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-test
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
+          erlang-cache-infix: -otp${{ matrix.otp }}
 
       - name: Build
         run: just build
@@ -792,47 +656,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        # The channel and components come from rust-toolchain.toml alone (BT-5086).
-        run: rustup toolchain install --profile minimal --no-self-update
-
-      # erlef/setup-beam errors if both `version-file` (which has its own
-      # `erlang` line) and an explicit `otp-version` are given, so read just
-      # `rebar3`'s pinned version out of .tool-versions and pass both
-      # versions explicitly — `otp-version` varies per matrix leg, `rebar3`
-      # stays the repo's single pinned version on every leg.
-      - name: Read rebar3 version from .tool-versions
-        id: tool-versions
-        run: echo "rebar3=$(awk '/^rebar /{print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
           otp-version: ${{ matrix.otp }}
-          rebar3-version: ${{ steps.tool-versions.outputs.rebar3 }}
-          version-type: loose
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-test
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
+          erlang-cache-infix: -otp${{ matrix.otp }}
 
       - name: Build
         run: just build
@@ -869,40 +699,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        # The channel and components come from rust-toolchain.toml alone (BT-5086).
-        run: rustup toolchain install --profile minimal --no-self-update
-
-      # erlef/setup-beam errors if both `version-file` (which has its own
-      # `erlang` line) and an explicit `otp-version` are given, so read just
-      # `rebar3`'s pinned version out of .tool-versions and pass both
-      # versions explicitly — `otp-version` varies per matrix leg, `rebar3`
-      # stays the repo's single pinned version on every leg.
-      - name: Read rebar3 version from .tool-versions
-        id: tool-versions
-        run: echo "rebar3=$(awk '/^rebar /{print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
           otp-version: ${{ matrix.otp }}
-          rebar3-version: ${{ steps.tool-versions.outputs.rebar3 }}
-          version-type: loose
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
+          erlang-cache-infix: -otp${{ matrix.otp }}
 
       - name: Cache Dialyzer PLT
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
@@ -912,13 +715,6 @@ jobs:
           key: ${{ runner.os }}-dialyzer-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}
           restore-keys: |
             ${{ runner.os }}-dialyzer-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-test
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         run: just build
@@ -956,37 +752,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        # The channel and components come from rust-toolchain.toml alone (BT-5086).
-        run: rustup toolchain install --profile minimal --no-self-update
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-test
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
 
       - name: Build
         id: build
@@ -1059,25 +829,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        # The channel and components come from rust-toolchain.toml alone (BT-5086).
-        run: rustup toolchain install --profile minimal --no-self-update
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: install-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-key-prefix: install
 
       - name: Smoke test install (clean checkout)
         run: just test-install
