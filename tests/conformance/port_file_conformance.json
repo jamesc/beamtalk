@@ -1,5 +1,12 @@
 {
   "description": "Workspace `port` file: `PORT` on the first line, an optional NONCE on the second. `port` is null when the content is invalid. Cases both parsers agree on; read by beamtalk_workspace::parse_port_file (Rust) and parsePortFileContent in editors/vscode/src/workspaceClient.ts (TypeScript).",
+  "known_divergences": [
+    { "content": "0\n", "rust": "accepts (port 0)", "typescript": "rejects (port < 1)" },
+    { "content": "+4040\n", "rust": "accepts (u16::from_str allows a plus sign)", "typescript": "rejects (digits only)" },
+    { "content": "\n4040\n", "rust": "rejects (first line is empty)", "typescript": "accepts (trims the whole file first)" },
+    { "content": "  4040  \nabc\n", "rust": "accepts", "typescript": "rejects (trailing spaces on the port line survive the whole-file trim)" }
+  ],
+  "known_divergences_note": "Inputs the Erlang runtime never writes, on which the two parsers disagree. Not asserted by either test and not fixed here (BT-5092 is a refactor); settle the intended contract before adding them to cases. The Elixir front does not read the port file.",
   "cases": [
     { "name": "port and nonce", "content": "4040\nabc\n", "port": 4040, "nonce": "abc" },
     { "name": "port only, trailing newline", "content": "4040\n", "port": 4040, "nonce": null },
