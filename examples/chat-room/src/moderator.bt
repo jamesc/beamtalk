@@ -9,10 +9,10 @@
 /// 3. **New methods** — kick: and mute: for moderation actions
 ///
 /// Usage in REPL:
-///   > :load examples/chat-room/message.bt
-///   > :load examples/chat-room/chat_room.bt
-///   > :load examples/chat-room/chat_member.bt
-///   > :load examples/chat-room/moderator.bt
+///   > Workspace load: "examples/chat-room/src/message.bt"
+///   > Workspace load: "examples/chat-room/src/chat_room.bt"
+///   > Workspace load: "examples/chat-room/src/chat_member.bt"
+///   > Workspace load: "examples/chat-room/src/moderator.bt"
 ///
 /// ## Examples
 /// ```beamtalk

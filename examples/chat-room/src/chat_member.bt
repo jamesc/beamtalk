@@ -11,9 +11,9 @@
 ///
 /// Try it in the REPL:
 ///   $ beamtalk repl
-///   > :load examples/chat-room/message.bt
-///   > :load examples/chat-room/chat_room.bt
-///   > :load examples/chat-room/chat_member.bt
+///   > Workspace load: "examples/chat-room/src/message.bt"
+///   > Workspace load: "examples/chat-room/src/chat_room.bt"
+///   > Workspace load: "examples/chat-room/src/chat_member.bt"
 ///   > room := ChatRoom spawn
 ///   > alice := ChatMember spawn
 ///   > alice setName: "Alice"

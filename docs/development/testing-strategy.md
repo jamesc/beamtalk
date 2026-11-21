@@ -14,7 +14,6 @@ Beamtalk uses a multi-layered testing strategy covering the Rust compiler, Erlan
 | **Stdlib Tests** | **EUnit (compiled)** | **`stdlib/bootstrap-test/*.btscript`** | **Bootstrap primitive validation (no REPL needed)** |
 | **BUnit Tests** | **EUnit (TestCase)** | **`stdlib/test/*.bt`** | **Language feature tests via TestCase (`beamtalk test`)** |
 | Runtime Unit Tests | EUnit | `runtime/apps/beamtalk_runtime/test/*_tests.erl` | Test Erlang runtime modules |
-| Integration Tests | EUnit + daemon | `runtime/apps/beamtalk_runtime/test/*_integration_tests.erl` | Test REPL ↔ daemon communication |
 | Codegen Simulation Tests | EUnit | `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl` | Simulate compiler output, test runtime behavior |
 | REPL Protocol Tests (Rust) | Rust + REPL | `tests/repl-protocol/` | REPL TCP-protocol integration tests |
 | Parity Tests | Rust + REPL/MCP/CLI/LSP | `tests/parity/` (cases) + `crates/beamtalk-parity-tests/` (harness) | Cross-surface equivalence checks (BT-2077) |
@@ -348,7 +347,7 @@ Expression tests for bootstrap-critical primitives that TestCase transitively de
 
 **Command:** `just test-stdlib`
 
-**How it works:** The `beamtalk test-stdlib` command compiles each `.bt` file, parses `// =>` assertion comments, generates a thin EUnit wrapper, and runs via `eunit:test/1`. No REPL daemon is involved — tests compile and execute directly on BEAM.
+**How it works:** The `beamtalk test-stdlib` command compiles each `.bt` file, parses `// =>` assertion comments, generates a thin EUnit wrapper, and runs via `eunit:test/1`. No REPL or workspace is involved — tests compile and execute directly on BEAM.
 
 **Test file format** (same `// =>` format as E2E):
 ```beamtalk
@@ -586,29 +585,7 @@ shared helpers:
 
 ### 6. Integration Tests
 
-Test the interaction between the Rust compiler daemon and Erlang runtime.
-
-**Location:** `runtime/apps/beamtalk_runtime/test/beamtalk_repl_integration_tests.erl`
-
-**Requires:** Compiler daemon running (`beamtalk daemon start`)
-
-**What they test:**
-- TCP connection to daemon
-- Expression compilation via daemon
-- Hot code loading
-- Error handling across Rust/Erlang boundary
-
-**Running:**
-```bash
-# Terminal 1: Start daemon
-./target/debug/beamtalk daemon start --foreground
-
-# Terminal 2: Run tests
-cd runtime
-rebar3 eunit --module=beamtalk_repl_integration_tests
-```
-
-**CI runs these** with the daemon started in background mode.
+There is no separate compiler daemon and no `*_integration_tests.erl` suite. The compiler runs in-process for batch commands and as an OTP Port (`beamtalk_compiler_server`) inside a workspace, so Rust/Erlang integration is covered by the suites above: the compiler-port EUnit tests under `runtime/apps/beamtalk_compiler/test/`, the REPL protocol tests (section 8) and the parity tests under `tests/parity/`.
 
 ---
 
@@ -852,7 +829,7 @@ with no cache is unchanged: it builds the base side itself.
 
 ### 8. REPL Protocol Tests
 
-REPL TCP-protocol integration tests that require a running REPL daemon. (Previously called "E2E tests" — renamed in BT-2085 because they exercise one specific surface, not "end-to-end across surfaces". Cross-surface parity tests live under `tests/parity/`.)
+REPL protocol integration tests that require a running workspace (a detached BEAM node serving the REPL WebSocket). (Previously called "E2E tests" — renamed in BT-2085 because they exercise one specific surface, not "end-to-end across surfaces". Cross-surface parity tests live under `tests/parity/`.)
 
 **Location:** `tests/repl-protocol/`
 
@@ -865,13 +842,13 @@ find tests/repl-protocol/cases -name '*.btscript' | wc -l
 
 **What they test:**
 - Workspace bindings (`Workspace bind:as:` / `Workspace bindings`) and the class-side facades that need a live workspace (`Workspace`, `Transcript recent`/`clear`)
-- REPL commands (`:load`, variable persistence)
+- REPL commands (`:sync`, variable persistence)
 - Actor auto-await behavior
 - `ERROR:` assertion patterns
-- Integration between compiler daemon and runtime
+- Integration between the compiler port and runtime
 
 **When to use REPL-protocol tests:**
-Only for tests that genuinely need the REPL daemon. Most language feature tests belong in `stdlib/test/*.bt` as BUnit tests (see section 4b).
+Only for tests that genuinely need a running workspace. Most language feature tests belong in `stdlib/test/*.bt` as BUnit tests (see section 4b).
 
 **Test file format:**
 ```smalltalk
@@ -1135,7 +1112,6 @@ Tests that manipulate process-global state (environment variables, current worki
 | `e2e` | Full E2E test with escript compilation | End-to-end language tests |
 | `env_var` | Modifying environment variables | `std::env::set_var`, `std::env::remove_var` |
 | `cwd` | Changing current working directory | `std::env::set_current_dir` |
-| `daemon_lockfile` | Manipulating `~/.beamtalk/` directory | Daemon state management |
 
 **Why named locks?**
 
@@ -1342,14 +1318,12 @@ rebar3 shell                           # Interactive debugging
 
 ### Integration test failures
 ```bash
-# Check daemon is running
+# Check a workspace node is running
 ps aux | grep beamtalk
+./target/debug/beamtalk workspace list
 
-# Check socket exists  
-ls -la ~/.beamtalk/daemon.sock
-
-# Run daemon in foreground to see output
-./target/debug/beamtalk daemon start --foreground
+# Run a node in the foreground to see output (needs epmd)
+./target/debug/beamtalk repl --foreground
 ```
 
 ---

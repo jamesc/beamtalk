@@ -193,7 +193,7 @@ c increment    // => 2
 ```
 *Iteration time for a single method edit: <100ms via hot reload. Structural changes (adding fields, new classes) still require recompilation — seconds, not minutes.*
 
-The `>>` live-patching syntax is implemented — it replaces a single method on a live class, and existing instances pick up the new code immediately on the next message send. Classes can also be reloaded from their source file via `Counter reload` or the REPL shortcut `:reload Counter`. Structural changes (new state fields, new class definitions) go through the compiler but are still faster than most file-based workflows because the BEAM reloads only the changed module.
+The `>>` live-patching syntax is implemented — it replaces a single method on a live class, and existing instances pick up the new code immediately on the next message send. Classes can also be reloaded from their source file via `Counter reload`. Structural changes (new state fields, new class definitions) go through the compiler but are still faster than most file-based workflows because the BEAM reloads only the changed module.
 
 ### 4.2 Reflection Replaces Grep
 
