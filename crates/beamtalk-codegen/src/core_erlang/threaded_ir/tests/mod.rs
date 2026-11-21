@@ -62,6 +62,7 @@ mod dual_run;
 mod ensure_catch;
 mod fold_family;
 mod fold_locals;
+mod keyed_fold;
 mod local_rebind;
 mod lower_and_render_shim;
 mod method_nlr_boundary;

@@ -19,6 +19,7 @@
 //! per-op [`FoldOp`] spec supplies the label, body kind, leading accumulator
 //! slots and post-fold epilogue.
 
+use super::super::super::threaded_ir::{self, KeyedFoldCall};
 use super::super::super::{CoreErlangGenerator, Result};
 use super::super::analysis::SELF_THREADING_FOLDS;
 use super::super::family_slots::FoldFamilySlots;
@@ -521,40 +522,6 @@ pub(in crate::core_erlang::control_flow) enum DoSource<'a> {
     DictPairs { selector: &'a str },
 }
 
-/// `lists:foldl` for a list receiver, `beamtalk_collection:keyed_foldl/5` for
-/// anything else (BT-5097): a `Dictionary` is folded over its `{K, V}` pairs and
-/// the accumulated list holds `{K, Item}` pairs, which `from_list_like/2` turns
-/// back into a `Dictionary`. `wrapped` is whether the accumulator is the
-/// `{Acc, Family...}` wrapper of a `Self`-threading fold.
-fn keyed_foldl_call_doc(
-    lambda_var: &str,
-    init_acc: Document<'static>,
-    recv_var: &str,
-    selector: &str,
-    wrapped: bool,
-    fold_result: &str,
-) -> Document<'static> {
-    docvec![
-        " in let ",
-        leaf::var(fold_result.to_string()),
-        " = case call 'erlang':'is_list'(",
-        leaf::var(recv_var.to_string()),
-        ") of <'true'> when 'true' -> ",
-        ThreadingPlan::foldl_expr_doc(lambda_var, init_acc.clone(), recv_var),
-        " <'false'> when 'true' -> call 'beamtalk_collection':'keyed_foldl'(",
-        leaf::var(lambda_var.to_string()),
-        ", ",
-        init_acc,
-        ", ",
-        leaf::var(recv_var.to_string()),
-        ", ",
-        leaf::atom(selector.to_string()),
-        ", ",
-        leaf::atom(if wrapped { "true" } else { "false" }),
-        ") end in ",
-    ]
-}
-
 /// Whether the fold selector `label` threads a value-type `Self` through its
 /// accumulator ([`SELF_THREADING_FOLDS`]); every other fold rejects a field
 /// write in its body.
@@ -793,22 +760,36 @@ impl CoreErlangGenerator {
                 safe_list_var.clone(),
             )
         };
+        let result_list = body_kind.result_list();
         let guard_selector = op.guard_selector().to_string();
-        let fold_call = |lambda: &str, init: Document<'static>, wrapped: bool, result: &str| {
-            if keyed {
-                keyed_foldl_call_doc(
-                    lambda,
-                    init,
-                    &keyed_recv_var,
-                    &guard_selector,
-                    wrapped,
-                    result,
-                )
-            } else {
-                ThreadingPlan::foldl_call_doc(lambda, init, &safe_list_var, result)
+        let keyed_fold_call = |this: &mut Self,
+                               lambda: &str,
+                               init: Document<'static>,
+                               families: bool,
+                               result: &str|
+         -> Document<'static> {
+            if !keyed {
+                return ThreadingPlan::foldl_call_doc(lambda, init, &safe_list_var, result);
             }
+            let call = KeyedFoldCall {
+                lambda: lambda.to_string(),
+                init,
+                recv: keyed_recv_var.clone(),
+                selector: guard_selector.clone(),
+                result: result.to_string(),
+                result_list,
+                families,
+                list_path: result_list.map_or_else(Vec::new, |l| {
+                    // Test-only fault injection (`keyed_fold_corpus.rs`).
+                    let wrapped = families && !fault!(KeyedFoldPathIgnoresFamilies);
+                    KeyedFoldCall::path_for(l.slot, wrapped)
+                }),
+                span: body.span,
+            };
+            let errors = threaded_ir::verify_keyed_fold_call(&call);
+            this.report_threaded_ir_verify_errors(&errors, "keyed fold call", call.span);
+            threaded_ir::render_keyed_fold_call(&call)
         };
-
         if plan.use_tuple_acc {
             let vars_doc = plan.current_vars_doc(self); // Before push_scope.
             let init_tuple_doc = tuple_init_doc(op.pads_tuple_init(), &slot_inits, vars_doc);
@@ -847,7 +828,7 @@ impl CoreErlangGenerator {
                 plan.append_repack_stateacc_doc(self, lowered.guarded_op_bracket);
             let tail = self.fold_tail_doc(epilogue.tail, epilogue.result, &stateacc, None)?;
             docs.push(docvec![
-                fold_call(&lambda_var, init_tuple_doc, false, &fold_result),
+                keyed_fold_call(self, &lambda_var, init_tuple_doc, false, &fold_result),
                 epilogue.bindings,
                 extract_doc,
                 repack_doc,
@@ -909,7 +890,7 @@ impl CoreErlangGenerator {
         let tail =
             self.fold_tail_doc(epilogue.tail, epilogue.result, &state_out, slots.as_ref())?;
         docs.push(docvec![
-            fold_call(&lambda_var, init_acc, slots.is_some(), fold_pair),
+            keyed_fold_call(self, &lambda_var, init_acc, slots.is_some(), fold_pair),
             unwrap,
             epilogue.bindings,
             "let ",

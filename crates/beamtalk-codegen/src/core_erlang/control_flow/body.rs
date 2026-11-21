@@ -194,10 +194,23 @@ impl CoreErlangGenerator {
             let frame = this.current_branch_frame();
             let mut stmts = unpack_stmts;
             stmts.extend(this.lower_foldl_body(body, plan, kind, frame)?);
+            // BT-5097: the accumulator declares the result list its kind
+            // extends, once, here; the keyed fold call reads the same
+            // `BodyKind::result_list`.
+            if let Some(ThreadedStmt::FoldAccumulator { result_list, .. }) = stmts.last_mut() {
+                if !fault!(FoldAccumulatorOmitsResultList) {
+                    *result_list = kind.result_list();
+                }
+            }
             // BT-3863: checked before `carry_fold_families` wraps the
             // accumulator in the `Self` family's `Return`.
             let mut locals_errors =
                 threaded_ir::verify_fold_locals_carried(&stmts, &mode, &plan.threaded_locals, span);
+            locals_errors.extend(threaded_ir::verify_fold_result_list_declared(
+                &stmts,
+                kind.result_list(),
+                span,
+            ));
             locals_errors.extend(threaded_ir::verify_tuple_acc_no_family(
                 &mode,
                 plan.threaded_families().as_slice().is_empty(),
@@ -355,7 +368,12 @@ impl CoreErlangGenerator {
         value: Document<'static>,
         span: Span,
     ) -> ThreadedStmt {
-        ThreadedStmt::FoldAccumulator { carry, value, span }
+        ThreadedStmt::FoldAccumulator {
+            carry,
+            value,
+            span,
+            result_list: None,
+        }
     }
 
     /// ADR 0111 Addendum 15: lowers a `whileTrue:`/`whileFalse:`/

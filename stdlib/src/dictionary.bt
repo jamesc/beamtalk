@@ -172,11 +172,6 @@ sealed typed Collection(V) subclass: Dictionary(K, V)
   /// Keep the entries whose value satisfies `block`, answering a Dictionary
   /// with the keys preserved. `block` receives the value, as in `collect:`.
   ///
-  /// Known bug (BT-5097): a literal block that writes an outer local or field
-  /// is compiled through the state-threading fold, which answers a List of
-  /// the surviving values and drops the keys. `collect:` and `reject:` have
-  /// the same gap.
-  ///
   /// ## Examples
   /// ```beamtalk
   /// #{#a => 1, #b => 2} select: [:v | v > 1]   // => #{#b => 2}

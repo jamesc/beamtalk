@@ -2557,7 +2557,7 @@ fn test_writing_fold_calls_receiver_guard_with_its_selector() {
         let (guard, selector_arg) = if matches!(*selector, "collect:" | "select:" | "reject:") {
             (
                 "'beamtalk_collection':'keyed_foldl'(",
-                format!(", '{selector}', '"),
+                format!(", '{selector}', ["),
             )
         } else {
             (

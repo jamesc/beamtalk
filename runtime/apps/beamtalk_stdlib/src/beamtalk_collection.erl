@@ -240,33 +240,43 @@ from_list_like(_Recv, List) ->
 -doc """
 The fold call of a writing `collect:`/`select:`/`reject:` over a receiver that is
 not an Erlang list (BT-5097). A `Dictionary` is folded over its `{K, V}` pairs
-with the compiled lambda; each step that adds an element to the accumulator
-list (slot 1, or slot 1 of the wrapped accumulator when `Wrapped`) records it
-under its key, so the epilogue's `from_list_like/2` rebuilds a `Dictionary`.
-Any other receiver folds over `to_list_for_threading/2`, as before.
+with the compiled lambda; after each call the one element the lambda added to
+the result list is recorded under its key, so the epilogue's `from_list_like/2`
+rebuilds a `Dictionary`. Any other receiver folds over `to_list_for_threading/2`,
+as before.
+
+`ListPath` is the element positions from the accumulator to the result list.
+It and the "adds at most one element per call" this relies on are not decided
+here: codegen builds the call from the fold kind's declared result list and
+checks both (`KeyedFoldCall`, `VerifyError::KeyedFoldPathMismatch`).
 """.
--spec keyed_foldl(fun((term(), term()) -> term()), term(), term(), atom(), boolean()) -> term().
-keyed_foldl(Lambda, Init, Recv, Selector, Wrapped) ->
+-spec keyed_foldl(fun((term(), term()) -> term()), term(), term(), atom(), [pos_integer()]) ->
+    term().
+keyed_foldl(Lambda, Init, Recv, Selector, ListPath) ->
     case is_map(Recv) andalso not beamtalk_primitive:is_object(Recv) of
         true ->
             Step = fun({K, V}, {Keep, Acc}) ->
-                Acc2 = Lambda(V, set_acc_list(Wrapped, Acc, [])),
-                case get_acc_list(Wrapped, Acc2) of
+                Acc2 = Lambda(V, set_acc_list(ListPath, Acc, [])),
+                case get_acc_list(ListPath, Acc2) of
                     [] -> {Keep, Acc2};
                     [Item] -> {[{K, Item} | Keep], Acc2}
                 end
             end,
             {Keep, Out} = lists:foldl(Step, {[], Init}, maps:to_list(Recv)),
-            set_acc_list(Wrapped, Out, Keep);
+            set_acc_list(ListPath, Out, Keep);
         false ->
             lists:foldl(Lambda, Init, to_list_for_threading(Recv, Selector))
     end.
 
-get_acc_list(false, Acc) -> element(1, Acc);
-get_acc_list(true, Acc) -> element(1, element(1, Acc)).
+-spec get_acc_list([pos_integer()], tuple()) -> term().
+get_acc_list([Pos], Acc) -> element(Pos, Acc);
+get_acc_list([Pos | Rest], Acc) -> get_acc_list(Rest, element(Pos, Acc)).
 
-set_acc_list(false, Acc, List) -> setelement(1, Acc, List);
-set_acc_list(true, Acc, List) -> setelement(1, Acc, setelement(1, element(1, Acc), List)).
+-spec set_acc_list([pos_integer()], tuple(), term()) -> tuple().
+set_acc_list([Pos], Acc, List) ->
+    setelement(Pos, Acc, List);
+set_acc_list([Pos | Rest], Acc, List) ->
+    setelement(Pos, Acc, set_acc_list(Rest, element(Pos, Acc), List)).
 
 -doc """
 Convert any collection to a list by iterating with do:.

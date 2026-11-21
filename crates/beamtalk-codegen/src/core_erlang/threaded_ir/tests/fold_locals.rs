@@ -22,6 +22,7 @@ fn accumulator(carry: FoldCarry) -> ThreadedStmt {
         carry,
         value: docvec!["{T1, U1}"],
         span: span(),
+        result_list: None,
     }
 }
 
