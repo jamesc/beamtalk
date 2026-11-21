@@ -154,3 +154,8 @@ TestCase subclass: SetTest
     // The representation is still a term-order-sorted list, so `asList`
     // remains sorted regardless of insertion order.
     self assert: (((Set new) fromList: #(3, 1, 2)) asList) equals: #(1, 2, 3)
+
+  testWithAllIsTheConstructorAndFromListIsAnAlias =>
+    // BT-5090: `Set withAll:` is canonical; `fromList:` is a deprecated alias
+    self assert: (Set withAll: #(3, 1, 2, 2)) asList equals: #(1, 2, 3)
+    self assert: ((Set new) fromList: #(3, 1, 2, 2)) equals: (Set withAll: #(1, 2, 3))
