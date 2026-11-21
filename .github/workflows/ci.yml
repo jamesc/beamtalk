@@ -133,7 +133,11 @@ jobs:
           fi
 
           git fetch --depth=1 origin "$BASE_SHA"
-          changed="$(git diff --name-only "$BASE_SHA" HEAD)"
+          # --no-renames: list BOTH paths of a moved file. With rename detection a
+          # code file moved into an excluded path (crates/x/a.rs -> docs/a.rs) lists
+          # only the destination, so `code` (and every gate below) would miss that
+          # crates/ lost a file. This feeds `code` and all the gates that follow.
+          changed="$(git diff --name-only --no-renames "$BASE_SHA" HEAD)"
 
           # Docs-only PRs (every changed path excluded by the `push` list) skip the code jobs.
           code=$(printf '%s\n' "$changed" | python3 scripts/ci/ci_code_filter.py .github/workflows/ci.yml)
