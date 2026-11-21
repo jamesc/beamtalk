@@ -1483,16 +1483,25 @@ fn test_class_name_from_identity_overrides_module() {
 #[test]
 fn test_class_name_to_module_name() {
     // Single word
-    assert_eq!(util::to_module_name("Counter"), "counter");
+    assert_eq!(beamtalk_core::ast::to_module_name("Counter"), "counter");
 
     // Multi-word CamelCase
-    assert_eq!(util::to_module_name("MyCounterActor"), "my_counter_actor");
+    assert_eq!(
+        beamtalk_core::ast::to_module_name("MyCounterActor"),
+        "my_counter_actor"
+    );
 
     // With acronyms
-    assert_eq!(util::to_module_name("HTTPRouter"), "httprouter");
+    assert_eq!(
+        beamtalk_core::ast::to_module_name("HTTPRouter"),
+        "httprouter"
+    );
 
     // Mixed case
-    assert_eq!(util::to_module_name("HTTPSConnection"), "httpsconnection");
+    assert_eq!(
+        beamtalk_core::ast::to_module_name("HTTPSConnection"),
+        "httpsconnection"
+    );
 }
 
 #[test]

@@ -470,15 +470,6 @@ impl CoreErlangGenerator {
     }
 }
 
-/// Converts class name (`CamelCase`) to module name (`snake_case`).
-///
-/// Delegates to [`beamtalk_core::ast::to_module_name`] (Shared Kernel).
-///
-/// Visibility: `pub` to allow usage in IDE queries (hover, completion, etc.)
-pub fn to_module_name(class_name: &str) -> String {
-    beamtalk_core::ast::to_module_name(class_name)
-}
-
 /// Whether an Erlang module atom names a Beamtalk-owned module (BT-4153).
 ///
 /// Delegates to [`beamtalk_core::ast::is_beamtalk_erlang_module`] (Shared

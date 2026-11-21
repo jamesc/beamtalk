@@ -288,7 +288,10 @@ impl PrimitiveBindingTable {
     /// which handles multi-word names like `TranscriptStream` → `bt@stdlib@transcript_stream`.
     #[must_use]
     pub fn runtime_module_for_class(class_name: &str) -> String {
-        format!("bt@stdlib@{}", super::util::to_module_name(class_name))
+        format!(
+            "bt@stdlib@{}",
+            beamtalk_core::ast::to_module_name(class_name)
+        )
     }
 }
 
