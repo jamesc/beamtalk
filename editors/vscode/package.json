@@ -363,15 +363,15 @@
   },
   "dependencies": {
     "vscode-languageclient": "^10.1.0",
-    "ws": "^8.21.0"
+    "ws": "^8.23.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.4",
+    "@biomejs/biome": "^2.6.8",
     "@types/node": "^20.0.0",
-    "@types/vscode": "^1.82.0",
-    "@types/ws": "^8.0.0",
+    "@types/vscode": "^1.146.0",
+    "@types/ws": "^8.18.2",
     "@vscode/vsce": "^4.1.1",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "typescript": "^5.0.0",
     "vitest": "^4.1.12",
     "vscode-oniguruma": "^2.0.1",
