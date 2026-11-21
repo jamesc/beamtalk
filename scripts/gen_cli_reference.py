@@ -9,6 +9,7 @@ Writes the page, or with --check fails when the committed page differs from
 what the binary prints. The page is only the clap help text, so it cannot
 disagree with the CLI.
 """
+import os
 import re
 import subprocess
 import sys
@@ -49,7 +50,9 @@ def render(binary):
 
 def main():
     args = [a for a in sys.argv[1:] if a != "--check"]
-    binary = args[0] if args else "target/debug/beamtalk"
+    binary = args[0] if args else os.path.join(
+        os.environ.get("CARGO_TARGET_DIR", "target"), "debug", "beamtalk" + (".exe" if os.name == "nt" else "")
+    )
     text = render(binary)
     if "--check" in sys.argv:
         if open(OUT, encoding="utf-8").read() != text:
