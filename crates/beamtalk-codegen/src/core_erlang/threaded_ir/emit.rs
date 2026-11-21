@@ -1602,7 +1602,7 @@ pub(in crate::core_erlang) fn render_keyed_fold_call(call: &KeyedFoldCall) -> Do
     let scrutinee = form::call("erlang", "is_list", [recv()]);
     docvec![
         " in ",
-        form::let_in(
+        form::let_prefix(
             leaf::var(call.result.clone()),
             form::case_of(
                 scrutinee,
@@ -1612,10 +1612,7 @@ pub(in crate::core_erlang) fn render_keyed_fold_call(call: &KeyedFoldCall) -> Do
                 ],
                 Layout::Flat,
             ),
-            Document::Nil,
-            Layout::Flat,
         ),
-        " in ",
     ]
 }
 

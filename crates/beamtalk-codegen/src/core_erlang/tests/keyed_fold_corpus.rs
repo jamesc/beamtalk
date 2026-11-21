@@ -115,13 +115,13 @@ fn every_writing_collect_select_reject_compiles_with_a_silent_verifier_and_a_key
     let programs = programs();
     let failures: Vec<String> = programs
         .iter()
-        .filter_map(|(name, src, _)| match verifier_report(src, None) {
-            Some(report) => Some(format!("{name}: {report}")),
-            None => {
-                let code = codegen(src);
-                (!code.contains("'beamtalk_collection':'keyed_foldl'("))
-                    .then(|| format!("{name}: no keyed_foldl call\n{code}"))
+        .filter_map(|(name, src, _)| {
+            if let Some(report) = verifier_report(src, None) {
+                return Some(format!("{name}: {report}"));
             }
+            let code = codegen(src);
+            (!code.contains("'beamtalk_collection':'keyed_foldl'("))
+                .then(|| format!("{name}: no keyed_foldl call\n{code}"))
         })
         .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));

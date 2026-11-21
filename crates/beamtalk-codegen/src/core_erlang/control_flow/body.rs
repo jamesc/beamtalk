@@ -197,10 +197,10 @@ impl CoreErlangGenerator {
             // BT-5097: the accumulator declares the result list its kind
             // extends, once, here; the keyed fold call reads the same
             // `BodyKind::result_list`.
-            if let Some(ThreadedStmt::FoldAccumulator { result_list, .. }) = stmts.last_mut() {
-                if !fault!(FoldAccumulatorOmitsResultList) {
-                    *result_list = kind.result_list();
-                }
+            if let Some(ThreadedStmt::FoldAccumulator { result_list, .. }) = stmts.last_mut()
+                && !fault!(FoldAccumulatorOmitsResultList)
+            {
+                *result_list = kind.result_list();
             }
             // BT-3863: checked before `carry_fold_families` wraps the
             // accumulator in the `Self` family's `Return`.
