@@ -18,7 +18,7 @@ use super::reload::{
     OpenPathsHandle, class_changed_listener, compute_publish_diagnostics, reload_check_listener,
     seed_reload_diagnostics,
 };
-use super::{Backend, FetchContentParams, FetchContentResult, LoadedTypeCache, NavCache};
+use super::{Backend, FetchContentParams, FetchContentResult, LoadedTypeCache};
 use crate::server::lock::LockRecover;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -72,7 +72,6 @@ impl Backend {
             flush_listener: tokio::sync::Mutex::new(None),
             class_changed_listener: tokio::sync::Mutex::new(None),
             delegate_to_runtime: std::sync::atomic::AtomicBool::new(false),
-            nav_cache: Arc::new(std::sync::Mutex::new(NavCache::default())),
             reload_check_listener: tokio::sync::Mutex::new(None),
             reload_diagnostics: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
@@ -1374,14 +1373,10 @@ impl Backend {
             flush_rx,
         ));
 
-        // cache-invalidation listener for class-loaded /
-        // method-installed push events. The listener holds a clone of the
-        // shared `Arc<Mutex<NavCache>>` so it can bump the generation
-        // counter as events arrive.
-        let class_changed_handle = tokio::spawn(class_changed_listener(
-            Arc::clone(&self.nav_cache),
-            class_changed_rx,
-        ));
+        // Drains class-loaded / method-installed push events so the runtime
+        // client's channel stays open (BT-5080: the former nav cache that
+        // consumed them cached nothing and was removed).
+        let class_changed_handle = tokio::spawn(class_changed_listener(class_changed_rx));
 
         let reload_check_handle = self.spawn_reload_check_listener(
             client.clone(),

@@ -196,7 +196,7 @@ pub struct Backend {
     /// reload-check listener task (spawned once, outlives any single
     /// request handler's `&self` borrow) can recompute *static* diagnostics
     /// and merge them with reload-induced ones when it republishes — the
-    /// same reason [`Self::versions`] and [`Self::nav_cache`] are
+    /// same reason [`Self::versions`] is
     /// `Arc`-wrapped. `self.service.lock()` is unaffected: `Arc<Mutex<T>>`
     /// derefs to `Mutex<T>`.
     service: Arc<Mutex<SimpleLanguageService>>,
@@ -305,7 +305,7 @@ pub struct Backend {
     /// `workspace/applyEdit` per touched file.
     flush_listener: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// handle to the class-changed-event listener task that
-    /// consumes `ClassChangedEvent`s and invalidates [`Self::nav_cache`].
+    /// drains `ClassChangedEvent`s (debug-logged; nothing caches nav results).
     class_changed_listener: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// feature flag — when true and a runtime is attached, the
     /// LSP delegates navigation queries (find-references / implementation
@@ -315,15 +315,6 @@ pub struct Backend {
     /// `initializationOptions.delegateToRuntime` field and never mutated
     /// after that — atomic for cheap concurrent reads from nav handlers.
     delegate_to_runtime: std::sync::atomic::AtomicBool,
-    /// per-query cache of runtime-attached nav results, keyed by
-    /// query string. Invalidated wholesale on every `ClassChangedEvent`
-    /// (coarse but correct for the foundation issue — per-method children
-    /// can refine to per-class buckets if needed).
-    ///
-    /// Shared `Arc` so the class-changed listener task can hold a clone
-    /// without keeping the `Backend` itself alive (the listener is aborted
-    /// on `Drop` via `class_changed_listener`'s `JoinHandle`).
-    nav_cache: Arc<std::sync::Mutex<NavCache>>,
     /// ADR 0105 Phase 1: handle to the reload-check-event listener
     /// task that consumes `ReloadCheckEvent`s and publishes/clears
     /// reload-induced diagnostics.
@@ -349,30 +340,6 @@ pub(in crate::server) struct LoadedTypeCache {
     roots: HashSet<PathBuf>,
     registry: beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
     known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules,
-}
-
-/// Coarse cache for runtime-attached navigation results.
-///
-/// The foundation issue uses a single generation counter — every
-/// `ClassChangedEvent` increments it, and cache entries are tagged with
-/// the generation they were computed under. A reader treats any entry
-/// whose generation predates the current one as stale.
-///
-/// Per-method children can keep the same shape and add
-/// payloads keyed by `(NavQuery, generation)` if they want memoisation;
-/// the foundation issue ships the invariant (any class change ⇒ caches
-/// are stale) without committing to a memoisation policy.
-#[derive(Debug, Default)]
-pub(crate) struct NavCache {
-    /// Monotonic generation. Starts at 0; bumped on every class change.
-    generation: u64,
-}
-
-impl NavCache {
-    /// Bump the generation — invalidates every cached entry.
-    pub(crate) fn invalidate(&mut self) {
-        self.generation = self.generation.saturating_add(1);
-    }
 }
 
 #[tower_lsp::async_trait]

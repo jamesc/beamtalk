@@ -337,7 +337,11 @@ impl BeamtalkMcp {
             duration_us = duration_us,
             "search_examples"
         );
-        tracing::debug!(query = %params.query, "search_examples query");
+        tracing::debug!(
+            query_hash = %query_hash,
+            query_len = params.query.len(),
+            "search_examples query"
+        );
 
         if results.is_empty() {
             timer.mark_ok();
