@@ -189,8 +189,6 @@ export function setupTerminalMonitoring(context: vscode.ExtensionContext): void 
   );
 }
 
-// ─── Extension activation ─────────────────────────────────────────────────────
-
 /** Registers `beamtalk.startRepl` and `beamtalk.stopRepl` (BT-1025). */
 export function registerReplCommands(context: vscode.ExtensionContext): void {
   // ─── Start / Stop REPL commands (BT-1025) ──────────────────────────────────

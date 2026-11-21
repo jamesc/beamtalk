@@ -239,5 +239,3 @@ export function setupAutoConnect(context: vscode.ExtensionContext): void {
     }
   }
 }
-
-// ─── Start REPL command ───────────────────────────────────────────────────────

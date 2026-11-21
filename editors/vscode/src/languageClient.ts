@@ -188,8 +188,6 @@ export async function startClient(context: vscode.ExtensionContext): Promise<voi
   }
 }
 
-// ─── Workspace ID derivation ─────────────────────────────────────────────────
-
 /** Registers `beamtalk.restartServer`. */
 export function registerServerCommands(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
