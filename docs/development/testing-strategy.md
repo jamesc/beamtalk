@@ -469,6 +469,8 @@ TestCase subclass: CounterTest
 2. Add test methods prefixed with `test`
 3. Run `just test-bunit`
 
+**File and class names:** a package `.bt` file compiles to the BEAM module `bt@<package>@<path>`, where `<path>` is the snake-cased path under the source root without `.bt` (`src/http/server.bt` becomes `http@server`; ADR 0026). The mapping loses case, so `FooBar.bt` and `foo_bar.bt` in one package both become `bt@<package>@foo_bar`. A build that finds two files deriving the same module fails up front and names both files and the module (BT-5074). Test class names must also be unique in scope: `beamtalk test` stops on a duplicate test class name (BT-4350). Name the file after the class in snake case (`MyFeatureTest` in `my_feature_test.bt`).
+
 **Design:** See [ADR 0014](../ADR/0014-beamtalk-test-framework.md) Phase 2 for the full TestCase framework rationale.
 
 ---

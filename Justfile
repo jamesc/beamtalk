@@ -76,7 +76,7 @@ fixture_reader_tests := "(" + corpus_tests + ") & test(/shared_corpus|match_the_
 #        + just test-integration test-mcp test-repl-protocol (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-generated-builtins check-codegen-boundary check-surface-drift test-grammar test-github-extension test-vscode test-hermetic-home
+ci: build lint check-cli-reference test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-generated-builtins check-codegen-boundary check-surface-drift test-grammar test-github-extension test-vscode test-hermetic-home
 
 [windows]
 ci: build clippy fmt-check-rust test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift
@@ -976,7 +976,7 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-repo lint-docs-refs
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-repo lint-docs-refs lint-env-docs
 
 # The repo-wide lint-* recipes and script tests that need only the toolchain CI's
 # lint job has. `lint` runs this group and ci.yml's lint job runs it by name, so
@@ -988,6 +988,19 @@ lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-enc
 # exists. Intended historical references live in scripts/ci/docs-refs-allowlist.txt.
 lint-docs-refs:
     @python3 scripts/ci/check_docs_refs.py
+
+# Lint (BT-5089): every environment variable the code reads has a row in
+# docs/development/environment-variables.md, and every row is still read.
+lint-env-docs:
+    @python3 scripts/ci/check_env_docs.py
+
+# Regenerate docs/cli-workspace.md from `beamtalk workspace --help` (BT-5089).
+gen-cli-reference: build-rust
+    @python3 scripts/gen_cli_reference.py
+
+# Fail when docs/cli-workspace.md differs from the CLI's own help (BT-5089).
+check-cli-reference: build-rust
+    @python3 scripts/gen_cli_reference.py --check
 
 # Test (BT-5032): every repo path literal in a workflow's `paths:` filter or the
 # ci.yml `changes` job's `matches` gate names something that exists, so a renamed

@@ -115,7 +115,7 @@ _rel/
 *.pem
 *.key
 
-# Git worktrees (created by worktree-up.ps1 or Claude Code)
+# Git worktrees (created by a worktree tool or Claude Code)
 .worktrees/
 .claude/worktrees/
 .claude/shared-target/
