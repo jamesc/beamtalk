@@ -19,6 +19,7 @@
 //! per-op [`FoldOp`] spec supplies the label, body kind, leading accumulator
 //! slots and post-fold epilogue.
 
+use super::super::super::threaded_ir::{self, KeyedFoldCall};
 use super::super::super::{CoreErlangGenerator, Result};
 use super::super::analysis::SELF_THREADING_FOLDS;
 use super::super::family_slots::FoldFamilySlots;
@@ -744,13 +745,51 @@ impl CoreErlangGenerator {
         let state_index = slot_count + 1;
         // Save the receiver temp for the String-aware result check.
         let str_check_var = list_var.clone();
-        let safe_list = super::list_recv_to_safe_list_doc(
-            recv_code,
-            Some(op.guard_selector()),
-            list_var,
-            safe_list_var.clone(),
-        );
-
+        // BT-5097: `collect:`/`select:`/`reject:` answer the receiver's species, so
+        // a `Dictionary` keeps its keys: the non-list arm of the fold call hands
+        // the receiver to the keyed fold instead of flattening it to values.
+        let keyed = matches!(op, FoldOp::Collect | FoldOp::Select | FoldOp::Reject);
+        let keyed_recv_var = list_var.clone();
+        let safe_list = if keyed {
+            form::let_prefix(leaf::var(list_var), recv_code)
+        } else {
+            super::list_recv_to_safe_list_doc(
+                recv_code,
+                Some(op.guard_selector()),
+                list_var,
+                safe_list_var.clone(),
+            )
+        };
+        let result_list = body_kind.result_list();
+        let guard_selector = op.guard_selector().to_string();
+        let keyed_fold_call = |this: &mut Self,
+                               lambda: &str,
+                               init: Document<'static>,
+                               families: bool,
+                               result: &str|
+         -> Document<'static> {
+            if !keyed {
+                return ThreadingPlan::foldl_call_doc(lambda, init, &safe_list_var, result);
+            }
+            let call = KeyedFoldCall {
+                lambda: lambda.to_string(),
+                init,
+                recv: keyed_recv_var.clone(),
+                selector: guard_selector.clone(),
+                result: result.to_string(),
+                result_list,
+                families,
+                list_path: result_list.map_or_else(Vec::new, |l| {
+                    // Test-only fault injection (`keyed_fold_corpus.rs`).
+                    let wrapped = families && !fault!(KeyedFoldPathIgnoresFamilies);
+                    KeyedFoldCall::path_for(l.slot, wrapped)
+                }),
+                span: body.span,
+            };
+            let errors = threaded_ir::verify_keyed_fold_call(&call);
+            this.report_threaded_ir_verify_errors(&errors, "keyed fold call", call.span);
+            threaded_ir::render_keyed_fold_call(&call)
+        };
         if plan.use_tuple_acc {
             let vars_doc = plan.current_vars_doc(self); // Before push_scope.
             let init_tuple_doc = tuple_init_doc(op.pads_tuple_init(), &slot_inits, vars_doc);
@@ -789,12 +828,7 @@ impl CoreErlangGenerator {
                 plan.append_repack_stateacc_doc(self, lowered.guarded_op_bracket);
             let tail = self.fold_tail_doc(epilogue.tail, epilogue.result, &stateacc, None)?;
             docs.push(docvec![
-                ThreadingPlan::foldl_call_doc(
-                    &lambda_var,
-                    init_tuple_doc,
-                    &safe_list_var,
-                    &fold_result
-                ),
+                keyed_fold_call(self, &lambda_var, init_tuple_doc, false, &fold_result),
                 epilogue.bindings,
                 extract_doc,
                 repack_doc,
@@ -856,7 +890,7 @@ impl CoreErlangGenerator {
         let tail =
             self.fold_tail_doc(epilogue.tail, epilogue.result, &state_out, slots.as_ref())?;
         docs.push(docvec![
-            ThreadingPlan::foldl_call_doc(&lambda_var, init_acc, &safe_list_var, fold_pair),
+            keyed_fold_call(self, &lambda_var, init_acc, slots.is_some(), fold_pair),
             unwrap,
             epilogue.bindings,
             "let ",

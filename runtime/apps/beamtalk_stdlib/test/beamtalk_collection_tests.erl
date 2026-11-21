@@ -28,6 +28,13 @@ stdlib_setup() ->
     beamtalk_test_boot:boot_real_stdlib('Interval'),
     ok.
 
+%% `keyed_foldl/5` runs the receiver guard for a plain map, which resolves the
+%% `Dictionary` class: wait for it as well as the `Interval` canary.
+dictionary_setup() ->
+    stdlib_setup(),
+    beamtalk_test_boot:wait_for_class('Dictionary', 50),
+    ok.
+
 stdlib_teardown(_) -> ok.
 
 %%% ============================================================================
@@ -303,3 +310,125 @@ to_list_for_threading_extension_test() ->
     after
         beamtalk_extensions:unregister('Interval', 'inject:into:')
     end.
+
+%%% ============================================================================
+%%% keyed_foldl/5 and from_list_like/2 over a Dictionary (BT-5097)
+%%% ============================================================================
+
+%% The fold lambdas below have the shape codegen compiles: `{AccList, Count}`, the
+%% result list at element 1, one element added per call at most. The reference is
+%% the same lambda over `lists:foldl` on the values, which is what a list receiver
+%% gets; the keyed fold must agree on the count, the order of the calls and the
+%% survivors.
+
+keyed_foldl_test_() ->
+    Dict = #{a => 1, b => 2, c => 3, d => 4},
+    Select = fun(Pred) ->
+        fun(V, {Acc, N}) ->
+            case Pred(N, V) of
+                true -> {[V | Acc], N + 1};
+                false -> {Acc, N + 1}
+            end
+        end
+    end,
+    Collect = fun(V, {Acc, N}) -> {[V * 10 | Acc], N + 1} end,
+    Wrapped = fun(Lambda) -> fun(V, {Inner, Self}) -> {Lambda(V, Inner), Self + 1} end end,
+    Rebuild = fun(Dict0, Out) -> beamtalk_collection:from_list_like(Dict0, lists:reverse(Out)) end,
+    {setup, fun dictionary_setup/0, fun stdlib_teardown/1, [
+        {"select keeps the keys of the entries the lambda kept", fun() ->
+            Lambda = Select(fun(_N, V) -> V > 2 end),
+            {Out, 4} = beamtalk_collection:keyed_foldl(Lambda, {[], 0}, Dict, 'select:', [1]),
+            ?assertEqual(#{c => 3, d => 4}, Rebuild(Dict, Out))
+        end},
+        {"the predicate sees duplicate values one at a time, so the right keys survive", fun() ->
+            Dup = #{a => 1, b => 1, c => 1},
+            Lambda = Select(fun(N, _V) -> N =:= 1 end),
+            {Out, 3} = beamtalk_collection:keyed_foldl(Lambda, {[], 0}, Dup, 'select:', [1]),
+            Result = Rebuild(Dup, Out),
+            ?assertEqual(1, map_size(Result)),
+            %% maps:to_list order is the call order: the second entry survives.
+            [{_, _} = Second | _] = tl(maps:to_list(Dup)),
+            ?assertEqual(maps:from_list([Second]), Result)
+        end},
+        {"collect answers every key with the lambda's answer", fun() ->
+            {Out, 4} = beamtalk_collection:keyed_foldl(Collect, {[], 0}, Dict, 'collect:', [1]),
+            ?assertEqual(#{a => 10, b => 20, c => 30, d => 40}, Rebuild(Dict, Out))
+        end},
+        {"collect keeps answers that are empty lists or lists", fun() ->
+            L = fun(V, {Acc, N}) -> {[lists:duplicate(V - 1, V) | Acc], N + 1} end,
+            {Out, 2} = beamtalk_collection:keyed_foldl(L, {[], 0}, #{x => 1, y => 2}, 'collect:', [
+                1
+            ]),
+            ?assertEqual(#{x => [], y => [2]}, Rebuild(#{x => 1, y => 2}, Out))
+        end},
+        {"an empty dictionary runs the lambda never and answers an empty one", fun() ->
+            {Out, 0} = beamtalk_collection:keyed_foldl(Collect, {[], 0}, #{}, 'collect:', [1]),
+            ?assertEqual(#{}, Rebuild(#{}, Out))
+        end},
+        {"a wrapped accumulator is walked through element 1", fun() ->
+            {{Out, 4}, 4} = beamtalk_collection:keyed_foldl(
+                Wrapped(Collect), {{[], 0}, 0}, Dict, 'collect:', [1, 1]
+            ),
+            ?assertEqual(#{a => 10, b => 20, c => 30, d => 40}, Rebuild(Dict, Out))
+        end},
+        {"agrees with the list fold over the values on every call and survivor", fun() ->
+            Lambda = Select(fun(N, V) -> (N + V) rem 2 =:= 0 end),
+            {ListOut, 4} = lists:foldl(Lambda, {[], 0}, maps:values(Dict)),
+            {DictOut, 4} = beamtalk_collection:keyed_foldl(Lambda, {[], 0}, Dict, 'select:', [1]),
+            ?assertEqual(lists:reverse(ListOut), [V || {_K, V} <- lists:reverse(DictOut)])
+        end}
+    ]}.
+
+%% ADR 0133 receiver guard: a plain `Dictionary` takes the keyed fold, which must
+%% still refuse a writing fold the in-place fold would make skip a method the class
+%% answers outside the stdlib (a runtime extension wins dispatch).
+keyed_foldl_receiver_guard_test_() ->
+    Dict = #{a => 1, b => 2},
+    Lambda = fun(V, {Acc, N}) -> {[V | Acc], N + 1} end,
+    Fun = fun(_Args, _Self, State) -> {reply, nil, State} end,
+    Run = fun(Selector) ->
+        beamtalk_collection:keyed_foldl(Lambda, {[], 0}, Dict, Selector, [1])
+    end,
+    {setup, fun dictionary_setup/0, fun stdlib_teardown/1, [
+        {"no extension: the fold runs", fun() ->
+            ?assertMatch({[_, _], 2}, Run('select:'))
+        end},
+        {"an extension of the selector itself is refused", fun() ->
+            ok = beamtalk_extensions:register('Dictionary', 'select:', Fun, bt5097_test),
+            try
+                ?assertBtError(stateful_block_dispatch, Run('select:')),
+                %% the same refusal as the flattening fold gives
+                ?assertBtError(
+                    stateful_block_dispatch,
+                    beamtalk_collection:to_list_for_threading(Dict, 'select:')
+                )
+            after
+                beamtalk_extensions:unregister('Dictionary', 'select:')
+            end
+        end},
+        {"an extension of a collection message the stdlib's selector runs through is refused",
+            fun() ->
+                ok = beamtalk_extensions:register('Dictionary', 'inject:into:', Fun, bt5097_test),
+                try
+                    ?assertBtError(stateful_block_dispatch, Run('collect:')),
+                    ?assertBtError(
+                        stateful_block_dispatch,
+                        beamtalk_collection:to_list_for_threading(Dict, 'collect:')
+                    )
+                after
+                    beamtalk_extensions:unregister('Dictionary', 'inject:into:')
+                end
+            end},
+        {"an extension that is not a collection message changes nothing", fun() ->
+            ok = beamtalk_extensions:register('Dictionary', 'bt5097Harmless', Fun, bt5097_test),
+            try
+                ?assertMatch({[_, _], 2}, Run('select:'))
+            after
+                beamtalk_extensions:unregister('Dictionary', 'bt5097Harmless')
+            end
+        end}
+    ]}.
+
+from_list_like_dictionary_receiver_test() ->
+    ?assertEqual(#{a => 1}, beamtalk_collection:from_list_like(#{b => 2}, [{a, 1}])),
+    ?assertEqual(#{}, beamtalk_collection:from_list_like(#{b => 2}, [])).

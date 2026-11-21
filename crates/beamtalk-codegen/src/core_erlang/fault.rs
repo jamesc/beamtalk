@@ -163,6 +163,14 @@ mod registry {
         /// `Self` family its body advanced out through the accumulator
         /// (`FoldFamilyNotCarried`).
         DropFoldFamilySlot,
+        /// BT-5097: a keyed fold call (`collect:` / `select:` / `reject:`
+        /// over a non-list receiver) walks to the result list as if the fold
+        /// had no `{Acc, Family..}` wrapper, though it has one
+        /// (`KeyedFoldPathMismatch`).
+        KeyedFoldPathIgnoresFamilies,
+        /// BT-5097: a fold lambda's accumulator does not declare the result
+        /// list its kind extends (`FoldResultListUndeclared`).
+        FoldAccumulatorOmitsResultList,
         /// BT-3857: the producer's last `MapPut` rebind is rewritten into a
         /// `MapHeld` over the version that rebind would have produced, read
         /// through it. That version is never produced (a held rebind steps

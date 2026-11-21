@@ -12,9 +12,9 @@ use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     AccParam, BindOp, CallSiteLine, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary,
     EnsureCatchVars, EnsureForeignNlr, EnsureNlrRelay, FastPath, FoldAccShape, ForeignCleanupBody,
-    FrameId, LOOP_FN_STEM, LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars, RebindLowering,
-    RethrowSlot, ThreadedStmt, ThreadingMode, TokenId, TryRegion, ValueRef, VersionPrefix,
-    VersionedVar,
+    FrameId, KeyedFoldCall, LOOP_FN_STEM, LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars,
+    RebindLowering, RethrowSlot, ThreadedStmt, ThreadingMode, TokenId, TryRegion, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::docvec;
@@ -1563,6 +1563,57 @@ fn render_tuple_acc_unpack(
         ));
     }
     Document::Vec(docs)
+}
+
+/// BT-5097: `" in let <result> = case is_list(<recv>) of <'true'> ->
+/// lists:foldl(<lambda>, <init>, <recv>) <'false'> ->
+/// beamtalk_collection:keyed_foldl(<lambda>, <init>, <recv>, '<selector>',
+/// [<path>]) end in "` — a [`KeyedFoldCall`]. The list receiver's arm is the
+/// plain `lists:foldl` call every other fold makes, so the list path costs
+/// what it did before the keyed arm existed.
+pub(in crate::core_erlang) fn render_keyed_fold_call(call: &KeyedFoldCall) -> Document<'static> {
+    let recv = || leaf::var(call.recv.clone());
+    let list_arm = form::call(
+        "lists",
+        "foldl",
+        [leaf::var(call.lambda.clone()), call.init.clone(), recv()],
+    );
+    let path = docvec![
+        "[",
+        join(
+            call.list_path
+                .iter()
+                .map(|n| leaf::int_lit(i64::try_from(*n).unwrap_or(i64::MAX))),
+            &Document::Str(", ")
+        ),
+        "]"
+    ];
+    let keyed_arm = form::call(
+        "beamtalk_collection",
+        "keyed_foldl",
+        [
+            leaf::var(call.lambda.clone()),
+            call.init.clone(),
+            recv(),
+            leaf::atom(call.selector.clone()),
+            path,
+        ],
+    );
+    let scrutinee = form::call("erlang", "is_list", [recv()]);
+    docvec![
+        " in ",
+        form::let_prefix(
+            leaf::var(call.result.clone()),
+            form::case_of(
+                scrutinee,
+                [
+                    form::clause([leaf::atom("true")], None, list_arm, Layout::Flat),
+                    form::clause([leaf::atom("false")], None, keyed_arm, Layout::Flat),
+                ],
+                Layout::Flat,
+            ),
+        ),
+    ]
 }
 
 pub(in crate::core_erlang) fn render_value(value: &ValueRef, ctx: &RenderCtx) -> Document<'static> {

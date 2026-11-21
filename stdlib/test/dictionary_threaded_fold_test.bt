@@ -1,0 +1,204 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5097: `Dictionary select:` / `reject:` / `collect:` with a block that
+// writes an outer local or field answer a Dictionary with the keys kept, the
+// same as with a pure block, and the writes are visible after the send.
+
+TestCase subclass: DictionaryThreadedFoldTest
+  field: m = 0
+
+  // `^` out of the block exits the enclosing method, and a raise inside the block
+  // propagates: the same for a Dictionary as for a List.
+  firstAbove: limit in: coll =>
+    n := 0
+    coll
+      select: [:v |
+        n := n + 1
+        v > limit ifTrue: [^v]
+        true
+      ]
+    -1
+
+  rejectEarlyReturn: coll =>
+    n := 0
+    coll
+      reject: [:v |
+        n := n + 1
+        v > 1 ifTrue: [^v]
+        false
+      ]
+    -1
+
+  collectEarlyReturn: coll =>
+    n := 0
+    coll
+      collect: [:v |
+        n := n + 1
+        v > 1 ifTrue: [^v * 100]
+        v
+      ]
+    -1
+
+  raiseInside: coll =>
+    n := 0
+    coll
+      collect: [:v |
+        n := n + 1
+        self error: "boom"
+      ]
+    n
+
+  testNonLocalReturnFromSelect =>
+    self assert: (self firstAbove: 1 in: #{#a => 1, #b => 2}) equals: 2
+    self assert: (self firstAbove: 1 in: #(1, 2, 3)) equals: 2
+    self assert: (self firstAbove: 9 in: #{#a => 1}) equals: -1
+
+  testNonLocalReturnFromRejectAndCollect =>
+    self assert: (self rejectEarlyReturn: #{#a => 1, #b => 2}) equals: 2
+    self assert: (self rejectEarlyReturn: #(1, 2)) equals: 2
+    self assert: (self collectEarlyReturn: #{#a => 1, #b => 2}) equals: 200
+    self assert: (self collectEarlyReturn: #(1, 2)) equals: 200
+
+  testRaiseInsideBlockPropagates =>
+    self should: [self raiseInside: #{#a => 1}] raise: #user_error
+    self should: [self raiseInside: #(1)] raise: #user_error
+
+  testSelectConditionalWrite =>
+    n := 0
+    r := #{#a => 1, #b => 2, #c => 3}
+      select: [:v |
+        v > 1 ifTrue: [n := n + 1]
+        v > 2
+      ]
+    self assert: r equals: #{#c => 3}
+    self assert: n equals: 2
+
+  testRejectConditionalWrite =>
+    n := 0
+    r := #{#a => 1, #b => 2, #c => 3}
+      reject: [:v |
+        v > 1 ifTrue: [n := n + 1]
+        v > 2
+      ]
+    self assert: r equals: #{#a => 1, #b => 2}
+    self assert: n equals: 2
+
+  testCollectConditionalWrite =>
+    n := 0
+    r := #{#a => 1, #b => 2}
+      collect: [:v |
+        v > 1 ifTrue: [n := n + 1]
+        v
+      ]
+    self assert: r equals: #{#a => 1, #b => 2}
+    self assert: n equals: 1
+
+  testCollectResultsThatAreLists =>
+    n := 0
+    r := #{#a => 1, #b => 2}
+      collect: [:v |
+        n := n + 1
+        #(v)
+      ]
+    self assert: r equals: #{#a => #(1), #b => #(2)}
+
+  testCollectNilAndEmptyListResults =>
+    n := 0
+    r := #{#a => 1}
+      collect: [:v |
+        n := n + 1
+        nil
+      ]
+    self assert: r equals: #{#a => nil}
+
+  testNestedSelectInCollect =>
+    n := 0
+    r := #{#x => #{#a => 1, #b => 2}, #y => #{#c => 3}}
+      collect: [:inner |
+        inner
+          select: [:v |
+            n := n + 1
+            v > 1
+          ]
+      ]
+    self assert: r equals: #{#x => #{#b => 2}, #y => #{#c => 3}}
+    self assert: n equals: 3
+
+  testNestedDepthThree =>
+    n := 0
+    r := #{#p => #{#q => #{#a => 1, #b => 2}}}
+      collect: [:l1 |
+        l1
+          collect: [:l2 |
+            l2
+              reject: [:v |
+                n := n + 1
+                v > 1
+              ]
+          ]
+      ]
+    self assert: r equals: #{#p => #{#q => #{#a => 1}}}
+    self assert: n equals: 2
+
+  testDictionaryInsideListFold =>
+    n := 0
+    r := #(#{#a => 1}, #{#b => 2})
+      collect: [:d |
+        d
+          select: [:v |
+            n := n + 1
+            true
+          ]
+      ]
+    self assert: r equals: #(#{#a => 1}, #{#b => 2})
+    self assert: n equals: 2
+
+  testListReceiverStillAnswersList =>
+    n := 0
+    r := #(1, 2, 3)
+      select: [:v |
+        n := n + 1
+        v > 1
+      ]
+    self assert: r equals: #(2, 3)
+    self assert: n equals: 3
+
+  testFieldWriteInValueType =>
+    r := #{#a => 1, #b => 2}
+      collect: [:v |
+        self.m := self.m + v
+        v * 10
+      ]
+    self assert: r equals: #{#a => 10, #b => 20}
+    self assert: self.m equals: 3
+
+  testSetReceiverUnchanged =>
+    n := 0
+    r := (Set withAll: #(1, 2, 3))
+      select: [:v |
+        n := n + 1
+        v > 1
+      ]
+    self assert: r class equals: Set
+    self assert: n equals: 3
+
+  testActorSelect =>
+    a := Bt5097DictFoldActor spawn
+    r := a selectWriting
+    self assert: (r at: 1) equals: #{#b => 2, #c => 3}
+    self assert: (r at: 2) equals: 3
+    self assert: (r at: 3) equals: 6
+
+  testActorReject =>
+    a := Bt5097DictFoldActor spawn
+    r := a rejectWriting
+    self assert: (r at: 1) equals: #{#a => 1}
+    self assert: (r at: 2) equals: 3
+
+  testActorCollect =>
+    a := Bt5097DictFoldActor spawn
+    r := a collectWriting
+    self assert: (r at: 1) equals: #{#a => 10, #b => 20}
+    self assert: (r at: 2) equals: 3
+    self assert: a count equals: 3

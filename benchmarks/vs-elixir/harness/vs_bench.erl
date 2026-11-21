@@ -131,6 +131,12 @@ rows() ->
         {"6e", alloc, "inject:into: 100 elements / Enum.reduce", 5000, 'inject:list:', list100, [
             {enum_reduce_sum, list100}, {lists_foldl, list100}
         ]},
+        {"6f", alloc, "collect: writing an outer local, 100 elements / Enum.map_reduce", 5000,
+            'collectWriting:list:', list100, [{enum_map_counting, list100}]},
+        {"6g", alloc, "select: writing an outer local, 100 elements / Enum.reduce", 5000,
+            'selectWriting:list:', list100, [{enum_filter_counting, list100}]},
+        {"6h", alloc, "Dictionary collect: writing an outer local, 100 entries / Enum.reduce", 5000,
+            'dictCollectWriting:d:', dict100, [{map_collect_counting, dict100}]},
         {"7a", machinery, "actor sync read: c count / GenServer.call", 20000, 'actorCall:c:',
             bt_counter, [{gen_call, ex_counter}]},
         {"7b", machinery, "actor state update: c increment / GenServer.call", 20000,
@@ -248,6 +254,7 @@ fixtures() ->
         adder => {Bt(adder), ?EX:adder()},
         list100 => {Bt(list100), ?EX:list100()},
         dict => {Bt(dict), ?EX:dict()},
+        dict100 => {Bt(dict100), ?EX:dict100()},
         string => {Bt(string), ?EX:string()},
         binary => {Bt(binary), ?EX:string()},
         tuple => {Bt(tuple), ?EX:tuple()},
@@ -610,6 +617,9 @@ compiles_to("6b") -> "lists:foldl over a fun whose accumulator is the bare `sum`
 compiles_to("6c") -> "is_list guard, lists:foreach(fun)";
 compiles_to("6d") -> "is_list guard, lists:map(fun); * with is_number guard";
 compiles_to("6e") -> "is_list guard, lists:foldl(fun); + with coercion try";
+compiles_to("6f") -> "is_list guard, lists:foldl(fun) carrying {AccList, Count}; the fold result is reversed";
+compiles_to("6g") -> "as 6f, the item or nothing added per call";
+compiles_to("6h") -> "is_list guard, keyed_foldl/5: maps:to_list pairs, the same fold fun, one {K, Item} recorded per call; maps:from_list";
 compiles_to("7a") -> "send(C, count, []) -> beamtalk_actor:sync_send, gen_server:call + telemetry/trace/ctx hooks both sides";
 compiles_to("7b") -> "as 7a";
 compiles_to("7c") -> "beamtalk_message_dispatch:cast -> gen_server:cast + the same hooks";

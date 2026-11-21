@@ -2551,9 +2551,22 @@ fn test_writing_fold_calls_receiver_guard_with_its_selector() {
             "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    n := 0\n    {expr}\n    n\n"
         );
         let code = codegen(&src);
+        // BT-5097: `collect:`/`select:`/`reject:` hand a non-list receiver to
+        // `keyed_foldl/5`, which runs the same guard for anything that is not
+        // a plain `Dictionary`.
+        let (guard, selector_arg) = if matches!(*selector, "collect:" | "select:" | "reject:") {
+            (
+                "'beamtalk_collection':'keyed_foldl'(",
+                format!(", '{selector}', ["),
+            )
+        } else {
+            (
+                "'beamtalk_collection':'to_list_for_threading'(",
+                format!(", '{selector}')"),
+            )
+        };
         assert!(
-            code.contains("'beamtalk_collection':'to_list_for_threading'(")
-                && code.contains(&format!(", '{selector}')")),
+            code.contains(guard) && code.contains(&selector_arg),
             "{selector}: a writing fold must call the receiver guard with its selector. Got:\n{code}"
         );
         if matches!(*selector, "eachWithIndex:" | "do:separatedBy:") {

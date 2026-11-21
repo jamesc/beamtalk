@@ -17,10 +17,10 @@ use super::super::nlr::NlrArmShape;
 use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCleanup,
-    EnsureForeignNlr, EnsureNlrRelay, FoldAccShape, FoldCarry, ForeignCleanupBody, FrameId,
-    LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind,
-    RebindLowering, RebindShape, RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadingMode,
-    UserCodeRegion, ValueRef, VersionPrefix, VersionedVar,
+    EnsureForeignNlr, EnsureNlrRelay, FoldAccShape, FoldCarry, FoldResultList, ForeignCleanupBody,
+    FrameId, KeyedFoldCall, LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape, OnDoCatchVars,
+    RebindFrame, RebindFrameKind, RebindLowering, RebindShape, RethrowSlot, StateAccFallbackReason,
+    ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -130,6 +130,34 @@ pub(in crate::core_erlang) enum VerifyError {
     FoldAccShapeMismatch {
         mode: FoldAccShape,
         found: FoldCarry,
+        at: Span,
+    },
+
+    /// BT-5097: a keyed fold ([`KeyedFoldCall`]) over a fold kind that declares
+    /// no result list (`BodyKind::result_list` is `None`). The driver would
+    /// read a slot that holds something else (a count, a flag, a map) as the
+    /// list of kept elements and rebuild the `Dictionary` from it.
+    KeyedFoldNoResultList { selector: String, at: Span },
+
+    /// BT-5097: a keyed fold whose `list_path` is not where the accumulator
+    /// holds its result list: the kind's slot, under element 1 of the
+    /// `{Acc, Family..}` wrapper exactly when the fold has family slots. The
+    /// driver would reset or read the wrong element (a threaded local, or a
+    /// `Self`).
+    KeyedFoldPathMismatch {
+        expected: Vec<usize>,
+        found: Vec<usize>,
+        at: Span,
+    },
+
+    /// BT-5097: the fold lambda's last accumulator does not declare the
+    /// result list its fold kind says it extends (`found` is what the
+    /// statement carries, `None` when the body ends in no accumulator
+    /// statement). The keyed driver's "the lambda adds at most one element per
+    /// call" would then rest on nothing.
+    FoldResultListUndeclared {
+        expected: FoldResultList,
+        found: Option<FoldResultList>,
         at: Span,
     },
 
@@ -1349,6 +1377,57 @@ pub(in crate::core_erlang) fn verify_fold_locals_carried(
         found: found.cloned(),
         at,
     }]
+}
+
+/// BT-5097, [`VerifyError::KeyedFoldNoResultList`] and
+/// [`VerifyError::KeyedFoldPathMismatch`] over one [`KeyedFoldCall`]: the
+/// fold kind declares a result list, and the call walks to it by the path the
+/// kind's slot and the fold's family wrapper give.
+pub(in crate::core_erlang) fn verify_keyed_fold_call(call: &KeyedFoldCall) -> Vec<VerifyError> {
+    let Some(list) = call.result_list else {
+        return vec![VerifyError::KeyedFoldNoResultList {
+            selector: call.selector.clone(),
+            at: call.span,
+        }];
+    };
+    let expected = KeyedFoldCall::path_for(list.slot, call.families);
+    if call.list_path == expected {
+        Vec::new()
+    } else {
+        vec![VerifyError::KeyedFoldPathMismatch {
+            expected,
+            found: call.list_path.clone(),
+            at: call.span,
+        }]
+    }
+}
+
+/// BT-5097, [`VerifyError::FoldResultListUndeclared`] over one fold lambda
+/// body: when its kind has a result list (`expected`), the last statement
+/// must be the accumulator that declares exactly it.
+pub(in crate::core_erlang) fn verify_fold_result_list_declared(
+    body: &[ThreadedStmt],
+    expected: Option<FoldResultList>,
+    at: Span,
+) -> Vec<VerifyError> {
+    let Some(expected) = expected else {
+        return Vec::new();
+    };
+    let (found, at) = match body.last() {
+        Some(ThreadedStmt::FoldAccumulator {
+            result_list, span, ..
+        }) => (*result_list, *span),
+        _ => (None, at),
+    };
+    if found == Some(expected) {
+        Vec::new()
+    } else {
+        vec![VerifyError::FoldResultListUndeclared {
+            expected,
+            found,
+            at,
+        }]
+    }
 }
 
 /// BT-3939, [`VerifyError::ProducerSiteNotThreaded`] over one frame's

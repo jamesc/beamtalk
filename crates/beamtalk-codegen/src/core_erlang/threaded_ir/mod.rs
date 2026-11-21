@@ -90,7 +90,8 @@ pub(super) use build::{
     build_local_threading_prelude, build_method_body, opaque_escapes, stepping_local_rebinds,
 };
 pub(super) use emit::{
-    RenderCtx, cell_put_call, cell_take_call, render, render_value, take_cell_store_emitted,
+    RenderCtx, cell_put_call, cell_take_call, render, render_keyed_fold_call, render_value,
+    take_cell_store_emitted,
 };
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.
 pub(super) use ir::CallSiteLine;
@@ -99,11 +100,12 @@ pub(super) use ir::RebindFrameKind;
 #[cfg(test)]
 pub(super) use ir::STATIC_LOOP_FNS;
 pub(super) use ir::{
-    BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCatchVars, EnsureCleanup,
-    EnsureForeignNlr, EnsureNlrRelay, FastPath, FoldAccShape, FoldCarry, ForeignCleanupBody,
-    FrameId, LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars, RethrowSlot,
-    StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, TryRegion,
-    UserCodeRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
+    BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, ConsPerCall, EnsureCatchVars,
+    EnsureCleanup, EnsureForeignNlr, EnsureNlrRelay, FOLD_RESULT_LIST_SLOT, FastPath, FoldAccShape,
+    FoldCarry, FoldResultList, ForeignCleanupBody, FrameId, KeyedFoldCall, LoopCounter, NlrCarry,
+    NlrThrowShape, OnDoCatchVars, RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadedValue,
+    ThreadingMode, TokenId, TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix,
+    VersionedVar,
 };
 pub(super) use ir::{COUNTED_LOOP_FN, LOOP_FN_STEM, REPEAT_LOOP_FN, WHILE_LOOP_FN};
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
@@ -113,8 +115,9 @@ pub(super) use verify::{
     ClassMethodDefect, ConditionWriteSite, RacingConstruct, SequencedSibling, StaleReadDefect,
     StateReadSite, StateRestoreDefect, VerifyError, verify_bind_frames,
     verify_condition_writes_in_map, verify_fold_family_carried, verify_fold_locals_carried,
-    verify_producer_sites_threaded, verify_repl_producer_sites_threaded, verify_sibling_reads,
-    verify_tuple_acc_no_family, verify_tuple_acc_state_reads,
+    verify_fold_result_list_declared, verify_keyed_fold_call, verify_producer_sites_threaded,
+    verify_repl_producer_sites_threaded, verify_sibling_reads, verify_tuple_acc_no_family,
+    verify_tuple_acc_state_reads,
 };
 
 // `AccParam`/`CloseContext` have no production caller by name

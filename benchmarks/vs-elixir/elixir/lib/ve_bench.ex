@@ -45,10 +45,14 @@ defmodule VeBench do
   def counter, do: elem(Counter.start(), 1)
   def sub_counter, do: elem(VeBench.SubCounter.start(), 1)
   def pool, do: elem(DynamicSupervisor.start_link(strategy: :one_for_one), 1)
-  def capped_pool, do: elem(DynamicSupervisor.start_link(strategy: :one_for_one, max_children: 8), 1)
+
+  def capped_pool,
+    do: elem(DynamicSupervisor.start_link(strategy: :one_for_one, max_children: 8), 1)
+
   def adder, do: fn x -> x + 1 end
   def list100, do: Enum.to_list(1..100)
   def dict, do: %{a: 1, b: 2, k: 3}
+  def dict100, do: Map.new(1..100, &{&1, &1})
   def string, do: "hello world"
   def tuple, do: {1, 2}
   def math_module, do: Math
@@ -105,6 +109,28 @@ defmodule VeBench do
   defbench(:enum_reduce_sum, l, do: Enum.reduce(l, 0, fn e, acc -> acc + e end))
   defbench(:enum_each, l, do: Enum.each(l, fn e -> e end))
   defbench(:enum_map, l, do: Enum.map(l, fn e -> e * 2 end))
+  # Rows 6f-6h (BT-5097): the same work with a counter the block writes.
+  defbench(:enum_map_counting, l,
+    do: elem(Enum.map_reduce(l, 0, fn e, c -> {e * 2, c + 1} end), 0)
+  )
+
+  defbench(:enum_filter_counting, l,
+    do:
+      l
+      |> Enum.reduce({[], 0}, fn e, {acc, c} ->
+        if e > 50, do: {[e | acc], c + 1}, else: {acc, c + 1}
+      end)
+      |> elem(0)
+      |> :lists.reverse()
+  )
+
+  defbench(:map_collect_counting, d,
+    do:
+      d
+      |> Enum.reduce({%{}, 0}, fn {k, v}, {acc, c} -> {Map.put(acc, k, v * 2), c + 1} end)
+      |> elem(0)
+  )
+
   defbench(:lists_foldl, l, do: :lists.foldl(fn e, acc -> acc + e end, 0, l))
 
   # === 15. DynamicSupervisor start_child + terminate_child (BT-4502) ===

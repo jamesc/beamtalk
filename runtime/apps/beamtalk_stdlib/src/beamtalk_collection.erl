@@ -34,7 +34,8 @@ Collection. They fold over `to_list/1`; `max`/`min`/`average` raise
     minimum/1,
     sum/1,
     to_list/1,
-    to_list_for_threading/2
+    to_list_for_threading/2,
+    keyed_foldl/5
 ]).
 
 %% Explicit `(Erlang beamtalk_collection) raiseEmpty: ... selector: ...` FFI
@@ -227,8 +228,60 @@ from_list_like(#{?BT_CLASS_TAG_KEY := 'Array'}, List) ->
     beamtalk_array:from_list(List);
 from_list_like(#{?BT_CLASS_TAG_KEY := 'Set'}, List) ->
     beamtalk_set:from_list(List);
+from_list_like(Recv, Pairs) when is_map(Recv) ->
+    case beamtalk_primitive:is_object(Recv) of
+        %% BT-5097: a keyed fold answers `{Key, Item}` pairs.
+        false -> maps:from_list(Pairs);
+        true -> Pairs
+    end;
 from_list_like(_Recv, List) ->
     List.
+
+-doc """
+The fold call of a writing `collect:`/`select:`/`reject:` over a receiver that is
+not an Erlang list (BT-5097). A `Dictionary` is folded over its `{K, V}` pairs
+with the compiled lambda (after the same receiver guard as any other non-list
+receiver, `guard_writing_fold/2`); after each call the one element the lambda added to
+the result list is recorded under its key, so the epilogue's `from_list_like/2`
+rebuilds a `Dictionary`. Any other receiver folds over `to_list_for_threading/2`,
+as before.
+
+`ListPath` is the element positions from the accumulator to the result list.
+It and the "adds at most one element per call" this relies on are not decided
+here: codegen builds the call from the fold kind's declared result list and
+checks both (`KeyedFoldCall`, `VerifyError::KeyedFoldPathMismatch`).
+""".
+-spec keyed_foldl(fun((term(), term()) -> term()), term(), term(), atom(), [pos_integer()]) ->
+    term().
+keyed_foldl(Lambda, Init, Recv, Selector, ListPath) ->
+    case is_map(Recv) andalso not beamtalk_primitive:is_object(Recv) of
+        true ->
+            %% The ADR 0133 receiver guard, once per call: a runtime extension of
+            %% the selector (or of a message it runs through) wins dispatch, so the
+            %% in-place fold would skip it.
+            ok = guard_writing_fold(Recv, Selector),
+            Step = fun({K, V}, {Keep, Acc}) ->
+                Acc2 = Lambda(V, set_acc_list(ListPath, Acc, [])),
+                case get_acc_list(ListPath, Acc2) of
+                    [] -> {Keep, Acc2};
+                    [Item] -> {[{K, Item} | Keep], Acc2}
+                end
+            end,
+            {Keep, Out} = lists:foldl(Step, {[], Init}, maps:to_list(Recv)),
+            set_acc_list(ListPath, Out, Keep);
+        false ->
+            lists:foldl(Lambda, Init, to_list_for_threading(Recv, Selector))
+    end.
+
+-spec get_acc_list([pos_integer()], tuple()) -> term().
+get_acc_list([Pos], Acc) -> element(Pos, Acc);
+get_acc_list([Pos | Rest], Acc) -> get_acc_list(Rest, element(Pos, Acc)).
+
+-spec set_acc_list([pos_integer()], tuple(), term()) -> tuple().
+set_acc_list([Pos], Acc, List) ->
+    setelement(Pos, Acc, List);
+set_acc_list([Pos | Rest], Acc, List) ->
+    setelement(Pos, Acc, set_acc_list(Rest, element(Pos, Acc), List)).
 
 -doc """
 Convert any collection to a list by iterating with do:.
@@ -331,6 +384,18 @@ to_list_for_threading(#{?BT_CLASS_TAG_KEY := 'Array'}, 'sort:') ->
         [<<" answers an Array from 'sort:', but the in-place fold would answer a List">>]
     );
 to_list_for_threading(Recv, Selector) ->
+    ok = guard_writing_fold(Recv, Selector),
+    to_list(Recv).
+
+-doc """
+The checks of `to_list_for_threading/2` without the conversion (BT-5097): `ok`
+when the in-place fold may stand in for `Selector` on `Recv`, otherwise the
+`stateful_block_dispatch` / `does_not_understand` it raises. `keyed_foldl/5` runs
+it once per call for a `Dictionary`, which is folded over its pairs instead of
+its `to_list/1`.
+""".
+-spec guard_writing_fold(term(), atom()) -> ok.
+guard_writing_fold(Recv, Selector) ->
     {Class, Provider} = selector_provider(Recv, Selector),
     case Provider of
         stdlib ->
@@ -355,7 +420,7 @@ to_list_for_threading(Recv, Selector) ->
                         )
                     of
                         false ->
-                            to_list(Recv);
+                            ok;
                         true ->
                             refuse_writing_fold(
                                 Class,

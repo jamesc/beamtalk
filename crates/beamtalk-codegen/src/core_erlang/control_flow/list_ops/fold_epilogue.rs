@@ -15,7 +15,9 @@
 //! dispatch lives here, on [`BodyKind`] itself, next to the tails.
 
 use super::super::super::CoreErlangGenerator;
-use super::super::super::threaded_ir::{FoldCarry, ThreadedStmt};
+use super::super::super::threaded_ir::{
+    ConsPerCall, FOLD_RESULT_LIST_SLOT, FoldCarry, FoldResultList, ThreadedStmt,
+};
 use super::super::ThreadingPlan;
 use super::BodyKind;
 use beamtalk_cerl_doc::form::{self, Layout};
@@ -51,6 +53,36 @@ impl BodyKind {
             | Self::FoldlPartition { .. }
             | Self::FoldlGroupBy { .. }
             | Self::FoldlSort { .. } => true,
+        }
+    }
+
+    /// BT-5097: the result list this kind's accumulator extends, for a kind
+    /// that has one a keyed fold can drive: `select:`/`reject:` add the item
+    /// or nothing, `collect:` adds the block's answer, both at the head of
+    /// the kind's own accumulator ([`FOLD_RESULT_LIST_SLOT`]). Every other
+    /// kind carries something else there (a count, a flag, a pair of lists, a
+    /// map, the item found) or several elements, so a keyed fold over it is
+    /// not defined; exhaustive on purpose, so a new kind decides.
+    pub(in crate::core_erlang::control_flow) fn result_list(&self) -> Option<FoldResultList> {
+        let list = |cons| {
+            Some(FoldResultList {
+                slot: FOLD_RESULT_LIST_SLOT,
+                cons,
+            })
+        };
+        match self {
+            Self::FoldlFilter { .. } => list(ConsPerCall::AtMostOne),
+            Self::FoldlCollect => list(ConsPerCall::ExactlyOne),
+            Self::FoldlDo
+            | Self::FoldlInject
+            | Self::FoldlBoolPredicate { .. }
+            | Self::FoldlDetect { .. }
+            | Self::FoldlCount
+            | Self::FoldlTakeWhile { .. }
+            | Self::FoldlDropWhile { .. }
+            | Self::FoldlPartition { .. }
+            | Self::FoldlGroupBy { .. }
+            | Self::FoldlSort { .. } => None,
         }
     }
 

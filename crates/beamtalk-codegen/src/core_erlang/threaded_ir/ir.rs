@@ -589,6 +589,71 @@ pub(in crate::core_erlang) enum FoldCarry {
     Value,
 }
 
+/// BT-5097: how many elements one call of a fold lambda adds to the fold's
+/// result list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ConsPerCall {
+    /// A filter (`select:`/`reject:`): the element, or nothing.
+    AtMostOne,
+    /// A map (`collect:`): the block's answer, always.
+    ExactlyOne,
+}
+
+/// BT-5097: the result list of a fold whose accumulator ends in one — the
+/// layout a keyed fold ([`KeyedFoldCall`]) reads without knowing the kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) struct FoldResultList {
+    /// The 1-based tuple position of the list in the fold kind's own
+    /// accumulator (`{AccList, Var1, ..}`).
+    pub(in crate::core_erlang) slot: usize,
+    pub(in crate::core_erlang) cons: ConsPerCall,
+}
+
+/// The result-list slot of every fold accumulator that has one: the one
+/// constant `acc_tuple`'s head, the epilogues' `AccList` reads and the keyed
+/// fold's path all derive from.
+pub(in crate::core_erlang) const FOLD_RESULT_LIST_SLOT: usize = 1;
+
+/// BT-5097: the fold call of a writing `collect:` / `select:` / `reject:`.
+/// A list receiver folds with `lists:foldl`; any other receiver goes to
+/// `beamtalk_collection:keyed_foldl/5`, which folds a `Dictionary`'s `{K, V}`
+/// pairs with the same lambda and records each element the lambda adds under
+/// its key. That driver reads the accumulator through `list_path` and relies
+/// on the lambda adding at most one element per call, so both are carried
+/// here as data and checked by
+/// [`VerifyError::KeyedFoldNoResultList`](super::verify::VerifyError::KeyedFoldNoResultList)
+/// and [`VerifyError::KeyedFoldPathMismatch`](super::verify::VerifyError::KeyedFoldPathMismatch)
+/// instead of living in the runtime's head.
+#[derive(Debug, Clone)]
+pub(in crate::core_erlang) struct KeyedFoldCall {
+    pub(in crate::core_erlang) lambda: String,
+    pub(in crate::core_erlang) init: Document<'static>,
+    /// The receiver variable the fold is over.
+    pub(in crate::core_erlang) recv: String,
+    /// The collection message the fold stands in for (the receiver guard's).
+    pub(in crate::core_erlang) selector: String,
+    /// The variable the fold's (possibly wrapped) result is bound to.
+    pub(in crate::core_erlang) result: String,
+    /// What the fold kind says its accumulator holds (`BodyKind::result_list`);
+    /// `None` for a kind with no result list, which a keyed fold cannot drive.
+    pub(in crate::core_erlang) result_list: Option<FoldResultList>,
+    /// Whether the accumulator is the `{Acc, Family..}` wrapper of a
+    /// `Self`-threading fold (`FoldFamilySlots`).
+    pub(in crate::core_erlang) families: bool,
+    /// The element positions the driver walks from the accumulator to the
+    /// result list.
+    pub(in crate::core_erlang) list_path: Vec<usize>,
+    pub(in crate::core_erlang) span: Span,
+}
+
+impl KeyedFoldCall {
+    /// The path to the result list: the kind's own accumulator is element 1
+    /// of the `{Acc, Family..}` wrapper when there is one.
+    pub(in crate::core_erlang) fn path_for(slot: usize, families: bool) -> Vec<usize> {
+        if families { vec![1, slot] } else { vec![slot] }
+    }
+}
+
 /// One statement of the lowered IR. Every variant is built in production.
 // `ConditionalLoop` is far larger than every other node (it carries the whole
 // loop skeleton); boxing it would ripple through every lowering and test
@@ -892,6 +957,11 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         carry: FoldCarry,
         value: Document<'static>,
         span: Span,
+        /// BT-5097: the result list this accumulator extends, and how many
+        /// elements one call adds to it. Stamped once, from the fold kind
+        /// (`BodyKind::result_list`), by `generate_foldl_loop_body`; `None`
+        /// for a kind with no such list.
+        result_list: Option<FoldResultList>,
     },
 
     /// BT-4015: a `whileTrue:`/`whileFalse:` condition closure's hand-back of
