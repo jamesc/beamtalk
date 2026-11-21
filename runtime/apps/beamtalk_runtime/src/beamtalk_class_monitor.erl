@@ -81,11 +81,21 @@ Register a class process for crash monitoring.
 
 Called by `beamtalk_object_class:start/2` after every successful start
 (including restarts). Synchronous on purpose: `start/2` must not return
-until the monitor is armed, otherwise a kill delivered before the watch is
-processed surfaces as a `noproc` 'DOWN' — indistinguishable from the
-deliberate-stop race `is_deliberate_stop(noproc)` exists for — and the
+until the monitor has *requested* its monitor, otherwise a kill delivered
+before the watch is processed surfaces as a `noproc` 'DOWN' — indistinguishable
+from the deliberate-stop race `is_deliberate_stop(noproc)` exists for — and the
 crash would silently not be recovered. A no-op when the monitor is not
 running (EUnit suites without the runtime supervision tree).
+
+The call narrows that window; it does not close it. The monitor request
+reaches `Pid` as a signal, and the BEAM orders signals only between one sender
+and one receiver, so a kill sent by a third process right after `watch/2`
+returns can overtake it (BT-5102: about 2 in 100000 watch-then-kill rounds
+on OTP 28). `Pid` is then already gone when the request arrives, the 'DOWN'
+reason is `noproc`, and there is no eager restart. That is the same loss the
+`noproc` clause accepts, and lazy recovery on the next send covers it. A test
+that kills a watched process and expects a restart must first wait until the
+process lists this monitor in `process_info(Pid, monitored_by)`.
 """.
 -spec watch(atom(), pid()) -> ok.
 watch(ClassName, Pid) ->
