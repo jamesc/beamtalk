@@ -56,11 +56,11 @@
   //    - Basic git config from GIT_USER_NAME/GIT_USER_EMAIL env vars
   //    - Can build and develop normally
   //
-  // 2. Git Worktrees (advanced): Use scripts/worktree-up.ps1 for parallel work
-  //    - Creates worktrees with isolated containers
-  //    - Sets up SSH commit signing
-  //    - Configures Copilot CLI with MCP
-  //    - See scripts/worktree-up.ps1 for details
+  // 2. Git Worktrees (advanced): parallel work in isolated containers. The
+  //    worktree-management script that used to be scripts/worktree-up.ps1 is no
+  //    longer in this repository. The Beamtalk-specific hooks it called remain:
+  //    - worktree-up-hook.sh (runs in the container after start-up)
+  //    - worktree-down-hook.ps1 (cleanup when a worktree is removed)
   // ═══════════════════════════════════════════════════════════════════════════
   "containerEnv": {
     "CARGO_TARGET_DIR": "${containerWorkspaceFolder}/target"
