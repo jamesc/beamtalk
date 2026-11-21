@@ -5,8 +5,8 @@
 //
 // Demonstrates TestCase subclass with assertion methods
 // Run interactively in the REPL:
-//   > :load examples/counter.bt
-//   > :load examples/example_counter_test.bt
+//   > Workspace load: "examples/getting-started/src/counter.bt"
+//   > Workspace load: "examples/getting-started/test/example_counter_test.bt"
 //   > ExampleCounterTest runAll
 //
 // Note: Each test runs in a fresh TestCase instance, so there is no shared

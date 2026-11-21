@@ -13,7 +13,7 @@ For persistent workspaces (actors survive REPL disconnect, multiple sessions), s
 - [Component Responsibilities](#component-responsibilities)
 - [Compilation Pipeline](#compilation-pipeline)
 - [Live Development Flow](#live-development-flow)
-- [Compiler Daemon](#compiler-daemon)
+- [Compiler Port](#compiler-port)
 - [BEAM Node Integration](#beam-node-integration)
 - [Directory Structure](#directory-structure)
 - [Performance Targets](#performance-targets)
@@ -28,7 +28,7 @@ For persistent workspaces (actors survive REPL disconnect, multiple sessions), s
 
 ## Overview
 
-The Beamtalk compiler is written in **Rust** and runs as a daemon on the developer's machine. It compiles `.bt` source files to BEAM bytecode, which is then hot-loaded into a running BEAM node. The Rust compiler is **not** part of the runtime — it's build infrastructure.
+The Beamtalk compiler is written in **Rust** and runs as an OTP Port owned by the BEAM node (see [Compiler Port](#compiler-port)); the CLI's batch commands (`beamtalk build`, `check`) run the same compiler in-process. It compiles `.bt` source files to BEAM bytecode, which is then hot-loaded into a running BEAM node. The Rust compiler is **not** part of the runtime — it's build infrastructure.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -89,7 +89,7 @@ For Beamtalk, self-hosting would delay shipping by 1+ years with no user-facing 
 
 | Component | Runs Where | Written In | Purpose |
 |-----------|------------|------------|---------|
-| **Compiler** | Dev machine (daemon) | Rust | Parse, type-check, generate Core Erlang |
+| **Compiler** | Dev machine (OTP Port under the BEAM node, or in-process for `build`/`check`) | Rust | Parse, type-check, generate Core Erlang |
 | **LSP Server** | Dev machine | Rust | IDE features (completions, errors, hover) |
 | **REPL CLI** | Dev machine | Rust | Thin shell, sends input to BEAM node |
 | **REPL Backend** | BEAM node | Erlang | Receives code, coordinates with compiler, evaluates |
@@ -248,61 +248,35 @@ Target: **<50ms** for single-file change to loaded code.
 The REPL compiles each expression on demand:
 
 1. **Input**: `counter increment`
-2. **REPL server** sends to compiler daemon
+2. **REPL server** sends to the compiler port (`beamtalk_compiler_server`)
 3. **Compiler** returns bytecode for the expression
 4. **REPL server** loads and evaluates
 5. **Result** sent back to CLI for display
 
 ---
 
-## Compiler Daemon
+## Compiler Port
 
-The compiler runs as a long-lived daemon process for performance:
-
-```bash
-# Started automatically by VS Code extension or CLI
-beamtalk daemon start
-
-# Or run in foreground for debugging
-beamtalk daemon --foreground
-```
-
-### IPC Protocol
-
-Communication via Unix socket (or TCP on Windows):
+There is no separate compiler daemon process (`beamtalk` has no `daemon` subcommand). Inside a running workspace the compiler is an **OTP Port**: `beamtalk_compiler_server`, a supervised gen_server in the BEAM node, owns the Rust compiler binary (`beamtalk-compiler-port`) and serialises requests to it. If the port crashes, the supervisor restarts it. See [ADR 0022](ADR/0022-embedded-compiler-via-otp-port.md).
 
 ```
-~/.beamtalk/daemon.sock
+REPL server / class loader (Erlang)
+        │  gen_server:call
+        ▼
+beamtalk_compiler_server  ──ETF over length-prefixed frames──►  Rust compiler port
+        ◄────────── Core Erlang / diagnostics / class metadata ─────────
 ```
 
-Protocol: JSON-RPC 2.0 (same as LSP)
+### Port protocol
 
-```json
-// Request: Compile file
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "compile",
-  "params": {
-    "path": "/project/src/counter.bt"
-  }
-}
+Requests and replies are Erlang terms (ETF) in length-prefixed frames over the port's stdin/stdout, not JSON-RPC and not a socket. The port is stateless: source plus metadata in, Core Erlang or diagnostics out. Session state (class cache, known variables) lives in the Erlang gen_server and is injected per request.
 
-// Response
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "beam_path": "/project/_build/counter.beam",
-    "diagnostics": []
-  }
-}
-```
+For batch work (`beamtalk build`, `beamtalk check`, `beamtalk test`) the CLI calls the compiler crates directly and no port is involved.
 
 ### Compiler State
 
 Illustrative sketch of the state a persistent compiler process would need to
-track — see "Incremental Compilation" above for what's actually implemented
+track (the compiler port itself is stateless; see above) — see "Incremental Compilation" above for what's actually implemented
 today (`SimpleLanguageService`'s per-file cache and `ProjectIndex`, plus the
 batch build's two-pass content-hash cache; there is no query-graph database):
 
@@ -331,7 +305,8 @@ A small Erlang process runs in the BEAM node to receive hot reloads:
 -module(beamtalk_loader).
 -behaviour(gen_server).
 
-%% Receives compiled .beam files from compiler daemon
+%% Illustrative sketch (no module named beamtalk_loader exists): receives
+%% compiled .beam files from the compiler
 handle_cast({load_module, Module, Binary}, State) ->
     code:load_binary(Module, "", Binary),
     {noreply, State};

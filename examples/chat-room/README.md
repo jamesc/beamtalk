@@ -32,10 +32,10 @@ beamtalk repl
 ### Step 1: Load all classes
 
 ```beamtalk
-> :load src/message.bt
-> :load src/chat_room.bt
-> :load src/chat_member.bt
-> :load src/moderator.bt
+> Workspace load: "src/message.bt"
+> Workspace load: "src/chat_room.bt"
+> Workspace load: "src/chat_member.bt"
+> Workspace load: "src/moderator.bt"
 ```
 
 ### Step 2: Create the room and members
@@ -169,5 +169,5 @@ Creates a new instance by merging provided fields with defaults.
 Try these experiments:
 1. **Add more members** and watch Set handle them
 2. **Use `mod say:`** to see `[MOD]` prefix via super
-3. **Hot reload**: Edit a `.bt` file and `:reload` it — existing actors get new methods!
+3. **Hot reload**: Edit a `.bt` file and run `ChatRoom reload` (or `:sync`) — existing actors get new methods!
 4. **Multiple rooms**: Create several ChatRoom instances and move members between them

@@ -4,8 +4,8 @@
 // BUnit tests for the Transaction value type
 //
 // Run in the REPL:
-//   > :load src/transaction.bt
-//   > :load test/transaction_test.bt
+//   > Workspace load: "src/transaction.bt"
+//   > Workspace load: "test/transaction_test.bt"
 //   > TransactionTest runAll
 
 TestCase subclass: TransactionTest

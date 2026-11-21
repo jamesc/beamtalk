@@ -4,9 +4,9 @@
 // BUnit tests for the Bank actor
 //
 // Run in the REPL:
-//   > :load src/account.bt
-//   > :load src/bank.bt
-//   > :load test/bank_test.bt
+//   > Workspace load: "src/account.bt"
+//   > Workspace load: "src/bank.bt"
+//   > Workspace load: "test/bank_test.bt"
 //   > BankTest runAll
 
 TestCase subclass: BankTest
