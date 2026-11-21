@@ -595,7 +595,7 @@ accumulator — the realistic shape `sum`/`inject:into:` compile to).
   collapses: the realistic fold A/B measures only **~1.09× (~0.5 ns/elem)**.
 - It applies **only to the guarded path**. The bare fast path — all hot stdlib
   arithmetic and ~95% of user code — is byte-for-byte unchanged and pays nothing
-  (asserted by codegen regression tests in `tests/expressions.rs`).
+  (asserted by codegen regression tests in `crates/beamtalk-codegen/src/core_erlang/tests/expressions.rs`).
 - The guarded path includes synthetic fold accumulators (e.g. the `I + 1` index
   increment compiled for `do:`/`eachWithIndex:`), since codegen can't statically
   prove the accumulator is numeric. **Measured, this is negligible** (~1.09× on a
@@ -802,7 +802,7 @@ expected.
 build-time-checked selector set rather than a purely hand-maintained one):
 `beamtalk_primitive:is_string_binary_shared_selector/1` lists the `binary.bt`
 instance selectors `string.bt` does not redefine, and
-`crates/beamtalk-cli/src/commands/build_stdlib.rs`'s
+`crates/beamtalk-cli/src/commands/build_stdlib/mod.rs`'s
 `test_binary_string_shared_selectors_stay_in_sync` recomputes that same set
 from the real `.bt` sources on every `cargo test` run, failing if either file
 changes the override relationship the hardcoded Erlang list assumes — the
