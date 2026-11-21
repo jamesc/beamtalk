@@ -331,6 +331,7 @@ The release name must not contain `@` (it forms part of the `-sname` flag).
 | Directory | Contents |
 |-----------|----------|
 | `lib/<app>-<vsn>/ebin/` | Compiled `.beam` files for each app in the closure |
+| `lib/<app>-<vsn>/priv/` | Private data files for apps that have them (native deps, NIF shared objects, etc.) |
 | `erts-<vsn>/` | Bundled Erlang runtime (when `include-erts = true`) |
 | `releases/<vsn>/` | `.rel`, `start.boot`, `sys.config`, `vm.args` |
 | `releases/<vsn>/beamtalk-provenance.json` | OTP/beamtalk versions, `required_otp` range |
@@ -338,6 +339,7 @@ The release name must not contain `@` (it forms part of the `-sname` flag).
 | `releases/RELEASES` | OTP release metadata |
 | `bin/<name>` | POSIX launcher script |
 | `bin/<name>.cmd` | Windows launcher script |
+| `share/beamtalk/stdlib/` | Stdlib `.bt` sources (used by LSP/MCP for browsing and completion) |
 | `<name>-<vsn>.tar.gz` | Distributable tarball |
 
 ### Launcher Commands

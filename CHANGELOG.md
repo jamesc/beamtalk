@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Security: release cookie no longer visible in `ps`; dev/REPL/LiveView distribution pinned to loopback (BT-5067, [#5601](https://github.com/jamesc/beamtalk/pull/5601)).**
+  - Changed: the release launcher passes the cookie through `ERL_AFLAGS` in the process environment instead of expanding `-setcookie <cookie>` into the `erl` command line, so it no longer appears in `ps` or `/proc/<pid>/cmdline`. A cookie containing whitespace, quotes or backslashes is rejected at start (it cannot be carried safely in `ERL_AFLAGS`).
+  - Changed: the detached workspace node and the named foreground REPL node now start with `-kernel inet_dist_use_interface {127,0,0,1}`, so Erlang distribution listens on loopback only. The LiveView IDE sets the same kernel env. A non-loopback `ERL_EPMD_ADDRESS` overrides this, matching the existing epmd opt-out.
+  - Changed: `validate_release_path_component` now allows only letters, digits, `-`, `_`, `.`, `+` in the release name (`.` and `+` are needed for versions).
+- **Security: foreground REPL now starts distributed; WebSocket hardened (BT-5066, [#5606](https://github.com/jamesc/beamtalk/pull/5606)).**
+  - Changed: `beamtalk repl --foreground` now always starts the node distributed (a generated `-sname beamtalk_fg_<pid>_<rand>`) under a per-process random cookie written to a 0600 temp file, never `~/.erlang.cookie` or `nocookie`. This requires `epmd` to be reachable. The node is `-sname`-addressable, which it was not before.
+  - Changed: the WebSocket upgrade now checks `Origin` (must be a loopback host or absent) and `Host` (must be a loopback name or the bound address). A cross-origin page is refused even with a valid cookie.
+  - Changed: pre-auth connections have a 10 s idle timeout and 4 KiB max frame size (restored to infinity and 1 MiB on successful auth). Max concurrent connections: 256.
+- **Security: MCP tools are confined to the project root (BT-5070, [#5605](https://github.com/jamesc/beamtalk/pull/5605)).**
+  - Changed: `lint`, `diagnostic_summary`, `load_file`, `load_project`, `test` and `export_traces` reject paths that resolve (after symlinks and `..`) outside the project root. `--allow-outside-project` opts out. All tools now carry `readOnlyHint` and, where appropriate, `destructiveHint`.
+  - Changed: non-loopback `--bind` now prints a cleartext-traffic warning at every start.
+- **Fix: LSP survives a handler panic; MCP `complete` rejects a mid-character cursor (BT-5078, [#5623](https://github.com/jamesc/beamtalk/pull/5623)).**
+  - Fixed: a single handler panic no longer poisons the service mutex. The LSP recovers and continues serving subsequent requests.
+  - Fixed: MCP `complete` with a cursor byte offset inside a multi-byte UTF-8 character now returns `invalid_params` instead of panicking.
+- **Fix: LSP range formatting, lint scope, MCP auto-attach (BT-5080, [#5657](https://github.com/jamesc/beamtalk/pull/5657)).**
+  - Fixed: `textDocument/rangeFormatting` now formats only the top-level constructs that overlap the requested range, instead of reformatting the entire file.
+  - Fixed: lint no longer produces false positives from variables leaking between methods or across match-arm scopes.
+  - Changed: MCP auto-attach now connects only to the current project's workspace. If the project has no live workspace but other projects do, startup fails with an error naming them. An explicit `--workspace-id` that is not running is now an error (it used to silently fall back to another workspace).
+  - Added: a warning when two project files define the same class (the alphabetically first file wins).
+- **Fix: two source files producing the same module name are now a build error (BT-5074, [#5615](https://github.com/jamesc/beamtalk/pull/5615)).** For example, `src/FooBar.bt` and `src/foo_bar.bt` both produce `bt@pkg@foo_bar`, which was silently ambiguous. The build now fails naming both files. Project classes consistently win over dependency classes in the module index.
+- **Fix: `beamtalk release` now includes native Erlang modules and dependency `priv/` directories (BT-5072, [#5611](https://github.com/jamesc/beamtalk/pull/5611)).** Previously, `.beam` files from `native/*.erl` sources and dependency `priv/` directories were silently omitted from the assembled release, so `code:priv_dir/1` and native module calls failed at run time. `share/` (stdlib sources for LSP/MCP) is also included in Windows release archives.
 - **Added: one spelling per concept across the stdlib; `Array` reads like `List` (BT-5090).** No selector is removed and no existing call changes behaviour.
   - Added: `Array reversed`, `indexOf:`, `take:`, `drop:`, `sort` and `sort:`, each answering what the `List` selector answers (an Array, or an index). `Array` still has no `add:` or `addFirst:`. They call `beamtalk_array` helpers directly, so no existing send path changes.
   - Added: `String reversed`, `Duration asDays`, `Logger warning:` and `Logger warning:metadata:`. They are the canonical spellings, matching `List reversed`, `asHours` and the `#warning` level.
