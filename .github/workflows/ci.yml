@@ -288,6 +288,20 @@ jobs:
         # The root Cargo.lock is committed; fail if Cargo.toml changed without it.
         run: cargo tree --locked --workspace --depth 0 > /dev/null
 
+      - name: Check runtime/rebar.lock is up to date
+        # rebar.lock is committed (BT-5086). Re-locking must change nothing: a
+        # drift means rebar.config changed without the lock (run `rebar3 lock`
+        # in runtime/ and commit it), or a dependency range now resolves
+        # differently from what the lock pins.
+        working-directory: runtime
+        run: |
+          rebar3 lock
+          if [ -n "$(git status --porcelain -- rebar.lock)" ]; then
+            git --no-pager diff -- rebar.lock
+            echo "::error file=runtime/rebar.lock::rebar.lock is missing or out of date; run 'rebar3 lock' in runtime/ and commit it"
+            exit 1
+          fi
+
       # `lint-repo` is the Justfile's single list of the repo-wide lint-* and
       # script-test recipes; `just lint` runs the same group, so this step can
       # no longer drift from it (BT-5032: the hand-copied list had dropped

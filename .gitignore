@@ -78,7 +78,7 @@ logs/
 
 # Rebar3
 .rebar3/
-rebar.lock
+# runtime/rebar.lock is committed (BT-5086); `rebar3 lock` must leave it unchanged
 rebar3.crashdump
 # rebar3 checkout deps (local development overrides, not committed)
 runtime/_checkouts/
