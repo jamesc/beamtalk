@@ -21,6 +21,14 @@
 //! * An LSP capability is enabled in `crates/beamtalk-lsp/src/server/`
 //!   but is not referenced in the parity doc.
 //!
+//! Two user-documentation tables are checked the same way (BT-5088):
+//!
+//! * The MCP tool table in `docs/beamtalk-tooling.md` lists exactly the
+//!   `#[tool(...)]` functions the server implements.
+//! * The settings table in `editors/vscode/README.md` lists exactly the
+//!   `contributes.configuration` properties of `editors/vscode/package.json`,
+//!   with the same defaults.
+//!
 //! Run via `just check-surface-drift` — the binary discovers the repo
 //! root by walking up from `CARGO_MANIFEST_DIR`, so it can be invoked
 //! from any working directory.
@@ -37,6 +45,11 @@ const PARITY_DOC: &str = "docs/development/surface-parity.md";
 /// every op the REPL protocol routes. Read as data — never scraped from source.
 const REPL_OP_TABLE: &str = "runtime/apps/beamtalk_workspace/test/fixtures/repl_op_table.json";
 const MCP_SERVER: &str = "crates/beamtalk-mcp/src/server/tools/";
+/// User doc whose MCP tool table must match the server's tool list.
+const TOOLING_DOC: &str = "docs/beamtalk-tooling.md";
+/// VS Code extension README (settings table) and the manifest it documents.
+const VSCODE_README: &str = "editors/vscode/README.md";
+const VSCODE_PACKAGE_JSON: &str = "editors/vscode/package.json";
 const REPL_DISPATCH: &str = "crates/beamtalk-cli/src/commands/repl/handlers.rs";
 /// The single source of the REPL meta-command vocabulary — every
 /// `":cmd"` name/alias tab-completion offers lives in this table
@@ -82,6 +95,7 @@ fn run() -> Result<(), Vec<String>> {
     let code = CodeInventory::scan(&repo_root).map_err(|e| vec![e])?;
     let mut errors = Vec::new();
     check_drift(&doc, &code, &mut errors);
+    check_user_docs(&repo_root, &code, &mut errors);
     if errors.is_empty() {
         Ok(())
     } else {
@@ -994,6 +1008,153 @@ fn capability_to_doc_names(field: &str) -> Vec<String> {
 }
 
 /// Run the actual drift checks and append any issues to `errors`.
+/// Run the two user-doc table checks, reading the files under `repo_root`.
+fn check_user_docs(repo_root: &Path, code: &CodeInventory, errors: &mut Vec<String>) {
+    match fs::read_to_string(repo_root.join(TOOLING_DOC)) {
+        Ok(text) => check_mcp_tool_table(&text, &code.mcp_tools, errors),
+        Err(e) => errors.push(format!("cannot read {TOOLING_DOC}: {e}")),
+    }
+    let readme = fs::read_to_string(repo_root.join(VSCODE_README));
+    let manifest = fs::read_to_string(repo_root.join(VSCODE_PACKAGE_JSON));
+    match (readme, manifest) {
+        (Ok(readme), Ok(manifest)) => check_vscode_settings(&readme, &manifest, errors),
+        (Err(e), _) => errors.push(format!("cannot read {VSCODE_README}: {e}")),
+        (_, Err(e)) => errors.push(format!("cannot read {VSCODE_PACKAGE_JSON}: {e}")),
+    }
+}
+
+/// Backticked first cell of a markdown table row, e.g. `` | `evaluate` | x | ``
+/// gives `evaluate`. `None` for rows whose first cell is not a single code span.
+fn first_code_cell(line: &str) -> Option<(String, Vec<String>)> {
+    let cells = split_table_row(line);
+    let first = cells.first()?.trim();
+    let name = first.strip_prefix('`')?.strip_suffix('`')?;
+    if name.is_empty() || name.contains('`') {
+        return None;
+    }
+    Some((name.to_string(), cells))
+}
+
+/// The names in the "| MCP Tool | Description |" table of the tooling doc.
+fn mcp_tool_table_names(doc: &str) -> Option<BTreeSet<String>> {
+    let mut lines = doc.lines();
+    lines.find(|l| {
+        let cells = split_table_row(l);
+        cells.first().is_some_and(|c| c.trim() == "MCP Tool")
+    })?;
+    let mut names = BTreeSet::new();
+    for line in lines {
+        if !line.trim_start().starts_with('|') {
+            break;
+        }
+        if let Some((name, _)) = first_code_cell(line) {
+            names.insert(name);
+        }
+    }
+    Some(names)
+}
+
+fn check_mcp_tool_table(doc: &str, tools: &BTreeSet<String>, errors: &mut Vec<String>) {
+    let Some(documented) = mcp_tool_table_names(doc) else {
+        errors.push(format!(
+            "{TOOLING_DOC} has no `| MCP Tool | Description |` table — the MCP tool table \
+             moved; update beamtalk-surface-drift."
+        ));
+        return;
+    };
+    for t in tools.difference(&documented) {
+        errors.push(format!(
+            "MCP tool `{t}` is implemented in {MCP_SERVER} but missing from the MCP tool table in {TOOLING_DOC}."
+        ));
+    }
+    for t in documented.difference(tools) {
+        errors.push(format!(
+            "{TOOLING_DOC} documents MCP tool `{t}` but the server implements no such tool \
+             (tool names are the `#[tool]` function names, with underscores)."
+        ));
+    }
+}
+
+/// Settings (name -> default as compact JSON) from `contributes.configuration`.
+fn manifest_settings(manifest: &str) -> Result<BTreeMap<String, String>, String> {
+    let json: serde_json::Value =
+        serde_json::from_str(manifest).map_err(|e| format!("{VSCODE_PACKAGE_JSON}: {e}"))?;
+    let config = json
+        .pointer("/contributes/configuration")
+        .ok_or_else(|| format!("{VSCODE_PACKAGE_JSON} has no contributes.configuration"))?;
+    let sections: Vec<&serde_json::Value> = match config {
+        serde_json::Value::Array(a) => a.iter().collect(),
+        other => vec![other],
+    };
+    let mut out = BTreeMap::new();
+    for section in sections {
+        if let Some(props) = section.get("properties").and_then(|p| p.as_object()) {
+            for (name, def) in props {
+                let default = def
+                    .get("default")
+                    .map_or_else(|| "null".to_string(), ToString::to_string);
+                out.insert(name.clone(), default);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Settings rows (name -> default cell text) of the README's "| Setting | Default |" table.
+fn readme_settings(readme: &str) -> Option<BTreeMap<String, String>> {
+    let mut lines = readme.lines();
+    lines.find(|l| {
+        let cells = split_table_row(l);
+        cells.first().is_some_and(|c| c.trim() == "Setting")
+    })?;
+    let mut out = BTreeMap::new();
+    for line in lines {
+        if !line.trim_start().starts_with('|') {
+            break;
+        }
+        if let Some((name, cells)) = first_code_cell(line) {
+            let default = cells
+                .get(1)
+                .map(|c| c.trim().trim_matches('`').to_string())
+                .unwrap_or_default();
+            out.insert(name, default);
+        }
+    }
+    Some(out)
+}
+
+fn check_vscode_settings(readme: &str, manifest: &str, errors: &mut Vec<String>) {
+    let declared = match manifest_settings(manifest) {
+        Ok(d) => d,
+        Err(e) => {
+            errors.push(e);
+            return;
+        }
+    };
+    let Some(documented) = readme_settings(readme) else {
+        errors.push(format!(
+            "{VSCODE_README} has no `| Setting | Default | ... |` table — update beamtalk-surface-drift."
+        ));
+        return;
+    };
+    for (name, default) in &declared {
+        match documented.get(name) {
+            None => errors.push(format!(
+                "VS Code setting `{name}` is declared in {VSCODE_PACKAGE_JSON} but missing from the settings table in {VSCODE_README}."
+            )),
+            Some(doc_default) if doc_default != default => errors.push(format!(
+                "VS Code setting `{name}` defaults to `{default}` in {VSCODE_PACKAGE_JSON} but {VSCODE_README} says `{doc_default}`."
+            )),
+            Some(_) => {}
+        }
+    }
+    for name in documented.keys().filter(|n| !declared.contains_key(*n)) {
+        errors.push(format!(
+            "{VSCODE_README} documents VS Code setting `{name}` but {VSCODE_PACKAGE_JSON} does not declare it."
+        ));
+    }
+}
+
 fn check_drift(doc: &ParityDoc, code: &CodeInventory, errors: &mut Vec<String>) {
     // 1) Every REPL op present in code must be documented.
     for op in &code.repl_ops {
@@ -1086,6 +1247,86 @@ fn check_drift(doc: &ParityDoc, code: &CodeInventory, errors: &mut Vec<String>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -----------------------------------------------------------------------
+    // User-doc table checks (BT-5088).
+    // -----------------------------------------------------------------------
+
+    fn set(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn mcp_table_matching_tool_list_is_clean() {
+        let doc = "intro\n\n| MCP Tool | Description |\n|---|---|\n| `evaluate` | x |\n| `list_actors` | y |\n\nafter | `not_a_tool` |\n";
+        let mut errors = Vec::new();
+        check_mcp_tool_table(doc, &set(&["evaluate", "list_actors"]), &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn mcp_table_reports_missing_and_phantom_tools() {
+        let doc =
+            "| MCP Tool | Description |\n|---|---|\n| `evaluate` | x |\n| `list_modules` | y |\n";
+        let mut errors = Vec::new();
+        check_mcp_tool_table(doc, &set(&["evaluate", "lint"]), &mut errors);
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("`lint`") && e.contains("missing"))
+        );
+        assert!(errors.iter().any(|e| e.contains("`list_modules`")));
+    }
+
+    #[test]
+    fn mcp_table_missing_header_is_an_error() {
+        let mut errors = Vec::new();
+        check_mcp_tool_table("no table here", &set(&["evaluate"]), &mut errors);
+        assert_eq!(errors.len(), 1);
+    }
+
+    const MANIFEST: &str = r#"{"contributes":{"configuration":{"properties":{
+        "beamtalk.stdlibSourceDir":{"type":"string","default":""},
+        "beamtalk.trace.server":{"type":"string","default":"off"},
+        "beamtalk.workspace.autoConnect":{"type":"boolean","default":true}}}}}"#;
+
+    #[test]
+    fn vscode_settings_in_step_are_clean() {
+        let readme = "| Setting | Default | Description |\n|---|---|---|\n| `beamtalk.stdlibSourceDir` | `\"\"` | a |\n| `beamtalk.trace.server` | `\"off\"` | b |\n| `beamtalk.workspace.autoConnect` | `true` | c |\n";
+        let mut errors = Vec::new();
+        check_vscode_settings(readme, MANIFEST, &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn vscode_settings_drift_is_reported() {
+        let readme = "| Setting | Default | Description |\n|---|---|---|\n| `beamtalk.stdlib.sourceDir` | `\"\"` | a |\n| `beamtalk.trace.server` | `\"verbose\"` | b |\n";
+        let mut errors = Vec::new();
+        check_vscode_settings(readme, MANIFEST, &mut errors);
+        // renamed setting (one missing + one phantom), one wrong default, one missing
+        assert_eq!(errors.len(), 4, "{errors:?}");
+        assert!(
+            errors.iter().any(
+                |e| e.contains("`beamtalk.stdlib.sourceDir`") && e.contains("does not declare")
+            )
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("`beamtalk.trace.server`") && e.contains("defaults to"))
+        );
+    }
+
+    #[test]
+    fn repo_docs_match_code() {
+        // The real files in this checkout: the same check `just check-surface-drift` runs.
+        let root = find_repo_root().expect("repo root");
+        let code = CodeInventory::scan(&root).expect("scan");
+        let mut errors = Vec::new();
+        check_user_docs(&root, &code, &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
 
     // -----------------------------------------------------------------------
     // REPL command table <-> dispatch cross-check scanners.

@@ -31,10 +31,10 @@ beamtalk repl
 ## Loading the Example
 
 ```
-> :load account.bt
-> :load transaction.bt
-> :load bank.bt
-> :load transfer_agent.bt
+> Workspace load: "account.bt"
+> Workspace load: "transaction.bt"
+> Workspace load: "bank.bt"
+> Workspace load: "transfer_agent.bt"
 ```
 
 ## Key Concepts

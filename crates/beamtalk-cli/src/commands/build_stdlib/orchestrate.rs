@@ -53,7 +53,7 @@ pub(super) const STDLIB_APP_FILE: &str = "beamtalk_stdlib.app";
 
 /// Build the standard library.
 ///
-/// Finds all `.bt` files in `lib/`, compiles them with stdlib mode enabled,
+/// Finds all `.bt` files in `stdlib/src/`, compiles them with stdlib mode enabled,
 /// and writes `.beam` files to `runtime/apps/beamtalk_stdlib/ebin/`.
 /// Skips the build if all outputs are newer than all inputs (incremental).
 #[instrument(skip_all)]

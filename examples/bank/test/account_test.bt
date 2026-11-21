@@ -4,8 +4,8 @@
 // BUnit tests for the Account actor
 //
 // Run in the REPL:
-//   > :load src/account.bt
-//   > :load test/account_test.bt
+//   > Workspace load: "src/account.bt"
+//   > Workspace load: "test/account_test.bt"
 //   > AccountTest runAll
 
 TestCase subclass: AccountTest
