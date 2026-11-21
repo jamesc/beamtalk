@@ -986,6 +986,8 @@ Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding ag
 
 The server binary is `beamtalk-mcp` (generated projects get an `.mcp.json` that runs `beamtalk-mcp --start`, which starts a workspace if none is running). Tool names use underscores, exactly as listed below; `beamtalk-surface-drift` fails CI if this table and the server's tool list disagree.
 
+**Which workspace it attaches to (BT-5080).** `beamtalk-mcp` attaches only to the running workspace of the current project; it never silently attaches to another project's. With no flag and no running workspace for this project, startup fails; if other projects' workspaces are running, the error names them and says to pick one with `--workspace-id <id>`, give a port with `--port`, or start this project's with `--start`. An explicit `--workspace-id` that is not running is an error and never falls back to a different workspace. Tool output shows which workspace a call touched: `describe` starts with a `Workspace: <id>` line, and `flush`, `remove_class` and `rename_class` end with one (`Workspace: (explicit --port)` when the server was given `--port`).
+
 Path arguments of `lint`, `diagnostic_summary`, `load_file`, `load_project`, `test` (file) and `export_traces` are confined to the project root (symlinks and `..` are resolved); pass `--allow-outside-project` to `beamtalk-mcp` to lift that. Every tool carries MCP `readOnlyHint`, and every non-read-only tool a `destructiveHint`.
 
 | MCP Tool | Description |
