@@ -1922,26 +1922,23 @@ beamtalk generate stubs lists maps string
 
 ### Loading Code into the Workspace
 
-Beamtalk source files are loaded into the live workspace via `:load` or the `Workspace` class-side facade. Loaded classes are immediately available — existing actors pick up new code on next dispatch.
+Beamtalk source files are loaded into the live workspace via the `Workspace` class-side facade (there is no `:load` REPL command). Loaded classes are immediately available — existing actors pick up new code on next dispatch.
 
 ```beamtalk
-// Via REPL shortcut
-:load examples/counter.bt
-// => Loaded: Counter
-
-// Via native message send (works from compiled code and MCP)
+// Load one file (works from compiled code and MCP too)
 Workspace load: "examples/counter.bt"
+// => #(Counter)
 
-// Load an entire directory (compiles all .bt files in dependency order)
-Workspace load: "src/"
+// Recompile every changed file of the project (needs beamtalk.toml);
+// the REPL shortcut is `:sync`
+Workspace sync
 
 // Reload a specific class from its source file
 Counter reload
 // => Counter  (recompiled and hot-swapped)
-
-// Or via REPL shortcut
-:reload Counter
 ```
+
+`Workspace load:` takes a single file; a directory raises an error. Use `Workspace sync` to load a whole project.
 
 See [Workspace and Reflection API](#workspace-and-reflection-api) for the full `Workspace` facade interface.
 
@@ -2987,7 +2984,7 @@ protocol a method was flattened from, or `nil` for a method the class wrote
 itself.
 
 Editing a loaded protocol file's provisions and reloading it
-(`ProtocolName reload` / `:reload ProtocolName`) atomically recompiles and
+(`ProtocolName reload`) atomically recompiles and
 hot-swaps every loaded, source-backed user together — all-or-nothing: if any
 user's recompile fails against the edited protocol, nothing installs and the
 error names the failing user (ADR 0127 §11).
@@ -3938,7 +3935,7 @@ Beamtalk uses **sync-by-default** actor message passing (ADR 0043). The `.` mess
 
 ```beamtalk
 // Load the Counter actor
-:load examples/counter.bt
+Workspace load: "examples/counter.bt"
 
 // Spawn an actor — returns a reference
 c := Counter spawn
@@ -5635,7 +5632,7 @@ Registry reset          // => 0
 ```
 
 > The `>>` live-edit path recompiles the class's recorded source, so it applies
-> to classes defined in source (inline `Object subclass:` or `:load`ed files).
+> to classes defined in source (inline `Object subclass:` or files loaded with `Workspace load:`).
 > Purely-programmatic `ClassBuilder` classes have no recorded source; supply their
 > class methods up front via `classMethods:` / `addClassMethod:body:` instead.
 
@@ -6015,14 +6012,14 @@ for the surface tables.
 
 A live edit doesn't just change the class being patched — it can invalidate
 every existing caller in the image. Every save above (`>>`, class-body
-redefinition, `:load`) triggers an **incremental re-check of known
+redefinition, `Workspace load:`) triggers an **incremental re-check of known
 dependents**: the compiler re-checks the callers `beamtalk_xref` (ADR 0087)
 already knows about, using the same type checker that runs at compile time,
 and publishes what it finds as live diagnostics — no rebuild, no manual
 "find senders" required.
 
 ```beamtalk
-:load counter.bt
+Workspace load: "counter.bt"
 counter := Counter spawn
 counter getCount + 1          // => 1
 
@@ -7210,8 +7207,6 @@ The REPL `:` commands are convenience aliases that desugar to the native message
 | REPL shortcut | Beamtalk native equivalent |
 |---------------|---------------------------|
 | `:sync` | `Workspace sync` |
-| `:load path` | `Workspace load: "path"` |
-| `:reload Counter` | `Counter reload` |
 | `:test` | `Workspace test` |
 | `:test CounterTest` | `Workspace test: CounterTest` |
 | `:help Counter` | `Beamtalk help: Counter` |
@@ -7902,7 +7897,7 @@ original v0.1 flat-global-namespace decision is [ADR 0031](ADR/0031-flat-namespa
 
 ### How loading works
 
-When you load a file — using `:load path/to/file.bt` or `Workspace load: "path/to/file.bt"`:
+When you load a file with `Workspace load: "path/to/file.bt"`:
 
 1. The file is compiled to a BEAM module named `bt@class_name` (ADR 0016)
 2. The module's `on_load` hook registers each class with the class registry
@@ -7912,12 +7907,9 @@ When you load a file — using `:load path/to/file.bt` or `Workspace load: "path
 4. The class records its source file path for future `reload` calls
 
 ```beamtalk
-// Via : shortcut
-:load examples/counter.bt
-// => Loaded: Counter
-
-// Via native message send (works from compiled code too)
+// Works from compiled code too
 (Workspace load: "examples/counter.bt")
+// => #(Counter)
 
 c := Counter spawn
 c increment
@@ -7925,10 +7917,6 @@ c increment
 
 // Reload by class name (class-based, not file-based)
 Counter reload
-// => Counter
-
-// Or via : shortcut (desugars to Counter reload)
-:reload Counter
 // => Counter
 ```
 
@@ -7939,11 +7927,11 @@ atoms differ (e.g. `bt@counter` vs `bt@other_pkg@counter`), and Beamtalk emits a
 warning to alert you to the collision:
 
 ```text
-:load my_app/counter.bt
-// => Loaded: Counter
+Workspace load: "my_app/counter.bt"
+// => #(Counter)
 
-:load other_pkg/counter.bt
-// => Loaded: Counter
+Workspace load: "other_pkg/counter.bt"
+// => #(Counter)
 // warning: Class 'Counter' redefined (was bt@counter, now bt@other_pkg@counter)
 ```
 
@@ -7983,7 +7971,7 @@ prefix. Attempting to load user code that redefines one of these returns a
 structured error:
 
 ```text
-:load my_integers.bt
+Workspace load: "my_integers.bt"
 // => Error: Cannot redefine stdlib class 'Integer'
 //    Hint: Choose a different name. `Integer` is a protected stdlib class name.
 ```

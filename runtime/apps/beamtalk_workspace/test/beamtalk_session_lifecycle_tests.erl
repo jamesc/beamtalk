@@ -27,7 +27,12 @@ lifecycle_test_() ->
         fun reattach_cancels_idle_countdown/1,
         fun attached_session_never_idles_out/1,
         fun busy_detached_session_is_not_stopped/1,
-        fun never_attached_session_has_no_idle_timer/1,
+        fun never_attached_session_idles_out/1,
+        fun never_attached_session_within_period_stays/1,
+        fun close_aborts_running_eval/1,
+        fun attach_to_stopped_session_answers_gone/1,
+        fun attach_after_queued_idle_timeout_answers_gone/1,
+        fun idle_period_is_settable_from_environment/1,
         fun close_stops_session_and_removes_row/1,
         fun sessions_op_lists_ids_that_resume_accepts/1,
         fun idle_monitor_sees_detached_only_workspace_as_idle/1,
@@ -106,11 +111,13 @@ fake_worker(Session) ->
 
 detached_session_is_stopped_and_row_removed(_) ->
     {"connect, disconnect without resuming: process and row are gone", fun() ->
-        set_idle_seconds(0),
+        %% The period is read at detach time; setting it after attach keeps the
+        %% never-attached bound (BT-5084) from racing the attach.
         Session = new_session(<<"lc-1">>),
         Mon = erlang:monitor(process, Session),
         Client = new_client(),
         attach(Session, Client),
+        set_idle_seconds(0),
         disconnect(Client),
         receive
             {'DOWN', Mon, process, Session, normal} -> ok
@@ -153,10 +160,10 @@ reattach_cancels_idle_countdown(_) ->
 
 attached_session_never_idles_out(_) ->
     {"a session with a client is not stopped by a timeout", fun() ->
-        set_idle_seconds(0),
         Session = new_session(<<"lc-4">>),
         Client = new_client(),
         attach(Session, Client),
+        set_idle_seconds(0),
         Session ! session_idle_timeout,
         ok = beamtalk_test_wait:sync(Session),
         ?assert(is_process_alive(Session)),
@@ -165,10 +172,10 @@ attached_session_never_idles_out(_) ->
 
 busy_detached_session_is_not_stopped(_) ->
     {"a detached session with a running eval is not stopped", fun() ->
-        set_idle_seconds(0),
         Session = new_session(<<"lc-5">>),
         Client = new_client(),
         attach(Session, Client),
+        set_idle_seconds(0),
         Worker = fake_worker(Session),
         disconnect(Client),
         Session ! session_idle_timeout,
@@ -178,10 +185,18 @@ busy_detached_session_is_not_stopped(_) ->
         Worker ! stop
     end}.
 
-never_attached_session_has_no_idle_timer(_) ->
-    {"a session no client ever attached to is not reaped by a timeout", fun() ->
+never_attached_session_idles_out(_) ->
+    {"a session no client ever attached to idles out (BT-5084)", fun() ->
         set_idle_seconds(0),
         Session = new_session(<<"lc-6">>),
+        beamtalk_test_wait:dead(Session),
+        ?assertEqual(error, beamtalk_session_table:lookup(<<"lc-6">>))
+    end}.
+
+never_attached_session_within_period_stays(_) ->
+    {"a never-attached session inside its idle period is kept", fun() ->
+        set_idle_seconds(3600),
+        Session = new_session(<<"lc-6b">>),
         Session ! session_idle_timeout,
         ok = beamtalk_test_wait:sync(Session),
         ?assert(is_process_alive(Session)),
@@ -199,6 +214,74 @@ close_stops_session_and_removes_row(_) ->
         ?assertEqual({status, ok}, beamtalk_repl_ops:dispatch(<<"close">>, #{}, Msg, Session)),
         beamtalk_test_wait:dead(Session),
         ?assertEqual(error, beamtalk_session_table:lookup(<<"lc-7">>))
+    end}.
+
+close_aborts_running_eval(_) ->
+    {"close mid-eval kills the eval worker instead of orphaning it (BT-5084)", fun() ->
+        Session = new_session(<<"lc-close-eval">>),
+        Worker = fake_worker(Session),
+        ?assert(is_process_alive(Worker)),
+        ?assertEqual(ok, beamtalk_session_sup:stop_session(Session)),
+        beamtalk_test_wait:dead(Session),
+        beamtalk_test_wait:dead(Worker)
+    end}.
+
+attach_to_stopped_session_answers_gone(_) ->
+    {"attach to a session that is gone answers gone, never ok", fun() ->
+        Session = new_session(<<"lc-gone">>),
+        ok = beamtalk_repl_shell:stop(Session),
+        Client = new_client(),
+        ?assertEqual(gone, beamtalk_repl_shell:attach(Session, Client)),
+        disconnect(Client)
+    end}.
+
+attach_after_queued_idle_timeout_answers_gone(_) ->
+    {"resume race: an idle timeout queued ahead of the attach wins; the caller is told",
+        {timeout, 30, fun() ->
+            %% A detached session, so the order of messages is under the test's control.
+            set_idle_seconds(3600),
+            Session2 = new_session(<<"lc-race2">>),
+            C1 = new_client(),
+            attach(Session2, C1),
+            ok = sys:suspend(Session2),
+            set_idle_seconds(0),
+            C1 ! stop,
+            beamtalk_test_wait:dead(C1),
+            beamtalk_test_wait:until(fun() ->
+                {message_queue_len, N} = erlang:process_info(Session2, message_queue_len),
+                N >= 1
+            end),
+            Session2 ! session_idle_timeout,
+            Self = self(),
+            C2 = new_client(),
+            spawn(fun() -> Self ! {attached, beamtalk_repl_shell:attach(Session2, C2)} end),
+            beamtalk_test_wait:until(fun() ->
+                {message_queue_len, N} = erlang:process_info(Session2, message_queue_len),
+                N >= 3
+            end),
+            ok = sys:resume(Session2),
+            receive
+                {attached, Result} -> ?assertEqual(gone, Result)
+            after 5000 -> ?assert(false)
+            end,
+            beamtalk_test_wait:dead(Session2),
+            disconnect(C2)
+        end}}.
+
+idle_period_is_settable_from_environment(_) ->
+    {"BEAMTALK_SESSION_IDLE_SECONDS sets the idle period; app env wins", fun() ->
+        application:unset_env(beamtalk_workspace, session_idle_seconds),
+        os:putenv("BEAMTALK_SESSION_IDLE_SECONDS", "7"),
+        try
+            ?assertEqual(7, beamtalk_repl_shell:session_idle_seconds()),
+            set_idle_seconds(9),
+            ?assertEqual(9, beamtalk_repl_shell:session_idle_seconds()),
+            application:unset_env(beamtalk_workspace, session_idle_seconds),
+            os:putenv("BEAMTALK_SESSION_IDLE_SECONDS", "nope"),
+            ?assertEqual(14400, beamtalk_repl_shell:session_idle_seconds())
+        after
+            os:unsetenv("BEAMTALK_SESSION_IDLE_SECONDS")
+        end
     end}.
 
 sessions_op_lists_ids_that_resume_accepts(_) ->

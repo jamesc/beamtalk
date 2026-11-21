@@ -28,7 +28,7 @@ beamtalk repl
 ```
 
 All source files in `src/` load automatically when you start the REPL.
-To run the tests: `:load "test/"`
+To run the tests: `:test`
 
 ## Key Concepts
 

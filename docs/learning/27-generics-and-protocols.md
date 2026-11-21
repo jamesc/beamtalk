@@ -5,7 +5,7 @@ Beamtalk's type system goes beyond simple annotations with two powerful features
 **structural protocols** for formalizing duck-typing contracts. Both are
 compile-time only — zero runtime cost.
 
-> **Status:** v0.3.0 — fully implemented. See
+> **Status:** implemented. See
 > [ADR 0068](../ADR/0068-parametric-types-and-protocols.md) for design rationale.
 
 ## Why generics?
@@ -199,13 +199,15 @@ Require multiple protocols with `&`:
 sort: items :: Collection(Object) & Comparable => ...
 ```
 
-Extend a protocol:
+Extend a protocol (one protocol per `.bt` file):
 
 ```
 Protocol define: Sortable
-  extending: Comparable
+  extending: Keyed
   sortKey -> Object
 ```
+
+`extending:` names a protocol defined in your own package (here `Keyed`). Naming a stdlib protocol such as `Comparable` is currently rejected by the compiler with "extends unknown protocol".
 
 ### Type parameter bounds
 
@@ -224,15 +226,15 @@ Union types express that a value may be one of several types:
 ```
 x :: Integer | String := getValue
 x asString             // Both Integer and String have asString
-x size                 // Warning: Integer does not respond to 'size'
-x + 1                  // Warning: String does not respond to '+'
+x size                 // Compile-time diagnostic: Integer does not respond to 'size'
+x + 1                  // Compile-time diagnostic: String does not respond to '+'
 ```
 
-The most common union is `String | nil` — Beamtalk's Option/Maybe pattern:
+The most common union is `String | Nil` — Beamtalk's Option/Maybe pattern:
 
 ```
-name :: String | nil := dictionary at: "name"
-name size              // Warning: UndefinedObject does not respond to 'size'
+name :: String | Nil := dictionary at: "name"
+name size              // Compile-time diagnostic: Nil does not respond to 'size'
 ```
 
 ## Control flow narrowing
@@ -255,7 +257,7 @@ validate: x :: Object =>
 **Union + narrowing compose** — the killer feature:
 
 ```
-name :: String | nil := dictionary at: "name"
+name :: String | Nil := dictionary at: "name"
 name isNil ifTrue: [^"unknown"]
 name size              // name narrowed to String — nil eliminated
 ```
@@ -276,21 +278,16 @@ In CI, `--warnings-as-errors` enforces that warnings are fixed before merging.
 
 ## Runtime introspection
 
-Generic type information survives in `__beamtalk_meta/0` for tooling:
+Generic type information survives in `__beamtalk_meta/0` for tooling. Protocols are named by Symbol:
 
+```beamtalk
+(Integer conformsTo: #Printable) printString // => true
+(Integer conformsTo: #NoSuchProtocol) printString // => false
+Integer protocols printString // => #(#Comparable, #Printable)
+Printable requiredMethods printString // => #(#asString, #printString)
 ```
-> :help Result >> unwrap
-unwrap -> T
 
-> Integer conformsTo: Printable
-=> true
-
-> Integer protocols
-=> #(Printable, Comparable)
-
-> Printable requiredMethods
-=> #(#asString)
-```
+In the REPL, `:help Result unwrap` shows the generic signature (`unwrap -> T`) and its documentation.
 
 This is **not** reified generics — no runtime type checks, no generic tags
 on instances. It's introspection data for the REPL, `:help`, and IDE tooling.
@@ -300,7 +297,7 @@ on instances. It's introspection data for the REPL, `:help`, and IDE tooling.
 ```
 // Generic class
 Value subclass: Stack(E)
-  field: items :: Array(E) = #()
+  field: items :: List(E) = #()
   push: item :: E -> Self => ...
   pop -> E => ...
 
@@ -312,7 +309,7 @@ Protocol define: Printable
 display: thing :: Printable => Transcript show: thing asString
 
 // Union + narrowing
-name :: String | nil := lookup: key
+name :: String | Nil := lookup: key
 name isNil ifTrue: [^"default"]
 name size  // safe — narrowed to String
 
@@ -351,7 +348,7 @@ mean? What are `T`, `R`, and `E`?
 `Array` also conforms to `Collection(E)` because it has `size`, `do:`,
 `collect:`, and `select:`.
 
-Check at runtime: `Array conformsTo: Printable` returns `true`.
+Check at runtime: `Array conformsTo: #Printable` returns `true`.
 Check at compile time: use `:: Printable` as a type annotation and see if
 warnings appear.
 </details>
@@ -365,14 +362,15 @@ to avoid type warnings.
 
 ```
 double: x :: Integer | String =>
-  x class =:= Integer ifTrue: [
+  (x isKindOf: Integer) ifTrue: [
     ^x * 2       // x narrowed to Integer — has '*'
   ]
   x ++ x         // x is String here (Integer case returned early)
 ```
 
-The `^` (early return) after the `ifTrue:` block eliminates Integer from the
-union for the rest of the method, leaving only String.
+The `^` (early return) after an `isKindOf:` test eliminates Integer from the
+union for the rest of the method, leaving only String. (A `x class =:= Integer`
+test narrows only inside its own `ifTrue:` block, not after an early return.)
 </details>
 
 Next: Appendix — [Glossary](26-glossary.md)

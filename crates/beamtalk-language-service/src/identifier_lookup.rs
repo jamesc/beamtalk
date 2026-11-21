@@ -200,44 +200,16 @@ impl SimpleLanguageService {
         module: &Module,
         offset: u32,
     ) -> Option<crate::queries::definition_provider::SelectorLookup> {
-        // Check top-level expressions
-        for stmt in &module.expressions {
-            if let Some(result) = crate::queries::definition_provider::find_selector_lookup_in_expr(
-                &stmt.expression,
-                offset,
-            ) {
-                return Some(result);
+        // Every expression root: statements, method bodies, state and
+        // class-variable defaults, protocol provided methods (BT-5079).
+        let mut found = None;
+        beamtalk_core::ast_walker::for_each_root_expr(module, |expr| {
+            if found.is_none() {
+                found =
+                    crate::queries::definition_provider::find_selector_lookup_in_expr(expr, offset);
             }
-        }
-        // Check class method bodies
-        for class in &module.classes {
-            for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for stmt in &method.body {
-                    if let Some(result) =
-                        crate::queries::definition_provider::find_selector_lookup_in_expr(
-                            &stmt.expression,
-                            offset,
-                        )
-                    {
-                        return Some(result);
-                    }
-                }
-            }
-        }
-        // Check standalone method bodies
-        for smd in &module.method_definitions {
-            for stmt in &smd.method.body {
-                if let Some(result) =
-                    crate::queries::definition_provider::find_selector_lookup_in_expr(
-                        &stmt.expression,
-                        offset,
-                    )
-                {
-                    return Some(result);
-                }
-            }
-        }
-        None
+        });
+        found
     }
 
     /// Finds the identifier at a given position.
@@ -335,6 +307,12 @@ impl SimpleLanguageService {
                 && let Some(ident) =
                     Self::find_identifier_in_type_annotation(type_annotation, offset_val)
             {
+                return Some(ident);
+            }
+        }
+        // State and class-variable defaults are expressions (BT-5079).
+        for expr in class.state_default_exprs() {
+            if let Some(ident) = Self::find_identifier_in_expr(expr, offset) {
                 return Some(ident);
             }
         }

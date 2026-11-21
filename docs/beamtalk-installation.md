@@ -24,7 +24,8 @@ curl -fsSL https://beamtalk.dev/install.sh | sh
 ```
 
 This downloads the latest release for your platform, extracts it to
-`~/.beamtalk`, and adds `~/.beamtalk/bin` to your shell's PATH.
+`~/.beamtalk`, and prints the line to add `~/.beamtalk/bin` to your shell profile
+if it is not already on your `PATH` (it does not edit the profile itself).
 
 To install a specific version or custom location:
 
@@ -41,6 +42,12 @@ curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --edge      # latest main 
 ```
 
 The `--edge` channel (`BEAMTALK_EDGE=1` environment equivalent) installs the rolling build of the latest `main` commit, so downstream package CI can test against the current tip without waiting for a nightly.
+
+The installer verifies the archive's SHA-256 against the `.sha256` file published with each release and stops if that file cannot be fetched or does not match. Pass `--insecure-skip-checksum` only if you accept installing an unverified archive. Each install replaces the previous one, so files a newer release dropped do not linger, and `--uninstall` (with the same `--prefix`) removes it:
+
+```
+curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --uninstall
+```
 
 ## Manual install from release archive
 
@@ -118,11 +125,13 @@ The status bar will show the Beamtalk workspace connection status.
 Create a new project:
 
 ```
-beamtalk new my-project
-cd my-project
+beamtalk new my_project
+cd my_project
 ```
 
-This sets up the standard project file structure. Then start the REPL:
+This sets up the standard project file structure. Package names use lowercase
+letters, digits and underscores only: `beamtalk new my-project` is rejected.
+Then start the REPL:
 
 ```
 beamtalk repl

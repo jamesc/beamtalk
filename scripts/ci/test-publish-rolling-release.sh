@@ -20,6 +20,8 @@ trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/bin" "$T/assets"
 echo a > "$T/assets/new.tar.gz"
 echo b > "$T/assets/new.tar.gz.sha256"
+echo c > "$T/assets/other.tar.gz"
+echo d > "$T/assets/other.tar.gz.sha256"
 echo notes > "$T/notes.md"
 
 # Fake gh. FAKE_RELEASE_EXISTS=1 makes `release view` succeed; the asset list
@@ -28,6 +30,11 @@ cat > "$T/bin/gh" <<'GH'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE_LOG"
 case "$1 $2" in
+  "api -X")
+    # FAKE_PATCH_ERR: PATCH of the tag ref fails with this message.
+    if [[ "$*" == *"-X PATCH"* && -n "${FAKE_PATCH_ERR:-}" ]]; then
+      echo "gh: ${FAKE_PATCH_ERR}" >&2; exit 1
+    fi ;;
   "release view")
     [ "${FAKE_RELEASE_EXISTS:-0}" = 1 ] || exit 1
     if [[ "$*" == *--json* ]]; then printf '%s\n' ${FAKE_ASSETS:-}; fi ;;
@@ -45,7 +52,7 @@ run() {
   : > "$T/log"
   set +e
   PATH="$T/bin:$PATH" FAKE_LOG="$T/log" GITHUB_REPOSITORY=o/r \
-    bash "$SCRIPT" edge abc123 "Edge" "$T/notes.md" "$T/assets/new.tar.gz" "$T/assets/new.tar.gz.sha256" >/dev/null 2>&1
+    bash "$SCRIPT" edge abc123 "Edge" "$T/notes.md" "$T/assets/new.tar.gz" "$T/assets/other.tar.gz" "$T/assets/new.tar.gz.sha256" "$T/assets/other.tar.gz.sha256" >/dev/null 2>&1
   RC=$?
   set -e
 }
@@ -65,11 +72,29 @@ check "existing: tag moved after assets" \
 check "existing: notes refreshed last" \
   '[ "$(line_of "api -X PATCH")" -lt "$(line_of "release edit edge")" ]'
 
+# Asset order (BT-5101): every archive is followed immediately by its own
+# .sha256, one upload call per file, however the caller ordered the arguments.
+# Archives-first/checksums-last would only move the stale-checksum window.
+check "order: one upload call per asset" '[ "$(grep -c "^release upload" "$T/log")" -eq 4 ]'
+check "order: archive, then its checksum, then the next pair" \
+  '[ "$(grep "^release upload" "$T/log" | sed -E "s#.*/([^/ ]+) --clobber#\1#" | tr "\n" " ")" = "new.tar.gz new.tar.gz.sha256 other.tar.gz other.tar.gz.sha256 " ]'
+
 # Upload fails: nothing else happens, the old release is untouched.
 FAKE_RELEASE_EXISTS=1 FAKE_FAIL_ON="release upload" run
 check "failed upload: script fails" '[ "$RC" -ne 0 ]'
 check "failed upload: no tag move, delete or edit" \
   '! grep -qE "^(api|release delete|release edit)" "$T/log"'
+
+# Tag move (BT-5101): only a missing ref falls through to create.
+FAKE_RELEASE_EXISTS=1 FAKE_PATCH_ERR="Reference does not exist (HTTP 422)" run
+check "missing ref: succeeds" '[ "$RC" -eq 0 ]'
+check "missing ref: tag created with POST" 'grep -q "^api -X POST repos/o/r/git/refs .*refs/tags/edge" "$T/log"'
+FAKE_RELEASE_EXISTS=1 FAKE_PATCH_ERR="Resource not accessible by integration (HTTP 403)" run
+check "other PATCH failure: script fails" '[ "$RC" -ne 0 ]'
+check "other PATCH failure: no POST fall-through" '! grep -q "^api -X POST" "$T/log"'
+check "other PATCH failure: release notes not edited" '! grep -q "^release edit" "$T/log"'
+ERR_OUT="$(FAKE_RELEASE_EXISTS=1 FAKE_PATCH_ERR="Resource not accessible by integration (HTTP 403)" PATH="$T/bin:$PATH" FAKE_LOG="$T/log2" GITHUB_REPOSITORY=o/r bash "$SCRIPT" edge abc "t" "$T/notes.md" "$T/assets/new.tar.gz" 2>&1 || true)"
+check "other PATCH failure: own error reported" '[[ "$ERR_OUT" == *"Resource not accessible"* ]]'
 
 # No release yet: tag placed, then the release created from it.
 FAKE_RELEASE_EXISTS=0 run

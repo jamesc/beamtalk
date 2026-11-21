@@ -60,9 +60,11 @@ Every generated project includes a `Justfile` with these targets:
 |--------|---------|-------------|
 | `build` | `beamtalk build` | Compile the project |
 | `test` | `beamtalk test` | Run the test suite |
-| `fmt` | `beamtalk fmt --check` | Check formatting |
+| `fmt` | `beamtalk fmt-check` | Check formatting |
 | `fmt-fix` | `beamtalk fmt` | Format in place |
-| `ci` | `fmt build test` | Full CI check |
+| `lint` | `beamtalk lint` | Lint source files |
+| `clean` | `rm -rf _build` | Remove build artifacts |
+| `ci` | `fmt lint build test` | Full CI check |
 | `release` | *(script)* | Tag a release from `beamtalk.toml` version |
 | `publish` | `git push origin --tags` | Push release tags |
 | `run` | `beamtalk run` | Run the application (**`--app` only**) |
@@ -260,7 +262,7 @@ This metadata serves multiple purposes:
 
 ### Hot-Patching
 
-When a `.bt` file is reloaded (via `Workspace load:`, `:reload`, or a VS Code file save), the compiler produces new BEAM bytecode and the runtime hot-loads it using standard OTP code loading (`code:load_binary/3`). The class gen_server process updates its live state to reflect the new methods — hot-patched methods take effect on the next message send without restarting the actor.
+When a `.bt` file is reloaded (via `Workspace load:`, `Counter reload`, `:sync`, or a VS Code file save), the compiler produces new BEAM bytecode and the runtime hot-loads it using standard OTP code loading (`code:load_binary/3`). The class gen_server process updates its live state to reflect the new methods — hot-patched methods take effect on the next message send without restarting the actor.
 
 The compiler server is also notified of the change so its class cache stays current. Since `__beamtalk_meta/0` is a compiled function baked into the module, it reflects the original compilation — not hot-patches. The gen_server's `class_state` record is the authoritative live view; the compiler server receives updates synthesised from `class_state`, not from the stale `__beamtalk_meta/0`.
 
@@ -373,12 +375,14 @@ The Beamtalk REPL is an interactive development environment connected to a persi
 
 ```bash
 beamtalk repl                # Start or reconnect to workspace
-beamtalk repl --foreground   # Start node in foreground (debug mode; conflicts with --workspace,
+beamtalk repl --foreground   # Start node in foreground (debug mode; needs epmd; conflicts with --workspace,
                              # --persistent, --ephemeral and --idle-timeout)
 beamtalk repl --idle-timeout 600  # Stop the workspace after 10 idle minutes
 beamtalk repl --port 9090    # Use a specific port
 beamtalk repl --node mynode  # Use a specific node name
 ```
+
+**Session idle period.** A REPL session whose client disconnected stays resumable for 4 hours, then the workspace stops it. A session no client ever attached to (a `clone`, a dist-attached LiveView) is stopped after the same period without an eval. Change the period with the `BEAMTALK_SESSION_IDLE_SECONDS` environment variable of the workspace node, or with `{beamtalk_workspace, [{session_idle_seconds, N}]}` in `sys.config` (which wins). This is separate from `--idle-timeout`, which stops the whole workspace node.
 
 On startup, the REPL prints the version and a help hint:
 
@@ -445,19 +449,19 @@ REPL commands start with `:` and provide shortcuts for common operations. Most a
 
 | Command | Native equivalent | Description |
 |---------|-------------------|-------------|
-| `:load path/to/file.bt` | `Workspace load: "path/to/file.bt"` | Compile and hot-load a `.bt` file |
-| `:load path/to/dir/` | `Workspace load: "path/to/dir/"` | Load all `.bt` files from a directory recursively |
-| `:reload Counter` | `Counter reload` | Recompile a class from its source file |
-| `:reload` | *(reload last loaded file/dir)* | Reload the most recently loaded file or directory |
+| *(none)* | `Workspace load: "path/to/file.bt"` | Compile and hot-load one `.bt` file; answers the list of loaded classes. A directory is an error |
+| *(none)* | `Counter reload` | Recompile a class from its source file |
 | `:sync` / `:s` | `Workspace sync` | Sync workspace with project (requires `beamtalk.toml`) |
 | `:recheck image` | `Workspace recheckImage` | Re-check all live classes for stale callers / broken signatures |
 | `:unload Counter` | *(removes class)* | Unload a user class from the workspace |
 
-**`:load`** compiles the file and hot-loads the resulting BEAM module. If a class with the same name already exists, the new code replaces it — live actors pick up the new methods on their next message send.
+There are no `:load` or `:reload` commands: `:load path` is a parse error in the REPL. Use `Workspace load:` for one file, `Counter reload` for one class, and `:sync` for the whole project.
+
+**`Workspace load:`** compiles the file and hot-loads the resulting BEAM module. If a class with the same name already exists, the new code replaces it — live actors pick up the new methods on their next message send.
 
 ```beamtalk
-> :load examples/counter.bt
-Loaded: Counter
+> Workspace load: "examples/counter.bt"
+#(Counter)
 
 > c := Counter spawn
 Actor(Counter, 0.234.0)
@@ -466,12 +470,7 @@ Actor(Counter, 0.234.0)
 1
 ```
 
-**`:load`** also accepts directories, loading all `.bt` files recursively:
-
-```beamtalk
-> :load src/models/
-Loaded 3 files from src/models/
-```
+`Workspace load:` takes a single file; passing a directory raises `Failed to read file: eisdir`. To load several files, use `:sync` (the whole project) or one `Workspace load:` per file.
 
 **`:sync`** loads (or reloads) the entire project defined by `beamtalk.toml` in the current directory. It is incremental — unchanged files are skipped:
 
@@ -586,8 +585,8 @@ x
 | `:test CounterTest` | `Workspace test: CounterTest` | Run a specific test class |
 
 ```beamtalk
-> :load test/counter_test.bt
-Loaded: CounterTest
+> Workspace load: "test/counter_test.bt"
+#(CounterTest)
 
 > :test CounterTest
 Running 1 test class...
@@ -745,11 +744,11 @@ Actor(InlineCounter, 0.234.0)
 
 ### Hot Reload
 
-When a class is reloaded (via `:load`, `:reload`, or an inline redefinition), existing actor instances pick up the new code on their next message send. State is preserved across the reload.
+When a class is reloaded (via `Workspace load:`, `Counter reload`, `:sync`, or an inline redefinition), existing actor instances pick up the new code on their next message send. State is preserved across the reload.
 
 ```beamtalk
-> :load examples/counter.bt
-Loaded: Counter
+> Workspace load: "examples/counter.bt"
+#(Counter)
 
 > c := Counter spawn
 Actor(Counter, 0.234.0)
@@ -761,7 +760,7 @@ Actor(Counter, 0.234.0)
 2
 
 // Edit counter.bt to change increment behavior, then:
-> :reload Counter
+> Counter reload
 Counter
 
 // Existing actor uses new code, state preserved
@@ -886,8 +885,8 @@ Method bodies and batch-compiled code use only the class registry. `bind:as:` re
 The typical interactive development cycle:
 
 ```beamtalk
-> :load src/counter.bt          // Load the class
-Loaded: Counter
+> Workspace load: "src/counter.bt"          // Load the class
+#(Counter)
 
 > c := Counter spawn            // Try it out
 Actor(Counter, 0.234.0)
@@ -897,14 +896,14 @@ Actor(Counter, 0.234.0)
 
 // ... edit counter.bt in your editor ...
 
-> :reload Counter               // Hot-reload the change
+> Counter reload               // Hot-reload the change
 Counter
 
 > c increment                   // Existing actor uses new code
 11
 
-> :load test/counter_test.bt     // Load tests
-Loaded: CounterTest
+> Workspace load: "test/counter_test.bt"     // Load tests
+#(CounterTest)
 
 > :test CounterTest             // Run tests
 2 passed, 0 failed
@@ -985,17 +984,33 @@ ok
 
 Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding agents structured access to the live workspace. The MCP tools connect via the same WebSocket protocol as the REPL and VS Code extension — the agent interacts with the same running system.
 
+The server binary is `beamtalk-mcp` (generated projects get an `.mcp.json` that runs `beamtalk-mcp --start`, which starts a workspace if none is running). Tool names use underscores, exactly as listed below; `beamtalk-surface-drift` fails CI if this table and the server's tool list disagree.
+
+Path arguments of `lint`, `diagnostic_summary`, `load_file`, `load_project`, `test` (file) and `export_traces` are confined to the project root (symlinks and `..` are resolved); pass `--allow-outside-project` to `beamtalk-mcp` to lift that. Every tool carries MCP `readOnlyHint`, and every non-read-only tool a `destructiveHint`.
+
 | MCP Tool | Description |
 |----------|-------------|
-| `evaluate` | Run any Beamtalk expression in the workspace (optional `timeout_secs` overrides the default 30 s; `BEAMTALK_MCP_EVAL_TIMEOUT` env var sets the server-wide default) |
-| `load_file` | Compile and hot-reload a `.bt` file |
+| `evaluate` | Run any Beamtalk expression in the workspace (optional `timeout_secs` overrides the default 30 s; `BEAMTALK_MCP_EVAL_TIMEOUT` env var sets the server-wide default; `trace=true` returns per-statement step values) |
+| `complete` | Autocompletion suggestions for partial input |
+| `interrupt` | Cancel a running evaluation |
+| `inspect` | Inspect a running actor's state by PID |
+| `show_codegen` | Show generated Core Erlang for an expression (`code`) or a loaded class (`class`, optional `selector`) |
+| `load_file` | Compile and hot-load a `.bt` file |
 | `load_project` | Load all project files in dependency order |
-| `list_modules` | List loaded BEAM modules |
-| `list_classes` | List loaded Beamtalk classes (with optional filter) |
-| `docs` | Query class/method documentation |
-| `test` | Run tests (all, by class, or by file) |
-| `search_examples` | Search the bundled example corpus |
-| `search_classes` | Search class names and documentation |
+| `reload_class` | Hot-reload a class, migrating running actors to the new code |
+| `unload` | Unload a class from the workspace (running actors are unaffected) |
+| `list_classes` | List loaded Beamtalk classes (optional `superclass` filter, optional `scope`: `stdlib` or `user`) |
+| `list_packages` | List loaded packages with versions, class counts and dependencies |
+| `package_classes` | List the classes belonging to a named package |
+| `docs` | Query class/method documentation (`class`, or `erlang_module` for Erlang FFI, plus optional selector) |
+| `test` | Run tests (all, by `class`, or by `file`; `class` and `file` are mutually exclusive) |
+| `lint` | Style and redundancy lint of a file or directory (`path`, `warnings_as_errors`) |
+| `search_examples` | Search the bundled example corpus (offline) |
+| `search_classes` | Search class names and documentation (offline) |
+| `describe` | Discover the supported REPL operations and protocol version |
+| `list_actors` | List live actors (PID and class) |
+| `supervision_tree` | Snapshot the live supervision tree (`scope`: `default` or `system`) |
+| `nodes` | List connected BEAM nodes with their shape-skew counts |
 | `save_method` | Durable live patch (ADR 0082): wraps `aClass compile: #sel source: body`; logs a durable ChangeEntry |
 | `try_method` | Ephemeral spike (ADR 0082): wraps `aClass tryCompile: #sel source: body`; logs an ephemeral ChangeEntry (not flushable — pruned on workspace restart or via `Workspace changes clear`) |
 | `save_class` | Create a new class file (ADR 0082): wraps `Workspace newClass: source at: path`; logs a `kind: #'new-class'` ChangeEntry (flush writes the file to disk) |
@@ -1006,11 +1021,11 @@ Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding ag
 | `flush` | Write pending durable changes to disk (ADR 0082): wraps `Workspace flush` (optional `class` / `file` / `kind` argument selects a subset). Pass `confirm_destructive: true` to include Tier 2 entries (`remove-class`/`rename-class`/`rename-method` — file deletion or multi-file rewrite) |
 | `list_changes` | Wraps `Workspace changes` — serialised view of the pending ChangeLog |
 | `dirty_methods` | Wraps `Workspace changes dirtyMethods` — per-class set of dirty selectors |
-| `enable-tracing` | Enable detailed trace event capture for actor dispatch (also switches on the opt-in `[beamtalk, actor, dispatch, *]` telemetry events, BT-4113) |
-| `disable-tracing` | Disable trace event capture (aggregate stats remain) |
-| `get-traces` | Retrieve trace events with optional filters (actor, selector, class, outcome, duration) |
-| `export-traces` | Export trace events to a JSON file |
-| `actor-stats` | Get aggregate per-actor, per-method statistics (call counts, durations, error rates) |
+| `enable_tracing` | Enable detailed trace event capture for actor dispatch (also switches on the opt-in `[beamtalk, actor, dispatch, *]` telemetry events, BT-4113) |
+| `disable_tracing` | Disable trace event capture (aggregate stats remain) |
+| `get_traces` | Retrieve trace events with optional filters (actor, selector, class, outcome, duration) |
+| `export_traces` | Export trace events to a JSON file |
+| `actor_stats` | Get aggregate per-actor, per-method statistics (call counts, durations, error rates) |
 | `precheck_method` | Pre-save advisory (ADR 0105 Phase 3): compile a pending method edit and report would-be-stale dependents without installing it |
 | `recheck_image` | Whole-image re-check (ADR 0105 Phase 3): re-check all live classes for stale callers and broken signatures |
 | `diagnostic_summary` | Aggregated diagnostic counts by category/severity plus type-coverage stats (offline) |
@@ -1101,8 +1116,8 @@ Each test method gets a fresh instance with `setUp` → test → `tearDown` life
 
 ```text
 // From the REPL:
-> :load stdlib/test/counter_test.bt
-Loaded CounterTest
+> Workspace load: "stdlib/test/counter_test.bt"
+#(CounterTest)
 
 > :test CounterTest
 Running 1 test class...

@@ -4,8 +4,8 @@
 // BUnit tests for the Message value type
 //
 // Run in the REPL:
-//   > :load src/message.bt
-//   > :load test/message_test.bt
+//   > Workspace load: "src/message.bt"
+//   > Workspace load: "test/message_test.bt"
 //   > MessageTest runAll
 
 TestCase subclass: MessageTest

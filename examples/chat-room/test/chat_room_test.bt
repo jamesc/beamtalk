@@ -8,11 +8,11 @@
 // the message — no sync barriers are needed
 //
 // Run in the REPL:
-//   > :load src/message.bt
-//   > :load src/chat_room.bt
-//   > :load src/chat_member.bt
-//   > :load src/moderator.bt
-//   > :load test/chat_room_test.bt
+//   > Workspace load: "src/message.bt"
+//   > Workspace load: "src/chat_room.bt"
+//   > Workspace load: "src/chat_member.bt"
+//   > Workspace load: "src/moderator.bt"
+//   > Workspace load: "test/chat_room_test.bt"
 //   > ChatRoomTest runAll
 
 TestCase subclass: ChatRoomTest

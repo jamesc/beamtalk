@@ -1,5 +1,13 @@
 ## HTTP Client
 
+> **`HTTPClient` is not part of the standard library.** It lives in the
+> separate [`beamtalk-http`](https://github.com/jamesc/beamtalk-http) package.
+> In a project that does not depend on that package, `HTTPClient` is an
+> undefined class and none of the examples below run. Add the package as a
+> dependency first (see the [Package Management guide](../beamtalk-packages.md));
+> the API below is that package's, and is not checked by this repository's
+> doctests, so the blocks are marked as illustrative.
+
 Beamtalk's `HTTPClient` lets you make HTTP requests — both as simple class-level
 calls and through a configurable actor for repeated requests to the same server.
 

@@ -6,7 +6,7 @@
 ///
 /// Try it in the REPL:
 ///   $ beamtalk repl
-///   > :load examples/hanoi.bt
+///   > Workspace load: "examples/getting-started/src/hanoi.bt"
 ///
 /// ## Examples
 /// ```beamtalk

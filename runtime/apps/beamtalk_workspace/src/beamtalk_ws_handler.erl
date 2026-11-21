@@ -436,9 +436,14 @@ websocket_info(
 websocket_info(_Info, State) ->
     {ok, State}.
 
--doc "WebSocket close code for a session process exit: 1000 if deliberate, else 1011.".
+-doc """
+WebSocket close code for a session process exit: 1000 if deliberate, else 1011.
+`shutdown` is what the supervisor sends for the `close` op (BT-5084), so it is
+deliberate too.
+""".
 -spec session_close_code(term()) -> 1000 | 1011.
 session_close_code(normal) -> 1000;
+session_close_code(shutdown) -> 1000;
 session_close_code(_Unexpected) -> 1011.
 
 -doc "Connection terminated — clean up or keep session for resume.".
@@ -822,7 +827,9 @@ start_or_resume_session(ResumeId, Meta, State) when is_binary(ResumeId) ->
     %% Try to resume existing session
     case beamtalk_session_table:lookup(ResumeId) of
         {ok, Pid} ->
-            case is_process_alive(Pid) of
+            %% attach/2 is a call (BT-5084): `gone` means the shell stopped (idle
+            %% timeout) between the lookup and now, so fall back to a new session.
+            case is_process_alive(Pid) andalso beamtalk_repl_shell:attach(Pid, self()) =:= ok of
                 true ->
                     MonRef = erlang:monitor(process, Pid),
                     ?LOG_INFO("WebSocket session resumed", #{
@@ -845,7 +852,6 @@ start_or_resume_session(ResumeId, Meta, State) when is_binary(ResumeId) ->
                             <<"session">> => ResumeId
                         })
                     ),
-                    beamtalk_repl_shell:attach(Pid, self()),
                     {[{text, AuthOk}, {text, SessionMsg}] ++ InitialActors, State#ws_state{
                         authenticated = true,
                         session_id = ResumeId,
@@ -896,7 +902,7 @@ create_session(SessionId, Meta, State) ->
                 peer => State#ws_state.peer,
                 domain => [beamtalk, runtime]
             }),
-            beamtalk_repl_shell:attach(SessionPid, self()),
+            _ = beamtalk_repl_shell:attach(SessionPid, self()),
             beamtalk_workspace_meta:update_activity(),
             %% Subscribe to all live push streams (Transcript, actors,
             %% classes, bindings, flush) via the stable facade. ADR 0082 Phase 3:

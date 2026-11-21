@@ -665,8 +665,8 @@ EUnit modules should be named `*_tests.erl` and Common Test suites `*_SUITE.erl`
 
 Native Erlang modules participate in workspace hot-loading:
 
-- **`:load_project`** scans `native/` alongside `src/`, recompiling changed `.erl` files before `.bt` files
-- **`:reload ClassName`** demand-compiles the referenced native `.erl` file if it is newer than its `.beam`
+- **`:sync`** (`Workspace sync`) scans `native/` alongside `src/`, recompiling changed `.erl` files before `.bt` files
+- **`ClassName reload`** demand-compiles the referenced native `.erl` file if it is newer than its `.beam`
 
 Both paths use `compile:file/2` directly — no rebar3 invocation for interactive reloading.
 
