@@ -54,7 +54,9 @@ TestCase subclass: OSTest
   testRunTimeoutNegativeDurationFailsLikeNegativeInteger =>
     // BT-5090: a Duration is only unit-converted; validation is the Integer path's
     asInteger := [OS run: "echo hi" timeout: -1] on: Error do: [:e | e kind]
-    asDuration := [OS run: "echo hi" timeout: (Duration milliseconds: -1)] on: Error do: [:e | e kind]
+    asDuration := [
+      OS run: "echo hi" timeout: (Duration milliseconds: -1)
+    ] on: Error do: [:e | e kind]
     self assert: asDuration equals: asInteger
     self assert: asInteger equals: #type_error
 
