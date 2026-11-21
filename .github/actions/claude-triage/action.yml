@@ -58,7 +58,7 @@ runs:
         JSON
 
     - name: Triage with Claude
-      uses: anthropics/claude-code-action@16f9f71ab9c490faf367f94dd294897edc25be33 # v1
+      uses: anthropics/claude-code-action@6070f08d2b4766348e0acded463606a7b176417b # v1
       env:
         LINEAR_API_KEY: ${{ inputs.linear-api-key }}
       with:
