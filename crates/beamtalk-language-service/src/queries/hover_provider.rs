@@ -265,7 +265,7 @@ fn find_hover_in_declarations(
             let mut hover =
                 class_reference_hover_info(&class.name.name, None, class.name.span, hierarchy);
             if let Some(chain) = shape_chain_summary(class) {
-                hover = HoverInfo::new(format!("{}\n\n{chain}", hover.contents), hover.span);
+                hover.contents = format!("{}\n\n{chain}", hover.contents).into();
             }
             if let Some(doc) = &class.doc_comment {
                 hover = hover.with_documentation(doc.clone());
@@ -2592,6 +2592,23 @@ mod tests {
             "chain should name the migrateFromV1: hook: {}",
             hover.contents
         );
+    }
+
+    /// BT-5095: appending the shape chain to a class-name hover must keep the
+    /// structured `class_name` (the LSP stdlib policy note reads it).
+    #[test]
+    fn hover_on_class_name_with_shape_chain_keeps_class_name() {
+        let source = concat!(
+            "Actor subclass: Cart\n",
+            "  shapeVersion: 2\n",
+            "  state: items = #()\n",
+            "\n",
+            "  class migrateFromV1: old -> Dictionary =>\n",
+            "    old\n",
+        );
+        let hover = hover_at(source, pos_at(source, source.find("Cart").unwrap())).unwrap();
+        assert!(hover.contents.contains("Shape chain"), "{}", hover.contents);
+        assert_eq!(hover.class_name.as_deref(), Some("Cart"));
     }
 
     #[test]

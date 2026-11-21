@@ -984,23 +984,6 @@ fn collect_provision_scope(
     current_package: Option<&str>,
     known_packages: Option<HashSet<String>>,
 ) -> ProvisionScope {
-    // Phase -1: Trait flattening (ADR 0127 §3, BT-3588) — expand every
-    // `uses:` line into its class's own body *before* anything else sees
-    // the module, exactly where the ADR places it ("Expansion … runs
-    // before `ClassHierarchy` is built"). A module with no `uses:` lines
-    // anywhere is untouched by `expand_module` and costs nothing beyond the
-    // one `any()` scan, so this runs unconditionally rather than gating on
-    // a knob the caller would have to remember to set.
-    //
-    // This flattens a *clone*, local to this function — `module` stays a
-    // `&Module` the caller owns and reuses for codegen afterward
-    // (`lower_module_for_codegen`/`generate_module`), which this function
-    // has no way to mutate through a shared reference. So the flattened
-    // methods reach every consumer of `AnalysisResult` below (diagnostics,
-    // `class_hierarchy`, `protocol_registry`, `type_map`, …) but not yet the
-    // caller's own AST — see `trait_expansion`'s module doc ("Codegen does
-    // not see this module yet") for the full boundary and BT-3590, which
-    // owns wiring the flattened module through to codegen.
     // `external_protocols` (ADR 0127 §10a; BT-3591) merges every
     // carried protocol carried in from outside this module — used
     // both by `expand_module` right below and by `check_after_hierarchy`

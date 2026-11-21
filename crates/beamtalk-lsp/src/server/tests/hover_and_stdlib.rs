@@ -194,7 +194,7 @@ fn stdlib_policy_note_marks_high_confidence_for_sealed_method_hover() {
     let hover = hover_on(&mut service, "3 negated", "negated");
     assert!(
         hover.method_resolved,
-        "hover on `+` resolves a method: {hover:?}"
+        "hover on `negated` resolves a method: {hover:?}"
     );
     let note = stdlib_hover_policy_note(&service, &hover);
     assert!(note.is_some());
