@@ -783,3 +783,19 @@ fn completion_after_class_receiver_lists_trait_provided_method() {
         "provided method `max:` should be offered, got: {labels:?}"
     );
 }
+
+#[test]
+fn add_annotation_inserts_before_the_real_body_arrow_not_one_in_a_comment() {
+    // BT-5079: the first `=>` in the method span is inside the comment.
+    let mut service = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("a.bt");
+    let source = "Object subclass: Foo\n  go // note: a => b\n    => 1\n";
+    service.update_file(file.clone(), source.to_string());
+    let actions = service.code_actions(&file, 25, 25);
+    let action = actions
+        .iter()
+        .find(|a| a.title.starts_with("Add annotation"))
+        .expect("an Add annotation action");
+    let arrow = u32::try_from(source.rfind("=>").unwrap()).unwrap();
+    assert_eq!(action.edits[0].span.start(), arrow, "{action:?}");
+}

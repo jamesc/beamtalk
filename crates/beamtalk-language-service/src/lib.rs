@@ -1490,10 +1490,18 @@ impl LanguageService for SimpleLanguageService {
             || self.project_index.alias_registry().has_alias(&ident.name)
             || ctx == IdentifierContext::TypeReference
         {
-            return crate::queries::references_provider::find_class_references(
+            let mut refs = crate::queries::references_provider::find_class_references(
                 &ident.name,
                 self.files.iter().map(|(path, data)| (path, &data.module)),
             );
+            // `pkg@Name` is `Name` in package `pkg` (BT-5079): keep it only
+            // when `pkg` is the declaring package, as class rename does.
+            let own_package = self.declaring_package(&ident.name);
+            refs.retain(|loc| {
+                self.qualifier_of(loc, &ident.name)
+                    .is_none_or(|q| own_package.as_deref() == Some(q))
+            });
+            return refs;
         }
 
         // Fall back to identifier-based references across all files
@@ -1657,29 +1665,20 @@ impl LanguageService for SimpleLanguageService {
 
 /// Finds the byte offset of the `=>` body opener of a method definition.
 ///
-/// Scans forward from `method_span.start()` in `source` looking for the first
-/// `=>` token.  Inserting text at this offset places a return-type annotation
-/// just before the body opener, e.g. turning `count => 42` into
-/// `count -> Integer => 42`.
-///
+/// Lexes the method's span and returns the first `=>` *token*. Comments are
+/// trivia, so a `=>` inside one is never mistaken for the opener (BT-5079).
 /// Returns `None` when the span is out of bounds or no `=>` is found.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "source files over 4GB are not supported"
-)]
 fn find_body_open_offset(source: &str, method_span: Span) -> Option<u32> {
-    let start = method_span.start() as usize;
-    let end = method_span.end() as usize;
-    let src = source.get(start..end.min(source.len()))?;
-    let bytes = src.as_bytes();
-    let mut i = 0;
-    while i < bytes.len().saturating_sub(1) {
-        if bytes[i] == b'=' && bytes[i + 1] == b'>' {
-            return Some((start + i) as u32);
-        }
-        i += 1;
-    }
-    None
+    let start = method_span.start();
+    let text = source.get(start as usize..(method_span.end() as usize).min(source.len()))?;
+    beamtalk_core::source_analysis::Lexer::new(text)
+        .find(|t| {
+            matches!(
+                t.kind(),
+                beamtalk_core::source_analysis::TokenKind::FatArrow
+            )
+        })
+        .map(|t| start + t.span().start())
 }
 
 impl Default for SimpleLanguageService {

@@ -64,6 +64,16 @@ defmodule BtAttachWeb.WorkspaceSupervisorInspectTest do
     })
   end
 
+  # Mount the cockpit and wait for the off-socket mount-time reads (BT-2591:
+  # `start_async(:mount_load, …)` loads the bindings) to fold in. Reading the DOM
+  # straight after `live/2` races that load, so the seeded binding's Inspect
+  # button may not exist yet (BT-5099).
+  defp mount_settled(conn) do
+    {:ok, view, _html} = live(owner_conn(conn), "/")
+    render_async(view, 5_000)
+    view
+  end
+
   # A live, pid-backed supervisor handle (the test pid is always alive, so the
   # real `Workspace.inspectable?/1` `is_pid/1` gate passes and the bindings pane
   # offers the Inspect button).
@@ -74,7 +84,7 @@ defmodule BtAttachWeb.WorkspaceSupervisorInspectTest do
     test "inspecting a supervisor shows its children, not an empty field table", %{conn: conn} do
       StubWorkspaceClient.put_bindings([{"app_sup", sup_handle()}])
 
-      {:ok, view, _html} = live(owner_conn(conn), "/")
+      view = mount_settled(conn)
 
       html = view |> element("button[phx-value-name='app_sup']") |> render_click()
 
@@ -96,7 +106,7 @@ defmodule BtAttachWeb.WorkspaceSupervisorInspectTest do
     test "head chips reflect the supervisor identity (class + pid)", %{conn: conn} do
       StubWorkspaceClient.put_bindings([{"app_sup", sup_handle(:MyAppSup)}])
 
-      {:ok, view, _html} = live(owner_conn(conn), "/")
+      view = mount_settled(conn)
       html = view |> element("button[phx-value-name='app_sup']") |> render_click()
 
       # The supervisor's class chip is shown (target_info supervisor clause).
@@ -112,7 +122,7 @@ defmodule BtAttachWeb.WorkspaceSupervisorInspectTest do
     test "drilling a nested supervisor child re-inspects it as its own supervisor", %{conn: conn} do
       StubWorkspaceClient.put_bindings([{"app_sup", sup_handle()}])
 
-      {:ok, view, _html} = live(owner_conn(conn), "/")
+      view = mount_settled(conn)
       view |> element("button[phx-value-name='app_sup']") |> render_click()
 
       # The nested supervisor child (WorkerPool) is the 2nd drillable row (index 1).
@@ -133,7 +143,7 @@ defmodule BtAttachWeb.WorkspaceSupervisorInspectTest do
     test "a foreign OTP child renders but is not drillable", %{conn: conn} do
       StubWorkspaceClient.put_bindings([{"app_sup", sup_handle()}])
 
-      {:ok, view, _html} = live(owner_conn(conn), "/")
+      view = mount_settled(conn)
       html = view |> element("button[phx-value-name='app_sup']") |> render_click()
 
       # The foreign logger row is present...
@@ -147,7 +157,7 @@ defmodule BtAttachWeb.WorkspaceSupervisorInspectTest do
     test "a live supervisor with no children shows a clear empty state", %{conn: conn} do
       StubWorkspaceClient.put_bindings([{"empty_sup", sup_handle(:EmptySup)}])
 
-      {:ok, view, _html} = live(owner_conn(conn), "/")
+      view = mount_settled(conn)
       html = view |> element("button[phx-value-name='empty_sup']") |> render_click()
 
       assert html =~ "Inspecting"
@@ -159,7 +169,7 @@ defmodule BtAttachWeb.WorkspaceSupervisorInspectTest do
     test "a dead/unreachable supervisor degrades to an error, not a crash", %{conn: conn} do
       StubWorkspaceClient.put_bindings([{"dead_sup", sup_handle(:DeadSup)}])
 
-      {:ok, view, _html} = live(owner_conn(conn), "/")
+      view = mount_settled(conn)
       html = view |> element("button[phx-value-name='dead_sup']") |> render_click()
 
       # The inspect failed (stale_handle) → the pane shows the error rather than a

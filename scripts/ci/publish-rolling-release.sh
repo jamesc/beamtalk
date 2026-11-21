@@ -7,8 +7,8 @@
 # created it, so a failed create left nothing for `install.sh --edge` /
 # `--nightly` to download.
 #
-# Order when the release already exists: upload the new assets (replacing
-# same-named ones), drop assets the new build no longer ships, move the tag to
+# Order when the release already exists: upload the new assets (each archive
+# followed by its checksum, see upload_ordered; replacing same-named ones), drop assets the new build no longer ships, move the tag to
 # the new commit, then refresh title and notes. A failure at any step leaves the
 # previous release in place. When it does not exist the tag is placed first and
 # the release created from it.
@@ -33,16 +33,56 @@ for f in "$@"; do
 done
 
 move_tag() {
-    # PATCH moves an existing tag; POST creates it when there is none yet.
-    if ! gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" \
-        -f sha="${SHA}" -F force=true >/dev/null 2>&1; then
+    # PATCH moves an existing tag. Only a missing ref falls through to POST
+    # (create); any other PATCH failure is reported as itself and stops, so the
+    # real cause (permissions, rate limit, ...) is not replaced by a POST error
+    # (BT-5101).
+    local out
+    if out="$(gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" \
+        -f sha="${SHA}" -F force=true 2>&1)"; then
+        return 0
+    fi
+    if grep -qi 'reference does not exist' <<<"${out}"; then
         gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
             -f ref="refs/tags/${TAG}" -f sha="${SHA}" >/dev/null
+    else
+        echo "error: could not move tag ${TAG} to ${SHA}: ${out}" >&2
+        return 1
     fi
 }
 
+# Upload order when replacing assets (BT-5101). install.sh requires the
+# .sha256 to match the archive, so a client must not see a new archive next to
+# an old checksum for longer than one small upload. Each archive is therefore
+# uploaded alone, immediately followed by its own <archive>.sha256, one call per
+# file (a multi-file `gh release upload` uploads concurrently, so its argument
+# order guarantees nothing). Uploading all archives first and all checksums
+# last would only move the mismatch window, not shrink it. Any checksum whose
+# archive is not in the list goes last. `--clobber` deletes the old asset
+# before uploading the new one, so an archive can be briefly absent (a clear
+# download error, not a mismatch); GitHub has no atomic asset replace or rename
+# over an existing name.
+upload_ordered() {
+    local f done_list=$'\n' all_list
+    # A here-string match, not `printf | grep -q`: under pipefail grep exiting
+    # early can SIGPIPE printf and report a false "no checksum".
+    all_list="$(printf '%s\n' "$@")"
+    for f in "$@"; do
+        [[ "${f}" == *.sha256 ]] && continue
+        gh release upload "${TAG}" "${f}" --clobber
+        done_list+="${f}"$'\n'
+        if grep -qxF -- "${f}.sha256" <<<"${all_list}"; then
+            gh release upload "${TAG}" "${f}.sha256" --clobber
+            done_list+="${f}.sha256"$'\n'
+        fi
+    done
+    for f in "$@"; do
+        grep -qxF -- "${f}" <<<"${done_list}" || gh release upload "${TAG}" "${f}" --clobber
+    done
+}
+
 if gh release view "${TAG}" >/dev/null 2>&1; then
-    gh release upload "${TAG}" "$@" --clobber
+    upload_ordered "$@"
 
     keep=""
     for f in "$@"; do keep+="$(basename "$f")"$'\n'; done

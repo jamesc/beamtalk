@@ -277,26 +277,38 @@ fn override_in_subclass_confirms_no_self_or_super_site() {
 #[test]
 fn self_send_in_superclass_is_a_candidate_and_unrelated_class_is_untouched() {
     let (svc, file, pos) = setup(&[
-        ("/p/A.bt", "Object subclass: A\n  go => 1\n"),
-        ("/p/B.bt", "A subclass: B\n  g@@o => 2\n  run => self go\n"),
+        ("/p/A.bt", "Object subclass: A\n  g@@o => 1\n"),
+        ("/p/B.bt", "A subclass: B\n  go => 2\n  run => self go\n"),
         ("/p/T.bt", "Object subclass: T\n  tick => self go\n"),
     ]);
-    // B>>go overrides A>>go; renaming B>>go: confirmed = B's definition and
-    // `self go` in B (B has no overriding subclass). A's definition is not touched.
+    // Renaming A>>go: only A's definition is confirmed. B overrides it, so
+    // B's definition and `self go` are left alone; T is unrelated.
     let plan = svc.plan_rename(&file, pos, "walk").expect("plan");
     assert_eq!(
-        apply(&svc, "/p/B.bt", &plan.confirmed),
-        "A subclass: B\n  walk => 2\n  run => self walk\n"
+        apply(&svc, "/p/A.bt", &plan.confirmed),
+        "Object subclass: A\n  walk => 1\n"
     );
     assert_eq!(
-        apply(&svc, "/p/A.bt", &plan.confirmed),
-        "Object subclass: A\n  go => 1\n"
+        apply(&svc, "/p/B.bt", &plan.confirmed),
+        "A subclass: B\n  go => 2\n  run => self go\n"
     );
     assert_eq!(
         apply(&svc, "/p/T.bt", &plan.confirmed),
         "Object subclass: T\n  tick => self go\n"
     );
-    assert_eq!(plan.candidates.len(), 1);
+    assert_eq!(plan.candidates.len(), 2);
+}
+
+#[test]
+fn renaming_an_override_is_refused_rather_than_detaching_it() {
+    // Before BT-5079 this renamed B>>go and its `self go` sends, leaving
+    // A>>go (and every caller that reaches it) behind.
+    let (svc, file, pos) = setup(&[
+        ("/p/A.bt", "Object subclass: A\n  go => 1\n"),
+        ("/p/B.bt", "A subclass: B\n  g@@o => 2\n  run => self go\n"),
+    ]);
+    let err = svc.plan_rename(&file, pos, "walk").unwrap_err();
+    assert!(err.message.contains("overrides"), "{}", err.message);
 }
 
 #[test]
@@ -356,4 +368,165 @@ fn send_cursor_resolves_the_unique_defining_class() {
         apply(&svc, "/p/use.bt", &candidate_edits(&plan)),
         "x walk\n"
     );
+}
+
+// ---- BT-5079: inheritance, state defaults, package qualifiers, perform sites ----
+
+#[test]
+fn selector_rename_refuses_when_an_ancestor_defines_the_old_selector() {
+    // `Sub>>size` overrides `Base>>size`: renaming only Sub's copy would
+    // silently detach the override (callers still reach `Base>>size`).
+    let (svc, file, pos) = setup(&[
+        ("/p/Base.bt", "Object subclass: Base\n  size => 1\n"),
+        ("/p/Sub.bt", "Base subclass: Sub\n  si@@ze => 2\n"),
+    ]);
+    let err = svc.plan_rename(&file, pos, "count").unwrap_err();
+    assert!(err.message.contains("overrides"), "{}", err.message);
+    assert!(err.message.contains("Base"), "{}", err.message);
+}
+
+#[test]
+fn selector_rename_refuses_when_a_stdlib_ancestor_defines_the_old_selector() {
+    let (mut svc, file, pos) = setup(&[
+        ("/std/Coll.bt", "Object subclass: Coll\n  size => 0\n"),
+        ("/p/Sub.bt", "Coll subclass: Sub\n  si@@ze => 2\n"),
+    ]);
+    svc.mark_stdlib_file(Utf8PathBuf::from("/std/Coll.bt"));
+    let err = svc.plan_rename(&file, pos, "count").unwrap_err();
+    assert!(err.message.contains("overrides"), "{}", err.message);
+}
+
+#[test]
+fn selector_rename_refuses_new_name_defined_by_an_ancestor_or_descendant() {
+    let (svc, file, pos) = setup(&[
+        ("/p/Base.bt", "Object subclass: Base\n  bar => 1\n"),
+        ("/p/Sub.bt", "Base subclass: Sub\n  fo@@o => 2\n"),
+    ]);
+    let err = svc.plan_rename(&file, pos, "bar").unwrap_err();
+    assert!(err.message.contains("Base"), "{}", err.message);
+
+    let (svc, file, pos) = setup(&[
+        ("/p/Base.bt", "Object subclass: Base\n  fo@@o => 1\n"),
+        ("/p/Sub.bt", "Base subclass: Sub\n  bar => 2\n"),
+    ]);
+    let err = svc.plan_rename(&file, pos, "bar").unwrap_err();
+    assert!(err.message.contains("Sub"), "{}", err.message);
+
+    // The other side is unaffected.
+    let (svc, file, pos) = setup(&[
+        ("/p/Base.bt", "Object subclass: Base\n  fo@@o => 1\n"),
+        ("/p/Sub.bt", "Base subclass: Sub\n  class bar => 2\n"),
+    ]);
+    svc.plan_rename(&file, pos, "bar")
+        .expect("other side is fine");
+}
+
+#[test]
+fn class_rename_reaches_a_class_used_only_in_a_state_default() {
+    let (svc, file, pos) = setup(&[
+        ("/p/models.bt", "Object subclass: St@@ack\n  push => 1\n"),
+        (
+            "/p/Holder.bt",
+            "Object subclass: Holder\n  state: s = Stack new\n  classState: cv = Stack new\n  get => s\n",
+        ),
+    ]);
+    let plan = svc.plan_rename(&file, pos, "Pile").expect("plan");
+    let out = apply(&svc, "/p/Holder.bt", &plan.confirmed);
+    assert!(!out.contains("Stack"), "dangling reference left: {out}");
+}
+
+#[test]
+fn class_rename_skips_references_qualified_by_another_package() {
+    let (mut svc, file, pos) = setup(&[
+        ("/p/Json.bt", "Object subclass: Js@@on\n  go => 1\n"),
+        (
+            "/p/use.bt",
+            "Object subclass: Use\n  a => Json new\n  b => http@Json new\n",
+        ),
+    ]);
+    svc.set_root_packages(vec![(Utf8PathBuf::from("/p"), "mine".into())]);
+    let plan = svc.plan_rename(&file, pos, "Doc").expect("plan");
+    assert_eq!(
+        apply(&svc, "/p/use.bt", &plan.confirmed),
+        "Object subclass: Use\n  a => Doc new\n  b => http@Json new\n"
+    );
+}
+
+#[test]
+fn selector_rename_reports_symbols_and_perform_arguments_as_candidates() {
+    let (svc, file, pos) = setup(&[(
+        "/p/a.bt",
+        "Object subclass: Foo\n  g@@o => 1\n  a => self perform: #go\n  b => self respondsTo: #go\n  c => #go\n",
+    )]);
+    let plan = svc.plan_rename(&file, pos, "walk").expect("plan");
+    let cands = candidate_edits(&plan);
+    let out = apply(&svc, "/p/a.bt", &cands);
+    assert!(
+        out.contains("perform: #walk") && out.contains("respondsTo: #walk"),
+        "{out}"
+    );
+    // A bare symbol literal elsewhere is also a candidate.
+    assert!(out.contains("c => #walk"), "{out}");
+    // Never applied by default.
+    assert!(!apply(&svc, "/p/a.bt", &plan.confirmed).contains("#walk"));
+}
+
+#[test]
+fn caret_directly_after_an_identifier_is_outside_it_for_every_request() {
+    // BT-5079 decision: identifier hit tests are half-open `[start, end)` in
+    // rename, prepareRename, definition, hover and references, matching the
+    // pinned definition behaviour. `Foo|` is not on `Foo`; `|Foo` and `Fo|o` are.
+    let mut svc = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("/p/a.bt");
+    svc.update_file(
+        file.clone(),
+        "Object subclass: Foo\n  go => 1\n\nx := Foo\n".to_string(),
+    );
+    let end = Position::new(3, 8); // directly after `Foo`
+    let start = Position::new(3, 5);
+    assert!(svc.prepare_rename(&file, end).is_err());
+    assert!(svc.plan_rename(&file, end, "Bar").is_err());
+    assert!(svc.goto_definition(&file, end).is_none());
+    let h = svc.hover(&file, end);
+    assert!(h.is_none(), "{h:?}");
+    assert!(svc.find_references(&file, end).is_empty());
+    for pos in [start, Position::new(3, 7)] {
+        assert!(svc.prepare_rename(&file, pos).is_ok());
+        assert!(svc.plan_rename(&file, pos, "Bar").is_ok());
+        assert!(svc.goto_definition(&file, pos).is_some());
+        assert!(svc.hover(&file, pos).is_some());
+        assert!(!svc.find_references(&file, pos).is_empty());
+    }
+}
+
+#[test]
+fn find_references_skips_references_qualified_by_another_package() {
+    let mut svc = SimpleLanguageService::new();
+    svc.set_root_packages(vec![(Utf8PathBuf::from("/p"), "mine".into())]);
+    let json = Utf8PathBuf::from("/p/Json.bt");
+    let usage = Utf8PathBuf::from("/p/use.bt");
+    svc.update_file(
+        json.clone(),
+        "Object subclass: Json\n  go => 1\n".to_string(),
+    );
+    svc.update_file(
+        usage.clone(),
+        "Object subclass: Use\n  a => Json new\n  b => http@Json new\n  c => mine@Json new\n"
+            .to_string(),
+    );
+    let refs = svc.find_references(&json, Position::new(0, 20));
+    let in_use: Vec<u32> = refs
+        .iter()
+        .filter(|l| l.file == usage)
+        .map(|l| l.span.start())
+        .collect();
+    let text = svc.file_source(&usage).unwrap();
+    let lines: Vec<&str> = in_use
+        .iter()
+        .map(|s| {
+            let line_start = text[..*s as usize].rfind('\n').map_or(0, |i| i + 1);
+            text[line_start..].lines().next().unwrap().trim()
+        })
+        .collect();
+    assert_eq!(lines, ["a => Json new", "c => mine@Json new"], "{refs:?}");
 }

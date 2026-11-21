@@ -42,6 +42,12 @@ curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --edge      # latest main 
 
 The `--edge` channel (`BEAMTALK_EDGE=1` environment equivalent) installs the rolling build of the latest `main` commit, so downstream package CI can test against the current tip without waiting for a nightly.
 
+The installer verifies the archive's SHA-256 against the `.sha256` file published with each release and stops if that file cannot be fetched or does not match. Pass `--insecure-skip-checksum` only if you accept installing an unverified archive. Each install replaces the previous one, so files a newer release dropped do not linger, and `--uninstall` (with the same `--prefix`) removes it:
+
+```
+curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --uninstall
+```
+
 ## Manual install from release archive
 
 Download the latest release for your platform from the
