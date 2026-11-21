@@ -65,8 +65,8 @@ sealed typed Value subclass: ChangeLog
 
   /// Required by `Enumerable(ChangeEntry)` — the active entries, the same
   /// set the default collection views (`size`, `isEmpty`, `do:`) already
-  /// operate on. `select:` deliberately keeps ranging over the *full* entry
-  /// set (class wins, below) rather than this narrower snapshot.
+  /// operate on. `select:` and `reject:` deliberately keep ranging over the
+  /// *full* entry set (class wins, below) rather than this narrower snapshot.
   ///
   /// ## Examples
   /// ```beamtalk
