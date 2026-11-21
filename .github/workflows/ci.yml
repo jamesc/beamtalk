@@ -170,7 +170,7 @@ jobs:
           # only, skipped this step on its PR, and turned main red), so any
           # change to those runs them, not just changes to the guide itself.
           learn=$(flag matches \
-            'docs/learning/*' .github/workflows/ci.yml Justfile \
+            'docs/learning/*' .github/workflows/ci.yml '.github/actions/*' Justfile \
             'crates/*' Cargo.toml Cargo.lock 'runtime/*' 'stdlib/*')
 
           runtime=$(flag matches 'runtime/*')
@@ -180,14 +180,14 @@ jobs:
           # toolchain and lint config, the recipes, the release-build commands
           # in the workflows and scripts/ci.
           rust=$(flag matches 'crates/*' Cargo.toml Cargo.lock rust-toolchain.toml \
-              clippy.toml Justfile '.github/workflows/*' 'scripts/ci/*')
+              clippy.toml Justfile '.github/workflows/*' '.github/actions/*' 'scripts/ci/*')
 
           # BT-5057: beamtalk-exec has `#[cfg(unix)]` / `#[cfg(windows)]` halves,
           # and the Windows one otherwise compiles only in ci-platforms.yml
           # (opt-in) and nightly.
           exec=$(flag matches 'crates/beamtalk-exec/*' 'crates/beamtalk-etf/*' \
               'crates/beamtalk-build/*' Cargo.toml Cargo.lock \
-              rust-toolchain.toml '.github/workflows/ci.yml')
+              rust-toolchain.toml '.github/workflows/ci.yml' '.github/actions/*')
 
           # BT-5033: `npm test` and `tsc` for the extension. Besides the
           # extension itself, its tests read the runtime's `?PROTOCOL_VERSION`
@@ -201,7 +201,7 @@ jobs:
               runtime/apps/beamtalk_runtime/include/beamtalk.hrl \
               'runtime/apps/*/test/fixtures/*' \
               crates/beamtalk-core/tests/fixtures/section_divider_grammar_cases.json \
-              Justfile .github/workflows/ci.yml)
+              Justfile .github/workflows/ci.yml '.github/actions/*')
 
           # BT-5033: the runtime's shared fixtures are read by corpus-tier Rust
           # tests (`*_matches_shared_corpus`), which a PR otherwise runs only
@@ -210,7 +210,7 @@ jobs:
           # that read them, runs it on the test-rust job's existing build.
           fixture_readers=$(flag matches 'runtime/apps/*/test/fixtures/*' \
               'crates/beamtalk-core/*' 'crates/beamtalk-codegen/*' 'crates/beamtalk-repl/*' \
-              Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml)
+              Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml '.github/actions/*')
 
           # The desktop app's own paths (the crate, the workspace crates it
           # links, the root manifest and lockfile those crates take their
@@ -219,7 +219,7 @@ jobs:
           desktop=$(flag matches 'desktop/*' 'crates/beamtalk-desktop-broker/*' \
               'crates/beamtalk-desktop-shell/*' 'crates/beamtalk-env/*' 'crates/beamtalk-workspace/*' \
               'crates/beamtalk-repl-protocol/*' 'crates/beamtalk-build/*' 'crates/beamtalk-cerl-doc/*' \
-              Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml '.github/actions/test-desktop/*')
+              Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml '.github/actions/*')
 
           {
             echo "code=$code"
