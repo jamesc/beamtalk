@@ -190,16 +190,24 @@ monitor_diagnostics() ->
             ["no monitor registered"];
         Mon ->
             Events =
-                case catch sys:log(Mon, get) of
+                try sys:log(Mon, get) of
                     {ok, Log} -> lists:sublist(lists:reverse(Log), 8);
                     Other -> [{log_unavailable, Other}]
+                catch
+                    Class:Reason -> [{log_unavailable, {Class, Reason}}]
                 end,
             Registry =
-                case catch meck:history(beamtalk_class_registry) of
-                    History when is_list(History) ->
-                        [{element(2, element(2, H)), element(3, element(2, H))} || H <- History];
-                    Unmocked ->
-                        {not_mocked, Unmocked}
+                try meck:history(beamtalk_class_registry) of
+                    History ->
+                        [{element(2, element(2, H)), element(3, element(2, H))} || H <- History]
+                catch
+                    Class2:Reason2 -> {not_mocked, {Class2, Reason2}}
+                end,
+            State =
+                try
+                    sys:get_state(Mon, 1000)
+                catch
+                    Class3:Reason3 -> {unavailable, {Class3, Reason3}}
                 end,
             [
                 line("pid", Mon),
@@ -207,7 +215,7 @@ monitor_diagnostics() ->
                     "process_info",
                     process_info(Mon, [status, message_queue_len, current_stacktrace])
                 ),
-                line("state", catch sys:get_state(Mon, 1000)),
+                line("state", State),
                 line("registry calls", Registry)
             ] ++ [line("event (newest first)", E) || E <- Events]
     end.
