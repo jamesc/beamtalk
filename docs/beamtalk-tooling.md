@@ -369,7 +369,7 @@ Use this as a CI deploy gate to catch missing migration methods before productio
 
 The Beamtalk REPL is an interactive development environment connected to a persistent workspace — a detached BEAM node that survives disconnections ([ADR 0004](ADR/0004-persistent-workspace-management.md)). Actors keep running between sessions; REPL variable bindings are session-local.
 
-**`BEAMTALK_HOME`.** The CLI, VS Code extension and runtime resolve workspace state under `~/.beamtalk` by default. Set `BEAMTALK_HOME` to override this root (e.g. `export BEAMTALK_HOME=/data/beamtalk`). The detached BEAM node, `beamtalk workspace`, and the VS Code extension all honour the same variable, so they agree on where workspaces live.
+**`BEAMTALK_HOME`.** The CLI, VS Code extension and runtime resolve workspace state under `~/.beamtalk` by default. Set `BEAMTALK_HOME` to override this root (e.g. `export BEAMTALK_HOME=/data/beamtalk`). The detached BEAM node, `beamtalk workspace`, and the VS Code extension all honour the same variable, so they agree on where workspaces live. Every other environment variable the code reads is listed in [environment-variables](development/environment-variables.md); the `beamtalk workspace` subcommands and flags are in [cli-workspace](cli-workspace.md).
 
 ### Starting the REPL
 
@@ -985,6 +985,8 @@ ok
 Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding agents structured access to the live workspace. The MCP tools connect via the same WebSocket protocol as the REPL and VS Code extension — the agent interacts with the same running system.
 
 The server binary is `beamtalk-mcp` (generated projects get an `.mcp.json` that runs `beamtalk-mcp --start`, which starts a workspace if none is running). Tool names use underscores, exactly as listed below; `beamtalk-surface-drift` fails CI if this table and the server's tool list disagree.
+
+**Which workspace it attaches to (BT-5080).** `beamtalk-mcp` attaches only to the running workspace of the current project; it never silently attaches to another project's. With no flag and no running workspace for this project, startup fails; if other projects' workspaces are running, the error names them and says to pick one with `--workspace-id <id>`, give a port with `--port`, or start this project's with `--start`. An explicit `--workspace-id` that is not running is an error and never falls back to a different workspace. Tool output shows which workspace a call touched: `describe` starts with a `Workspace: <id>` line, and `flush`, `remove_class` and `rename_class` end with one (`Workspace: (explicit --port)` when the server was given `--port`).
 
 Path arguments of `lint`, `diagnostic_summary`, `load_file`, `load_project`, `test` (file) and `export_traces` are confined to the project root (symlinks and `..` are resolved); pass `--allow-outside-project` to `beamtalk-mcp` to lift that. Every tool carries MCP `readOnlyHint`, and every non-read-only tool a `destructiveHint`.
 

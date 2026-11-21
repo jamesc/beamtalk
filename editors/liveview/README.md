@@ -20,6 +20,9 @@ This is the productionised successor to the BT-2394 spike
 - `lib/bt_attach_web/live/workspace_live.ex` — the two-pane LiveView (Workspace +
   live Transcript). Each mount gets its own workspace-supervised session;
   eval state persists across evals within the session.
+  Its template is `workspace_live.html.heex`; the session lifecycle is in
+  `session_lifecycle.ex`, and the Tweaks and System Browser function components
+  are in `shell_components.ex` and `browser_components.ex`.
 - `test/bt_attach_web/workspace_live_test.exs` — `:workspace`-tagged end-to-end
   tests against a real workspace (eval round-trip, session persistence, live
   Transcript push).

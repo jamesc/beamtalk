@@ -60,6 +60,10 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # The dtolnay action set this for every job; keep it now that rust-toolchain.toml installs the toolchain.
+  CARGO_INCREMENTAL: "0"
+
 jobs:
   e2e:
     # Pinned: ubuntu-latest moved to 26.04 on 2026-10-20 and Playwright's
@@ -73,7 +77,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        # The channel comes from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       # Erlang/Elixir/rebar3 versions all come from the repo-root
       # .tool-versions (shared with mise on dev machines and the

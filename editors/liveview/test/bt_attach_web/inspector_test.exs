@@ -55,6 +55,11 @@ defmodule BtAttachWeb.Live.InspectorTest do
 
   @inspector_source Path.expand("../../lib/bt_attach_web/live/inspector.ex", __DIR__)
   @workspace_live_source Path.expand("../../lib/bt_attach_web/live/workspace_live.ex", __DIR__)
+  # `bind_session/3` moved to `SessionLifecycle` (BT-5092).
+  @session_lifecycle_source Path.expand(
+                              "../../lib/bt_attach_web/live/session_lifecycle.ex",
+                              __DIR__
+                            )
 
   setup do
     Application.put_env(:bt_attach, :workspace_client, StubWorkspaceClient)
@@ -872,7 +877,7 @@ defmodule BtAttachWeb.Live.InspectorTest do
       # `Inspector.init_assigns()` rather than hand-listing the keys via a
       # local `assign/3` pipe (the pre-BT-3302 shape this guards against
       # regressing to).
-      source = File.read!(@workspace_live_source)
+      source = File.read!(@session_lifecycle_source) <> File.read!(@workspace_live_source)
 
       assert source =~ "assign(Inspector.init_assigns())"
 
