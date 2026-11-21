@@ -4,14 +4,14 @@
 import * as vscode from "vscode";
 import { state } from "./extensionState";
 import { InspectorPanel } from "./inspectorPanel";
-import { AliasContentProvider, StdlibContentProvider } from "./virtualDocuments";
-import { BeamtalkTaskProvider } from "./taskProvider";
 import { registerServerCommands, startClient } from "./languageClient";
 import { registerLogUi } from "./logUi";
 import { registerNavigationCommands } from "./navigationCommands";
+import { registerReplCommands, setReplRunning, setupTerminalMonitoring } from "./repl";
+import { BeamtalkTaskProvider } from "./taskProvider";
+import { AliasContentProvider, StdlibContentProvider } from "./virtualDocuments";
 import { setupAutoConnect } from "./workspaceConnection";
 import { registerWorkspaceExplorer } from "./workspaceExplorer";
-import { registerReplCommands, setReplRunning, setupTerminalMonitoring } from "./repl";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   // Reset context state on each activation — VS Code persists setContext values

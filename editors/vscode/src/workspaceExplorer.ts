@@ -2,18 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
+import { state } from "./extensionState";
 import { InspectorPanel } from "./inspectorPanel";
 import { TranscriptViewProvider } from "./transcriptView";
+import { openStdlibDocumentForClass } from "./virtualDocuments";
 import type { ClassOrigin } from "./workspaceClient";
 import {
   type ActorItemNode,
+  ALL_CLASS_ORIGINS,
   type BindingItemNode,
   type ClassItemNode,
-  ALL_CLASS_ORIGINS,
   WorkspaceTreeDataProvider,
 } from "./workspaceTreeView";
-import { openStdlibDocumentForClass } from "./virtualDocuments";
-import { state } from "./extensionState";
 
 /** `context.workspaceState` key persisting the "Classes" section's origin filter. */
 const CLASS_FILTER_STATE_KEY = "beamtalk.classOriginFilter";
@@ -130,7 +130,7 @@ export function registerWorkspaceExplorer(context: vscode.ExtensionContext): voi
 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.inspectBinding", (node?: BindingItemNode) => {
-      if (!node || node.kind !== "binding-item") {
+      if (node?.kind !== "binding-item") {
         void vscode.window.showInformationMessage("Select a binding in Workspace Explorer first.");
         return;
       }
@@ -149,7 +149,7 @@ export function registerWorkspaceExplorer(context: vscode.ExtensionContext): voi
 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.inspectActor", (node?: ActorItemNode) => {
-      if (!node || node.kind !== "actor-item") {
+      if (node?.kind !== "actor-item") {
         void vscode.window.showInformationMessage("Select an actor in Workspace Explorer first.");
         return;
       }

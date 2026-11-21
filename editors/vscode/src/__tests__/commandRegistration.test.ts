@@ -79,14 +79,14 @@ vi.mock("../serverDiscovery", () => ({
   resolveStdlibSourceDir: vi.fn(() => ""),
 }));
 
-import { InspectorPanel } from "../inspectorPanel";
 import { state } from "../extensionState";
+import { InspectorPanel } from "../inspectorPanel";
 import { registerServerCommands } from "../languageClient";
 import { registerLogUi } from "../logUi";
 import { registerNavigationCommands } from "../navigationCommands";
 import { registerReplCommands } from "../repl";
-import { registerWorkspaceExplorer } from "../workspaceExplorer";
 import type { TranscriptViewProvider } from "../transcriptView";
+import { registerWorkspaceExplorer } from "../workspaceExplorer";
 import { ALL_CLASS_ORIGINS, type WorkspaceTreeDataProvider } from "../workspaceTreeView";
 
 interface FakeContext {

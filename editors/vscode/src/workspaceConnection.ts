@@ -7,10 +7,10 @@ import * as vscode from "vscode";
 import { workspacesBaseDir } from "./beamtalkRoot";
 import { state } from "./extensionState";
 import { InspectorPanel } from "./inspectorPanel";
-import { type LogEntry, WorkspaceClient } from "./workspaceClient";
-import { computeWorkspaceId } from "./workspaceId";
 import { findProjectRoot } from "./projectRoot";
 import { setReplRunning } from "./repl";
+import { type LogEntry, WorkspaceClient } from "./workspaceClient";
+import { computeWorkspaceId } from "./workspaceId";
 
 /**
  * Format a structured log entry for human-readable display in the Output panel.
