@@ -3,46 +3,75 @@
 # SPDX-License-Identifier: Apache-2.0
 """Verdict for ci.yml's `ci-ok` aggregate job, and a structural check of it (BT-5086).
 
-`ci-ok` is the one check branch protection should require. Each job it `needs`
-must have succeeded, except that a job may be *skipped* when ci.yml itself gates
-it with a job-level `if:` that reads `needs.changes.outputs.*` (the path gates),
-and only while the `changes` job succeeded. Everything else is a failure:
-failed, cancelled, or skipped without such a gate (a skipped always-run job, or
-every job skipped because an upstream failed, must not read as green).
+`ci-ok` is the one check branch protection should require. ci.yml runs on every
+pull_request; its `changes` job decides which jobs have work (`code` for a PR
+that touches anything but docs, plus one output per path gate). Each job `ci-ok`
+needs must have succeeded, except that a job may be *skipped* while `changes`
+succeeded when ci.yml itself explains the skip:
 
-The set of skippable jobs is read from ci.yml, not listed here, so adding a
-gated job needs no change to this script.
+* it has a path gate (`if:` reading `needs.changes.outputs.<gate>`), or
+* it is a code job (gated on `needs.changes.outputs.code`, directly or through a
+  `needs` chain) and `changes` reported `code=false` (a docs-only PR).
+
+Everything else is a failure: failed, cancelled, or skipped without such a
+reason. In particular a code job skipped while `code` is true reads as red, and
+so does any skip after a failed `changes` job.
+
+The skippable set is read from ci.yml, not listed here, so adding a gated job
+needs no change to this script.
 
   ci_ok.py verdict <ci.yml>     NEEDS_JSON in $NEEDS; exit 1 on a bad verdict
-  ci_ok.py check   [ci.yml]     fail unless ci-ok needs every other job, and
-                                ci.yml / ci-ok-docs.yml path filters partition the repo
+  ci_ok.py check   [ci.yml]     fail unless ci-ok needs every other job and every
+                                job is gated on a `changes` output
 """
 
 import json
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 JOB = "ci-ok"
 
 
-def skippable(job):
-    cond = str(job.get("if", ""))
-    return "needs.changes.outputs" in cond
+OUTPUT = re.compile(r"needs\.changes\.outputs\.(\w+)")
+
+
+def gates(job):
+    return set(OUTPUT.findall(str(job.get("if", ""))))
+
+
+def needs_of(job):
+    needs = job.get("needs", [])
+    return [needs] if isinstance(needs, str) else list(needs)
+
+
+def path_gated(job):
+    """A path gate: `if:` reads a `changes` output other than `code`."""
+    return bool(gates(job) - {"code"})
+
+
+def code_gated(name, jobs, seen=()):
+    """Gated on `code` directly, or because a job it needs is."""
+    job = jobs.get(name, {})
+    if "code" in gates(job):
+        return True
+    return any(code_gated(n, jobs, seen + (name,)) for n in needs_of(job) if n not in seen)
 
 
 def verdict(needs, jobs):
     """Return a list of problems for `needs` (the `toJSON(needs)` map)."""
     problems = []
-    changes_ok = needs.get("changes", {}).get("result") == "success"
+    changes = needs.get("changes", {})
+    changes_ok = changes.get("result") == "success"
+    docs_only = changes_ok and changes.get("outputs", {}).get("code") == "false"
     for name, info in sorted(needs.items()):
         result = info.get("result")
         if result == "success":
             continue
-        if result == "skipped" and changes_ok and skippable(jobs.get(name, {})):
-            continue
+        if result == "skipped" and changes_ok:
+            if path_gated(jobs.get(name, {})) or (docs_only and code_gated(name, jobs)):
+                continue
         problems.append(f"{name}: {result}")
     return problems
 
@@ -60,71 +89,16 @@ def structure(jobs):
     missing = sorted(set(jobs) - {JOB} - set(needs))
     if missing:
         problems.append(f"{JOB} does not need: {', '.join(missing)}")
+    if "code" not in jobs.get("changes", {}).get("outputs", {}):
+        problems.append("`changes` must emit a `code` output")
+    # Every job but the two must be skippable for a stated reason; otherwise it
+    # would run (and cost a runner) on a docs-only PR.
+    for name, job in sorted(jobs.items()):
+        if name in ("changes", JOB):
+            continue
+        if not (path_gated(job) or code_gated(name, jobs)):
+            problems.append(f"{name} is not gated on a `changes` output (it would run on docs-only PRs)")
     return problems
-
-
-def glob_regex(pat):
-    """GitHub path-filter glob: `*` stays inside a path segment, `**` crosses `/`."""
-    out, i = "", 0
-    while i < len(pat):
-        if pat.startswith("**", i):
-            out += ".*"
-            i += 2
-        elif pat[i] == "*":
-            out += "[^/]*"
-            i += 1
-        elif pat[i] == "?":
-            out += "[^/]"
-            i += 1
-        else:
-            out += re.escape(pat[i])
-            i += 1
-    return re.compile(out + r"\Z")
-
-
-def included(patterns, path):
-    """Last matching pattern wins; a `!` pattern excludes."""
-    result = False
-    for pat in patterns:
-        neg = pat.startswith("!")
-        if glob_regex(pat[1:] if neg else pat).match(path):
-            result = not neg
-    return result
-
-
-def pr_paths(path):
-    import yaml
-
-    doc = yaml.safe_load(Path(path).read_text())
-    on = doc.get("on", doc.get(True))
-    return on["pull_request"]["paths"]
-
-
-# Paths that must each start exactly one of the two workflows, besides the
-# tracked files: they probe the filter's edges (nested .md, re-included docs).
-PROBES = [
-    "README.md", "crates/x/README.md", "docs/a.md", "docs/learning/ch1.md", "docs/deep/dir/x.md",
-    "docs/beamtalk-language-features.md", "docs/repl-protocol.md", "docs/development/surface-parity.md",
-    "docs/development/other.md", ".devcontainer/Dockerfile",
-    "LICENSE", "SECURITY.md", "src/new.rs", ".github/workflows/ci.yml",
-]
-
-
-def partition(ci_paths, docs_paths, files):
-    """Files that start both workflows' neither, or ci.yml and the docs one: ok only if one."""
-    bad = []
-    for f in files:
-        a, b = included(ci_paths, f), included(docs_paths, f)
-        if a == b and not (a and b):  # neither
-            bad.append(f"{f}: starts neither ci.yml nor ci-ok-docs.yml")
-        elif a and b:
-            bad.append(f"{f}: starts both ci.yml and ci-ok-docs.yml")
-    return bad
-
-
-def tracked_files(root):
-    out = subprocess.run(["git", "-C", str(root), "ls-files"], capture_output=True, text=True, check=True)
-    return out.stdout.splitlines()
 
 
 def load_jobs(path):
@@ -143,11 +117,9 @@ def main(argv):
             print(f"::error::ci-ok: {p}")
         if problems:
             return 1
-        print("ci-ok: every required job succeeded or was skipped by a path gate")
+        print("ci-ok: every needed job succeeded or was skipped for a stated reason")
         return 0
     problems = structure(jobs)
-    docs_wf = Path(path).with_name("ci-ok-docs.yml")
-    problems += partition(pr_paths(path), pr_paths(docs_wf), PROBES + tracked_files(Path(path).parents[2]))
     for p in problems:
         print(f"{path}: {p}")
     return 1 if problems else 0

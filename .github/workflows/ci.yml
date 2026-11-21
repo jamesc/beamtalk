@@ -15,6 +15,15 @@ name: CI
 # put back for the same reason (BT-5032): both checks live only in this
 # workflow, so a docs-only edit to either must still run it.
 # `just test-workflow-paths` checks every path literal here exists.
+#
+# The list above filters `push` only. A pull_request always starts this workflow
+# (BT-5086): `ci-ok`, the one check branch protection should require, must exist
+# on every PR, and GitHub documents a required check from a workflow skipped by
+# path filtering as stuck "Pending". The `changes` job applies the SAME list to
+# the PR's changed files (scripts/ci/ci_code_filter.py reads it from here; it
+# yields the `code` output) and every code job is gated on `code`, so a PR that
+# the filter would have skipped runs only `changes` and `ci-ok`.
+# test_ci_code_filter.py pins that list to the former pull_request list.
 on:
   push:
     branches: [main]
@@ -35,17 +44,6 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
-    paths:
-      - '**'
-      - '!*.md'
-      - '!docs/**'
-      - 'docs/learning/**'
-      - 'docs/beamtalk-language-features.md'
-      - 'docs/repl-protocol.md'
-      - 'docs/development/surface-parity.md'
-      - '!LICENSE'
-      - '!SECURITY.md'
-      - '!.devcontainer/**'
 
 # PR runs cancel the superseded run for the same PR. A push to main is keyed on
 # its own SHA and never cancelled: main is the safety net for everything the PR
@@ -86,6 +84,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      # The PR touches something outside the docs-only paths (the `push` list
+      # above): the code jobs run. False means a docs-only PR: only `changes`
+      # and `ci-ok` run. Always true on a push to main or a dispatch.
+      code: ${{ steps.filter.outputs.code }}
       # A PR touched the desktop app's own paths: test-desktop (ubuntu) runs.
       # Never true on a push to main.
       desktop: ${{ steps.filter.outputs.desktop }}
@@ -124,6 +126,7 @@ jobs:
             # desktop (ci-platforms.yml's).
             {
               echo "desktop=false"
+              echo "code=true"
               for k in core_diff_modes learn runtime rust exec vscode fixture_readers; do echo "$k=true"; done
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -131,6 +134,9 @@ jobs:
 
           git fetch --depth=1 origin "$BASE_SHA"
           changed="$(git diff --name-only "$BASE_SHA" HEAD)"
+
+          # Docs-only PRs (every changed path excluded by the `push` list) skip the code jobs.
+          code=$(printf '%s\n' "$changed" | python3 scripts/ci/ci_code_filter.py .github/workflows/ci.yml)
 
           # matches PATTERN...: true when any changed path matches a shell glob
           # (`*` crosses `/`, so `dir/*` is a prefix match).
@@ -212,6 +218,7 @@ jobs:
               Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml '.github/actions/test-desktop/*')
 
           {
+            echo "code=$code"
             echo "desktop=$desktop"
             echo "core_diff_modes=$core_diff_modes"
             echo "learn=$learn"
@@ -238,6 +245,8 @@ jobs:
   # past the Actions cache cap and evicted the caches builds rely on. PR
   # runs restore main's entries.
   lint:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -349,7 +358,8 @@ jobs:
     needs: changes
     # Run even if `changes` failed (the fixture step then skips, its output is
     # empty): a skipped test-rust would read as passing to branch protection.
-    if: ${{ !cancelled() }}
+    # Skipped only for a docs-only PR (`code` is exactly 'false').
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -626,6 +636,8 @@ jobs:
   # subcommand's output equals the declared window, so this job's matrix can
   # never silently drift from doctor's/build's/release's own window checks.
   otp-matrix:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -936,6 +948,7 @@ jobs:
   # still surfaces there.
   test-integration:
     needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -1037,6 +1050,8 @@ jobs:
   # jobs, so it adds runner time but little wall-clock. Linux only;
   # ci-platforms.yml and release/nightly cover the other OSes.
   test-install:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -1072,8 +1087,11 @@ jobs:
   # (and report) even when a needed job failed or was cancelled; a bare `needs:`
   # job would be skipped instead, and a skipped required check reads as passing.
   # scripts/ci/ci_ok.py decides: every job must have succeeded, except a job
-  # ci.yml itself gates on `needs.changes.outputs.*` may be skipped while
-  # `changes` succeeded. `just test-ci-ok` checks this job needs every other job.
+  # with a path gate (`needs.changes.outputs.<gate>`) may be skipped, and a
+  # code job may be skipped when `changes` says `code=false` (docs-only PR), in
+  # both cases only while `changes` succeeded. A code job skipped while `code` is
+  # true is red. `just test-ci-ok` checks this job needs every other job and
+  # that every job is gated, so a new job cannot run on docs-only PRs by accident.
   ci-ok:
     name: ci-ok
     if: ${{ always() }}
