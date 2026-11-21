@@ -106,8 +106,8 @@ defmodule BtAttach.MixProject do
       # Playwright, so the connected-only JS hooks (CodeEditor, KeyboardShortcuts,
       # SelectionTracker, TweaksPanel) actually run — they are invisible to
       # LiveViewTest's server-side render. See test/.../workspace_browser_test.exs.
-      {:phoenix_test, "~> 0.11", only: :test, runtime: false},
-      {:phoenix_test_playwright, "~> 0.14", only: :test, runtime: false},
+      {:phoenix_test, "~> 0.14", only: :test, runtime: false},
+      {:phoenix_test_playwright, "~> 0.19", only: :test, runtime: false},
       {:esbuild, "~> 0.8", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.2", runtime: Mix.env() == :dev},
       {:telemetry_metrics, "~> 1.0"},
