@@ -1011,7 +1011,7 @@ impl CoreErlangGenerator {
         {
             return module.as_str().to_string();
         }
-        let snake = super::util::to_module_name(class_name);
+        let snake = beamtalk_core::ast::to_module_name(class_name);
         if Self::is_known_stdlib_type(class_name) {
             format!("bt@stdlib@{snake}")
         } else if let beamtalk_core::semantic_analysis::PackageId::Package(name) = pkg {

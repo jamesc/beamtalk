@@ -55,8 +55,8 @@
 
 use std::fmt;
 
-use super::util::to_module_name;
 use beamtalk_cerl_doc::escape::escape_atom_chars;
+use beamtalk_core::ast::to_module_name;
 
 /// A Core Erlang atom value object.
 ///
