@@ -342,9 +342,8 @@ sealed typed Number subclass: Integer
   /// 1 to: 10 by: 3 do: [:i | Transcript show: i]
   /// ```
   ///
-  /// A step of 0 raises. Known bug (BT-5098): a literal block that writes an
-  /// outer local is inlined by the compiler, and that path still does nothing
-  /// for a step of 0.
+  /// A step of 0 raises. A literal block that writes an outer local is inlined
+  /// by the compiler as a counted loop; that path raises the same error (BT-5098).
   to: end :: Integer by: step :: Integer do: block :: Block(Integer, Object) -> Nil =>
     step =:= 0 ifTrue: [self error: "Interval step cannot be zero"]
     cond := (step > 0 and: [self <= end]) or: [step < 0 and: [self >= end]]

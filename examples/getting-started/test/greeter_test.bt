@@ -9,8 +9,8 @@
 // for the with-arg, no-arg, and flag-shaped-arg cases.
 //
 // Run in the REPL:
-//   > :load src/greeter.bt
-//   > :load test/greeter_test.bt
+//   > Workspace load: "src/greeter.bt"
+//   > Workspace load: "test/greeter_test.bt"
 //   > GreeterTest runAll
 
 TestCase subclass: GreeterTest

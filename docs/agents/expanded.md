@@ -219,7 +219,7 @@ All **user-facing/public API errors** MUST use the structured `#beamtalk_error{}
 
 ### Structured Error System
 
-All errors use `#beamtalk_error{}` records defined in `runtime/include/beamtalk.hrl`:
+All errors use `#beamtalk_error{}` records defined in `runtime/apps/beamtalk_runtime/include/beamtalk.hrl`:
 
 ```erlang
 -record(beamtalk_error, {
@@ -363,13 +363,13 @@ Identifies which component of the codebase the issue affects:
 
 | Label | Description | Key Directories |
 |-------|-------------|----------------|
-| `class-system` | Class definition, parsing, codegen, and runtime | `crates/beamtalk-core/src/ast.rs`, `crates/beamtalk-core/src/source_analysis/` |
+| `class-system` | Class definition, parsing, codegen, and runtime | `crates/beamtalk-core/src/ast/mod.rs`, `crates/beamtalk-core/src/source_analysis/` |
 | `stdlib` | Standard library: collections, primitives, strings (compiled from `stdlib/src/*.bt` via pragmas — see [ADR 0007](../docs/ADR/0007-compilable-stdlib-with-primitive-injection.md)) | `stdlib/src/` |
-| `repl` | REPL backend and CLI interaction | `runtime/src/beamtalk_repl.erl`, `crates/beamtalk-cli/src/repl/` |
+| `repl` | REPL backend and CLI interaction | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_eval.erl`, `crates/beamtalk-cli/src/commands/repl/` |
 | `cli` | Command-line interface and build tooling | `crates/beamtalk-cli/` |
-| `codegen` | Code generation to Core Erlang/BEAM | `crates/beamtalk-core/src/erlang.rs` |
-| `runtime` | Erlang runtime: actors, futures, OTP integration | `runtime/src/` |
-| `parser` | Lexer, parser, AST | `crates/beamtalk-core/src/source_analysis/`, `crates/beamtalk-core/src/ast.rs` |
+| `codegen` | Code generation to Core Erlang/BEAM | `crates/beamtalk-codegen/src/core_erlang/mod.rs` |
+| `runtime` | Erlang runtime: actors, futures, OTP integration | `runtime/apps/` |
+| `parser` | Lexer, parser, AST | `crates/beamtalk-core/src/source_analysis/`, `crates/beamtalk-core/src/ast/mod.rs` |
 
 #### Issue Type
 
@@ -681,7 +681,7 @@ All Core Erlang codegen MUST use `Document` / `docvec!` API. Never use `format!(
 
 ### State-Threading Codegen — ThreadedIr + Verifier (ADR 0111)
 
-State threading — actor/instance `State`, value-type `Self`, loop-local threading, and non-local-return (NLR) relay across loops, conditionals, exception handling (`on:do:`/`ensure:`), list-op accumulators, gen_server actor-state routing, and Tier 2 stateful-block bodies — now lowers through `crates/beamtalk-codegen/src/core_erlang/threaded_ir.rs`'s `ThreadedIr` type **as the emission input** (the real `Bind`/`Threaded`/`NlrCatch`/`Return` nodes built for a construct's mutation sequence are what `verify()` checks and `render()` turns into the `Document` emitted — not a side-channel fixture checked alongside a separately hand-rolled `Document`), and is checked by its `verify()` pass. General expression codegen stays AST-directed and unaffected. Class variables are **not** a threading family (ADR 0130): they live in the class process's dictionary and are written in place through `beamtalk_class_vars`, so there is no `ClassVars` slot, shadow write or scope token to thread. The one class-variable construct in `ThreadedIr` is the catch boundary, `ThreadedStmt::OnDoCatch` (`snapshot/0` before the `try`, `restore/1` first in the non-NLR catch arm), checked by `VerifyError::CatchWithoutClassVarRestore`. Actor `State` crosses a call that may run user code through the `'$bt_actor_state'` cell instead of through threading (ADR 0137): method bodies keep threading `State` in locals, and each such call is a `SyncedCall` node that stores the current version before the call and loads it after — except a self-send to a compiled method of the same actor, which passes `State` as an argument and stays threaded. The invariant is that at every bracketed call the cell equals the current threaded `State` and the caller reloads after it, with the `gen_server` state the only copy between callbacks; `VerifyError::UnbracketedUserCodeSend` fails the build where a bracket is missing, so a missed sync point is never a stale read (see [actor-state-cell.md](../development/actor-state-cell.md) for the mechanism). When touching any of these constructs, build the matching `ThreadedIr` fragment and call `verify()` (via the shared `report_threaded_ir_verify_errors` helper in `control_flow/mod.rs`) rather than adding a new ad-hoc `debug_assert!` — see [docs/development/debugging.md](../development/debugging.md#threadedir-verifier-adr-0111-bt-3129-bt-3165) for the `VerifyError` variants and `just verify-threaded-ir` for the CI gate that runs `verify()` over the full stdlib/bootstrap-test corpus.
+State threading — actor/instance `State`, value-type `Self`, loop-local threading, and non-local-return (NLR) relay across loops, conditionals, exception handling (`on:do:`/`ensure:`), list-op accumulators, gen_server actor-state routing, and Tier 2 stateful-block bodies — now lowers through `crates/beamtalk-codegen/src/core_erlang/threaded_ir/mod.rs`'s `ThreadedIr` type **as the emission input** (the real `Bind`/`Threaded`/`NlrCatch`/`Return` nodes built for a construct's mutation sequence are what `verify()` checks and `render()` turns into the `Document` emitted — not a side-channel fixture checked alongside a separately hand-rolled `Document`), and is checked by its `verify()` pass. General expression codegen stays AST-directed and unaffected. Class variables are **not** a threading family (ADR 0130): they live in the class process's dictionary and are written in place through `beamtalk_class_vars`, so there is no `ClassVars` slot, shadow write or scope token to thread. The one class-variable construct in `ThreadedIr` is the catch boundary, `ThreadedStmt::OnDoCatch` (`snapshot/0` before the `try`, `restore/1` first in the non-NLR catch arm), checked by `VerifyError::CatchWithoutClassVarRestore`. Actor `State` crosses a call that may run user code through the `'$bt_actor_state'` cell instead of through threading (ADR 0137): method bodies keep threading `State` in locals, and each such call is a `SyncedCall` node that stores the current version before the call and loads it after — except a self-send to a compiled method of the same actor, which passes `State` as an argument and stays threaded. The invariant is that at every bracketed call the cell equals the current threaded `State` and the caller reloads after it, with the `gen_server` state the only copy between callbacks; `VerifyError::UnbracketedUserCodeSend` fails the build where a bracket is missing, so a missed sync point is never a stale read (see [actor-state-cell.md](../development/actor-state-cell.md) for the mechanism). When touching any of these constructs, build the matching `ThreadedIr` fragment and call `verify()` (via the shared `report_threaded_ir_verify_errors` helper in `control_flow/mod.rs`) rather than adding a new ad-hoc `debug_assert!` — see [docs/development/debugging.md](../development/debugging.md#threadedir-verifier-adr-0111-bt-3129-bt-3165) for the `VerifyError` variants and `just verify-threaded-ir` for the CI gate that runs `verify()` over the full stdlib/bootstrap-test corpus.
 
 #### Outer locals are a threading family (ADR 0131)
 

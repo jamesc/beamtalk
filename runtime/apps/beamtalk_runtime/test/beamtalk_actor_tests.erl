@@ -2971,6 +2971,34 @@ async_send_watcher_exits_when_future_settles_test() ->
     end),
     gen_server:stop(Counter).
 
+%% BT-5084: an actor that stays alive and never settles a future must not pin the
+%% watcher (and, through its producer registration, the future) forever.
+async_send_watcher_cap_rejects_unsettled_future_test() ->
+    ok = application:set_env(beamtalk_runtime, future_watcher_cap_ms, 100),
+    Silent = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    try
+        Future = beamtalk_future:new(),
+        FuturePid = beamtalk_future:pid(Future),
+        Watcher = beamtalk_actor_send:spawn_future_watcher(Silent, FuturePid, noReply),
+        WatcherMon = erlang:monitor(process, Watcher),
+        ?assertThrow(
+            {future_rejected, #beamtalk_error{kind = future_expired, selector = noReply}},
+            beamtalk_future:await(Future, 5000)
+        ),
+        receive
+            {'DOWN', WatcherMon, process, Watcher, _} -> ok
+        after 2000 -> ?assert(false)
+        end,
+        ?assert(is_process_alive(Silent))
+    after
+        application:unset_env(beamtalk_runtime, future_watcher_cap_ms),
+        Silent ! stop
+    end.
+
 %% BT-5020: the watcher has no time cutoff, so an actor that dies while busy
 %% (however long) still rejects every in-flight future with actor_dead.
 async_send_future_rejected_when_busy_actor_killed_test() ->

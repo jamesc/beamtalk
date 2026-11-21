@@ -480,7 +480,9 @@ emit_class_def_entries([#{name := Name}], Expression, PrevSources) ->
         undefined ->
             false;
         PrevSource ->
-            ?ENTRIES:emit_class_def_entry(NameBin, Expression, PrevSource),
+            beamtalk_refactor_support:note_changelog_result(
+                ?ENTRIES:emit_class_def_entry(NameBin, Expression, PrevSource)
+            ),
             true
     end;
 emit_class_def_entries(_MultipleOrNoClasses, _Expression, _PrevSources) ->

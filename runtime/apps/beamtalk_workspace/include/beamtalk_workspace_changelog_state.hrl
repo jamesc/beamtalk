@@ -18,5 +18,9 @@
     epoch :: non_neg_integer(),
     %% True once the "active entries exceed the ring bound" warning has been
     %% logged for the current overflow episode (BT-5016); cleared when it ends.
-    ring_overflow_warned = false :: boolean()
+    ring_overflow_warned = false :: boolean(),
+    %% True once a rotation pass found the ring over its bound with nothing
+    %% archivable (every entry active). Appends cannot change that, so they skip
+    %% the full-table scan until a flush / clear makes entries inactive (BT-5084).
+    rotation_stuck = false :: boolean()
 }).

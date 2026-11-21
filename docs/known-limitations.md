@@ -4,13 +4,11 @@ Beamtalk is under active development. This page documents features that are **no
 
 ## Language Features
 
-### Package Dependencies: Path and Git Only (No Registry Yet)
+### Flat Namespace Within a Package
 
-Beamtalk has a package namespace and dependency system ([ADR 0070](ADR/0070-package-namespaces-and-dependencies.md)): declare dependencies in `beamtalk.toml`, reference a dependency's classes by their short name, and disambiguate with qualified `package@Class` names when needed. Class-name collisions between dependencies are a **compile error** (not silent shadowing) — resolve them with the qualified name. There are no per-file `import`/`export` statements: within a package (and the REPL workspace) all classes share a flat namespace by design.
+Beamtalk has a package namespace and dependency system ([ADR 0070](ADR/0070-package-namespaces-and-dependencies.md)): declare dependencies in `beamtalk.toml` (registry, `path` or `git`), reference a dependency's classes by their short name, and disambiguate with qualified `package@Class` names when needed. Class-name collisions between dependencies are a **compile error** (not silent shadowing) — resolve them with the qualified name. There are no per-file `import`/`export` statements: within a package (and the REPL workspace) all classes share a flat namespace by design.
 
-The remaining gap is the **source** of dependencies: only `path` (local) and `git` dependencies are supported. Registry-based resolution (e.g. `json = "1.0"` via a Hex.pm-style registry) is deferred until the ecosystem warrants it.
-
-**Workaround:** Vendor a package via a `git` or `path` dependency instead of a registry name.
+Registry dependencies pin an exact `major.minor.patch` version; version ranges are not supported (use a `git` dependency for a moving target).
 
 **References:** [ADR 0070](ADR/0070-package-namespaces-and-dependencies.md) (package namespaces + dependencies), [ADR 0031](ADR/0031-flat-namespace-for-v01.md) (superseded — the original v0.1 flat-namespace decision), [Package Management guide](beamtalk-packages.md)
 
@@ -47,27 +45,22 @@ cls class           // => Counter class (metaclass object)
 
 ## Concurrency
 
-### Supervision API Is Low-Level
+### Supervision Trees Are Declared by Subclassing
 
-The `Supervisor` and `DynamicSupervisor` classes provide programmatic access to OTP supervision trees, but there is no declarative DSL for defining supervision hierarchies or restart strategies inline with class definitions.
+`Supervisor` and `DynamicSupervisor` give programmatic access to OTP supervision trees. A static tree is a `Supervisor` subclass whose `childSpecs` (and optionally `strategy`, `maxRestarts`, `restartWindow`) are instance-side methods; there is no separate declarative DSL or inline restart-strategy syntax on actor classes (ADR 0059, ADR 0135).
 
-**Current API:**
 ```beamtalk
-sup := Supervisor start: {
-  SupervisionSpec strategy: #one_for_one children: {
-    SupervisionSpec child: MyWorker id: "worker1"
-  }
-}
+Supervisor subclass: WebApp
+  childSpecs => #(DatabasePool HTTPRouter MetricsCollector)
+
+app := (WebApp supervise) unwrap
 ```
 
 ## Type System
 
-### Types Are Optional Warnings Only
+### Type Errors Are Warnings
 
-Gradual typing (ADR 0025) is in Phase 1. Type annotations are parsed and checked, but:
-- Type errors produce **warnings**, never compile errors
-- Union and generic type annotations are not yet checked
-- Dialyzer spec generation is partial
+Gradual typing (ADR 0025, ADR 0068) checks annotations, `typed` classes, unions, generics and narrowing, but a type problem is a **warning**, never a compile error. To make a build fail on warnings, pass `--warnings-as-errors` (`beamtalk build`, `check`, `test`); to accept a known one, use `@expect`.
 
 This is by design — types are documentation-first in Beamtalk.
 

@@ -4,7 +4,7 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
 
 ## Adding a New AST Node
 
-1. Define type in `crates/beamtalk-core/src/ast.rs`
+1. Define type in `crates/beamtalk-core/src/ast/mod.rs`
 2. Add parsing in `crates/beamtalk-core/src/source_analysis/`
 3. Add type checking in `analyse.rs` if needed
 4. Add Core Erlang generation in `erlang.rs`
@@ -36,7 +36,7 @@ The build walks it recursively, so a nested class compiles, documents, installs
 and loads exactly like a top-level one — a flat and a nested tree produce
 byte-identical `beamtalk_stdlib.app` output.
 
-**Subdirectories never affect module names.** `stdlib/src/collections/array.bt`
+**Subdirectories never affect module names.** `stdlib/src/array.bt`
 compiles to `bt@stdlib@array`, not `bt@stdlib@collections@array`. This
 deliberately diverges from user packages, where `src/util/math.bt` becomes
 `util@math`.

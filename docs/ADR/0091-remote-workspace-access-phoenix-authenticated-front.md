@@ -9,6 +9,8 @@ Extends [ADR 0020 — Connection Security](0020-connection-security.md). Amends
 [ADR 0017 — Browser Connectivity](0017-browser-connectivity-to-running-workspaces.md)
 Phase 3.
 
+**Pointer update (2026-11-21, BT-5089):** `beamtalk_authorized_ops.erl` was never added under that name. Per-operation authorization is implemented in the Phoenix front, `editors/liveview/lib/bt_attach/rbac.ex` and `editors/liveview/lib/bt_attach/facade.ex`. The decision text is unchanged.
+
 ## Context
 
 ### Problem statement

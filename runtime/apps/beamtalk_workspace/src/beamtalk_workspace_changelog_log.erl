@@ -22,6 +22,7 @@ ChangeLog persistence: the `changes.jsonl` append/load path, transactional rotat
     persist_append/4,
     rewrite_log/2,
     rotate_transactional/3,
+    truncate_to/2,
     source_ref_filename/2,
     sweep_stale_temps/1,
     truncate_log/1,
@@ -70,10 +71,74 @@ write_optional_source(SourcesDir, Ref, Body) ->
     Path = filename:join(SourcesDir, binary_to_list(Ref)),
     write_file_atomic(Path, Body).
 
+%% Append `Data` to `Path` and fsync before returning (BT-5084): the entry is only
+%% reported recorded once it is on stable storage, like the atomic temp+rename
+%% writes (`write_file_atomic/2`) used for every other ChangeLog file.
+-spec append_synced(string(), iodata()) -> ok | {error, term()}.
+append_synced(Path, Data) ->
+    case file:open(Path, [append, raw, binary]) of
+        {ok, Fd} ->
+            append_synced_open(Path, Fd, Data);
+        {error, _} = Err ->
+            Err
+    end.
+
+-spec append_synced_open(string(), file:fd(), iodata()) -> ok | {error, term()}.
+append_synced_open(Path, Fd, Data) ->
+    case file:position(Fd, eof) of
+        {ok, Before} ->
+            Result =
+                case file:write(Fd, Data) of
+                    ok -> file:sync(Fd);
+                    {error, _} = Err -> Err
+                end,
+            _ = file:close(Fd),
+            %% A failed write or fsync may leave a whole line on disk that the
+            %% caller is told was not recorded; the next append would reuse its
+            %% seq and one entry would overwrite the other at load. Cut the file
+            %% back to where it was (BT-5084).
+            case Result of
+                ok ->
+                    ok;
+                {error, _} ->
+                    case truncate_to(Path, Before) of
+                        ok ->
+                            ok;
+                        {error, CutReason} ->
+                            %% The whole line stays under a seq the next append
+                            %% reuses; say so rather than fail silently.
+                            ?LOG_ERROR(
+                                "ChangeLog ~ts: could not cut back a failed append",
+                                [Path],
+                                #{reason => CutReason, domain => [beamtalk, runtime]}
+                            )
+                    end,
+                    Result
+            end;
+        {error, _} = Err ->
+            _ = file:close(Fd),
+            Err
+    end.
+
+-spec truncate_to(string(), non_neg_integer()) -> ok | {error, term()}.
+truncate_to(Path, Size) ->
+    case file:open(Path, [read, write, raw, binary]) of
+        {ok, Fd} ->
+            Result =
+                case file:position(Fd, Size) of
+                    {ok, _} -> file:truncate(Fd);
+                    {error, _} = Err -> Err
+                end,
+            _ = file:close(Fd),
+            Result;
+        {error, _} = Err ->
+            Err
+    end.
+
 -spec append_metadata_line(#entry{}, #state{}) -> ok | {error, term()}.
 append_metadata_line(Entry, State) ->
     Line = [beamtalk_workspace_changelog_codec:entry_to_json(Entry), $\n],
-    case file:write_file(State#state.log_path, Line, [append]) of
+    case append_synced(State#state.log_path, Line) of
         ok ->
             ok;
         {error, Reason} ->
@@ -122,14 +187,16 @@ repair_tail_binary(LogPath, Bin) ->
                     true ->
                         ?LOG_WARNING(
                             "ChangeLog ~ts: last entry was missing its newline; restored",
-                            [LogPath]
+                            [LogPath],
+                            #{domain => [beamtalk, runtime]}
                         ),
                         <<Whole/binary, Tail/binary, $\n>>;
                     false ->
                         ?LOG_WARNING(
                             "ChangeLog ~ts: dropping a partial last entry (~b bytes) left "
                             "by an interrupted write",
-                            [LogPath, byte_size(Tail)]
+                            [LogPath, byte_size(Tail)],
+                            #{domain => [beamtalk, runtime]}
                         ),
                         Whole
                 end,
@@ -137,9 +204,11 @@ repair_tail_binary(LogPath, Bin) ->
                 ok ->
                     ok;
                 {error, Reason} ->
-                    ?LOG_WARNING("ChangeLog ~ts: could not repair torn tail: ~p", [
-                        LogPath, Reason
-                    ])
+                    ?LOG_WARNING(
+                        "ChangeLog ~ts: could not repair torn tail: ~p",
+                        [LogPath, Reason],
+                        #{domain => [beamtalk, runtime]}
+                    )
             end,
             Repaired
     end.
@@ -189,7 +258,9 @@ load_from_disk(State) ->
         {error, enoent} ->
             State#state{next_seq = 0, epoch = 1};
         {error, Reason} ->
-            ?LOG_WARNING("Failed to read ChangeLog at ~ts: ~p", [LogPath, Reason]),
+            ?LOG_WARNING("Failed to read ChangeLog at ~ts: ~p", [LogPath, Reason], #{
+                domain => [beamtalk, runtime]
+            }),
             State#state{next_seq = 0, epoch = 1}
     end.
 
@@ -230,7 +301,9 @@ parse_log(Bin) ->
                 {true, beamtalk_workspace_changelog_codec:entry_from_json(Line)}
             catch
                 Class:Reason ->
-                    ?LOG_WARNING("Skipping malformed ChangeLog line: ~p:~p", [Class, Reason]),
+                    ?LOG_WARNING("Skipping malformed ChangeLog line: ~p:~p", [Class, Reason], #{
+                        domain => [beamtalk, runtime]
+                    }),
                     false
             end
         end,

@@ -10,7 +10,7 @@
 /// 4. **Auto-generated getters** — `text` and `sender` provided by Value
 ///
 /// Usage in REPL:
-///   > :load examples/chat-room/message.bt
+///   > Workspace load: "examples/chat-room/src/message.bt"
 ///
 /// ## Examples
 /// ```beamtalk

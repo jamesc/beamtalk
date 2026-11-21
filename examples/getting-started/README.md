@@ -47,8 +47,7 @@ All source files in `src/` load automatically when you start the REPL.
 ## Running Tests
 
 ```text
-> :load "test/"
-> CounterTest runAll
+> :test
 ```
 
 ## What's Next?

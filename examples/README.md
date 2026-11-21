@@ -22,7 +22,7 @@ Open a workspace in Claude Code and the MCP server starts automatically.
 ```bash
 cd examples/getting-started
 beamtalk repl
-> :load src/hello.bt
+> Workspace load: "src/hello.bt"
 > Hello new
 ```
 
