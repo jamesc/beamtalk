@@ -588,7 +588,7 @@ shared helpers:
 
 Test the interaction between the Rust compiler daemon and Erlang runtime.
 
-**Location:** `runtime/apps/beamtalk_runtime/test/beamtalk_repl_integration_tests.erl`
+**Location:** `runtime/apps/beamtalk_workspace/test/` (`beamtalk_repl_*_tests.erl`)
 
 **Requires:** Compiler daemon running (`beamtalk daemon start`)
 
@@ -675,7 +675,7 @@ projections such as `erlang:element` over variables are exempt). Because it
 runs inside the compiler, `just test-stdlib`, `just test-bunit` (the
 `verify-threaded-ir` corpus) and every codegen unit test enforce it.
 It scans list cells and map literals only (not tuple elements or direct `call`
-argument lists). `tests/racing_operand_corpus.rs` proves it fails on a
+argument lists). `crates/beamtalk-codegen/src/core_erlang/tests/racing_operand_corpus.rs` proves it fails on a
 reintroduced in-place builder (`Fault::OperandsInPlace`).
 
 #### Codegen fault injection (BT-4688)
@@ -954,7 +954,7 @@ Three expectation directives are supported:
 The harness recognises two placeholder tokens in the input:
 
 * `<project>` — replaced with the staged temp copy of `tests/parity/fixtures/simple_project/`
-* `<bad_file>` — replaced with the staged copy of `tests/parity/fixtures/diagnostic/BadSyntax.bt`
+* `<bad_file>` — replaced with the staged copy of `tests/parity/fixtures/diagnostic/bad_syntax.bt`
 
 **Workspace pool:** all REPL and MCP cases share a single workspace started
 once per harness run. The pattern is borrowed from `crates/beamtalk-mcp/src/client.rs::tests`.

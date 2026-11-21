@@ -976,12 +976,18 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-repo
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-repo lint-docs-refs
 
 # The repo-wide lint-* recipes and script tests that need only the toolchain CI's
 # lint job has. `lint` runs this group and ci.yml's lint job runs it by name, so
 # the two cannot diverge (BT-5032). Add a new lint here, not to either list.
 lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns check-lint-parity check-pins test-lint-stamp test-refresh-edge test-install-script test-determine-version test-publish-rolling-release test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly test-workflow-paths test-cache-keys
+
+# Lint (BT-5089): every `just <recipe>` and repo path named in the contributor docs
+# (AGENTS.md, CONTRIBUTING.md, docs/agents, docs/development, four ADRs' paths)
+# exists. Intended historical references live in scripts/ci/docs-refs-allowlist.txt.
+lint-docs-refs:
+    @python3 scripts/ci/check_docs_refs.py
 
 # Test (BT-5032): every repo path literal in a workflow's `paths:` filter or the
 # ci.yml `changes` job's `matches` gate names something that exists, so a renamed

@@ -182,7 +182,7 @@ While an actor callback runs, the actor state map lives in one cell owned by `be
 
 ### Structured Error Records
 
-All Beamtalk errors use `#beamtalk_error{}` records from `runtime/include/beamtalk.hrl`:
+All Beamtalk errors use `#beamtalk_error{}` records from `runtime/apps/beamtalk_runtime/include/beamtalk.hrl`:
 
 ```erlang
 -include("beamtalk.hrl").

@@ -413,11 +413,11 @@ cost of gate 3. The bracket closes it without threading (BT-4121):
   hybrid body, a `StateAcc` loop or fold nested in the region, a conditional
   arm and an `on:do:` body all call the same hook. A write inside an actor
   closure goes through the cell view (`cell_field_write_doc`), is never part of
-  the loop's frame and records nothing. `tests/field_write_sites.rs` counts the
+  the loop's frame and records nothing. `crates/beamtalk-codegen/src/core_erlang/tests/field_write_sites.rs` counts the
   field `Put` constructions, the dynamic `maps:put`/`maps:remove` mutations and
   the hook's callers per file, so a new write site of either shape cannot skip
   the record. (A self-send, which `fieldAt:put:` and `clearField:` are, keeps a
-  body off the stateless paths too, so for those the record is a second guard.) `tests/guarded_op_loops.rs` shows the finding
+  body off the stateless paths too, so for those the record is a second guard.) `crates/beamtalk-codegen/src/core_erlang/tests/guarded_op_loops.rs` shows the finding
   fires under a test-only fault that turns mode selection's exclusion off.
 - Each marker records the loop-entry `State`, and each threaded-`State` use
   in its body (an `on:do:` `PreState` boundary, a `StateAcc` seed) is noted
@@ -455,7 +455,7 @@ in the region (a `StateAcc` loop or fold) records nothing, since that frame's
 state was seeded from the cell and the seed is checked itself. Stores are not
 reads: a loop's pre-store, an `on:do:` pre-region `State` and a loop plan's
 initial state go through the non-recording `state_var_to_store`, and a source
-test (`tests/stale_read_sites.rs`) keeps every other codegen file off the
+test (`crates/beamtalk-codegen/src/core_erlang/tests/stale_read_sites.rs`) keeps every other codegen file off the
 accessors the choke point is built from. The check is emitter-recorded, like
 `UnbracketedGuardedOperator`, rather than a `verify()` tree walk: field reads
 are AST-directed `Document`s inside opaque `Statement`/`ValueRef::Doc` nodes

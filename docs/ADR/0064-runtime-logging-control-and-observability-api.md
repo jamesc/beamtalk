@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-03-17)
 
+**Pointer update (2026-11-21, BT-5089):** implementation moved after this ADR was written; the decision text is unchanged. Core Erlang codegen is in `crates/beamtalk-codegen/src/core_erlang/` (Logger recognition: `intrinsics/logger.rs`) rather than `beamtalk-core`; `stdlib/src/beamtalk_interface.bt` is now `stdlib/src/beamtalk.bt` and the Logger class is `stdlib/src/logger.bt`; `beamtalk_logger.erl` no longer exists; the runtime half is `runtime/apps/beamtalk_runtime/src/beamtalk_logging_config.erl`.
+
 ## Context
 
 ### Problem
