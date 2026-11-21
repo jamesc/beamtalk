@@ -18,6 +18,7 @@ import {
   resolveAliasDocument,
   resolveClassDocument,
 } from "./documentResolution";
+import { state } from "./extensionState";
 import { InspectorPanel } from "./inspectorPanel";
 import { registerLogLevelSync } from "./logLevelSync";
 import { resolveDeclarationOffset } from "./symbolLookup";
@@ -36,14 +37,6 @@ import type {
 } from "./workspaceTreeView";
 import { ALL_CLASS_ORIGINS, WorkspaceTreeDataProvider } from "./workspaceTreeView";
 
-let client: LanguageClient | undefined;
-let outputChannel: vscode.LogOutputChannel | undefined;
-let traceOutputChannel: vscode.LogOutputChannel | undefined;
-/** Output channel for live runtime log streaming (BT-1433). */
-let logOutputChannel: vscode.OutputChannel | undefined;
-/** Status bar item showing / changing the active log level. */
-let logLevelStatusBarItem: vscode.StatusBarItem | undefined;
-
 const LOG_LEVELS = [
   "debug",
   "info",
@@ -55,8 +48,6 @@ const LOG_LEVELS = [
   "emergency",
 ] as const;
 type LogLevel = (typeof LOG_LEVELS)[number];
-let workspaceTreeProvider: WorkspaceTreeDataProvider | undefined;
-let transcriptViewProvider: TranscriptViewProvider | undefined;
 
 /** `context.workspaceState` key persisting the "Classes" section's origin filter. */
 const CLASS_FILTER_STATE_KEY = "beamtalk.classOriginFilter";
@@ -68,16 +59,9 @@ const CLASS_ORIGIN_LABELS: Record<ClassOrigin, string> = {
   stdlib: "Standard Library",
 };
 
-/** The active WorkspaceClient, set when a workspace port file is detected. */
-let workspaceWsClient: WorkspaceClient | undefined;
-/** The integrated terminal running `beamtalk repl`, if started by this extension. */
-let replTerminal: vscode.Terminal | undefined;
-/** True while `beamtalk repl` is actively running inside replTerminal. */
-let replRunning = false;
-
 /** Update replRunning and sync the VS Code context so toolbar buttons respond. */
 function setReplRunning(value: boolean): void {
-  replRunning = value;
+  state.replRunning = value;
   void vscode.commands.executeCommand("setContext", "beamtalk.replRunning", value);
 }
 
@@ -233,17 +217,20 @@ function resolveStdlibSourceDir(): string {
  */
 class StdlibContentProvider implements vscode.TextDocumentContentProvider {
   async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
-    if (!client) {
+    if (!state.client) {
       return `// ${uri.toString()}\n// Language server is not connected. Install Beamtalk to enable stdlib navigation.\n`;
     }
     try {
-      const result = await client.sendRequest<{ content: string }>("beamtalk-lsp/fetchContent", {
-        uri: uri.toString(),
-      });
+      const result = await state.client.sendRequest<{ content: string }>(
+        "beamtalk-lsp/fetchContent",
+        {
+          uri: uri.toString(),
+        }
+      );
       return result.content;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      outputChannel?.warn(`Failed to fetch stdlib content for ${uri}: ${message}`);
+      state.outputChannel?.warn(`Failed to fetch stdlib content for ${uri}: ${message}`);
       return `// Failed to load ${uri.toString()}\n// ${message}\n`;
     }
   }
@@ -272,10 +259,10 @@ class StdlibContentProvider implements vscode.TextDocumentContentProvider {
 export async function openStdlibDocumentForClass(
   classInfo: ClassInfo
 ): Promise<vscode.TextDocument | undefined> {
-  if (classInfo.source_origin !== "stdlib" || !client) return undefined;
+  if (classInfo.source_origin !== "stdlib" || !state.client) return undefined;
   const uriString = `beamtalk-stdlib:///${classNameToStdlibFilename(classInfo.name)}`;
   try {
-    await client.sendRequest<{ content: string }>("beamtalk-lsp/fetchContent", {
+    await state.client.sendRequest<{ content: string }>("beamtalk-lsp/fetchContent", {
       uri: uriString,
     });
   } catch {
@@ -294,7 +281,7 @@ export async function openStdlibDocumentForClass(
 function aliasSourceFetcher():
   | ((name: string, pkg?: string) => Promise<{ content: string | null }>)
   | null {
-  const wsClient = workspaceWsClient;
+  const wsClient = state.workspaceWsClient;
   return wsClient ? (name, pkg) => wsClient.browseAliasSource(name, pkg) : null;
 }
 
@@ -453,15 +440,17 @@ class BeamtalkTaskProvider implements vscode.TaskProvider {
 /** Creates the LSP client and starts it. */
 async function startClient(context: vscode.ExtensionContext): Promise<void> {
   // Create the output channel early so discovery failures are visible.
-  outputChannel ??= vscode.window.createOutputChannel("Beamtalk Language Server", { log: true });
-  traceOutputChannel ??= vscode.window.createOutputChannel("Beamtalk Language Server Trace", {
+  state.outputChannel ??= vscode.window.createOutputChannel("Beamtalk Language Server", {
+    log: true,
+  });
+  state.traceOutputChannel ??= vscode.window.createOutputChannel("Beamtalk Language Server Trace", {
     log: true,
   });
 
   const resolved = await resolveServerPath(context);
 
   if (!resolved) {
-    outputChannel.warn(
+    state.outputChannel.warn(
       "Could not find beamtalk-lsp. Searched: beamtalk.server.path setting, " +
         "sysroot via `beamtalk --print-sysroot`, and PATH. " +
         'Set "beamtalk.server.path" in settings, ensure `beamtalk-lsp` is on the extension host PATH, ' +
@@ -490,7 +479,7 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
   };
 
   if (resolved.warning) {
-    outputChannel.warn(resolved.warning);
+    state.outputChannel.warn(resolved.warning);
   }
 
   const clientOptions: LanguageClientOptions = {
@@ -499,40 +488,45 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
       { scheme: "untitled", language: "beamtalk" },
       { scheme: "beamtalk-stdlib", language: "beamtalk" },
     ],
-    outputChannel,
-    traceOutputChannel,
+    outputChannel: state.outputChannel,
+    traceOutputChannel: state.traceOutputChannel,
     revealOutputChannelOn: RevealOutputChannelOn.Never,
     initializationOptions: {
       stdlibSourceDir: resolveStdlibSourceDir(),
     },
   };
 
-  client = new LanguageClient("beamtalk", "Beamtalk Language Server", serverOptions, clientOptions);
+  state.client = new LanguageClient(
+    "beamtalk",
+    "Beamtalk Language Server",
+    serverOptions,
+    clientOptions
+  );
 
   // Auto-restart up to 5 times on crash before giving up.
-  client.clientOptions.errorHandler = client.createDefaultErrorHandler(5);
+  state.client.clientOptions.errorHandler = state.client.createDefaultErrorHandler(5);
 
-  outputChannel.info(`Starting language server: ${serverPath}`);
+  state.outputChannel.info(`Starting language server: ${serverPath}`);
 
   try {
-    await client.start();
-    outputChannel.info("Language server started successfully");
+    await state.client.start();
+    state.outputChannel.info("Language server started successfully");
     // BT-3285: retarget an open tab across a `renameTo:`/`moveClass:to:`
     // flush — see `handleDocumentMoved`'s doc for why this notification
     // exists instead of relying on `workspace/applyEdit`'s `RenameFile` op.
-    client.onNotification(DOCUMENT_MOVED_NOTIFICATION, (params: DocumentMovedParams) => {
+    state.client.onNotification(DOCUMENT_MOVED_NOTIFICATION, (params: DocumentMovedParams) => {
       handleDocumentMoved(params).catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
-        outputChannel?.warn(`Failed to handle documentMoved notification: ${message}`);
+        state.outputChannel?.warn(`Failed to handle documentMoved notification: ${message}`);
       });
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    outputChannel.error(`Failed to start language server: ${message}`);
+    state.outputChannel.error(`Failed to start language server: ${message}`);
     vscode.window.showErrorMessage(
       `Failed to start Beamtalk language server (${serverPath}): ${message}`
     );
-    client = undefined;
+    state.client = undefined;
   }
 }
 
@@ -622,11 +616,11 @@ function formatLogEntry(entry: LogEntry): string {
 function connectWorkspace(workspaceId: string): void {
   // Always dispose the previous connection — even if the workspace ID matches,
   // the port number may have changed (workspace restart overwrites the port file).
-  if (workspaceWsClient) {
-    workspaceWsClient.dispose();
-    workspaceWsClient = undefined;
-    workspaceTreeProvider?.setClient(null);
-    transcriptViewProvider?.setClient(null);
+  if (state.workspaceWsClient) {
+    state.workspaceWsClient.dispose();
+    state.workspaceWsClient = undefined;
+    state.workspaceTreeProvider?.setClient(null);
+    state.transcriptViewProvider?.setClient(null);
     InspectorPanel.setClient(null);
   }
 
@@ -635,13 +629,15 @@ function connectWorkspace(workspaceId: string): void {
     newClient = WorkspaceClient.fromFiles(workspaceId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    outputChannel?.warn(`Failed to create WorkspaceClient for workspace ${workspaceId}: ${msg}`);
+    state.outputChannel?.warn(
+      `Failed to create WorkspaceClient for workspace ${workspaceId}: ${msg}`
+    );
     return;
   }
 
-  workspaceWsClient = newClient;
-  workspaceTreeProvider?.setClient(newClient);
-  transcriptViewProvider?.setClient(newClient);
+  state.workspaceWsClient = newClient;
+  state.workspaceTreeProvider?.setClient(newClient);
+  state.transcriptViewProvider?.setClient(newClient);
   InspectorPanel.setClient(newClient);
 
   // Close inspector panels for actors that have stopped.
@@ -650,7 +646,7 @@ function connectWorkspace(workspaceId: string): void {
     if (event.channel === "actors" && event.event === "stopped") {
       InspectorPanel.notifyActorStopped(event.data.pid);
     } else if (event.channel === "logs" && event.event === "entry") {
-      logOutputChannel?.appendLine(formatLogEntry(event.data));
+      state.logOutputChannel?.appendLine(formatLogEntry(event.data));
     }
   });
 
@@ -658,17 +654,17 @@ function connectWorkspace(workspaceId: string): void {
   // between this extension and the workspace node. The client won't retry,
   // so without this the workspace views would just stay empty.
   newClient.onAuthError((message) => {
-    outputChannel?.error(`Workspace ${workspaceId}: ${message}`);
+    state.outputChannel?.error(`Workspace ${workspaceId}: ${message}`);
     void vscode.window.showErrorMessage(`Beamtalk workspace connection refused: ${message}`);
   });
 
   // Subscribe to log streaming once connected (BT-1433).
-  newClient.onConnectionChange((state) => {
-    if (state === "connected") {
+  newClient.onConnectionChange((connectionState) => {
+    if (connectionState === "connected") {
       const config = vscode.workspace.getConfiguration("beamtalk");
       const level = config.get<string>("logs.level", "warning");
       newClient.subscribeLogs(level).catch((err) => {
-        outputChannel?.warn(
+        state.outputChannel?.warn(
           `Failed to subscribe to logs: ${err instanceof Error ? err.message : String(err)}`
         );
       });
@@ -676,24 +672,24 @@ function connectWorkspace(workspaceId: string): void {
   });
 
   newClient.connect();
-  outputChannel?.info(`Connected to workspace: ${workspaceId}`);
+  state.outputChannel?.info(`Connected to workspace: ${workspaceId}`);
 }
 
 /** Disconnect from the current workspace and show disconnected state. */
 function disconnectWorkspace(reason: "port-removed"): void {
-  if (!workspaceWsClient) {
+  if (!state.workspaceWsClient) {
     return;
   }
 
-  const id = workspaceWsClient.id;
-  workspaceWsClient.dispose();
-  workspaceWsClient = undefined;
-  workspaceTreeProvider?.setClient(null);
-  transcriptViewProvider?.setClient(null);
+  const id = state.workspaceWsClient.id;
+  state.workspaceWsClient.dispose();
+  state.workspaceWsClient = undefined;
+  state.workspaceTreeProvider?.setClient(null);
+  state.transcriptViewProvider?.setClient(null);
   InspectorPanel.setClient(null);
 
   setReplRunning(false);
-  outputChannel?.info(`Disconnected from workspace ${id}: ${reason}`);
+  state.outputChannel?.info(`Disconnected from workspace ${id}: ${reason}`);
 
   if (reason === "port-removed") {
     void vscode.window
@@ -713,7 +709,6 @@ function disconnectWorkspace(reason: "port-removed"): void {
  * and cookie files as separate operations, so the cookie may not exist yet
  * when the port file watcher fires.
  */
-let portDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function handlePortFileAppeared(portUri: vscode.Uri): Promise<void> {
   const config = vscode.workspace.getConfiguration("beamtalk");
@@ -735,11 +730,11 @@ async function handlePortFileAppeared(portUri: vscode.Uri): Promise<void> {
   }
 
   // Debounce: wait briefly for the cookie file to be written before reading.
-  if (portDebounceTimer !== null) {
-    clearTimeout(portDebounceTimer);
+  if (state.portDebounceTimer !== null) {
+    clearTimeout(state.portDebounceTimer);
   }
-  portDebounceTimer = setTimeout(() => {
-    portDebounceTimer = null;
+  state.portDebounceTimer = setTimeout(() => {
+    state.portDebounceTimer = null;
     connectWorkspace(workspaceId);
   }, 200);
 }
@@ -747,7 +742,7 @@ async function handlePortFileAppeared(portUri: vscode.Uri): Promise<void> {
 /** Called when a port file is removed (workspace stopped or timed out). */
 function handlePortFileRemoved(portUri: vscode.Uri): void {
   const workspaceId = path.basename(path.dirname(portUri.fsPath));
-  if (workspaceWsClient?.id !== workspaceId) {
+  if (state.workspaceWsClient?.id !== workspaceId) {
     return;
   }
   disconnectWorkspace("port-removed");
@@ -760,7 +755,9 @@ function handlePortFileRemoved(portUri: vscode.Uri): void {
 function setupAutoConnect(context: vscode.ExtensionContext): void {
   const workspacesDir = workspacesBaseDir();
   if (workspacesDir === undefined) {
-    outputChannel?.warn("Auto-connect disabled: cannot determine the Beamtalk home directory");
+    state.outputChannel?.warn(
+      "Auto-connect disabled: cannot determine the Beamtalk home directory"
+    );
     return;
   }
 
@@ -771,7 +768,7 @@ function setupAutoConnect(context: vscode.ExtensionContext): void {
     fs.mkdirSync(workspacesDir, { recursive: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    outputChannel?.warn(`Auto-connect disabled: cannot create ${workspacesDir}: ${msg}`);
+    state.outputChannel?.warn(`Auto-connect disabled: cannot create ${workspacesDir}: ${msg}`);
     return;
   }
 
@@ -821,13 +818,13 @@ async function captureSessionId(
       const match = SESSION_ID_PATTERN.exec(text);
       if (match) {
         const sessionId = match[1];
-        outputChannel?.info(`Captured session ID: ${sessionId}`);
+        state.outputChannel?.info(`Captured session ID: ${sessionId}`);
         // Only act if this is still our active REPL terminal.
-        if (replTerminal !== terminal) {
+        if (state.replTerminal !== terminal) {
           break;
         }
         setReplRunning(true);
-        workspaceTreeProvider?.setSessionId(sessionId);
+        state.workspaceTreeProvider?.setSessionId(sessionId);
         // Don't break — keep reading. The REPL may reconnect and emit a new
         // session ID (BT-1021); we need to pick up the updated value.
         tail = "";
@@ -842,10 +839,10 @@ async function captureSessionId(
 
   // Stream ended — the REPL process exited (e.g. user typed :q).
   // Clear the session so bindings disappear and the Start button returns.
-  if (replTerminal === terminal) {
+  if (state.replTerminal === terminal) {
     setReplRunning(false);
-    workspaceTreeProvider?.setSessionId(null);
-    outputChannel?.info("REPL session ended; session bindings cleared.");
+    state.workspaceTreeProvider?.setSessionId(null);
+    state.outputChannel?.info("REPL session ended; session bindings cleared.");
   }
 }
 
@@ -873,28 +870,28 @@ function replCommand(): string {
  */
 function startReplCommand(context: vscode.ExtensionContext): void {
   // Reuse the existing terminal if the REPL is still actively running.
-  if (replTerminal && replTerminal.exitStatus === undefined && replRunning) {
-    replTerminal.show();
+  if (state.replTerminal && state.replTerminal.exitStatus === undefined && state.replRunning) {
+    state.replTerminal.show();
     return;
   }
 
   // If the shell terminal is alive but the REPL has stopped, close it and open a
   // fresh one so we always start from the correct project root cwd.
-  if (replTerminal && replTerminal.exitStatus === undefined && !replRunning) {
-    replTerminal.dispose();
-    replTerminal = undefined;
+  if (state.replTerminal && state.replTerminal.exitStatus === undefined && !state.replRunning) {
+    state.replTerminal.dispose();
+    state.replTerminal = undefined;
   }
 
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri;
-  replTerminal = vscode.window.createTerminal({
+  state.replTerminal = vscode.window.createTerminal({
     name: "Beamtalk Session",
     iconPath: new vscode.ThemeIcon("beaker"),
     cwd,
   });
-  replTerminal.show();
+  state.replTerminal.show();
   setReplRunning(true);
 
-  const terminal = replTerminal;
+  const terminal = state.replTerminal;
 
   if (terminal.shellIntegration) {
     // Shell integration is already active — use executeCommand so we can read output.
@@ -925,7 +922,7 @@ function startReplCommand(context: vscode.ExtensionContext): void {
 
     // Fallback: start REPL via sendText if shell integration doesn't activate.
     const fallbackTimer = setTimeout(() => {
-      if (!started && replTerminal === terminal) {
+      if (!started && state.replTerminal === terminal) {
         integrationDisposable.dispose();
         terminal.sendText(replCommand());
       }
@@ -948,14 +945,14 @@ function setupTerminalMonitoring(context: vscode.ExtensionContext): void {
   // Detect REPL terminal closure.
   context.subscriptions.push(
     vscode.window.onDidCloseTerminal((terminal) => {
-      if (terminal !== replTerminal) {
+      if (terminal !== state.replTerminal) {
         return;
       }
-      replTerminal = undefined;
+      state.replTerminal = undefined;
       setReplRunning(false);
       // Clear session ID — bindings from the closed session are gone.
-      workspaceTreeProvider?.setSessionId(null);
-      outputChannel?.info("Beamtalk Session terminal closed; session bindings cleared.");
+      state.workspaceTreeProvider?.setSessionId(null);
+      state.outputChannel?.info("Beamtalk Session terminal closed; session bindings cleared.");
     })
   );
 
@@ -971,8 +968,8 @@ function setupTerminalMonitoring(context: vscode.ExtensionContext): void {
         return;
       }
       // Adopt this terminal as our REPL terminal if we don't already have one.
-      if (!replTerminal || replTerminal.exitStatus !== undefined) {
-        replTerminal = event.terminal;
+      if (!state.replTerminal || state.replTerminal.exitStatus !== undefined) {
+        state.replTerminal = event.terminal;
       }
       void captureSessionId(event.execution, event.terminal);
     })
@@ -1002,10 +999,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.restartServer", async () => {
-      outputChannel?.info("Restarting language server…");
-      if (client) {
-        await client.stop();
-        client = undefined;
+      state.outputChannel?.info("Restarting language server…");
+      if (state.client) {
+        await state.client.stop();
+        state.client = undefined;
       }
       await startClient(context);
     })
@@ -1013,18 +1010,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ─── Beamtalk Logs output channel + log level picker (BT-1433) ────────────
 
-  logOutputChannel ??= vscode.window.createOutputChannel("Beamtalk Logs");
+  state.logOutputChannel ??= vscode.window.createOutputChannel("Beamtalk Logs");
 
-  logLevelStatusBarItem?.dispose();
-  logLevelStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 50);
-  logLevelStatusBarItem.command = "beamtalk.setLogLevel";
-  logLevelStatusBarItem.tooltip = "Beamtalk log level — click to change";
-  context.subscriptions.push(logLevelStatusBarItem);
+  state.logLevelStatusBarItem?.dispose();
+  state.logLevelStatusBarItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right,
+    50
+  );
+  state.logLevelStatusBarItem.command = "beamtalk.setLogLevel";
+  state.logLevelStatusBarItem.tooltip = "Beamtalk log level — click to change";
+  context.subscriptions.push(state.logLevelStatusBarItem);
 
   const updateLogLevelStatusBar = (level: string): void => {
-    if (logLevelStatusBarItem) {
-      logLevelStatusBarItem.text = `$(filter) ${level}`;
-      logLevelStatusBarItem.show();
+    if (state.logLevelStatusBarItem) {
+      state.logLevelStatusBarItem.text = `$(filter) ${level}`;
+      state.logLevelStatusBarItem.show();
     }
   };
 
@@ -1038,9 +1038,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     registerLogLevelSync(
       vscode.workspace,
-      () => workspaceWsClient,
+      () => state.workspaceWsClient,
       updateLogLevelStatusBar,
-      (msg) => outputChannel?.warn(msg)
+      (msg) => state.outputChannel?.warn(msg)
     )
   );
 
@@ -1064,20 +1064,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.showLogs", () => {
-      logOutputChannel?.show();
+      state.logOutputChannel?.show();
     })
   );
 
   // ─── Workspace Explorer (BT-1023) ──────────────────────────────────────────
 
-  workspaceTreeProvider = new WorkspaceTreeDataProvider();
-  context.subscriptions.push(workspaceTreeProvider);
+  state.workspaceTreeProvider = new WorkspaceTreeDataProvider();
+  context.subscriptions.push(state.workspaceTreeProvider);
   // Lets sidebar hover tooltips (resolveTreeItem) read source for stdlib
   // classes too, via the same beamtalk-stdlib:// virtual URI fallback
   // navigation already uses — without it, a stdlib-defined class or a method/
   // state var inherited from one never has a real source_file to read a doc
   // comment from, and the hover always falls back to hardcoded metadata.
-  workspaceTreeProvider.setStdlibDocumentOpener(openStdlibDocumentForClass);
+  state.workspaceTreeProvider.setStdlibDocumentOpener(openStdlibDocumentForClass);
 
   // Restore the "Classes" filter from the last session in this workspace, if any.
   const persistedClassFilter = context.workspaceState.get<ClassOrigin[]>(CLASS_FILTER_STATE_KEY);
@@ -1086,7 +1086,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     persistedClassFilter.length > 0 &&
     persistedClassFilter.length < ALL_CLASS_ORIGINS.length;
   if (isPersistedFilterActive) {
-    workspaceTreeProvider.setClassOriginFilter(new Set(persistedClassFilter));
+    state.workspaceTreeProvider.setClassOriginFilter(new Set(persistedClassFilter));
   }
   void vscode.commands.executeCommand(
     "setContext",
@@ -1096,40 +1096,40 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.window.createTreeView("beamtalk.workspaceExplorer", {
-      treeDataProvider: workspaceTreeProvider,
+      treeDataProvider: state.workspaceTreeProvider,
     })
   );
 
   // ─── Transcript View (BT-1024) ─────────────────────────────────────────────
 
-  transcriptViewProvider = new TranscriptViewProvider({
+  state.transcriptViewProvider = new TranscriptViewProvider({
     fullReload: vscode.env.remoteName === "wsl",
   });
-  context.subscriptions.push(transcriptViewProvider);
+  context.subscriptions.push(state.transcriptViewProvider);
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       TranscriptViewProvider.viewType,
-      transcriptViewProvider
+      state.transcriptViewProvider
     )
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.clearTranscript", () => {
-      transcriptViewProvider?.clear();
+      state.transcriptViewProvider?.clear();
     })
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.refreshWorkspace", () => {
-      void workspaceTreeProvider?.refresh();
+      void state.workspaceTreeProvider?.refresh();
     })
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.filterClasses", async () => {
-      if (!workspaceTreeProvider) return;
-      const current = workspaceTreeProvider.classFilter;
+      if (!state.workspaceTreeProvider) return;
+      const current = state.workspaceTreeProvider.classFilter;
       const picks: Array<vscode.QuickPickItem & { origin: ClassOrigin }> = ALL_CLASS_ORIGINS.map(
         (origin) => ({
           label: CLASS_ORIGIN_LABELS[origin],
@@ -1145,7 +1145,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // undefined means the picker was dismissed (Escape) — leave the filter as-is.
       if (selected === undefined) return;
       const origins = new Set<ClassOrigin>(selected.map((pick) => pick.origin));
-      workspaceTreeProvider.setClassOriginFilter(origins);
+      state.workspaceTreeProvider.setClassOriginFilter(origins);
       await context.workspaceState.update(
         CLASS_FILTER_STATE_KEY,
         origins.size > 0 ? [...origins] : undefined
@@ -1160,7 +1160,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.clearClassFilter", async () => {
-      workspaceTreeProvider?.setClassOriginFilter(new Set());
+      state.workspaceTreeProvider?.setClassOriginFilter(new Set());
       await context.workspaceState.update(CLASS_FILTER_STATE_KEY, undefined);
       void vscode.commands.executeCommand("setContext", "beamtalk.classFilterActive", false);
     })
@@ -1173,8 +1173,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
       const sessionId =
-        workspaceTreeProvider?.currentSessionId ?? workspaceWsClient?.currentSessionId ?? null;
-      InspectorPanel.show(workspaceWsClient ?? null, {
+        state.workspaceTreeProvider?.currentSessionId ??
+        state.workspaceWsClient?.currentSessionId ??
+        null;
+      InspectorPanel.show(state.workspaceWsClient ?? null, {
         kind: "binding",
         name: node.name,
         value: node.value,
@@ -1189,7 +1191,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void vscode.window.showInformationMessage("Select an actor in Workspace Explorer first.");
         return;
       }
-      InspectorPanel.show(workspaceWsClient ?? null, {
+      InspectorPanel.show(state.workspaceWsClient ?? null, {
         kind: "actor",
         info: node.info,
       });
@@ -1271,7 +1273,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.reloadClass", async (node?: ClassItemNode) => {
-      if (!workspaceWsClient) {
+      if (!state.workspaceWsClient) {
         await vscode.window.showInformationMessage("Not connected to a Beamtalk workspace.");
         return;
       }
@@ -1284,7 +1286,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // BT-2091: Reloads via `ClassName reload` (the deprecated `reload`
         // protocol op has been removed). The runtime locates the source
         // file via the class's recorded `source_file` attribute.
-        const result = await workspaceWsClient.reload(className);
+        const result = await state.workspaceWsClient.reload(className);
         const names = result.classes.map((c) => c.name).filter(Boolean);
         const baseMessage =
           names.length > 0 ? `Reloaded: ${names.join(", ")}` : "Reload completed.";
@@ -1430,8 +1432,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("beamtalk.stopRepl", () => {
       // Close the REPL terminal — clears the session and bindings,
       // but leaves the workspace connection up so classes/actors remain visible.
-      if (replTerminal && replTerminal.exitStatus === undefined) {
-        replTerminal.dispose();
+      if (state.replTerminal && state.replTerminal.exitStatus === undefined) {
+        state.replTerminal.dispose();
       }
     })
   );
@@ -1445,10 +1447,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): Thenable<void> | undefined {
-  const stop = client?.stop();
-  if (portDebounceTimer !== null) {
-    clearTimeout(portDebounceTimer);
-    portDebounceTimer = null;
+  const stop = state.client?.stop();
+  if (state.portDebounceTimer !== null) {
+    clearTimeout(state.portDebounceTimer);
+    state.portDebounceTimer = null;
   }
   // Close all inspector panels before disposing the client so they don't
   // attempt to re-fetch after the connection is gone.
@@ -1456,20 +1458,20 @@ export function deactivate(): Thenable<void> | undefined {
   // Providers are disposed via context.subscriptions; dispose() is idempotent
   // so no double-dispose risk, but we detach the client first to ensure no
   // late push events fire into disposed providers.
-  workspaceWsClient?.dispose();
-  workspaceWsClient = undefined;
-  replTerminal = undefined;
-  workspaceTreeProvider?.setClient(null);
-  workspaceTreeProvider = undefined;
-  transcriptViewProvider?.setClient(null);
-  transcriptViewProvider = undefined;
-  logLevelStatusBarItem?.dispose();
-  logLevelStatusBarItem = undefined;
-  logOutputChannel?.dispose();
-  outputChannel?.dispose();
-  traceOutputChannel?.dispose();
-  logOutputChannel = undefined;
-  outputChannel = undefined;
-  traceOutputChannel = undefined;
+  state.workspaceWsClient?.dispose();
+  state.workspaceWsClient = undefined;
+  state.replTerminal = undefined;
+  state.workspaceTreeProvider?.setClient(null);
+  state.workspaceTreeProvider = undefined;
+  state.transcriptViewProvider?.setClient(null);
+  state.transcriptViewProvider = undefined;
+  state.logLevelStatusBarItem?.dispose();
+  state.logLevelStatusBarItem = undefined;
+  state.logOutputChannel?.dispose();
+  state.outputChannel?.dispose();
+  state.traceOutputChannel?.dispose();
+  state.logOutputChannel = undefined;
+  state.outputChannel = undefined;
+  state.traceOutputChannel = undefined;
   return stop;
 }
