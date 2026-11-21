@@ -41,6 +41,10 @@ verbatim.
     classify_class/1,
     log_class_removal/2,
     current_author_context/0,
+    note_changelog_result/1,
+    take_changelog_warnings/0,
+    begin_changelog_warnings/0,
+    end_changelog_warnings/0,
     %% Shared by the class-rename and method-rename pipelines (BT-4703).
     raise_if_colliding/2,
     rename_collision_error/3,
@@ -237,11 +241,12 @@ classify_class(ClassNameBin) ->
 log_class_removal(ClassNameBin, Snapshot) ->
     {Author, AuthorKind} = current_author_context(),
     %% `{error, no_workspace}` (no workspace running) is ignored: no live
-    %% ChangeLog to append to.
-    _ = beamtalk_workspace_callback:emit_remove_class_change_entry(
-        ClassNameBin, Snapshot, Author, AuthorKind
-    ),
-    ok.
+    %% ChangeLog to append to. A failed append becomes an eval warning.
+    note_changelog_result(
+        beamtalk_workspace_callback:emit_remove_class_change_entry(
+            ClassNameBin, Snapshot, Author, AuthorKind
+        )
+    ).
 
 %% ADR 0125 §1.5: refuse a method-level compile or workspace operation on a
 %% node that cannot perform it (a release without a compiler, or any release
@@ -268,6 +273,60 @@ require_class_capability(Op, ClassName, Suffix) ->
     beamtalk_capability:require(Op, ClassName, fun() ->
         iolist_to_binary([atom_to_binary(ClassName, utf8), <<" ">>, Suffix])
     end).
+
+%% BT-5084: a ChangeLog entry that could not be recorded for a change that is
+%% already live. These primitives return a plain value to Beamtalk, so they have
+%% no reply to put a warning on; the warning is queued in the calling (eval)
+%% process and `take_changelog_warnings/0` hands it to the eval reply, which is
+%% where a patch's warning already shows up. `ok` / `{error, no_workspace}` need
+%% nothing.
+-define(CHANGELOG_WARNINGS_KEY, '$beamtalk_changelog_warnings').
+-define(CHANGELOG_EVAL_KEY, '$beamtalk_changelog_eval').
+
+-spec note_changelog_result(term()) -> ok.
+note_changelog_result({warning, Text}) when is_binary(Text) ->
+    %% Queue only inside `with_changelog_warnings/1`, which marks its process and
+    %% drains the queue. `beamtalk_session_id` is not a safe marker: a class
+    %% gen_server carries it too while it runs a class method for a session caller,
+    %% and nothing there would ever drain the queue. Everywhere else the ERROR log
+    %% `append_entry/3` already wrote is the report.
+    case erlang:get(?CHANGELOG_EVAL_KEY) of
+        true ->
+            Queued =
+                case erlang:get(?CHANGELOG_WARNINGS_KEY) of
+                    undefined -> [];
+                    List -> List
+                end,
+            _ = erlang:put(?CHANGELOG_WARNINGS_KEY, [Text | Queued]),
+            ok;
+        _ ->
+            ok
+    end;
+note_changelog_result(_) ->
+    ok.
+
+%% Start collecting in this process (an eval worker): clears any stale queue and
+%% marks the process so `note_changelog_result/1` queues. Pair with
+%% `end_changelog_warnings/0`.
+-spec begin_changelog_warnings() -> ok.
+begin_changelog_warnings() ->
+    _ = erlang:erase(?CHANGELOG_WARNINGS_KEY),
+    _ = erlang:put(?CHANGELOG_EVAL_KEY, true),
+    ok.
+
+%% Stop collecting and return what was queued, oldest first.
+-spec end_changelog_warnings() -> [binary()].
+end_changelog_warnings() ->
+    _ = erlang:erase(?CHANGELOG_EVAL_KEY),
+    take_changelog_warnings().
+
+%% Drain the warnings queued by `note_changelog_result/1`, oldest first.
+-spec take_changelog_warnings() -> [binary()].
+take_changelog_warnings() ->
+    case erlang:erase(?CHANGELOG_WARNINGS_KEY) of
+        undefined -> [];
+        List -> lists:reverse(List)
+    end.
 
 %% Resolve the audit author for the current patch. ADR 0082 distinguishes
 %% `human' (REPL / interactive) from `agent' (MCP `save_method' / `try_method').
@@ -387,5 +446,6 @@ rename_rewrite_failed_error(ErrClass, _Op, Noun, _NoSitesMsg, Reason) ->
 log_rename_change(Fields, RewriteResult) ->
     {Author, AuthorKind} = current_author_context(),
     Spec = Fields#{intent => durable, author => Author, author_kind => AuthorKind},
-    _ = beamtalk_workspace_callback:emit_rewrite_change_entry(Spec, RewriteResult),
-    ok.
+    note_changelog_result(
+        beamtalk_workspace_callback:emit_rewrite_change_entry(Spec, RewriteResult)
+    ).

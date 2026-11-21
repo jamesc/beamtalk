@@ -2320,11 +2320,12 @@ validate_sites_delegates() ->
     ?assertMatch({error, _}, Result).
 
 emit_remove_change_entry_delegates() ->
-    %% Best-effort append; returns ok even when there is nothing to record.
+    %% BT-5084: no ChangeLog server runs here, so the append fails; the emitter
+    %% reports that as a warning instead of the old silent `ok`.
     Result = beamtalk_repl_loader_changelog_entries:emit_remove_change_entry(
         <<"__bt3337_never_a_class__">>, foo, instance, <<"repl">>, human
     ),
-    ?assertEqual(ok, Result).
+    ?assertMatch({warning, <<"The change is live", _/binary>>}, Result).
 
 %%====================================================================
 %% reload_file/1 (disk-revert reload): the success path,

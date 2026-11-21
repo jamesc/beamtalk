@@ -238,8 +238,10 @@ new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, D
                     ),
                     case Mode of
                         log ->
-                            ?ENTRIES:emit_new_class_entry(
-                                DeclaredName, list_to_binary(Source), list_to_binary(AbsPath)
+                            beamtalk_refactor_support:note_changelog_result(
+                                ?ENTRIES:emit_new_class_entry(
+                                    DeclaredName, list_to_binary(Source), list_to_binary(AbsPath)
+                                )
                             ),
                             %% ADR 0082 Phase 4: autoflush also covers new-class entries
                             %% (they are durable + flushable by construction). See the
