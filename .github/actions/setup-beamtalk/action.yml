@@ -1,0 +1,115 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# The toolchain setup every Beamtalk CI job repeated: Rust, Erlang/OTP (+ rebar3),
+# just, and the Rust and Erlang/rebar3 caches (BT-5095). One place for the pinned
+# action SHAs and cache keys, so a fix lands in every caller (BT-5086).
+#
+# The caller checks out the repository first. Anything job-specific (cargo-nextest,
+# Node.js, extra Rust targets, the Dialyzer PLT cache, other caches) stays in the
+# workflow, after this step.
+
+name: Setup Beamtalk toolchain
+description: Install Rust, Erlang/OTP, just and the Rust / Erlang caches
+
+inputs:
+  rust:
+    description: Install the Rust toolchain from rust-toolchain.toml
+    default: 'true'
+  erlang:
+    description: Install Erlang/OTP and rebar3
+    default: 'true'
+  otp-version:
+    description: >-
+      OTP version for a matrix leg. When empty, the OTP and rebar3 versions both
+      come from .tool-versions (strict). When set, only rebar3 comes from
+      .tool-versions and the OTP version is loose-matched.
+    default: ''
+  just:
+    description: Install just
+    default: 'true'
+  rust-cache:
+    description: Restore and save the Rust dependency cache (Swatinem/rust-cache)
+    default: 'true'
+  rust-cache-key-prefix:
+    description: Prefix of the rust-cache `key` (followed by the hash of Cargo.toml)
+    default: profile
+  rust-cache-shared-key:
+    description: rust-cache `shared-key` (empty means none)
+    default: ''
+  rust-cache-workspaces:
+    description: rust-cache `workspaces`
+    default: '.'
+  rust-cache-save-if:
+    description: rust-cache `save-if`
+    default: ${{ github.ref == 'refs/heads/main' }}
+  erlang-cache:
+    description: Cache the Erlang/rebar3 artifacts (Unix runners)
+    default: 'false'
+  erlang-cache-infix:
+    description: >-
+      Inserted after `erlang` in the Erlang cache key, e.g. `-otp27` for a matrix
+      leg, so legs do not share an entry.
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      if: inputs.rust == 'true'
+      # The channel and components come from rust-toolchain.toml alone (BT-5086).
+      shell: bash
+      run: rustup toolchain install --profile minimal --no-self-update
+
+    # erlef/setup-beam errors if both `version-file` (which has its own
+    # `erlang` line) and an explicit `otp-version` are given, so read just
+    # `rebar3`'s pinned version out of .tool-versions and pass both
+    # versions explicitly — `otp-version` varies per matrix leg, `rebar3`
+    # stays the repo's single pinned version on every leg.
+    - name: Read rebar3 version from .tool-versions
+      id: tool-versions
+      if: inputs.erlang == 'true' && inputs.otp-version != ''
+      shell: bash
+      run: echo "rebar3=$(awk '/^rebar /{print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
+
+    - name: Install Erlang/OTP
+      if: inputs.erlang == 'true' && inputs.otp-version == ''
+      uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      with:
+        version-file: .tool-versions
+        version-type: strict
+        github-token: ${{ github.token }}
+
+    - name: Install Erlang/OTP (matrix leg)
+      if: inputs.erlang == 'true' && inputs.otp-version != ''
+      uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      with:
+        otp-version: ${{ inputs.otp-version }}
+        rebar3-version: ${{ steps.tool-versions.outputs.rebar3 }}
+        version-type: loose
+        github-token: ${{ github.token }}
+
+    - name: Install Just
+      if: inputs.just == 'true'
+      uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+    - name: Cache Rust dependencies
+      if: inputs.rust-cache == 'true'
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      with:
+        shared-key: ${{ inputs.rust-cache-shared-key }}
+        key: ${{ inputs.rust-cache-key-prefix }}-${{ hashFiles('Cargo.toml') }}
+        workspaces: ${{ inputs.rust-cache-workspaces }}
+        save-if: ${{ inputs.rust-cache-save-if }}
+
+    - name: Cache Erlang/rebar3 artifacts
+      if: inputs.erlang-cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+      with:
+        path: |
+          ~/.cache/rebar3
+          runtime/_build
+          ~/.rebar3
+        key: ${{ runner.os }}-erlang${{ inputs.erlang-cache-infix }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
+        restore-keys: |
+          ${{ runner.os }}-erlang${{ inputs.erlang-cache-infix }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
