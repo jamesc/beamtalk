@@ -7,8 +7,9 @@
 /// `List(SupervisionNode)` plus the parent/child adjacency captured at snapshot
 /// time. It is the high-level view layered on the flat records: the full
 /// collection protocol (`do:`, `select:`, `detect:`, `collect:`, plus
-/// `isNotEmpty`, `inject:into:`, `anySatisfy:`, `count:` via
-/// `uses: Enumerable(SupervisionNode)`, ADR 0127 §9) plus tree
+/// `isNotEmpty`, `inject:into:`, `reject:`, `includes:`, `anySatisfy:`,
+/// `allSatisfy:`, `noneSatisfy:`, `count:` via
+/// `uses: Enumerable(SupervisionNode)`, ADR 0127 §9, all over the same nodes) plus tree
 /// navigation (`root`, `nodesOfKind:`, `findClass:`). Reach one via
 /// `ProcessNavigation default tree` or `Node current processes`.
 ///

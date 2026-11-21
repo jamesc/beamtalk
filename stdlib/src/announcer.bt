@@ -126,17 +126,18 @@ typed Object subclass: Announcer
   announceAndWait: anEvent :: Announcement -> Nil =>
     (Erlang beamtalk_announcements) announceAndWaitOn: self event: anEvent
 
-  /// Announce an event synchronously with a custom per-handler timeout (ms).
+  /// Announce an event synchronously with a custom per-handler timeout: an
+  /// Integer of milliseconds or a `Duration`.
   ///
   /// ## Examples
   /// ```beamtalk
   /// announcer announceAndWait: event timeout: 10000
   /// ```
-  announceAndWait: anEvent :: Announcement timeout: ms :: Integer -> Nil =>
+  announceAndWait: anEvent :: Announcement timeout: ms :: Integer | Duration -> Nil =>
     (Erlang beamtalk_announcements)
       announceAndWaitOn: self
       event: anEvent
-      timeout: ms
+      timeout: ((Erlang beamtalk_duration) to_timeout: ms)
 
   // === Managing subscriptions ===
 
