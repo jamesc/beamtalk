@@ -209,6 +209,6 @@ Rationale:
 ## Appendix: Evaluation Script
 
 The evaluation was performed by `scripts/evaluate_spec_coverage.escript`, which
-invokes `beamtalk_spec_reader:read_specs/1` against every `.beam` file in the
-OTP lib directory and tallies type quality metrics. The script is committed
-alongside this report for reproducibility.
+invoked `beamtalk_spec_reader:read_specs/1` against every `.beam` file in the
+OTP lib directory and tallied type quality metrics. The script was committed
+alongside this report and has since been removed (BT-5095); it is in git history.

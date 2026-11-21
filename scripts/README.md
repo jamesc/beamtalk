@@ -34,8 +34,7 @@ root. CI-only checks live in [`ci/`](ci/); most are run through `just` recipes
 | `gen-actor-closure-matrix.py` | ADR 0137 actor-field-closure matrix |
 | `gen-bt4367arm-local-grid.py`, `gen-bt4460-plain-arm-nested-grid.py`, `gen-bt4461-repl-arm-cached-binding-grid.py` | ADR 0131 differential grid fixtures |
 | `compile-pipeline-corpus-lint.escript` | Lint the fuzz `compile_pipeline` corpus |
-| `validate_specs.escript`, `evaluate_spec_coverage.escript` | Validate generated `-spec` attributes; measure OTP spec coverage |
-| `convert_tests.py` | Convert `// =>` expression tests to BUnit format |
+| `validate_specs.escript` | Validate generated `-spec` attributes |
 | `clean-covertool-xml.py` | Clean covertool XML reports |
 
 Test fixtures for the runtime are compiled by
