@@ -50,7 +50,7 @@ fn make_dep_repo(parent: &Path, name: &str) -> String {
     git(&repo, &["init", "-q", "-b", "main"]);
     git(&repo, &["add", "-A"]);
     git(&repo, &["commit", "-q", "-m", "one"]);
-    format!("file://{}", repo.display())
+    cli_common::file_url(&repo)
 }
 
 fn write_project(project: &Path, deps: &str) {

@@ -717,16 +717,9 @@ try_change_code_timeout_logs_error_and_resumes_when_change_finishes_test_() ->
             ?assertEqual([{Pid, timeout}], Failures),
             ?awaitMessage({hot_reload_log_event, #{level := error}}, 1000),
             %% The slow migration (6.5 s) is still running: suspended for now ...
-            ?assertEqual(
-                suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
-            ),
+            ?assertEqual(suspended, sys_state(Pid)),
             %% ... and resumed by the worker once it finishes.
-            ok = beamtalk_test_wait:until(
-                fun() ->
-                    running =:= maps:get(sysState, beamtalk_process_navigation:status(Pid))
-                end,
-                15000
-            )
+            ok = beamtalk_test_wait:until(fun() -> running =:= sys_state(Pid) end, 15000)
         after
             logger:remove_handler(HandlerId),
             logger:set_primary_config(level, OldLevel),
@@ -750,12 +743,7 @@ reloader_killed_mid_change_still_resumes_actor_test_() ->
             ?awaitMessage(change_started, 5000),
             exit(Reloader, kill),
             beamtalk_test_wait:dead(Reloader),
-            ok = beamtalk_test_wait:until(
-                fun() ->
-                    running =:= maps:get(sysState, beamtalk_process_navigation:status(Pid))
-                end,
-                15000
-            )
+            ok = beamtalk_test_wait:until(fun() -> running =:= sys_state(Pid) end, 15000)
         after
             beamtalk_test_proc:stop(Pid)
         end
@@ -772,9 +760,7 @@ slow_failing_migration_is_not_resumed_test_() ->
                 beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {slow_fail, 6000}),
             %% `status` is a system message, so it answers only after the failing
             %% migration has finished; the actor must still be suspended then.
-            ?assertEqual(
-                suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
-            )
+            ?assertEqual(suspended, sys_state(Pid))
         after
             try
                 sys:resume(Pid)
@@ -804,9 +790,7 @@ overlapping_reload_does_not_resume_a_failed_migration_test_() ->
                 beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {fail, second}),
             %% `status` is a system message: it answers only after A has failed and
             %% B's worker has retried (and failed too).
-            ?assertEqual(
-                suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
-            )
+            ?assertEqual(suspended, sys_state(Pid))
         after
             try
                 sys:resume(Pid)
@@ -837,7 +821,7 @@ overlapping_reload_reruns_the_later_migration_test_() ->
                 beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {mark, b}),
             ok = beamtalk_test_wait:until(
                 fun() ->
-                    running =:= maps:get(sysState, beamtalk_process_navigation:status(Pid)) andalso
+                    running =:= sys_state(Pid) andalso
                         b =:= maps:get(migrated, sys:get_state(Pid), undefined)
                 end,
                 20000
@@ -854,7 +838,7 @@ failed_migration_stays_suspended_test() ->
     try
         {ok, 0, [{Pid, _}]} =
             beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {crash, why}),
-        ?assertEqual(suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid)))
+        ?assertEqual(suspended, sys_state(Pid))
     after
         unlink(Pid),
         try
@@ -864,6 +848,23 @@ failed_migration_stays_suspended_test() ->
         end,
         beamtalk_test_proc:stop(Pid)
     end.
+
+%% The actor's OTP sys state (`running` | `suspended`), once the actor answers.
+%% `beamtalk_process_navigation:status/1` gives up after 2 s and answers `nil`,
+%% and an actor running a slow migration answers no system message until the
+%% migration ends. Several tests here ask while a 6-7 s migration is still
+%% running, so a single `status/1` raced the migration's end (BT-5120: `nil`
+%% on a loaded macOS runner). Ask again until the actor answers.
+sys_state(Pid) ->
+    beamtalk_test_wait:value(
+        fun() ->
+            case beamtalk_process_navigation:status(Pid) of
+                #{sysState := State} -> {ok, State};
+                nil -> no_answer
+            end
+        end,
+        20000
+    ).
 
 %% logger handler callback: forward events to the test process.
 log(LogEvent, #{config := #{parent := Parent}}) ->
@@ -889,9 +890,7 @@ try_change_code_crash_produces_exception_failure_test() ->
         ?assertNotEqual(timeout, Reason),
         %% BT-3534 suspend-on-failure: the pid is alive but left suspended,
         %% not resumed onto new code with its old-shaped state.
-        ?assertEqual(
-            suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
-        )
+        ?assertEqual(suspended, sys_state(Pid))
     after
         %% Process may have already been killed by the exit; guard teardown.
         %% sys:resume/1 is a no-op on a process that was never suspended and
@@ -931,9 +930,7 @@ try_change_code_failure_leaves_actor_suspended_and_inspectable_test() ->
         %% failure reason is {error, boom}, not the bare boom the callback
         %% returned.
         ?assertEqual([{Pid, {error, boom}}], Failures),
-        ?assertEqual(
-            suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
-        ),
+        ?assertEqual(suspended, sys_state(Pid)),
         %% sys:get_state/1 still works on a suspended process — state is
         %% intact, not lost, not reset.
         ?assertEqual(#{v => 1}, sys:get_state(Pid))
@@ -959,16 +956,12 @@ try_change_code_retry_after_fix_resumes_and_succeeds_test() ->
         %% {error, _} before returning — see the sibling test above.
         {ok, 0, [{Pid, {error, boom}}]} =
             beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {fail, boom}),
-        ?assertEqual(
-            suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
-        ),
+        ?assertEqual(suspended, sys_state(Pid)),
         %% Retry with corrected Extra ("the author fixes the hook") — the
         %% pid is re-suspended (idempotent) and, on success, resumed.
         {ok, 1, []} =
             beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], normal_extra),
-        ?assertEqual(
-            running, maps:get(sysState, beamtalk_process_navigation:status(Pid))
-        ),
+        ?assertEqual(running, sys_state(Pid)),
         %% Genuinely responsive again, not merely reported so.
         ?assertEqual(ok, gen_server:call(Pid, ping))
     after
