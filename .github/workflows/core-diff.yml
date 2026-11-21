@@ -65,37 +65,11 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Install Rust toolchain
-        # The channel and components come from rust-toolchain.toml alone (BT-5086).
-        run: rustup toolchain install --profile minimal --no-self-update
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-test
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
 
       # BT-3887: the base-side snapshot is a pure function of the PR's base
       # SHA (`just core-diff-base-snapshot` builds it from a worktree of that
