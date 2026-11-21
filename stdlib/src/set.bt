@@ -3,32 +3,35 @@
 
 /// Set — Unordered collection of unique elements.
 ///
-/// Sets are immutable collections backed by Erlang's ordsets module.
-/// Operations that "modify" a set return a new set.
+/// Sets are immutable collections. The elements are kept as a term-order-sorted
+/// list of distinct values inside a tagged map, so `asList` answers them in that
+/// order. Element identity is strict (`=:=`), as for `Dictionary` keys: `1` and
+/// `1.0` are two elements. Operations that "modify" a set return a new set.
 ///
 /// Deliberately has no `first`/`last` — a Set promises no ordering, so
 /// either name would misleadingly suggest one. Use `anyOne` to grab a
 /// single element (no ordering guarantee, may differ between calls), or
-/// `asList first` / `asList last` if you specifically want the order
-/// `asList` currently answers in.
+/// `asList first` / `asList last` if you specifically want the sorted order
+/// `asList` answers in.
 ///
 /// ## Examples
 /// ```beamtalk
 /// Set new class                    // => Set
 /// (Set new add: 1) includes: 1    // => true
 /// (Set new add: 1) size           // => 1
+/// (Set withAll: #(1, 2, 2, 3)) size   // => 3
 /// ```
 sealed typed Collection(E) subclass: Set(E)
   field: elements :: List(E) = #()
 
-  /// Create a Set from a list, deduplicating elements.
+  /// Create a Set from a list, deduplicating elements. This is the constructor.
   ///
   /// Used by the species pattern on Collection so that `collect:` and
   /// `select:` on a Set return a Set.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Set class withAll: #(1, 2, 2, 3)  // => a Set with 1, 2, 3
+  /// (Set withAll: #(1, 2, 2, 3)) size   // => 3
   /// ```
   class withAll: list :: List(E) -> Set(E) => @primitive
 
@@ -122,8 +125,8 @@ sealed typed Collection(E) subclass: Set(E)
 
   /// Convert the set to a list of elements.
   ///
-  /// Perf override of `Collection>>asList`: converts directly from the
-  /// underlying map keys, faster than the generic `do:`-fold.
+  /// Perf override of `Collection>>asList`: returns the stored sorted element
+  /// list directly, faster than the generic `do:`-fold.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -134,11 +137,13 @@ sealed typed Collection(E) subclass: Set(E)
   /// A Set is already a Set — identity override of `Collection>>asSet`.
   asSet -> Set(E) => self
 
-  /// Create a set from a list of elements.
+  /// Deprecated alias of the class-side constructor `Set withAll:`; same
+  /// behaviour, kept for existing callers. Sent to an instance, so it reads
+  /// `Set new fromList: ...`.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Set new fromList: #(1, 2, 2, 3)
+  /// (Set new fromList: #(1, 2, 2, 3)) size   // => 3
   /// ```
   fromList: list :: List -> Set(E) => @primitive
 

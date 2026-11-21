@@ -23,8 +23,11 @@ beyond simple BIF calls (bounds checking, error formatting, iteration).
     partition/2,
     intersperse/2,
     take/2,
+    take/3,
     drop/2,
+    drop/3,
     sort_with/2,
+    sort_with/3,
     from_to/3,
     reverse_group_values/1,
     unique/1,
@@ -143,43 +146,63 @@ reject(List, Block) when is_list(List) ->
 
 -doc "Take N elements with validation.".
 -spec take(list(), term()) -> list().
-take(List, N) when is_list(List), not is_integer(N) ->
+take(List, N) ->
+    take('List', List, N).
+
+-doc """
+Take N elements with validation, naming `Class` in the error.
+
+`beamtalk_array` calls this with `'Array'` so `List` and `Array` share one
+implementation and one set of error shapes (BT-5090).
+""".
+-spec take(atom(), list(), term()) -> list().
+take(Class, List, N) when is_list(List), not is_integer(N) ->
     Hint = beamtalk_error:chars_to_binary(
         io_lib:format("Argument must be a non-negative integer, got ~ts", [describe_value(N)])
     ),
-    beamtalk_error:raise_type_error('List', 'take:', Hint);
-take(List, N) when is_list(List), is_integer(N), N < 0 ->
+    beamtalk_error:raise_type_error(Class, 'take:', Hint);
+take(Class, List, N) when is_list(List), is_integer(N), N < 0 ->
     Hint = beamtalk_error:chars_to_binary(
         io_lib:format("Argument must be a non-negative integer, got: ~tp", [N])
     ),
-    beamtalk_error:raise_type_error('List', 'take:', Hint);
-take(List, N) when is_list(List), is_integer(N), N >= 0 ->
+    beamtalk_error:raise_type_error(Class, 'take:', Hint);
+take(_Class, List, N) when is_list(List), is_integer(N), N >= 0 ->
     lists:sublist(List, N).
 
 -doc "Drop N elements with validation.".
 -spec drop(list(), term()) -> list().
-drop(List, N) when is_list(List), not is_integer(N) ->
+drop(List, N) ->
+    drop('List', List, N).
+
+-doc "Drop N elements with validation, naming `Class` in the error (see `take/3`).".
+-spec drop(atom(), list(), term()) -> list().
+drop(Class, List, N) when is_list(List), not is_integer(N) ->
     Hint = beamtalk_error:chars_to_binary(
         io_lib:format("Argument must be a non-negative integer, got ~ts", [describe_value(N)])
     ),
-    beamtalk_error:raise_type_error('List', 'drop:', Hint);
-drop(List, N) when is_list(List), is_integer(N), N < 0 ->
+    beamtalk_error:raise_type_error(Class, 'drop:', Hint);
+drop(Class, List, N) when is_list(List), is_integer(N), N < 0 ->
     Hint = beamtalk_error:chars_to_binary(
         io_lib:format("Argument must be a non-negative integer, got: ~tp", [N])
     ),
-    beamtalk_error:raise_type_error('List', 'drop:', Hint);
-drop(List, N) when is_list(List), is_integer(N), N >= 0 ->
+    beamtalk_error:raise_type_error(Class, 'drop:', Hint);
+drop(_Class, List, N) when is_list(List), is_integer(N), N >= 0 ->
     safe_nthtail(N, List).
 
 -doc "Sort with comparator block, with validation.".
 -spec sort_with(list(), term()) -> list().
-sort_with(List, Block) when is_list(List), is_function(Block, 2) ->
+sort_with(List, Block) ->
+    sort_with('List', List, Block).
+
+-doc "Sort with comparator block, naming `Class` in the error (see `take/3`).".
+-spec sort_with(atom(), list(), term()) -> list().
+sort_with(_Class, List, Block) when is_list(List), is_function(Block, 2) ->
     lists:sort(Block, List);
-sort_with(_List, Block) ->
+sort_with(Class, _List, Block) ->
     Hint = beamtalk_error:chars_to_binary(
         io_lib:format("sort: expects a 2-argument block, got ~ts", [describe_value(Block)])
     ),
-    beamtalk_error:raise_type_error('List', 'sort:', Hint).
+    beamtalk_error:raise_type_error(Class, 'sort:', Hint).
 
 -doc "Zip two lists into a list of 2-element List pairs [Elem1, Elem2].".
 -spec zip(list(), list()) -> list().
