@@ -34,7 +34,8 @@ Collection. They fold over `to_list/1`; `max`/`min`/`average` raise
     minimum/1,
     sum/1,
     to_list/1,
-    to_list_for_threading/2
+    to_list_for_threading/2,
+    keyed_foldl/5
 ]).
 
 %% Explicit `(Erlang beamtalk_collection) raiseEmpty: ... selector: ...` FFI
@@ -227,8 +228,45 @@ from_list_like(#{?BT_CLASS_TAG_KEY := 'Array'}, List) ->
     beamtalk_array:from_list(List);
 from_list_like(#{?BT_CLASS_TAG_KEY := 'Set'}, List) ->
     beamtalk_set:from_list(List);
+from_list_like(Recv, Pairs) when is_map(Recv) ->
+    case beamtalk_primitive:is_object(Recv) of
+        %% BT-5097: a keyed fold answers `{Key, Item}` pairs.
+        false -> maps:from_list(Pairs);
+        true -> Pairs
+    end;
 from_list_like(_Recv, List) ->
     List.
+
+-doc """
+The fold call of a writing `collect:`/`select:`/`reject:` over a receiver that is
+not an Erlang list (BT-5097). A `Dictionary` is folded over its `{K, V}` pairs
+with the compiled lambda; each step that adds an element to the accumulator
+list (slot 1, or slot 1 of the wrapped accumulator when `Wrapped`) records it
+under its key, so the epilogue's `from_list_like/2` rebuilds a `Dictionary`.
+Any other receiver folds over `to_list_for_threading/2`, as before.
+""".
+-spec keyed_foldl(fun((term(), term()) -> term()), term(), term(), atom(), boolean()) -> term().
+keyed_foldl(Lambda, Init, Recv, Selector, Wrapped) ->
+    case is_map(Recv) andalso not beamtalk_primitive:is_object(Recv) of
+        true ->
+            Step = fun({K, V}, {Keep, Acc}) ->
+                Acc2 = Lambda(V, set_acc_list(Wrapped, Acc, [])),
+                case get_acc_list(Wrapped, Acc2) of
+                    [] -> {Keep, Acc2};
+                    [Item] -> {[{K, Item} | Keep], Acc2}
+                end
+            end,
+            {Keep, Out} = lists:foldl(Step, {[], Init}, maps:to_list(Recv)),
+            set_acc_list(Wrapped, Out, Keep);
+        false ->
+            lists:foldl(Lambda, Init, to_list_for_threading(Recv, Selector))
+    end.
+
+get_acc_list(false, Acc) -> element(1, Acc);
+get_acc_list(true, Acc) -> element(1, element(1, Acc)).
+
+set_acc_list(false, Acc, List) -> setelement(1, Acc, List);
+set_acc_list(true, Acc, List) -> setelement(1, Acc, setelement(1, element(1, Acc), List)).
 
 -doc """
 Convert any collection to a list by iterating with do:.

@@ -239,35 +239,74 @@ TestCase subclass: DictionaryTest
     self assert: r class equals: Dictionary
     self assert: (#{#a => 1} reject: [:v | true]) equals: #{}
 
-  // PIN-BUG BT-5097: a block that writes an outer local goes through the
-  // state-threading fold, which answers a List of values and drops the keys.
-  // The fix deletes these pins (and expects a Dictionary, or a raise).
-  testPinBugSelectWritingBlockAnswersList =>
+  // BT-5097: a block that writes an outer local goes through the
+  // state-threading fold; it keeps the keys, as the pure block does.
+  testSelectWritingBlockKeepsKeys =>
     n := 0
     r := #{#a => 1, #b => 2}
       select: [:v |
         n := n + 1
         v > 1
       ]
-    self assert: r equals: #(2)
+    self assert: r equals: #{#b => 2}
+    self assert: r class equals: Dictionary
+    self assert: n equals: 2
 
-  testPinBugRejectWritingBlockAnswersList =>
+  testRejectWritingBlockKeepsKeys =>
     n := 0
     r := #{#a => 1, #b => 2}
       reject: [:v |
         n := n + 1
         v > 1
       ]
-    self assert: r equals: #(1)
+    self assert: r equals: #{#a => 1}
+    self assert: r class equals: Dictionary
+    self assert: n equals: 2
 
-  testPinBugCollectWritingBlockAnswersList =>
+  testCollectWritingBlockKeepsKeys =>
     n := 0
-    r := #{#a => 1}
+    r := #{#a => 1, #b => 2}
       collect: [:v |
         n := n + 1
         v * 10
       ]
-    self assert: r equals: #(10)
+    self assert: r equals: #{#a => 10, #b => 20}
+    self assert: r class equals: Dictionary
+    self assert: n equals: 2
+
+  testWritingBlockEmptyReceiver =>
+    n := 0
+    s := #{}
+      select: [:v |
+        n := n + 1
+        true
+      ]
+    r := #{}
+      reject: [:v |
+        n := n + 1
+        true
+      ]
+    c := #{}
+      collect: [:v |
+        n := n + 1
+        v
+      ]
+    self assert: s equals: #{}
+    self assert: r equals: #{}
+    self assert: c equals: #{}
+    self assert: n equals: 0
+
+  testWritingBlockOnVariableReceiverAndDuplicateValues =>
+    n := 0
+    d := #{#a => 1, #b => 1, #c => 1}
+    r := d
+      select: [:v |
+        n := n + 1
+        n == 2
+      ]
+    self assert: r size equals: 1
+    self assert: r class equals: Dictionary
+    self assert: n equals: 3
 
   testAnyOne =>
     d := #{#a => 1, #b => 2, #c => 3}

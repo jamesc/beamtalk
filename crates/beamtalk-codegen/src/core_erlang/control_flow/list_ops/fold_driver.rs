@@ -521,6 +521,40 @@ pub(in crate::core_erlang::control_flow) enum DoSource<'a> {
     DictPairs { selector: &'a str },
 }
 
+/// `lists:foldl` for a list receiver, `beamtalk_collection:keyed_foldl/5` for
+/// anything else (BT-5097): a `Dictionary` is folded over its `{K, V}` pairs and
+/// the accumulated list holds `{K, Item}` pairs, which `from_list_like/2` turns
+/// back into a `Dictionary`. `wrapped` is whether the accumulator is the
+/// `{Acc, Family...}` wrapper of a `Self`-threading fold.
+fn keyed_foldl_call_doc(
+    lambda_var: &str,
+    init_acc: Document<'static>,
+    recv_var: &str,
+    selector: &str,
+    wrapped: bool,
+    fold_result: &str,
+) -> Document<'static> {
+    docvec![
+        " in let ",
+        leaf::var(fold_result.to_string()),
+        " = case call 'erlang':'is_list'(",
+        leaf::var(recv_var.to_string()),
+        ") of <'true'> when 'true' -> ",
+        ThreadingPlan::foldl_expr_doc(lambda_var, init_acc.clone(), recv_var),
+        " <'false'> when 'true' -> call 'beamtalk_collection':'keyed_foldl'(",
+        leaf::var(lambda_var.to_string()),
+        ", ",
+        init_acc,
+        ", ",
+        leaf::var(recv_var.to_string()),
+        ", ",
+        leaf::atom(selector.to_string()),
+        ", ",
+        leaf::atom(if wrapped { "true" } else { "false" }),
+        ") end in ",
+    ]
+}
+
 /// Whether the fold selector `label` threads a value-type `Self` through its
 /// accumulator ([`SELF_THREADING_FOLDS`]); every other fold rejects a field
 /// write in its body.
@@ -744,12 +778,29 @@ impl CoreErlangGenerator {
         let state_index = slot_count + 1;
         // Save the receiver temp for the String-aware result check.
         let str_check_var = list_var.clone();
-        let safe_list = super::list_recv_to_safe_list_doc(
-            recv_code,
-            Some(op.guard_selector()),
-            list_var,
-            safe_list_var.clone(),
-        );
+        // BT-5097: `collect:`/`select:`/`reject:` answer the receiver's species, so
+        // a `Dictionary` keeps its keys: the non-list arm of the fold call hands
+        // the receiver to the keyed fold instead of flattening it to values.
+        let keyed = matches!(op, FoldOp::Collect | FoldOp::Select | FoldOp::Reject);
+        let keyed_recv_var = list_var.clone();
+        let safe_list = if keyed {
+            docvec!["let ", leaf::var(list_var), " = ", recv_code, " in "]
+        } else {
+            super::list_recv_to_safe_list_doc(
+                recv_code,
+                Some(op.guard_selector()),
+                list_var,
+                safe_list_var.clone(),
+            )
+        };
+        let guard_selector = op.guard_selector().to_string();
+        let fold_call = |lambda: &str, init: Document<'static>, wrapped: bool, result: &str| {
+            if keyed {
+                keyed_foldl_call_doc(lambda, init, &keyed_recv_var, &guard_selector, wrapped, result)
+            } else {
+                ThreadingPlan::foldl_call_doc(lambda, init, &safe_list_var, result)
+            }
+        };
 
         if plan.use_tuple_acc {
             let vars_doc = plan.current_vars_doc(self); // Before push_scope.
@@ -789,12 +840,7 @@ impl CoreErlangGenerator {
                 plan.append_repack_stateacc_doc(self, lowered.guarded_op_bracket);
             let tail = self.fold_tail_doc(epilogue.tail, epilogue.result, &stateacc, None)?;
             docs.push(docvec![
-                ThreadingPlan::foldl_call_doc(
-                    &lambda_var,
-                    init_tuple_doc,
-                    &safe_list_var,
-                    &fold_result
-                ),
+                fold_call(&lambda_var, init_tuple_doc, false, &fold_result),
                 epilogue.bindings,
                 extract_doc,
                 repack_doc,
@@ -856,7 +902,7 @@ impl CoreErlangGenerator {
         let tail =
             self.fold_tail_doc(epilogue.tail, epilogue.result, &state_out, slots.as_ref())?;
         docs.push(docvec![
-            ThreadingPlan::foldl_call_doc(&lambda_var, init_acc, &safe_list_var, fold_pair),
+            fold_call(&lambda_var, init_acc, slots.is_some(), fold_pair),
             unwrap,
             epilogue.bindings,
             "let ",
