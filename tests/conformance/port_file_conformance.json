@@ -1,0 +1,19 @@
+{
+  "description": "Workspace `port` file: `PORT` on the first line, an optional NONCE on the second. `port` is null when the content is invalid. Cases both parsers agree on; read by beamtalk_workspace::parse_port_file (Rust) and parsePortFileContent in editors/vscode/src/workspaceClient.ts (TypeScript).",
+  "cases": [
+    { "name": "port and nonce", "content": "4040\nabc\n", "port": 4040, "nonce": "abc" },
+    { "name": "port only, trailing newline", "content": "4040\n", "port": 4040, "nonce": null },
+    { "name": "port only, no newline", "content": "4040", "port": 4040, "nonce": null },
+    { "name": "empty nonce line", "content": "4040\n\n", "port": 4040, "nonce": null },
+    { "name": "leading whitespace before the port is trimmed", "content": "  4040\nabc\n", "port": 4040, "nonce": "abc" },
+    { "name": "whitespace around the nonce is trimmed", "content": "4040\n  abc \n", "port": 4040, "nonce": "abc" },
+    { "name": "CRLF line endings", "content": "4040\r\nabc\r\n", "port": 4040, "nonce": "abc" },
+    { "name": "lowest valid port", "content": "1\nabc\n", "port": 1, "nonce": "abc" },
+    { "name": "highest valid port", "content": "65535\n", "port": 65535, "nonce": null },
+    { "name": "port above 65535", "content": "65536\nabc\n", "port": null, "nonce": null },
+    { "name": "non-numeric port", "content": "not-a-port\nabc\n", "port": null, "nonce": null },
+    { "name": "trailing garbage after digits", "content": "4040abc\nabc\n", "port": null, "nonce": null },
+    { "name": "negative port", "content": "-1\n", "port": null, "nonce": null },
+    { "name": "empty file", "content": "", "port": null, "nonce": null }
+  ]
+}

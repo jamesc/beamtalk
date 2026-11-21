@@ -553,6 +553,32 @@ mod tests {
         assert_eq!(parse_port_file(""), None);
     }
 
+    /// Shared with the VS Code extension (`parsePortFileContent` in
+    /// `editors/vscode/src/workspaceClient.ts`): both read the same fixture.
+    #[test]
+    fn parse_port_file_matches_the_shared_conformance_fixture() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/conformance/port_file_conformance.json");
+        let raw = fs::read_to_string(path).unwrap();
+        let fixture: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let expected = case["port"].as_u64().map(|port| {
+                (
+                    u16::try_from(port).unwrap(),
+                    case["nonce"].as_str().map(str::to_string),
+                )
+            });
+            assert_eq!(
+                parse_port_file(case["content"].as_str().unwrap()),
+                expected,
+                "{name}"
+            );
+        }
+    }
+
     #[test]
     fn read_port_file_nonce_in_finds_nonce_for_port() {
         let tmp = tempfile::TempDir::new().unwrap();
