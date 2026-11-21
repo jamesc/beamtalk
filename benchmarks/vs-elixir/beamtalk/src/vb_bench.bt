@@ -46,6 +46,13 @@ sealed Object subclass: VbBench
 
   class dict -> Dictionary(Symbol, Integer) => #{#a => 1, #b => 2, #k => 3}
 
+  class dict100 -> Dictionary(Integer, Integer) =>
+    (1 to: 100)
+      inject: #{}
+      into: [:d :i |
+        d at: i put: i
+      ]
+
   class string -> String => "hello world"
 
   // A raw binary (a `Binary`, not a tagged `String`), as an FFI `binary()` result is.
@@ -245,6 +252,44 @@ sealed Object subclass: VbBench
   class collect: n :: Integer list: list :: List(Integer) -> Object =>
     last := nil
     n timesRepeat: [last := list collect: [:e | e * 2]]
+    last
+
+  // Rows 6f-6h (BT-5097): the block writes an outer local, so the send is the
+  // state-threading fold (`lists:foldl`, or `keyed_foldl` for a Dictionary).
+  class collectWriting: n :: Integer list: list :: List(Integer) -> Object =>
+    last := nil
+    count := 0
+    n timesRepeat: [
+      last := list
+        collect: [:e |
+          count := count + 1
+          e * 2
+        ]
+    ]
+    last
+
+  class selectWriting: n :: Integer list: list :: List(Integer) -> Object =>
+    last := nil
+    count := 0
+    n timesRepeat: [
+      last := list
+        select: [:e |
+          count := count + 1
+          e > 50
+        ]
+    ]
+    last
+
+  class dictCollectWriting: n :: Integer d: d :: Dictionary(Integer, Integer) -> Object =>
+    last := nil
+    count := 0
+    n timesRepeat: [
+      last := d
+        collect: [:v |
+          count := count + 1
+          v * 2
+        ]
+    ]
     last
 
   class inject: n :: Integer list: list :: List(Integer) -> Integer =>
