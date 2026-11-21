@@ -28,6 +28,13 @@ stdlib_setup() ->
     beamtalk_test_boot:boot_real_stdlib('Interval'),
     ok.
 
+%% `keyed_foldl/5` runs the receiver guard for a plain map, which resolves the
+%% `Dictionary` class: wait for it as well as the `Interval` canary.
+dictionary_setup() ->
+    stdlib_setup(),
+    beamtalk_test_boot:wait_for_class('Dictionary', 50),
+    ok.
+
 stdlib_teardown(_) -> ok.
 
 %%% ============================================================================
@@ -327,7 +334,7 @@ keyed_foldl_test_() ->
     Collect = fun(V, {Acc, N}) -> {[V * 10 | Acc], N + 1} end,
     Wrapped = fun(Lambda) -> fun(V, {Inner, Self}) -> {Lambda(V, Inner), Self + 1} end end,
     Rebuild = fun(Dict0, Out) -> beamtalk_collection:from_list_like(Dict0, lists:reverse(Out)) end,
-    [
+    {setup, fun dictionary_setup/0, fun stdlib_teardown/1, [
         {"select keeps the keys of the entries the lambda kept", fun() ->
             Lambda = Select(fun(_N, V) -> V > 2 end),
             {Out, 4} = beamtalk_collection:keyed_foldl(Lambda, {[], 0}, Dict, 'select:', [1]),
@@ -370,7 +377,7 @@ keyed_foldl_test_() ->
             {DictOut, 4} = beamtalk_collection:keyed_foldl(Lambda, {[], 0}, Dict, 'select:', [1]),
             ?assertEqual(lists:reverse(ListOut), [V || {_K, V} <- lists:reverse(DictOut)])
         end}
-    ].
+    ]}.
 
 %% ADR 0133 receiver guard: a plain `Dictionary` takes the keyed fold, which must
 %% still refuse a writing fold the in-place fold would make skip a method the class
@@ -382,7 +389,7 @@ keyed_foldl_receiver_guard_test_() ->
     Run = fun(Selector) ->
         beamtalk_collection:keyed_foldl(Lambda, {[], 0}, Dict, Selector, [1])
     end,
-    [
+    {setup, fun dictionary_setup/0, fun stdlib_teardown/1, [
         {"no extension: the fold runs", fun() ->
             ?assertMatch({[_, _], 2}, Run('select:'))
         end},
@@ -420,7 +427,7 @@ keyed_foldl_receiver_guard_test_() ->
                 beamtalk_extensions:unregister('Dictionary', 'bt5097Harmless')
             end
         end}
-    ].
+    ]}.
 
 from_list_like_dictionary_receiver_test() ->
     ?assertEqual(#{a => 1}, beamtalk_collection:from_list_like(#{b => 2}, [{a, 1}])),
