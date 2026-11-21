@@ -967,7 +967,7 @@ fn flatten_module<'m>(
 /// What flattening `uses:` provisions needs from outside the module (ADR 0127).
 struct ProvisionScope {
     /// Every protocol carried in from outside this module, first definition
-    /// winning (see Phase -1 in [`analyse_full`]).
+    /// winning (see [`collect_provision_scope`]).
     external_protocols: HashMap<EcoString, ProtocolDefinition>,
     /// Protocol name -> declaring package, where known.
     provision_packages: HashMap<EcoString, EcoString>,
@@ -985,8 +985,8 @@ fn collect_provision_scope(
     known_packages: Option<HashSet<String>>,
 ) -> ProvisionScope {
     // `external_protocols` (ADR 0127 §10a; BT-3591) merges every
-    // carried protocol carried in from outside this module — used
-    // both by `expand_module` right below and by `check_after_hierarchy`
+    // protocol carried in from outside this module — used both by
+    // `expand_module` (in `prepare_module`) and by `check_after_hierarchy`
     // later (Phase 0.55), which needs the same protocol definitions to check
     // a cross-file/cross-package `uses:` line's requirements and
     // `excluding:`/`overriding:` names.
