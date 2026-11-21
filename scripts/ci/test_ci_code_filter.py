@@ -3,6 +3,7 @@
 """Tests for ci_code_filter.py and path_filter.py (BT-5086)."""
 
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -75,6 +76,47 @@ class CodeFilter(unittest.TestCase):
         self.assertTrue(included(["docs/**"], "docs/a/b.md"))
         self.assertFalse(included(["**", "!docs/**"], "docs/a/b.md"))
         self.assertTrue(included(["**", "!docs/**", "docs/learning/**"], "docs/learning/a.md"))
+
+
+class RenamedFiles(unittest.TestCase):
+    """A code file moved into an excluded path must still count as code (BT-5086)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = Path(self.tmp.name)
+        self.git("init", "-q", ".")
+        self.git("config", "user.email", "t@example.invalid")
+        self.git("config", "user.name", "t")
+        (self.repo / "crates/x").mkdir(parents=True)
+        (self.repo / "crates/x/a.rs").write_text("fn main() {}\n" * 20)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "base")
+        (self.repo / "docs").mkdir()
+        self.git("mv", "crates/x/a.rs", "docs/a.rs")
+        self.git("commit", "-q", "-m", "move")
+
+    def git(self, *args):
+        return subprocess.run(["git", "-C", str(self.repo), *args], capture_output=True, text=True, check=True).stdout
+
+    def changed(self, *flags):
+        return self.git("diff", "--name-only", *flags, "HEAD~1", "HEAD").split()
+
+    def test_rename_detection_hides_the_old_path(self):
+        patterns = f.code_patterns(CI_YML)
+        with_renames = self.changed("-M")
+        self.assertEqual(with_renames, ["docs/a.rs"])
+        self.assertFalse(f.has_code(patterns, with_renames))  # the hole
+
+    def test_no_renames_lists_both_paths_and_counts_as_code(self):
+        patterns = f.code_patterns(CI_YML)
+        both = self.changed("--no-renames")
+        self.assertEqual(sorted(both), ["crates/x/a.rs", "docs/a.rs"])
+        self.assertTrue(f.has_code(patterns, both))
+
+    def test_ci_yml_changes_job_uses_no_renames(self):
+        text = CI_YML.read_text()
+        self.assertIn('git diff --name-only --no-renames "$BASE_SHA" HEAD', text)
 
 
 if __name__ == "__main__":

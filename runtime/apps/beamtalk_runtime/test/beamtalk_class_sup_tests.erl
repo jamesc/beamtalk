@@ -180,6 +180,14 @@ wait_class_pid_row(Pid) ->
         beamtalk_class_registry:class_name_for_pid(Pid) =/= not_found
     end).
 
+%% Block until the class monitor itself holds the monitor on `Pid`. The monitor
+%% is asked to watch a class from `beamtalk_object_class:start/2`, but that only
+%% *requests* the monitor; the kill the test sends next can overtake the request
+%% (signals are ordered per sender pair only) and the monitor would then see
+%% `noproc`, not `killed`, and rightly not restart (BT-5102, BT-5106).
+arm_monitor(Pid) ->
+    ok = beamtalk_test_wait:monitored_by(Pid, beamtalk_class_monitor).
+
 eager_restart_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -190,6 +198,7 @@ eager_restart_test_() ->
                         {ok, OldPid} = beamtalk_object_class:start(
                             'SupTest3236C', minimal_class_info()
                         ),
+                        arm_monitor(OldPid),
                         beamtalk_test_proc:kill_and_wait(OldPid),
                         %% No send to the class here — the monitor's 'DOWN' handler
                         %% must bring it back on its own.
@@ -298,6 +307,7 @@ restart_budget_test_() ->
                     {ok, PidA} = beamtalk_object_class:start('SupTest3236E', minimal_class_info()),
                     {ok, PidB} = beamtalk_object_class:start('SupTest3236F', minimal_class_info()),
                     %% First crash: within budget → eagerly restarted.
+                    arm_monitor(PidA),
                     beamtalk_test_proc:kill_and_wait(PidA),
                     ?assertEqual(
                         ok,
@@ -310,9 +320,11 @@ restart_budget_test_() ->
                     ),
                     Pid2 = beamtalk_class_registry:whereis_class('SupTest3236E'),
                     %% Second crash inside the window: budget exhausted → stays down.
+                    arm_monitor(Pid2),
                     beamtalk_test_proc:kill_and_wait(Pid2),
                     ?assertEqual(undefined, beamtalk_class_registry:whereis_class('SupTest3236E')),
                     %% The budget is per class: an unrelated class still restarts.
+                    arm_monitor(PidB),
                     beamtalk_test_proc:kill_and_wait(PidB),
                     ?assertEqual(
                         ok,
@@ -415,6 +427,7 @@ monitor_restart_readopts_test_() ->
                     stop_if_alive(MonPid),
                     {ok, NewMon} = beamtalk_class_monitor:start_link(),
                     ?assert(is_process_alive(NewMon)),
+                    arm_monitor(OldPid),
                     beamtalk_test_proc:kill_and_wait(OldPid),
                     ?assertEqual(
                         ok,
