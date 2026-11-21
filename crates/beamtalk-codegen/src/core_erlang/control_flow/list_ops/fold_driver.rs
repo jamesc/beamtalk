@@ -751,7 +751,7 @@ impl CoreErlangGenerator {
         let keyed = matches!(op, FoldOp::Collect | FoldOp::Select | FoldOp::Reject);
         let keyed_recv_var = list_var.clone();
         let safe_list = if keyed {
-            docvec!["let ", leaf::var(list_var), " = ", recv_code, " in "]
+            form::let_prefix(leaf::var(list_var), recv_code)
         } else {
             super::list_recv_to_safe_list_doc(
                 recv_code,

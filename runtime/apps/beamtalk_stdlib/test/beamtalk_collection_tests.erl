@@ -372,6 +372,56 @@ keyed_foldl_test_() ->
         end}
     ].
 
+%% ADR 0133 receiver guard: a plain `Dictionary` takes the keyed fold, which must
+%% still refuse a writing fold the in-place fold would make skip a method the class
+%% answers outside the stdlib (a runtime extension wins dispatch).
+keyed_foldl_receiver_guard_test_() ->
+    Dict = #{a => 1, b => 2},
+    Lambda = fun(V, {Acc, N}) -> {[V | Acc], N + 1} end,
+    Fun = fun(_Args, _Self, State) -> {reply, nil, State} end,
+    Run = fun(Selector) ->
+        beamtalk_collection:keyed_foldl(Lambda, {[], 0}, Dict, Selector, [1])
+    end,
+    [
+        {"no extension: the fold runs", fun() ->
+            ?assertMatch({[_, _], 2}, Run('select:'))
+        end},
+        {"an extension of the selector itself is refused", fun() ->
+            ok = beamtalk_extensions:register('Dictionary', 'select:', Fun, bt5097_test),
+            try
+                ?assertBtError(stateful_block_dispatch, Run('select:')),
+                %% the same refusal as the flattening fold gives
+                ?assertBtError(
+                    stateful_block_dispatch,
+                    beamtalk_collection:to_list_for_threading(Dict, 'select:')
+                )
+            after
+                beamtalk_extensions:unregister('Dictionary', 'select:')
+            end
+        end},
+        {"an extension of a collection message the stdlib's selector runs through is refused",
+            fun() ->
+                ok = beamtalk_extensions:register('Dictionary', 'inject:into:', Fun, bt5097_test),
+                try
+                    ?assertBtError(stateful_block_dispatch, Run('collect:')),
+                    ?assertBtError(
+                        stateful_block_dispatch,
+                        beamtalk_collection:to_list_for_threading(Dict, 'collect:')
+                    )
+                after
+                    beamtalk_extensions:unregister('Dictionary', 'inject:into:')
+                end
+            end},
+        {"an extension that is not a collection message changes nothing", fun() ->
+            ok = beamtalk_extensions:register('Dictionary', 'bt5097Harmless', Fun, bt5097_test),
+            try
+                ?assertMatch({[_, _], 2}, Run('select:'))
+            after
+                beamtalk_extensions:unregister('Dictionary', 'bt5097Harmless')
+            end
+        end}
+    ].
+
 from_list_like_dictionary_receiver_test() ->
     ?assertEqual(#{a => 1}, beamtalk_collection:from_list_like(#{b => 2}, [{a, 1}])),
     ?assertEqual(#{}, beamtalk_collection:from_list_like(#{b => 2}, [])).

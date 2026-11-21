@@ -240,7 +240,8 @@ from_list_like(_Recv, List) ->
 -doc """
 The fold call of a writing `collect:`/`select:`/`reject:` over a receiver that is
 not an Erlang list (BT-5097). A `Dictionary` is folded over its `{K, V}` pairs
-with the compiled lambda; after each call the one element the lambda added to
+with the compiled lambda (after the same receiver guard as any other non-list
+receiver, `guard_writing_fold/2`); after each call the one element the lambda added to
 the result list is recorded under its key, so the epilogue's `from_list_like/2`
 rebuilds a `Dictionary`. Any other receiver folds over `to_list_for_threading/2`,
 as before.
@@ -255,6 +256,10 @@ checks both (`KeyedFoldCall`, `VerifyError::KeyedFoldPathMismatch`).
 keyed_foldl(Lambda, Init, Recv, Selector, ListPath) ->
     case is_map(Recv) andalso not beamtalk_primitive:is_object(Recv) of
         true ->
+            %% The ADR 0133 receiver guard, once per call: a runtime extension of
+            %% the selector (or of a message it runs through) wins dispatch, so the
+            %% in-place fold would skip it.
+            ok = guard_writing_fold(Recv, Selector),
             Step = fun({K, V}, {Keep, Acc}) ->
                 Acc2 = Lambda(V, set_acc_list(ListPath, Acc, [])),
                 case get_acc_list(ListPath, Acc2) of
@@ -379,6 +384,18 @@ to_list_for_threading(#{?BT_CLASS_TAG_KEY := 'Array'}, 'sort:') ->
         [<<" answers an Array from 'sort:', but the in-place fold would answer a List">>]
     );
 to_list_for_threading(Recv, Selector) ->
+    ok = guard_writing_fold(Recv, Selector),
+    to_list(Recv).
+
+-doc """
+The checks of `to_list_for_threading/2` without the conversion (BT-5097): `ok`
+when the in-place fold may stand in for `Selector` on `Recv`, otherwise the
+`stateful_block_dispatch` / `does_not_understand` it raises. `keyed_foldl/5` runs
+it once per call for a `Dictionary`, which is folded over its pairs instead of
+its `to_list/1`.
+""".
+-spec guard_writing_fold(term(), atom()) -> ok.
+guard_writing_fold(Recv, Selector) ->
     {Class, Provider} = selector_provider(Recv, Selector),
     case Provider of
         stdlib ->
@@ -403,7 +420,7 @@ to_list_for_threading(Recv, Selector) ->
                         )
                     of
                         false ->
-                            to_list(Recv);
+                            ok;
                         true ->
                             refuse_writing_fold(
                                 Class,

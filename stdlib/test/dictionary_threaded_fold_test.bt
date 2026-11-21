@@ -8,6 +8,62 @@
 TestCase subclass: DictionaryThreadedFoldTest
   field: m = 0
 
+  // `^` out of the block exits the enclosing method, and a raise inside the block
+  // propagates: the same for a Dictionary as for a List.
+  firstAbove: limit in: coll =>
+    n := 0
+    coll
+      select: [:v |
+        n := n + 1
+        v > limit ifTrue: [^v]
+        true
+      ]
+    -1
+
+  rejectEarlyReturn: coll =>
+    n := 0
+    coll
+      reject: [:v |
+        n := n + 1
+        v > 1 ifTrue: [^v]
+        false
+      ]
+    -1
+
+  collectEarlyReturn: coll =>
+    n := 0
+    coll
+      collect: [:v |
+        n := n + 1
+        v > 1 ifTrue: [^v * 100]
+        v
+      ]
+    -1
+
+  raiseInside: coll =>
+    n := 0
+    coll
+      collect: [:v |
+        n := n + 1
+        self error: "boom"
+      ]
+    n
+
+  testNonLocalReturnFromSelect =>
+    self assert: (self firstAbove: 1 in: #{#a => 1, #b => 2}) equals: 2
+    self assert: (self firstAbove: 1 in: #(1, 2, 3)) equals: 2
+    self assert: (self firstAbove: 9 in: #{#a => 1}) equals: -1
+
+  testNonLocalReturnFromRejectAndCollect =>
+    self assert: (self rejectEarlyReturn: #{#a => 1, #b => 2}) equals: 2
+    self assert: (self rejectEarlyReturn: #(1, 2)) equals: 2
+    self assert: (self collectEarlyReturn: #{#a => 1, #b => 2}) equals: 200
+    self assert: (self collectEarlyReturn: #(1, 2)) equals: 200
+
+  testRaiseInsideBlockPropagates =>
+    self should: [self raiseInside: #{#a => 1}] raise: #user_error
+    self should: [self raiseInside: #(1)] raise: #user_error
+
   testSelectConditionalWrite =>
     n := 0
     r := #{#a => 1, #b => 2, #c => 3}
