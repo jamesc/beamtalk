@@ -99,7 +99,7 @@ defmodule BtAttach.MixProject do
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       # Pinned to the 1.0.x line: 1.1 swapped the LiveViewTest DOM parser to
       # lazy_html (a native NIF), whereas 1.0.x uses the pure-Elixir floki below.
-      {:phoenix_live_view, "~> 1.0.0"},
+      {:phoenix_live_view, "~> 1.2.13"},
       {:floki, ">= 0.30.0", only: :test},
       # Browser e2e: PhoenixTest's unified API driving a *real* Chromium via
       # Playwright, so the connected-only JS hooks (CodeEditor, KeyboardShortcuts,
