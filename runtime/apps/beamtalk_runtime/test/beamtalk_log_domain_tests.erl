@@ -5,7 +5,7 @@
 
 -module(beamtalk_log_domain_tests).
 -moduledoc """
-BT-5046: every `?LOG_*` call in the runtime app must reach domain-filtered
+BT-5046: every `?LOG_*` call in the runtime, workspace, stdlib and compiler apps must reach domain-filtered
 handlers (the transcript, `Logger enableDebug:`). A call carries a `domain`
 either on the call itself or by a process-level default: the module sets one in
 its `init` (`beamtalk_logging_config:set_domain/1` or
@@ -19,12 +19,19 @@ explicit `domain` on the call.
 """.
 -include_lib("eunit/include/eunit.hrl").
 
-no_log_call_lacks_a_domain_test() ->
-    SrcDir = filename:join([filename:dirname(?FILE), "..", "src"]),
-    Files = filelib:wildcard(filename:join(SrcDir, "*.erl")),
-    ?assert(Files =/= []),
-    Offenders = lists:append([undomained_calls(F) || F <- Files]),
-    ?assertEqual([], Offenders).
+no_log_call_lacks_a_domain_test_() ->
+    %% BT-5084: the workspace, stdlib and compiler apps are held to the same rule
+    %% as the runtime (the test was runtime-only).
+    [
+        {atom_to_list(App), fun() ->
+            SrcDir = filename:join([filename:dirname(?FILE), "..", "..", atom_to_list(App), "src"]),
+            Files = filelib:wildcard(filename:join(SrcDir, "*.erl")),
+            ?assert(Files =/= []),
+            Offenders = lists:append([undomained_calls(F) || F <- Files]),
+            ?assertEqual([], Offenders)
+        end}
+     || App <- [beamtalk_runtime, beamtalk_workspace, beamtalk_stdlib, beamtalk_compiler]
+    ].
 
 %% Calls without a domain, in modules with no process-level default.
 undomained_calls(File) ->

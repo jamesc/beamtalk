@@ -484,7 +484,8 @@ result_to_json(
             ?LOG_ERROR(
                 "BUnit result JSON encoding failed (~p:~p); "
                 "falling back to counts-only output: ~p",
-                [Class, Reason, Stacktrace]
+                [Class, Reason, Stacktrace],
+                #{domain => [beamtalk, stdlib]}
             ),
             degraded_result_json(Result, Reason)
     end.

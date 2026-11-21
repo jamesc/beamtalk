@@ -172,3 +172,28 @@ fn provided_method_overridden_by_user_is_still_analysed() {
         messages(src)
     );
 }
+
+// BT-5084: the new behaviour BT-5026 introduced is that a state default
+// expression is analysed, so a default that names something only an instance
+// can see is an error rather than being silently skipped.
+
+#[test]
+fn state_default_referring_to_sibling_field_is_an_error() {
+    let src = "Object subclass: Foo\n  state: x = 1\n  state: y = x\n  get => 1\n";
+    assert_eq!(
+        count(src, "Undefined variable: x"),
+        1,
+        "a default cannot read a sibling field: {:?}",
+        messages(src)
+    );
+}
+
+#[test]
+fn state_default_referring_to_self_is_an_error() {
+    let src = "Object subclass: Foo\n  state: x = self\n  get => 1\n";
+    let msgs = messages(src);
+    assert!(
+        !msgs.is_empty(),
+        "a default has no receiver, so `self` must be diagnosed: {msgs:?}"
+    );
+}

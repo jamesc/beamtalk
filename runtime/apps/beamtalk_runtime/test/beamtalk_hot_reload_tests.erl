@@ -628,6 +628,27 @@ code_change(_OldVsn, _State, {crash, Reason}) ->
     exit(Reason);
 code_change(_OldVsn, _State, {fail, Reason}) ->
     {error, Reason};
+code_change(_OldVsn, State, {slow_notify, Ms, Parent}) ->
+    Parent ! change_started,
+    %% sleep: keeps the migration in flight while the test kills the reloader
+    timer:sleep(Ms),
+    {ok, State};
+code_change(_OldVsn, State, {slow_mark_notify, Ms, Parent, Tag}) ->
+    Parent ! change_started,
+    %% sleep: keeps the first migration running while a second reload starts
+    timer:sleep(Ms),
+    {ok, State#{migrated => Tag}};
+code_change(_OldVsn, State, {mark, Tag}) ->
+    {ok, State#{migrated => Tag}};
+code_change(_OldVsn, _State, {slow_fail_notify, Ms, Parent}) ->
+    Parent ! change_started,
+    %% sleep: keeps the first migration running while a second reload starts
+    timer:sleep(Ms),
+    {error, slow_failure};
+code_change(_OldVsn, _State, {slow_fail, Ms}) ->
+    %% sleep: a migration slower than the caller's wait that then fails
+    timer:sleep(Ms),
+    {error, slow_failure};
 code_change(_OldVsn, State, {slow, Ms}) ->
     %% sleep: simulates a migration slower than sys:change_code's 5 s timeout
     timer:sleep(Ms),
@@ -680,10 +701,10 @@ trigger_code_change_mixed_success_and_failure_test() ->
         gen_server:stop(LivePid)
     end.
 
-%% BT-5021: a `sys:change_code/4` timeout is reported at ERROR (the actor stays
-%% suspended, as for any failed migration, so the next reload retries) rather
-%% than returning `{error, timeout}` silently.
-try_change_code_timeout_logs_error_and_stays_suspended_test_() ->
+%% BT-5021: a `sys:change_code/4` timeout is reported at ERROR rather than
+%% returning `{error, timeout}` silently. BT-5084: the actor is not left
+%% suspended; the change's owner resumes it once the change has finished.
+try_change_code_timeout_logs_error_and_resumes_when_change_finishes_test_() ->
     {timeout, 30, fun() ->
         OldLevel = maps:get(level, logger:get_primary_config()),
         ok = logger:set_primary_config(level, all),
@@ -695,8 +716,16 @@ try_change_code_timeout_logs_error_and_stays_suspended_test_() ->
                 beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {slow, 6500}),
             ?assertEqual([{Pid, timeout}], Failures),
             ?awaitMessage({hot_reload_log_event, #{level := error}}, 1000),
+            %% The slow migration (6.5 s) is still running: suspended for now ...
             ?assertEqual(
                 suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
+            ),
+            %% ... and resumed by the worker once it finishes.
+            ok = beamtalk_test_wait:until(
+                fun() ->
+                    running =:= maps:get(sysState, beamtalk_process_navigation:status(Pid))
+                end,
+                15000
             )
         after
             logger:remove_handler(HandlerId),
@@ -705,6 +734,136 @@ try_change_code_timeout_logs_error_and_stays_suspended_test_() ->
             beamtalk_test_proc:stop(Pid)
         end
     end}.
+
+%% BT-5084: the process doing the reload dies mid-change. The actor must still
+%% be resumed once the change finishes (it was left suspended before).
+reloader_killed_mid_change_still_resumes_actor_test_() ->
+    {timeout, 30, fun() ->
+        {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+        unlink(Pid),
+        Parent = self(),
+        Reloader = spawn(fun() ->
+            beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {slow_notify, 1500, Parent})
+        end),
+        try
+            %% The migration is running inside the actor, which is suspended.
+            ?awaitMessage(change_started, 5000),
+            exit(Reloader, kill),
+            beamtalk_test_wait:dead(Reloader),
+            ok = beamtalk_test_wait:until(
+                fun() ->
+                    running =:= maps:get(sysState, beamtalk_process_navigation:status(Pid))
+                end,
+                15000
+            )
+        after
+            beamtalk_test_proc:stop(Pid)
+        end
+    end}.
+
+%% BT-5084 (review): a migration that outlasts the caller's wait and THEN FAILS
+%% must not be resumed onto new code with old-shaped state (ADR 0123 §3).
+slow_failing_migration_is_not_resumed_test_() ->
+    {timeout, 30, fun() ->
+        {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+        unlink(Pid),
+        try
+            {ok, 0, [{Pid, timeout}]} =
+                beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {slow_fail, 6000}),
+            %% `status` is a system message, so it answers only after the failing
+            %% migration has finished; the actor must still be suspended then.
+            ?assertEqual(
+                suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
+            )
+        after
+            try
+                sys:resume(Pid)
+            catch
+                _:_ -> ok
+            end,
+            beamtalk_test_proc:stop(Pid)
+        end
+    end}.
+
+%% BT-5084 (review): a second reload that starts while the first one's slow
+%% migration is still running must not resume the actor when the first fails.
+overlapping_reload_does_not_resume_a_failed_migration_test_() ->
+    {timeout, 60, fun() ->
+        {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+        unlink(Pid),
+        Parent = self(),
+        spawn(fun() ->
+            beamtalk_hot_reload:trigger_code_change(
+                ?MODULE, [Pid], {slow_fail_notify, 7000, Parent}
+            )
+        end),
+        try
+            ?awaitMessage(change_started, 5000),
+            %% Reload B queues behind A's migration; its caller gives up at 5 s.
+            {ok, 0, [{Pid, timeout}]} =
+                beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {fail, second}),
+            %% `status` is a system message: it answers only after A has failed and
+            %% B's worker has retried (and failed too).
+            ?assertEqual(
+                suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
+            )
+        after
+            try
+                sys:resume(Pid)
+            catch
+                _:_ -> ok
+            end,
+            beamtalk_test_proc:stop(Pid)
+        end
+    end}.
+
+%% BT-5084 (review): reload A (older code) finishes and resumes the actor while
+%% reload B (newer code) is queued behind it. B's change must still run on the
+%% suspended actor, so the final state has B's shape and the actor is running.
+overlapping_reload_reruns_the_later_migration_test_() ->
+    {timeout, 60, fun() ->
+        {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+        unlink(Pid),
+        Parent = self(),
+        spawn(fun() ->
+            beamtalk_hot_reload:trigger_code_change(
+                ?MODULE, [Pid], {slow_mark_notify, 6000, Parent, a}
+            )
+        end),
+        try
+            ?awaitMessage(change_started, 5000),
+            %% B's caller gives up at 5 s; its worker is queued behind A.
+            {ok, 0, [{Pid, timeout}]} =
+                beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {mark, b}),
+            ok = beamtalk_test_wait:until(
+                fun() ->
+                    running =:= maps:get(sysState, beamtalk_process_navigation:status(Pid)) andalso
+                        b =:= maps:get(migrated, sys:get_state(Pid), undefined)
+                end,
+                20000
+            )
+        after
+            beamtalk_test_proc:stop(Pid)
+        end
+    end}.
+
+%% BT-5084: a migration that returns an error still leaves the actor suspended
+%% (ADR 0123 §3, state integrity); that is the one deliberate case.
+failed_migration_stays_suspended_test() ->
+    {ok, Pid} = gen_server:start_link(?MODULE, #{}, []),
+    try
+        {ok, 0, [{Pid, _}]} =
+            beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {crash, why}),
+        ?assertEqual(suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid)))
+    after
+        unlink(Pid),
+        try
+            sys:resume(Pid)
+        catch
+            _:_ -> ok
+        end,
+        beamtalk_test_proc:stop(Pid)
+    end.
 
 %% logger handler callback: forward events to the test process.
 log(LogEvent, #{config := #{parent := Parent}}) ->

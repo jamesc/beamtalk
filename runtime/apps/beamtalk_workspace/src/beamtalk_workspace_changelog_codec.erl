@@ -251,7 +251,9 @@ candidate_site_from_json(Malformed) ->
 
 -spec drop_malformed_candidate_site(term()) -> error.
 drop_malformed_candidate_site(Malformed) ->
-    ?LOG_WARNING("Dropping malformed candidate_site: ~p", [Malformed]),
+    ?LOG_WARNING("Dropping malformed candidate_site: ~p", [Malformed], #{
+        domain => [beamtalk, runtime]
+    }),
     error.
 
 -spec candidate_sites_to_json([candidate_site()] | undefined) -> [map()] | null.
