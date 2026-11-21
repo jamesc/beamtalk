@@ -393,7 +393,7 @@ fn attach_and_open_window(
 }
 
 /// How long a front gets to shut down after `SIGTERM` before it is force-killed
-/// (BT-5081). A BEAM `init:stop` that terminates the LiveViews (running their
+/// (BT-5081). A BEAM `init:stop` that terminates the `LiveViews` (running their
 /// `terminate/2` session cleanup) normally finishes well inside a second; 3 s
 /// leaves slack for a loaded machine without making a wedged front stall the
 /// UI thread (window close and quit stop fronts inline) for long.

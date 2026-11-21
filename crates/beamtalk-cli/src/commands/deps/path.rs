@@ -199,7 +199,7 @@ pub(crate) fn compile_dependency_at(
         let src = dep_root.join("priv");
         let dest = dep_build.join("priv");
         if src.is_dir() && src != dest {
-            let _ = std::fs::remove_dir_all(&dest);
+            remove_stale_dir(&dest)?;
             beamtalk_workspace::copy_tree(src.as_std_path(), dest.as_std_path())
                 .into_diagnostic()
                 .wrap_err_with(|| format!("Failed to copy '{src}' to '{dest}'"))?;
@@ -228,6 +228,19 @@ pub(crate) fn compile_dependency_at(
         stubs_dir,
         extensions,
     })
+}
+
+/// Remove a previously staged directory. A missing directory is fine; any
+/// other failure is an error, since stale files would sit beside the new ones
+/// (BT-5103).
+fn remove_stale_dir(dir: &Utf8Path) -> Result<()> {
+    match std::fs::remove_dir_all(dir) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to remove stale '{dir}' before copying priv/")),
+    }
 }
 
 /// Class-hierarchy inputs for compiling one dependency: its own Pass 1
@@ -1054,6 +1067,21 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn remove_stale_dir_ignores_missing_but_reports_failure() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        assert!(remove_stale_dir(&root.join("absent")).is_ok());
+        let present = root.join("present");
+        fs::create_dir_all(present.join("sub")).unwrap();
+        remove_stale_dir(&present).unwrap();
+        assert!(!present.exists());
+        // A regular file where a directory is expected cannot be removed as one.
+        let file = root.join("file");
+        fs::write(&file, "x").unwrap();
+        assert!(remove_stale_dir(&file).is_err());
+    }
 
     #[test]
     fn test_canonicalize_dep_path() {

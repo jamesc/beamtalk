@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fix: native builds see Rust and Go toolchain locations; a failed native build explains the restricted `rebar3` environment; a failed `priv/` cleanup is an error (BT-5103).**
+  - Added: `CARGO_HOME`, `RUSTUP_HOME`, `RUSTUP_TOOLCHAIN`, `CARGO_TARGET_DIR`, `RUSTC`, `RUSTFLAGS`, `GOPATH`, `GOROOT`, `GOCACHE`, `GOMODCACHE`, `GOBIN` and `XDG_{CACHE,CONFIG,DATA}_HOME` join the `rebar3` environment allowlist, so rustler and Go builds find their toolchain. Secrets (`HEX_API_KEY`, cargo registry tokens, `GOPROXY`) are still withheld.
+  - Changed: a failed `rebar3 compile` now says rebar3 ran with a restricted environment; `-v` logs the names passed (never values).
+  - Fixed: a dependency's staged `priv/` that cannot be removed before the copy now fails the build instead of leaving stale files beside the new ones.
+  - Do: configure a private hex organisation with `rebar3 hex organization auth`; see "Security notes" in `docs/beamtalk-packages.md`.
 - **Breaking: `beamtalk.toml` is validated strictly (BT-5076).**
   - Changed: an unknown key or section in `beamtalk.toml` (top level, `[package]` or `[application]`) is now an error naming the key and listing the valid ones. A misspelt `[dependancies]` or `strict_deps` (for `strict-deps`) used to be dropped without a word, leaving the dependency or strict mode off.
   - Changed: `[package] version` must be a SemVer version (`1.2.3`, optionally `-rc.1` / `+build`). It used to take any text and flow into the `.app` `vsn`, the release directory name and the `.rel`.
