@@ -33,6 +33,10 @@ defmodule BtAttach.Facade do
   # The authorized op vocabulary and its capability class (ADR 0091 Decision 3/4).
   # `eval`/`load_source`/`save`/`flush`/`reload` inject or run code (execute);
   # the read ops trigger no user code; `kill`/`rotate_cookie` are admin.
+  # `actors`, `info`, `kill`, `load_source`, `rotate_cookie`, `sessions` and
+  # `subscribe_actors` are declared here (the ADR 0091 RBAC vocabulary) but have
+  # no `invoke/3` clause yet: they are kept as reserved vocabulary and answer
+  # `{:error, {:unsupported_op, op}}` once authorized.
   @ops %{
     eval: :execute,
     # BT-5081: stop the eval running in the caller's own session (the dock's
