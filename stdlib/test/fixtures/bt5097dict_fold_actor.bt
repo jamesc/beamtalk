@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5097: writing `Dictionary` select:/reject:/collect: in an actor method.
+// The field and a local are written by the block and read after the send.
+
+Actor subclass: Bt5097DictFoldActor
+  state: n = 0
+
+  count => self.n
+
+  selectWriting =>
+    t := 0
+    r := #{#a => 1, #b => 2, #c => 3}
+      select: [:v |
+        self.n := self.n + 1
+        t := t + v
+        v > 1
+      ]
+    #[r, self.n, t]
+
+  rejectWriting =>
+    r := #{#a => 1, #b => 2, #c => 3}
+      reject: [:v |
+        self.n := self.n + 1
+        v > 1
+      ]
+    #[r, self.n]
+
+  collectWriting =>
+    r := #{#a => 1, #b => 2}
+      collect: [:v |
+        self.n := self.n + v
+        v * 10
+      ]
+    #[r, self.n]
