@@ -981,7 +981,33 @@ lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-repo lint-doc
 # The repo-wide lint-* recipes and script tests that need only the toolchain CI's
 # lint job has. `lint` runs this group and ci.yml's lint job runs it by name, so
 # the two cannot diverge (BT-5032). Add a new lint here, not to either list.
-lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns check-lint-parity check-pins test-lint-stamp test-refresh-edge test-install-script test-determine-version test-publish-rolling-release test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly test-workflow-paths test-cache-keys test-ci-ok
+# One dependency per line, sorted, so two PRs adding a lint do not conflict on one
+# long line (BT-5086); keep it that way.
+lint-repo: \
+    check-lint-parity \
+    check-pins \
+    lint-banned-patterns \
+    lint-beamtalk-stdlib \
+    lint-binary-literal-encoding \
+    lint-class-var-catchers \
+    lint-compiler-made-names \
+    lint-coverage-skips \
+    lint-duplicate-erlang-modules \
+    lint-nlr-tuple-matches \
+    lint-old-style-catch \
+    lint-removed-facade-names \
+    lint-workaround-comments \
+    test-cache-keys \
+    test-check-stdlib-class-beams \
+    test-ci-ok \
+    test-core-diff-normalise \
+    test-determine-version \
+    test-install-script \
+    test-lint-stamp \
+    test-publish-rolling-release \
+    test-refresh-edge \
+    test-vs-elixir-nightly \
+    test-workflow-paths
 
 # Lint (BT-5089): every `just <recipe>` and repo path named in the contributor docs
 # (AGENTS.md, CONTRIBUTING.md, docs/agents, docs/development, four ADRs' paths)
