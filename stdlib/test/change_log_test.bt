@@ -269,6 +269,15 @@ TestCase subclass: ChangeLogTest
     orphans := self mixedLog select: [:e | e isOrphan]
     self assert: orphans size equals: 1
 
+  // BT-5090: `reject:` is `select:`'s complement over the same full set, not
+  // `Enumerable`'s provision over the active entries.
+  testRejectRangesOverTheFullSetLikeSelect =>
+    log := self mixedLog
+    isOrphan := [:e | e isOrphan]
+    kept := log reject: isOrphan
+    self assert: kept size + (log select: isOrphan) size equals: log allEntries size
+    self assert: (kept anySatisfy: [:e | e isOrphan]) not
+
   testSelectOrphanIsExpectedClass =>
     orphans := self mixedLog select: [:e | e isOrphan]
     self assert: orphans first className equals: #Widget

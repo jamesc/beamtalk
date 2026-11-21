@@ -11,14 +11,17 @@
 ///
 /// A ChangeLog snapshot holds *every* logged entry, but its default collection
 /// views (`size`, `isEmpty`, `notEmpty`, `do:`, `dirtyMethods`, plus
-/// `isNotEmpty`, `inject:into:`, `collect:`, `detect:ifNone:`, `anySatisfy:`,
-/// `count:` via `uses: Enumerable(ChangeEntry)`, ADR 0127 §9) reflect only
+/// `isNotEmpty`, `inject:into:`, `collect:`, `detect:`, `detect:ifNone:`,
+/// `includes:`, `anySatisfy:`, `allSatisfy:`, `noneSatisfy:`, `count:` via
+/// `uses: Enumerable(ChangeEntry)`, ADR 0127 §9) reflect only
 /// the **active** entries: changes from the current epoch that have not been
 /// orphaned. Prior-epoch and orphan entries (whose memory state was lost on
 /// workspace restart, so they are no longer re-appliable) are excluded from
-/// those views — but `select:` ranges over the full set (this class's own
-/// method, kept over `Enumerable`'s provision — class wins, ADR 0127 §3), so
-/// it can still reach them (e.g. `Workspace changes select: [:e | e isOrphan]`).
+/// those views — but `select:` and `reject:` range over the full set (this
+/// class's own methods, kept over `Enumerable`'s provisions — class wins, ADR
+/// 0127 §3), so they can still reach them (e.g.
+/// `Workspace changes select: [:e | e isOrphan]`). `reject:` stays the
+/// complement of `select:`, so the two always partition `allEntries`.
 /// `notEmpty` (`self isEmpty not`) is likewise this class's own — distinct
 /// from, and unaffected by, `Enumerable`'s `isNotEmpty`.
 ///
@@ -123,6 +126,19 @@ sealed typed Value subclass: ChangeLog
   /// ```
   select: block :: Block(ChangeEntry, Boolean) -> List(ChangeEntry) =>
     self.entries select: block
+
+  /// Reject entries for which `block` returns true, over the *full* entry set.
+  ///
+  /// The complement of `select:`: `(select: b) size + (reject: b) size` is
+  /// `allEntries size`. Like `select:`, and unlike the other collection views,
+  /// it ranges over every entry — including prior-epoch and orphan entries.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes reject: [:e | e isOrphan]    // everything but orphans
+  /// ```
+  reject: block :: Block(ChangeEntry, Boolean) -> List(ChangeEntry) =>
+    self.entries reject: block
 
   /// Return the dirty methods grouped by class: `#{Class -> #{selectors}}`.
   ///
