@@ -149,7 +149,7 @@ defmodule BtAttachWeb.WorkspaceOriginFilterTest do
         |> Floki.parse_fragment!()
         |> Floki.find(~s(select.src-select option[value="project"]))
 
-      assert Floki.attribute(select, "selected") == ["selected"]
+      assert Floki.attribute(select, "selected") == [""]
 
       # ...and the tree is actually scoped to the project's own classes.
       assert interactive_classes(html) == Enum.sort(@project)
@@ -171,7 +171,7 @@ defmodule BtAttachWeb.WorkspaceOriginFilterTest do
         |> Floki.parse_fragment!()
         |> Floki.find(~s(select.src-select option[value="all"]))
 
-      assert Floki.attribute(select, "selected") == ["selected"]
+      assert Floki.attribute(select, "selected") == [""]
       assert interactive_classes(html) == ~w(Integer Object)
     end
 

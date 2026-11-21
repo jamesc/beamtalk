@@ -341,7 +341,9 @@
                     phx-click="dock_tab"
                     phx-value-tab={tab}
                   >
-                    {label}<span :if={tab == "changes" and @changes != []} class="tab-count">{length(@changes)}</span>
+                    {label}<span :if={tab == "changes" and @changes != []} class="tab-count">{length(
+                      @changes
+                    )}</span>
                   </button>
                 </span>
                 <span class="spacer"></span>

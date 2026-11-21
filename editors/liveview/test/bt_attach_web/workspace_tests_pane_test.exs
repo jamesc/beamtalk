@@ -457,7 +457,7 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       # initial default for a workspace with project classes) is marked.
       assert html =~ ~s(<select name="src")
       assert html =~ ~s(aria-label="Class source filter")
-      assert html =~ ~s(<option value="project" selected="selected">)
+      assert html =~ ~s(<option value="project" selected="">)
       assert html =~ ~s(<option value="all">)
       assert html =~ ~s(<option value="deps">)
       assert html =~ ~s(<option value="stdlib">)

@@ -97,16 +97,17 @@ defmodule BtAttach.MixProject do
       {:phoenix, "~> 1.8.16"},
       {:phoenix_html, "~> 4.1"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
-      # Pinned to the 1.0.x line: 1.1 swapped the LiveViewTest DOM parser to
-      # lazy_html (a native NIF), whereas 1.0.x uses the pure-Elixir floki below.
-      {:phoenix_live_view, "~> 1.0.0"},
+      # LiveViewTest's DOM parser is lazy_html (a native NIF, test-only: optional
+      # in LiveView, and already required by phoenix_test). It never reaches the
+      # prod release. floki stays for the tests that parse rendered HTML directly.
+      {:phoenix_live_view, "~> 1.2.13"},
       {:floki, ">= 0.30.0", only: :test},
       # Browser e2e: PhoenixTest's unified API driving a *real* Chromium via
       # Playwright, so the connected-only JS hooks (CodeEditor, KeyboardShortcuts,
       # SelectionTracker, TweaksPanel) actually run — they are invisible to
-      # LiveViewTest's server-side floki render. See test/.../workspace_browser_test.exs.
-      {:phoenix_test, "~> 0.11", only: :test, runtime: false},
-      {:phoenix_test_playwright, "~> 0.14", only: :test, runtime: false},
+      # LiveViewTest's server-side render. See test/.../workspace_browser_test.exs.
+      {:phoenix_test, "~> 0.14", only: :test, runtime: false},
+      {:phoenix_test_playwright, "~> 0.19", only: :test, runtime: false},
       {:esbuild, "~> 0.8", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.2", runtime: Mix.env() == :dev},
       {:telemetry_metrics, "~> 1.0"},
@@ -118,7 +119,7 @@ defmodule BtAttach.MixProject do
       # Decision 1). Assent is a lightweight, framework-agnostic auth library
       # (no Plug/DB coupling) that does discovery, PKCE and ID-token validation
       # over OTP's built-in :httpc — we don't roll our own crypto (Principle 5).
-      {:assent, "~> 0.2"},
+      {:assent, "~> 0.4"},
       # Test-only: stubs `:net_adm.names/0` and `:net_adm.names/1` independently
       # (BT-3003 regression, workspace_classify_unreachable_hostname_test.exs) —
       # dynamically starting real distribution isn't reliable across CI

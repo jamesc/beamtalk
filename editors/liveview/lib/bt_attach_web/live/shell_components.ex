@@ -85,8 +85,7 @@ defmodule BtAttachWeb.Live.ShellComponents do
               aria-label={hex}
               data-tweak="accent"
               data-tweak-value={hex}
-            >
-            </button>
+            ></button>
           </div>
           <span class="twk-accent-note">Dusk uses its built-in accent</span>
         </div>
