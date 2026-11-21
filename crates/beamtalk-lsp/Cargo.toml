@@ -51,6 +51,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 futures-util.workspace = true
 thiserror = { workspace = true }
+# why: BT-5080 — range formatting diffs the whole-file format against the
+# original so only hunks inside the selected constructs are returned.
+similar = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "rt", "macros"] }

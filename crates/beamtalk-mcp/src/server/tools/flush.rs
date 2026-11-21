@@ -108,7 +108,7 @@ impl BeamtalkMcp {
             }
         };
 
-        timer.ok_text(text)
+        timer.ok_text(format!("{text}\n{}", self.workspace_note()))
     }
 
     /// List pending `ChangeLog` entries (ADR 0082 Phase 3).

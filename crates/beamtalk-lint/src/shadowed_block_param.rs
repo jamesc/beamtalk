@@ -41,8 +41,11 @@ impl LintPass for ShadowedBlockParamPass {
         // Top-level expressions (module scope, depth 0)
         check_expr_seq(&module.expressions, &mut scope, diagnostics);
 
+        // Each method gets a fresh scope: module-level script variables are not
+        // visible inside method bodies.
         for method in module.all_methods() {
-            check_method(method, &mut scope, diagnostics);
+            let mut method_scope = LintScope::new();
+            check_method(method, &mut method_scope, diagnostics);
         }
     }
 }
@@ -231,10 +234,14 @@ fn check_expr(expr: &Expression, scope: &mut LintScope, diagnostics: &mut Vec<Di
         Match { value, arms, .. } => {
             check_expr(value, scope, diagnostics);
             for arm in arms {
+                // Pattern variables are visible in the guard and body of their arm only.
+                scope.push();
+                define_pattern_vars_in_scope(&arm.pattern, scope);
                 if let Some(guard) = &arm.guard {
                     check_expr(guard, scope, diagnostics);
                 }
                 check_expr(&arm.body, scope, diagnostics);
+                scope.pop();
             }
         }
 
@@ -355,6 +362,31 @@ mod tests {
         let diags = lint(src);
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
         assert_eq!(diags[0].severity, Severity::Lint);
+        assert!(diags[0].message.contains("`x`"));
+    }
+
+    /// Script variable at module level must not leak into method bodies (BT-5080).
+    #[test]
+    fn script_variable_does_not_leak_into_methods() {
+        let src = "x := 5.\nObject subclass: Foo\n  foo => items do: [:x | x]";
+        let diags = lint(src);
+        assert!(diags.is_empty(), "Expected no lints, got: {diags:?}");
+    }
+
+    /// Variables from one method do not leak into the next method.
+    #[test]
+    fn method_locals_do_not_leak_into_other_methods() {
+        let src = "Object subclass: Foo\n  a => x := 1. x\n  b => items do: [:x | x]";
+        let diags = lint(src);
+        assert!(diags.is_empty(), "Expected no lints, got: {diags:?}");
+    }
+
+    /// Match-arm pattern variables are in scope for blocks in the arm body.
+    #[test]
+    fn match_arm_pattern_variable_shadowed_by_block_param() {
+        let src = "Object subclass: Foo\n  foo: v => v match: [{x, _} -> items do: [:x | x]]";
+        let diags = lint(src);
+        assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
         assert!(diags[0].message.contains("`x`"));
     }
 
