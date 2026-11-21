@@ -218,3 +218,58 @@ fn line_index_roundtrips_every_char_boundary() {
         assert_eq!(ix.position_to_offset(pos), offset, "offset {offset}");
     }
 }
+
+// ── Range formatting (BT-5080) ────────────────────────────────────────────
+
+fn apply_byte_edits(source: &str, edits: &[range_format::ByteEdit]) -> String {
+    let mut out = source.to_string();
+    for e in edits.iter().rev() {
+        out.replace_range(e.start..e.end, &e.new_text);
+    }
+    out
+}
+
+const TWO_CLASSES: &str =
+    "Object subclass: Alpha\n  one =>   1\n\nObject subclass: Beta\n  two =>   2\n";
+
+#[test]
+fn range_format_only_changes_overlapping_construct() {
+    let start = TWO_CLASSES.find("two").unwrap();
+    let edits = range_format::format_range_edits(TWO_CLASSES, start, start + 3).unwrap();
+    assert!(!edits.is_empty(), "selected construct needs formatting");
+    let out = apply_byte_edits(TWO_CLASSES, &edits);
+    let first = TWO_CLASSES.find("\n\nObject subclass: Beta").unwrap();
+    assert_eq!(
+        &out[..first],
+        &TWO_CLASSES[..first],
+        "text outside the selection must be unchanged"
+    );
+    assert_ne!(out, TWO_CLASSES);
+    assert!(
+        !out.contains("=>   2"),
+        "selected method is formatted: {out}"
+    );
+}
+
+#[test]
+fn range_format_other_construct_untouched_when_selecting_first() {
+    let start = TWO_CLASSES.find("one").unwrap();
+    let edits = range_format::format_range_edits(TWO_CLASSES, start, start).unwrap();
+    let out = apply_byte_edits(TWO_CLASSES, &edits);
+    assert!(out.ends_with("two =>   2\n"), "Beta unchanged: {out}");
+    assert!(!out.contains("=>   1"), "Alpha formatted: {out}");
+}
+
+#[test]
+fn range_format_full_range_matches_whole_document() {
+    let edits = range_format::format_range_edits(TWO_CLASSES, 0, TWO_CLASSES.len()).unwrap();
+    assert_eq!(
+        apply_byte_edits(TWO_CLASSES, &edits),
+        format_source(TWO_CLASSES).unwrap()
+    );
+}
+
+#[test]
+fn range_format_parse_error_returns_none() {
+    assert!(range_format::format_range_edits("@@@invalid@@@", 0, 3).is_none());
+}

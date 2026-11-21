@@ -496,7 +496,6 @@ pub fn resolve_receiver_class_context(
     native_types: Option<&NativeTypeRegistry>,
 ) -> Option<ReceiverClassContext> {
     let class_context = find_class_context(module, offset, false);
-    let type_map = infer_types(module, hierarchy, native_types);
     match &selector_lookup.receiver_hint {
         ReceiverHint::ClassReference(name) => Some(ReceiverClassContext {
             class_name: name.clone(),
@@ -518,7 +517,9 @@ pub fn resolve_receiver_class_context(
                     class_side,
                 })
         }
-        ReceiverHint::Expression(span) => type_map
+        // Inference is the expensive step; only the expression-receiver case
+        // needs it (BT-5080), so `self`/`super`/`ClassName` lookups skip it.
+        ReceiverHint::Expression(span) => infer_types(module, hierarchy, native_types)
             .get(*span)
             // A map shape (ADR 0147) resolves as its `Dictionary`.
             .and_then(InferredType::instance_class)
