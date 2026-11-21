@@ -369,8 +369,10 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   values -> List(V) => self delegate
 
   /// The values as a `List` snapshot — the one method `Enumerable` requires.
-  /// Gives `Ets` `do:`, `inject:into:`, `select:`, `collect:`, `detect:ifNone:`,
-  /// `anySatisfy:` and `count:` over a point-in-time copy of the values.
+  /// Gives `Ets` `do:`, `inject:into:`, `select:`, `reject:`, `collect:`,
+  /// `detect:`, `detect:ifNone:`, `anySatisfy:`, `allSatisfy:`, `noneSatisfy:`,
+  /// `includes:` (values, not keys; `includesKey:` is the key test) and `count:`
+  /// over a point-in-time copy of the values.
   elements -> List(V) => self values
 
   /// Evaluate `block` with each key and value of a snapshot taken up front

@@ -190,10 +190,15 @@ TestCase subclass: AnnouncementsTest
     received delete
 
   testAnnounceAndWaitNegativeDurationFailsLikeNegativeInteger =>
+    // A subscriber makes the wait use its timeout (an empty announcer returns
+    // before looking at it), so an unconverted Duration would raise here.
+    self.announcer when: TestEvent do: [:e | nil]
     asInteger := [
       self.announcer announceAndWait: (TestEvent payload: 1) timeout: -1
+      #returned
     ] on: Error do: [:e | e kind]
     asDuration := [
       self.announcer announceAndWait: (TestEvent payload: 1) timeout: (Duration milliseconds: -1)
+      #returned
     ] on: Error do: [:e | e kind]
     self assert: asDuration equals: asInteger

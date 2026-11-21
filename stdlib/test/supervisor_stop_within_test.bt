@@ -129,6 +129,20 @@ TestCase subclass: SupervisorStopWithinTest
     self deny: pool isAlive
     self assert: (self table at: #terminated) equals: #shutdown
 
+  testDynamicStopWithinAcceptsDuration =>
+    pool := (Bt4047PatientPool supervise) unwrap
+    (pool startChild: #{#tableName => #bt4047Shutdown}) unwrap
+    result := pool stopWithin: (Duration seconds: 10)
+    self assert: (self assertOk: result) equals: nil
+    self deny: pool isAlive
+
+  testDynamicStopWithinDurationTimesOutLikeInteger =>
+    pool := (Bt4047PatientPool supervise) unwrap
+    (pool startChild: #{#tableName => #bt4047Shutdown}) unwrap
+    result := pool stopWithin: (Duration milliseconds: 50)
+    self assert: result error kind equals: #timeout
+    self waitForDeathOf: pool
+
   testDynamicStopWithinGenerousWaitStopsCleanly =>
     pool := (Bt4047PatientPool supervise) unwrap
     (pool startChild: #{#tableName => #bt4047Shutdown}) unwrap
