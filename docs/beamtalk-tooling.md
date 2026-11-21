@@ -331,6 +331,7 @@ The release name must not contain `@` (it forms part of the `-sname` flag).
 | Directory | Contents |
 |-----------|----------|
 | `lib/<app>-<vsn>/ebin/` | Compiled `.beam` files for each app in the closure |
+| `lib/<app>-<vsn>/priv/` | An app's `priv/` directory, when it has one, copied from beside its source `ebin/` (dependency `priv/` is staged to `_build/deps/<name>/priv` at build time), so `code:priv_dir/1` resolves |
 | `erts-<vsn>/` | Bundled Erlang runtime (when `include-erts = true`) |
 | `releases/<vsn>/` | `.rel`, `start.boot`, `sys.config`, `vm.args` |
 | `releases/<vsn>/beamtalk-provenance.json` | OTP/beamtalk versions, `required_otp` range |
