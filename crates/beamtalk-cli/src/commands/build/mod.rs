@@ -122,6 +122,17 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
 
     let env = setup_build_environment(path)?;
 
+    // Serialise package builds of one project across processes (BT-5075): the
+    // build, dependency resolution and `beamtalk.lock` all write `_build/` and
+    // the lock. Held to the end of `build`; released on every exit path.
+    let _project_lock = if env.full_manifest.is_some() {
+        Some(crate::commands::dir_lock::lock_project_build(
+            &env.project_root,
+        )?)
+    } else {
+        None
+    };
+
     let options = prepare_options(&env, path, options);
     let options = &options;
 

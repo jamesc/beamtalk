@@ -10,7 +10,7 @@
 //!
 //! That distinction is why this file exists at all (adversarial-review
 //! follow-up, BT-3244): `muda` (the native menu backend `menu::build` goes
-//! through) enforces AppKit's rule that `NSMenuItem`s can only be
+//! through) enforces `AppKit`'s rule that `NSMenuItem`s can only be
 //! constructed on the process's actual main thread, and panics otherwise —
 //! confirmed by hand when a `menu::build` call was first tried as an
 //! ordinary `#[test]` (see `src/menu.rs`'s test module for where that was

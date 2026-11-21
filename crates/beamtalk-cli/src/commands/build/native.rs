@@ -7,12 +7,12 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 use crate::commands::deps::lockfile::{NativeLockSource, NativePackageLock};
 use beamtalk_core::build_layout::BuildLayout;
@@ -573,17 +573,60 @@ const REBAR3_ENV_ALLOWLIST: &[&str] = &[
     "AR",
     "MAKE",
     "PKG_CONFIG_PATH",
+    // Rust toolchain locations for rustler-style NIFs (BT-5103). Locations,
+    // flags and build outputs only; `CARGO_REGISTRIES_*_TOKEN` and
+    // `CARGO_REGISTRY_TOKEN` are secrets and stay withheld.
+    "CARGO_HOME",
+    "RUSTUP_HOME",
+    "RUSTUP_TOOLCHAIN",
+    "CARGO_TARGET_DIR",
+    "RUSTC",
+    "RUSTFLAGS",
+    // Go toolchain locations for Go-backed ports. `GOPROXY`/`GOPRIVATE` are
+    // withheld: a proxy URL may embed credentials.
+    "GOPATH",
+    "GOROOT",
+    "GOCACHE",
+    "GOMODCACHE",
+    "GOBIN",
+    // XDG base directories: where rebar3 finds its cache and `hex.config`
+    // (including credentials saved by `rebar3 hex auth`) when `HOME` alone
+    // is not the layout.
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
 ];
 
 /// Clear the inherited environment of a rebar3 command, then re-add only the
-/// [`REBAR3_ENV_ALLOWLIST`] entries that are set.
-fn apply_rebar3_env(cmd: &mut std::process::Command) {
+/// [`REBAR3_ENV_ALLOWLIST`] entries that are set. Returns the names passed
+/// (never values), for the `-v` log and the failure hint (BT-5103).
+fn apply_rebar3_env(cmd: &mut std::process::Command) -> Vec<&'static str> {
+    apply_rebar3_env_from(cmd, |k| std::env::var_os(k))
+}
+
+fn apply_rebar3_env_from(
+    cmd: &mut std::process::Command,
+    lookup: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> Vec<&'static str> {
     cmd.env_clear();
+    let mut passed = Vec::new();
     for var in REBAR3_ENV_ALLOWLIST {
-        if let Some(value) = std::env::var_os(var) {
+        if let Some(value) = lookup(var) {
             cmd.env(var, value);
+            passed.push(*var);
         }
     }
+    passed
+}
+
+/// Appended to a failed rebar3 run: the inner tool's error never mentions
+/// that the environment was restricted (BT-5103).
+fn rebar3_restricted_env_hint() -> &'static str {
+    "\nNote: rebar3 ran with a restricted environment (only an allowlist of variables is \
+     passed; secrets and unlisted toolchain settings are withheld). If a build tool \
+     could not find its toolchain or credentials, run with `-v` to see the variable \
+     names that were passed (names only), and see 'rebar3 environment' in \
+     docs/beamtalk-packages.md for the list and how to configure private hex packages."
 }
 
 /// Render one `{deps, [...]}` entry for `rebar.config` from the manifest.
@@ -943,7 +986,8 @@ fn compile_with_rebar3(
         .wrap_err("Failed to canonicalize rebar base dir")?;
     let rebar3_command = |subcommand: &str| {
         let mut cmd = rebar3_base_command(&rebar3);
-        apply_rebar3_env(&mut cmd);
+        let passed = apply_rebar3_env(&mut cmd);
+        debug!(subcommand, passed = ?passed, "rebar3 environment (names only)");
         cmd.arg(subcommand);
         // rebar3 reads rebar.config from cwd — run from _build/dev/native/
         cmd.current_dir(rebar_base_dir.as_std_path());
@@ -983,7 +1027,11 @@ fn compile_with_rebar3(
         let stdout = String::from_utf8_lossy(&output.stdout);
         let combined = format!("{stdout}{stderr}");
         // Surface rebar3 errors with context
-        miette::bail!("rebar3 compile failed:\n{}", combined.trim_end());
+        miette::bail!(
+            "rebar3 compile failed:\n{}\n{}",
+            combined.trim_end(),
+            rebar3_restricted_env_hint()
+        );
     }
 
     // Collect all ebin directories produced by rebar3
@@ -1177,6 +1225,60 @@ pub(crate) fn collect_rebar3_ebin_paths(layout: &BuildLayout) -> Vec<Utf8PathBuf
     paths
 }
 
+/// Module names of the installed Erlang/OTP, taken from its own code path so
+/// the list cannot drift from the OTP release in use. Empty (the check is then
+/// skipped, with a debug log) if `erl` cannot be run.
+fn otp_module_names() -> HashSet<String> {
+    let output = beamtalk_workspace::erl_command()
+        .args([
+            "-noshell",
+            "-eval",
+            "lists:foreach(fun({M,_,_}) -> io:format(\"~s~n\", [M]) end, \
+             code:all_available()), halt().",
+        ])
+        .output();
+    match output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect(),
+        other => {
+            warn!(
+                ?other,
+                "Could not list OTP modules; skipping the check that native modules do not \
+                 shadow OTP modules"
+            );
+            HashSet::new()
+        }
+    }
+}
+
+/// Reject a package's native module names that would shadow an OTP module
+/// (`native/lists.erl`) or sit in the `beamtalk_*` namespace the runtime owns.
+fn check_native_module_names(
+    package: &str,
+    modules: &[String],
+    otp_modules: &HashSet<String>,
+) -> Result<()> {
+    for module in modules {
+        if otp_modules.contains(module) {
+            miette::bail!(
+                "Native module '{module}' in package '{package}' has the same name as an \
+                 Erlang/OTP module and would replace it at runtime.\n\n  \
+                 Rename it, prefixing with the package name (e.g. '{package}_{module}')."
+            );
+        }
+        if module.starts_with("beamtalk_") {
+            miette::bail!(
+                "Native module '{module}' in package '{package}' is in the 'beamtalk_' \
+                 namespace reserved for the Beamtalk runtime.\n\n  \
+                 Rename it, prefixing with the package name (e.g. '{package}_{module}')."
+            );
+        }
+    }
+    Ok(())
+}
+
 /// ADR 0072 Phase 1: Check for native Erlang module name collisions across
 /// packages in the dependency graph.
 ///
@@ -1194,6 +1296,17 @@ pub(crate) fn check_native_module_collisions(
 
     // Collect native modules from root package
     let root_modules = discover_native_modules(project_root)?;
+    let dep_native_modules = resolved_deps
+        .iter()
+        .map(|dep| Ok((dep.name.as_str(), discover_native_modules(&dep.root)?)))
+        .collect::<Result<Vec<_>>>()?;
+    if !root_modules.is_empty() || dep_native_modules.iter().any(|(_, m)| !m.is_empty()) {
+        let otp = otp_module_names();
+        check_native_module_names(root_package_name, &root_modules, &otp)?;
+        for (dep_name, modules) in &dep_native_modules {
+            check_native_module_names(dep_name, modules, &otp)?;
+        }
+    }
 
     // Collect native modules from each dependency
     let mut module_owners: HashMap<String, Vec<String>> = HashMap::new();
@@ -1278,6 +1391,31 @@ mod rebar3_env_tests {
             !vars.iter().any(|(k, _)| k == "AWS_SECRET_ACCESS_KEY"),
             "{vars:?}"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn toolchain_location_variables_reach_the_build_step() {
+        // A fake build step that prints what it sees (BT-5103).
+        let mut cmd = std::process::Command::new("sh");
+        cmd.args(["-c", "echo \"$CARGO_HOME|$GOPATH|$HEX_API_KEY|$AWS_X\""]);
+        let lookup = |k: &str| match k {
+            "CARGO_HOME" => Some(OsString::from("/c")),
+            "GOPATH" => Some(OsString::from("/g")),
+            "HEX_API_KEY" | "AWS_X" => Some(OsString::from("secret")),
+            "PATH" => Some(OsString::from("/usr/bin:/bin")),
+            _ => None,
+        };
+        let passed = apply_rebar3_env_from(&mut cmd, lookup);
+        let out = cmd.output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "/c|/g||");
+        assert!(passed.contains(&"CARGO_HOME") && !passed.contains(&"HEX_API_KEY"));
+    }
+
+    #[test]
+    fn failure_hint_names_the_restriction_and_how_to_inspect_it() {
+        let hint = rebar3_restricted_env_hint();
+        assert!(hint.contains("restricted environment") && hint.contains("-v"));
     }
 
     #[test]

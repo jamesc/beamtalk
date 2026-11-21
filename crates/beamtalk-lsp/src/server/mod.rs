@@ -31,15 +31,16 @@ use tower_lsp::lsp_types::{
     CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, CodeActionResponse,
     CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, DocumentFormattingParams, DocumentRangeFormattingParams,
-    DocumentSymbolParams, DocumentSymbolResponse, Documentation, ExecuteCommandParams,
-    FoldingRange, FoldingRangeParams, GotoDefinitionParams, GotoDefinitionResponse, Hover,
-    HoverContents, HoverParams, InitializeParams, InitializeResult, InitializedParams,
-    MarkupContent, MarkupKind, MessageType, ParameterInformation, ParameterLabel, Range,
-    ReferenceParams, SignatureHelp, SignatureHelpParams, SignatureInformation, SymbolInformation,
-    TextEdit, TypeHierarchyItem, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
-    TypeHierarchySupertypesParams, Url, WorkspaceEdit, WorkspaceSymbolParams,
+    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
+    DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, Documentation,
+    ExecuteCommandParams, FoldingRange, FoldingRangeParams, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, InitializeResult,
+    InitializedParams, MarkupContent, MarkupKind, MessageType, ParameterInformation,
+    ParameterLabel, Range, ReferenceParams, SignatureHelp, SignatureHelpParams,
+    SignatureInformation, SymbolInformation, TextEdit, TypeHierarchyItem,
+    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url,
+    WorkspaceEdit, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -210,6 +211,15 @@ pub struct Backend {
     /// dedicated counter that only a genuine reopen touches makes that
     /// distinction unambiguous. See `did_close`'s doc for the full race.
     open_generation: Mutex<HashMap<Utf8PathBuf, u64>>,
+    /// Serialises "apply editor text + record its version" (`did_open`,
+    /// `did_change`) so a `did_open` that awaited a registry load cannot
+    /// write its older text over a newer `did_change` (BT-5078). Never held
+    /// across an `.await`; taken before `service`/`versions`.
+    text_sync: Mutex<()>,
+    /// Serialises sending `publishDiagnostics` against `did_close`'s clearing
+    /// publish, so a publish racing a close cannot leave ghost diagnostics on
+    /// a closed tab (BT-5078).
+    publish_lock: tokio::sync::Mutex<()>,
     /// Source for `open_generation`'s values — monotonic and global (not
     /// per-path) is sufficient: `did_close` only ever compares one path's
     /// before/after value against itself, never across paths.
@@ -223,6 +233,11 @@ pub struct Backend {
     dirty_files: Mutex<HashSet<Utf8PathBuf>>,
     /// Monotonic generation counter used to debounce `didChange` diagnostics per URI.
     diagnostic_generation: Mutex<HashMap<Url, u64>>,
+    /// Open files whose set of defined classes changed in an edit that has not
+    /// yet been followed by a cross-file republish. Set by every `did_change`;
+    /// consumed by whichever edit wins the debounce, so a superseded rename is
+    /// not lost (BT-5078).
+    pending_interface_change: Mutex<HashSet<Utf8PathBuf>>,
     /// Deferred preload config captured at initialize and consumed after handshake.
     preload_config: Mutex<Option<PreloadConfig>>,
     /// Paths of stdlib files loaded during preload; used to emit `beamtalk-stdlib://` URIs.
@@ -404,6 +419,13 @@ impl LanguageServer for Backend {
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         guard_notification("did_save", async move {
             self.handle_did_save(params).await;
+        })
+        .await;
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        guard_notification("did_change_watched_files", async move {
+            self.handle_did_change_watched_files(params).await;
         })
         .await;
     }

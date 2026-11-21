@@ -209,6 +209,17 @@ Advances git dependencies to the latest commit matching their spec (the latest t
 
 You can always edit `beamtalk.toml` directly instead of using `beamtalk deps add`. The CLI commands are convenience wrappers — the manifest file is the source of truth.
 
+### Concurrent beamtalk processes
+
+A CLI build, `beamtalk test`, a `deps` command and an editor-triggered build can run against one project at once. They share `_build/` and `beamtalk.lock`, so every operation that writes either takes one exclusive OS file lock, `_build/.build.lock`:
+
+- **Takes the lock:** `build` (and `run`, `repl` startup, `escript`, which build first), `test`, `lint`/`check` dependency resolution, `release`, `clean` (not `--dry-run`), `deps add` and `deps update`.
+- **Reads without it:** `deps list`, the LSP and MCP servers. Every file they read (`beamtalk.lock`, the cache sidecars, the `.app`, the corpus) is replaced by writing a temp file in the same directory and renaming it, so a reader sees the whole old file or the whole new one.
+
+A second process waits and prints `waiting for another beamtalk process in <dir>…`, then proceeds when the lock frees. There is no timeout and no flag. The lock is held by the kernel, so a crashed or killed process never leaves a stale lock; a leftover `.build.lock` file is harmless. `beamtalk repl` holds the lock only while it builds, not for the lifetime of the REPL or its workspace.
+
+Lock order, outermost first: project build lock (`_build/.build.lock`), then the registry cache lock (`~/.beamtalk/registry/<hash>/.lock`), then the native build lock (`_build/dev/native/.lock`). A workspace lock (the single-writer workspace metadata lock) is taken only after a build has returned, never while the build lock is held.
+
 ## Stdlib or Package?
 
 When deciding whether a class belongs in the standard library or in its own package, apply one rule:
@@ -637,4 +648,15 @@ The [Package Registry](#package-registry) section above (registry dependency res
 - **Release URL schemes.** A release's `git` URL comes from the index, which is third-party data. Only `https://`, `ssh://` and scp-style `user@host:path` are accepted; `file://` is accepted only when the registry itself is local. `http://` and `git://` are rejected for registry releases, and produce a warning when written directly in a manifest.
 - **Native git dependencies** (`[native.dependencies]`) are screened with the same rules as `[dependencies]` git URLs at manifest parse time.
 - **`publish`** requires an exact `major.minor.patch` version, strips credentials (`user:token@`) from the `origin` URL before it is written to the index, and stages only `packages/<name>.toml` in the index clone.
-- **`rebar3` environment.** `rebar3` runs with a cleared environment plus an allowlist (PATH, HOME, locale, proxy and CA settings, `SSH_AUTH_SOCK`, non-secret `GIT_*` configuration such as `GIT_SSH_COMMAND` and `GIT_ASKPASS`, rebar/hex/Erlang and C-toolchain variables), so native dependency build code does not see unrelated secrets.
+- **`rebar3` environment.** `rebar3` runs with a cleared environment plus an exact-name allowlist (no prefix wildcards), so native dependency build code does not see unrelated secrets. Anything not listed is withheld. The list (`REBAR3_ENV_ALLOWLIST` in `crates/beamtalk-cli/src/commands/build/native.rs`):
+  - Process and locale: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TERM`, `TMPDIR`, `TMP`, `TEMP`, `TZ`.
+  - Windows locations: `SystemRoot`, `SYSTEMROOT`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `PATHEXT`, `COMSPEC`, `HOMEDRIVE`, `HOMEPATH`.
+  - Network and CA: `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY` (and lower-case forms), `SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`.
+  - Git: `SSH_AUTH_SOCK`, `GIT_SSH`, `GIT_SSH_COMMAND`, `GIT_ASKPASS`, `SSH_ASKPASS`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_NOSYSTEM`, `GIT_EXEC_PATH` (`GIT_SSL_NO_VERIFY` is not forwarded).
+  - rebar3, hex, Erlang: `REBAR_CACHE_DIR`, `REBAR_CONFIG`, `REBAR_GLOBAL_CONFIG_DIR`, `REBAR_COLOR`, `REBAR_PROFILE`, `HEX_HOME`, `HEX_MIRROR`, `HEX_CDN`, `HEX_API_URL`, `HEX_HTTP_TIMEOUT`, `HEX_HTTP_CONCURRENCY`, `ERL_LIBS`, `ERL_FLAGS`, `ERL_AFLAGS`, `ERL_ZFLAGS`.
+  - C toolchain: `CC`, `CXX`, `CFLAGS`, `CXXFLAGS`, `LDFLAGS`, `CPPFLAGS`, `AR`, `MAKE`, `PKG_CONFIG_PATH`.
+  - Rust (rustler NIFs): `CARGO_HOME`, `RUSTUP_HOME`, `RUSTUP_TOOLCHAIN`, `CARGO_TARGET_DIR`, `RUSTC`, `RUSTFLAGS` — locations and flags only.
+  - Go: `GOPATH`, `GOROOT`, `GOCACHE`, `GOMODCACHE`, `GOBIN`. `GOPROXY` and `GOPRIVATE` are withheld because a proxy URL may embed credentials.
+  - XDG base directories: `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME` (where rebar3 keeps its cache and `hex.config`).
+  - **Secrets are never passed**, including `HEX_API_KEY`, `CARGO_REGISTRY_TOKEN`, `CARGO_REGISTRIES_*_TOKEN` and cloud credentials. `[native.dependencies]` has no private-registry setting. A private hex organisation is configured the way rebar3 does it: run `rebar3 hex organization auth <org>` (or `rebar3 hex auth`) once, which stores the credential in rebar3's `hex.config` under `~/.config/rebar3` (or `REBAR_GLOBAL_CONFIG_DIR` / `XDG_CONFIG_HOME`, both allowlisted), and the build reads it from there.
+  - **Seeing what was passed.** A failed native build ends with a note that rebar3 ran with a restricted environment. Re-run with `-v` (for example `beamtalk build -v`) to log the names of the variables passed to each rebar3 call (names only, never values).

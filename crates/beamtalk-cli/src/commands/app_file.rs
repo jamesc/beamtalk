@@ -10,7 +10,6 @@
 
 use camino::Utf8Path;
 use miette::{Context, IntoDiagnostic, Result};
-use std::fs;
 
 use crate::beam_compiler::escape_erlang_string;
 use crate::commands::util::format_sorted_atom_list;
@@ -82,6 +81,7 @@ pub struct AliasMetadata {
 /// The `.app` file is written to `{build_dir}/{package_name}.app` and contains:
 /// - `{description, ...}` from manifest
 /// - `{vsn, ...}` from manifest
+/// - `{licenses, [...]}` from manifest, when `[package] licenses` is set
 /// - `{modules, [...]}` auto-discovered from compiled modules
 /// - `{registered, []}`
 /// - `{applications, [kernel, stdlib, ...bt_deps..., ...hex_deps..., beamtalk_runtime, beamtalk_workspace]}`
@@ -114,7 +114,7 @@ pub fn generate_app_file(
     );
     let app_path = build_dir.join(format!("{}.app", manifest.name));
 
-    fs::write(&app_path, app_content)
+    crate::commands::util::write_atomic_if_changed(&app_path, &app_content, ".beamtalk-app.")
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to write .app file '{app_path}'"))?;
 
@@ -141,6 +141,16 @@ fn format_app_file(
             .unwrap_or("A beamtalk package"),
     );
     let version = escape_erlang_string(&manifest.version);
+    let licenses_entry = match manifest.licenses.as_deref() {
+        Some(licenses) if !licenses.is_empty() => {
+            let items: Vec<String> = licenses
+                .iter()
+                .map(|l| format!("\"{}\"", escape_erlang_string(l)))
+                .collect();
+            format!("\n    {{licenses, [{}]}},", items.join(", "))
+        }
+        _ => String::new(),
+    };
 
     let modules_list = format_sorted_atom_list(module_names);
     let classes_list = format_classes_list(class_metadata);
@@ -157,7 +167,7 @@ fn format_app_file(
     format!(
         r#"{{application, {name}, [
     {{description, "{description}"}},
-    {{vsn, "{version}"}},
+    {{vsn, "{version}"}},{licenses}
     {{modules, [{modules}]}},
     {{registered, []}},
     {{applications, [{applications}]}},{mod_entry}
@@ -169,6 +179,7 @@ fn format_app_file(
         name = manifest.name,
         description = description,
         version = version,
+        licenses = licenses_entry,
         modules = modules_list,
         applications = applications_list,
         classes = classes_list,
@@ -354,6 +365,30 @@ mod tests {
             licenses: None,
             strict_deps: false,
         }
+    }
+
+    #[test]
+    fn test_format_app_file_writes_licenses() {
+        let mut manifest = test_manifest("my_app", "0.1.0", None);
+        manifest.licenses = Some(vec!["Apache-2.0".to_string(), "MIT".to_string()]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[], None);
+        assert!(
+            result.contains("{licenses, [\"Apache-2.0\", \"MIT\"]},"),
+            "{result}"
+        );
+
+        let none = format_app_file(
+            &test_manifest("my_app", "0.1.0", None),
+            &[],
+            &[],
+            None,
+            &[],
+            &[],
+            &[],
+            &[],
+            None,
+        );
+        assert!(!none.contains("licenses"), "{none}");
     }
 
     #[test]
