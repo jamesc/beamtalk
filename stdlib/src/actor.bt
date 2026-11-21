@@ -666,6 +666,8 @@ Object subclass: Actor
   withTimeout: ms :: Timeout | Duration -> TimeoutProxy =>
     proxy := TimeoutProxy spawn
     proxy setTarget: self
+    // Redundant with setTimeoutMs:'s own Duration conversion, but kept: the
+    // ADR 0114 spike test refers to this branch (BT-5090).
     (ms isKindOf: Duration) ifTrue: [
       proxy setTimeoutMs: ms asMilliseconds
     ] ifFalse: [proxy setTimeoutMs: ms]

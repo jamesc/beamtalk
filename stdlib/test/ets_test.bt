@@ -351,3 +351,50 @@ TestCase subclass: EtsTest
     self should: [leaked at: "k"] raise: #access_denied
     a stop
     b stop
+
+  // === BT-5090: Dictionary-parity selectors ===
+  testAtIfPresentIfAbsent =>
+    self.table at: "n" put: 2
+    self
+      assert: (self.table
+        at: "n"
+        ifPresent: [:v | v * 10]
+        ifAbsent: [0])
+      equals: 20
+    self
+      assert: (self.table
+        at: "zz"
+        ifPresent: [:v | v * 10]
+        ifAbsent: [0])
+      equals: 0
+
+  testAtIfPresentIfAbsentTreatsStoredNilAsPresent =>
+    self.table at: "k" put: nil
+    self
+      assert: (self.table
+        at: "k"
+        ifPresent: [:v | #present]
+        ifAbsent: [#absent])
+      equals: #present
+    self assert: (self.table at: "k") equals: nil
+
+  testDoWithKeyMatchesKeysAndValuesDo =>
+    self.table at: "a" put: 1
+    self.table at: "b" put: 2
+    seen := Ets new: #etsTestDoWithKey type: #set
+    self.table doWithKey: [:k :v | seen at: k put: v]
+    self assert: seen asDictionary equals: #{"a" => 1, "b" => 2}
+    seen delete
+
+  testDoIteratesValuesViaEnumerable =>
+    // `do:` already comes from `Enumerable` (it was never missing)
+    self.table at: "a" put: 1
+    self.table at: "b" put: 2
+    sum := Ets new: #etsTestDoSum type: #set
+    self.table do: [:v | sum at: #total increment: v]
+    self assert: (sum at: #total) equals: 3
+    sum delete
+
+  testAtAnswersNilForMissingKeyUnlikeDictionary =>
+    self assert: (self.table at: "missing") equals: nil
+    self should: [#{"a" => 1} at: "missing"] raise: #key_error

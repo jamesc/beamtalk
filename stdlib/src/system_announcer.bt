@@ -52,5 +52,5 @@ sealed Announcer subclass: SystemAnnouncer
 
   /// PROHIBITED on SystemAnnouncer — raises UnsupportedOperation.
   /// The system bus is async-only (ADR 0093 §1).
-  announceAndWait: anEvent :: Announcement timeout: _ms :: Integer -> Nil =>
+  announceAndWait: anEvent :: Announcement timeout: _ms :: Integer | Duration -> Nil =>
     (Erlang beamtalk_announcements) systemAnnounceAndWaitError: anEvent

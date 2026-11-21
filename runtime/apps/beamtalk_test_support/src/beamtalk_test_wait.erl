@@ -27,6 +27,8 @@ caller to forget to check.
     value/2,
     dead/1,
     dead/2,
+    monitored_by/2,
+    monitored_by/3,
     class/1,
     class/2,
     sync/1
@@ -90,6 +92,36 @@ poll(Step, Deadline, IntervalMs) ->
                     poll(Step, Deadline, IntervalMs)
             end
     end.
+
+-doc """
+Block until `Pid` itself lists the process registered as `Name` in its
+`monitored_by` set (polls `process_info/2`; raises
+`error({wait_timeout, {predicate, false}})` if it never does, or `Pid` is dead).
+
+Use it before killing a process that a watcher (e.g. `beamtalk_class_monitor`)
+must see die with reason `killed`. A watcher's `watch/2` reply only means it
+*requested* the monitor; that request reaches `Pid` as a signal, and the BEAM
+orders signals only per sender pair, so a test's own `exit(Pid, kill)` can
+overtake it. The watcher then gets `'DOWN'` with `noproc` -- which the class
+monitor treats as a deliberate stop and does not restart (BT-5102, BT-5106).
+""".
+-spec monitored_by(pid(), atom()) -> ok.
+monitored_by(Pid, Name) ->
+    monitored_by(Pid, Name, ?DEFAULT_TIMEOUT_MS).
+
+-doc "`monitored_by/2` with an explicit budget in milliseconds.".
+-spec monitored_by(pid(), atom(), non_neg_integer()) -> ok.
+monitored_by(Pid, Name, TimeoutMs) when is_pid(Pid), is_atom(Name) ->
+    until(
+        fun() ->
+            case {whereis(Name), process_info(Pid, monitored_by)} of
+                {undefined, _} -> false;
+                {_, undefined} -> false;
+                {Watcher, {monitored_by, By}} -> lists:member(Watcher, By)
+            end
+        end,
+        TimeoutMs
+    ).
 
 -doc "`dead/2` with the default budget.".
 -spec dead(pid() | [pid()]) -> ok.

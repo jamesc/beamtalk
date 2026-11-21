@@ -173,13 +173,7 @@ await_restart_called(Name) ->
 %% the target confirms the monitor makes the `'DOWN'` reason `killed`.
 watch_armed(ClassName, Pid) ->
     ok = beamtalk_class_monitor:watch(ClassName, Pid),
-    Monitor = whereis(beamtalk_class_monitor),
-    beamtalk_test_wait:until(fun() ->
-        case process_info(Pid, monitored_by) of
-            {monitored_by, By} -> lists:member(Monitor, By);
-            undefined -> false
-        end
-    end).
+    beamtalk_test_wait:monitored_by(Pid, beamtalk_class_monitor).
 
 %% What the registered monitor was doing when a wait for it expired, as a list
 %% of lines (EUnit truncates deeply nested terms). Its own event log shows
