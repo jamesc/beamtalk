@@ -349,10 +349,11 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp resume_or_start(token, meta) do
     case token && SessionRegistry.checkout(token) do
       {:resumed, session_id, pid} ->
-        if Workspace.session_alive?(pid) do
+        if Workspace.session_alive?(pid) and attach_resumed(pid) do
           {:ok, session_id, pid, :resumed}
         else
-          # Stale entry (workspace restarted): discard it and start fresh.
+          # Stale entry (workspace restarted, or the session idled out while the
+          # tab was away): discard it and start fresh.
           SessionRegistry.discard(token)
           start_fresh(token, meta)
         end
@@ -360,6 +361,16 @@ defmodule BtAttachWeb.WorkspaceLive do
       _miss ->
         start_fresh(token, meta)
     end
+  end
+
+  # BT-5084: resuming attaches this LiveView to the session. `attach` answers
+  # `gone` when the session stopped (a detached session whose idle period ran out)
+  # between the liveness probe and now; the caller then starts a fresh one instead
+  # of binding to a dead pid. Any other outcome (including an older workspace
+  # without the call) keeps the resume, as before; `bind_session/3` attaches again
+  # and logs a failure.
+  defp attach_resumed(pid) do
+    ws_client().attach_session(pid, self()) != {:error, :gone}
   end
 
   # Origin/debug metadata for a freshly-created workspace session: always the

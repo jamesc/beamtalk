@@ -230,6 +230,9 @@ defmodule BtAttach.Workspace do
   def attach_session(session_pid, client_pid) when is_pid(session_pid) and is_pid(client_pid) do
     case rpc(:beamtalk_repl_shell, :attach, [session_pid, client_pid]) do
       :ok -> :ok
+      # BT-5084: `attach` is a call; `gone` means the session stopped (its idle
+      # period ran out) between the caller finding it and attaching.
+      :gone -> {:error, :gone}
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
       other -> {:error, {:unexpected_reply, other}}
     end
