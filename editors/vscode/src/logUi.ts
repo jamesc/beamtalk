@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { registerLogLevelSync } from "./logLevelSync";
 import { state } from "./extensionState";
+import { registerLogLevelSync } from "./logLevelSync";
 
 const LOG_LEVELS = [
   "debug",

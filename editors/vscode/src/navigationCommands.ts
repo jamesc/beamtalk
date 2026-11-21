@@ -4,13 +4,13 @@
 import * as vscode from "vscode";
 import { resolveClassDocument } from "./documentResolution";
 import { resolveDeclarationOffset } from "./symbolLookup";
+import { openAliasSourceDocument, openStdlibDocumentForClass } from "./virtualDocuments";
 import type {
   ClassItemNode,
   MethodItemNode,
   StateVarItemNode,
   TypeAliasItemNode,
 } from "./workspaceTreeView";
-import { openAliasSourceDocument, openStdlibDocumentForClass } from "./virtualDocuments";
 
 /** Commands that open class, type-alias, method and state-variable source. */
 export function registerNavigationCommands(context: vscode.ExtensionContext): void {
@@ -164,7 +164,7 @@ export function registerNavigationCommands(context: vscode.ExtensionContext): vo
     vscode.commands.registerCommand(
       "beamtalk.navigateToStateVar",
       async (node?: StateVarItemNode) => {
-        if (!node || node.kind !== "state-item") {
+        if (node?.kind !== "state-item") {
           await vscode.window.showInformationMessage(
             "Select a state variable in Workspace Explorer first."
           );

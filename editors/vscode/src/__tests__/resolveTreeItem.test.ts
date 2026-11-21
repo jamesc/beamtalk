@@ -26,6 +26,14 @@ function blankItem(): vscode.TreeItem {
 
 const noToken = {} as unknown as vscode.CancellationToken;
 
+/** Asserts the resolved item carries a markdown tooltip, then returns its text. */
+function tooltipValue(item: vscode.TreeItem | undefined): string {
+  expect(item).toBeDefined();
+  const tooltip = item?.tooltip as { value: string } | undefined;
+  expect(tooltip).toBeDefined();
+  return (tooltip as { value: string }).value;
+}
+
 /**
  * A fake TextDocument backed by a plain string, matching what the fast path
  * needs. `uri` mirrors what real `openTextDocument` returns (a document
@@ -134,7 +142,7 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
       classInfo,
     };
     const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
-    expect((resolved?.tooltip as { value: string }).value).toContain("deposit:");
+    expect(tooltipValue(resolved)).toContain("deposit:");
     // The whole point of the fast path: skip the full-file symbol computation
     // every sidebar hover previously paid for, on top of the hover request
     // itself — see the comment on `_lspHoverTooltip`.
@@ -161,7 +169,7 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
       classInfo,
     };
     const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
-    expect((resolved?.tooltip as { value: string }).value).toContain("deposit:");
+    expect(tooltipValue(resolved)).toContain("deposit:");
     expect(executeCommandMock).toHaveBeenCalledWith(
       "vscode.executeDocumentSymbolProvider",
       expect.anything()
@@ -192,7 +200,7 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
     });
     const node: ClassItemNode = { kind: "class-item", info: classInfo };
     const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
-    expect((resolved?.tooltip as { value: string }).value).toContain("Account");
+    expect(tooltipValue(resolved)).toContain("Account");
   });
 
   // BT-3497: unlike methods/state vars, a class-item tooltip previously had
@@ -217,7 +225,7 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
 
     const node: ClassItemNode = { kind: "class-item", info: classInfo };
     const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
-    const tooltip = (resolved?.tooltip as { value: string }).value;
+    const tooltip = tooltipValue(resolved);
     expect(tooltip).toBe("Holds a customer's balance and supports deposits.");
     expect(tooltip).not.toContain("**Account**");
   });
@@ -229,7 +237,7 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
       info: { ...classInfo, actor_count: 2 },
     };
     const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
-    const tooltip = (resolved?.tooltip as { value: string }).value;
+    const tooltip = tooltipValue(resolved);
     // SOURCE (the default fixture) has no /// comment above `class Account`.
     expect(tooltip).toContain("Account");
     expect(tooltip).toContain("2 running instances");
@@ -263,8 +271,8 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
     const instanceResolved = await provider.resolveTreeItem(blankItem(), instanceNode, noToken);
     const classResolved = await provider.resolveTreeItem(blankItem(), classNode, noToken);
 
-    expect((instanceResolved?.tooltip as { value: string }).value).toContain("(instance)");
-    expect((classResolved?.tooltip as { value: string }).value).toContain("(class)");
+    expect(tooltipValue(instanceResolved)).toContain("(instance)");
+    expect(tooltipValue(classResolved)).toContain("(class)");
     // The fast path resolves both without ever hitting the ambiguous
     // document-symbol fallback.
     expect(executeCommandMock).not.toHaveBeenCalledWith(
@@ -298,8 +306,8 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
     const instanceResolved = await provider.resolveTreeItem(blankItem(), instanceNode, noToken);
     const classResolved = await provider.resolveTreeItem(blankItem(), classNode, noToken);
 
-    expect((instanceResolved?.tooltip as { value: string }).value).toContain("(instance)");
-    expect((classResolved?.tooltip as { value: string }).value).toContain("(class)");
+    expect(tooltipValue(instanceResolved)).toContain("(instance)");
+    expect(tooltipValue(classResolved)).toContain("(class)");
     expect(executeCommandMock).not.toHaveBeenCalledWith(
       "vscode.executeDocumentSymbolProvider",
       expect.anything()
@@ -330,7 +338,7 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
 
     it("builds the tooltip from the wire-supplied signature/doc, never a file read or LSP round trip", async () => {
       const resolved = await provider.resolveTreeItem(blankItem(), syntheticNode, noToken);
-      const tooltip = (resolved?.tooltip as { value: string }).value;
+      const tooltip = tooltipValue(resolved);
       expect(tooltip).toContain("withBalance: aValue -> Account");
       expect(tooltip).toContain("compiler-generated");
       expect(tooltip).toContain("Compiler-derived copy-setter for slot `balance`.");
@@ -350,7 +358,7 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
         classInfo,
       };
       const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
-      expect((resolved?.tooltip as { value: string }).value).toContain("withBalance:");
+      expect(tooltipValue(resolved)).toContain("withBalance:");
     });
   });
 
@@ -381,7 +389,7 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
 
     it("never attempts a file read or LSP round trip for its tooltip", async () => {
       const resolved = await provider.resolveTreeItem(blankItem(), unindexedNode, noToken);
-      const tooltip = (resolved?.tooltip as { value: string }).value;
+      const tooltip = tooltipValue(resolved);
       expect(tooltip).toContain("supervisionSpec");
       expect(tooltip).toContain("no source available");
       expect(openTextDocumentMock).not.toHaveBeenCalled();
@@ -426,7 +434,7 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
         definingClass: "Actor",
       };
       const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
-      const tooltip = (resolved?.tooltip as { value: string }).value;
+      const tooltip = tooltipValue(resolved);
 
       expect(stdlibDocOpener).toHaveBeenCalledWith(stdlibClassInfo);
       expect(openTextDocumentMock).not.toHaveBeenCalled();
@@ -449,7 +457,7 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
         classInfo: stdlibClassInfo,
       };
       const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
-      const tooltip = (resolved?.tooltip as { value: string }).value;
+      const tooltip = tooltipValue(resolved);
 
       expect(stdlibDocOpener).toHaveBeenCalledWith(stdlibClassInfo);
       expect(tooltip).toContain("The process id backing this actor.");
@@ -466,7 +474,7 @@ describe("sidebar hover tooltip resolution (resolveTreeItem)", () => {
         definingClass: "Actor",
       };
       const resolved = await provider.resolveTreeItem(blankItem(), node, noToken);
-      const tooltip = (resolved?.tooltip as { value: string }).value;
+      const tooltip = tooltipValue(resolved);
 
       expect(openTextDocumentMock).not.toHaveBeenCalled();
       expect(tooltip).toContain("spawn");
