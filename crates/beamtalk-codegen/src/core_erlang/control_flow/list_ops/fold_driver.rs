@@ -796,7 +796,14 @@ impl CoreErlangGenerator {
         let guard_selector = op.guard_selector().to_string();
         let fold_call = |lambda: &str, init: Document<'static>, wrapped: bool, result: &str| {
             if keyed {
-                keyed_foldl_call_doc(lambda, init, &keyed_recv_var, &guard_selector, wrapped, result)
+                keyed_foldl_call_doc(
+                    lambda,
+                    init,
+                    &keyed_recv_var,
+                    &guard_selector,
+                    wrapped,
+                    result,
+                )
             } else {
                 ThreadingPlan::foldl_call_doc(lambda, init, &safe_list_var, result)
             }
