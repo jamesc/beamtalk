@@ -7,8 +7,8 @@
 /// delegating to the superclass implementation using "super".
 ///
 /// IMPORTANT: Load counter.bt first to define the Counter class:
-///   > :load examples/counter.bt
-///   > :load examples/logging_counter.bt
+///   > Workspace load: "examples/getting-started/src/counter.bt"
+///   > Workspace load: "examples/getting-started/src/logging_counter.bt"
 Counter subclass: LoggingCounter
 
   // Override increment to add logging before delegating to superclass
