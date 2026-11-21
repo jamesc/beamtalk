@@ -52,6 +52,10 @@ A leaf module: it calls only OTP.
     sweep_stale_staging_dirs/1
 ]).
 
+-ifdef(TEST).
+-export([strip_namespace_prefix/2]).
+-endif.
+
 %% How old a `temp_path/1` leftover must be before a sweep deletes it. A live
 %% writer renames its temp file within moments of writing it, so a file this
 %% old can only be a crashed writer's. The one value every workspace sweep uses.
@@ -77,7 +81,11 @@ component-prefix test. Symlinks are resolved on both sides before comparing
 (each existing component is read with `file:read_link_all/1`), so a link
 inside the root that points outside it is not inside either. A component that
 does not exist yet is taken as written, so a file about to be created is
-judged by its real parent.
+judged by its real parent. On Windows an absolute link target comes back with
+an NT or Win32 namespace prefix (`\??\C:\x`, `\\?\C:\x`); it is removed
+before comparing, so a root reached through a link still contains its files
+(BT-5122). 8.3 short names (`RUNNER~1`) are not expanded: a root and path
+must spell each component the same way.
 """.
 -spec path_inside(file:filename(), file:filename()) -> boolean().
 path_inside(Root, Path) ->
@@ -150,10 +158,42 @@ real_path([C | Rest], Acc, Hops) ->
         end,
     case file:read_link_all(Cur) of
         {ok, Target} ->
-            Abs = filename:absname(Target, filename:dirname(Cur)),
+            Abs = filename:absname(
+                strip_namespace_prefix(Target, os:type()), filename:dirname(Cur)
+            ),
             real_path(filename:split(Abs) ++ Rest, "", Hops + 1);
         {error, _} ->
             real_path(Rest, Cur, Hops)
+    end.
+
+%% A Windows link target without its namespace prefix (BT-5122).
+%% `file:read_link_all/1` reports an absolute target as the reparse point
+%% stores it: `\??\C:\x` (NT namespace) or `\\?\C:\x` (Win32
+%% long-path form), and a UNC one as `\??\UNC\srv\share`. Kept, the
+%% prefix splits into extra components and the target never compares equal
+%% to the same directory written as `C:/x`. Either slash may appear. Other
+%% systems are untouched: there `/??/x` is an ordinary path.
+-spec strip_namespace_prefix(string(), {atom(), atom()}) -> string().
+strip_namespace_prefix(Target, {win32, _}) ->
+    case strip_one_prefix(Target, ["\\??\\", "\\\\?\\", "/??/", "//?/"]) of
+        {ok, Rest} ->
+            case strip_one_prefix(Rest, ["UNC\\", "UNC/"]) of
+                {ok, Share} -> "\\\\" ++ Share;
+                none -> Rest
+            end;
+        none ->
+            Target
+    end;
+strip_namespace_prefix(Target, _OsType) ->
+    Target.
+
+-spec strip_one_prefix(string(), [string()]) -> {ok, string()} | none.
+strip_one_prefix(_Str, []) ->
+    none;
+strip_one_prefix(Str, [Prefix | More]) ->
+    case lists:prefix(Prefix, Str) of
+        true -> {ok, lists:nthtail(length(Prefix), Str)};
+        false -> strip_one_prefix(Str, More)
     end.
 
 -doc """

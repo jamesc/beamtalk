@@ -67,13 +67,45 @@ path_inside_symlink_test_() ->
                 beamtalk_workspace_file:path_inside(Root, filename:join(Root, "inner/a.bt"))
             ),
             %% A root reached through a link compares equal to its target.
-            ?_assert(
-                beamtalk_workspace_file:path_inside(
-                    filename:join(Dir, "rootlink"), filename:join(Root, "src/a.bt")
-                )
+            %% On failure, show the raw link target: on Windows it is the
+            %% form `file:read_link_all/1` reports (BT-5122).
+            ?_assertEqual(
+                {true, file:read_link_all(filename:join(Dir, "rootlink"))},
+                {
+                    beamtalk_workspace_file:path_inside(
+                        filename:join(Dir, "rootlink"), filename:join(Root, "src/a.bt")
+                    ),
+                    file:read_link_all(filename:join(Dir, "rootlink"))
+                }
             )
         ]
     end}.
+
+%% BT-5122: Windows reports an absolute link target with an NT or Win32
+%% namespace prefix; it is removed so the target compares equal to the same
+%% directory written plainly. Other systems keep the target as it is.
+strip_namespace_prefix_test_() ->
+    Win = {win32, nt},
+    Strip = fun beamtalk_workspace_file:strip_namespace_prefix/2,
+    [
+        ?_assertEqual("C:\\Users\\proj", Strip("\\??\\C:\\Users\\proj", Win)),
+        ?_assertEqual("C:\\Users\\proj", Strip("\\\\?\\C:\\Users\\proj", Win)),
+        ?_assertEqual("C:/Users/proj", Strip("//?/C:/Users/proj", Win)),
+        ?_assertEqual("C:/Users/proj", Strip("/??/C:/Users/proj", Win)),
+        ?_assertEqual("\\\\srv\\share\\proj", Strip("\\??\\UNC\\srv\\share\\proj", Win)),
+        ?_assertEqual("\\\\srv\\share\\proj", Strip("\\\\?\\UNC\\srv\\share\\proj", Win)),
+        %% Already plain, or relative: unchanged.
+        ?_assertEqual("C:\\Users\\proj", Strip("C:\\Users\\proj", Win)),
+        ?_assertEqual("src", Strip("src", Win)),
+        %% The stripped form splits like the plain one.
+        ?_assertEqual(
+            filename:split("C:/Users/proj"),
+            filename:split(Strip("\\??\\C:\\Users\\proj", Win))
+        ),
+        %% Not Windows: `/??/x` is an ordinary path and is kept.
+        ?_assertEqual("/??/x", Strip("/??/x", {unix, linux})),
+        ?_assertEqual("//?/x", Strip("//?/x", {unix, darwin}))
+    ].
 
 make_link_fixture() ->
     Dir = beamtalk_test_fs:tmp_dir("bt5070_path_inside"),
