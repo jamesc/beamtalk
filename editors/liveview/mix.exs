@@ -94,7 +94,7 @@ defmodule BtAttach.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      {:phoenix, "~> 1.7.14"},
+      {:phoenix, "~> 1.8.16"},
       {:phoenix_html, "~> 4.1"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       # Pinned to the 1.0.x line: 1.1 swapped the LiveViewTest DOM parser to
@@ -112,7 +112,7 @@ defmodule BtAttach.MixProject do
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
-      {:dns_cluster, "~> 0.1.1"},
+      {:dns_cluster, "~> 0.3.1"},
       {:bandit, "~> 1.5"},
       # OIDC authorization-code + PKCE for the authenticated front (ADR 0091
       # Decision 1). Assent is a lightweight, framework-agnostic auth library

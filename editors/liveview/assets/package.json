@@ -4,14 +4,14 @@
   "private": true,
   "description": "JS deps for editors/liveview. CodeMirror 6 powers the cockpit's code editor (BT-2538); it is BUNDLED into priv/static/assets/app.js by esbuild, so the shipped release stays npm-free — only the build needs node (provisioned via .tool-versions / mise). playwright is test-only, for the browser e2e suite (mix test --only playwright). See README 'Assets'.",
   "dependencies": {
-    "@codemirror/autocomplete": "^6.18.0",
-    "@codemirror/commands": "^6.7.1",
-    "@codemirror/language": "^6.10.8",
-    "@codemirror/lint": "^6.8.0",
+    "@codemirror/autocomplete": "^6.20.4",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/lint": "^6.9.8",
     "@codemirror/state": "^6.5.0",
-    "@codemirror/view": "^6.36.1"
+    "@codemirror/view": "^6.43.15"
   },
   "devDependencies": {
-    "playwright": "1.55.1"
+    "playwright": "1.65.1"
   }
 }
