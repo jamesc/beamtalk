@@ -76,7 +76,7 @@ fixture_reader_tests := "(" + corpus_tests + ") & test(/shared_corpus|match_the_
 #        + just test-integration test-mcp test-repl-protocol (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-generated-builtins check-codegen-boundary check-surface-drift test-grammar test-github-extension test-vscode test-hermetic-home
+ci: build lint check-cli-reference test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-generated-builtins check-codegen-boundary check-surface-drift test-grammar test-github-extension test-vscode test-hermetic-home
 
 [windows]
 ci: build clippy fmt-check-rust test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift
@@ -976,18 +976,57 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-repo lint-docs-refs
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-repo lint-docs-refs lint-env-docs
 
 # The repo-wide lint-* recipes and script tests that need only the toolchain CI's
 # lint job has. `lint` runs this group and ci.yml's lint job runs it by name, so
 # the two cannot diverge (BT-5032). Add a new lint here, not to either list.
-lint-repo: lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names lint-banned-patterns check-lint-parity check-pins test-lint-stamp test-refresh-edge test-install-script test-determine-version test-publish-rolling-release test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly test-workflow-paths test-cache-keys
+# One dependency per line, sorted, so two PRs adding a lint do not conflict on one
+# long line (BT-5086); keep it that way.
+lint-repo: \
+    check-lint-parity \
+    check-pins \
+    lint-banned-patterns \
+    lint-beamtalk-stdlib \
+    lint-binary-literal-encoding \
+    lint-class-var-catchers \
+    lint-compiler-made-names \
+    lint-coverage-skips \
+    lint-duplicate-erlang-modules \
+    lint-nlr-tuple-matches \
+    lint-old-style-catch \
+    lint-removed-facade-names \
+    lint-workaround-comments \
+    test-cache-keys \
+    test-check-stdlib-class-beams \
+    test-ci-ok \
+    test-core-diff-normalise \
+    test-determine-version \
+    test-install-script \
+    test-lint-stamp \
+    test-publish-rolling-release \
+    test-refresh-edge \
+    test-vs-elixir-nightly \
+    test-workflow-paths
 
 # Lint (BT-5089): every `just <recipe>` and repo path named in the contributor docs
 # (AGENTS.md, CONTRIBUTING.md, docs/agents, docs/development, four ADRs' paths)
 # exists. Intended historical references live in scripts/ci/docs-refs-allowlist.txt.
 lint-docs-refs:
     @python3 scripts/ci/check_docs_refs.py
+
+# Lint (BT-5089): every environment variable the code reads has a row in
+# docs/development/environment-variables.md, and every row is still read.
+lint-env-docs:
+    @python3 scripts/ci/check_env_docs.py
+
+# Regenerate docs/cli-workspace.md from `beamtalk workspace --help` (BT-5089).
+gen-cli-reference: build-rust
+    @python3 scripts/gen_cli_reference.py
+
+# Fail when docs/cli-workspace.md differs from the CLI's own help (BT-5089).
+check-cli-reference: build-rust
+    @python3 scripts/gen_cli_reference.py --check
 
 # Test (BT-5032): every repo path literal in a workflow's `paths:` filter or the
 # ci.yml `changes` job's `matches` gate names something that exists, so a renamed
@@ -1001,6 +1040,14 @@ test-workflow-paths:
 test-cache-keys:
     @python3 scripts/ci/check_cache_keys.py
     @cd scripts/ci && python3 -m unittest -q test_check_cache_keys
+
+# Test (BT-5086): ci.yml's `ci-ok` aggregate job runs always() and needs every
+# other job, every job is gated on a `changes` output (so a docs-only PR runs only
+# `changes` and `ci-ok`), and the `code` filter equals the former pull_request
+# `paths:` list. A job added to ci.yml cannot be left out of the one required check.
+test-ci-ok:
+    @python3 scripts/ci/ci_ok.py check
+    @cd scripts/ci && python3 -m unittest -q test_ci_ok test_ci_code_filter
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without

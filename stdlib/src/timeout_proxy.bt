@@ -53,8 +53,10 @@ typed Actor subclass: TimeoutProxy
   /// Set the target actor to forward messages to.
   setTarget: newTarget :: Actor -> Actor => self.target := newTarget
 
-  /// Set the timeout in milliseconds (or `#infinity`).
-  setTimeoutMs: ms :: Timeout -> Timeout => self.timeoutMs := ms
+  /// Set the timeout: an Integer of milliseconds, a `Duration`, or `#infinity`.
+  /// The field keeps storing milliseconds.
+  setTimeoutMs: ms :: Timeout | Duration -> Timeout =>
+    self.timeoutMs := ((Erlang beamtalk_duration) to_timeout: ms)
 
   // === Distribution ===
 

@@ -360,6 +360,14 @@ for `do:`, the fold's own source.
 -spec to_list_for_threading(term(), atom()) -> list().
 to_list_for_threading(Recv, _Selector) when is_list(Recv) ->
     Recv;
+to_list_for_threading(#{?BT_CLASS_TAG_KEY := 'Array'}, 'sort:') ->
+    %% BT-5090: the in-place fold sorts a plain list, but `Array sort:` answers
+    %% an Array, so folding would silently answer the wrong class.
+    refuse_writing_fold(
+        'Array',
+        'sort:',
+        [<<" answers an Array from 'sort:', but the in-place fold would answer a List">>]
+    );
 to_list_for_threading(Recv, Selector) ->
     {Class, Provider} = selector_provider(Recv, Selector),
     case Provider of

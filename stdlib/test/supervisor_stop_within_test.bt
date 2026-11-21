@@ -129,9 +129,45 @@ TestCase subclass: SupervisorStopWithinTest
     self deny: pool isAlive
     self assert: (self table at: #terminated) equals: #shutdown
 
+  testDynamicStopWithinAcceptsDuration =>
+    pool := (Bt4047PatientPool supervise) unwrap
+    (pool startChild: #{#tableName => #bt4047Shutdown}) unwrap
+    result := pool stopWithin: (Duration seconds: 10)
+    self assert: (self assertOk: result) equals: nil
+    self deny: pool isAlive
+
+  testDynamicStopWithinDurationTimesOutLikeInteger =>
+    pool := (Bt4047PatientPool supervise) unwrap
+    (pool startChild: #{#tableName => #bt4047Shutdown}) unwrap
+    result := pool stopWithin: (Duration milliseconds: 50)
+    self assert: result error kind equals: #timeout
+    self waitForDeathOf: pool
+
   testDynamicStopWithinGenerousWaitStopsCleanly =>
     pool := (Bt4047PatientPool supervise) unwrap
     (pool startChild: #{#tableName => #bt4047Shutdown}) unwrap
     result := pool stopWithin: 10000
     self assert: (self assertOk: result) equals: nil
     self deny: pool isAlive
+
+  // BT-5090: the wait may be a Duration
+  testStopWithinAcceptsDuration =>
+    sup := (Bt4047PatientSup supervise) unwrap
+    result := sup stopWithin: (Duration seconds: 10)
+    self assert: (self assertOk: result) equals: nil
+    self deny: sup isAlive
+
+  testStopWithinDurationTimeoutKeepsShuttingDownInBackground =>
+    sup := (Bt4047PatientSup supervise) unwrap
+    result := sup stopWithin: (Duration milliseconds: 50)
+    self assert: result error kind equals: #timeout
+    self waitForDeathOf: sup
+
+  testStopWithinNegativeDurationFailsLikeNegativeInteger =>
+    sup := (Bt4047PatientSup supervise) unwrap
+    asInteger := sup stopWithin: -1
+    asDuration := sup stopWithin: (Duration milliseconds: -1)
+    self assert: asDuration error kind equals: asInteger error kind
+    self assert: asInteger error kind equals: #type_error
+    self assert: sup isAlive
+    sup stop

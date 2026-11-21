@@ -21,7 +21,7 @@
 /// ```beamtalk
 /// agent := Subprocess open: "make" args: #("test")
 ///   env: #{#"CI" => #"true"}
-///   dir: #"/path/to/project"
+///   dir: "/path/to/project"
 /// ```
 ///
 /// ## Streaming stdout
@@ -50,7 +50,7 @@ typed Actor subclass: Subprocess native: beamtalk_subprocess
   ///
   /// ## Examples
   /// ```beamtalk
-  /// agent := (Subprocess open: "ls" args: #("-la") dir: #"/tmp") unwrap
+  /// agent := (Subprocess open: "ls" args: #("-la") dir: "/tmp") unwrap
   /// ```
   class open: command :: String args: args :: List(String) dir: dir :: String -> Result(Subprocess, Exception) =>
     Result tryDo: [
@@ -61,7 +61,7 @@ typed Actor subclass: Subprocess native: beamtalk_subprocess
   ///
   /// ## Examples
   /// ```beamtalk
-  /// agent := (Subprocess open: "make" args: #("test") env: #{#"CI" => #"true"} dir: #"/tmp") unwrap
+  /// agent := (Subprocess open: "make" args: #("test") env: #{#"CI" => #"true"} dir: "/tmp") unwrap
   /// ```
   class open: command :: String args: args :: List(String) env: env :: Dictionary dir: dir :: String -> Result(Subprocess, Exception) =>
     Result

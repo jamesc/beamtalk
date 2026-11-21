@@ -15,6 +15,15 @@ name: CI
 # put back for the same reason (BT-5032): both checks live only in this
 # workflow, so a docs-only edit to either must still run it.
 # `just test-workflow-paths` checks every path literal here exists.
+#
+# The list above filters `push` only. A pull_request always starts this workflow
+# (BT-5086): `ci-ok`, the one check branch protection should require, must exist
+# on every PR, and GitHub documents a required check from a workflow skipped by
+# path filtering as stuck "Pending". The `changes` job applies the SAME list to
+# the PR's changed files (scripts/ci/ci_code_filter.py reads it from here; it
+# yields the `code` output) and every code job is gated on `code`, so a PR that
+# the filter would have skipped runs only `changes` and `ci-ok`.
+# test_ci_code_filter.py pins that list to the former pull_request list.
 on:
   push:
     branches: [main]
@@ -28,7 +37,6 @@ on:
       - 'docs/development/surface-parity.md'
       - '!LICENSE'
       - '!SECURITY.md'
-      - '!.github/skills/**'
       - '!.devcontainer/**'
   # Manual run (Actions tab or `gh workflow run ci.yml --ref <branch>`): the
   # `changes` job treats any non-PR event like a push to main, so a dispatch
@@ -36,18 +44,6 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
-    paths:
-      - '**'
-      - '!*.md'
-      - '!docs/**'
-      - 'docs/learning/**'
-      - 'docs/beamtalk-language-features.md'
-      - 'docs/repl-protocol.md'
-      - 'docs/development/surface-parity.md'
-      - '!LICENSE'
-      - '!SECURITY.md'
-      - '!.github/skills/**'
-      - '!.devcontainer/**'
 
 # PR runs cancel the superseded run for the same PR. A push to main is keyed on
 # its own SHA and never cancelled: main is the safety net for everything the PR
@@ -63,6 +59,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # The dtolnay action set this for every job; keep it now that rust-toolchain.toml installs the toolchain.
+  CARGO_INCREMENTAL: "0"
   # BT-5034: a missing erlc/erl fails the Rust compile checks instead of
   # skipping them (`beamtalk_core::test_helpers::test_support::skip_or_fail`).
   # GitHub sets CI=true as well; this makes the contract explicit and keeps it
@@ -86,6 +84,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      # The PR touches something outside the docs-only paths (the `push` list
+      # above): the code jobs run. False means a docs-only PR: only `changes`
+      # and `ci-ok` run. Always true on a push to main or a dispatch.
+      code: ${{ steps.filter.outputs.code }}
       # A PR touched the desktop app's own paths: test-desktop (ubuntu) runs.
       # Never true on a push to main.
       desktop: ${{ steps.filter.outputs.desktop }}
@@ -124,13 +126,21 @@ jobs:
             # desktop (ci-platforms.yml's).
             {
               echo "desktop=false"
+              echo "code=true"
               for k in core_diff_modes learn runtime rust exec vscode fixture_readers; do echo "$k=true"; done
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           git fetch --depth=1 origin "$BASE_SHA"
-          changed="$(git diff --name-only "$BASE_SHA" HEAD)"
+          # --no-renames: list BOTH paths of a moved file. With rename detection a
+          # code file moved into an excluded path (crates/x/a.rs -> docs/a.rs) lists
+          # only the destination, so `code` (and every gate below) would miss that
+          # crates/ lost a file. This feeds `code` and all the gates that follow.
+          changed="$(git diff --name-only --no-renames "$BASE_SHA" HEAD)"
+
+          # Docs-only PRs (every changed path excluded by the `push` list) skip the code jobs.
+          code=$(printf '%s\n' "$changed" | python3 scripts/ci/ci_code_filter.py .github/workflows/ci.yml)
 
           # matches PATTERN...: true when any changed path matches a shell glob
           # (`*` crosses `/`, so `dir/*` is a prefix match).
@@ -160,7 +170,7 @@ jobs:
           # only, skipped this step on its PR, and turned main red), so any
           # change to those runs them, not just changes to the guide itself.
           learn=$(flag matches \
-            'docs/learning/*' .github/workflows/ci.yml Justfile \
+            'docs/learning/*' .github/workflows/ci.yml '.github/actions/*' Justfile \
             'crates/*' Cargo.toml Cargo.lock 'runtime/*' 'stdlib/*')
 
           runtime=$(flag matches 'runtime/*')
@@ -170,14 +180,14 @@ jobs:
           # toolchain and lint config, the recipes, the release-build commands
           # in the workflows and scripts/ci.
           rust=$(flag matches 'crates/*' Cargo.toml Cargo.lock rust-toolchain.toml \
-              clippy.toml Justfile '.github/workflows/*' 'scripts/ci/*')
+              clippy.toml Justfile '.github/workflows/*' '.github/actions/*' 'scripts/ci/*')
 
           # BT-5057: beamtalk-exec has `#[cfg(unix)]` / `#[cfg(windows)]` halves,
           # and the Windows one otherwise compiles only in ci-platforms.yml
           # (opt-in) and nightly.
           exec=$(flag matches 'crates/beamtalk-exec/*' 'crates/beamtalk-etf/*' \
               'crates/beamtalk-build/*' Cargo.toml Cargo.lock \
-              rust-toolchain.toml '.github/workflows/ci.yml')
+              rust-toolchain.toml '.github/workflows/ci.yml' '.github/actions/*')
 
           # BT-5033: `npm test` and `tsc` for the extension. Besides the
           # extension itself, its tests read the runtime's `?PROTOCOL_VERSION`
@@ -191,7 +201,7 @@ jobs:
               runtime/apps/beamtalk_runtime/include/beamtalk.hrl \
               'runtime/apps/*/test/fixtures/*' \
               crates/beamtalk-core/tests/fixtures/section_divider_grammar_cases.json \
-              Justfile .github/workflows/ci.yml)
+              Justfile .github/workflows/ci.yml '.github/actions/*')
 
           # BT-5033: the runtime's shared fixtures are read by corpus-tier Rust
           # tests (`*_matches_shared_corpus`), which a PR otherwise runs only
@@ -200,7 +210,7 @@ jobs:
           # that read them, runs it on the test-rust job's existing build.
           fixture_readers=$(flag matches 'runtime/apps/*/test/fixtures/*' \
               'crates/beamtalk-core/*' 'crates/beamtalk-codegen/*' 'crates/beamtalk-repl/*' \
-              Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml)
+              Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml '.github/actions/*')
 
           # The desktop app's own paths (the crate, the workspace crates it
           # links, the root manifest and lockfile those crates take their
@@ -209,9 +219,10 @@ jobs:
           desktop=$(flag matches 'desktop/*' 'crates/beamtalk-desktop-broker/*' \
               'crates/beamtalk-desktop-shell/*' 'crates/beamtalk-env/*' 'crates/beamtalk-workspace/*' \
               'crates/beamtalk-repl-protocol/*' 'crates/beamtalk-build/*' 'crates/beamtalk-cerl-doc/*' \
-              Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml '.github/actions/test-desktop/*')
+              Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml '.github/actions/*')
 
           {
+            echo "code=$code"
             echo "desktop=$desktop"
             echo "core_diff_modes=$core_diff_modes"
             echo "learn=$learn"
@@ -238,6 +249,8 @@ jobs:
   # past the Actions cache cap and evicted the caches builds rely on. PR
   # runs restore main's entries.
   lint:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -245,20 +258,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          toolchain: stable
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+          erlang-cache: 'true'
 
       # Node.js for fmt-check-js
       - name: Setup Node.js
@@ -268,26 +271,23 @@ jobs:
           cache: 'npm'
           cache-dependency-path: editors/vscode/package-lock.json
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
-
       - name: Check Cargo.lock is up to date
         # The root Cargo.lock is committed; fail if Cargo.toml changed without it.
         run: cargo tree --locked --workspace --depth 0 > /dev/null
+
+      - name: Check runtime/rebar.lock is up to date
+        # rebar.lock is committed (BT-5086). Re-locking must change nothing: a
+        # drift means rebar.config changed without the lock (run `rebar3 lock`
+        # in runtime/ and commit it), or a dependency range now resolves
+        # differently from what the lock pins.
+        working-directory: runtime
+        run: |
+          rebar3 lock
+          if [ -n "$(git status --porcelain -- rebar.lock)" ]; then
+            git --no-pager diff -- rebar.lock
+            echo "::error file=runtime/rebar.lock::rebar.lock is missing or out of date; run 'rebar3 lock' in runtime/ and commit it"
+            exit 1
+          fi
 
       # `lint-repo` is the Justfile's single list of the repo-wide lint-* and
       # script-test recipes; `just lint` runs the same group, so this step can
@@ -298,7 +298,7 @@ jobs:
       # (test-dialyzer job), JS/Elixir formatting beyond fmt-check
       # (the liveview workflow runs lint-elixir).
       - name: Clippy, format and repo lints
-        run: just clippy fmt-check lint-repo lint-docs-refs test-grammar test-github-extension
+        run: just clippy fmt-check lint-repo lint-docs-refs lint-env-docs test-grammar test-github-extension
 
       - name: Surface parity drift check (BT-2082)
         # Verifies REPL ops × CLI × MCP × LSP coverage matches
@@ -336,7 +336,8 @@ jobs:
     needs: changes
     # Run even if `changes` failed (the fixture step then skips, its output is
     # empty): a skipped test-rust would read as passing to branch protection.
-    if: ${{ !cancelled() }}
+    # Skipped only for a docs-only PR (`code` is exactly 'false').
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -344,46 +345,21 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          toolchain: stable
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
 
       - name: Install cargo-nextest
         uses: ./.github/actions/install-nextest
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-test
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
-
       # build first: the CLI integration tests exec the real `beamtalk` binary
       # against the built runtime and stdlib.
+      # BT-5089: docs/cli-workspace.md is the CLI's own help text, so a CLI change
+      # that does not regenerate it fails here (this job has the built binary).
       - name: Build and Rust tests
-        run: just build test-rust
+        run: just build test-rust check-cli-reference
 
       # BT-5033: the corpus tier is corpus.yml's and runs on a PR only with the
       # `ci:corpus` label, but its tests that read the runtime's shared
@@ -482,28 +458,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          toolchain: stable
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-release-check
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          workspaces: ". -> target/release-check"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-shared-key: linux-release-check
+          rust-cache-workspaces: . -> target/release-check
 
       - name: Check release build (warnings denied, no test-only code)
         run: just check-release-build
@@ -524,9 +483,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       # rust-toolchain.toml pins the channel cargo actually uses, so the
       # target goes on that toolchain (the action's `targets:` input would
@@ -562,38 +520,11 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          toolchain: stable
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-test
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
 
       - name: Compare snapshot-only and full .core output
         run: just core-diff-modes
@@ -615,6 +546,8 @@ jobs:
   # subcommand's output equals the declared window, so this job's matrix can
   # never silently drift from doctor's/build's/release's own window checks.
   otp-matrix:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -624,19 +557,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          toolchain: stable
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          erlang: 'false'
 
       # A PR gets only the newest OTP in the window (`last` after the numeric
       # sort); a push to main gets the full window. See the comment above
@@ -681,48 +605,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
-
-      # erlef/setup-beam errors if both `version-file` (which has its own
-      # `erlang` line) and an explicit `otp-version` are given, so read just
-      # `rebar3`'s pinned version out of .tool-versions and pass both
-      # versions explicitly — `otp-version` varies per matrix leg, `rebar3`
-      # stays the repo's single pinned version on every leg.
-      - name: Read rebar3 version from .tool-versions
-        id: tool-versions
-        run: echo "rebar3=$(awk '/^rebar /{print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
           otp-version: ${{ matrix.otp }}
-          rebar3-version: ${{ steps.tool-versions.outputs.rebar3 }}
-          version-type: loose
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-test
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
+          erlang-cache-infix: -otp${{ matrix.otp }}
 
       - name: Build
         run: just build
@@ -771,48 +660,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
-
-      # erlef/setup-beam errors if both `version-file` (which has its own
-      # `erlang` line) and an explicit `otp-version` are given, so read just
-      # `rebar3`'s pinned version out of .tool-versions and pass both
-      # versions explicitly — `otp-version` varies per matrix leg, `rebar3`
-      # stays the repo's single pinned version on every leg.
-      - name: Read rebar3 version from .tool-versions
-        id: tool-versions
-        run: echo "rebar3=$(awk '/^rebar /{print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
           otp-version: ${{ matrix.otp }}
-          rebar3-version: ${{ steps.tool-versions.outputs.rebar3 }}
-          version-type: loose
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-test
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
+          erlang-cache-infix: -otp${{ matrix.otp }}
 
       - name: Build
         run: just build
@@ -849,41 +703,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
-
-      # erlef/setup-beam errors if both `version-file` (which has its own
-      # `erlang` line) and an explicit `otp-version` are given, so read just
-      # `rebar3`'s pinned version out of .tool-versions and pass both
-      # versions explicitly — `otp-version` varies per matrix leg, `rebar3`
-      # stays the repo's single pinned version on every leg.
-      - name: Read rebar3 version from .tool-versions
-        id: tool-versions
-        run: echo "rebar3=$(awk '/^rebar /{print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
           otp-version: ${{ matrix.otp }}
-          rebar3-version: ${{ steps.tool-versions.outputs.rebar3 }}
-          version-type: loose
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
+          erlang-cache-infix: -otp${{ matrix.otp }}
 
       - name: Cache Dialyzer PLT
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
@@ -893,13 +719,6 @@ jobs:
           key: ${{ runner.os }}-dialyzer-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}
           restore-keys: |
             ${{ runner.os }}-dialyzer-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-test
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         run: just build
@@ -929,6 +748,7 @@ jobs:
   # still surfaces there.
   test-integration:
     needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -936,38 +756,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          toolchain: stable
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-src-${{ hashFiles('runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-deps-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.config.script', 'runtime/rebar.lock') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-test
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
 
       - name: Build
         id: build
@@ -1031,6 +824,8 @@ jobs:
   # jobs, so it adds runner time but little wall-clock. Linux only;
   # ci-platforms.yml and release/nightly cover the other OSes.
   test-install:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -1038,26 +833,39 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
         with:
-          toolchain: stable
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: install-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          rust-cache-key-prefix: install
 
       - name: Smoke test install (clean checkout)
         run: just test-install
+
+  # ─── Single required check (BT-5086) ───────────────────────────────────
+  # Branch protection should require this one job. `if: always()` makes it run
+  # (and report) even when a needed job failed or was cancelled; a bare `needs:`
+  # job would be skipped instead, and a skipped required check reads as passing.
+  # scripts/ci/ci_ok.py decides: every job must have succeeded, except a job
+  # with a path gate (`needs.changes.outputs.<gate>`) may be skipped, and a
+  # code job may be skipped when `changes` says `code=false` (docs-only PR), in
+  # both cases only while `changes` succeeded. A code job skipped while `code` is
+  # true is red. `just test-ci-ok` checks this job needs every other job and
+  # that every job is gated, so a new job cannot run on docs-only PRs by accident.
+  ci-ok:
+    name: ci-ok
+    if: ${{ always() }}
+    needs: [changes, lint, test-rust, test-vscode, test-desktop, check-release-build, check-exec-windows, core-diff-modes, otp-matrix, test-beam, test-runtime, test-dialyzer, test-integration, test-install]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows/ci.yml
+            scripts/ci/ci_ok.py
+
+      - name: Every needed job passed or was skipped by a path gate
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci/ci_ok.py verdict .github/workflows/ci.yml

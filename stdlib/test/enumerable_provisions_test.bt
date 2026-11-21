@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5090 (decision 4): `Enumerable` provides the queries `Collection` has and
+// it lacked — `reject:`, `allSatisfy:`, `noneSatisfy:`, `includes:`, `detect:` —
+// each forwarded to `elements`. `Adr0133EnumerableStdlib` is a user class that
+// `uses: Enumerable(...)` (fixtures/adr0133enumerable_stdlib.bt).
+
+TestCase subclass: EnumerableProvisionsTest
+
+  items => Adr0133EnumerableStdlib new: #{#items => #(1, 2, 3, 4)}
+
+  testReject => self assert: (self items reject: [:x | x > 2]) equals: #(1, 2)
+
+  testAllSatisfy =>
+    self assert: (self items allSatisfy: [:x | x > 0])
+    self deny: (self items allSatisfy: [:x | x > 1])
+
+  testNoneSatisfy =>
+    self assert: (self items noneSatisfy: [:x | x > 9])
+    self deny: (self items noneSatisfy: [:x | x > 3])
+
+  testIncludes =>
+    self assert: (self items includes: 3)
+    self deny: (self items includes: 9)
+
+  testDetect => self assert: (self items detect: [:x | x > 2]) equals: 3
+
+  testDetectRaisesNotFoundWhenNothingMatches =>
+    self should: [self items detect: [:x | x > 9]] raise: #not_found
+
+  testAgreesWithList =>
+    xs := #(1, 2, 3, 4)
+    self assert: (self items reject: [:x |
+      x isEven
+    ]) equals: (xs reject: [:x | x isEven])
+    self assert: (self items allSatisfy: [:x |
+      x < 5
+    ]) equals: (xs allSatisfy: [:x | x < 5])
+    self assert: (self items noneSatisfy: [:x |
+      x < 0
+    ]) equals: (xs noneSatisfy: [:x | x < 0])

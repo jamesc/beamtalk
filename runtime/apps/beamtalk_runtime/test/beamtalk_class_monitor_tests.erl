@@ -73,6 +73,7 @@ setup() ->
 setup(Opts) ->
     Restore = displace_registered_monitor(),
     {ok, Pid} = beamtalk_class_monitor:start_link(Opts),
+    ok = sys:log(Pid, {true, 50}),
     #{monitor => Pid, restore => Restore}.
 
 teardown(#{monitor := Pid, restore := Restore}) ->
@@ -155,7 +156,66 @@ fresh_idle_pid() ->
 
 %% Block until the mock reported a restart of `Name` (an event, not a poll).
 await_restart_called(Name) ->
-    ?awaitMessage({restart_class_called, Name}, ?KILL_WAIT_MS).
+    try
+        ?awaitMessage({restart_class_called, Name}, ?KILL_WAIT_MS)
+    catch
+        error:{await_message_timeout, Info} ->
+            erlang:error({await_message_timeout, Info ++ [{monitor, monitor_diagnostics()}]})
+    end.
+
+%% Watch `Pid` and return only once `Pid` itself reports the monitor in its
+%% `monitored_by` list. `watch/2` replies after the monitor has *requested* the
+%% monitor, but the request reaches `Pid` as a signal, and the BEAM orders
+%% signals only per sender pair: the test's own `exit(Pid, kill)`, sent right
+%% after `watch/2` returned, can overtake it. `Pid` then dies first and the
+%% monitor gets `'DOWN'` with `noproc` instead of `killed` -- which it rightly
+%% treats as a deliberate stop and never restarts (BT-5102). Killing only after
+%% the target confirms the monitor makes the `'DOWN'` reason `killed`.
+watch_armed(ClassName, Pid) ->
+    ok = beamtalk_class_monitor:watch(ClassName, Pid),
+    beamtalk_test_wait:monitored_by(Pid, beamtalk_class_monitor).
+
+%% What the registered monitor was doing when a wait for it expired, as a list
+%% of lines (EUnit truncates deeply nested terms). Its own event log shows
+%% whether it saw the 'DOWN', with which reason, and what it did about it.
+monitor_diagnostics() ->
+    case whereis(beamtalk_class_monitor) of
+        undefined ->
+            ["no monitor registered"];
+        Mon ->
+            Events =
+                try sys:log(Mon, get) of
+                    {ok, Log} -> lists:sublist(lists:reverse(Log), 8);
+                    Other -> [{log_unavailable, Other}]
+                catch
+                    Class:Reason -> [{log_unavailable, {Class, Reason}}]
+                end,
+            Registry =
+                try meck:history(beamtalk_class_registry) of
+                    History ->
+                        [{element(2, element(2, H)), element(3, element(2, H))} || H <- History]
+                catch
+                    Class2:Reason2 -> {not_mocked, {Class2, Reason2}}
+                end,
+            State =
+                try
+                    sys:get_state(Mon, 1000)
+                catch
+                    Class3:Reason3 -> {unavailable, {Class3, Reason3}}
+                end,
+            [
+                line("pid", Mon),
+                line(
+                    "process_info",
+                    process_info(Mon, [status, message_queue_len, current_stacktrace])
+                ),
+                line("state", State),
+                line("registry calls", Registry)
+            ] ++ [line("event (newest first)", E) || E <- Events]
+    end.
+
+line(Label, Term) ->
+    lists:flatten(io_lib:format("~s: ~0P", [Label, Term, 40])).
 
 %% Count (and consume) the `restart_class/1` reports still in the mailbox. Call
 %% only after a sync with the monitor (`sys:get_state/1`, whose reply follows
@@ -248,12 +308,12 @@ watch_dedup_test_() ->
                 expect_restart_reports_to(self(), fun fresh_idle_pid/0),
                 try
                     Dummy = beamtalk_test_proc:spawn_idle(),
-                    ok = beamtalk_class_monitor:watch('DedupClass', Dummy),
+                    ok = watch_armed('DedupClass', Dummy),
                     %% Second watch/2 on the same still-live pid must be a no-op
                     %% (do_watch/3's `maps:is_key(Pid, Watched) -> true` branch) —
                     %% otherwise this pid's death would fire two independent
                     %% 'DOWN' messages and restart_class/1 would run twice.
-                    ok = beamtalk_class_monitor:watch('DedupClass', Dummy),
+                    ok = watch_armed('DedupClass', Dummy),
                     %% Structural check, no waiting: the second watch/2 above is a
                     %% synchronous call, so the monitor holds exactly one ref now.
                     ?assertEqual(1, watch_count('DedupClass')),
@@ -294,7 +354,7 @@ assert_no_restart_on_exit(ClassName, ExitReason) ->
     expect_restart_reports_to(self(), fun fresh_idle_pid/0),
     try
         Dummy = beamtalk_test_proc:spawn_idle(),
-        ok = beamtalk_class_monitor:watch(ClassName, Dummy),
+        ok = watch_armed(ClassName, Dummy),
         kill_and_wait(Dummy, ExitReason),
         %% The 'DOWN' handler drops Dummy from `watched` in the same step that
         %% decides whether to restart, so once it is gone the decision is final:
@@ -318,7 +378,7 @@ unwatch_prunes_crash_history_test_() ->
                     expect_restart_reports_to(self(), fun() -> {error, injected_failure} end),
                     try
                         Dummy = beamtalk_test_proc:spawn_idle(),
-                        ok = beamtalk_class_monitor:watch('HistoryPruneClass', Dummy),
+                        ok = watch_armed('HistoryPruneClass', Dummy),
                         kill_and_wait(Dummy, kill),
                         ok = await_restart_called('HistoryPruneClass'),
                         _ = sys:get_state(MonPid),
@@ -348,7 +408,7 @@ restart_failure_test_() ->
                     expect_restart_reports_to(self(), fun() -> {error, injected_failure} end),
                     try
                         Dummy = beamtalk_test_proc:spawn_idle(),
-                        ok = beamtalk_class_monitor:watch('RestartFailClass', Dummy),
+                        ok = watch_armed('RestartFailClass', Dummy),
                         kill_and_wait(Dummy, kill),
                         ok = await_restart_called('RestartFailClass'),
                         % Synchronise with the monitor finishing the 'DOWN' handler
@@ -365,7 +425,7 @@ restart_failure_test_() ->
                     expect_restart_reports_to(self(), fun() -> error(injected_crash) end),
                     try
                         Dummy = beamtalk_test_proc:spawn_idle(),
-                        ok = beamtalk_class_monitor:watch('RestartCrashClass', Dummy),
+                        ok = watch_armed('RestartCrashClass', Dummy),
                         kill_and_wait(Dummy, kill),
                         ok = await_restart_called('RestartCrashClass'),
                         % Synchronise with the monitor finishing the 'DOWN' handler
@@ -391,7 +451,7 @@ restart_budget_exhausted_test_() ->
                 expect_restart_reports_to(self(), fun fresh_idle_pid/0),
                 try
                     Dummy1 = beamtalk_test_proc:spawn_idle(),
-                    ok = beamtalk_class_monitor:watch('BudgetClass', Dummy1),
+                    ok = watch_armed('BudgetClass', Dummy1),
                     kill_and_wait(Dummy1, kill),
                     %% Wait for the event, not a meck call counter: the monitor
                     %% reports from inside restart_class/1 itself (BT-4915).
@@ -405,8 +465,8 @@ restart_budget_exhausted_test_() ->
                     %% restarted instance", so the second crash lands inside the same
                     %% budget window as the first.
                     Dummy2 = beamtalk_test_proc:spawn_idle(),
-                    ok = beamtalk_class_monitor:watch('BudgetClass', Dummy2),
-                    %% watch/2 is a synchronous call here, so Dummy2 is already watched.
+                    ok = watch_armed('BudgetClass', Dummy2),
+                    %% watch_armed/2 returned, so Dummy2 is already watched.
                     ?assert(is_watched(Dummy2)),
                     kill_and_wait(Dummy2, kill),
                     %% The 'DOWN' handler drops Dummy2 from `watched` in the same

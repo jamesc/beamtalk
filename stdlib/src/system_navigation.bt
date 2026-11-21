@@ -653,6 +653,33 @@ sealed typed Object subclass: SystemNavigation
   class indexedSelectorsFrom: indexedRows :: List(Dictionary) into: result :: List(Symbol) -> List(Symbol) =>
     indexedRows inject: result into: [:acc :row | acc add: (row at: #selector)]
 
+  /// The one per-class method walk shared by every `collect*For:in:into:` scan.
+  /// Folds `aBlock` (`[:acc :method :methodSel | ...]`, answering the next
+  /// accumulator) over each method of `aScope` (a class or metaclass), starting
+  /// from `result`, and returns the final accumulator.
+  ///
+  /// Fetches each method via `>>`, guarded with `respondsTo:` so a scope for
+  /// which `>>` is not yet supported (e.g. metaclass-shaped registry entries)
+  /// is silently skipped rather than aborting the whole walk. A selector with
+  /// no method object contributes nothing; `aBlock` only sees real methods and
+  /// decides itself what a `nil` `source` means.
+  class internal walkMethodsOf: aScope :: Behaviour into: result :: List(Dictionary) do: aBlock :: Block(List(Dictionary), CompiledMethod, Symbol, List(Dictionary)) -> List(Dictionary) =>
+    aScope methods
+      inject: result
+      into: [:acc :methodSel |
+        method := (aScope respondsTo: #'>>') ifTrue: [
+          aScope >> methodSel
+        ] ifFalse: [nil]
+        method isNil
+          ifTrue: [acc]
+          ifFalse: [
+            aBlock
+              value: acc
+              value: method
+              value: methodSel
+          ]
+      ]
+
   /// Append senders of `aSelector` found in any instance method of `aScope`
   /// (a class) to `result`. Returns the (possibly extended) result list.
   ///
@@ -664,22 +691,16 @@ sealed typed Object subclass: SystemNavigation
   /// is not yet supported (e.g. metaclass-shaped registry entries) is
   /// silently skipped rather than aborting the whole walk.
   class collectSendersFor: aSelector :: Symbol in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
-    aScope methods
-      inject: result
-      into: [:acc :methodSel |
-        method := (aScope respondsTo: #'>>') ifTrue: [
-          aScope >> methodSel
-        ] ifFalse: [nil]
-        method isNil
-          ifTrue: [acc]
-          ifFalse: [
-            self
-              appendSendersIn: method source
-              selector: aSelector
-              class: aScope
-              methodSelector: methodSel
-              into: acc
-          ]
+    self
+      walkMethodsOf: aScope
+      into: result
+      do: [:acc :method :methodSel |
+        self
+          appendSendersIn: method source
+          selector: aSelector
+          class: aScope
+          methodSelector: methodSel
+          into: acc
       ]
 
   /// Append one record per matching `MessageSend` found in `methodSource`.
@@ -793,25 +814,19 @@ sealed typed Object subclass: SystemNavigation
   /// registry entries) is silently skipped, and a `nil` source (a primitive
   /// registered without source text) contributes nothing.
   class collectAnnounceSitesIn: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
-    aScope methods
-      inject: result
-      into: [:acc :methodSel |
-        method := (aScope respondsTo: #'>>') ifTrue: [
-          aScope >> methodSel
-        ] ifFalse: [nil]
-        method isNil
+    self
+      walkMethodsOf: aScope
+      into: result
+      do: [:acc :method :methodSel |
+        src := method source
+        src isNil
           ifTrue: [acc]
           ifFalse: [
-            src := method source
-            src isNil
-              ifTrue: [acc]
-              ifFalse: [
-                self
-                  appendAnnounceSitesIn: src
-                  class: aScope
-                  methodSelector: methodSel
-                  into: acc
-              ]
+            self
+              appendAnnounceSitesIn: src
+              class: aScope
+              methodSelector: methodSel
+              into: acc
           ]
       ]
 
@@ -1057,22 +1072,16 @@ sealed typed Object subclass: SystemNavigation
   /// is not yet supported (e.g. metaclass-shaped registry entries) is
   /// silently skipped rather than aborting the whole walk.
   class collectReferencesFor: targetName :: String in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
-    aScope methods
-      inject: result
-      into: [:acc :methodSel |
-        method := (aScope respondsTo: #'>>') ifTrue: [
-          aScope >> methodSel
-        ] ifFalse: [nil]
-        method isNil
-          ifTrue: [acc]
-          ifFalse: [
-            self
-              appendReferencesIn: method source
-              targetName: targetName
-              owner: aScope
-              methodSelector: methodSel
-              into: acc
-          ]
+    self
+      walkMethodsOf: aScope
+      into: result
+      do: [:acc :method :methodSel |
+        self
+          appendReferencesIn: method source
+          targetName: targetName
+          owner: aScope
+          methodSelector: methodSel
+          into: acc
       ]
 
   /// Append one record per matching `ClassReference` found in `methodSource`.
@@ -1236,23 +1245,17 @@ sealed typed Object subclass: SystemNavigation
   /// (e.g. metaclass-shaped registry entries) is silently skipped rather than
   /// aborting the whole walk — mirrors `collectSendersFor:in:into:`.
   class collectFieldAccessesFor: aSym :: Symbol in: aScope :: Behaviour readers: wantReaders :: Boolean into: result :: List(Dictionary) -> List(Dictionary) =>
-    aScope methods
-      inject: result
-      into: [:acc :methodSel |
-        method := (aScope respondsTo: #'>>') ifTrue: [
-          aScope >> methodSel
-        ] ifFalse: [nil]
-        method isNil
-          ifTrue: [acc]
-          ifFalse: [
-            self
-              appendFieldAccessesIn: method source
-              field: aSym
-              owner: aScope
-              methodSelector: methodSel
-              readers: wantReaders
-              into: acc
-          ]
+    self
+      walkMethodsOf: aScope
+      into: result
+      do: [:acc :method :methodSel |
+        self
+          appendFieldAccessesIn: method source
+          field: aSym
+          owner: aScope
+          methodSelector: methodSel
+          readers: wantReaders
+          into: acc
       ]
 
   /// Append one record per matching field access found in
@@ -1401,24 +1404,18 @@ sealed typed Object subclass: SystemNavigation
   /// with `respondsTo:` so a scope for which `>>` is not yet supported (e.g.
   /// metaclass-shaped registry entries) is silently skipped.
   class collectFfiSitesFor: module :: String function: function :: String arity: arity :: Object in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
-    aScope methods
-      inject: result
-      into: [:acc :methodSel |
-        method := (aScope respondsTo: #'>>') ifTrue: [
-          aScope >> methodSel
-        ] ifFalse: [nil]
-        method isNil
-          ifTrue: [acc]
-          ifFalse: [
-            self
-              appendFfiSitesIn: method source
-              module: module
-              function: function
-              arity: arity
-              owner: aScope
-              methodSelector: methodSel
-              into: acc
-          ]
+    self
+      walkMethodsOf: aScope
+      into: result
+      do: [:acc :method :methodSel |
+        self
+          appendFfiSitesIn: method source
+          module: module
+          function: function
+          arity: arity
+          owner: aScope
+          methodSelector: methodSel
+          into: acc
       ]
 
   /// Append one record per matching FFI call site found in `methodSource`.
@@ -1444,27 +1441,14 @@ sealed typed Object subclass: SystemNavigation
   /// per-method scan to the FFI-site query and threading the module/function/
   /// arity target.
   class collectExtensionFfiSitesFor: module :: String function: function :: String arity: arity :: Object into: result :: List(Dictionary) -> List(Dictionary) =>
-    extEntries := self liveExtensionsIn: self allExtensionsWithSource
-    extEntries
-      inject: result
-      into: [:acc :ext |
-        extClass := ext at: #class
-        extSelector := ext at: #selector
-        extSource := ext at: #source
-        lines := self
+    self
+      collectExtensionLinesInto: result
+      using: [:extSource |
+        self
           ffiSitesIn: extSource
           module: module
           function: function
           arity: arity
-        lines
-          inject: acc
-          into: [:innerAcc :line |
-            innerAcc add: #{
-              #class => extClass,
-              #selector => extSelector,
-              #line => line
-            }
-          ]
       ]
 
   // ===== Source-Text Search (methodsMatching:) =====
@@ -1546,23 +1530,17 @@ sealed typed Object subclass: SystemNavigation
   /// (e.g. metaclass-shaped registry entries; see `sendersOf:`) — are
   /// skipped silently.
   class collectMethodsMatching: aRegex :: Regex in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
-    aScope methods
-      inject: result
-      into: [:acc :methodSel |
-        method := (aScope respondsTo: #'>>') ifTrue: [
-          aScope >> methodSel
-        ] ifFalse: [nil]
-        method isNil
+    self
+      walkMethodsOf: aScope
+      into: result
+      do: [:acc :method :methodSel |
+        src := method source
+        src isNil
           ifTrue: [acc]
           ifFalse: [
-            src := method source
-            src isNil
-              ifTrue: [acc]
-              ifFalse: [
-                (src matchesRegex: aRegex) ifTrue: [
-                  acc add: #{#class => aScope, #selector => methodSel}
-                ] ifFalse: [acc]
-              ]
+            (src matchesRegex: aRegex) ifTrue: [
+              acc add: #{#class => aScope, #selector => methodSel}
+            ] ifFalse: [acc]
           ]
       ]
 
@@ -1706,6 +1684,33 @@ sealed typed Object subclass: SystemNavigation
 
   // ===== Shared Extension-Body Scan Helpers =====
 
+  /// The one extension-body scan shared by the line-reporting
+  /// `collectExtension*For:into:` queries (senders, references, FFI sites).
+  /// For every live extension (ADR 0066 / BT-2196) `linesBlock` is given the
+  /// extension's source and answers the 1-based line numbers of its hits; one
+  /// `#{#class, #selector, #line}` record per line is appended to `result`,
+  /// shaped identically to the class-body scan. Returns the (possibly extended)
+  /// result. An extension whose target class has been removed is skipped
+  /// (BT-4418) by `liveExtensionsIn:`.
+  class internal collectExtensionLinesInto: result :: List(Dictionary) using: linesBlock :: Block(String, List(Integer)) -> List(Dictionary) =>
+    extEntries := self liveExtensionsIn: self allExtensionsWithSource
+    extEntries
+      inject: result
+      into: [:acc :ext |
+        extClass := ext at: #class
+        extSelector := ext at: #selector
+        lines := linesBlock value: (ext at: #source)
+        lines
+          inject: acc
+          into: [:innerAcc :line |
+            innerAcc add: #{
+              #class => extClass,
+              #selector => extSelector,
+              #line => line
+            }
+          ]
+      ]
+
   /// Append senders of `aSelector` found in every extension method source
   /// (ADR 0066 / BT-2196) to `result`. Returns the (possibly extended) result.
   ///
@@ -1725,48 +1730,18 @@ sealed typed Object subclass: SystemNavigation
   /// `#'String class'`). An extension whose target class has been removed is
   /// skipped, never reported with a raw Symbol `#class` (BT-4418).
   class collectExtensionSendersFor: aSelector :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
-    extEntries := self liveExtensionsIn: self allExtensionsWithSource
-    extEntries
-      inject: result
-      into: [:acc :ext |
-        extClass := ext at: #class
-        extSelector := ext at: #selector
-        extSource := ext at: #source
-        lines := self sendersIn: extSource selector: aSelector
-        lines
-          inject: acc
-          into: [:innerAcc :line |
-            innerAcc add: #{
-              #class => extClass,
-              #selector => extSelector,
-              #line => line
-            }
-          ]
-      ]
+    self collectExtensionLinesInto: result using: [:extSource |
+      self sendersIn: extSource selector: aSelector
+    ]
 
   /// Append references to `targetName` found in every extension method
   /// source (ADR 0066 / BT-2196) to `result`. Returns the (possibly extended)
   /// result. Mirrors `collectExtensionSendersFor:into:`, swapping the
   /// per-method scan to `findReferencesToIn:class:`.
   class collectExtensionReferencesFor: targetName :: String into: result :: List(Dictionary) -> List(Dictionary) =>
-    extEntries := self liveExtensionsIn: self allExtensionsWithSource
-    extEntries
-      inject: result
-      into: [:acc :ext |
-        extClass := ext at: #class
-        extSelector := ext at: #selector
-        extSource := ext at: #source
-        lines := self referencesIn: extSource class: targetName
-        lines
-          inject: acc
-          into: [:innerAcc :line |
-            innerAcc add: #{
-              #class => extClass,
-              #selector => extSelector,
-              #line => line
-            }
-          ]
-      ]
+    self collectExtensionLinesInto: result using: [:extSource |
+      self referencesIn: extSource class: targetName
+    ]
 
   /// Append `{class, selector}` records for every extension method (ADR 0066
   /// / BT-2196) whose source matches `aRegex` to `result`. Returns the

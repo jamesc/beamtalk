@@ -13,6 +13,14 @@ defmodule BtAttach.WorkspaceTest do
   """
   use ExUnit.Case, async: true
 
+  # Shared with the desktop broker (crates/beamtalk-desktop-broker/src/sname.rs).
+  @sname_fixture_path Path.expand(
+                        "../../../../tests/conformance/attach_sname_conformance.json",
+                        __DIR__
+                      )
+  @external_resource @sname_fixture_path
+  @sname_fixture @sname_fixture_path |> File.read!() |> :json.decode()
+
   alias BtAttach.Workspace
 
   describe "format_value/1 — surface-consistent with the Rust formatter (Plain mode)" do
@@ -533,6 +541,25 @@ defmodule BtAttach.WorkspaceTest do
 
     test "a workspace-id suffix is combined with the given OS-pid entropy" do
       assert Workspace.attach_sname("ws-42", "1234") == :"bt_attach_ws-42_1234@localhost"
+    end
+
+    # Shared with the desktop broker's `predict_node_name` (sname.rs): both read
+    # tests/conformance/attach_sname_conformance.json.
+    for %{"name" => name, "suffix" => suffix, "os_pid" => os_pid, "node_name" => node_name} <-
+          @sname_fixture["with_suffix"] do
+      test "conformance: #{name}" do
+        assert Workspace.attach_sname(unquote(suffix), unquote(Integer.to_string(os_pid))) ==
+                 String.to_atom(unquote(node_name))
+      end
+    end
+
+    for suffix <- @sname_fixture["without_suffix"]["suffixes"] do
+      test "conformance: unset suffix #{inspect(suffix)} matches the fixture pattern" do
+        suffix = unquote(if suffix == :null, do: nil, else: suffix)
+        pattern = Regex.compile!(unquote(@sname_fixture["without_suffix"]["node_name_pattern"]))
+
+        assert Atom.to_string(Workspace.attach_sname(suffix, "999")) =~ pattern
+      end
     end
 
     test "the same suffix with different os_pid values never collides (per-process entropy)" do

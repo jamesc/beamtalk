@@ -12,7 +12,7 @@
 /// Constructors accept an Integer or a Float; Float inputs are scaled to
 /// milliseconds and rounded to the nearest integer, so `Duration seconds: 1.5`
 /// is exactly 1500 ms. Unit conversions (`asSeconds`, `asMinutes`, `asHours`,
-/// `totalDays`) return Integers truncated toward zero — exact Integer
+/// `asDays`) return Integers truncated toward zero — exact Integer
 /// arithmetic for deadlines was chosen over Float results.
 ///
 /// `uses: Comparable` (ADR 0127 §9) adds `between:and:`, `min:`, `max:` on
@@ -125,6 +125,15 @@ sealed typed Value subclass: Duration native: beamtalk_duration
   asHours -> Integer => self delegate
 
   /// Total whole days (Integer, truncated toward zero).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration hours: 36) asDays                    // => 1
+  /// ```
+  asDays -> Integer => self delegate
+
+  /// Deprecated alias of `asDays`, the spelling its `asSeconds`/`asMinutes`/
+  /// `asHours` siblings share; same behaviour, kept for existing callers.
   ///
   /// ## Examples
   /// ```beamtalk

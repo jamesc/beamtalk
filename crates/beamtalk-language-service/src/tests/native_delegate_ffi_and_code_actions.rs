@@ -470,3 +470,30 @@ fn code_actions_return_value_not_offered_on_threading_constructs() {
         );
     }
 }
+
+#[test]
+fn duplicate_class_in_two_files_reports_diagnostic() {
+    // BT-5080: same class in two project files => deterministic winner + diagnostic.
+    let mut service = SimpleLanguageService::new();
+    let (a, b) = (Utf8PathBuf::from("a.bt"), Utf8PathBuf::from("b.bt"));
+    service.update_file(a.clone(), "Object subclass: Dup\n  one => 1".to_string());
+    service.update_file(b.clone(), "Object subclass: Dup\n  two => 2".to_string());
+    for file in [&a, &b] {
+        let diags = service.diagnostics(file);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("class `Dup` is also defined in")),
+            "{file}: expected duplicate-class diagnostic, got {diags:?}"
+        );
+    }
+    let diags = service.diagnostics(&b);
+    let d = diags
+        .iter()
+        .find(|d| d.message.contains("also defined"))
+        .unwrap();
+    assert!(
+        d.hint.as_deref().is_some_and(|h| h.contains("a.bt")),
+        "hint names the winner: {d:?}"
+    );
+}

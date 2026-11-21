@@ -8,14 +8,17 @@
 use super::config::{
     PRELOAD_MAX_FILES, PreloadConfig, PreloadedFiles, collect_preload_files_within,
 };
-use super::convert::{offset_to_position, path_to_stdlib_uri, path_to_uri, uri_to_path};
+use super::convert::{
+    offset_to_position, path_to_stdlib_uri, path_to_uri, position_to_offset, uri_to_path,
+};
 use super::flush::flush_event_listener;
 use super::nav::{bt_locations_to_lsp, runtime_site_to_lsp_location};
+use super::range_format::format_range_edits;
 use super::reload::{
     OpenPathsHandle, class_changed_listener, compute_publish_diagnostics, reload_check_listener,
     seed_reload_diagnostics,
 };
-use super::{Backend, FetchContentParams, FetchContentResult, LoadedTypeCache, NavCache};
+use super::{Backend, FetchContentParams, FetchContentResult, LoadedTypeCache};
 use crate::server::lock::LockRecover;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -69,7 +72,6 @@ impl Backend {
             flush_listener: tokio::sync::Mutex::new(None),
             class_changed_listener: tokio::sync::Mutex::new(None),
             delegate_to_runtime: std::sync::atomic::AtomicBool::new(false),
-            nav_cache: Arc::new(std::sync::Mutex::new(NavCache::default())),
             reload_check_listener: tokio::sync::Mutex::new(None),
             reload_diagnostics: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
@@ -1188,6 +1190,37 @@ impl Backend {
         }])
     }
 
+    /// Formats only the top-level constructs overlapping `range` (BT-5080).
+    pub(in crate::server) fn format_document_range(
+        &self,
+        uri: &Url,
+        range: Range,
+    ) -> Option<Vec<TextEdit>> {
+        if uri.scheme() == "beamtalk-stdlib" {
+            return None;
+        }
+        let path = uri_to_path(uri)?;
+        let source = {
+            let svc = self.service.lock_recover();
+            svc.file_source(&path)?
+        };
+        let start = position_to_offset(range.start, &source);
+        let end = position_to_offset(range.end, &source);
+        let edits = format_range_edits(&source, start, end)?;
+        Some(
+            edits
+                .into_iter()
+                .map(|e| TextEdit {
+                    range: Range {
+                        start: offset_to_position(e.start, &source),
+                        end: offset_to_position(e.end, &source),
+                    },
+                    new_text: e.new_text,
+                })
+                .collect(),
+        )
+    }
+
     /// Republishes diagnostics for every currently-open file.
     ///
     /// Called once preload completes so that any file opened before
@@ -1340,14 +1373,10 @@ impl Backend {
             flush_rx,
         ));
 
-        // cache-invalidation listener for class-loaded /
-        // method-installed push events. The listener holds a clone of the
-        // shared `Arc<Mutex<NavCache>>` so it can bump the generation
-        // counter as events arrive.
-        let class_changed_handle = tokio::spawn(class_changed_listener(
-            Arc::clone(&self.nav_cache),
-            class_changed_rx,
-        ));
+        // Drains class-loaded / method-installed push events so the runtime
+        // client's channel stays open (BT-5080: the former nav cache that
+        // consumed them cached nothing and was removed).
+        let class_changed_handle = tokio::spawn(class_changed_listener(class_changed_rx));
 
         let reload_check_handle = self.spawn_reload_check_listener(
             client.clone(),

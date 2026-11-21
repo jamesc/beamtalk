@@ -14,6 +14,7 @@ mod adr0144_protocol_metatypes;
 mod alias_and_cross_file_diagnostics;
 mod find_references_click_rejection;
 mod goto_definition_navigation;
+mod identifier_lookup_type_annotations;
 mod native_delegate_ffi_and_code_actions;
 mod native_types_and_protocol_registry;
 mod pipeline_stage_navigation;

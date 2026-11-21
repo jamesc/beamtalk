@@ -119,12 +119,12 @@ source_file_from_module_returns_path_for_compiled_bt_module_test() ->
     end.
 
 source_file_from_module_latin1_range_path_is_utf8_test() ->
-    Path = [$/, $t, $m, $p, $/, 233, $., $b, $t],
+    Path = [$/, 233, $., $b, $t],
     Mod = bt4370_latin1,
     load_source_module(Mod, Path),
     try
         Bin = beamtalk_reflection:source_file_from_module(Mod),
-        ?assertEqual(<<"/tmp/", 195, 169, ".bt">>, Bin),
+        ?assertEqual(<<"/", 195, 169, ".bt">>, Bin),
         ?assertEqual(Bin, unicode:characters_to_binary(Bin, utf8))
     after
         unload_module(Mod)

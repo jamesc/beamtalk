@@ -755,7 +755,6 @@ pub fn local_threading_diagnostics(module: &Module, hierarchy: &ClassHierarchy) 
 /// let result = analyse_full(&module, ctx);
 /// assert_eq!(result.diagnostics.len(), 0);
 /// ```
-#[allow(clippy::too_many_lines)] // orchestration function — one call per analysis phase
 pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
     let AnalysisContext {
         known_vars,
@@ -778,26 +777,216 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
 
     let mut result = AnalysisResult::new();
 
-    // Phase -1: Trait flattening (ADR 0127 §3, BT-3588) — expand every
-    // `uses:` line into its class's own body *before* anything else sees
-    // the module, exactly where the ADR places it ("Expansion … runs
-    // before `ClassHierarchy` is built"). A module with no `uses:` lines
-    // anywhere is untouched by `expand_module` and costs nothing beyond the
-    // one `any()` scan, so this runs unconditionally rather than gating on
-    // a knob the caller would have to remember to set.
-    //
-    // This flattens a *clone*, local to this function — `module` stays a
-    // `&Module` the caller owns and reuses for codegen afterward
-    // (`lower_module_for_codegen`/`generate_module`), which this function
-    // has no way to mutate through a shared reference. So the flattened
-    // methods reach every consumer of `AnalysisResult` below (diagnostics,
-    // `class_hierarchy`, `protocol_registry`, `type_map`, …) but not yet the
-    // caller's own AST — see `trait_expansion`'s module doc ("Codegen does
-    // not see this module yet") for the full boundary and BT-3590, which
-    // owns wiring the flattened module through to codegen.
+    // The module as written, before flattening replaces `module` (see
+    // `flatten_module`). Checks about what the author *wrote* (the package
+    // qualifiers, Phase 7) read this.
+    let written_module = module;
+    let FlattenedModule {
+        module: prepared_module,
+        trait_origins,
+        trait_package,
+        provisions:
+            ProvisionScope {
+                external_protocols,
+                provision_packages,
+                known_packages,
+            },
+    } = flatten_module(
+        module,
+        &mut result,
+        pre_loaded_protocol_defs,
+        &protocol_sources,
+        &pre_loaded_classes,
+        current_package,
+        known_packages,
+    );
+    let module: &Module = &prepared_module;
+
+    // Pre-codegen semantic facts, computed once here on the pre-writeback AST
+    // (a pure walk with no hierarchy/type dependency) instead of by codegen.
+    result.semantic_facts = facts::compute_semantic_facts(module);
+
+    build_class_hierarchy(
+        module,
+        &mut result,
+        stdlib_mode,
+        &trait_origins,
+        knowledge_scope,
+        dependency_extensions_unknown,
+        current_package,
+    );
+
+    // Remember whether cross-file class metadata was provided so the
+    // structural validator can decide whether unresolved-class warnings are useful.
+    let has_cross_file_classes = !pre_loaded_classes.is_empty();
+
+    inject_pre_loaded_classes(
+        module,
+        &mut result,
+        pre_loaded_classes,
+        &pre_loaded_protocols,
+        current_package,
+    );
+    register_extension_methods(module, &mut result, cross_file_extensions);
+    register_protocols_and_check_traits(
+        module,
+        &mut result,
+        pre_loaded_protocols,
+        trait_package,
+        external_protocols,
+    );
+    register_type_aliases(module, &mut result, pre_loaded_aliases, current_package);
+
+    resolve_types_and_blocks(
+        module,
+        &mut result,
+        known_vars,
+        native_type_registry,
+        skip_module_expression_lint,
+        current_package,
+    );
+
+    run_validators(
+        module,
+        &mut result,
+        &ValidatorContext {
+            written_module,
+            known_vars,
+            stdlib_mode,
+            skip_module_expression_lint,
+            known_erlang_modules: &known_erlang_modules,
+            is_stub_file,
+            known_packages: known_packages.as_ref(),
+            current_package,
+            provision_packages: &provision_packages,
+        },
+        has_cross_file_classes,
+    );
+
+    stdlib_protocols::stamp_provision_packages(
+        &mut result.diagnostics,
+        &result.protocol_use_packages,
+    );
+
+    result
+}
+
+/// Phases 1-3: name resolution, type checking, then block context analysis.
+fn resolve_types_and_blocks(
+    module: &Module,
+    result: &mut AnalysisResult,
+    known_vars: &[&str],
+    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+    skip_module_expression_lint: bool,
+    current_package: Option<&str>,
+) {
+    // Phase 1: Name Resolution
+    let mut name_resolver = NameResolver::new();
+    name_resolver.define_known_vars(known_vars, module.span);
+    name_resolver.resolve_module(module);
+    result.diagnostics.extend(name_resolver.take_diagnostics());
+
+    // Extract scope from NameResolver to pass to Analyser
+    // This eliminates duplicate scope building - the scope already contains:
+    // - Built-in identifiers (true, false, nil)
+    // - Known REPL variables
+    // - All variable bindings from name resolution
+    let scope = name_resolver.into_scope();
+
+    let (type_map, known_remote_spans) = type_check_module(
+        module,
+        result,
+        native_type_registry,
+        skip_module_expression_lint,
+        current_package,
+    );
+    analyse_block_contexts(module, result, scope, type_map, &known_remote_spans);
+}
+
+/// The module after Phase -1, with what later phases need from it.
+struct FlattenedModule<'m> {
+    /// The flattened clone, or the caller's module when there was nothing to do.
+    module: std::borrow::Cow<'m, Module>,
+    trait_origins: trait_expansion::OriginMap,
+    trait_package: Option<&'m str>,
+    provisions: ProvisionScope,
+}
+
+/// Phase -1: Trait flattening (ADR 0127 §3, BT-3588) — expand every
+/// `uses:` line into its class's own body *before* anything else sees
+/// the module, exactly where the ADR places it ("Expansion … runs
+/// before `ClassHierarchy` is built"). A module with no `uses:` lines
+/// anywhere is untouched by `expand_module` and costs nothing beyond the
+/// one `any()` scan, so this runs unconditionally rather than gating on
+/// a knob the caller would have to remember to set.
+///
+/// This flattens a *clone*, local to this function — `module` stays a
+/// `&Module` the caller owns and reuses for codegen afterward
+/// (`lower_module_for_codegen`/`generate_module`), which this function
+/// has no way to mutate through a shared reference. So the flattened
+/// methods reach every consumer of `AnalysisResult` below (diagnostics,
+/// `class_hierarchy`, `protocol_registry`, `type_map`, …) but not yet the
+/// caller's own AST — see `trait_expansion`'s module doc ("Codegen does
+/// not see this module yet") for the full boundary and BT-3590, which
+/// owns wiring the flattened module through to codegen.
+fn flatten_module<'m>(
+    module: &'m Module,
+    result: &mut AnalysisResult,
+    pre_loaded_protocol_defs: Vec<ProtocolDefinition>,
+    protocol_sources: &ProtocolSourceMap,
+    pre_loaded_classes: &[class_hierarchy::ClassInfo],
+    current_package: Option<&'m str>,
+    known_packages: Option<HashSet<String>>,
+) -> FlattenedModule<'m> {
+    let provisions = collect_provision_scope(
+        pre_loaded_protocol_defs,
+        protocol_sources,
+        pre_loaded_classes,
+        current_package,
+        known_packages,
+    );
+
+    // The package a qualified `uses: pkg@Name` is compared with (BT-3684); the
+    // language service's placeholder package is not one.
+    let trait_package = trait_expansion::known_package(current_package);
+    result.trait_package = trait_package.map(EcoString::from);
+    let (module, trait_origins) = prepare_module(
+        module,
+        result,
+        &provisions.external_protocols,
+        trait_package,
+    );
+    FlattenedModule {
+        module,
+        trait_origins,
+        trait_package,
+        provisions,
+    }
+}
+
+/// What flattening `uses:` provisions needs from outside the module (ADR 0127).
+struct ProvisionScope {
+    /// Every protocol carried in from outside this module, first definition
+    /// winning (see [`collect_provision_scope`]).
+    external_protocols: HashMap<EcoString, ProtocolDefinition>,
+    /// Protocol name -> declaring package, where known.
+    provision_packages: HashMap<EcoString, EcoString>,
+    /// `known_packages` extended with every provision's declaring package.
+    known_packages: Option<HashSet<String>>,
+}
+
+/// Phase -1 (first half): merge the carried protocol definitions and resolve
+/// their free class names, ahead of `uses:` expansion.
+fn collect_provision_scope(
+    pre_loaded_protocol_defs: Vec<ProtocolDefinition>,
+    protocol_sources: &ProtocolSourceMap,
+    pre_loaded_classes: &[class_hierarchy::ClassInfo],
+    current_package: Option<&str>,
+    known_packages: Option<HashSet<String>>,
+) -> ProvisionScope {
     // `external_protocols` (ADR 0127 §10a; BT-3591) merges every
-    // carried protocol carried in from outside this module — used
-    // both by `expand_module` right below and by `check_after_hierarchy`
+    // protocol carried in from outside this module — used both by
+    // `expand_module` (in `prepare_module`) and by `check_after_hierarchy`
     // later (Phase 0.55), which needs the same protocol definitions to check
     // a cross-file/cross-package `uses:` line's requirements and
     // `excluding:`/`overriding:` names.
@@ -814,8 +1003,8 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // `expand_module` re-reads) is already resolved.
     trait_expansion::resolve_provision_names(
         &mut external_protocols,
-        &protocol_sources,
-        &pre_loaded_classes,
+        protocol_sources,
+        pre_loaded_classes,
         current_package,
     );
 
@@ -833,24 +1022,26 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         known
     });
 
-    // The package a qualified `uses: pkg@Name` is compared with (BT-3684); the
-    // language service's placeholder package is not one.
-    let trait_package = trait_expansion::known_package(current_package);
-    result.trait_package = trait_package.map(EcoString::from);
-    let expanded_module_storage;
-    let trait_origins;
+    ProvisionScope {
+        external_protocols,
+        provision_packages,
+        known_packages,
+    }
+}
+
+/// Phase -1 (second half): flatten `uses:` lines and normalise operands on an
+/// owned clone — borrowed untouched when there is nothing to do.
+fn prepare_module<'m>(
+    module: &'m Module,
+    result: &mut AnalysisResult,
+    external_protocols: &HashMap<EcoString, ProtocolDefinition>,
+    trait_package: Option<&str>,
+) -> (std::borrow::Cow<'m, Module>, trait_expansion::OriginMap) {
     // BT-4059: on the same owned clone, strip redundant parentheses from every
     // send operand (`ast::normalize`), after expansion so spliced-in
     // provisions are normalised too, and before anything below reads the
     // module — `(e) foo` must analyse exactly like `e foo`. Cloned only when
     // there is something to expand or peel.
-    // The module as written, before the owned clone below replaces `module`
-    // with its flattened form. Checks about what the author *wrote* (the
-    // package qualifiers, Phase 7) read this: the flattened form also holds
-    // every `uses:`d provision spliced into each using class, so a qualifier
-    // written once in a protocol would be seen once per user, and a protocol
-    // carried in from another file would be reported against this one.
-    let written_module = module;
     let has_uses = module.classes.iter().any(|c| !c.uses.is_empty());
     // BT-4721: a file is one compilation unit for its class. The compile
     // pipelines fold same-file extensions before analysis, so this is a no-op
@@ -860,18 +1051,19 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         .method_definitions
         .iter()
         .any(|md| crate::compilation::is_same_file_extension(module, md.class_name.name.as_str()));
-    let module: &Module = if has_uses || has_same_file_ext || normalize::needs_normalising(module) {
+    if has_uses || has_same_file_ext || normalize::needs_normalising(module) {
         let mut owned = module.clone();
         if has_same_file_ext {
             result
                 .diagnostics
                 .extend(crate::compilation::fold_same_file_extensions(&mut owned));
         }
+        let trait_origins;
         if has_uses {
             let (expansion_diags, origins, resolved_uses) =
                 trait_expansion::expand_module_with_resolved_uses(
                     &mut owned,
-                    &external_protocols,
+                    external_protocols,
                     trait_package,
                 );
             result.stdlib_protocol_uses = trait_expansion::stdlib_uses_of(&resolved_uses);
@@ -882,21 +1074,26 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
             trait_origins = trait_expansion::OriginMap::new();
         }
         normalize::peel_operand_parens(&mut owned);
-        expanded_module_storage = owned;
-        &expanded_module_storage
+        (std::borrow::Cow::Owned(owned), trait_origins)
     } else {
-        trait_origins = trait_expansion::OriginMap::new();
-        module
-    };
+        (
+            std::borrow::Cow::Borrowed(module),
+            trait_expansion::OriginMap::new(),
+        )
+    }
+}
 
-    // Compute pre-codegen semantic facts in the same pass as the rest of
-    // analysis, on the same (pre-writeback) module AST that codegen's own
-    // `compute_semantic_facts(module)` call would otherwise re-derive. A pure
-    // AST walk with no hierarchy/type dependency, so it can run
-    // anywhere in this function; done first for symmetry with the writeback
-    // trio's ordering in codegen.
-    result.semantic_facts = facts::compute_semantic_facts(module);
-
+/// Phase 0: build the class hierarchy and record how complete the injected
+/// cross-file knowledge is.
+fn build_class_hierarchy(
+    module: &Module,
+    result: &mut AnalysisResult,
+    stdlib_mode: bool,
+    trait_origins: &trait_expansion::OriginMap,
+    knowledge_scope: KnowledgeScope,
+    dependency_extensions_unknown: bool,
+    current_package: Option<&str>,
+) {
     // Phase 0: Build Class Hierarchy (ADR 0006 Phase 1a)
     let (hierarchy_result, hierarchy_diags) =
         ClassHierarchy::build_with_options(module, stdlib_mode);
@@ -906,7 +1103,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // `MethodInfo::origin` can only be stamped once `ClassHierarchy` exists
     // (ADR 0127 §3 — see `trait_expansion`'s module doc for why the pass
     // above can't do this itself).
-    trait_expansion::apply_origins(&mut result.class_hierarchy, &trait_origins);
+    trait_expansion::apply_origins(&mut result.class_hierarchy, trait_origins);
 
     // Record how complete the injected cross-file knowledge is so the
     // receiver-knowledge classifier can consult it (ADR 0100 Rule 2).
@@ -919,11 +1116,17 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     if let Some(pkg) = current_package {
         result.class_hierarchy.stamp_package(pkg);
     }
+}
 
-    // Remember whether cross-file class metadata was provided so the
-    // structural validator can decide whether unresolved-class warnings are useful.
-    let has_cross_file_classes = !pre_loaded_classes.is_empty();
-
+/// Inject cross-file class metadata (REPL session classes, other files of the
+/// package, dependencies) into the hierarchy.
+fn inject_pre_loaded_classes(
+    module: &Module,
+    result: &mut AnalysisResult,
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    pre_loaded_protocols: &[ProtocolInfo],
+    current_package: Option<&str>,
+) {
     // Filter out pre-loaded class entries whose names match a protocol
     // definition in the current module. The compiler server's class cache
     // includes synthetic protocol class entries from prior loads; injecting
@@ -984,7 +1187,14 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         result.class_hierarchy.propagate_class_kind(module);
         result.class_hierarchy.propagate_cross_file_class_kind();
     }
+}
 
+/// Register extension methods (this module's and project-wide) into the hierarchy.
+fn register_extension_methods(
+    module: &Module,
+    result: &mut AnalysisResult,
+    cross_file_extensions: Option<&crate::compilation::extension_index::ExtensionIndex>,
+) {
     // ADR 0066 Phase 4: Register extension methods into the class hierarchy
     // so the type checker sees them as part of each class's method surface.
     // Extension methods defined via `ClassName >> selector => ...` are collected
@@ -1009,7 +1219,16 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
             .class_hierarchy
             .register_extensions(cross_file_extensions);
     }
+}
 
+/// Phases 0.5 and 0.55: register protocols, then run the trait semantic checks.
+fn register_protocols_and_check_traits(
+    module: &Module,
+    result: &mut AnalysisResult,
+    pre_loaded_protocols: Vec<ProtocolInfo>,
+    trait_package: Option<&str>,
+    external_protocols: HashMap<EcoString, ProtocolDefinition>,
+) {
     // Phase 0.5: Protocol Registration (ADR 0068 Phase 2b)
     // Register protocol definitions from the module into the protocol registry.
     // Must happen after the class hierarchy is fully built (for namespace collision
@@ -1051,7 +1270,15 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // own doc. No further use of the local `external_protocols` binding
     // above this point, so moving (not cloning) it in is free.
     result.external_protocols = external_protocols;
+}
 
+/// Phase 0.6: register type aliases (baked stdlib, pre-loaded, then this module's).
+fn register_type_aliases(
+    module: &Module,
+    result: &mut AnalysisResult,
+    pre_loaded_aliases: Vec<AliasInfo>,
+    current_package: Option<&str>,
+) {
     // Phase 0.6: Type Alias Registration (ADR 0108 Phase 2/5/8)
     // Must happen after both the class hierarchy and protocol registry are
     // fully built for the current module — aliases share the class/protocol
@@ -1146,20 +1373,20 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         );
         result.diagnostics.extend(alias_diags);
     }
+}
 
-    // Phase 1: Name Resolution
-    let mut name_resolver = NameResolver::new();
-    name_resolver.define_known_vars(known_vars, module.span);
-    name_resolver.resolve_module(module);
-    result.diagnostics.extend(name_resolver.take_diagnostics());
-
-    // Extract scope from NameResolver to pass to Analyser
-    // This eliminates duplicate scope building - the scope already contains:
-    // - Built-in identifiers (true, false, nil)
-    // - Known REPL variables
-    // - All variable bindings from name resolution
-    let scope = name_resolver.into_scope();
-
+/// Phase 2: type checking (ADR 0025 Phase 1 — zero-syntax inference). Returns
+/// the `TypeMap` and the known-remote provenance the block-capture check reads.
+fn type_check_module(
+    module: &Module,
+    result: &mut AnalysisResult,
+    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+    skip_module_expression_lint: bool,
+    current_package: Option<&str>,
+) -> (
+    type_checker::TypeMap,
+    HashMap<Span, type_checker::known_remote::KnownRemote>,
+) {
     // Phase 2: Type Checking (ADR 0025 Phase 1 — zero-syntax inference)
     // ADR 0071 Phase 3: Create type checker with package context for
     // internal method visibility enforcement (E0403).
@@ -1208,6 +1435,17 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &mut result.diagnostics,
     );
 
+    (type_map, known_remote_spans)
+}
+
+/// Phase 3: block context analysis (captures, mutations, context determination).
+fn analyse_block_contexts(
+    module: &Module,
+    result: &mut AnalysisResult,
+    scope: scope::Scope,
+    type_map: type_checker::TypeMap,
+    known_remote_spans: &HashMap<Span, type_checker::known_remote::KnownRemote>,
+) {
     // Phase 3: Block Context Analysis (captures, mutations, context determination)
     // Receive scope from NameResolver and TypeMap from TypeChecker
     let mut analyser = Analyser::with_scope(scope, type_map);
@@ -1222,7 +1460,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         analyser.type_map(),
         &analyser.result.block_info,
         Some(&result.alias_registry),
-        &known_remote_spans,
+        known_remote_spans,
         &mut result.diagnostics,
     );
     // ADR 0115 Phase 2: recover the `TypeMap` by destructuring
@@ -1237,30 +1475,6 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     result.diagnostics.extend(analyser_result.diagnostics);
     result.block_info = analyser_result.block_info;
     result.type_map = analyser_type_map;
-
-    run_validators(
-        module,
-        &mut result,
-        &ValidatorContext {
-            written_module,
-            known_vars,
-            stdlib_mode,
-            skip_module_expression_lint,
-            known_erlang_modules: &known_erlang_modules,
-            is_stub_file,
-            known_packages: known_packages.as_ref(),
-            current_package,
-            provision_packages: &provision_packages,
-        },
-        has_cross_file_classes,
-    );
-
-    stdlib_protocols::stamp_provision_packages(
-        &mut result.diagnostics,
-        &result.protocol_use_packages,
-    );
-
-    result
 }
 
 /// Inputs the post-analysis validator run needs beyond `module` and the

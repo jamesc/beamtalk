@@ -13,7 +13,7 @@ defmodule BtAttachWeb.ClassRowsRenderTest do
   defp row(name, superclass), do: %{"name" => name, "superclass" => superclass}
 
   defp render_rows(rows) do
-    render_component(&BtAttachWeb.WorkspaceLive.class_rows/1,
+    render_component(&BtAttachWeb.Live.BrowserComponents.class_rows/1,
       rows: rows,
       selected_class: nil,
       browser_side: "instance"

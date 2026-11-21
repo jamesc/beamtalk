@@ -91,22 +91,25 @@ pub fn parse_workspace_id(stdout: &str) -> Option<String> {
 /// is considered dead.
 const LIVENESS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// Find a running workspace and return its port, cookie, and workspace ID.
+/// Find the live workspace for the current project and return its port,
+/// cookie, and workspace ID.
 ///
-/// Scans `~/.beamtalk/workspaces/` for candidates and keeps only the live ones
-/// (see [`candidate_is_live`]). The workspace for the current directory wins
-/// when it is live; otherwise a single live candidate is used; several live
-/// candidates are an error naming them, because guessing could attach to
-/// another project's workspace (BT-5029).
+/// Only the workspace for the current directory is ever attached to
+/// (BT-5080). Other live workspaces belong to other projects, and a session
+/// started in project A must not run `flush`, `remove_class` or
+/// `rename_class` against project B. When the current project has no live
+/// workspace but others are running, this is an error naming them and saying
+/// how to attach explicitly. Scans `~/.beamtalk/workspaces/` and keeps only
+/// live candidates (see [`candidate_is_live`]).
 ///
 /// Returns the workspace ID for port re-discovery on reconnect.
 ///
 /// # Errors
 ///
-/// Returns a message listing the candidates when more than one live workspace
-/// exists and none belongs to the current directory.
+/// Returns a message naming the other running workspaces when the current
+/// project has none of its own.
 pub fn discover_any_port_cookie_and_id() -> Result<Option<(u16, String, String)>, String> {
-    tracing::debug!("scanning for any running workspace");
+    tracing::debug!("scanning for a running workspace for the current project");
     let Ok(root) = beamtalk_workspace::workspaces_base_dir() else {
         return Ok(None);
     };
@@ -150,26 +153,29 @@ fn discover_any_in(
         tracing::info!(port = found.0, workspace_id = %found.2, "using workspace for current directory");
         return Ok(Some(found));
     }
-    match live.len() {
-        0 => {
-            tracing::debug!("no running workspace found");
-            Ok(None)
-        }
-        1 => {
-            let found = live.remove(0);
-            tracing::info!(port = found.0, workspace_id = %found.2, "discovered running workspace");
-            Ok(Some(found))
-        }
-        _ => {
-            let ids: Vec<&str> = live.iter().map(|(_, _, id)| id.as_str()).collect();
-            Err(format!(
-                "Found {} running beamtalk workspaces ({}) and none belongs to the current \
-                 directory. Pass --workspace-id <id> or --port to choose one.",
-                ids.len(),
-                ids.join(", ")
-            ))
-        }
+    if live.is_empty() {
+        tracing::debug!("no running workspace found");
+        return Ok(None);
     }
+    let ids: Vec<&str> = live.iter().map(|(_, _, id)| id.as_str()).collect();
+    let (what, which) = if ids.len() == 1 {
+        ("another workspace is running", format!("`{}`", ids[0]))
+    } else {
+        (
+            "other workspaces are running",
+            ids.iter()
+                .map(|id| format!("`{id}`"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    };
+    Err(format!(
+        "No running beamtalk workspace for this project, but {what}: {which}. \
+         Not attaching to a different project's workspace. Start one for this project \
+         with 'beamtalk repl' or --start, or attach explicitly with --workspace-id <id> \
+         (e.g. --workspace-id {}) or --port.",
+        ids[0]
+    ))
 }
 
 /// Whether the workspace in `dir` is alive, not a crashed node's leftovers.
@@ -431,7 +437,9 @@ mod tests {
         let (_l, live) = live_listener();
         write_workspace(root.path(), "aaaa_dead", dead_port(), None);
         write_workspace(root.path(), "zzzz_live", live, None);
-        let found = discover_any_in(root.path(), None).unwrap().unwrap();
+        let found = discover_any_in(root.path(), Some("zzzz_live"))
+            .unwrap()
+            .unwrap();
         assert_eq!(found.2, "zzzz_live");
         assert_eq!(found.0, live);
     }
@@ -469,17 +477,26 @@ mod tests {
         assert!(err.contains("--workspace-id"), "got: {err}");
     }
 
+    /// BT-5080: one live workspace belonging to another project is NOT
+    /// attached to; the error names it and says how to attach explicitly.
     #[test]
-    fn discovery_with_one_live_workspace_uses_it() {
+    fn discovery_with_one_other_live_workspace_is_an_error_naming_it() {
         let root = tempfile::tempdir().unwrap();
         let (_l, p) = live_listener();
         write_workspace(root.path(), "solo", p, None);
-        assert_eq!(
-            discover_any_in(root.path(), Some("not-it"))
-                .unwrap()
-                .unwrap()
-                .2,
-            "solo"
+        let err = discover_any_in(root.path(), Some("not-it")).unwrap_err();
+        assert!(err.contains("`solo`"), "names the other workspace: {err}");
+        assert!(
+            err.contains("--workspace-id solo"),
+            "says how to attach: {err}"
         );
+        assert!(err.contains("Not attaching"), "got: {err}");
+    }
+
+    #[test]
+    fn discovery_with_no_live_workspace_is_none() {
+        let root = tempfile::tempdir().unwrap();
+        write_workspace(root.path(), "dead", dead_port(), None);
+        assert_eq!(discover_any_in(root.path(), Some("mine")).unwrap(), None);
     }
 }

@@ -64,5 +64,25 @@ Protocol define: Enumerable(E)
   anySatisfy: block :: Block(E, Boolean) -> Boolean =>
     self elements anySatisfy: block
 
+  /// True if every element satisfies `block`.
+  allSatisfy: block :: Block(E, Boolean) -> Boolean =>
+    self elements allSatisfy: block
+
+  /// True if no element satisfies `block`.
+  noneSatisfy: block :: Block(E, Boolean) -> Boolean =>
+    self elements noneSatisfy: block
+
+  /// Return the elements for which `block` answers `false`.
+  reject: block :: Block(E, Boolean) -> List(E) => self elements reject: block
+
+  /// True if `element` is one of the elements (strict equality, honouring an
+  /// element class's `equals:` override, as `List includes:` does).
+  includes: element :: Object -> Boolean => self elements includes: element
+
+  /// Find the first element matching `block`. Raises `not_found` if none
+  /// match (the error names `List`, the snapshot the search runs on); use
+  /// `detect:ifNone:` to supply a default.
+  detect: block :: Block(E, Boolean) -> E => self elements detect: block
+
   /// Count the elements for which `block` answers `true`.
   count: block :: Block(E, Boolean) -> Integer => self elements count: block

@@ -624,7 +624,7 @@ Object subclass: Actor
   /// Internal FFI seam (ADR 0101 Part 4): release this actor's registered
   /// name. Keeps `unregister` pure Beamtalk. Returns bare `ok`, which the
   /// FFI boundary auto-converts to `Result ok: nil` (ADR 0076/0121).
-  internal unregisterName -> Result(Nil) =>
+  internal unregisterName -> Result(Nil, Exception) =>
     (Erlang beamtalk_actor_ffi) unregister: self
 
   /// Return the Symbol this actor is registered under, or `nil` if unnamed.
@@ -666,6 +666,8 @@ Object subclass: Actor
   withTimeout: ms :: Timeout | Duration -> TimeoutProxy =>
     proxy := TimeoutProxy spawn
     proxy setTarget: self
+    // Redundant with setTimeoutMs:'s own Duration conversion, but kept: the
+    // ADR 0114 spike test refers to this branch (BT-5090).
     (ms isKindOf: Duration) ifTrue: [
       proxy setTimeoutMs: ms asMilliseconds
     ] ifFalse: [proxy setTimeoutMs: ms]

@@ -556,10 +556,32 @@ mod tests {
         workflow.lines().filter(|l| l.trim() == item).count()
     }
 
+    /// The lines of `trigger`'s block under `on:` (the `  <trigger>:` key and
+    /// everything indented deeper), or an empty list when it is absent.
+    fn trigger_block<'a>(workflow: &'a str, trigger: &str) -> Vec<&'a str> {
+        let key = format!("  {trigger}:");
+        let mut lines = workflow.lines().skip_while(|l| l.trim_end() != key);
+        let mut block = Vec::new();
+        if let Some(first) = lines.next() {
+            block.push(first);
+            for l in lines {
+                if l.trim().is_empty() || l.starts_with("    ") {
+                    block.push(l);
+                } else if !(l.trim_start().starts_with('#') && l.starts_with("  ")) {
+                    break;
+                }
+            }
+        }
+        block
+    }
+
     /// A doc-only PR that edits a corpus source under `docs/` must run
     /// `ci.yml`, whose `just build` regenerates the corpus from it. Each
-    /// source must be re-included after `!docs/**` in both of `ci.yml`'s
-    /// triggers.
+    /// source must be re-included after `!docs/**` in `ci.yml`'s one `paths:`
+    /// list (the `push` trigger's). A `pull_request` always starts `ci.yml`
+    /// (BT-5086) and its `changes` job applies that same list to the PR's
+    /// files (`scripts/ci/ci_code_filter.py`), so the `pull_request` trigger
+    /// must not carry a second, diverging `paths:` list.
     #[test]
     fn docs_corpus_sources_trigger_full_ci() {
         let learning = format!("{LEARNING_DOCS_DIR}/**");
@@ -577,12 +599,25 @@ mod tests {
         for pattern in DOCS_CORPUS_SOURCE_PATTERNS {
             assert_eq!(
                 path_filter_count(&ci, pattern),
-                2,
-                "ci.yml must re-include '{pattern}' after '!docs/**' in both its \
-                 push and pull_request paths, or a PR editing it skips the build \
-                 that regenerates the corpus from it"
+                1,
+                "ci.yml must re-include '{pattern}' after '!docs/**' in its \
+                 `paths:` list (the push trigger's, which the PR `changes` job \
+                 also applies), or a PR editing it skips the build that \
+                 regenerates the corpus from it"
             );
         }
+
+        let pull_request = trigger_block(&ci, "pull_request");
+        assert!(
+            !pull_request.is_empty(),
+            "ci.yml must run on pull_request so its `ci-ok` check always exists"
+        );
+        assert!(
+            !pull_request.iter().any(|l| l.trim() == "paths:"),
+            "ci.yml's pull_request trigger must not have its own `paths:` list: \
+             the `changes` job applies the push list to PRs, and a second list \
+             could diverge from it"
+        );
     }
 
     /// Regression guard: two back-to-back builds of the same source

@@ -26,7 +26,7 @@ Duration objects are represented as tagged maps:
 Constructors accept an Integer or a Float; Float inputs are scaled to
 milliseconds and rounded to the nearest integer (`Duration seconds: 1.5`
 is exactly 1500 ms). The unit accessors (`asSeconds`, `asMinutes`,
-`asHours`, `totalDays`) return Integers, truncating toward zero — the
+`asHours`, `asDays`) return Integers, truncating toward zero — the
 Float alternative was rejected so deadline arithmetic stays exact.
 
 ## FFI Shims
@@ -46,7 +46,7 @@ Erlang BIFs without dispatching (ADR 0002).
 -export([fromString/1]).
 
 %% Instance methods
--export(['asMilliseconds'/1, 'asSeconds'/1, 'asMinutes'/1, 'asHours'/1, 'totalDays'/1]).
+-export(['asMilliseconds'/1, 'asSeconds'/1, 'asMinutes'/1, 'asHours'/1, 'asDays'/1, 'totalDays'/1]).
 -export(['isZero'/1, 'isNegative'/1]).
 -export(['asString'/1, 'printString'/1]).
 -export(['+'/2, '-'/2, '*'/2]).
@@ -55,6 +55,9 @@ Erlang BIFs without dispatching (ADR 0002).
 %% Entry points for (Erlang beamtalk_duration) dispatch
 
 -export([add/2, subtract/2, multiply/2]).
+
+%% Shared call-boundary normaliser for time parameters (BT-5090).
+-export([to_timeout/1]).
 -export([lt/2, gt/2, lte/2, gte/2]).
 
 %% Exported for white-box tests only (no production caller).
@@ -121,6 +124,23 @@ fromString(_) ->
     beamtalk_error:raise_type_error('Duration', 'fromString:', <<"Argument must be a String">>).
 
 %%% ============================================================================
+%%% Time-parameter normaliser
+%%% ============================================================================
+
+-doc """
+Normalise a time parameter once, at the call boundary (BT-5090).
+
+A `Duration` becomes its milliseconds; an Integer and `infinity` pass through
+unchanged, and so does anything else, so the callee's existing validation (and
+its error) is untouched. Every stdlib time parameter typed `Integer | Duration`
+or `Timeout | Duration` converts with this one function rather than repeating
+the `Duration` clause.
+""".
+-spec to_timeout(term()) -> term().
+to_timeout(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) -> Ms;
+to_timeout(Other) -> Other.
+
+%%% ============================================================================
 %%% Instance Methods — Conversions
 %%% ============================================================================
 
@@ -144,9 +164,14 @@ fromString(_) ->
     trunc_div(Ms, ?MS_PER_HOUR).
 
 -doc "Total whole days (Integer, truncated toward zero).".
--spec 'totalDays'(t()) -> integer().
-'totalDays'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) ->
+-spec 'asDays'(t()) -> integer().
+'asDays'(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) ->
     trunc_div(Ms, ?MS_PER_DAY).
+
+-doc "Deprecated alias of `asDays/1` (BT-5090), kept for existing callers.".
+-spec 'totalDays'(t()) -> integer().
+'totalDays'(Duration) ->
+    'asDays'(Duration).
 
 %%% ============================================================================
 %%% Instance Methods — Predicates
