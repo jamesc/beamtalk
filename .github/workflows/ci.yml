@@ -380,8 +380,10 @@ jobs:
 
       # build first: the CLI integration tests exec the real `beamtalk` binary
       # against the built runtime and stdlib.
+      # BT-5089: docs/cli-workspace.md is the CLI's own help text, so a CLI change
+      # that does not regenerate it fails here (this job has the built binary).
       - name: Build and Rust tests
-        run: just build test-rust
+        run: just build test-rust check-cli-reference
 
       # BT-5033: the corpus tier is corpus.yml's and runs on a PR only with the
       # `ci:corpus` label, but its tests that read the runtime's shared
