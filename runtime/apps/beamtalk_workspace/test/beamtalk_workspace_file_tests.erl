@@ -97,10 +97,11 @@ strip_namespace_prefix_test_() ->
         %% Already plain, or relative: unchanged.
         ?_assertEqual("C:\\Users\\proj", Strip("C:\\Users\\proj", Win)),
         ?_assertEqual("src", Strip("src", Win)),
-        %% The stripped form splits like the plain one.
+        %% The stripped form splits like the plain one. Forward slashes, since
+        %% `filename:split/1` reads a backslash as a separator only on Windows.
         ?_assertEqual(
             filename:split("C:/Users/proj"),
-            filename:split(Strip("\\??\\C:\\Users\\proj", Win))
+            filename:split(Strip("//?/C:/Users/proj", Win))
         ),
         %% Not Windows: `/??/x` is an ordinary path and is kept.
         ?_assertEqual("/??/x", Strip("/??/x", {unix, linux})),
