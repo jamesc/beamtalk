@@ -367,7 +367,7 @@ Use this as a CI deploy gate to catch missing migration methods before productio
 
 The Beamtalk REPL is an interactive development environment connected to a persistent workspace — a detached BEAM node that survives disconnections ([ADR 0004](ADR/0004-persistent-workspace-management.md)). Actors keep running between sessions; REPL variable bindings are session-local.
 
-**`BEAMTALK_HOME`.** The CLI, VS Code extension and runtime resolve workspace state under `~/.beamtalk` by default. Set `BEAMTALK_HOME` to override this root (e.g. `export BEAMTALK_HOME=/data/beamtalk`). The detached BEAM node, `beamtalk workspace`, and the VS Code extension all honour the same variable, so they agree on where workspaces live.
+**`BEAMTALK_HOME`.** The CLI, VS Code extension and runtime resolve workspace state under `~/.beamtalk` by default. Set `BEAMTALK_HOME` to override this root (e.g. `export BEAMTALK_HOME=/data/beamtalk`). The detached BEAM node, `beamtalk workspace`, and the VS Code extension all honour the same variable, so they agree on where workspaces live. Every other environment variable the code reads is listed in [environment-variables](development/environment-variables.md); the `beamtalk workspace` subcommands and flags are in [cli-workspace](cli-workspace.md).
 
 ### Starting the REPL
 

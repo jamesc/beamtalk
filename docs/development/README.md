@@ -18,6 +18,8 @@ This directory contains documentation for **contributors and AI agents** working
 | [Common Tasks](common-tasks.md) | Step-by-step guides: adding AST nodes, CLI commands, stdlib features |
 | [Testing Strategy](testing-strategy.md) | Test organization, fixtures, E2E tests, coverage requirements |
 | [Stdlib API Consistency](stdlib-api-consistency.md) | Rules for selector spelling, `Array`/`List` parity, `Duration` parameters and `Enumerable` provisions, and the test that enforces them |
+| [Environment Variables](environment-variables.md) | Every environment variable the code reads, with a check that keeps the list complete |
+| [CLI: `beamtalk workspace`](../cli-workspace.md) | Subcommand and flag reference, generated from clap help |
 | [Actor State Cell](actor-state-cell.md) | How ADR 0137 keeps actor closures on live state: the sync-around-calls mechanism, `call_foreign/3`, verifier rules, costs and phase detail |
 | [AGENTS.md](../../AGENTS.md) | Complete guide for AI agents contributing to the codebase |
 
