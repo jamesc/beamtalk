@@ -111,19 +111,6 @@ fn configured_stdlib_source_dir_reads_initialize_option() {
     assert_eq!(configured.as_deref(), Some("stdlib/src"));
 }
 
-#[test]
-fn extract_hover_class_name_from_class_hover() {
-    let text = "Class: `Integer`";
-    assert_eq!(extract_hover_class_name(text), Some("Integer"));
-}
-
-#[test]
-fn extract_hover_class_name_from_package_qualified_hover() {
-    // Class name extraction must work with package provenance suffix
-    let text = "Class: `Parser` (from package `json`)";
-    assert_eq!(extract_hover_class_name(text), Some("Parser"));
-}
-
 /// BT-4341: the LSP hover formatter keeps a BT-4337 `## Options` section
 /// intact — the heading is demoted for compact display but the option
 /// bullets survive verbatim.
@@ -143,16 +130,27 @@ fn format_hover_documentation_keeps_options_bullets() {
     }
 }
 
-#[test]
-fn extract_hover_class_name_from_resolved_method_hover() {
-    let text = "```beamtalk\n+\n```\n\nResolved on `Integer` (defined in `Integer`)\n\n_instance-side, sealed_";
-    assert_eq!(extract_hover_class_name(text), Some("Integer"));
+/// The real hover for the last occurrence of `needle` in `source`, as the
+/// language service computes it (so the policy note is driven by the provider's
+/// own `class_name`, not a hand-built value).
+fn hover_on(service: &mut SimpleLanguageService, source: &str, needle: &str) -> HoverInfo {
+    let file = Utf8PathBuf::from("hover_policy.bt");
+    service.update_file(file.clone(), source.to_string());
+    let offset = u32::try_from(source.rfind(needle).unwrap()).unwrap();
+    let pos = beamtalk_language_service::Position::from_byte_offset(
+        source,
+        beamtalk_language_service::ByteOffset::new(offset),
+    )
+    .unwrap();
+    service.hover(&file, pos).expect("hover at needle")
 }
 
 #[test]
 fn stdlib_policy_note_for_sealed_class() {
-    let service = SimpleLanguageService::new();
-    let note = stdlib_hover_policy_note(&service, "Class: `Integer`");
+    let mut service = SimpleLanguageService::new();
+    let hover = hover_on(&mut service, "Integer spawn", "Integer");
+    assert_eq!(hover.class_name.as_deref(), Some("Integer"));
+    let note = stdlib_hover_policy_note(&service, &hover);
     assert!(note.is_some());
     let note = note.unwrap();
     assert!(note.contains("Stdlib Profile"));
@@ -162,20 +160,29 @@ fn stdlib_policy_note_for_sealed_class() {
 #[test]
 fn stdlib_policy_note_ignores_non_builtin_classes() {
     let mut service = SimpleLanguageService::new();
-    let file = Utf8PathBuf::from("user.bt");
-    service.update_file(
-        file,
-        "Object subclass: Counter\n  increment => 1".to_string(),
+    let hover = hover_on(
+        &mut service,
+        "Object subclass: Counter\n  increment => 1\n\nCounter new",
+        "Counter",
     );
-
-    let note = stdlib_hover_policy_note(&service, "Class: `Counter`");
+    assert_eq!(hover.class_name.as_deref(), Some("Counter"));
+    let note = stdlib_hover_policy_note(&service, &hover);
     assert!(note.is_none());
 }
 
 #[test]
+fn stdlib_policy_note_is_none_when_hover_has_no_class() {
+    let mut service = SimpleLanguageService::new();
+    let hover = hover_on(&mut service, "x := 42", "x");
+    assert_eq!(hover.class_name, None);
+    assert!(stdlib_hover_policy_note(&service, &hover).is_none());
+}
+
+#[test]
 fn stdlib_policy_note_for_abstract_class() {
-    let service = SimpleLanguageService::new();
-    let note = stdlib_hover_policy_note(&service, "Class: `Boolean`");
+    let mut service = SimpleLanguageService::new();
+    let hover = hover_on(&mut service, "Boolean spawn", "Boolean");
+    let note = stdlib_hover_policy_note(&service, &hover);
     assert!(note.is_some());
     let note = note.unwrap();
     assert!(note.contains("abstract"));
@@ -183,9 +190,13 @@ fn stdlib_policy_note_for_abstract_class() {
 
 #[test]
 fn stdlib_policy_note_marks_high_confidence_for_sealed_method_hover() {
-    let service = SimpleLanguageService::new();
-    let hover = "```beamtalk\n+\n```\n\nResolved on `Integer` (defined in `Integer`)\n\n_instance-side, sealed_";
-    let note = stdlib_hover_policy_note(&service, hover);
+    let mut service = SimpleLanguageService::new();
+    let hover = hover_on(&mut service, "3 negated", "negated");
+    assert!(
+        hover.method_resolved,
+        "hover on `+` resolves a method: {hover:?}"
+    );
+    let note = stdlib_hover_policy_note(&service, &hover);
     assert!(note.is_some());
     let note = note.unwrap();
     assert!(note.contains("Confidence: high"));
@@ -194,25 +205,18 @@ fn stdlib_policy_note_marks_high_confidence_for_sealed_method_hover() {
 
 #[test]
 fn stdlib_policy_note_does_not_mark_high_confidence_for_class_hover() {
-    let service = SimpleLanguageService::new();
-    let note = stdlib_hover_policy_note(&service, "Class: `Integer`");
+    let mut service = SimpleLanguageService::new();
+    let hover = hover_on(&mut service, "Integer spawn", "Integer");
+    let note = stdlib_hover_policy_note(&service, &hover);
     assert!(note.is_some());
     assert!(!note.unwrap().contains("Confidence: high"));
 }
 
 #[test]
-fn policy_note_works_for_resolved_method_hover_markdown() {
-    let service = SimpleLanguageService::new();
-    let hover = HoverInfo::new("```beamtalk\n+\n```", Span::new(0, 1)).with_documentation(
-        "Resolved on `Integer` (defined in `Integer`)\n\n_instance-side, sealed_",
-    );
-    let markdown = format!(
-        "{}\n\n{}",
-        hover.contents,
-        format_hover_documentation(hover.documentation.as_deref().unwrap_or_default())
-    );
-
-    let note = stdlib_hover_policy_note(&service, &markdown);
+fn policy_note_works_for_resolved_method_hover() {
+    let mut service = SimpleLanguageService::new();
+    let hover = hover_on(&mut service, "3 negated", "negated");
+    let note = stdlib_hover_policy_note(&service, &hover);
     assert!(note.is_some());
     assert!(note.unwrap().contains("Integer"));
 }

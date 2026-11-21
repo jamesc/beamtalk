@@ -1272,7 +1272,11 @@ fn resolved_selector_hover_info(
         Some(existing) => format!("{existing}\n\n{resolution_context}\n\n{meta_line}"),
         None => format!("{resolution_context}\n\n{meta_line}"),
     };
-    Some(HoverInfo::new(summary, span).with_documentation(doc))
+    Some(
+        HoverInfo::new(summary, span)
+            .with_documentation(doc)
+            .with_resolved_class(receiver_class.clone()),
+    )
 }
 
 /// Builds hover info for an FFI call selector (ADR 0075 Phase 4).
@@ -1568,7 +1572,7 @@ fn class_reference_hover_info(
         }
     }
 
-    HoverInfo::new(info, span)
+    HoverInfo::new(info, span).with_class_name(class_name.clone())
 }
 
 #[cfg(test)]
@@ -1833,6 +1837,52 @@ mod tests {
             "Unexpected hover documentation: {:?}",
             hover.documentation
         );
+    }
+
+    /// BT-5095: the rendered markdown is exactly what it was before hover
+    /// started carrying structured class data.
+    #[test]
+    fn class_hover_markdown_is_unchanged_and_carries_class_name() {
+        let source = "Object subclass: Counter\n  increment => 1\n\nCounter new";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let pos = pos_at(source, source.rfind("Counter").unwrap());
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None, None).unwrap();
+        assert_eq!(
+            hover.contents.as_str(),
+            "Class: `Counter`\n\nExtends: `Object`\n\nHierarchy: Counter → Object → ProtoObject\n\n**Methods:**\n- `increment -> Integer`"
+        );
+        assert_eq!(hover.documentation, None);
+        assert_eq!(hover.class_name.as_deref(), Some("Counter"));
+        assert!(!hover.method_resolved);
+    }
+
+    #[test]
+    fn method_hover_markdown_is_unchanged_and_carries_resolved_class() {
+        let source = "Object subclass: Counter\n  increment => 1\n\nCounter new increment";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let pos = pos_at(source, source.rfind("increment").unwrap());
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None, None).unwrap();
+        assert_eq!(
+            hover.contents.as_str(),
+            "```beamtalk\nincrement -> Integer\n```"
+        );
+        assert_eq!(
+            hover.documentation.as_deref(),
+            Some("Resolved on `Counter` (defined in `Counter`)\n\n_instance-side_")
+        );
+        assert_eq!(hover.class_name.as_deref(), Some("Counter"));
+        assert!(hover.method_resolved);
+    }
+
+    #[test]
+    fn hover_without_a_class_has_no_class_name() {
+        let hover = hover_at("x := 42", Position::new(0, 0)).unwrap();
+        assert_eq!(hover.class_name, None);
+        assert!(!hover.method_resolved);
     }
 
     #[test]
