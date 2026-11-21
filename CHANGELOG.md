@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Added: one spelling per concept across the stdlib; `Array` reads like `List` (BT-5090).** No selector is removed and no existing call changes behaviour.
+  - Added: `Array reversed`, `indexOf:`, `take:`, `drop:`, `sort` and `sort:`, each answering what the `List` selector answers (an Array, or an index). `Array` still has no `add:` or `addFirst:`. They call `beamtalk_array` helpers directly, so no existing send path changes.
+  - Added: `String reversed`, `Duration asDays`, `Logger warning:` and `Logger warning:metadata:`. They are the canonical spellings, matching `List reversed`, `asHours` and the `#warning` level.
+  - Deprecated (still work, same behaviour): `String reverse` (use `reversed`), `Duration totalDays` (use `asDays`), `Logger warn:` and `Logger warn:metadata:` (use `warning:`), `Set fromList:` (use `Set withAll:`). "Deprecated" is a sentence in the doc comment; the compiler does not warn.
+  - Fixed (docs/types): the `Set` class docs describe the real representation (a sorted list of distinct elements, identity `=:=`), not `ordsets`/map keys; `Actor unregisterName` is typed `Result(Nil, Exception)`, the error type the FFI boundary infers; the `dir:` examples for `Subprocess` and `ReactiveSubprocess` pass Strings, which is all the runtime accepts; `File openHandles` is documented with `#[...]` Array syntax.
 - **Fix: native builds see Rust and Go toolchain locations; a failed native build explains the restricted `rebar3` environment; a failed `priv/` cleanup is an error (BT-5103).**
   - Added: `CARGO_HOME`, `RUSTUP_HOME`, `RUSTUP_TOOLCHAIN`, `CARGO_TARGET_DIR`, `RUSTC`, `RUSTFLAGS`, `GOPATH`, `GOROOT`, `GOCACHE`, `GOMODCACHE`, `GOBIN` and `XDG_{CACHE,CONFIG,DATA}_HOME` join the `rebar3` environment allowlist, so rustler and Go builds find their toolchain. Secrets (`HEX_API_KEY`, cargo registry tokens, `GOPROXY`) are still withheld.
   - Changed: a failed `rebar3 compile` now says rebar3 ran with a restricted environment; `-v` logs the names passed (never values).

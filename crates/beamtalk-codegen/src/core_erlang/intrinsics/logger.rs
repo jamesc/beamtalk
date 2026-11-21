@@ -117,11 +117,13 @@ impl CoreErlangGenerator {
                 match selector_name.as_str() {
                     "debug:" if arguments.len() == 1 => ("debug", false),
                     "info:" if arguments.len() == 1 => ("info", false),
-                    "warn:" if arguments.len() == 1 => ("warning", false),
+                    "warn:" | "warning:" if arguments.len() == 1 => ("warning", false),
                     "error:" if arguments.len() == 1 => ("error", false),
                     "debug:metadata:" if arguments.len() == 2 => ("debug", true),
                     "info:metadata:" if arguments.len() == 2 => ("info", true),
-                    "warn:metadata:" if arguments.len() == 2 => ("warning", true),
+                    "warn:metadata:" | "warning:metadata:" if arguments.len() == 2 => {
+                        ("warning", true)
+                    }
                     "error:metadata:" if arguments.len() == 2 => ("error", true),
                     // any other selector — fall through to normal dispatch
                     _ => return Ok(None),

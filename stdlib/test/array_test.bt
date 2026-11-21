@@ -144,3 +144,80 @@ TestCase subclass: ArrayTest
     self assert: #[1, 2, 3] equals: #[1, 2, 3]
     self deny: (#[1, 2, 3] =:= #[1, 2, 4])
     self deny: (#[1, 2] =:= #[1, 2, 3])
+
+  // === Order-dependent reads (BT-5090) ===
+  testReversed =>
+    self assert: #[1, 2, 3] reversed equals: #[3, 2, 1]
+    self assert: #[] reversed equals: #[]
+    // equal to a literal, so the canonical representation holds
+    self assert: (#[1, 2, 3] reversed reversed) equals: #[1, 2, 3]
+
+  testIndexOf =>
+    self assert: (#[10, 20, 30] indexOf: 20) equals: 2
+    self assert: (#[10, 20, 30] indexOf: 99) equals: nil
+    self assert: (#[] indexOf: 1) equals: nil
+    self assert: (#[1, 2, 1] indexOf: 1) equals: 1
+
+  testTakeAndDrop =>
+    self assert: (#[1, 2, 3, 4] take: 2) equals: #[1, 2]
+    self assert: (#[1, 2] take: 5) equals: #[1, 2]
+    self assert: (#[1, 2, 3] take: 0) equals: #[]
+    self assert: (#[1, 2, 3, 4] drop: 2) equals: #[3, 4]
+    self assert: (#[1, 2] drop: 5) equals: #[]
+    self assert: (#[1, 2, 3] drop: 0) equals: #[1, 2, 3]
+
+  testTakeAndDropRejectBadCounts =>
+    // `perform:withArguments:` so the argument is checked at run time, not compile time
+    self should: [
+      #[1, 2] perform: #take: withArguments: #(-1)
+    ] raise: #type_error
+    self should: [
+      #[1, 2] perform: #drop: withArguments: #(-1)
+    ] raise: #type_error
+    self should: [
+      #[1, 2] perform: #take: withArguments: #("x")
+    ] raise: #type_error
+    self should: [
+      #[1, 2] perform: #drop: withArguments: #("x")
+    ] raise: #type_error
+
+  testSort =>
+    self assert: #[3, 1, 2] sort equals: #[1, 2, 3]
+    self assert: #[] sort equals: #[]
+    self assert: (#[3, 1, 2] sort: [:a :b | a > b]) equals: #[3, 2, 1]
+
+  testSortWithBadComparatorRaises =>
+    self should: [
+      #[3, 1, 2] perform: #sort: withArguments: #([:a | a])
+    ] raise: #type_error
+
+  testNewSelectorsAgreeWithList =>
+    xs := #(5, 3, 9, 1)
+    arr := Array withAll: xs
+    self assert: arr reversed asList equals: xs reversed
+    self assert: (arr indexOf: 9) equals: (xs indexOf: 9)
+    self assert: (arr take: 2) asList equals: (xs take: 2)
+    self assert: (arr drop: 2) asList equals: (xs drop: 2)
+    self assert: arr sort asList equals: xs sort
+    self assert: (arr sort: [:a :b |
+      a > b
+    ]) asList equals: (xs sort: [:a :b | a > b])
+
+  testArrayDoesNotGrow =>
+    self deny: (#[1, 2] respondsTo: #add:)
+    self deny: (#[1, 2] respondsTo: #addFirst:)
+
+  // The comparator assigns an outer local, so `sort:` is lowered as an in-place
+  // fold over the receiver (ADR 0133).
+  sortWriting: coll =>
+    n := 0
+    coll
+      sort: [:a :b |
+        n := n + 1
+        a < b
+      ]
+
+  testSortWithWritingComparatorRefusesInsteadOfAnsweringAList =>
+    // BT-5090: the in-place fold would answer a List; `Array sort:` answers an
+    // Array, so it refuses (never a silently wrong class).
+    self should: [self sortWriting: #[3, 1, 2]] raise: #stateful_block_dispatch

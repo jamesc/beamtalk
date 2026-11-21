@@ -271,6 +271,17 @@ sealed typed Binary subclass: String
 
   /// Reverse the string (grapheme-aware).
   ///
+  /// `reversed` is the canonical spelling, shared with `List` and `Array`.
+  /// Calls `beamtalk_string:reverse/1` directly, so `reversed` pays no extra hop.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "hello" reversed     // => "olleh"
+  /// ```
+  reversed -> String => (Erlang beamtalk_string) reverse: self
+
+  /// Deprecated alias of `reversed`; same behaviour, kept for existing callers.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// "hello" reverse      // => "olleh"

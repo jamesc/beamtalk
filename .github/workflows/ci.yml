@@ -28,7 +28,6 @@ on:
       - 'docs/development/surface-parity.md'
       - '!LICENSE'
       - '!SECURITY.md'
-      - '!.github/skills/**'
       - '!.devcontainer/**'
   # Manual run (Actions tab or `gh workflow run ci.yml --ref <branch>`): the
   # `changes` job treats any non-PR event like a push to main, so a dispatch
@@ -46,7 +45,6 @@ on:
       - 'docs/development/surface-parity.md'
       - '!LICENSE'
       - '!SECURITY.md'
-      - '!.github/skills/**'
       - '!.devcontainer/**'
 
 # PR runs cancel the superseded run for the same PR. A push to main is keyed on
@@ -63,6 +61,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # The dtolnay action set this for every job; keep it now that rust-toolchain.toml installs the toolchain.
+  CARGO_INCREMENTAL: "0"
   # BT-5034: a missing erlc/erl fails the Rust compile checks instead of
   # skipping them (`beamtalk_core::test_helpers::test_support::skip_or_fail`).
   # GitHub sets CI=true as well; this makes the contract explicit and keeps it
@@ -246,9 +246,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
@@ -345,9 +344,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
@@ -483,9 +481,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
@@ -524,9 +521,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       # rust-toolchain.toml pins the channel cargo actually uses, so the
       # target goes on that toolchain (the action's `targets:` input would
@@ -563,9 +559,8 @@ jobs:
           fetch-depth: 0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
@@ -625,9 +620,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install Just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
@@ -682,9 +676,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       # erlef/setup-beam errors if both `version-file` (which has its own
       # `erlang` line) and an explicit `otp-version` are given, so read just
@@ -772,9 +765,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       # erlef/setup-beam errors if both `version-file` (which has its own
       # `erlang` line) and an explicit `otp-version` are given, so read just
@@ -850,9 +842,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       # erlef/setup-beam errors if both `version-file` (which has its own
       # `erlang` line) and an explicit `otp-version` are given, so read just
@@ -937,9 +928,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
@@ -1039,9 +1029,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
+        # The channel and components come from rust-toolchain.toml alone (BT-5086).
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
@@ -1061,3 +1050,29 @@ jobs:
 
       - name: Smoke test install (clean checkout)
         run: just test-install
+
+  # ─── Single required check (BT-5086) ───────────────────────────────────
+  # Branch protection should require this one job. `if: always()` makes it run
+  # (and report) even when a needed job failed or was cancelled; a bare `needs:`
+  # job would be skipped instead, and a skipped required check reads as passing.
+  # scripts/ci/ci_ok.py decides: every job must have succeeded, except a job
+  # ci.yml itself gates on `needs.changes.outputs.*` may be skipped while
+  # `changes` succeeded. `just test-ci-ok` checks this job needs every other job.
+  ci-ok:
+    name: ci-ok
+    if: ${{ always() }}
+    needs: [changes, lint, test-rust, test-vscode, test-desktop, check-release-build, check-exec-windows, core-diff-modes, otp-matrix, test-beam, test-runtime, test-dialyzer, test-integration, test-install]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows/ci.yml
+            scripts/ci/ci_ok.py
+
+      - name: Every needed job passed or was skipped by a path gate
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci/ci_ok.py verdict .github/workflows/ci.yml

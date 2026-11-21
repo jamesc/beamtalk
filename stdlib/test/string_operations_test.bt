@@ -101,3 +101,10 @@ TestCase subclass: StringOperationsTest
         "hi" perform: #collect: withArguments: (Erlang erlang tuple_to_list: (Erlang erlang make_tuple: 1 init: statefulBlock))
       ]
       raise: #stateful_block_dispatch
+
+  testReversedIsTheCanonicalSpelling =>
+    // BT-5090: `reversed` matches List and Array; `reverse` stays as an alias
+    self assert: "hello" reversed equals: "olleh"
+    self assert: "hello" reverse equals: "olleh"
+    self assert: "" reversed equals: ""
+    self assert: "héllo" reversed equals: "olléh"
