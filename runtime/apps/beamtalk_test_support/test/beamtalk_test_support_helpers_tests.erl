@@ -45,6 +45,28 @@ dead_times_out_test() ->
     ?assertError({wait_timeout, {alive, [Pid]}}, beamtalk_test_wait:dead(Pid, 20)),
     ok = beamtalk_test_proc:kill_and_wait(Pid).
 
+monitored_by_waits_for_named_watcher_test() ->
+    Pid = beamtalk_test_proc:spawn_idle(),
+    Name = beamtalk_test_unique:atom("bt5106_watcher"),
+    Watcher = spawn(fun() ->
+        erlang:monitor(process, Pid),
+        receive
+            stop -> ok
+        end
+    end),
+    register(Name, Watcher),
+    ?assertEqual(ok, beamtalk_test_wait:monitored_by(Pid, Name)),
+    Watcher ! stop,
+    ok = beamtalk_test_proc:kill_and_wait(Pid).
+
+monitored_by_times_out_without_watcher_test() ->
+    Pid = beamtalk_test_proc:spawn_idle(),
+    ?assertError(
+        {wait_timeout, {predicate, false}},
+        beamtalk_test_wait:monitored_by(Pid, no_such_watcher_bt5106, 30)
+    ),
+    ok = beamtalk_test_proc:kill_and_wait(Pid).
+
 kill_and_wait_test() ->
     Pid = beamtalk_test_proc:spawn_idle(),
     ?assertEqual(ok, beamtalk_test_proc:kill_and_wait(Pid)),
