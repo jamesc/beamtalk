@@ -461,13 +461,15 @@ abstract Object subclass: Supervisor
   /// negative (or non-Integer, non-`#infinity`) `ms` `#type_error`.
   /// Sealed, like `stop` (BT-3984); `stop` stays unbounded.
   ///
+  /// `ms` is an Integer of milliseconds, a `Duration`, or `#infinity`.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// (server stopWithin: 5000) unwrap   // => nil, once the tree is down
   /// (busy stopWithin: 10) error kind   // => #timeout (still stopping in the background)
   /// ```
-  sealed stopWithin: ms :: Timeout -> Result(Nil, Error) =>
-    self stopWithinResult: ms
+  sealed stopWithin: ms :: Timeout | Duration -> Result(Nil, Error) =>
+    self stopWithinResult: ((Erlang beamtalk_duration) to_timeout: ms)
 
   /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped
   /// `stopWithin/2` call. Keeps `stopWithin:` pure Beamtalk.

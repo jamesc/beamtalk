@@ -180,3 +180,25 @@ TestCase subclass: AnnouncementsTest
     self assert: received value equals: 10
     other unsubscribe: myPid
     received delete
+
+  // --- BT-5090: the timeout may be a Duration ---
+  testAnnounceAndWaitWithDurationTimeoutDelivers =>
+    received := AtomicCounter new: #announcementsTestDurationTimeout
+    self.announcer when: TestEvent do: [:e | received incrementBy: e payload]
+    self.announcer announceAndWait: (TestEvent payload: 7) timeout: (Duration seconds: 5)
+    self assert: received value equals: 7
+    received delete
+
+  testAnnounceAndWaitNegativeDurationFailsLikeNegativeInteger =>
+    // A subscriber makes the wait use its timeout (an empty announcer returns
+    // before looking at it), so an unconverted Duration would raise here.
+    self.announcer when: TestEvent do: [:e | nil]
+    asInteger := [
+      self.announcer announceAndWait: (TestEvent payload: 1) timeout: -1
+      #returned
+    ] on: Error do: [:e | e kind]
+    asDuration := [
+      self.announcer announceAndWait: (TestEvent payload: 1) timeout: (Duration milliseconds: -1)
+      #returned
+    ] on: Error do: [:e | e kind]
+    self assert: asDuration equals: asInteger

@@ -83,7 +83,13 @@ A use the table's protection forbids raises `access_denied`, never a raw
 -export([badarg_error/2]).
 -endif.
 -export([
-    removeAll/1, values/1, keysAndValuesDo/2, asDictionary/1, ifPresent/3, incrementAt/3, updateAt/3
+    removeAll/1,
+    values/1,
+    keysAndValuesDo/2,
+    asDictionary/1,
+    ifPresent/3, ifPresent/4,
+    incrementAt/3,
+    updateAt/3
 ]).
 
 %% `at/2` is a same-named alias for `self delegate` on `at:` to reach —
@@ -517,6 +523,28 @@ ifPresent(_Self, _Key, _Block) ->
     beamtalk_error:raise_type_error(
         'Ets', 'at:ifPresent:', ?RECEIVER_HINT
     ).
+
+-doc """
+If Key is present evaluate PresentBlock(Value), else AbsentBlock(); answer the result.
+
+One `ets:lookup` decides the branch, and a stored `nil` is present.
+""".
+-spec ifPresent(t(), Key :: term(), function(), function()) -> term().
+ifPresent(#{?BT_CLASS_TAG_KEY := 'Ets', table := TableName}, Key, PresentBlock, AbsentBlock) when
+    is_function(PresentBlock, 1), is_function(AbsentBlock, 0)
+->
+    case guarded(TableName, 'at:ifPresent:ifAbsent:', fun() -> ets:lookup(TableName, Key) end) of
+        [{_K, Value} | _] -> call_block(PresentBlock, [Value], 'at:ifPresent:ifAbsent:');
+        [] -> call_block(AbsentBlock, [], 'at:ifPresent:ifAbsent:')
+    end;
+ifPresent(#{?BT_CLASS_TAG_KEY := 'Ets'}, _Key, _PresentBlock, _AbsentBlock) ->
+    beamtalk_error:raise_type_error(
+        'Ets',
+        'at:ifPresent:ifAbsent:',
+        <<"Third argument must be a one-argument Block and fourth a zero-argument Block">>
+    );
+ifPresent(_Self, _Key, _PresentBlock, _AbsentBlock) ->
+    beamtalk_error:raise_type_error('Ets', 'at:ifPresent:ifAbsent:', ?RECEIVER_HINT).
 
 -doc """
 Atomically add N to the integer stored at Key (missing key starts at 0) via
