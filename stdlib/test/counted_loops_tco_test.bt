@@ -41,11 +41,26 @@ TestCase subclass: CountedLoopsTcoTest
       do: [:i | last := i]
     self assert: last equals: 1
 
-  testToByDoZeroStepIsNoop =>
-    // to:by:do: with zero step — body must never execute; asserts early exit
+  // BT-5098: a zero step raises (it used to be a silent no-op); the body never runs.
+  testToByDoZeroStepRaisesAndBodyNeverRuns =>
+    self should: [self zeroStepCount] raise: #user_error
+    self assert: self zeroStepCountAfterError equals: 0
+
+  zeroStepCount =>
     count := 0
     1
       to: 100000
       by: 0
       do: [:_ | count := count + 1]
-    self assert: count equals: 0
+    count
+
+  // The count at the moment the zero-step error is raised (the body never ran).
+  zeroStepCountAfterError =>
+    count := 0
+    [
+      1
+        to: 100000
+        by: 0
+        do: [:_ | count := count + 1]
+    ] on: Exception do: [:e | nil]
+    count

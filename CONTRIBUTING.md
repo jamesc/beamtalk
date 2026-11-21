@@ -125,7 +125,7 @@ just build          # Build everything (Rust + Erlang + stdlib)
 just test           # Run Rust tests + Erlang runtime + stdlib tests
 just test-stdlib    # Compiled language feature tests (part of `just test`)
 just test-repl-protocol  # REPL TCP-protocol tests (slow, full language validation)
-just ci                  # Full CI: build, lint, test, test-stdlib, test-integration, test-mcp, test-repl-protocol
+just ci                  # Full CI (see the `ci` recipe in the Justfile for the exact list)
 
 just fmt            # Format all code
 just fmt-check      # Check formatting without changing files
@@ -189,20 +189,28 @@ All source files must include the Apache 2.0 header:
 ```
 beamtalk/
 ├── crates/
-│   ├── beamtalk-core/       # Lexer, parser, AST, codegen
-│   └── beamtalk-cli/        # CLI, REPL client, test runners
-├── stdlib/src/                # Standard library (.bt source files)
-├── runtime/                  # Erlang runtime (OTP apps)
+│   ├── beamtalk-core/             # Lexer, parser, AST, semantic analysis
+│   ├── beamtalk-codegen/          # Core Erlang code generation
+│   ├── beamtalk-language-service/ # Queries behind the LSP and MCP
+│   ├── beamtalk-lint/             # Lint passes
+│   ├── beamtalk-cli/              # CLI, REPL client, test runners
+│   └── ...                        # LSP, MCP, workspace, packaging (see crates/)
+├── stdlib/
+│   ├── src/                       # Standard library (.bt source files)
+│   ├── test/                      # BUnit tests (TestCase)
+│   └── bootstrap-test/            # Bootstrap primitive tests (.btscript)
+├── runtime/                       # Erlang runtime (OTP apps)
 │   └── apps/
-│       ├── beamtalk_runtime/ # Core runtime (primitives, actors, objects)
-│       ├── beamtalk_workspace/ # REPL, workspace, session management
-│       └── beamtalk_stdlib/  # Compiled stdlib (.beam files)
-├── docs/                     # Design documents, ADRs
-├── examples/                 # Example Beamtalk programs
+│       ├── beamtalk_runtime/      # Core runtime (primitives, actors, objects)
+│       ├── beamtalk_workspace/    # REPL, workspace, session management
+│       ├── beamtalk_stdlib/       # Compiled stdlib (.beam files)
+│       └── beamtalk_compiler/     # Compiler port
+├── docs/                          # Design documents, ADRs
+├── examples/                      # Example Beamtalk programs
 ├── tests/
-│   ├── stdlib/               # Compiled expression tests
-│   └── repl-protocol/        # REPL TCP protocol tests
-└── test-package-compiler/    # Compiler snapshot tests
+│   ├── parity/                    # Cross-surface parity fixtures
+│   └── repl-protocol/             # REPL TCP protocol tests
+└── test-package-compiler/         # Compiler snapshot tests
 ```
 
 ### Key Documentation
