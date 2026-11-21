@@ -190,3 +190,22 @@ export function setupTerminalMonitoring(context: vscode.ExtensionContext): void 
 }
 
 // ─── Extension activation ─────────────────────────────────────────────────────
+
+/** Registers `beamtalk.startRepl` and `beamtalk.stopRepl` (BT-1025). */
+export function registerReplCommands(context: vscode.ExtensionContext): void {
+  // ─── Start / Stop REPL commands (BT-1025) ──────────────────────────────────
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.startRepl", () => startReplCommand(context))
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.stopRepl", () => {
+      // Close the REPL terminal — clears the session and bindings,
+      // but leaves the workspace connection up so classes/actors remain visible.
+      if (state.replTerminal && state.replTerminal.exitStatus === undefined) {
+        state.replTerminal.dispose();
+      }
+    })
+  );
+}
