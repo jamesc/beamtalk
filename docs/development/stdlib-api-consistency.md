@@ -36,6 +36,25 @@ that forwards to the canonical selector.
    `ReactiveSubprocess` error types) are fixed as long as callers' matchable
    errors do not change.
 
+## Known, deliberate differences
+
+* **`Subprocess` and `ReactiveSubprocess` error types.** `Subprocess open:...`
+  is declared `Result(Subprocess, Exception)` and built with `Result tryDo:`,
+  so the error payload is whatever exception the block raised.
+  `ReactiveSubprocess open:...` is declared `Result(ReactiveSubprocess, Error)`
+  and is built in Erlang (`beamtalk_reactive_subprocess:start_subprocess`), so
+  its payload is a structured `Error`. Widening the reactive one to `Exception`
+  would take `Error`-only methods away from callers; narrowing the plain one to
+  `Error` would be untrue whenever `tryDo:` catches a non-`Error` exception.
+  Either changes what callers can call or match on, so both stay as they are
+  and no consistency rule covers them.
+* **`File openHandles`** answers an `Array` of 3-element `Array`s, and its
+  declared type says so. The doc examples used `List` literal syntax; they now
+  use `#[...]`.
+* **`dir :: String` parameters** (`Subprocess`, `ReactiveSubprocess`) stay
+  `String`: the runtime rejects a Symbol. The examples that passed Symbols were
+  wrong and now pass Strings.
+
 A compiler-checked deprecation annotation is out of scope: "deprecated" is a
 sentence in the alias's doc comment.
 

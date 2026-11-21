@@ -23,7 +23,10 @@ beamtalk repl
 ### 2. Run the MCP server
 
 ```bash
-# Auto-discover running REPL
+# Attach to the running REPL for the current project directory.
+# It never attaches to another project's workspace; if only other
+# workspaces are running it errors and names them. Pick one with
+# --workspace-id <id> (tool output names the attached workspace).
 beamtalk-mcp
 
 # Or specify port explicitly

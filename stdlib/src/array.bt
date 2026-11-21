@@ -152,6 +152,68 @@ sealed typed Collection(E) subclass: Array(E)
   /// ```
   inject: initial :: A into: block :: Block(A, E, A) -> A => @primitive
 
+  // === Order-dependent reads (BT-5090) ===
+  //
+  // Array is an indexed peer of List for reading, not for growing: it answers
+  // the order-dependent selectors below but has no `add:` or `addFirst:`.
+  // Each calls a `beamtalk_array` helper directly (the FFI call is a plain
+  // remote call), so no existing send path changes.
+
+  /// Return a new Array with the elements in reverse order.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[1, 2, 3] reversed          // => #[3, 2, 1]
+  /// ```
+  reversed -> Array(E) => (Erlang beamtalk_array) reversed: self
+
+  /// Return the 1-based index of the first element equal to `item`, or `nil`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[10, 20, 30] indexOf: 20    // => 2
+  /// #[10, 20, 30] indexOf: 99    // => nil
+  /// ```
+  indexOf: item :: Object -> Integer | Nil =>
+    (Erlang beamtalk_array) indexOf: self item: item
+
+  /// Return a new Array of the first `n` elements. Total: answers fewer when
+  /// the array is shorter. Raises `type_error` for a negative or non-Integer `n`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[1, 2, 3, 4] take: 2        // => #[1, 2]
+  /// #[1, 2] take: 5              // => #[1, 2]
+  /// ```
+  take: n :: Integer -> Array(E) => (Erlang beamtalk_array) take: self count: n
+
+  /// Return a new Array without the first `n` elements. Total, like `take:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[1, 2, 3, 4] drop: 2        // => #[3, 4]
+  /// #[1, 2] drop: 5              // => #[]
+  /// ```
+  drop: n :: Integer -> Array(E) => (Erlang beamtalk_array) drop: self count: n
+
+  /// Return a new Array sorted by Erlang term order.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[3, 1, 2] sort              // => #[1, 2, 3]
+  /// ```
+  sort -> Array(E) => (Erlang beamtalk_array) sort: self
+
+  /// Return a new Array sorted by `comparator`, which answers true when its
+  /// first argument sorts at or before its second.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[3, 1, 2] sort: [:a :b | a > b]   // => #[3, 2, 1]
+  /// ```
+  sort: comparator :: Block(E, E, Boolean) -> Array(E) =>
+    (Erlang beamtalk_array) sort: self with: comparator
+
   // === Printing ===
 
   /// Return a developer-readable string representation.

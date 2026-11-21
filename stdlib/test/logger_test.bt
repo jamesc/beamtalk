@@ -83,3 +83,12 @@ TestCase subclass: LoggerTest
     self assert: (Logger activeDebugTargets isKindOf: List)
 
   testLoggerInfoIsString => self assert: (Logger loggerInfo isKindOf: String)
+
+  testWarningReturnsNil =>
+    // warning: is the canonical spelling; warn: stays as an alias
+    self assert: (Logger warning: "test warning message") equals: nil
+
+  testWarningWithMetadata =>
+    self assert: (Logger warning: "test warning" metadata: #{
+      "attempt" => 2
+    }) equals: nil

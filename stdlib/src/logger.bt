@@ -51,7 +51,27 @@ sealed typed Object subclass: Logger
 
   // === Warning ===
 
-  /// Log a message at warning level.
+  /// Log a message at warning level. `warning:` is the canonical spelling: it
+  /// matches the `#warning` level, as `info:`, `error:` and `debug:` match theirs.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger warning: "retrying operation"
+  /// // => nil
+  /// ```
+  class warning: message :: String -> Nil => @intrinsic loggerWarn
+
+  /// Log a message at warning level with structured metadata.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger warning: "retrying" metadata: #{"attempt" => 2}
+  /// // => nil
+  /// ```
+  class warning: message :: String metadata: meta :: Dictionary -> Nil =>
+    @intrinsic loggerWarnMeta
+
+  /// Deprecated alias of `warning:`; same behaviour, kept for existing callers.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -60,7 +80,7 @@ sealed typed Object subclass: Logger
   /// ```
   class warn: message :: String -> Nil => @intrinsic loggerWarn
 
-  /// Log a message at warning level with structured metadata.
+  /// Deprecated alias of `warning:metadata:`; same behaviour, kept for existing callers.
   ///
   /// ## Examples
   /// ```beamtalk

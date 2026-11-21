@@ -3330,13 +3330,15 @@ fn test_logger_intrinsic_bodies_route_through_runtime_string_unwrap() {
         &code,
         &["'logger':'log'"],
     );
-    for level in ["debug", "info", "warning", "error"] {
+    // BT-5090: `warning:` is canonical and `warn:` is its alias, each with a
+    // plain and a metadata: form, so `warning` has two bodies per spelling.
+    for (level, expected) in [("debug", 2), ("info", 2), ("warning", 4), ("error", 2)] {
         let needle = format!("call 'beamtalk_logging_config':'log'('{level}', ");
         assert_eq!(
             code.matches(&needle).count(),
-            2,
-            "expected the plain and metadata: `{level}` bodies to lower to \
-             beamtalk_logging_config:log/3. Got:\n{code}"
+            expected,
+            "expected {expected} `{level}` bodies (plain and metadata: forms, one per \
+             spelling) to lower to beamtalk_logging_config:log/3. Got:\n{code}"
         );
     }
 }

@@ -38,6 +38,7 @@ TestCase subclass: DurationTest
     self assert: (Duration seconds: 119) asMinutes equals: 1
     self assert: (Duration minutes: 90) asHours equals: 1
     self assert: (Duration hours: 36) totalDays equals: 1
+    self assert: (Duration hours: 36) asDays equals: 1
 
   // ===== Predicates =====
   testIsZero =>

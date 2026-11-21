@@ -1272,12 +1272,29 @@ impl LanguageService for SimpleLanguageService {
                     source_file_stem,
                     ..Default::default()
                 };
-                crate::queries::diagnostic_provider::compute_project_diagnostics(
+                let mut diags = crate::queries::diagnostic_provider::compute_project_diagnostics(
                     &data.module,
                     &data.source,
                     data.diagnostics.clone(),
                     &ctx,
-                )
+                );
+                // BT-5080: the same class in two project files. The sorted-first
+                // path wins deterministically; say so on the losing/winning
+                // definition so the conflict is visible instead of silent.
+                for (name, other, winner) in self.project_index.duplicate_classes_of(file) {
+                    if let Some(class) = data.module.classes.iter().find(|c| c.name.name == name) {
+                        diags.push(
+                            beamtalk_core::source_analysis::Diagnostic::warning(
+                                format!("class `{name}` is also defined in `{other}`"),
+                                class.name.span,
+                            )
+                            .with_hint(format!(
+                                "`{winner}` takes precedence in the project index; rename or remove one definition."
+                            )),
+                        );
+                    }
+                }
+                diags
             })
             .unwrap_or_default()
     }
@@ -1573,16 +1590,19 @@ impl LanguageService for SimpleLanguageService {
             end,
         );
 
-        let inferred = beamtalk_core::semantic_analysis::type_checker::infer_method_return_types(
-            &file_data.module,
-            self.project_index.hierarchy(),
-            self.native_types.as_deref(),
-        );
-
-        if inferred.is_empty() {
-            return actions;
-        }
-
+        // Collect the unannotated methods overlapping the requested range
+        // *before* running inference: editors request code actions on every
+        // cursor move, and inference is the expensive part (BT-5080).
+        // Cursor requests (start == end) use a point-in-span check; selections
+        // use half-open interval overlap.
+        let overlaps = |span: Span| {
+            if start == end {
+                span.start() <= start && start < span.end()
+            } else {
+                span.start() < end && start < span.end()
+            }
+        };
+        let mut candidates: Vec<((ecow::EcoString, ecow::EcoString, bool), Span)> = Vec::new();
         for class in &file_data.module.classes {
             for (method, is_class_method) in class
                 .methods
@@ -1590,66 +1610,50 @@ impl LanguageService for SimpleLanguageService {
                 .map(|m| (m, false))
                 .chain(class.class_methods.iter().map(|m| (m, true)))
             {
-                if method.return_type.is_some() {
-                    continue;
-                }
-                // Only offer for methods whose span overlaps the requested range.
-                // Distinguish cursor requests (start == end, point-in-span check) from
-                // selection requests (half-open interval overlap).
-                let overlaps = if start == end {
-                    method.span.start() <= start && start < method.span.end()
-                } else {
-                    method.span.start() < end && start < method.span.end()
-                };
-                if !overlaps {
-                    continue;
-                }
-                let key = (
-                    class.name.name.clone(),
-                    method.selector.name(),
-                    is_class_method,
-                );
-                // The inferred map stores InferredType; use
-                // `display_for_diagnostic()` so user-facing annotations render
-                // source-friendly names (e.g., `Nil` instead of `UndefinedObject`).
-                if let Some(inferred_ty) = inferred.get(&key) {
-                    let display = inferred_ty
-                        .display_for_diagnostic()
-                        .unwrap_or_else(|| ecow::EcoString::from("Dynamic"));
-                    if let Some(offset) = find_body_open_offset(source, method.span) {
-                        actions.push(CodeAction::new(
-                            format!("Add annotation: -> {display}"),
-                            format!("-> {display} "),
-                            offset,
-                        ));
-                    }
+                if method.return_type.is_none() && overlaps(method.span) {
+                    candidates.push((
+                        (
+                            class.name.name.clone(),
+                            method.selector.name(),
+                            is_class_method,
+                        ),
+                        method.span,
+                    ));
                 }
             }
         }
-
         for standalone in &file_data.module.method_definitions {
             let method = &standalone.method;
-            if method.return_type.is_some() {
-                continue;
+            if method.return_type.is_none() && overlaps(method.span) {
+                candidates.push((
+                    (
+                        standalone.class_name.name.clone(),
+                        method.selector.name(),
+                        standalone.is_class_method,
+                    ),
+                    method.span,
+                ));
             }
-            let overlaps = if start == end {
-                method.span.start() <= start && start < method.span.end()
-            } else {
-                method.span.start() < end && start < method.span.end()
-            };
-            if !overlaps {
-                continue;
-            }
-            let key = (
-                standalone.class_name.name.clone(),
-                method.selector.name(),
-                standalone.is_class_method,
-            );
+        }
+        if candidates.is_empty() {
+            return actions;
+        }
+
+        let inferred = beamtalk_core::semantic_analysis::type_checker::infer_method_return_types(
+            &file_data.module,
+            self.project_index.hierarchy(),
+            self.native_types.as_deref(),
+        );
+
+        for (key, span) in candidates {
+            // The inferred map stores InferredType; use
+            // `display_for_diagnostic()` so user-facing annotations render
+            // source-friendly names (e.g., `Nil` instead of `UndefinedObject`).
             if let Some(inferred_ty) = inferred.get(&key) {
                 let display = inferred_ty
                     .display_for_diagnostic()
                     .unwrap_or_else(|| ecow::EcoString::from("Dynamic"));
-                if let Some(offset) = find_body_open_offset(source, method.span) {
+                if let Some(offset) = find_body_open_offset(source, span) {
                     actions.push(CodeAction::new(
                         format!("Add annotation: -> {display}"),
                         format!("-> {display} "),
