@@ -663,7 +663,7 @@ sealed typed Object subclass: SystemNavigation
   /// is silently skipped rather than aborting the whole walk. A selector with
   /// no method object contributes nothing; `aBlock` only sees real methods and
   /// decides itself what a `nil` `source` means.
-  class walkMethodsOf: aScope :: Behaviour into: result :: List(Dictionary) do: aBlock :: Block(List(Dictionary), CompiledMethod, Symbol, List(Dictionary)) -> List(Dictionary) =>
+  class internal walkMethodsOf: aScope :: Behaviour into: result :: List(Dictionary) do: aBlock :: Block(List(Dictionary), CompiledMethod, Symbol, List(Dictionary)) -> List(Dictionary) =>
     aScope methods
       inject: result
       into: [:acc :methodSel |
@@ -1692,7 +1692,7 @@ sealed typed Object subclass: SystemNavigation
   /// shaped identically to the class-body scan. Returns the (possibly extended)
   /// result. An extension whose target class has been removed is skipped
   /// (BT-4418) by `liveExtensionsIn:`.
-  class collectExtensionLinesInto: result :: List(Dictionary) using: linesBlock :: Block(String, List(Integer)) -> List(Dictionary) =>
+  class internal collectExtensionLinesInto: result :: List(Dictionary) using: linesBlock :: Block(String, List(Integer)) -> List(Dictionary) =>
     extEntries := self liveExtensionsIn: self allExtensionsWithSource
     extEntries
       inject: result
