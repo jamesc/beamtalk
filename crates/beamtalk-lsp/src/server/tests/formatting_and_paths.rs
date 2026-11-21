@@ -229,7 +229,8 @@ fn apply_byte_edits(source: &str, edits: &[range_format::ByteEdit]) -> String {
     out
 }
 
-const TWO_CLASSES: &str = "Object subclass: Alpha\n  one =>   1\n\nObject subclass: Beta\n  two =>   2\n";
+const TWO_CLASSES: &str =
+    "Object subclass: Alpha\n  one =>   1\n\nObject subclass: Beta\n  two =>   2\n";
 
 #[test]
 fn range_format_only_changes_overlapping_construct() {
@@ -244,7 +245,10 @@ fn range_format_only_changes_overlapping_construct() {
         "text outside the selection must be unchanged"
     );
     assert_ne!(out, TWO_CLASSES);
-    assert!(!out.contains("=>   2"), "selected method is formatted: {out}");
+    assert!(
+        !out.contains("=>   2"),
+        "selected method is formatted: {out}"
+    );
 }
 
 #[test]

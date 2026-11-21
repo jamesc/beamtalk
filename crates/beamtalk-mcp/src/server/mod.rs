@@ -211,6 +211,16 @@ impl BeamtalkMcp {
         }
     }
 
+    /// A one-line note naming the workspace this server is attached to
+    /// (BT-5080), appended to state-changing and discovery tool output so an
+    /// agent can see which workspace its call touched.
+    pub(crate) fn workspace_note(&self) -> String {
+        match self.client.workspace_id() {
+            Some(id) => format!("Workspace: {id}"),
+            None => "Workspace: (explicit --port)".to_string(),
+        }
+    }
+
     /// Check a client-supplied path against the path policy, answering the
     /// canonical path or a tool error result to return as-is.
     pub(crate) fn confine_path(&self, path: &str) -> Result<String, CallToolResult> {
@@ -352,7 +362,9 @@ impl ServerHandler for BeamtalkMcp {
                  'list_changes' / 'dirty_methods' to inspect pending workspace changes, \
                  'flush' to write durable ChangeLog entries to disk, \
                  'describe' for capability discovery, 'clear' to reset bindings, \
-                 'unload' to remove a class, and 'interrupt' to cancel evaluations.",
+                 'unload' to remove a class, and 'interrupt' to cancel evaluations. \
+                 'describe', 'flush', 'remove_class' and 'rename_class' name the attached \
+                 workspace in their output.",
             )
     }
 }

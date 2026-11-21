@@ -5,8 +5,8 @@
 //! pushes from the runtime, publishes the resulting diagnostics, and tracks
 //! which paths are currently open so publication can be safely deferred.
 
-use super::convert::{LineIndex, path_to_uri, to_lsp_diagnostic, uri_to_path};
 use super::ReloadDiagnosticsByUriAndOrigin;
+use super::convert::{LineIndex, path_to_uri, to_lsp_diagnostic, uri_to_path};
 use crate::server::lock::LockRecover;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

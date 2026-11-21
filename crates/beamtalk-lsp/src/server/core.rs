@@ -11,9 +11,9 @@ use super::config::{
 use super::convert::{
     offset_to_position, path_to_stdlib_uri, path_to_uri, position_to_offset, uri_to_path,
 };
-use super::range_format::format_range_edits;
 use super::flush::flush_event_listener;
 use super::nav::{bt_locations_to_lsp, runtime_site_to_lsp_location};
+use super::range_format::format_range_edits;
 use super::reload::{
     OpenPathsHandle, class_changed_listener, compute_publish_diagnostics, reload_check_listener,
     seed_reload_diagnostics,

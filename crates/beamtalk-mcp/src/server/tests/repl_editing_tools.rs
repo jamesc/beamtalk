@@ -175,6 +175,10 @@ async fn remove_class_success_and_error() {
         .await
         .unwrap();
     assert!(call_text(&ok).contains("not yet flushed"));
+    assert!(
+        call_text(&ok).contains("Workspace: "),
+        "names the workspace"
+    );
 
     let (_fake2, mcp2) = fake_mcp(respond_error("sealed class")).await;
     let error = mcp2
@@ -248,7 +252,8 @@ async fn flush_success_no_filter() {
         }))
         .await
         .unwrap();
-    assert_eq!(call_text(&result), "Flushed");
+    // BT-5080: the output names the attached workspace.
+    assert_eq!(call_text(&result), "Flushed\nWorkspace: (explicit --port)");
 }
 
 #[tokio::test]

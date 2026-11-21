@@ -1391,7 +1391,9 @@ mod tests {
     }
 
     fn dup_hierarchy(method: &str) -> ClassHierarchy {
-        let (module, _) = parse(lex_with_eof(&format!("Object subclass: Dup\n  {method} => 1")));
+        let (module, _) = parse(lex_with_eof(&format!(
+            "Object subclass: Dup\n  {method} => 1"
+        )));
         ClassHierarchy::build(&module).0.unwrap()
     }
 

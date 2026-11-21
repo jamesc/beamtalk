@@ -615,7 +615,7 @@ impl BeamtalkMcp {
 
         check_response!(response, "Describe failed");
 
-        let mut parts = Vec::new();
+        let mut parts = vec![ContentBlock::text(self.workspace_note())];
 
         if let Some(ops) = response.ops {
             parts.push(ContentBlock::text(format!(
@@ -630,7 +630,7 @@ impl BeamtalkMcp {
             )));
         }
 
-        if parts.is_empty() {
+        if parts.len() == 1 {
             parts.push(ContentBlock::text("No describe information available"));
         }
 
