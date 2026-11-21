@@ -197,7 +197,7 @@ monitor_diagnostics() ->
             Registry =
                 case catch meck:history(beamtalk_class_registry) of
                     History when is_list(History) ->
-                        [{element(1, element(2, H)), element(2, element(2, H))} || H <- History];
+                        [{element(2, element(2, H)), element(3, element(2, H))} || H <- History];
                     Unmocked ->
                         {not_mocked, Unmocked}
                 end,

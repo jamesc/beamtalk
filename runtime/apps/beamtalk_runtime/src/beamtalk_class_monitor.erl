@@ -106,7 +106,9 @@ watch(ClassName, Pid) ->
             %% The monitor's own eager restart re-enters start/2 → watch/2
             %% from inside handle_info; a call-to-self would deadlock. The
             %% self-queued cast is processed before any later message, so the
-            %% arming guarantee still effectively holds for this path.
+            %% monitor is requested before the monitor handles anything else,
+            %% as on the call path (with the same signal-ordering caveat as
+            %% the docstring).
             gen_server:cast(?MODULE, {watch, ClassName, Pid});
         _ ->
             gen_server:call(?MODULE, {watch, ClassName, Pid})
