@@ -1003,10 +1003,12 @@ test-cache-keys:
     @cd scripts/ci && python3 -m unittest -q test_check_cache_keys
 
 # Test (BT-5086): ci.yml's `ci-ok` aggregate job runs always() and needs every
-# other job, so a job added to ci.yml cannot be left out of the one required check.
+# other job, every job is gated on a `changes` output (so a docs-only PR runs only
+# `changes` and `ci-ok`), and the `code` filter equals the former pull_request
+# `paths:` list. A job added to ci.yml cannot be left out of the one required check.
 test-ci-ok:
     @python3 scripts/ci/ci_ok.py check
-    @cd scripts/ci && python3 -m unittest -q test_ci_ok
+    @cd scripts/ci && python3 -m unittest -q test_ci_ok test_ci_code_filter
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
