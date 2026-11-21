@@ -55,8 +55,8 @@ them, so the send path costs the same number of calls as before the split.
     ]}
 ).
 
-%% Longest a future watcher outlives an unsettled send (BT-5084); same hour as the
-%% future's own orphan cap. `future_watcher_cap_ms` (application env) overrides it.
+%% Longest a future watcher outlives an unsettled send (BT-5084). `future_watcher_cap_ms`
+%% (application env) overrides it.
 -define(FUTURE_WATCHER_CAP_MS, 3600000).
 
 %% Lifecycle selectors answered locally with a plain value or error, shared by

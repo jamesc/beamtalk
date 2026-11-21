@@ -633,6 +633,13 @@ code_change(_OldVsn, State, {slow_notify, Ms, Parent}) ->
     %% sleep: keeps the migration in flight while the test kills the reloader
     timer:sleep(Ms),
     {ok, State};
+code_change(_OldVsn, State, {slow_mark_notify, Ms, Parent, Tag}) ->
+    Parent ! change_started,
+    %% sleep: keeps the first migration running while a second reload starts
+    timer:sleep(Ms),
+    {ok, State#{migrated => Tag}};
+code_change(_OldVsn, State, {mark, Tag}) ->
+    {ok, State#{migrated => Tag}};
 code_change(_OldVsn, _State, {slow_fail_notify, Ms, Parent}) ->
     Parent ! change_started,
     %% sleep: keeps the first migration running while a second reload starts
@@ -806,6 +813,36 @@ overlapping_reload_does_not_resume_a_failed_migration_test_() ->
             catch
                 _:_ -> ok
             end,
+            beamtalk_test_proc:stop(Pid)
+        end
+    end}.
+
+%% BT-5084 (review): reload A (older code) finishes and resumes the actor while
+%% reload B (newer code) is queued behind it. B's change must still run on the
+%% suspended actor, so the final state has B's shape and the actor is running.
+overlapping_reload_reruns_the_later_migration_test_() ->
+    {timeout, 60, fun() ->
+        {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+        unlink(Pid),
+        Parent = self(),
+        spawn(fun() ->
+            beamtalk_hot_reload:trigger_code_change(
+                ?MODULE, [Pid], {slow_mark_notify, 6000, Parent, a}
+            )
+        end),
+        try
+            ?awaitMessage(change_started, 5000),
+            %% B's caller gives up at 5 s; its worker is queued behind A.
+            {ok, 0, [{Pid, timeout}]} =
+                beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {mark, b}),
+            ok = beamtalk_test_wait:until(
+                fun() ->
+                    running =:= maps:get(sysState, beamtalk_process_navigation:status(Pid)) andalso
+                        b =:= maps:get(migrated, sys:get_state(Pid), undefined)
+                end,
+                20000
+            )
+        after
             beamtalk_test_proc:stop(Pid)
         end
     end}.
