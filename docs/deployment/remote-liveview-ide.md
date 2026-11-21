@@ -176,7 +176,7 @@ docker run --network host \
   -e BT_OIDC_ISSUER=https://idp.example.com \
   -e BT_OIDC_CLIENT_ID=beamtalk-ide \
   -e BT_OIDC_CLIENT_SECRET="$BT_OIDC_CLIENT_SECRET" \
-  ghcr.io/jamesc/beamtalk-ide:0.5.0
+  ghcr.io/jamesc/beamtalk-ide:0.6.0
 ```
 
 `--network host` co-locates the container with the workspace so the Phoenix ↔

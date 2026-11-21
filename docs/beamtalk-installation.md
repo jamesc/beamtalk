@@ -30,7 +30,7 @@ if it is not already on your `PATH` (it does not edit the profile itself).
 To install a specific version or custom location:
 
 ```
-curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --version v0.5.0
+curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --version v0.6.0
 curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --prefix /usr/local
 ```
 

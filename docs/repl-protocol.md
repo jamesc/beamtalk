@@ -37,7 +37,7 @@ Client and node must be built from the same checkout: `beamtalk_version` (exact,
 
 **Why the build version, not a contract hash (BT-4329).** The lock exists so a client never runs a different compiler from the node's: the CLI compiles locally, and MCP's offline lint uses its own linked `beamtalk-core`. A protocol-contract hash (op set plus wire shapes) would let a binary with a different compiler attach whenever the wire happens to be unchanged — exactly the drift BT-4327 closed. A hash alongside the version would add nothing, since the exact version is already the stricter check. Running nodes being invalidated by unrelated commits is the intended cost. The one client that compiles nothing, the VS Code extension, already gets a protocol-only gate (below).
 
-**Display vs. identity (BT-4812).** `beamtalk --version` and the REPL banner print `BEAMTALK_BUILD_ID` (`0.5.0-edge+<sha> (<date>)`, `.dirty` marker, channel), which is for people. The lock compares `BEAMTALK_VERSION` only, so the date, channel and `.dirty` never affect whether a client may attach.
+**Display vs. identity (BT-4812).** `beamtalk --version` and the REPL banner print `BEAMTALK_BUILD_ID` (`0.6.0-edge+<sha> (<date>)`, `.dirty` marker, channel), which is for people. The lock compares `BEAMTALK_VERSION` only, so the date, channel and `.dirty` never affect whether a client may attach.
 
 **Known limitation: dirty trees (BT-4329).** Neither side carries a `-dirty` suffix: both derivations report the clean `HEAD` sha. Cargo reruns `beamtalk-build`'s build script only when its `rerun-if-changed` paths (`HEAD`, refs, `packed-refs`) change, so a dirty flag on the Rust side would be frozen at whatever the last build-script run saw, while `scripts/version.escript` computes its own at Erlang build time — the two would disagree when nothing really differs. Tracking the working tree would rerun the build script on every build, the rebuild storm BT-3879 removed. A client and node built from different uncommitted edits of the same commit therefore pass the lock. The fix is to restart the workspace after `just build`, which rebuilds both sides together.
 
@@ -779,7 +779,7 @@ Returns the list of supported operations with their parameters, protocol version
     "describe": {"params": []},
     "health": {"params": []}
   },
-  "versions": {"protocol": "2.0", "beamtalk": "0.5.0"},
+  "versions": {"protocol": "2.0", "beamtalk": "0.6.0"},
   "status": ["done"]
 }
 ```
