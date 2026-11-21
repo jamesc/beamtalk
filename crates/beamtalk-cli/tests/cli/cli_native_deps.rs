@@ -78,10 +78,6 @@ fn commit_version(repo: &Path, name: &str, version: &str) -> String {
     git(repo, &["rev-parse", "HEAD"])
 }
 
-fn file_url(repo: &Path) -> String {
-    format!("file://{}", repo.display())
-}
-
 fn write_manifest(project: &Path, native_deps: &str) {
     std::fs::write(
         project.join("beamtalk.toml"),
@@ -129,7 +125,7 @@ fn native_git_dep_follows_beamtalk_lock() {
 
     let project = cli_common::fixture_project();
     let project = project.path();
-    let url = file_url(&foo);
+    let url = cli_common::file_url(&foo);
     write_manifest(
         project,
         &format!("foo = {{ git = \"{url}\", branch = \"main\" }}"),
@@ -194,7 +190,7 @@ fn transitive_native_git_dep_pinned_on_fresh_build() {
         "foo1",
         &format!(
             "{{bar, {{git, \"{}\", {{branch, \"main\"}}}}}}",
-            file_url(&bar)
+            cli_common::file_url(&bar)
         ),
     );
 
@@ -204,7 +200,7 @@ fn transitive_native_git_dep_pinned_on_fresh_build() {
         project,
         &format!(
             "foo = {{ git = \"{}\", branch = \"main\" }}",
-            file_url(&foo)
+            cli_common::file_url(&foo)
         ),
     );
 
@@ -236,12 +232,12 @@ fn changing_one_native_dep_keeps_others_pinned() {
     let foo_dep = |branch: &str| {
         format!(
             "foo = {{ git = \"{}\", branch = \"{branch}\" }}",
-            file_url(&foo)
+            cli_common::file_url(&foo)
         )
     };
     let baz_dep = format!(
         "baz = {{ git = \"{}\", branch = \"main\" }}",
-        file_url(&baz)
+        cli_common::file_url(&baz)
     );
 
     write_manifest(project, &format!("{}\n{baz_dep}", foo_dep("main")));
@@ -281,7 +277,7 @@ fn fresh_test_knows_native_dep_modules_but_warns_on_unknown() {
         "foo1",
         &format!(
             "{{bar, {{git, \"{}\", {{branch, \"main\"}}}}}}",
-            file_url(&bar)
+            cli_common::file_url(&bar)
         ),
     );
 
@@ -291,7 +287,7 @@ fn fresh_test_knows_native_dep_modules_but_warns_on_unknown() {
         project,
         &format!(
             "foo = {{ git = \"{}\", branch = \"main\" }}",
-            file_url(&foo)
+            cli_common::file_url(&foo)
         ),
     );
     std::fs::create_dir_all(project.join("test/fixtures")).expect("mkdir fixtures");

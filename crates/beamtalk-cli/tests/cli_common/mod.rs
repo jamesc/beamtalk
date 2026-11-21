@@ -22,6 +22,20 @@ pub fn project_root() -> PathBuf {
     beamtalk_workspace::cargo_workspace_root!()
 }
 
+/// A `file://` URL for a local path, safe to embed in a TOML basic string.
+///
+/// Uses forward slashes, and on Windows prepends `/` so `C:\Users\x` becomes
+/// `file:///C:/Users/x`. A raw `display()` would put `\U...` into the
+/// manifest, which TOML reads as a unicode escape (BT-5118).
+#[allow(dead_code)]
+pub fn file_url(path: &Path) -> String {
+    let mut s = path.display().to_string().replace('\\', "/");
+    if !s.starts_with('/') {
+        s.insert(0, '/');
+    }
+    format!("file://{s}")
+}
+
 /// Path to the `beamtalk` binary, for tests that spawn it via
 /// `std::process::Command` rather than `assert_cmd`.
 ///

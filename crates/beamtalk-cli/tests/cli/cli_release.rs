@@ -78,7 +78,16 @@ fn release_output_with_only_lib_dir_is_refused_and_untouched_test() {
         .timeout(std::time::Duration::from_mins(3))
         .assert()
         .failure()
-        .stderr(contains(".beamtalk-release"));
+        // miette wraps at 80 columns and may break inside the marker name
+        // (at its hyphen) when the temp path is long, as on Windows
+        // (BT-5119): match with the gutter and all whitespace removed.
+        .stderr(predicates::function::function(|stderr: &str| {
+            let flat: String = stderr
+                .chars()
+                .filter(|c| *c != '│' && !c.is_whitespace())
+                .collect();
+            flat.contains("'.beamtalk-release'markerfile") && flat.contains("refusingtodelete")
+        }));
 
     assert!(out.join("sentinel.txt").is_file(), "sentinel must survive");
     assert!(out.join("lib").is_dir());
