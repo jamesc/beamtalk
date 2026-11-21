@@ -1,0 +1,15 @@
+{
+  "description": "Distribution short name a LiveView front registers with epmd (ADR 0097 Implementation 1a). BtAttach.Workspace.attach_sname/2 (Elixir) composes it; beamtalk-desktop-broker's sname.rs predicts it. Both read this file.",
+  "with_suffix": [
+    { "name": "plain workspace id", "suffix": "abc123", "os_pid": 4242, "node_name": "bt_attach_abc123_4242@localhost", "short_name": "bt_attach_abc123_4242" },
+    { "name": "hyphenated suffix", "suffix": "ws-42", "os_pid": 1234, "node_name": "bt_attach_ws-42_1234@localhost", "short_name": "bt_attach_ws-42_1234" },
+    { "name": "underscored suffix", "suffix": "spike_a", "os_pid": 1001, "node_name": "bt_attach_spike_a_1001@localhost", "short_name": "bt_attach_spike_a_1001" },
+    { "name": "twelve-hex workspace id", "suffix": "0123456789ab", "os_pid": 1, "node_name": "bt_attach_0123456789ab_1@localhost", "short_name": "bt_attach_0123456789ab_1" },
+    { "name": "large pid", "suffix": "abc123", "os_pid": 4194304, "node_name": "bt_attach_abc123_4194304@localhost", "short_name": "bt_attach_abc123_4194304" }
+  ],
+  "without_suffix": {
+    "description": "An unset or empty suffix is Elixir-only: the broker always passes the workspace id. The name falls back to a unique integer.",
+    "suffixes": [null, ""],
+    "node_name_pattern": "^bt_attach_[0-9]+@localhost$"
+  }
+}

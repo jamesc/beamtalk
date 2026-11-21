@@ -252,16 +252,15 @@ export class WorkspaceClient {
     const wsDir = path.join(base, workspaceId);
 
     const portContent = fs.readFileSync(path.join(wsDir, "port"), "utf8");
-    const portStr = portContent.trim().split(/\r?\n/)[0];
-    if (!/^\d+$/.test(portStr)) {
-      throw new Error(`Invalid port in ${path.join(wsDir, "port")}: ${JSON.stringify(portStr)}`);
+    const parsed = parsePortFileContent(portContent);
+    if (!parsed.ok) {
+      throw new Error(
+        `Invalid port in ${path.join(wsDir, "port")}: ${JSON.stringify(parsed.firstLine)}`
+      );
     }
-    const port = Number(portStr);
-    if (port < 1 || port > 65535) {
-      throw new Error(`Invalid port in ${path.join(wsDir, "port")}: ${JSON.stringify(portStr)}`);
-    }
+    const port = parsed.port;
 
-    assertPortFileFresh(wsDir, port, portContent);
+    assertPortFileFresh(wsDir, port, parsed.nonce);
 
     const cookie = fs.readFileSync(path.join(wsDir, "cookie"), "utf8").trim();
     if (!cookie) {
@@ -890,6 +889,31 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+/** Result of parsing a workspace `port` file: `PORT\nNONCE`, the nonce line optional. */
+export type PortFileParse =
+  | { ok: true; port: number; nonce: string | undefined }
+  | { ok: false; firstLine: string };
+
+/**
+ * Parse the contents of a workspace `port` file.
+ *
+ * The TypeScript twin of `beamtalk_workspace::parse_port_file`; both are
+ * pinned to `tests/conformance/port_file_conformance.json`. The port must be
+ * decimal digits in 1..=65535; a missing or empty nonce line is `undefined`.
+ */
+export function parsePortFileContent(content: string): PortFileParse {
+  const lines = content.trim().split(/\r?\n/);
+  const firstLine = lines[0];
+  if (!/^\d+$/.test(firstLine)) {
+    return { ok: false, firstLine };
+  }
+  const port = Number(firstLine);
+  if (port < 1 || port > 65535) {
+    return { ok: false, firstLine };
+  }
+  return { ok: true, port, nonce: lines[1]?.trim() || undefined };
+}
+
 /**
  * Refuse to hand the workspace cookie to a stale port (BT-5069).
  *
@@ -901,8 +925,7 @@ function pidAlive(pid: number): boolean {
  * alive. A killed node whose port was re-bound by another process therefore
  * never receives the cookie. Old files without a nonce/pid stay accepted.
  */
-function assertPortFileFresh(wsDir: string, port: number, portContent: string): void {
-  const fileNonce = portContent.trim().split(/\r?\n/)[1]?.trim() || undefined;
+function assertPortFileFresh(wsDir: string, port: number, fileNonce: string | undefined): void {
   let info: { port?: unknown; pid?: unknown; nonce?: unknown };
   try {
     info = JSON.parse(fs.readFileSync(path.join(wsDir, "node.info"), "utf8"));

@@ -129,9 +129,9 @@ pub fn attach_node_suffix(workspace_id: &str) -> String {
 /// Predict the epmd short registration name a front spawned with
 /// `BT_ATTACH_NODE_SUFFIX=<suffix>` and OS pid `os_pid` will register under.
 ///
-/// Must stay byte-for-byte in sync with `BtAttach.Workspace.attach_sname/2`
-/// (`editors/liveview/lib/bt_attach/workspace.ex`):
-/// `:"bt_attach_#{suffix}_#{os_pid}@localhost"`.
+/// Format: `bt_attach_<suffix>_<os_pid>@localhost`, the name
+/// `BtAttach.Workspace.attach_sname/2` (`editors/liveview/lib/bt_attach/workspace.ex`)
+/// composes. Both are pinned to `tests/conformance/attach_sname_conformance.json`.
 #[must_use]
 pub fn predict_node_name(suffix: &str, os_pid: u32) -> String {
     format!("bt_attach_{suffix}_{os_pid}@localhost")
@@ -235,14 +235,34 @@ mod tests {
         assert_eq!(attach_node_suffix("abc123"), "abc123");
     }
 
+    /// Shared with the Elixir front (`BtAttach.WorkspaceTest`'s sname
+    /// conformance tests): both sides read the same fixture, so the names the
+    /// broker predicts cannot drift from the ones the front registers.
     #[test]
-    fn predict_node_name_matches_the_shipped_elixir_format() {
-        // Byte-for-byte against BtAttach.Workspace.attach_sname/2's
-        // `:"bt_attach_#{suffix}_#{os_pid}@localhost"`.
-        assert_eq!(
-            predict_node_name("abc123", 4242),
-            "bt_attach_abc123_4242@localhost"
-        );
+    fn predict_node_name_matches_the_shared_conformance_fixture() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/conformance/attach_sname_conformance.json");
+        let raw = std::fs::read_to_string(path).expect("read sname fixture");
+        let fixture: serde_json::Value = serde_json::from_str(&raw).expect("fixture is JSON");
+        let cases = fixture["with_suffix"]
+            .as_array()
+            .expect("with_suffix array");
+        assert!(!cases.is_empty());
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let suffix = case["suffix"].as_str().unwrap();
+            let os_pid = u32::try_from(case["os_pid"].as_u64().unwrap()).unwrap();
+            assert_eq!(
+                predict_node_name(suffix, os_pid),
+                case["node_name"].as_str().unwrap(),
+                "node_name: {name}"
+            );
+            assert_eq!(
+                predict_short_name(suffix, os_pid),
+                case["short_name"].as_str().unwrap(),
+                "short_name: {name}"
+            );
+        }
     }
 
     #[test]
