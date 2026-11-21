@@ -318,7 +318,6 @@ fn flush_provision_on_error<T>(
 
 /// Phase 5-8: Build the class index (Pass 1), merge dependency indexes,
 /// compile changed source files (Pass 2), and compile Core Erlang to BEAM.
-#[allow(clippy::too_many_lines)] // orchestration function — one call per build phase
 fn execute_build_passes(
     env: &BuildEnvironment,
     options: &beamtalk_core::CompilerOptions,
@@ -355,43 +354,12 @@ fn execute_build_passes(
     // with the stub inputs.
     let stub_inputs_hash = fold_native_registry(stub_inputs_hash, native_type_registry.as_deref());
 
-    // ADR 0127 §10a (BT-3591): a class's `uses:` line makes its file's
-    // build-graph cache key depend on that protocol's content too — see
-    // `detect_changes`'s doc. `protocol_hashes` covers every provision-bearing
-    // protocol known to this build (same-package cross-file + dependency);
-    // `file_protocol_uses` comes from Pass 1's `ClassIndexResult` (which
-    // itself persists it in the incremental cache — see
-    // `IncrementalPass1Result.file_protocol_uses`), so it covers every
-    // source file regardless of whether Pass 1 re-scanned it this build,
-    // not just the ones in `index.cached_asts` (a cache-fresh file has no
-    // `cached_asts` entry at all).
-    let protocol_hashes = crate::commands::util::protocol_hashes(
-        &index.all_protocol_defs,
-        index.file_protocol_uses.values().flatten(),
-        environment::package_identity(env.pkg_manifest(), options.stdlib_mode),
-    );
-    let file_protocol_uses = index.file_protocol_uses.clone();
+    let edges = build_graph_edges(env, options, &index, stub_inputs_hash);
 
     // Per-file change detection — only recompile files whose source
     // is newer than the corresponding .beam output. Pass 1's already-computed
     // content hashes (`index.source_hashes`) let this skip re-hashing
     // any file Pass 1 already hashed this build.
-    let mut surface_keys = index.surface_keys.clone();
-    if let Some(keys) = &mut surface_keys {
-        // Package-wide inputs no class name addresses, folded like the full hash.
-        keys.globals =
-            fold_known_erlang_modules(keys.globals.clone(), &options.known_erlang_modules);
-    }
-    let edges = BuildGraphEdges {
-        file_protocol_uses,
-        protocol_hashes,
-        analysis_surface_hash: fold_known_erlang_modules(
-            index.analysis_surface_hash.clone(),
-            &options.known_erlang_modules,
-        ),
-        stub_inputs_hash,
-        surface_keys,
-    };
     let mut changes = detect_changes(
         &env.source_files,
         &env.build_dir,
@@ -408,177 +376,312 @@ fn execute_build_passes(
         );
     }
 
-    // Collect ALL module names for .app generation (both changed and unchanged),
-    // but only compile changed files.
-    let changed_set: HashSet<&Utf8Path> = changes
-        .changed_files
-        .iter()
-        .map(Utf8PathBuf::as_path)
-        .collect();
-
     // Pass 2: compile each file with the full class → module index.
     // Reuse cached ASTs from Pass 1 to avoid re-reading and re-parsing.
     // Only compile files that have changed since last build.
     let mut cached_asts = std::mem::take(&mut index.cached_asts);
-    let mut core_files = Vec::new();
-    // Source of every file in the erlc batch, for invalidation if it fails.
-    let mut batch_files: Vec<&str> = Vec::new();
-    let mut module_names = Vec::new();
     let compile_ctx = new_compile_context(env, &index, native_type_registry);
+    fail_on_broken_stubs(&stub_diagnostics, options, &compile_ctx)?;
 
-    // BT-4550: a broken `stubs/` file yields error-severity diagnostics
-    // (stub files are parsed too) - fail the build on those instead of
-    // merely counting them in the summary while exiting 0. A wrong stub
-    // silently skews FFI typing for every file. Warning-severity stub
-    // diagnostics (e.g. drift warnings) still pass, via the shared gate
-    // `beamtalk check` uses.
+    // Collect ALL module names for .app generation (both changed and unchanged),
+    // but only compile changed files.
+    let pass2 = Pass2Files {
+        pairs: &file_module_pairs,
+        changed_set: changes
+            .changed_files
+            .iter()
+            .map(Utf8PathBuf::as_path)
+            .collect(),
+        options,
+        compile_ctx: &compile_ctx,
+        edges: &edges,
+        // An unchanged file's diagnostics from its last actual compile, so they
+        // can be replayed instead of silently vanishing the moment the file
+        // stops being recompiled.
+        previous_diagnostics: crate::commands::build_cache::load_diagnostics_cache(&env.build_dir),
+    };
+    let mut compiled = pass2.run(
+        &mut cached_asts,
+        &mut changes.source_hashes,
+        stub_diagnostics,
+    )?;
+
+    compile_ctx
+        .provision_sink
+        .flush(&compile_ctx.hierarchy.pre_loaded_protocol_sources, options);
+
+    let diagnostic_summary = finish_pass2(env, &mut compiled, &changes, file_module_pairs.len())?;
+
+    Ok(BuildPassesResult {
+        module_names: compiled.module_names,
+        file_module_pairs,
+        hierarchy: compile_ctx.hierarchy,
+        own_class_infos: index.own_class_infos,
+        native_result,
+        diagnostic_summary,
+    })
+}
+
+/// The cross-file inputs folded into every file's build-graph cache key
+/// (ADR 0127 §10a; BT-3591, BT-4690).
+///
+/// A class's `uses:` line makes its file's cache key depend on that
+/// protocol's content too — see `detect_changes`'s doc. `protocol_hashes`
+/// covers every provision-bearing protocol known to this build (same-package
+/// cross-file + dependency); `file_protocol_uses` comes from Pass 1's
+/// `ClassIndexResult` (which itself persists it in the incremental cache — see
+/// `IncrementalPass1Result.file_protocol_uses`), so it covers every source
+/// file regardless of whether Pass 1 re-scanned it this build, not just the
+/// ones in `index.cached_asts` (a cache-fresh file has no `cached_asts` entry
+/// at all).
+fn build_graph_edges(
+    env: &BuildEnvironment,
+    options: &beamtalk_core::CompilerOptions,
+    index: &class_index::ClassIndexResult,
+    stub_inputs_hash: String,
+) -> BuildGraphEdges {
+    let protocol_hashes = crate::commands::util::protocol_hashes(
+        &index.all_protocol_defs,
+        index.file_protocol_uses.values().flatten(),
+        environment::package_identity(env.pkg_manifest(), options.stdlib_mode),
+    );
+    let mut surface_keys = index.surface_keys.clone();
+    if let Some(keys) = &mut surface_keys {
+        // Package-wide inputs no class name addresses, folded like the full hash.
+        keys.globals =
+            fold_known_erlang_modules(keys.globals.clone(), &options.known_erlang_modules);
+    }
+    BuildGraphEdges {
+        file_protocol_uses: index.file_protocol_uses.clone(),
+        protocol_hashes,
+        analysis_surface_hash: fold_known_erlang_modules(
+            index.analysis_surface_hash.clone(),
+            &options.known_erlang_modules,
+        ),
+        stub_inputs_hash,
+        surface_keys,
+    }
+}
+
+/// BT-4550: a broken `stubs/` file yields error-severity diagnostics (stub
+/// files are parsed too) - fail the build on those instead of merely counting
+/// them in the summary while exiting 0. A wrong stub silently skews FFI typing
+/// for every file. Warning-severity stub diagnostics (e.g. drift warnings)
+/// still pass, via the shared gate `beamtalk check` uses.
+fn fail_on_broken_stubs(
+    stub_diagnostics: &[beamtalk_core::source_analysis::Diagnostic],
+    options: &beamtalk_core::CompilerOptions,
+    compile_ctx: &CompileContext<'_>,
+) -> Result<()> {
     if crate::beam_compiler::diagnostics_are_errors(
-        &stub_diagnostics,
+        stub_diagnostics,
         options,
         &compile_ctx.diagnostics_overrides,
     ) {
         error!("Build failed for stub declarations");
         miette::bail!("build failed: stub declarations contain errors");
     }
-    // Collect diagnostics from all compiled files for the summary.
-    // Seed with stubs/ diagnostics (skipped signatures, version drift).
-    let mut all_build_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = stub_diagnostics;
+    Ok(())
+}
 
-    // An unchanged file's diagnostics from its last actual compile,
-    // so they can be replayed (shown and counted) instead of silently
-    // vanishing the moment the file stops being recompiled. Rebuilt from
-    // scratch below (rather than mutated in place) so a file removed from
-    // the project, or one whose diagnostics changed, never leaves a stale
-    // entry in the sidecar this build writes back out.
-    let previous_diagnostics_cache =
-        crate::commands::build_cache::load_diagnostics_cache(&env.build_dir);
-    let mut new_diagnostics_cache: HashMap<
-        String,
-        Vec<beamtalk_core::source_analysis::Diagnostic>,
-    > = HashMap::with_capacity(file_module_pairs.len());
-    // Every changed file (always known) plus every unchanged file
-    // whose diagnostics were actually found in the cache and replayed, or
-    // recompiled below because they weren't.
-    let mut files_with_known_diagnostics = 0usize;
-    // Unchanged files recompiled this build solely because the
-    // diagnostics sidecar had no entry for them (a fresh sidecar right after
-    // upgrading to this feature, corruption, or a cache-version bump) — their
-    // .beam is already current, only their diagnostics were unknown. Counted
-    // separately so the "Compiling N of M files" summary below still
-    // reflects what `core_files` actually holds.
-    let mut diagnostics_cache_miss_recompiles = 0usize;
+/// Everything Pass 2's per-file loop needs to know about the build.
+struct Pass2Files<'a, 'c> {
+    pairs: &'a [(Utf8PathBuf, String, Utf8PathBuf)],
+    changed_set: HashSet<&'a Utf8Path>,
+    options: &'a beamtalk_core::CompilerOptions,
+    compile_ctx: &'a CompileContext<'c>,
+    edges: &'a BuildGraphEdges,
+    previous_diagnostics: HashMap<String, Vec<beamtalk_core::source_analysis::Diagnostic>>,
+}
 
-    for (file, module_name, core_file) in &file_module_pairs {
-        module_names.push(module_name.clone());
+/// What Pass 2's per-file loop produced.
+struct Pass2Compiled<'a> {
+    /// Module of every file (compiled and unchanged), for `.app` generation.
+    module_names: Vec<String>,
+    /// Core Erlang files handed to erlc this build.
+    core_files: Vec<Utf8PathBuf>,
+    /// Source of every file in the erlc batch, for invalidation if it fails.
+    batch_files: Vec<&'a str>,
+    /// Diagnostics from all files (compiled or replayed) plus `stubs/`.
+    all_build_diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
+    /// The diagnostics sidecar this build writes back out. Rebuilt from
+    /// scratch (never mutated in place) so a file removed from the project, or
+    /// one whose diagnostics changed, never leaves a stale entry.
+    new_diagnostics_cache: HashMap<String, Vec<beamtalk_core::source_analysis::Diagnostic>>,
+    /// Every changed file (always known) plus every unchanged file whose
+    /// diagnostics were found in the cache and replayed, or recompiled because
+    /// they weren't.
+    files_with_known_diagnostics: usize,
+    /// Unchanged files recompiled solely because the diagnostics sidecar had
+    /// no entry for them (a fresh sidecar right after upgrading to this
+    /// feature, corruption, or a cache-version bump) — their .beam is already
+    /// current, only their diagnostics were unknown. Counted separately so the
+    /// "Compiling N of M files" summary still reflects what `core_files` holds.
+    diagnostics_cache_miss_recompiles: usize,
+}
 
-        if changed_set.contains(file.as_path()) {
-            let cached = cached_asts.remove(file);
-            let file_diags = compile_and_rekey(
-                file,
-                module_name,
-                core_file,
-                options,
-                &compile_ctx,
-                cached,
-                &edges,
-                &mut changes.source_hashes,
-            )?;
-            files_with_known_diagnostics += 1;
-            new_diagnostics_cache.insert(file.as_str().to_string(), file_diags.clone());
-            all_build_diags.extend(file_diags);
-            core_files.push(core_file.clone());
-            batch_files.push(file.as_str());
-            continue;
-        }
+impl<'a> Pass2Compiled<'a> {
+    /// Record a file that was compiled this build.
+    fn record_compiled(
+        &mut self,
+        file: &'a Utf8Path,
+        core_file: &Utf8Path,
+        file_diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
+    ) {
+        self.files_with_known_diagnostics += 1;
+        self.new_diagnostics_cache
+            .insert(file.as_str().to_string(), file_diags.clone());
+        self.all_build_diags.extend(file_diags);
+        self.core_files.push(core_file.to_path_buf());
+        self.batch_files.push(file.as_str());
+    }
+}
 
-        if let Some(cached_diags) = previous_diagnostics_cache.get(file.as_str()) {
-            debug!(file = %file, "Skipping unchanged file (diagnostics replayed from cache)");
-            if !cached_diags.is_empty() {
-                // A cached diagnostic's span is only valid against the exact
-                // content that produced it — `changed_set` already
-                // guarantees this file's content hash hasn't moved since
-                // then, so re-reading it now is safe to render against.
-                if let Ok(source) = fs::read_to_string(file) {
-                    crate::diagnostic::print_diagnostics_text(
-                        cached_diags,
-                        file.as_str(),
-                        &source,
-                        options,
-                    );
-                }
+impl<'a> Pass2Files<'a, '_> {
+    /// Compile every changed file (and any unchanged file with no cached
+    /// diagnostics), replaying cached diagnostics for the rest.
+    /// `seed_diagnostics` (the `stubs/` diagnostics) start the summary.
+    fn run(
+        &self,
+        cached_asts: &mut HashMap<Utf8PathBuf, CachedAst>,
+        source_hashes: &mut HashMap<String, String>,
+        seed_diagnostics: Vec<beamtalk_core::source_analysis::Diagnostic>,
+    ) -> Result<Pass2Compiled<'a>> {
+        let mut out = Pass2Compiled {
+            module_names: Vec::new(),
+            core_files: Vec::new(),
+            batch_files: Vec::new(),
+            all_build_diags: seed_diagnostics,
+            new_diagnostics_cache: HashMap::with_capacity(self.pairs.len()),
+            files_with_known_diagnostics: 0,
+            diagnostics_cache_miss_recompiles: 0,
+        };
+
+        for (file, module_name, core_file) in self.pairs {
+            out.module_names.push(module_name.clone());
+
+            if self.changed_set.contains(file.as_path()) {
+                let file_diags =
+                    self.compile_one(file, module_name, core_file, cached_asts, source_hashes)?;
+                out.record_compiled(file, core_file, file_diags);
+                continue;
             }
-            // The cache holds the diagnostics a build produced, not that
-            // build's verdict, so judge them against *this* run's options:
-            // `--warnings-as-errors` must fail on a replayed warning exactly
-            // as it does on a freshly compiled one (CI runs on warm caches).
-            if crate::beam_compiler::diagnostics_are_errors(
-                cached_diags,
-                options,
-                &compile_ctx.diagnostics_overrides,
-            ) {
-                miette::bail!("Failed to compile '{file}'");
-            }
-            // A replayed provision diagnostic joins the other users' so it is
-            // still reported once, against the protocol's file.
-            compile_ctx.provision_sink.report(
-                cached_diags,
-                &compile_ctx.hierarchy.pre_loaded_protocol_sources,
-                options,
-            );
-            files_with_known_diagnostics += 1;
-            all_build_diags.extend(cached_diags.iter().cloned());
-            new_diagnostics_cache.insert(file.as_str().to_string(), cached_diags.clone());
-            continue;
-        }
 
-        // Unchanged, but no diagnostics cache entry — recompile now
-        // so the gap closes within this one build instead of leaving the
-        // file silently unreported until its content next changes or
-        // `--force` is used. `compile_file` transparently falls back to
-        // reading and parsing from disk when Pass 1 didn't cache this file's
-        // AST either (its own, separate incremental cache), so this is safe
-        // even though the file was never in `cached_asts`.
-        debug!(file = %file, "Unchanged file has no diagnostics cache entry — recompiling");
+            if let Some(cached_diags) = self.previous_diagnostics.get(file.as_str()) {
+                debug!(file = %file, "Skipping unchanged file (diagnostics replayed from cache)");
+                self.replay_cached_diagnostics(file, cached_diags)?;
+                out.files_with_known_diagnostics += 1;
+                out.all_build_diags.extend(cached_diags.iter().cloned());
+                out.new_diagnostics_cache
+                    .insert(file.as_str().to_string(), cached_diags.clone());
+                continue;
+            }
+
+            // Unchanged, but no diagnostics cache entry — recompile now
+            // so the gap closes within this one build instead of leaving the
+            // file silently unreported until its content next changes or
+            // `--force` is used. `compile_file` transparently falls back to
+            // reading and parsing from disk when Pass 1 didn't cache this file's
+            // AST either (its own, separate incremental cache), so this is safe
+            // even though the file was never in `cached_asts`.
+            debug!(file = %file, "Unchanged file has no diagnostics cache entry — recompiling");
+            let file_diags =
+                self.compile_one(file, module_name, core_file, cached_asts, source_hashes)?;
+            out.diagnostics_cache_miss_recompiles += 1;
+            out.record_compiled(file, core_file, file_diags);
+        }
+        Ok(out)
+    }
+
+    fn compile_one(
+        &self,
+        file: &Utf8Path,
+        module_name: &str,
+        core_file: &Utf8Path,
+        cached_asts: &mut HashMap<Utf8PathBuf, CachedAst>,
+        source_hashes: &mut HashMap<String, String>,
+    ) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
         let cached = cached_asts.remove(file);
-        let file_diags = compile_and_rekey(
+        compile_and_rekey(
             file,
             module_name,
             core_file,
-            options,
-            &compile_ctx,
+            self.options,
+            self.compile_ctx,
             cached,
-            &edges,
-            &mut changes.source_hashes,
-        )?;
-        files_with_known_diagnostics += 1;
-        diagnostics_cache_miss_recompiles += 1;
-        new_diagnostics_cache.insert(file.as_str().to_string(), file_diags.clone());
-        all_build_diags.extend(file_diags);
-        core_files.push(core_file.clone());
-        batch_files.push(file.as_str());
+            self.edges,
+            source_hashes,
+        )
     }
 
-    compile_ctx
-        .provision_sink
-        .flush(&compile_ctx.hierarchy.pre_loaded_protocol_sources, options);
+    /// Show, judge and report an unchanged file's cached diagnostics as if it
+    /// had just been compiled.
+    fn replay_cached_diagnostics(
+        &self,
+        file: &Utf8Path,
+        cached_diags: &[beamtalk_core::source_analysis::Diagnostic],
+    ) -> Result<()> {
+        if !cached_diags.is_empty() {
+            // A cached diagnostic's span is only valid against the exact
+            // content that produced it — `changed_set` already
+            // guarantees this file's content hash hasn't moved since
+            // then, so re-reading it now is safe to render against.
+            if let Ok(source) = fs::read_to_string(file) {
+                crate::diagnostic::print_diagnostics_text(
+                    cached_diags,
+                    file.as_str(),
+                    &source,
+                    self.options,
+                );
+            }
+        }
+        // The cache holds the diagnostics a build produced, not that
+        // build's verdict, so judge them against *this* run's options:
+        // `--warnings-as-errors` must fail on a replayed warning exactly
+        // as it does on a freshly compiled one (CI runs on warm caches).
+        if crate::beam_compiler::diagnostics_are_errors(
+            cached_diags,
+            self.options,
+            &self.compile_ctx.diagnostics_overrides,
+        ) {
+            miette::bail!("Failed to compile '{file}'");
+        }
+        // A replayed provision diagnostic joins the other users' so it is
+        // still reported once, against the protocol's file.
+        self.compile_ctx.provision_sink.report(
+            cached_diags,
+            &self.compile_ctx.hierarchy.pre_loaded_protocol_sources,
+            self.options,
+        );
+        Ok(())
+    }
+}
 
+/// Compile the batch to BEAM, persist the sidecars and summarise diagnostics.
+fn finish_pass2(
+    env: &BuildEnvironment,
+    compiled: &mut Pass2Compiled<'_>,
+    changes: &changes::ChangeDetectionResult,
+    total_files: usize,
+) -> Result<beamtalk_core::source_analysis::DiagnosticSummary> {
     // BT-5074: the erlc worker writes beams one module at a time, so a batch
     // that fails - or a build killed mid-batch - can leave a new beam beside a
     // stored hash that still describes the previous content. Forget the batch's
     // hashes *before* compiling; success writes them back below. Skipped when
     // nothing compiles, so a no-change build does no extra sidecar I/O.
-    if !batch_files.is_empty() {
+    if !compiled.batch_files.is_empty() {
         crate::commands::build_cache::invalidate_beam_hashes(
             &env.build_dir,
-            batch_files.iter().copied(),
+            compiled.batch_files.iter().copied(),
         );
     }
+    let miss_recompiles = compiled.diagnostics_cache_miss_recompiles;
     compile_to_beam(
         &env.build_dir,
-        &core_files,
-        changes.changed_files.len() + diagnostics_cache_miss_recompiles,
-        changes.unchanged_files.len() - diagnostics_cache_miss_recompiles,
-        file_module_pairs.len(),
+        &compiled.core_files,
+        changes.changed_files.len() + miss_recompiles,
+        changes.unchanged_files.len() - miss_recompiles,
+        total_files,
     )?;
 
     // Persist diagnostics before the beam-hash sidecar. If the
@@ -589,26 +692,24 @@ fn execute_build_passes(
     // already matching the new content while the diagnostics cache still
     // held the superseded file's diagnostics, which would then get replayed
     // as if it were current.
-    crate::commands::build_cache::save_diagnostics_cache(&env.build_dir, &new_diagnostics_cache);
+    crate::commands::build_cache::save_diagnostics_cache(
+        &env.build_dir,
+        &compiled.new_diagnostics_cache,
+    );
     // Only persist the beam-hash sidecar once compilation has
     // actually succeeded (the `?` above already returned on failure) — the
     // saved hashes assert "this content produced the `.beam` now on disk".
     crate::commands::build_cache::save_beam_hash_cache(&env.build_dir, &changes.source_hashes);
 
-    let all_build_diags = crate::diagnostic::dedupe_provision_diagnostics(all_build_diags);
-    let diagnostic_summary = beamtalk_core::source_analysis::DiagnosticSummary::from_diagnostics(
-        &all_build_diags,
-        files_with_known_diagnostics,
-    );
-
-    Ok(BuildPassesResult {
-        module_names,
-        file_module_pairs,
-        hierarchy: compile_ctx.hierarchy,
-        own_class_infos: index.own_class_infos,
-        native_result,
-        diagnostic_summary,
-    })
+    let all_build_diags = crate::diagnostic::dedupe_provision_diagnostics(std::mem::take(
+        &mut compiled.all_build_diags,
+    ));
+    Ok(
+        beamtalk_core::source_analysis::DiagnosticSummary::from_diagnostics(
+            &all_build_diags,
+            compiled.files_with_known_diagnostics,
+        ),
+    )
 }
 
 /// ADR 0125 §3.1: warn (not fail) when the running OTP major falls outside

@@ -75,7 +75,7 @@ pub(in crate::server) use lock::LockRecover;
 #[cfg(test)]
 pub(in crate::server) use crate::runtime::FlushFileKind;
 #[cfg(test)]
-pub(in crate::server) use beamtalk_core::source_analysis::{Severity, Span};
+pub(in crate::server) use beamtalk_core::source_analysis::Severity;
 #[cfg(test)]
 pub(in crate::server) use beamtalk_core::unparse::format_source;
 #[cfg(test)]
@@ -90,8 +90,6 @@ pub(in crate::server) use convert::*;
 pub(in crate::server) use ecow::EcoString;
 #[cfg(test)]
 pub(in crate::server) use flush::*;
-#[cfg(test)]
-pub(in crate::server) use hover::*;
 #[cfg(test)]
 pub(in crate::server) use nav::*;
 #[cfg(test)]
@@ -463,11 +461,11 @@ impl LanguageServer for Backend {
 
             Ok(hover.map(|h| {
                 let mut value = h.contents.to_string();
-                if let Some(doc) = h.documentation {
+                if let Some(doc) = h.documentation.as_deref() {
                     value.push_str("\n\n");
-                    value.push_str(&format_hover_documentation(&doc));
+                    value.push_str(&format_hover_documentation(doc));
                 }
-                if let Some(stdlib_note) = stdlib_hover_policy_note(&svc, &value) {
+                if let Some(stdlib_note) = stdlib_hover_policy_note(&svc, &h) {
                     value.push_str("\n\n");
                     value.push_str(&stdlib_note);
                 }

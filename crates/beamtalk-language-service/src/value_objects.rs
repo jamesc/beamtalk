@@ -214,6 +214,13 @@ pub struct HoverInfo {
     pub documentation: Option<EcoString>,
     /// The span this hover applies to.
     pub span: Span,
+    /// The class this hover is about, when it is a class reference (`Class:`
+    /// hover) or a method resolved on a receiver class (`Resolved on` hover).
+    /// Lets clients add class-level context without parsing `contents`.
+    pub class_name: Option<EcoString>,
+    /// `true` when `class_name` is the receiver class a method hover resolved
+    /// on, rather than a class reference.
+    pub method_resolved: bool,
 }
 
 impl HoverInfo {
@@ -224,7 +231,24 @@ impl HoverInfo {
             contents: contents.into(),
             documentation: None,
             span,
+            class_name: None,
+            method_resolved: false,
         }
+    }
+
+    /// Records the class this hover is a reference to.
+    #[must_use]
+    pub fn with_class_name(mut self, class_name: impl Into<EcoString>) -> Self {
+        self.class_name = Some(class_name.into());
+        self
+    }
+
+    /// Records the receiver class a method hover resolved on.
+    #[must_use]
+    pub fn with_resolved_class(mut self, class_name: impl Into<EcoString>) -> Self {
+        self.class_name = Some(class_name.into());
+        self.method_resolved = true;
+        self
     }
 
     /// Adds documentation.
