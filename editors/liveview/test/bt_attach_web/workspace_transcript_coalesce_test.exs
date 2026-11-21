@@ -51,7 +51,8 @@ defmodule BtAttachWeb.WorkspaceTranscriptCoalesceTest do
     {:noreply, socket} =
       WorkspaceLive.handle_info({:transcript_output, "one move"}, socket)
 
-    assert [{_id, _at, %{text: "one move"}, -@transcript_limit}] = pending_inserts(socket)
+    assert [{_id, _at, %{text: "one move"}, -@transcript_limit, _update_only}] =
+             pending_inserts(socket)
   end
 
   test "a burst already queued in the mailbox is coalesced into one render pass" do
@@ -68,11 +69,13 @@ defmodule BtAttachWeb.WorkspaceTranscriptCoalesceTest do
 
     # All 50 lines landed in a SINGLE handle_info — no per-line render.
     assert length(inserts) == 50
-    texts = Enum.map(inserts, fn {_id, _at, %{text: t}, _limit} -> t end)
+    texts = Enum.map(inserts, fn {_id, _at, %{text: t}, _limit, _update_only} -> t end)
     assert texts == Enum.map(1..50, &"move #{&1}")
 
     # Every insert carries the depth cap so the DOM stays bounded.
-    assert Enum.all?(inserts, fn {_id, _at, _item, limit} -> limit == -@transcript_limit end)
+    assert Enum.all?(inserts, fn {_id, _at, _item, limit, _update_only} ->
+             limit == -@transcript_limit
+           end)
 
     # The mailbox is fully drained — nothing left to trigger another render.
     refute_received {:transcript_output, _}
@@ -86,7 +89,7 @@ defmodule BtAttachWeb.WorkspaceTranscriptCoalesceTest do
     {:noreply, socket} =
       WorkspaceLive.handle_info({:transcript_output, "dup"}, socket)
 
-    ids = pending_inserts(socket) |> Enum.map(fn {id, _at, _item, _limit} -> id end)
+    ids = pending_inserts(socket) |> Enum.map(fn {id, _at, _item, _limit, _update_only} -> id end)
     assert length(ids) == 21
     assert length(Enum.uniq(ids)) == 21
   end
@@ -97,7 +100,7 @@ defmodule BtAttachWeb.WorkspaceTranscriptCoalesceTest do
     {:noreply, socket} =
       WorkspaceLive.handle_info({:transcript_output, ~c"charlist line"}, socket)
 
-    assert [{_id, _at, %{text: "charlist line"}, _limit}] = pending_inserts(socket)
+    assert [{_id, _at, %{text: "charlist line"}, _limit, _update_only}] = pending_inserts(socket)
   end
 
   test "the drain is capped per pass so a single handle_info can't run unbounded" do

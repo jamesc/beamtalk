@@ -87,7 +87,7 @@ defmodule BtAttachWeb.Live.DockTest do
   # `request`/`response`/`kind` of an appended scrollback row instead of only
   # the side-effecting assigns (`repl_seq`/`repl_terms`).
   defp last_repl_entry(socket) do
-    {_id, _at, item, _limit} = hd(socket.assigns.streams.repl.inserts)
+    {_id, _at, item, _limit, _update_only} = hd(socket.assigns.streams.repl.inserts)
     item
   end
 

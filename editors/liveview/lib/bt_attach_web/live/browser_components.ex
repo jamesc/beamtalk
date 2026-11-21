@@ -149,6 +149,7 @@ defmodule BtAttachWeb.Live.BrowserComponents do
              field added here — a no-op rather than an unhandled LiveView event. --%>
         <form
           :if={@browser_mode == :classes}
+          id="browser-source-form"
           phx-change="browser_source"
           onsubmit="return false"
           class="src-filter"
@@ -175,6 +176,7 @@ defmodule BtAttachWeb.Live.BrowserComponents do
              Project (with an All fallback when no native module is project-origin). --%>
         <form
           :if={@browser_mode == :native}
+          id="native-source-form"
           phx-change="native_source"
           onsubmit="return false"
           class="src-filter"
@@ -1009,7 +1011,8 @@ defmodule BtAttachWeb.Live.BrowserComponents do
         phx-value-selector={site["method"]}
       >
         <span class="nav-site-name mono">
-          {site["class"]}<span :if={site["class_side"] == true} class="nav-side-tag">class</span> » {site[
+          {site["class"]}<span :if={site["class_side"] == true} class="nav-side-tag">class</span>
+          » {site[
             "method"
           ]}
         </span>
