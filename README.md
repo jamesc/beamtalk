@@ -54,14 +54,14 @@ live method editing, and a workspace eval pane (the *[LiveView IDE](#liveview-id
 
 ---
 
-## What's New in 0.5
+## What's New in 0.6
 
-- **Pipelines and value-update safety.** The `|>` pipeline operator and `Object >> then:`, with new warnings for value updates that are thrown away.
-- **Stateless class methods run in the caller; class variables live in the class process.** Locals thread through loops, conditionals, `on:do:`/`ensure:` and `match:`.
-- **Supervisors and actor failure follow OTP.** Several instances of one supervisor class, children by id, and an error in `handleInfo:` or a cast now crashes the actor.
-- **Readable stack traces.** Frames render as `Class>>selector`; `:raw-mfa` in the REPL shows the raw frames.
-- **A stronger type system.** Named type aliases, traits as protocols with provided methods, set-theoretic narrowing and typed OTP opaque handles.
-- **Strict `beamtalk.toml`.** On main since 0.5.0: unknown keys are errors and `version` must be a `major.minor.patch` version (see "Unreleased" in the changelog).
+- **Security by default.** The release cookie stays out of `ps`, dev and REPL nodes listen on loopback only, MCP tools stay inside the project, and the LiveView IDE refuses a network bind without authentication.
+- **Safer builds and packages.** Strict `beamtalk.toml` validation, a build lock for concurrent `beamtalk` processes, reproducible builds, and releases that ship native modules and `priv/`.
+- **Stricter compile-time checks.** Unknown `pkg@Class` qualifiers, repeated destructuring names and misdeclared `native:` subclasses are compile errors.
+- **Actors are found by scanning, not registering.** `allInstances`, hot reload and `Node current actors` see supervised and named children too.
+- **Editor tooling.** LSP rename for classes and selectors, package-aware find-references and range formatting.
+- **A more consistent stdlib.** One spelling per concept, `Duration` time parameters, and `Dictionary select:` keeps its keys.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full list and the migration notes for each breaking change.
 
@@ -271,7 +271,7 @@ Docker image (`ghcr.io/jamesc/beamtalk-ide`) — separate from the toolchain bun
 **New to Beamtalk?** See the [REPL Tutorial](examples/repl-tutorial.md) for a complete beginner's guide!
 
 ```text
-Beamtalk v0.5.0
+Beamtalk v0.6.0
 Type :help for available commands, :exit to quit.
 
 > message := "Hello, Beamtalk!"

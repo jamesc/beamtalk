@@ -73,18 +73,18 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-build"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "beamtalk-cerl-doc",
 ]
 
 [[package]]
 name = "beamtalk-cerl-doc"
-version = "0.5.0"
+version = "0.6.0"
 
 [[package]]
 name = "beamtalk-codegen"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "beamtalk-cerl-doc",
  "beamtalk-core",
@@ -94,7 +94,7 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "beamtalk-build",
  "beamtalk-cerl-doc",

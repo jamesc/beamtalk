@@ -2,6 +2,109 @@
 
 ## Unreleased
 
+## 0.6.0 — 2026-11-21
+
+### Highlights
+
+0.6.0 is a hardening release. The headline changes:
+
+- **Security by default.** The release cookie no longer shows in `ps`. Erlang distribution for dev, REPL and LiveView nodes listens on loopback only. The REPL WebSocket checks `Origin` and `Host`. MCP tools stay inside the project root. The LiveView IDE refuses a non-loopback bind without authentication. `install.sh` refuses an archive it cannot verify.
+- **Safer builds and packages.** `beamtalk.toml` is validated strictly. Concurrent `beamtalk` processes on one project take turns through a build lock. Two files that produce the same module name are a build error. Builds are reproducible (project-relative source paths). `beamtalk release` ships native Erlang modules and dependency `priv/` directories, and works on a stock Windows install.
+- **Stricter compile-time checks.** An unknown `pkg@Class` qualifier, a repeated name in a destructuring pattern, a `native:` subclass without its own backing module, and an internal class in an extension method's signature are now compile errors instead of run-time surprises.
+- **Actors are found by scanning, not registering (ADR 0150).** The actor registries are gone. `allInstances`, hot reload and `Node current actors` see every actor, supervised and named children included, and a spawn no longer queues on a registry process.
+- **Editor tooling.** LSP rename (F2) for classes and selectors, package-aware find-references, range formatting, and an LSP that survives a handler panic.
+- **A more consistent stdlib.** One spelling per concept, `Array` reads like `List`, time parameters take a `Duration`, and `Dictionary select:` / `reject:` / `collect:` keep their keys.
+
+### Breaking changes and migration
+
+Each item says what changed and what to do. The entries under "All changes" carry the full detail and the BT/ADR references.
+
+#### Language and compiler
+
+- **An unknown `pkg@Class` package qualifier is a compile error (BT-4921, BT-4929).** This includes `uses: pkg@Proto` and protocol provided-method bodies. A transitive dependency must now be declared directly to be named in a qualifier.
+  - Do: add the package to `[dependencies]` in `beamtalk.toml`, or drop the qualifier.
+- **A repeated name in a destructuring array pattern is a compile error (BT-5052).** `#[a, a] := #[1, 2]` used to compile and keep the last element.
+  - Do: give each element its own name; compare afterwards, or use a `match:` arm.
+- **A concrete subclass of a `native:` class or actor must declare its own `native:` (BT-4961, BT-4964).** Before, the subclass compiled but its methods were unreachable (`Value`/`Object`) or `spawn` failed at run time (actors).
+  - Do: write `Queue subclass: MyQ native: your_backing_module`, or hold the native class in a field of a plain class.
+- **A cross-file `self delegate` extension on a `native:` class is a compile error (BT-4930).** It compiled before and failed on every call. `native:` classes from compiled dependencies are now recognised as native everywhere, so `Foo new` on a fieldless `native:` class from a dependency is a compile error too.
+  - Do: move the method into the file that declares the class.
+- **E0402 applies to extension methods (BT-4923).** A `Foo >> sel` whose signature names an `internal` class of the package is an error, as it already was in a class body.
+  - Do: make the class public, change the signature, or mark the extension `internal`.
+- **A class that `uses: Enumerable` while inheriting `reject:`, `allSatisfy:`, `noneSatisfy:`, `includes:` or `detect:` fails to compile (BT-5090).**
+  - Do: add `overriding: #(#includes:)` to take Enumerable's version, or `excluding: #(#includes:)` to keep the inherited one.
+- **Source file names must use letters, digits and underscores; two files producing the same module name are a build error (BT-4868, BT-5074).** `my-helper.bt` and `foo.v2.bt` are rejected; `src/FooBar.bt` beside `src/foo_bar.bt` fails the build.
+  - Do: rename the files.
+
+#### Standard library
+
+- **`Dictionary select:` / `reject:` answer a Dictionary with the keys kept (BT-5083, BT-5097).** They answered a List of values.
+  - Do: call `values` on the result where the List was wanted.
+- **String regexes are code-point based; `DateTime` parsing is stricter (BT-5030).** `.`, `\w`, `\b` and `\d` now see characters, not bytes. `DateTime fromString:` rejects a trailing newline; out-of-range instants raise `type_error`; an absent year in `parse:format:` defaults to 1970.
+  - Do: use a bare-binary pattern where byte semantics were relied on.
+- **A failed FFI call that raises `function_clause` reports `type_error` or `runtime_error`, not `arity_mismatch` (BT-4866).** A stock call with a nested `String` is retried once with the Strings unwrapped, as `badarg` already was.
+  - Do: match `#type_error` / `#runtime_error` (or `Error`) instead of `#arity_mismatch`; make such callees idempotent or pass raw binaries.
+
+#### Runtime
+
+- **A remote `asyncSend:args:` raises `unsupported_operation` at once (BT-4989).**
+  - Do: use a synchronous send to a remote actor.
+- **`await` on a future whose actor has died raises `#future_expired` immediately (BT-5020).** It used to wait for the await timeout.
+- **`removeFromSystem` refuses while a supervisor holds a child of the class (BT-4936).**
+  - Do: `terminateChild:` and `deleteChild:` first.
+- **Erlang integrations: the actor registries are removed and lifecycle telemetry is opt-in (BT-4951, BT-4953, BT-4997).** `beamtalk_object_instances`, `beamtalk_repl_actors` and `beamtalk_actor:register_spawned/4` are gone. `[beamtalk, actor, lifecycle, start|stop]` telemetry is emitted only when asked for. Beamtalk code needs nothing.
+  - Do: Erlang code should use `beamtalk_actor_scan` / `beamtalk_runtime_api:all_instances/1`; a telemetry exporter should set `{beamtalk_runtime, lifecycle_telemetry}` to `true` or call `beamtalk_telemetry:enable_lifecycle_events/0`.
+- **`:actors` and the other actor lists include `native:` and runtime-owned actors (BT-4960).** Runtime actors are marked `"system": true` (`[system]` in text).
+  - Do: scripts that count actors should filter on `system`.
+
+#### Tooling, CLI and packages
+
+- **`beamtalk.toml` is validated strictly (BT-5076).** An unknown key or section is an error, `[package] version` must be SemVer, and the runtime and OTP application names are reserved.
+  - Do: fix the typo, use a `major.minor.patch` version, or rename the package or native module.
+- **CLI flags renamed, with no aliases (BT-5045).** `repl --timeout` → `--idle-timeout`; `workspace logs --workspace NAME` → `workspace logs NAME`; `workspace list --json` → `--format json`; `workspace logs --format` → `--log-format`. Flags that did nothing (`repl --foreground --workspace`, …) are now parse errors.
+  - Do: update scripts.
+- **`beamtalk lint` exits 1 on any error-severity diagnostic (BT-4942).**
+  - Do: fix the errors; a CI job that ignored them will now fail.
+- **`beamtalk run` exits `128 + signal` when the BEAM is killed by a signal (BT-5028).** It exited 0. Unix only.
+- **`beamtalk deps update` re-resolves the whole dependency subtree (BT-4920),** removes lock entries nothing reaches, and leaves `beamtalk.lock` unchanged on any conflict.
+  - Do: after bumping a pin, run `beamtalk deps update <name>` and commit the lock.
+- **`install.sh` requires a verified checksum (BT-5087).** A missing `.sha256` or checksum tool is an error.
+  - Do: install `sha256sum` or `shasum`; `--insecure-skip-checksum` opts out.
+- **A release cookie with whitespace, quotes or backslashes is rejected at start (BT-5067).**
+
+#### REPL, MCP and LiveView IDE
+
+- **`beamtalk repl --foreground` always starts a distributed node (BT-5066),** so it needs `epmd` to be reachable.
+- **The LiveView IDE front binds loopback by default and refuses a non-loopback bind without authentication (BT-5065).**
+  - Do: for a remote deploy set `BT_ATTACH_BIND_IP` and configure OIDC; `BT_IDE_ALLOW_UNAUTHENTICATED=1` opts out on a trusted network.
+- **MCP tools reject paths outside the project root, and auto-attach only to the current project's workspace (BT-5070, BT-5080).** An explicit `--workspace-id` that is not running is an error.
+  - Do: pass `--allow-outside-project` where needed; start the project's workspace first.
+- **`close` stops the REPL session, and `sessions` answers session ids, not pid strings (BT-5012).** A detached session is reaped after the idle period (default 4 hours, `BEAMTALK_SESSION_IDLE_SECONDS`).
+
+### All changes
+
+- **Added: a build lock serialises `beamtalk` processes on one project (BT-5075, [#5631](https://github.com/jamesc/beamtalk/pull/5631)).**
+  - Changed: `build` (and everything that builds first: `run`, `repl` startup, `check`), `test`, `lint` dependency resolution, `release`, `clean`, `deps add` and `deps update` take an OS advisory lock on `_build/.build.lock`. A second process waits and says so. Concurrent cold builds no longer fail on a half-cloned git dependency, and two concurrent `deps add` no longer lose a manifest or lock entry. The kernel drops the lock when a process dies, so a killed build leaves nothing stale. `deps list`, the LSP and MCP read without it.
+  - Changed: generated sidecars, the `.app`, the corpus files and generated callback `.erl` files are written by temp file and rename.
+  - See `docs/beamtalk-packages.md` § Concurrent beamtalk processes.
+- **Security: `install.sh` requires a verified checksum, replaces instead of overlaying, adds `--uninstall` (BT-5087, [#5620](https://github.com/jamesc/beamtalk/pull/5620)).**
+  - Changed: a missing `.sha256` or no `sha256sum`/`shasum` is now an error; `--insecure-skip-checksum` installs without verifying. Every published release ships the checksums.
+  - Changed: the archive is extracted to a staging directory and each unit it supplies replaces the old one, with rollback on failure, so files a newer release dropped no longer linger.
+  - Added: `--uninstall` removes the binaries, `lib/beamtalk`, `share/beamtalk` and the build marker.
+- **Fix: LSP rename refuses unsafe renames; find-references is package-aware (BT-5079, [#5635](https://github.com/jamesc/beamtalk/pull/5635), [#5652](https://github.com/jamesc/beamtalk/pull/5652)).**
+  - Changed: renaming a method that overrides an ancestor's (project or stdlib) is refused; it used to rename only the override. Renaming to a selector an ancestor or descendant already defines on that side is refused.
+  - Changed: class rename and find-references touch a `pkg@Name` reference only when `pkg` is the declaring package.
+  - Added: `#old` symbol literals are offered as rename candidates (not applied by default). Rename, references, go-to-definition and hover now see state and class-variable defaults and protocol provided methods.
+  - Fixed: hover on a unary/binary method header spans exactly the selector; "Add annotation" skips a `=>` inside a header comment.
+- **Fix: LiveView and desktop session lifecycle (BT-5081, [#5633](https://github.com/jamesc/beamtalk/pull/5633)).**
+  - Fixed: the desktop shell stops a front with SIGTERM and a 3 s grace before force-killing, and the LiveView attaches its session with its own pid, so a front that dies leaves the session detached (and reaped) instead of active forever.
+  - Added: when the workspace restarts, the LiveView shows a "workspace connection lost" banner with a Reconnect button; evals are refused until Reconnect.
+  - Fixed: `bin/server` and the IDE config honour `BEAMTALK_HOME`, through one shared rule pinned to a conformance fixture.
+- **Fix: session, ChangeLog and hot reload follow-ups (BT-5084, [#5634](https://github.com/jamesc/beamtalk/pull/5634), [#5630](https://github.com/jamesc/beamtalk/pull/5630), [#5648](https://github.com/jamesc/beamtalk/pull/5648)).**
+  - Fixed: `close` kills a running eval. A deliberate close sends WebSocket code 1000. Resuming a session that has just gone falls back to a new session.
+  - Changed: a session no client ever attached to is stopped after the idle period. The period is settable with `session_idle_seconds` or `BEAMTALK_SESSION_IDLE_SECONDS` (default 4 hours).
+  - Fixed: an eval that changes classes or methods now carries a warning when the ChangeLog write fails (it was silent on six paths). Appends time out after 60 s and are fsynced; removing a never-flushed class retires its entries.
+  - Fixed: a hot reload with a slow migration no longer leaves the actor suspended after it finishes. A future's watcher ends after the orphan cap (1 hour) and rejects with `future_expired`.
 - **Added: time parameters accept a `Duration`; `Enumerable` and `Ets` gain the `Collection` / `Dictionary` queries (BT-5090).** No existing call changes behaviour. One source-compatibility case: see the `Enumerable` bullet.
   - Added: `Duration` is accepted (an Integer still means milliseconds, `#infinity` is still allowed where it was) by `Announcer announceAndWait:timeout:`, `SystemAnnouncer announceAndWait:timeout:`, `OS run:timeout:`, `Supervisor stopWithin:`, `DynamicSupervisor stopWithin:` and `TimeoutProxy setTimeoutMs:`. A `Duration` is converted once at the call; a negative one fails exactly as a negative Integer does.
   - Added: `Enumerable` provides `reject:`, `allSatisfy:`, `noneSatisfy:`, `includes:` and `detect:`, each forwarded to `elements`. A class that defines one of these itself keeps its own.
