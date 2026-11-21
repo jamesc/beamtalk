@@ -8,7 +8,10 @@
 use super::config::{
     PRELOAD_MAX_FILES, PreloadConfig, PreloadedFiles, collect_preload_files_within,
 };
-use super::convert::{offset_to_position, path_to_stdlib_uri, path_to_uri, uri_to_path};
+use super::convert::{
+    offset_to_position, path_to_stdlib_uri, path_to_uri, position_to_offset, uri_to_path,
+};
+use super::range_format::format_range_edits;
 use super::flush::flush_event_listener;
 use super::nav::{bt_locations_to_lsp, runtime_site_to_lsp_location};
 use super::reload::{
@@ -1186,6 +1189,37 @@ impl Backend {
             },
             new_text: formatted,
         }])
+    }
+
+    /// Formats only the top-level constructs overlapping `range` (BT-5080).
+    pub(in crate::server) fn format_document_range(
+        &self,
+        uri: &Url,
+        range: Range,
+    ) -> Option<Vec<TextEdit>> {
+        if uri.scheme() == "beamtalk-stdlib" {
+            return None;
+        }
+        let path = uri_to_path(uri)?;
+        let source = {
+            let svc = self.service.lock_recover();
+            svc.file_source(&path)?
+        };
+        let start = position_to_offset(range.start, &source);
+        let end = position_to_offset(range.end, &source);
+        let edits = format_range_edits(&source, start, end)?;
+        Some(
+            edits
+                .into_iter()
+                .map(|e| TextEdit {
+                    range: Range {
+                        start: offset_to_position(e.start, &source),
+                        end: offset_to_position(e.end, &source),
+                    },
+                    new_text: e.new_text,
+                })
+                .collect(),
+        )
     }
 
     /// Republishes diagnostics for every currently-open file.

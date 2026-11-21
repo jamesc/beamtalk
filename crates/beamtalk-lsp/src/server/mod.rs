@@ -54,6 +54,7 @@ mod handlers;
 mod hover;
 mod lock;
 mod nav;
+mod range_format;
 mod reload;
 
 pub(in crate::server) use commands::build_command_expression;
@@ -716,16 +717,16 @@ impl LanguageServer for Backend {
 
     /// Formats the document for a selected range.
     ///
-    /// Beamtalk formatting is a whole-file operation (the unparser works on the
-    /// full module AST), so this method formats the entire document and returns
-    /// a single edit even when only a range is selected. `VSCode` accepts
-    /// whole-document edits from `rangeFormatting` without issue.
+    /// The unparser is a whole-module operation, so the document is formatted
+    /// as a whole and only the edits inside the top-level constructs
+    /// overlapping the selected range are returned; text outside them is left
+    /// untouched (BT-5080).
     async fn range_formatting(
         &self,
         params: DocumentRangeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
         guard_request("range_formatting", async move {
-            Ok(self.format_document(&params.text_document.uri))
+            Ok(self.format_document_range(&params.text_document.uri, params.range))
         })
         .await
     }
