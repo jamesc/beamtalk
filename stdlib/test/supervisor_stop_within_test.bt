@@ -148,3 +148,12 @@ TestCase subclass: SupervisorStopWithinTest
     result := sup stopWithin: (Duration milliseconds: 50)
     self assert: result error kind equals: #timeout
     self waitForDeathOf: sup
+
+  testStopWithinNegativeDurationFailsLikeNegativeInteger =>
+    sup := (Bt4047PatientSup supervise) unwrap
+    asInteger := sup stopWithin: -1
+    asDuration := sup stopWithin: (Duration milliseconds: -1)
+    self assert: asDuration error kind equals: asInteger error kind
+    self assert: asInteger error kind equals: #type_error
+    self assert: sup isAlive
+    sup stop

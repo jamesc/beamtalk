@@ -17,7 +17,8 @@
 //! [`EXPECTED_FAILURES`]. This is not a skip: the test fails both when a
 //! violation is *not* listed and when a listed entry no longer violates, so
 //! each later PR must delete the entries it fixes. The list is empty when
-//! BT-5090 is done.
+//! BT-5090 is done. Deliberate, permanent exceptions (each with its reason)
+//! live in [`PERMANENT_EXCEPTIONS`]; a stale entry there fails the test too.
 
 use beamtalk_core::ast::{
     ClassDefinition, MessageSelector, MethodDefinition, Module, ProtocolDefinition, TypeAnnotation,
@@ -70,11 +71,35 @@ const TIME_GENERATED_SETTERS: &[(&str, &str)] = &[
 
 /// Rules the stdlib does not yet satisfy. Each entry is
 /// `"<rule>: <Class> <detail>"`; every PR that fixes one deletes it.
-const EXPECTED_FAILURES: &[&str] = &[
-    "time: Actor stopWith:timeout: parameter for timeout: does not accept Duration",
-    "time: ProtoObject perform:withArguments:timeout: parameter for timeout: does not accept Duration",
-    "time: RetryPolicy withInitialInterval: is a generated setter typed from an Integer field; define it explicitly to accept Duration",
-    "time: RetryPolicy withMaximumInterval: is a generated setter typed from an Integer field; define it explicitly to accept Duration",
+const EXPECTED_FAILURES: &[&str] = &[];
+
+/// Deliberate, permanent exceptions to the rules, each with its reason
+/// (BT-5090 decision 3). Unlike [`EXPECTED_FAILURES`] these are not debts: they
+/// stay, so the list must not be used to defer a fix. A listed entry that stops
+/// violating fails the test (delete it), and a new unlisted violation still
+/// fails.
+const PERMANENT_EXCEPTIONS: &[(&str, &str)] = &[
+    (
+        "time: Actor stopWith:timeout: parameter for timeout: does not accept Duration",
+        "lowered by the actorStopWithTimeout intrinsic straight to gen_server:stop/3, a \
+         lifecycle primitive; a Duration would need a conversion in the generated code",
+    ),
+    (
+        "time: ProtoObject perform:withArguments:timeout: parameter for timeout: does not accept Duration",
+        "lowered by codegen straight to beamtalk_message_dispatch:send/4, which hands the \
+         timeout to gen_server:call; accepting a Duration would touch the send path",
+    ),
+    (
+        "time: RetryPolicy withInitialInterval: is a generated setter typed from an Integer field; define it explicitly to accept Duration",
+        "RetryPolicy is a typed Value class whose setters are generated from Integer fields; \
+         a hand-written setter must build the copy with untyped FFI (rejected in a typed \
+         class) or by rebuilding through new: with every field, which silently drops a \
+         field added later",
+    ),
+    (
+        "time: RetryPolicy withMaximumInterval: is a generated setter typed from an Integer field; define it explicitly to accept Duration",
+        "as withInitialInterval:",
+    ),
 ];
 
 fn stdlib_modules() -> Vec<(String, Module)> {
@@ -307,7 +332,22 @@ fn collection_has_one_argument_detect() {
 #[test]
 fn stdlib_api_consistency_rules_hold_except_named_expected_failures() {
     let s = load();
-    let found = violations(&s);
+    let all = violations(&s);
+    let permanent: BTreeSet<String> = PERMANENT_EXCEPTIONS
+        .iter()
+        .map(|(v, _)| (*v).to_string())
+        .collect();
+    let stale_permanent: Vec<_> = permanent.difference(&all).collect();
+    assert!(
+        stale_permanent.is_empty(),
+        "PERMANENT_EXCEPTIONS entries that no longer violate (delete them):\n{}",
+        stale_permanent
+            .iter()
+            .map(|v| format!("    \"{v}\","))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    let found: BTreeSet<String> = all.difference(&permanent).cloned().collect();
     let expected: BTreeSet<String> = EXPECTED_FAILURES.iter().map(|e| (*e).to_string()).collect();
 
     let unexpected: Vec<_> = found.difference(&expected).collect();

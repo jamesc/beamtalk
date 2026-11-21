@@ -188,3 +188,8 @@ TestCase subclass: AnnouncementsTest
     self.announcer announceAndWait: (TestEvent payload: 7) timeout: (Duration seconds: 5)
     self assert: received value equals: 7
     received delete
+
+  testAnnounceAndWaitNegativeDurationFailsLikeNegativeInteger =>
+    asInteger := [self.announcer announceAndWait: (TestEvent payload: 1) timeout: -1] on: Error do: [:e | e kind]
+    asDuration := [self.announcer announceAndWait: (TestEvent payload: 1) timeout: (Duration milliseconds: -1)] on: Error do: [:e | e kind]
+    self assert: asDuration equals: asInteger
