@@ -141,6 +141,124 @@ pub(crate) struct IncrementalPass1Result {
     pub file_protocol_uses: HashMap<Utf8PathBuf, Vec<EcoString>>,
 }
 
+/// A versioned JSON sidecar stored in the build directory.
+///
+/// All three sidecars (Pass 1 cache, beam hashes, diagnostics) share one
+/// load/save protocol: best-effort I/O, a format-version gate, and the same
+/// atomic write. [`load_sidecar`] / [`save_sidecar`] implement it once.
+trait Sidecar: Serialize + serde::de::DeserializeOwned {
+    /// File name inside the build directory.
+    const FILENAME: &'static str;
+    /// Human-readable name used in log messages.
+    const LABEL: &'static str;
+    /// Current format version; a stored `version()` that differs is a miss.
+    const VERSION: u32;
+    /// What a corrupt or version-mismatched sidecar costs, for the log line.
+    const MISS_EFFECT: &'static str;
+
+    /// The format version recorded in the file.
+    fn version(&self) -> u32;
+    /// Number of entries, for the debug log line.
+    fn entry_count(&self) -> usize;
+}
+
+/// Load sidecar `S` from `build_dir`; `None` on no file, corrupt JSON, or a
+/// version mismatch (each logged with `S::MISS_EFFECT`).
+fn load_sidecar<S: Sidecar>(build_dir: &Utf8Path) -> Option<S> {
+    let path = build_dir.join(S::FILENAME);
+    let Ok(data) = fs::read_to_string(&path) else {
+        debug!("No {} found at {path}", S::LABEL);
+        return None;
+    };
+
+    let Ok(sidecar) = serde_json::from_str::<S>(&data) else {
+        warn!("{} is corrupt or unreadable — {}", S::LABEL, S::MISS_EFFECT);
+        return None;
+    };
+
+    if sidecar.version() != S::VERSION {
+        info!(
+            cached = sidecar.version(),
+            current = S::VERSION,
+            "{} version mismatch — {}",
+            S::LABEL,
+            S::MISS_EFFECT
+        );
+        return None;
+    }
+
+    debug!(
+        entries = sidecar.entry_count(),
+        "Loaded {} from {path}",
+        S::LABEL
+    );
+    Some(sidecar)
+}
+
+/// Save sidecar `S` to `build_dir`. Best-effort — serialisation or I/O
+/// failures are logged as warnings but never fail the build.
+fn save_sidecar<S: Sidecar>(build_dir: &Utf8Path, sidecar: &S) {
+    let path = build_dir.join(S::FILENAME);
+    let data = match serde_json::to_string(sidecar) {
+        Ok(d) => d,
+        Err(e) => {
+            warn!(error = %e, "Failed to serialise {}", S::LABEL);
+            return;
+        }
+    };
+
+    if let Err(e) = crate::commands::util::write_atomic_if_changed(&path, &data, ".beamtalk-cache.")
+    {
+        warn!(error = %e, "Failed to write {} to {path}", S::LABEL);
+        return;
+    }
+
+    debug!(
+        entries = sidecar.entry_count(),
+        "Saved {} to {path}",
+        S::LABEL
+    );
+}
+
+impl Sidecar for Pass1Cache {
+    const FILENAME: &'static str = CACHE_FILENAME;
+    const LABEL: &'static str = "Pass 1 cache";
+    const VERSION: u32 = CACHE_VERSION;
+    const MISS_EFFECT: &'static str = "rebuilding";
+    fn version(&self) -> u32 {
+        self.version
+    }
+    fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+}
+
+impl Sidecar for BeamHashCache {
+    const FILENAME: &'static str = BEAM_HASH_CACHE_FILENAME;
+    const LABEL: &'static str = "beam-hash cache";
+    const VERSION: u32 = BEAM_HASH_CACHE_VERSION;
+    const MISS_EFFECT: &'static str = "treating all files as changed";
+    fn version(&self) -> u32 {
+        self.version
+    }
+    fn entry_count(&self) -> usize {
+        self.hashes.len()
+    }
+}
+
+impl Sidecar for DiagnosticsCache {
+    const FILENAME: &'static str = DIAGNOSTICS_CACHE_FILENAME;
+    const LABEL: &'static str = "diagnostics cache";
+    const VERSION: u32 = DIAGNOSTICS_CACHE_VERSION;
+    const MISS_EFFECT: &'static str = "treating all files as having none";
+    fn version(&self) -> u32 {
+        self.version
+    }
+    fn entry_count(&self) -> usize {
+        self.diagnostics.len()
+    }
+}
+
 /// Result of loading the cache — distinguishes "no cache" from "manifest invalidated".
 enum CacheLoadResult {
     /// Cache loaded successfully.
@@ -156,26 +274,9 @@ enum CacheLoadResult {
 /// Returns `Miss` if the cache doesn't exist, has a version mismatch,
 /// or is corrupt. Returns `ManifestInvalidated` if the manifest has changed.
 fn load_cache(build_dir: &Utf8Path, manifest_path: Option<&Utf8Path>) -> CacheLoadResult {
-    let cache_path = build_dir.join(CACHE_FILENAME);
-    let Ok(data) = fs::read_to_string(&cache_path) else {
-        debug!("No Pass 1 cache found at {cache_path}");
+    let Some(cache) = load_sidecar::<Pass1Cache>(build_dir) else {
         return CacheLoadResult::Miss;
     };
-
-    let Ok(cache) = serde_json::from_str::<Pass1Cache>(&data) else {
-        warn!("Pass 1 cache is corrupt or unreadable — rebuilding");
-        return CacheLoadResult::Miss;
-    };
-
-    // Version check
-    if cache.version != CACHE_VERSION {
-        info!(
-            cached = cache.version,
-            current = CACHE_VERSION,
-            "Pass 1 cache version mismatch — rebuilding"
-        );
-        return CacheLoadResult::Miss;
-    }
 
     // Manifest mtime check: if beamtalk.toml has changed, invalidate everything
     if let Some(mp) = manifest_path {
@@ -190,10 +291,6 @@ fn load_cache(build_dir: &Utf8Path, manifest_path: Option<&Utf8Path>) -> CacheLo
         return CacheLoadResult::ManifestInvalidated;
     }
 
-    debug!(
-        entries = cache.entries.len(),
-        "Loaded Pass 1 cache from {cache_path}"
-    );
     CacheLoadResult::Hit(cache)
 }
 
@@ -214,26 +311,7 @@ fn save_cache(
         entries: file_entries,
     };
 
-    let cache_path = build_dir.join(CACHE_FILENAME);
-    let data = match serde_json::to_string(&cache) {
-        Ok(d) => d,
-        Err(e) => {
-            warn!(error = %e, "Failed to serialise Pass 1 cache");
-            return;
-        }
-    };
-
-    if let Err(e) =
-        crate::commands::util::write_atomic_if_changed(&cache_path, &data, ".beamtalk-cache.")
-    {
-        warn!(error = %e, "Failed to write Pass 1 cache to {cache_path}");
-        return;
-    }
-
-    debug!(
-        entries = cache.entries.len(),
-        "Saved Pass 1 cache to {cache_path}"
-    );
+    save_sidecar(build_dir, &cache);
 }
 
 /// Discard the Pass 1 metadata cache from `build_dir` (ADR 0098).
@@ -281,31 +359,7 @@ struct BeamHashCache {
 /// so a miss just costs one extra rebuild per affected file, never a stale
 /// skip.
 pub(crate) fn load_beam_hash_cache(build_dir: &Utf8Path) -> HashMap<String, String> {
-    let cache_path = build_dir.join(BEAM_HASH_CACHE_FILENAME);
-    let Ok(data) = fs::read_to_string(&cache_path) else {
-        debug!("No beam-hash cache found at {cache_path}");
-        return HashMap::new();
-    };
-
-    let Ok(cache) = serde_json::from_str::<BeamHashCache>(&data) else {
-        warn!("Beam-hash cache is corrupt or unreadable — treating all files as changed");
-        return HashMap::new();
-    };
-
-    if cache.version != BEAM_HASH_CACHE_VERSION {
-        info!(
-            cached = cache.version,
-            current = BEAM_HASH_CACHE_VERSION,
-            "Beam-hash cache version mismatch — treating all files as changed"
-        );
-        return HashMap::new();
-    }
-
-    debug!(
-        entries = cache.hashes.len(),
-        "Loaded beam-hash cache from {cache_path}"
-    );
-    cache.hashes
+    load_sidecar::<BeamHashCache>(build_dir).map_or_else(HashMap::new, |cache| cache.hashes)
 }
 
 /// BT-5074: forget the recorded hash of each of `sources` before an erlc
@@ -337,26 +391,7 @@ pub(crate) fn save_beam_hash_cache(build_dir: &Utf8Path, hashes: &HashMap<String
         hashes: hashes.clone(),
     };
 
-    let cache_path = build_dir.join(BEAM_HASH_CACHE_FILENAME);
-    let data = match serde_json::to_string(&cache) {
-        Ok(d) => d,
-        Err(e) => {
-            warn!(error = %e, "Failed to serialise beam-hash cache");
-            return;
-        }
-    };
-
-    if let Err(e) =
-        crate::commands::util::write_atomic_if_changed(&cache_path, &data, ".beamtalk-cache.")
-    {
-        warn!(error = %e, "Failed to write beam-hash cache to {cache_path}");
-        return;
-    }
-
-    debug!(
-        entries = cache.hashes.len(),
-        "Saved beam-hash cache to {cache_path}"
-    );
+    save_sidecar(build_dir, &cache);
 }
 
 /// Name of the sidecar file recording, for each source file, the diagnostics
@@ -399,31 +434,7 @@ struct DiagnosticsCache {
 pub(crate) fn load_diagnostics_cache(
     build_dir: &Utf8Path,
 ) -> HashMap<String, Vec<beamtalk_core::source_analysis::Diagnostic>> {
-    let cache_path = build_dir.join(DIAGNOSTICS_CACHE_FILENAME);
-    let Ok(data) = fs::read_to_string(&cache_path) else {
-        debug!("No diagnostics cache found at {cache_path}");
-        return HashMap::new();
-    };
-
-    let Ok(cache) = serde_json::from_str::<DiagnosticsCache>(&data) else {
-        warn!("Diagnostics cache is corrupt or unreadable — treating all files as having none");
-        return HashMap::new();
-    };
-
-    if cache.version != DIAGNOSTICS_CACHE_VERSION {
-        info!(
-            cached = cache.version,
-            current = DIAGNOSTICS_CACHE_VERSION,
-            "Diagnostics cache version mismatch — treating all files as having none"
-        );
-        return HashMap::new();
-    }
-
-    debug!(
-        entries = cache.diagnostics.len(),
-        "Loaded diagnostics cache from {cache_path}"
-    );
-    cache.diagnostics
+    load_sidecar::<DiagnosticsCache>(build_dir).map_or_else(HashMap::new, |cache| cache.diagnostics)
 }
 
 /// Save the diagnostics sidecar to `build_dir`.
@@ -442,26 +453,7 @@ pub(crate) fn save_diagnostics_cache(
         diagnostics: diagnostics.clone(),
     };
 
-    let cache_path = build_dir.join(DIAGNOSTICS_CACHE_FILENAME);
-    let data = match serde_json::to_string(&cache) {
-        Ok(d) => d,
-        Err(e) => {
-            warn!(error = %e, "Failed to serialise diagnostics cache");
-            return;
-        }
-    };
-
-    if let Err(e) =
-        crate::commands::util::write_atomic_if_changed(&cache_path, &data, ".beamtalk-cache.")
-    {
-        warn!(error = %e, "Failed to write diagnostics cache to {cache_path}");
-        return;
-    }
-
-    debug!(
-        entries = cache.diagnostics.len(),
-        "Saved diagnostics cache to {cache_path}"
-    );
+    save_sidecar(build_dir, &cache);
 }
 
 /// A file's `uses:` protocol keys
