@@ -346,7 +346,7 @@ impl BeamtalkMcp {
             )
         };
 
-        timer.ok_text(text)
+        timer.ok_text(format!("{text}\n{}", self.workspace_note()))
     }
 
     /// Rename a class in the running Beamtalk system (ADR 0114 Phase 5).
@@ -397,7 +397,7 @@ impl BeamtalkMcp {
             response.value_string()
         );
 
-        timer.ok_text(text)
+        timer.ok_text(format!("{text}\n{}", self.workspace_note()))
     }
 
     /// Rename a method on a class in the running Beamtalk system (ADR 0114

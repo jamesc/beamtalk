@@ -5,8 +5,8 @@
 //! pushes from the runtime, publishes the resulting diagnostics, and tracks
 //! which paths are currently open so publication can be safely deferred.
 
+use super::ReloadDiagnosticsByUriAndOrigin;
 use super::convert::{LineIndex, path_to_uri, to_lsp_diagnostic, uri_to_path};
-use super::{NavCache, ReloadDiagnosticsByUriAndOrigin};
 use crate::server::lock::LockRecover;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -40,32 +40,21 @@ impl OpenPathsHandle {
         guard.contains_key(path)
     }
 }
-/// consume `ClassChangedEvent`s from the runtime listener and
-/// bump the shared nav-cache generation.
+/// Drain `ClassChangedEvent`s from the runtime listener.
 ///
-/// The foundation issue uses a coarse single-counter invalidation:
-/// any class load / reload / method install bumps the generation, and
-/// readers compare entries against the current counter. The per-method
-/// children can keep the same shape if they add their
-/// own per-class buckets — the listener stays the same.
-///
-/// Holds an `Arc` to `Backend::nav_cache` rather than a back-reference to
-/// the `Backend` so the task does not keep the backend alive on its own.
-/// When `ensure_runtime_attached` stores the `JoinHandle`, the task ends
-/// when the handle is aborted (during a subsequent attach or backend
-/// drop) or when the `class_changed_rx` channel closes (`RuntimeClient`
-/// disconnect).
+/// The runtime client requires a live receiver for its class-changed channel
+/// (a dropped receiver logs a warning per event). Nothing consumes the events
+/// today — the nav cache that once did cached nothing and was removed
+/// (BT-5080) — so they are only debug-logged. The task ends when the
+/// `JoinHandle` is aborted or the channel closes (`RuntimeClient` disconnect).
 pub(in crate::server) async fn class_changed_listener(
-    nav_cache: Arc<Mutex<NavCache>>,
     mut class_changed_rx: tokio::sync::mpsc::UnboundedReceiver<ClassChangedEvent>,
 ) {
     while let Some(event) = class_changed_rx.recv().await {
         tracing::debug!(
             class_name = %event.class_name,
-            "class_changed_listener: invalidating nav cache"
+            "class_changed_listener: class changed"
         );
-        let mut guard = nav_cache.lock_recover();
-        guard.invalidate();
     }
     tracing::debug!("class_changed_listener: channel closed, exiting");
 }

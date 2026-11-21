@@ -430,9 +430,22 @@ impl ProjectIndex {
             .cloned()
             .collect();
 
-        self.file_classes.insert(file.clone(), new_names);
+        self.file_classes.insert(file.clone(), new_names.clone());
         self.file_hierarchies.insert(file, hierarchy.clone());
         self.merged_hierarchy.merge(hierarchy);
+
+        // BT-5080: `merge` is last-writer-wins, but `remerge_classes` (run when
+        // a file is removed or edited) picks the sorted-first path, so the
+        // winner of a class defined in two files depended on edit order. Resolve
+        // every class this file shares with another file the same way
+        // `remerge_classes` does: the sorted-first path wins, always.
+        let shared: Vec<EcoString> = new_names
+            .into_iter()
+            .filter(|name| self.files_defining(name).nth(1).is_some())
+            .collect();
+        if !shared.is_empty() {
+            self.remerge_classes(&shared);
+        }
 
         // ADR 0108 Phase 8: a class/protocol change in *this* file
         // can create or resolve a namespace collision with an alias
@@ -770,8 +783,10 @@ impl ProjectIndex {
     /// deterministic (sorted by path) iteration order.
     fn remerge_classes(&mut self, names: &[EcoString]) {
         // Sort file paths for deterministic conflict resolution
+        // Project files outrank stdlib files (a user class intentionally
+        // overrides a stdlib one); within each kind the sorted-first path wins.
         let mut sorted_paths: Vec<&Utf8PathBuf> = self.file_hierarchies.keys().collect();
-        sorted_paths.sort();
+        sorted_paths.sort_by_key(|p| (self.stdlib_files.contains(*p), *p));
 
         let mut changed = false;
         for name in names {
@@ -787,6 +802,47 @@ impl ProjectIndex {
         if changed {
             self.merged_hierarchy.rebuild_all_indexes();
         }
+    }
+
+    /// Files whose per-file hierarchy defines class `name`.
+    fn files_defining<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a Utf8PathBuf> + 'a {
+        self.file_hierarchies
+            .iter()
+            .filter(move |(_, h)| h.get_class(name).is_some())
+            .map(|(p, _)| p)
+    }
+
+    /// Classes defined by `file` that another (non-stdlib) indexed file also
+    /// defines (BT-5080), as `(class name, other file, winning file)`.
+    ///
+    /// The winner is the sorted-first path, the same deterministic rule
+    /// [`Self::remerge_classes`] applies. Stdlib files are excluded: shadowing
+    /// a stdlib class has its own diagnostic.
+    #[must_use]
+    pub fn duplicate_classes_of(
+        &self,
+        file: &Utf8PathBuf,
+    ) -> Vec<(EcoString, Utf8PathBuf, Utf8PathBuf)> {
+        if self.stdlib_files.contains(file) {
+            return Vec::new();
+        }
+        let Some(names) = self.file_classes.get(file) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for name in names {
+            let mut others: Vec<&Utf8PathBuf> = self
+                .files_defining(name)
+                .filter(|p| *p != file && !self.stdlib_files.contains(*p))
+                .collect();
+            if others.is_empty() {
+                continue;
+            }
+            others.sort();
+            let winner = others[0].min(file).clone();
+            out.push((name.clone(), others[0].clone(), winner));
+        }
+        out
     }
 
     /// Returns the set of files currently indexed.
@@ -1322,15 +1378,63 @@ mod tests {
         let hierarchy_b = ClassHierarchy::build(&module_b).0.unwrap();
         index.update_file(Utf8PathBuf::from("b.bt"), &hierarchy_b);
 
-        // b.bt was last to merge, so Dup currently has methodB
+        // BT-5080: the winner is the sorted-first path (a.bt) regardless of
+        // which file was indexed last.
         let class = index.hierarchy().get_class("Dup").unwrap();
-        assert!(class.methods.iter().any(|m| m.selector == "methodB"));
+        assert!(class.methods.iter().any(|m| m.selector == "methodA"));
 
         // Remove b.bt — a.bt's definition should survive (deterministic)
         index.remove_file(&Utf8PathBuf::from("b.bt"));
         assert!(index.hierarchy().has_class("Dup"));
         let class = index.hierarchy().get_class("Dup").unwrap();
         assert!(class.methods.iter().any(|m| m.selector == "methodA"));
+    }
+
+    fn dup_hierarchy(method: &str) -> ClassHierarchy {
+        let (module, _) = parse(lex_with_eof(&format!(
+            "Object subclass: Dup\n  {method} => 1"
+        )));
+        ClassHierarchy::build(&module).0.unwrap()
+    }
+
+    /// BT-5080: the winner of a class defined in two files does not depend on
+    /// which file was updated last.
+    #[test]
+    fn duplicate_class_winner_is_independent_of_edit_order() {
+        let (a, b) = (Utf8PathBuf::from("a.bt"), Utf8PathBuf::from("b.bt"));
+        let selectors = |index: &ProjectIndex| -> Vec<String> {
+            index
+                .hierarchy()
+                .get_class("Dup")
+                .unwrap()
+                .methods
+                .iter()
+                .map(|m| m.selector.to_string())
+                .collect()
+        };
+        let mut ab = ProjectIndex::new();
+        ab.update_file(a.clone(), &dup_hierarchy("methodA"));
+        ab.update_file(b.clone(), &dup_hierarchy("methodB"));
+        let mut ba = ProjectIndex::new();
+        ba.update_file(b.clone(), &dup_hierarchy("methodB"));
+        ba.update_file(a.clone(), &dup_hierarchy("methodA"));
+        assert_eq!(selectors(&ab), selectors(&ba));
+        assert!(selectors(&ab).contains(&"methodA".to_string()));
+        // Re-editing the losing file must not flip the winner.
+        ab.update_file(b.clone(), &dup_hierarchy("methodB2"));
+        assert!(selectors(&ab).contains(&"methodA".to_string()));
+    }
+
+    #[test]
+    fn duplicate_classes_of_reports_other_file_and_winner() {
+        let (a, b) = (Utf8PathBuf::from("a.bt"), Utf8PathBuf::from("b.bt"));
+        let mut index = ProjectIndex::new();
+        index.update_file(a.clone(), &dup_hierarchy("methodA"));
+        assert!(index.duplicate_classes_of(&a).is_empty());
+        index.update_file(b.clone(), &dup_hierarchy("methodB"));
+        let dups = index.duplicate_classes_of(&b);
+        assert_eq!(dups, vec![("Dup".into(), a.clone(), a.clone())]);
+        assert_eq!(index.duplicate_classes_of(&a)[0].2, a);
     }
 
     #[test]

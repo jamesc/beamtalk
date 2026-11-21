@@ -349,7 +349,9 @@ async fn describe_reports_ops_and_versions() {
 async fn describe_empty_response_has_fallback_text() {
     let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
     let result = mcp.describe().await.unwrap();
-    assert_eq!(call_text(&result), "No describe information available");
+    let text = call_text(&result);
+    assert!(text.contains("No describe information available"), "{text}");
+    assert!(text.contains("Workspace: "), "names the workspace: {text}");
 }
 
 #[tokio::test]

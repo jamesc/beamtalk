@@ -127,6 +127,13 @@ struct ReplClientInner {
 }
 
 impl ReplClient {
+    /// The workspace this client is attached to, or `None` when connected via
+    /// an explicit `--port` (BT-5080: tool output names it).
+    #[must_use]
+    pub fn workspace_id(&self) -> Option<&str> {
+        self.workspace_id.as_deref()
+    }
+
     /// Connect to a REPL server at the given port on localhost with cookie auth.
     /// This variant supports optional session resume by including a `resume` field
     /// in the auth handshake which the server understands.
