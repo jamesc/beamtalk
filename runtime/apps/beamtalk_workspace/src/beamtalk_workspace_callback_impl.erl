@@ -63,7 +63,7 @@ remove_method(ClassNameBin, Selector, Side, StdlibPolicy) ->
 
 -spec emit_remove_change_entry(
     binary(), atom() | binary(), instance | class, binary(), human | agent
-) -> ok.
+) -> beamtalk_workspace_callback:emit_result().
 emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
     ?ENTRIES:emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind).
 
@@ -75,7 +75,7 @@ emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
     binary() | undefined,
     binary(),
     human | agent
-) -> ok.
+) -> beamtalk_workspace_callback:emit_result().
 emit_extension_remove_change_entry(
     ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
 ) ->
@@ -97,7 +97,8 @@ rewrite_sites(DefinitionSite, ReferenceSites) ->
 validate_sites(DefinitionSite, ReferenceSites) ->
     beamtalk_repl_loader_rewrite:validate_sites(DefinitionSite, ReferenceSites).
 
--spec emit_rewrite_change_entry(map(), beamtalk_repl_loader_rewrite:rewrite_result()) -> ok.
+-spec emit_rewrite_change_entry(map(), beamtalk_repl_loader_rewrite:rewrite_result()) ->
+    beamtalk_workspace_callback:emit_result().
 emit_rewrite_change_entry(Spec, RewriteResult) ->
     ?ENTRIES:emit_rewrite_change_entry(Spec, RewriteResult).
 
@@ -105,6 +106,7 @@ emit_rewrite_change_entry(Spec, RewriteResult) ->
 capture_class_removal_snapshot(ClassNameBin) ->
     ?ENTRIES:capture_class_removal_snapshot(ClassNameBin).
 
--spec emit_remove_class_change_entry(binary(), map(), binary(), human | agent) -> ok.
+-spec emit_remove_class_change_entry(binary(), map(), binary(), human | agent) ->
+    beamtalk_workspace_callback:emit_result().
 emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
     ?ENTRIES:emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind).

@@ -124,6 +124,10 @@
     %% considered "dirty". Don't read this field alone as "this reached disk"
     %% — for that, check the entry's `kind` too.
     flushed = false :: boolean(),
+    %% True when `flushed` was set by retiring the entry (a never-flushed new
+    %% class was removed, BT-5016) rather than by writing it to disk: nothing
+    %% reached disk, so history must not report it as flushed (BT-5084).
+    cancelled = false :: boolean(),
     %% Derived, in-memory only — not persisted (recomputed on restart).
     prior_epoch = false :: boolean(),
     orphan = false :: boolean()

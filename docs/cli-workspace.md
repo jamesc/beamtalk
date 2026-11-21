@@ -8,7 +8,7 @@ see [environment-variables](development/environment-variables.md).
 ## `beamtalk workspace`
 
 ```text
-Manage workspaces (list, stop, status, attach, transcript, logs, create)
+Manage workspaces (list, stop, status, attach, transcript, logs, create, prune)
 
 Usage: beamtalk workspace [OPTIONS] <COMMAND>
 

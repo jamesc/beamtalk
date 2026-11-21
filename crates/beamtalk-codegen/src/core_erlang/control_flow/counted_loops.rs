@@ -18,6 +18,7 @@ use super::loop_scope::{DirectParamsKind, DirectParamsLoopScope};
 use super::plan::ThreadingPlan;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
 
@@ -198,6 +199,34 @@ impl CoreErlangGenerator {
         self.generate_counted_stateful_loop(&frame, body, &plan)
     }
 
+    /// BT-5098: `do case Step =:= 0 of 'true' -> raise 'false' -> 'ok' end`.
+    /// The raise is the one `Object>>error:` lowering (`object_error_raise_doc`)
+    /// that the stdlib `Integer>>to:by:do:` reaches through `self error:`, so
+    /// both paths raise the same `user_error` (class from the receiver). Emitted
+    /// once in the loop preamble, so the loop body pays nothing.
+    fn zero_step_guard_doc(&mut self, recv_var: &str, step_var: &str) -> Document<'static> {
+        let msg_var = self.fresh_temp_var("StepMsg");
+        let raise = form::let_in(
+            leaf::var(msg_var.clone()),
+            leaf::binary_lit("Interval step cannot be zero"),
+            self.object_error_raise_doc(recv_var, &msg_var),
+            Layout::Flat,
+        );
+        let is_zero = form::call(
+            "erlang",
+            "=:=",
+            [leaf::var(step_var.to_string()), leaf::int_lit(0)],
+        );
+        form::do_prefix(form::case_of(
+            is_zero,
+            [
+                form::clause([leaf::atom("true")], None, raise, Layout::Flat),
+                form::clause([leaf::atom("false")], None, leaf::atom("ok"), Layout::Flat),
+            ],
+            Layout::Flat,
+        ))
+    }
+
     pub(in crate::core_erlang) fn generate_to_by_do_with_mutations(
         &mut self,
         receiver: &Expression,
@@ -214,6 +243,9 @@ impl CoreErlangGenerator {
         let limit_code = self.expression_doc(limit)?;
         let step_var = self.fresh_temp_var("temp");
         let step_code = self.expression_doc(step)?;
+        // BT-5098: a step of 0 raises, as `Integer>>to:by:do:` does. Checked
+        // once here in the preamble (not per iteration).
+        let zero_step_guard = self.zero_step_guard_doc(&start_var, &step_var);
         // gensym the loop counter (the block param is aliased to it).
         let counter = self.fresh_temp_var("loopidx");
 
@@ -233,7 +265,8 @@ impl CoreErlangGenerator {
                 leaf::var(step_var.clone()),
                 " = ",
                 step_code,
-                " in",
+                " in ",
+                zero_step_guard,
             ],
             fn_name: threaded_ir::COUNTED_LOOP_FN.to_string(),
             condition_prelude: docvec![
@@ -762,6 +795,33 @@ mod tests {
         assert!(
             code.contains("ExitSA"),
             "timesRepeat: direct-params: exit StateAcc rebuild expected. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_to_by_do_zero_step_guard_is_in_preamble_not_loop() {
+        // BT-5098: the zero-step check runs once, before the letrec, and
+        // raises the same user_error as `Integer>>to:by:do:`.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 10 by: 2 do: [:i | sum := sum + i]\n    self.n := sum\n";
+        let code = codegen(src);
+        // The message is a Core Erlang binary literal (bytes), so key on the call.
+        let guard = code
+            .find("'with_message'")
+            .expect("zero-step guard expected");
+        let loop_fn = code.find("letrec").expect("letrec expected");
+        assert!(
+            guard < loop_fn,
+            "zero-step guard must precede the letrec. Got:\n{code}"
+        );
+        assert_eq!(
+            code.matches("'with_message'").count(),
+            1,
+            "exactly one guard. Got:\n{code}"
+        );
+        assert!(code.contains("'user_error'"), "Got:\n{code}");
+        assert!(
+            code.contains("'beamtalk_primitive':'class_of'"),
+            "class comes from the receiver, as `self error:`. Got:\n{code}"
         );
     }
 

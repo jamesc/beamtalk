@@ -86,7 +86,9 @@ eval_main() ->
                     activate_all_loaded_app_modules(),
                     do_eval_main(ClassStr, SelectorStr, RestArgs);
                 {error, Reason} ->
-                    ?LOG_ERROR("could not start the runtime: ~p", [Reason]),
+                    ?LOG_ERROR("could not start the runtime: ~p", [Reason], #{
+                        domain => [beamtalk, runtime]
+                    }),
                     beamtalk_script_harness:halt_unless_stopping(1)
             end;
         _ ->
