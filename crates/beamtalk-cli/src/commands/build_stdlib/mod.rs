@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** CLI / Build System
 //!
-//! Compiles all `lib/*.bt` files through the normal pipeline with `--stdlib-mode`
+//! Compiles all `stdlib/src/*.bt` files through the normal pipeline with `--stdlib-mode`
 //! and outputs `.beam` files to `runtime/apps/beamtalk_stdlib/ebin/`.
 //! Uses incremental builds: skips compilation if all outputs are newer than
 //! all inputs (source files, compiler binary, and runtime `.beam` files).

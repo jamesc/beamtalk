@@ -30,7 +30,7 @@ Items without source (e.g. REPL-defined classes) show without navigation icons.
 
 ## Requirements
 
-The [beamtalk-lsp](https://github.com/jamesc/beamtalk) server must be installed and available on your PATH:
+The `beamtalk-lsp` language server and the `beamtalk` CLI must be available. The extension finds `beamtalk-lsp` automatically (the Beamtalk install's sysroot first, then `PATH`) and `beamtalk` on `PATH`; use `beamtalk.server.path` / `beamtalk.binary.path` to point at specific binaries. When building from source:
 
 ```bash
 cargo install --path crates/beamtalk-lsp
@@ -40,10 +40,17 @@ A running Beamtalk workspace is required for the Workspace explorer panel.
 
 ## Configuration
 
+These are the settings the extension contributes (`contributes.configuration` in `package.json`; `just check-surface-drift` fails if this table and `package.json` disagree on names or defaults).
+
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `beamtalk.server.path` | `beamtalk-lsp` | Path to the beamtalk-lsp executable |
-| `beamtalk.stdlib.sourceDir` | `""` | Optional path to stdlib `.bt` sources for navigation fallback; accepts absolute paths (including outside project) or paths relative to the Beamtalk project root (`beamtalk.toml`) |
+| `beamtalk.binary.path` | `""` | Path to the `beamtalk` CLI binary. Empty uses `PATH`. Set to e.g. `${workspaceFolder}/target/debug/beamtalk` in dev mode so `beamtalk repl` uses the current build |
+| `beamtalk.server.path` | `""` | Override path to the `beamtalk-lsp` binary. Empty uses automatic discovery (sysroot, then `PATH`) |
+| `beamtalk.stdlibSourceDir` | `""` | Directory containing stdlib `.bt` sources, so *Go to Definition* resolves stdlib classes. Empty auto-discovers from the `beamtalk-lsp` binary's sysroot. Accepts absolute paths (including outside the project), paths relative to the Beamtalk project root (`beamtalk.toml`), and `${workspaceFolder}` |
+| `beamtalk.trace.server` | `"off"` | Trace communication between VS Code and the language server: `off`, `messages` or `verbose` |
+| `beamtalk.workspace.autoConnect` | `true` | Auto-connect the Workspace Explorer to a running workspace when a workspace port file appears |
+| `beamtalk.repl.ephemeral` | `false` | Start the Beamtalk REPL in ephemeral mode (`-e`): bindings are not persisted across sessions |
+| `beamtalk.logs.level` | `"warning"` | Minimum level streamed to the Beamtalk Logs output channel (`debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency`) |
 
 ### External stdlib sources
 
@@ -51,7 +58,7 @@ If your project keeps stdlib sources outside the project root, set an absolute p
 
 ```json
 {
-	"beamtalk.stdlib.sourceDir": "/opt/beamtalk/stdlib/lib"
+	"beamtalk.stdlibSourceDir": "/opt/beamtalk/stdlib/src"
 }
 ```
 
@@ -59,7 +66,7 @@ If stdlib is inside the project, you can use a project-relative path:
 
 ```json
 {
-	"beamtalk.stdlib.sourceDir": "lib"
+	"beamtalk.stdlibSourceDir": "stdlib/src"
 }
 ```
 

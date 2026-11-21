@@ -245,6 +245,8 @@ compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
     %% crash left a stray `.erl` that the next build compiled. The scratch
     %% directory is skipped by `find_erl_files/2`, and the real file's
     %% directory is added to the include path so sibling includes still resolve.
+    %% BT-5084: reclaim scratch directories a crashed save left behind.
+    _ = beamtalk_workspace_file:sweep_stale_staging_dirs(filename:dirname(ErlPath)),
     StagingDir = beamtalk_workspace_file:staging_dir(ErlPath),
     TempPath = filename:join(StagingDir, filename:basename(ErlPath)),
     CompileRoot =

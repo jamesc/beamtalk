@@ -2477,21 +2477,29 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   test "closing a tab tears down its session after the grace window (BT-2410)", %{conn: conn} do
     # The no-orphaned-sessions guarantee: a tab that closes and never reconnects
     # has its workspace-supervised session reaped after the (test-shortened) grace
-    # window — the active-session count returns to its pre-mount value.
+    # window.
+    #
+    # Asserted on THIS tab's own session, not on the workspace-wide
+    # `session_count()` (BT-5105). The count is shared with every other tab, and a
+    # tokened tab closed by the previous test keeps its session for the same grace
+    # window: a baseline read at the start of this test then includes a session
+    # that is reaped during it, so the count ends one below the baseline and a
+    # `== before` assertion can never hold.
     conn = with_token(conn, "teardown-#{System.unique_integer([:positive])}")
-
-    before = BtAttach.Workspace.session_count()
-    assert is_integer(before)
 
     {:ok, view, _} = live(conn, "/")
     submit_and_settle(view, "#eval-form", %{expr: "z := 1"})
-    # One more active session while the tab is open.
-    assert eventually(fn -> BtAttach.Workspace.session_count() == before + 1 end)
+
+    session_pid = :sys.get_state(view.pid).socket.assigns.session_pid
+    assert is_pid(session_pid)
+    # Alive while the tab is open (also proves the workspace is reachable, so a
+    # later "not alive" cannot be an unreachable-workspace false negative).
+    assert BtAttach.Workspace.session_alive?(session_pid)
 
     # Close the tab and DON'T reconnect: after the grace window the registry reaps
-    # the session, so the count returns to baseline (no leak).
+    # the session.
     GenServer.stop(view.pid)
-    assert eventually(fn -> BtAttach.Workspace.session_count() == before end)
+    assert eventually(fn -> not BtAttach.Workspace.session_alive?(session_pid) end)
   end
 
   # ── REPL tab (BT-2543) ───────────────────────────────────────────────────────

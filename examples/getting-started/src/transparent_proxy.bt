@@ -20,8 +20,8 @@
 //
 // ```bash
 // $ cargo run -- repl
-// > :load examples/transparent_proxy.bt
-// > :load tests/repl-protocol/fixtures/counter.bt
+// > Workspace load: "examples/getting-started/src/transparent_proxy.bt"
+// > Workspace load: "tests/repl-protocol/fixtures/counter.bt"
 //
 // # Create a counter and increment it
 // > counter := Counter spawn

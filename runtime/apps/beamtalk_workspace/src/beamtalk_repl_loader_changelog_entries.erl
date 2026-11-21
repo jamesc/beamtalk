@@ -14,7 +14,7 @@ Extracted from `beamtalk_repl_loader` (BT-4683). The loader installs a change
 in memory first and then calls one of the `emit_*` functions here; each one
 builds the entry and appends it to `beamtalk_workspace_changelog`. Appending
 is best effort: a failure is logged and never raised by
-`best_effort_changelog_append/3` / `append_entry/3`, because the change is already live and a
+`append_entry/3`, because the change is already live and a
 ChangeLog write must never undo it.
 
 Flushability (does the entry name an in-project `.bt` file and a resolvable
@@ -25,7 +25,7 @@ fails. Each entry kind passes its own span resolver as a fun.
 """.
 
 -export([
-    %% Entry emitters (best effort; always return `ok`).
+    %% Entry emitters (best effort; return `ok` or `{warning, Text}`, never raise).
     emit_class_def_entry/3,
     emit_rewrite_change_entry/2,
     emit_new_class_entry/3,
@@ -76,23 +76,10 @@ fails. Each entry kind passes its own span resolver as a fun.
 %%% ----------------------------------------------------------------------------
 
 -doc """
-Build a ChangeLog entry with `BuildFun` and append it, logging and swallowing
-any failure.
-
-Every `emit_*` function in this module runs after its change is already live
-in memory (ADR 0082: "install is authoritative, log is best effort"), so a
-failure while building or appending the entry must never reach the caller.
-On failure this logs `Label` at warning level with `Meta` plus
-`error_class`/`reason`/`stack`/`domain`, and returns `ok`.
-""".
--spec best_effort_changelog_append(string(), map(), fun(() -> map())) -> ok.
-best_effort_changelog_append(Label, Meta, BuildFun) ->
-    _ = append_entry(Label, Meta, BuildFun),
-    ok.
-
--doc """
-Like `best_effort_changelog_append/3`, but reports whether the entry was
-recorded.
+Build a ChangeLog entry with `BuildFun` and append it, reporting whether the entry
+was recorded. Every `emit_*` function runs after its change is already live in
+memory (ADR 0082: "install is authoritative, log is best effort"), so a failure
+must never raise to the caller, but it is never silent either (BT-5084).
 
 Returns `ok` when the entry was appended, or `{warning, Text}` when it was not
 (the build raised, or `beamtalk_workspace_changelog:append/1` returned
@@ -219,9 +206,9 @@ read_and_resolve(Base, SourceFile, AbsPath, ReadFailedMsg, ResolveFun) ->
 %% Emit the durable `new-class` ChangeEntry for a freshly created class. Best
 %% effort: a ChangeLog write must never fail or undo the in-memory install (the
 %% class is already live), mirroring emit_change_entry/1's contract.
--spec emit_new_class_entry(binary(), binary(), binary()) -> ok.
+-spec emit_new_class_entry(binary(), binary(), binary()) -> emit_result().
 emit_new_class_entry(ClassNameBin, Source, SourceFile) ->
-    best_effort_changelog_append(
+    append_entry(
         "Failed to emit ChangeLog entry for new class (class still installed)",
         #{class_name => ClassNameBin},
         fun() ->
@@ -324,9 +311,9 @@ change_entry(MethodInfo) ->
 %% Emit the durable `'class-def'` ChangeEntry for one redefined class. Best
 %% effort: a ChangeLog write must never fail or undo the in-memory install
 %% (the class is already live), mirroring emit_change_entry/1's contract.
--spec emit_class_def_entry(binary(), string(), string()) -> ok.
+-spec emit_class_def_entry(binary(), string(), string()) -> emit_result().
 emit_class_def_entry(ClassNameBin, NewSource, PrevSource) ->
-    best_effort_changelog_append(
+    append_entry(
         "Failed to emit ChangeLog entry for class redefinition (class still installed)",
         #{class_name => ClassNameBin},
         fun() ->
@@ -683,9 +670,10 @@ entry itself is appended (a site's `source_ref`/`prev_source_ref` must
 already be a written ref by the time `append/1` sees it — see that
 function's doc).
 """.
--spec emit_rewrite_change_entry(map(), beamtalk_repl_loader_rewrite:rewrite_result()) -> ok.
+-spec emit_rewrite_change_entry(map(), beamtalk_repl_loader_rewrite:rewrite_result()) ->
+    emit_result().
 emit_rewrite_change_entry(Spec, RewriteResult) ->
-    best_effort_changelog_append(
+    append_entry(
         "Failed to emit ChangeLog entry for multi-site rewrite (rewrite still installed)",
         #{spec => Spec},
         fun() -> rewrite_change_entry(Spec, RewriteResult) end
@@ -1061,9 +1049,9 @@ the append input map below simply carries no `source` key, which
 -spec emit_remove_change_entry(
     binary(), atom() | binary(), instance | class, binary(), human | agent
 ) ->
-    ok.
+    emit_result().
 emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
-    best_effort_changelog_append(
+    append_entry(
         "Failed to emit ChangeLog entry for method removal (removal still installed)",
         #{class => ClassNameBin, selector => Selector},
         fun() ->
@@ -1166,11 +1154,11 @@ has nothing to re-install against).
     binary() | undefined,
     binary(),
     human | agent
-) -> ok.
+) -> emit_result().
 emit_extension_remove_change_entry(
     ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
 ) ->
-    best_effort_changelog_append(
+    append_entry(
         "Failed to emit ChangeLog entry for extension removal (removal still installed)",
         #{class => ClassNameBin, selector => Selector},
         fun() ->
@@ -1276,7 +1264,7 @@ undoes the removal, which is already irreversible in memory by this point.
 class removal has no method-level target (ADR 0082's established schema,
 reused verbatim: `side: null` for every kind but `"remove-method"`).
 """.
--spec emit_remove_class_change_entry(binary(), map(), binary(), human | agent) -> ok.
+-spec emit_remove_class_change_entry(binary(), map(), binary(), human | agent) -> emit_result().
 emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
     case cancel_pending_new_class(ClassNameBin) of
         cancelled ->
@@ -1318,7 +1306,7 @@ cancel_pending_new_class(ClassNameBin) ->
                 not_cancelled;
             true ->
                 Seqs = [beamtalk_workspace_changelog:entry_seq(E) || E <- Pending],
-                case beamtalk_workspace_changelog:mark_flushed(Seqs) of
+                case beamtalk_workspace_changelog:retire_entries(Seqs) of
                     ok ->
                         cancelled;
                     {error, Reason} ->
@@ -1334,12 +1322,25 @@ cancel_pending_new_class(ClassNameBin) ->
                 end
         end
     catch
-        exit:_ -> not_cancelled
+        %% BT-5084: any failure (not only an `exit` from a stopped server) falls
+        %% back to recording the removal; the caller must never see a raise.
+        ErrClass:ErrReason:Stack ->
+            ?LOG_WARNING(
+                "Could not retire pending entries of a removed new class",
+                #{
+                    class => ClassNameBin,
+                    error_class => ErrClass,
+                    reason => ErrReason,
+                    stack => Stack,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            not_cancelled
     end.
 
--spec append_remove_class_entry(binary(), map(), binary(), human | agent) -> ok.
+-spec append_remove_class_entry(binary(), map(), binary(), human | agent) -> emit_result().
 append_remove_class_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
-    best_effort_changelog_append(
+    append_entry(
         "Failed to emit ChangeLog entry for class removal (removal still installed)",
         #{class => ClassNameBin},
         fun() ->

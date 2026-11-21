@@ -1,0 +1,25 @@
+# Intended references to things that no longer exist (BT-5089).
+# Format: `<file>: <token>` (or `*: <token>`), a reason comment above each group.
+# scripts/ci/check_docs_refs.py fails on a stale entry, so remove one when the
+# reference goes away.
+
+# architecture-principles.md §1 narrates the retirement of the boundary checker
+# (BT-3363, ADR 0117); naming the removed recipe and crate is the point.
+docs/development/architecture-principles.md: just check-boundary
+docs/development/architecture-principles.md: crates/beamtalk-boundary-check
+
+# ADRs are historical records (BT-5089): their old paths stay in the decision text and a
+# dated "Pointer update" note under ## Status says where each one went.
+docs/ADR/0027-cross-platform-support.md: crates/beamtalk-cli/src/commands/workspace/mod.rs:262,293,586
+docs/ADR/0040-workspace-native-repl-commands.md: examples/counter.bt
+docs/ADR/0040-workspace-native-repl-commands.md: runtime/apps/beamtalk_runtime/src/beamtalk_interface.erl
+docs/ADR/0040-workspace-native-repl-commands.md: runtime/apps/beamtalk_runtime/src/beamtalk_system_dictionary.erl
+docs/ADR/0040-workspace-native-repl-commands.md: runtime/apps/beamtalk_workspace/src/beamtalk_workspace_config.erl
+docs/ADR/0040-workspace-native-repl-commands.md: runtime/apps/beamtalk_workspace/src/beamtalk_workspace_environment.erl
+docs/ADR/0040-workspace-native-repl-commands.md: stdlib/src/SystemDictionary.bt
+docs/ADR/0040-workspace-native-repl-commands.md: stdlib/src/beamtalk_interface.bt
+docs/ADR/0040-workspace-native-repl-commands.md: stdlib/src/workspace_interface.bt
+docs/ADR/0064-runtime-logging-control-and-observability-api.md: crates/beamtalk-core/src/codegen/core_erlang
+docs/ADR/0064-runtime-logging-control-and-observability-api.md: runtime/apps/beamtalk_stdlib/src/beamtalk_logger.erl
+docs/ADR/0064-runtime-logging-control-and-observability-api.md: stdlib/src/beamtalk_interface.bt
+docs/ADR/0091-remote-workspace-access-phoenix-authenticated-front.md: runtime/apps/beamtalk_workspace/src/beamtalk_authorized_ops.erl

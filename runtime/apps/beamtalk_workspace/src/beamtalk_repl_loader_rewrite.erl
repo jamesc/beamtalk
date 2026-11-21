@@ -868,7 +868,9 @@ emit_move_class_change_entry(ClassNameBin, OldPathBin, NewPathBin, RewriteResult
         author => ?ENTRIES:new_class_author(),
         author_kind => ?ENTRIES:new_class_author_kind()
     },
-    ?ENTRIES:emit_rewrite_change_entry(Spec, RewriteResult).
+    beamtalk_refactor_support:note_changelog_result(
+        ?ENTRIES:emit_rewrite_change_entry(Spec, RewriteResult)
+    ).
 
 -spec move_class_error(atom(), atom(), binary()) -> #beamtalk_error{}.
 move_class_error(Kind, ClassName, Message) ->

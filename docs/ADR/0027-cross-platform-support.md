@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-02-17)
 
+**Pointer update (2026-11-21, BT-5089):** file paths below were refreshed; the decision text is unchanged. The `/proc` start-time tracking cited as `crates/beamtalk-cli/src/commands/workspace/mod.rs:262,293,586` now lives in `crates/beamtalk-workspace/src/pid_liveness.rs` (`proc_start_time`), used from `crates/beamtalk-cli/src/commands/workspace/lifecycle.rs`.
+
 ## Context
 
 ### The Problem

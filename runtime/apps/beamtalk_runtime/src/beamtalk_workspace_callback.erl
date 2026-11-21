@@ -52,7 +52,10 @@ the workspace's compile-and-install pipeline. This module is that seam:
 -define(PREVIOUS_KEY, {beamtalk_runtime, workspace_callback_previous}).
 
 -type no_workspace() :: {error, no_workspace}.
--export_type([no_workspace/0]).
+%% Outcome of recording a ChangeLog entry: `ok`, or a user-visible warning when
+%% the live change was not recorded (BT-5084).
+-type emit_result() :: ok | {warning, binary()}.
+-export_type([no_workspace/0, emit_result/0]).
 
 -callback reload_class_file(string(), atom()) -> {ok, [map()]} | {error, term()}.
 -callback eval_with_self(term(), binary() | string()) ->
@@ -67,7 +70,7 @@ the workspace's compile-and-install pipeline. This module is that seam:
 ) -> {ok, binary()} | {error, term()}.
 -callback emit_remove_change_entry(
     binary(), atom() | binary(), instance | class, binary(), human | agent
-) -> ok.
+) -> emit_result().
 -callback emit_extension_remove_change_entry(
     binary(),
     atom() | binary(),
@@ -76,12 +79,13 @@ the workspace's compile-and-install pipeline. This module is that seam:
     binary() | undefined,
     binary(),
     human | agent
-) -> ok.
+) -> emit_result().
 -callback rewrite_sites(map() | undefined, [map()]) -> {ok, map()} | {error, term()}.
 -callback validate_sites(map() | undefined, [map()]) -> ok | {error, term()}.
--callback emit_rewrite_change_entry(map(), map()) -> ok.
+-callback emit_rewrite_change_entry(map(), map()) -> emit_result().
 -callback capture_class_removal_snapshot(binary()) -> map().
--callback emit_remove_class_change_entry(binary(), map(), binary(), human | agent) -> ok.
+-callback emit_remove_class_change_entry(binary(), map(), binary(), human | agent) ->
+    emit_result().
 
 %%% Registration
 
@@ -176,7 +180,7 @@ remove_method(ClassNameBin, Selector, Side, StdlibPolicy) ->
 
 -spec emit_remove_change_entry(
     binary(), atom() | binary(), instance | class, binary(), human | agent
-) -> ok | no_workspace().
+) -> emit_result() | no_workspace().
 emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
     invoke(emit_remove_change_entry, [ClassNameBin, Selector, Side, Author, AuthorKind]).
 
@@ -188,7 +192,7 @@ emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
     binary() | undefined,
     binary(),
     human | agent
-) -> ok | no_workspace().
+) -> emit_result() | no_workspace().
 emit_extension_remove_change_entry(
     ClassNameBin, Selector, Side, Owner, PrevSource, Author, AuthorKind
 ) ->
@@ -204,7 +208,7 @@ rewrite_sites(DefinitionSite, ReferenceSites) ->
 validate_sites(DefinitionSite, ReferenceSites) ->
     invoke(validate_sites, [DefinitionSite, ReferenceSites]).
 
--spec emit_rewrite_change_entry(map(), map()) -> ok | no_workspace().
+-spec emit_rewrite_change_entry(map(), map()) -> emit_result() | no_workspace().
 emit_rewrite_change_entry(Spec, RewriteResult) ->
     invoke(emit_rewrite_change_entry, [Spec, RewriteResult]).
 
@@ -213,7 +217,7 @@ capture_class_removal_snapshot(ClassNameBin) ->
     invoke(capture_class_removal_snapshot, [ClassNameBin]).
 
 -spec emit_remove_class_change_entry(binary(), map(), binary(), human | agent) ->
-    ok | no_workspace().
+    emit_result() | no_workspace().
 emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
     invoke(emit_remove_class_change_entry, [ClassNameBin, Snapshot, Author, AuthorKind]).
 

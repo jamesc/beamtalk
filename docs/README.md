@@ -81,7 +81,7 @@ Use the REPL to load examples:
 
 ```
 $ beamtalk repl
-> :load examples/hello.bt
+> Workspace load: "examples/hello.bt"
 Loaded
 ```
 

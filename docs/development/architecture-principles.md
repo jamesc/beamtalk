@@ -335,7 +335,7 @@ mod tests {
 
 **Example:**
 ```beamtalk
-// tests/repl-protocol/cases/arithmetic.btscript
+// stdlib/bootstrap-test/arithmetic.btscript
 42 + 3
 // => 45
 

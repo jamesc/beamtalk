@@ -57,7 +57,8 @@ entry_to_json(#entry{} = E) ->
         <<"not_flushable_reason">> => null_or(E#entry.not_flushable_reason),
         <<"author">> => E#entry.author,
         <<"author_kind">> => atom_to_binary(E#entry.author_kind, utf8),
-        <<"flushed">> => E#entry.flushed
+        <<"flushed">> => E#entry.flushed,
+        <<"cancelled">> => E#entry.cancelled
     },
     iolist_to_binary(json:encode(Map)).
 
@@ -100,7 +101,8 @@ entry_from_json(Line) ->
         %% will not have this field — default to false so they re-appear as
         %% pending on first restart (the correct conservative outcome — they
         %% never made it to disk).
-        flushed = maps:get(<<"flushed">>, Map, false)
+        flushed = maps:get(<<"flushed">>, Map, false),
+        cancelled = maps:get(<<"cancelled">>, Map, false)
     }.
 
 %% Enum decoders use an explicit allowlist with a safe `unknown` fallback rather
@@ -251,7 +253,9 @@ candidate_site_from_json(Malformed) ->
 
 -spec drop_malformed_candidate_site(term()) -> error.
 drop_malformed_candidate_site(Malformed) ->
-    ?LOG_WARNING("Dropping malformed candidate_site: ~p", [Malformed]),
+    ?LOG_WARNING("Dropping malformed candidate_site: ~p", [Malformed], #{
+        domain => [beamtalk, runtime]
+    }),
     error.
 
 -spec candidate_sites_to_json([candidate_site()] | undefined) -> [map()] | null.

@@ -88,14 +88,14 @@ Variable bindings:
 
 ## Loading Files
 
-Load a Beamtalk source file and compile it as a module:
+Load a Beamtalk source file and compile it as a module with `Workspace load:`. It answers the classes it loaded:
 
 ```beamtalk
-> :load examples/getting-started/src/hello.bt
-Loaded Hello
+> Workspace load: "examples/getting-started/src/hello.bt"
+#(Hello)
 ```
 
-**Note:** `:load` is for loading class definitions. The class name in the file determines the module name, not the filename.
+**Note:** `Workspace load:` is for loading class definitions, one file at a time (a directory is an error). The class name in the file determines the module name, not the filename. There is no `:load` command in the REPL.
 
 ## Working with Classes
 
@@ -106,11 +106,11 @@ After loading, you can see loaded classes:
 #(Hello)
 ```
 
-Reload after editing:
+Reload after editing: `Hello reload` recompiles one class from its source file, and `:sync` recompiles every changed file in the project (the directory must contain a `beamtalk.toml`):
 
 ```beamtalk
-> :reload
-Reloaded examples/getting-started/src/hello.bt
+> Hello reload
+Hello
 ```
 
 ## Working with Actors
@@ -120,8 +120,8 @@ Beamtalk is built on the actor model. Actors are objects that run concurrently a
 **Note:** To try the examples below, you'll first need to load an actor class. The Counter actor is available in the examples:
 
 ```beamtalk
-> :load examples/getting-started/src/counter.bt
-Loaded examples/getting-started/src/counter.bt
+> Workspace load: "examples/getting-started/src/counter.bt"
+#(Counter)
 ```
 
 Now you can create and interact with Counter actors:
@@ -196,20 +196,23 @@ Use `:help` to see all available commands:
 > :help
 Beamtalk REPL Commands:
 
-  :help, :h               Show this help message
-  :help <Class>           Show instance-side class docs and methods
-  :help <Class> <sel>     Show instance-side method documentation
-  :exit, :q       Exit the REPL
-  :clear          Clear all variable bindings
-  :bindings       Show current variable bindings
-  :load <path>    Load a .bt file or directory
-  :reload         Reload the last loaded file or directory
-  :reload <Class> Reload a class by name
-  :unload <Class> Unload a class from the workspace
-  :test           Run all test classes
-  :test <Class>   Run a test class
-  :show-codegen <expr>  Show generated Core Erlang for an expression
-  :sc <expr>      Short alias for :show-codegen
+  :help, :h, :?       Show help, or `:help <Class>` / `:help <Class> <selector>` for docs
+  :exit, :quit, :q    Exit the REPL
+  :clear              Clear the current session's local bindings
+  :raw-mfa            Show every stack frame with its raw module:function/arity for this session: `:raw-mfa [on|off]`
+  :bindings, :b       List the current session's local binding names
+  :sync, :s           Sync the workspace with the project on disk (takes no arguments)
+  :unload             Unload a class from the workspace: `:unload <ClassName>`
+  :test, :t           Run tests, optionally scoped to one class: `:test [<ClassName>]`
+  :show-codegen, :sc  Show generated Core Erlang for an expression: `:show-codegen <expr>`
+  :interrupt, :int    Cancel a running evaluation
+  :flush              Write pending ChangeLog entries to disk
+  :changes            Show the workspace ChangeLog
+  :dirty              Show per-class dirty (uncommitted) selectors
+  :recheck            Re-check the whole live image: `:recheck image`
+  :remove-method, :remove-class, :flush-destructive, :rename-class, :rename-method
+                      Live-edit commands (some prompt for confirmation)
+  ...
 ```
 
 ### :clear - Reset Bindings
@@ -235,13 +238,13 @@ Error: Undefined variable: x
 #()
 ```
 
-### :reload - Reload Last File
+### Reloading after an edit
 
-After editing a file:
+After editing a file, recompile one class with `reload`, or everything that changed in the project with `:sync`:
 
 ```beamtalk
-> :reload
-✓ Reloaded examples/getting-started/src/counter.bt
+> Counter reload
+Counter
 ```
 
 ## Streams — Lazy Data Pipelines
@@ -405,8 +408,8 @@ Variable bindings:
   y = 52
   z = 2184
 
-> :load examples/getting-started/src/hello.bt
-Loaded Hello
+> Workspace load: "examples/getting-started/src/hello.bt"
+#(Hello)
 
 > Workspace classes
 #(Hello)

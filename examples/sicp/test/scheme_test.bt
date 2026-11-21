@@ -4,13 +4,13 @@
 // SchemeTest — BUnit tests for the Scheme metacircular evaluator
 //
 // Run interactively in the REPL:
-//   > :load src/scheme/scheme_symbol.bt
-//   > :load src/scheme/scheme_reader.bt
-//   > :load src/scheme/scheme_env.bt
-//   > :load src/scheme/scheme_lambda.bt
-//   > :load src/scheme/scheme_eval.bt
-//   > :load src/scheme/scheme_printer.bt
-//   > :load test/scheme_test.bt
+//   > Workspace load: "src/scheme/scheme_symbol.bt"
+//   > Workspace load: "src/scheme/scheme_reader.bt"
+//   > Workspace load: "src/scheme/scheme_env.bt"
+//   > Workspace load: "src/scheme/scheme_lambda.bt"
+//   > Workspace load: "src/scheme/scheme_eval.bt"
+//   > Workspace load: "src/scheme/scheme_printer.bt"
+//   > Workspace load: "test/scheme_test.bt"
 //   > SchemeTest runAll
 
 TestCase subclass: SchemeTest

@@ -4,8 +4,8 @@
 // BUnit tests for the Hello value type.
 //
 // Run in the REPL:
-//   > :load src/hello.bt
-//   > :load test/hello_test.bt
+//   > Workspace load: "src/hello.bt"
+//   > Workspace load: "test/hello_test.bt"
 //   > HelloTest runAll
 
 TestCase subclass: HelloTest

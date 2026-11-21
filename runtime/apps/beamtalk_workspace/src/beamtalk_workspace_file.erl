@@ -48,7 +48,8 @@ A leaf module: it calls only OTP.
     is_staging_dir_name/1,
     atomic_write/3,
     sweep_stale_temps/1, sweep_stale_temps/2,
-    sweep_stale_temps_in/1, sweep_stale_temps_in/2
+    sweep_stale_temps_in/1, sweep_stale_temps_in/2,
+    sweep_stale_staging_dirs/1
 ]).
 
 %% How old a `temp_path/1` leftover must be before a sweep deletes it. A live
@@ -358,6 +359,40 @@ older_than(File, Now, MaxAgeSeconds) ->
 -spec sweep_stale_temps(string()) -> [string()].
 sweep_stale_temps(Path) ->
     sweep_stale_temps(Path, ?STALE_TEMP_SECONDS).
+
+-doc """
+Delete every `.bt-staging.<digits>` scratch directory (`staging_dir/1`) directly
+in `Dir` whose last modification is more than the workspace's staleness
+threshold (an hour) ago, and return the paths it deleted (BT-5084). A writer that
+crashed between creating its directory and removing it leaves the directory
+behind and nothing else ever reads it; a fresh directory (a live writer's) is
+never touched.
+""".
+-spec sweep_stale_staging_dirs(file:filename()) -> [string()].
+sweep_stale_staging_dirs(Dir) ->
+    Now = erlang:system_time(second),
+    Names =
+        case file:list_dir(Dir) of
+            {ok, Ns} -> Ns;
+            {error, _} -> []
+        end,
+    lists:filtermap(
+        fun(Name) ->
+            Candidate = filename:join(Dir, Name),
+            case is_staging_dir_name(Name) andalso stale_dir(Candidate, Now) of
+                true -> file:del_dir_r(Candidate) =:= ok andalso {true, Candidate};
+                false -> false
+            end
+        end,
+        Names
+    ).
+
+-spec stale_dir(string(), integer()) -> boolean().
+stale_dir(Dir, Now) ->
+    case file:read_file_info(Dir, [{time, posix}]) of
+        {ok, #file_info{type = directory, mtime = MTime}} -> Now - MTime > ?STALE_TEMP_SECONDS;
+        _ -> false
+    end.
 
 -doc "`sweep_stale_temps_in/2` with the workspace's one staleness threshold (an hour).".
 -spec sweep_stale_temps_in(file:filename()) -> [string()].

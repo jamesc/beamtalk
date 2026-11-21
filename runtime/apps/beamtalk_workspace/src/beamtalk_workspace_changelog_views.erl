@@ -152,7 +152,8 @@ entry_to_value(#entry{} = E, Survivors) ->
         sourceFile => source_file_value(E#entry.source_file),
         orphan => E#entry.orphan,
         priorEpoch => E#entry.prior_epoch,
-        flushed => E#entry.flushed,
+        %% A retired (cancelled) entry never reached disk: not "flushed" (BT-5084).
+        flushed => E#entry.flushed andalso not E#entry.cancelled,
         active => Active,
         shadowed => Shadowed,
         clean => Clean,

@@ -297,7 +297,7 @@ jobs:
       # (test-dialyzer job), JS/Elixir formatting beyond fmt-check
       # (the liveview workflow runs lint-elixir).
       - name: Clippy, format and repo lints
-        run: just clippy fmt-check lint-repo test-grammar test-github-extension
+        run: just clippy fmt-check lint-repo lint-docs-refs test-grammar test-github-extension
 
       - name: Surface parity drift check (BT-2082)
         # Verifies REPL ops × CLI × MCP × LSP coverage matches
