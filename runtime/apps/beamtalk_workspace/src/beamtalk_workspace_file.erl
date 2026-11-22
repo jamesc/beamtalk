@@ -52,6 +52,10 @@ A leaf module: it calls only OTP.
     sweep_stale_staging_dirs/1
 ]).
 
+-ifdef(TEST).
+-export([comparable_parts/2]).
+-endif.
+
 %% How old a `temp_path/1` leftover must be before a sweep deletes it. A live
 %% writer renames its temp file within moments of writing it, so a file this
 %% old can only be a crashed writer's. The one value every workspace sweep uses.
@@ -77,15 +81,25 @@ component-prefix test. Symlinks are resolved on both sides before comparing
 (each existing component is read with `file:read_link_all/1`), so a link
 inside the root that points outside it is not inside either. A component that
 does not exist yet is taken as written, so a file about to be created is
-judged by its real parent.
+judged by its real parent. On Windows components compare
+case-insensitively, as the file system does: a link target comes back in
+the system's own spelling (`c:/Users/...`), which need not match the case a
+caller used (BT-5122). 8.3 short names (`RUNNER~1`) are not expanded, so a
+root written with one does not contain a path reached through a link, which
+Windows reports with the long name.
 """.
 -spec path_inside(file:filename(), file:filename()) -> boolean().
 path_inside(Root, Path) ->
     case {to_list(Root), to_list(Path)} of
         {{ok, R}, {ok, P}} ->
             case has_dotdot(R) orelse has_dotdot(P) of
-                true -> false;
-                false -> relative_parts(real_path(R), real_path(P)) =/= false
+                true ->
+                    false;
+                false ->
+                    lists:prefix(
+                        comparable_parts(real_path(R), os:type()),
+                        comparable_parts(real_path(P), os:type())
+                    )
             end;
         _ ->
             %% Not valid unicode: cannot be judged, so not inside.
@@ -155,6 +169,17 @@ real_path([C | Rest], Acc, Hops) ->
         {error, _} ->
             real_path(Rest, Cur, Hops)
     end.
+
+%% `Path`'s components in the form `path_inside/2` compares (BT-5122).
+%% Windows file systems are case-insensitive, and `file:read_link_all/1`
+%% reports a link target in the system's own spelling (`c:/Users/...`), so
+%% there each component is case-folded. Elsewhere case is significant and
+%% the components are kept as they are.
+-spec comparable_parts(file:filename(), {atom(), atom()}) -> [file:filename()].
+comparable_parts(Path, {win32, _}) ->
+    [string:casefold(C) || C <- filename:split(Path)];
+comparable_parts(Path, _OsType) ->
+    filename:split(Path).
 
 -doc """
 A fresh temp path next to `Path`: `<Path>.bt-staging.<unique>.tmp`. Unique per
