@@ -3,7 +3,9 @@
 #
 # VS Code Extension Release Pipeline
 # ====================================
-# Packages a single universal .vsix file and publishes to the VS Code Marketplace.
+# Packages a single universal .vsix file and publishes to the VS Code Marketplace
+# when the VSCE_PAT secret is set; without it the publish is skipped with a
+# warning and the .vsix is only attached to the GitHub Release.
 #
 # The extension no longer bundles a platform-specific beamtalk-lsp binary.
 # Instead, it discovers beamtalk-lsp at runtime via `beamtalk --print-sysroot`,
@@ -150,17 +152,33 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
+      # Marketplace publishing is optional: with no VSCE_PAT the release still
+      # passes (the .vsix is attached above) and this warning says the
+      # Marketplace was skipped, so it is visible on the run summary.
+      - name: Skip VS Code Marketplace (no VSCE_PAT)
+        if: env.VSCE_PAT == ''
+        run: |
+          echo "::warning::VSCE_PAT is not set: the VS Code Marketplace publish was skipped. The .vsix is still attached to the release."
+
+      # This job has no other checkout; setup-node reads the Node version
+      # from .tool-versions, so fetch just that file. Into a subdirectory:
+      # a checkout into the workspace root would clean away the .vsix
+      # downloaded above.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.VSCE_PAT != ''
+        with:
+          path: .node-version-src
+          sparse-checkout: |
+            .tool-versions
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Setup Node.js
+        if: env.VSCE_PAT != ''
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version-file: .tool-versions
+          node-version-file: .node-version-src/.tool-versions
 
-      # Runs whenever the job does (`publish` is true). A missing token fails
-      # the run loudly instead of skipping the step and reporting green.
       - name: Publish to VS Code Marketplace
-        run: |
-          if [ -z "$VSCE_PAT" ]; then
-            echo "::error::publish was requested but the VSCE_PAT secret is not set (or was not passed to this workflow)"
-            exit 1
-          fi
-          npx --yes @vscode/vsce publish --packagePath "$VSIX_NAME"
+        if: env.VSCE_PAT != ''
+        run: npx --yes @vscode/vsce publish --packagePath "$VSIX_NAME"
