@@ -13,7 +13,7 @@
 
 // Variable assigned in one turn can be used as match target in the next
 val := 42
-// => _
+// => 42
 
 val match: [42 -> "found"; _ -> "not found"]
 // => "found"

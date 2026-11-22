@@ -8,18 +8,18 @@
 
 Value subclass: IkAnimal
   kind => "animal"
-// => _
+// => "IkAnimal"
 
 IkAnimal subclass: IkDog
   kind => "dog"
-// => _
+// => "IkDog"
 
 Value subclass: IkRock
   kind => "rock"
-// => _
+// => "IkRock"
 
 dog := IkDog new
-// => _
+// => IkDog()
 
 dog isKindOf: IkAnimal
 // => true
