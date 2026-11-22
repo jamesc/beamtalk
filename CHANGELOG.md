@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-- **Fix: on Windows, a project root reached through an absolute symlink contains its files (BT-5122).**
-  - Fixed: `path_inside` (MCP project-root confinement and the workspace's other "is this file under that directory?" checks) removes the NT or Win32 namespace prefix (`\??\C:\x`, `\\?\C:\x`, and the `UNC` forms) that Windows reports on an absolute link target. Before, a file inside a root reached through an absolute symlink was refused. It failed safe: nothing outside the root got through. Other systems are unchanged.
-  - Not changed: 8.3 short names (`RUNNER~1`) are not expanded, so a root and a path must spell each component the same way.
+- **Fix: on Windows, a project root reached through a symlink contains its files (BT-5122).**
+  - Fixed: `path_inside` (MCP project-root confinement and the workspace's other "is this file under that directory?" checks) compares path components case-insensitively on Windows. Windows reports a link target in its own spelling (`c:/Users/...`), so a root reached through a symlink used to refuse a file inside it whenever the case differed, the drive letter included. It failed safe: nothing outside the root got through. Other systems still compare case-sensitively.
+  - Not changed: 8.3 short names (`RUNNER~1`) are not expanded. A root written with one does not contain a path reached through a link, which Windows reports with the long name.
 
 ## 0.6.0 — 2026-11-21
 

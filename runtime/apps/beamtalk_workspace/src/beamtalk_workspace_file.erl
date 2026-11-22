@@ -53,7 +53,7 @@ A leaf module: it calls only OTP.
 ]).
 
 -ifdef(TEST).
--export([strip_namespace_prefix/2]).
+-export([comparable_parts/2]).
 -endif.
 
 %% How old a `temp_path/1` leftover must be before a sweep deletes it. A live
@@ -81,19 +81,25 @@ component-prefix test. Symlinks are resolved on both sides before comparing
 (each existing component is read with `file:read_link_all/1`), so a link
 inside the root that points outside it is not inside either. A component that
 does not exist yet is taken as written, so a file about to be created is
-judged by its real parent. On Windows an absolute link target comes back with
-an NT or Win32 namespace prefix (`\??\C:\x`, `\\?\C:\x`); it is removed
-before comparing, so a root reached through a link still contains its files
-(BT-5122). 8.3 short names (`RUNNER~1`) are not expanded: a root and path
-must spell each component the same way.
+judged by its real parent. On Windows components compare
+case-insensitively, as the file system does: a link target comes back in
+the system's own spelling (`c:/Users/...`), which need not match the case a
+caller used (BT-5122). 8.3 short names (`RUNNER~1`) are not expanded, so a
+root written with one does not contain a path reached through a link, which
+Windows reports with the long name.
 """.
 -spec path_inside(file:filename(), file:filename()) -> boolean().
 path_inside(Root, Path) ->
     case {to_list(Root), to_list(Path)} of
         {{ok, R}, {ok, P}} ->
             case has_dotdot(R) orelse has_dotdot(P) of
-                true -> false;
-                false -> relative_parts(real_path(R), real_path(P)) =/= false
+                true ->
+                    false;
+                false ->
+                    lists:prefix(
+                        comparable_parts(real_path(R), os:type()),
+                        comparable_parts(real_path(P), os:type())
+                    )
             end;
         _ ->
             %% Not valid unicode: cannot be judged, so not inside.
@@ -158,43 +164,22 @@ real_path([C | Rest], Acc, Hops) ->
         end,
     case file:read_link_all(Cur) of
         {ok, Target} ->
-            Abs = filename:absname(
-                strip_namespace_prefix(Target, os:type()), filename:dirname(Cur)
-            ),
+            Abs = filename:absname(Target, filename:dirname(Cur)),
             real_path(filename:split(Abs) ++ Rest, "", Hops + 1);
         {error, _} ->
             real_path(Rest, Cur, Hops)
     end.
 
-%% A Windows link target without its namespace prefix (BT-5122).
-%% `file:read_link_all/1` reports an absolute target as the reparse point
-%% stores it: `\??\C:\x` (NT namespace) or `\\?\C:\x` (Win32
-%% long-path form), and a UNC one as `\??\UNC\srv\share`. Kept, the
-%% prefix splits into extra components and the target never compares equal
-%% to the same directory written as `C:/x`. Either slash may appear. Other
-%% systems are untouched: there `/??/x` is an ordinary path.
--spec strip_namespace_prefix(string(), {atom(), atom()}) -> string().
-strip_namespace_prefix(Target, {win32, _}) ->
-    case strip_one_prefix(Target, ["\\??\\", "\\\\?\\", "/??/", "//?/"]) of
-        {ok, Rest} ->
-            case strip_one_prefix(Rest, ["UNC\\", "UNC/"]) of
-                {ok, Share} -> "\\\\" ++ Share;
-                none -> Rest
-            end;
-        none ->
-            Target
-    end;
-strip_namespace_prefix(Target, _OsType) ->
-    Target.
-
--spec strip_one_prefix(string(), [string()]) -> {ok, string()} | none.
-strip_one_prefix(_Str, []) ->
-    none;
-strip_one_prefix(Str, [Prefix | More]) ->
-    case lists:prefix(Prefix, Str) of
-        true -> {ok, lists:nthtail(length(Prefix), Str)};
-        false -> strip_one_prefix(Str, More)
-    end.
+%% `Path`'s components in the form `path_inside/2` compares (BT-5122).
+%% Windows file systems are case-insensitive, and `file:read_link_all/1`
+%% reports a link target in the system's own spelling (`c:/Users/...`), so
+%% there each component is case-folded. Elsewhere case is significant and
+%% the components are kept as they are.
+-spec comparable_parts(file:filename(), {atom(), atom()}) -> [file:filename()].
+comparable_parts(Path, {win32, _}) ->
+    [string:casefold(C) || C <- filename:split(Path)];
+comparable_parts(Path, _OsType) ->
+    filename:split(Path).
 
 -doc """
 A fresh temp path next to `Path`: `<Path>.bt-staging.<unique>.tmp`. Unique per

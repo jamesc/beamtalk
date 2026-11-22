@@ -53,7 +53,8 @@ path_inside_dotdot_test_() ->
 %% BT-5070: a symlink under the root that points outside it is not inside.
 path_inside_symlink_test_() ->
     {setup, fun() -> make_link_fixture() end, fun(Dir) -> beamtalk_test_fs:rm_rf(Dir) end, fun(Dir) ->
-        Root = filename:join(Dir, "proj"),
+        Root = long_root(Dir),
+        RootLink = filename:join(Dir, "rootlink"),
         [
             ?_assert(beamtalk_workspace_file:path_inside(Root, filename:join(Root, "src/a.bt"))),
             ?_assertNot(
@@ -67,45 +68,60 @@ path_inside_symlink_test_() ->
                 beamtalk_workspace_file:path_inside(Root, filename:join(Root, "inner/a.bt"))
             ),
             %% A root reached through a link compares equal to its target.
-            %% On failure, show the raw link target: on Windows it is the
-            %% form `file:read_link_all/1` reports (BT-5122).
+            %% On failure, show the raw link target (BT-5122).
             ?_assertEqual(
-                {true, file:read_link_all(filename:join(Dir, "rootlink"))},
+                {true, file:read_link_all(RootLink)},
                 {
                     beamtalk_workspace_file:path_inside(
-                        filename:join(Dir, "rootlink"), filename:join(Root, "src/a.bt")
+                        RootLink, filename:join(Root, "src/a.bt")
                     ),
-                    file:read_link_all(filename:join(Dir, "rootlink"))
+                    file:read_link_all(RootLink)
                 }
             )
-        ]
+        ] ++ windows_case_cases(RootLink, Root)
     end}.
 
-%% BT-5122: Windows reports an absolute link target with an NT or Win32
-%% namespace prefix; it is removed so the target compares equal to the same
-%% directory written plainly. Other systems keep the target as it is.
-strip_namespace_prefix_test_() ->
+%% The project root in the spelling Windows reports for a link to it (BT-5122).
+%% `TMP` on a Windows runner holds an 8.3 short name (`RUNNER~1`) that
+%% `path_inside/2` cannot expand, while `file:read_link_all/1` answers the long
+%% name. Building the root from the link target keeps this test about links,
+%% not 8.3 names. On other systems the target is the root as created.
+long_root(Dir) ->
+    {ok, Target} = file:read_link_all(filename:join(Dir, "rootlink")),
+    filename:join(filename:dirname(Target), "proj").
+
+%% BT-5122: Windows compares paths case-insensitively, and reports a link
+%% target in its own spelling (`c:/Users/...`), so a root reached through a
+%% link still contains the same file written in another case. Elsewhere case
+%% is significant: there is nothing to check.
+windows_case_cases(RootLink, Root) ->
+    case os:type() of
+        {win32, _} ->
+            [
+                ?_assert(
+                    beamtalk_workspace_file:path_inside(
+                        RootLink, string:uppercase(filename:join(Root, "src/a.bt"))
+                    )
+                )
+            ];
+        _ ->
+            []
+    end.
+
+%% BT-5122: the components `path_inside/2` compares. Windows folds case;
+%% other systems keep each component as written.
+comparable_parts_test_() ->
+    Parts = fun beamtalk_workspace_file:comparable_parts/2,
     Win = {win32, nt},
-    Strip = fun beamtalk_workspace_file:strip_namespace_prefix/2,
+    Unix = {unix, linux},
     [
-        ?_assertEqual("C:\\Users\\proj", Strip("\\??\\C:\\Users\\proj", Win)),
-        ?_assertEqual("C:\\Users\\proj", Strip("\\\\?\\C:\\Users\\proj", Win)),
-        ?_assertEqual("C:/Users/proj", Strip("//?/C:/Users/proj", Win)),
-        ?_assertEqual("C:/Users/proj", Strip("/??/C:/Users/proj", Win)),
-        ?_assertEqual("\\\\srv\\share\\proj", Strip("\\??\\UNC\\srv\\share\\proj", Win)),
-        ?_assertEqual("\\\\srv\\share\\proj", Strip("\\\\?\\UNC\\srv\\share\\proj", Win)),
-        %% Already plain, or relative: unchanged.
-        ?_assertEqual("C:\\Users\\proj", Strip("C:\\Users\\proj", Win)),
-        ?_assertEqual("src", Strip("src", Win)),
-        %% The stripped form splits like the plain one. Forward slashes, since
-        %% `filename:split/1` reads a backslash as a separator only on Windows.
-        ?_assertEqual(
-            filename:split("C:/Users/proj"),
-            filename:split(Strip("//?/C:/Users/proj", Win))
-        ),
-        %% Not Windows: `/??/x` is an ordinary path and is kept.
-        ?_assertEqual("/??/x", Strip("/??/x", {unix, linux})),
-        ?_assertEqual("//?/x", Strip("//?/x", {unix, darwin}))
+        ?_assertEqual(Parts("c:/users/proj", Win), Parts("C:/Users/PROJ", Win)),
+        ?_assertEqual(Parts("c:/users/runneradmin", Win), Parts("C:/Users/RunnerAdmin", Win)),
+        %% A different name is still different, whatever its case.
+        ?_assertNotEqual(Parts("C:/Users/proj", Win), Parts("C:/Users/proj-other", Win)),
+        %% Case is significant elsewhere.
+        ?_assertNotEqual(Parts("/home/Proj", Unix), Parts("/home/proj", Unix)),
+        ?_assertEqual(["/", "home", "Proj"], Parts("/home/Proj", Unix))
     ].
 
 make_link_fixture() ->
