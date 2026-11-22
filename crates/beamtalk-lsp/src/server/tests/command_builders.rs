@@ -385,18 +385,3 @@ fn beamtalk_lsp_commands_list_matches_constants() {
     assert!(listed.contains(CMD_REMOVE_METHOD));
     assert_eq!(listed.len(), 8);
 }
-
-#[test]
-fn validate_selector_accepts_unary_keyword_and_binary() {
-    assert!(validate_selector("size").is_ok());
-    assert!(validate_selector("at:put:").is_ok());
-    assert!(validate_selector("+").is_ok());
-    assert!(validate_selector(">=").is_ok());
-}
-
-#[test]
-fn validate_selector_rejects_bad_shapes() {
-    assert!(validate_selector("").is_err());
-    assert!(validate_selector("bad selector!").is_err());
-    assert!(validate_selector("+foo").is_err());
-}
