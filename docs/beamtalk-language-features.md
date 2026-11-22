@@ -2946,7 +2946,8 @@ passed through a self-send to an actor loses `^` and captured-local writes
 (BT-3580). `Enumerable(E)` (`stdlib/src/enumerable.bt`) is written this way:
 its one requirement is `elements -> List(E)`, and every provision
 (`size`, `isEmpty`, `isNotEmpty`, `do:`, `inject:into:`, `select:`,
-`collect:`, `detect:ifNone:`, `anySatisfy:`, `count:`) forwards to the
+`collect:`, `reject:`, `detect:`, `detect:ifNone:`, `anySatisfy:`,
+`allSatisfy:`, `noneSatisfy:`, `includes:`, `count:`) forwards to the
 matching `List` primitive over that snapshot — no block ever crosses a
 self-send, so every provision runs in the *caller's* process regardless of
 whether the receiver is a `Value` or an `Actor`.
@@ -4769,7 +4770,7 @@ w3 := (pool startChild: #{#label => "y"}) unwrap   // => Actor(Worker, _)
 // Recoverable variant — useful when a failing init should not abort the caller
 pool startChild
   ifOk:    [:w | w process: 21]
-  ifError: [:e | Logger warn: e message]
+  ifError: [:e | Logger warning: e message]
 pool count                          // => 4
 
 // Terminate a specific child — idempotent (Ok(nil) even if already gone)
@@ -7501,7 +7502,7 @@ sub isActive    // => false
 | `when: aClass doOnce: aBlock` | Deliver exactly once, then auto-unsubscribe. Consumed atomically under concurrent announcers. |
 | `announce: anEvent` | Publish asynchronously — returns immediately, handlers run fire-and-forget. |
 | `announceAndWait: anEvent` | Publish synchronously — block until every handler completes (default 5 s timeout). |
-| `announceAndWait: anEvent timeout: ms` | Synchronous publish with a custom per-handler timeout in milliseconds. |
+| `announceAndWait: anEvent timeout: ms` | Synchronous publish with a custom per-handler timeout (Integer milliseconds or a `Duration`). |
 | `unsubscribe: receiver` | Remove every subscription `receiver` holds on this announcer. |
 
 Each `when:…` returns a **distinct** `Subscription` — a process may hold several
@@ -9097,6 +9098,7 @@ cache at: "key"                 // => 42
 cache at: "missing"             // => nil (not an error)
 cache at: "missing" ifAbsent: [0]  // => 0 (evaluate block when absent)
 cache at: "key" ifPresent: [:v | v + 1]  // => 43 (evaluate block if present; nil if absent)
+cache at: "key" ifPresent: [:v | v * 10] ifAbsent: [0]  // => 420 (one lookup; a stored nil is present)
 cache includesKey: "key"        // => true
 cache includesKey: "other"      // => false
 cache includes: 42              // => true (scan values)
@@ -9111,8 +9113,9 @@ cache do: [:v | Transcript show: v]
 cache select: [:v | v > 10]     // => List of matching values
 cache collect: [:v | v * 2]     // => List of transformed values
 
-// Key/value iteration
+// Key/value iteration (doWithKey: is an alias of keysAndValuesDo:)
 cache keysAndValuesDo: [:k :v | Transcript show: k, ' => ', v]
+cache doWithKey: [:k :v | Transcript show: k]
 
 // Snapshot to Dictionary
 d := cache asDictionary          // => Dictionary(K, V)
