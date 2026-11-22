@@ -121,7 +121,7 @@ pub(crate) fn build_command_expression(
             // Accepted with or without a leading '#', mirroring MCP's
             // `precheck_method` tool so both surfaces agree on input shape.
             let selector = selector.strip_prefix('#').unwrap_or(&selector);
-            validate_selector(selector)?;
+            beamtalk_core::source_analysis::validate_selector_input(selector)?;
             let source = expect_string_arg(arguments, 2, "source")?;
             if source.is_empty() {
                 return Err(format!("{CMD_PRECHECK_METHOD}: 'source' must not be empty"));
@@ -144,7 +144,7 @@ pub(crate) fn build_command_expression(
             // Accepted with or without a leading '#', mirroring MCP's
             // `remove_method` tool so both surfaces agree on input shape.
             let selector = selector.strip_prefix('#').unwrap_or(&selector);
-            validate_selector(selector)?;
+            beamtalk_core::source_analysis::validate_selector_input(selector)?;
             // Optional third argument: an `ifAbsent:` fallback. Unlike
             // `CMD_PRECHECK_METHOD`'s `source`, this is raw Beamtalk
             // expression code embedded as the fallback block's body, not a
@@ -218,11 +218,4 @@ pub(in crate::server) fn validate_class_name(name: &str) -> std::result::Result<
     Err(format!(
         "class name '{name}' contains invalid character '{c}' (allowed: letters, digits, underscore)"
     ))
-}
-/// Validate a Beamtalk selector (unary, keyword, or binary) before splicing
-/// it unescaped into a `#selector` literal in a built expression (ADR 0105
-/// Phase 3's `CMD_PRECHECK_METHOD`). Delegates to the canonical
-/// implementation in `beamtalk_core::source_analysis::validate_selector_input`.
-pub(in crate::server) fn validate_selector(sel: &str) -> std::result::Result<(), String> {
-    beamtalk_core::source_analysis::validate_selector_input(sel)
 }
