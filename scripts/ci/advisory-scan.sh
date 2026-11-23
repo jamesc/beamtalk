@@ -37,6 +37,7 @@ run_scan() { # title, dir, command...
 }
 
 run_scan "cargo audit (Cargo.lock)" . cargo audit --file Cargo.lock
+run_scan "cargo audit (fuzz/Cargo.lock)" . cargo audit --file fuzz/Cargo.lock
 run_scan "cargo audit (desktop/src-tauri/Cargo.lock)" . cargo audit --file desktop/src-tauri/Cargo.lock
 for d in editors/vscode editors/github-chrome editors/liveview/assets; do
     run_scan "npm audit --omit=dev (${d})" "${d}" npm audit --omit=dev

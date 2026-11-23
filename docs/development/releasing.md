@@ -18,7 +18,7 @@ The **Rust toolchain** is pinned in `rust-toolchain.toml`; update it there when 
 ## Cutting a release
 
 1. Update `VERSION` with the new version number.
-2. Update `Cargo.toml` workspace `version` to match (required by Cargo).
+2. Update `Cargo.toml` workspace `version` to match (required by Cargo). Then refresh the committed lockfiles that pin the workspace crate versions: run `cargo update --workspace` in the repo root and `cargo update --workspace --manifest-path fuzz/Cargo.toml`, and commit `Cargo.lock` and `fuzz/Cargo.lock` (and `desktop/src-tauri/Cargo.lock` if it pins them). CI's `cargo tree --locked` checks fail on a stale lockfile (BT-5114).
 3. Update `CHANGELOG.md` — add a new section following the existing format (Language, Standard Library, Runtime, Tooling, Internal subsections as needed).
 4. Update version references in docs: `README.md`, `docs/beamtalk-tooling.md`, `docs/beamtalk-language-features.md`, `docs/repl-protocol.md`, `docs/beamtalk-ddd-model.md`.
 5. Tag the release commit: `git tag v<version>`.

@@ -275,6 +275,10 @@ jobs:
         # The root Cargo.lock is committed; fail if Cargo.toml changed without it.
         run: cargo tree --locked --workspace --depth 0 > /dev/null
 
+      - name: Check fuzz/Cargo.lock is up to date
+        # fuzz/ is a separate workspace with its own committed lockfile (BT-5114).
+        run: cargo tree --locked --manifest-path fuzz/Cargo.toml --depth 0 > /dev/null
+
       - name: Check runtime/rebar.lock is up to date
         # rebar.lock is committed (BT-5086). Re-locking must change nothing: a
         # drift means rebar.config changed without the lock (run `rebar3 lock`
