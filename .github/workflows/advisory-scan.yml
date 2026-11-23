@@ -95,3 +95,22 @@ jobs:
           elif [ -n "${number}" ]; then
             gh issue close "${number}" --comment "Clean advisory scan: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           fi
+
+      # A setup step (cargo-audit, Erlang, Node, mix_audit) failing leaves the scan
+      # unrun and the job red, which nobody watches on a schedule. Say so in an issue
+      # instead of staying silent (BT-5114).
+      - name: Report that the scan could not run
+        if: failure() && steps.scan.outcome == 'skipped'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          title="Advisory scan could not run"
+          body="The weekly advisory scan failed before scanning: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          number="$(gh issue list --state open --search "\"${title}\" in:title" --json number,title \
+            --jq "map(select(.title == \"${title}\")) | .[0].number // empty")"
+          if [ -n "${number}" ]; then
+            gh issue comment "${number}" --body "${body}"
+          else
+            gh issue create --title "${title}" --body "${body}"
+          fi

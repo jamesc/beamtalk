@@ -126,9 +126,17 @@ updates:
         update-types:
           - "version-update:semver-major"
     groups:
+      # playwright must move with hex phoenix_test_playwright / playwright_ex, but
+      # Dependabot cannot group across ecosystems; keeping it in its own PR makes
+      # the pairing visible (BT-5114, after #5636 / #5642).
+      npm-playwright:
+        patterns:
+          - "playwright"
       npm-dependencies:
         patterns:
           - "*"
+        exclude-patterns:
+          - "playwright"
         update-types:
           - "minor"
           - "patch"
@@ -150,9 +158,16 @@ updates:
       prefix: "deps"
       include: "scope"
     groups:
+      elixir-playwright:
+        patterns:
+          - "phoenix_test_playwright"
+          - "playwright_ex"
       elixir-dependencies:
         patterns:
           - "*"
+        exclude-patterns:
+          - "phoenix_test_playwright"
+          - "playwright_ex"
         update-types:
           - "minor"
           - "patch"
