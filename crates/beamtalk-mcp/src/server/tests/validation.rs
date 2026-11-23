@@ -148,7 +148,7 @@ fn complete_cursor_must_be_on_a_char_boundary() {
 #[test]
 fn path_policy_confines_to_project_root() {
     let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().canonicalize().unwrap();
+    let root = beamtalk_core::paths::canonicalize(tmp.path()).unwrap();
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(root.join("src/a.bt"), "").unwrap();
     let outside = tempfile::tempdir().unwrap();
@@ -201,11 +201,26 @@ fn path_policy_returns_plain_canonical_paths() {
     assert!(!got.to_string_lossy().starts_with(r"\\?\"));
 }
 
+/// BT-5123: a root still in Windows verbatim (`\\?\`) form, as `std::fs::canonicalize`
+/// gives, confines the same as its plain form.
+#[cfg(windows)]
+#[test]
+fn path_policy_accepts_verbatim_root_on_windows() {
+    let tmp = tempfile::tempdir().unwrap();
+    let verbatim = tmp.path().canonicalize().unwrap();
+    assert!(verbatim.to_string_lossy().starts_with(r"\\?\"));
+    let plain = beamtalk_core::paths::canonicalize(tmp.path()).unwrap();
+    std::fs::write(plain.join("a.bt"), "").unwrap();
+    let policy = PathPolicy::Confined(verbatim);
+    let got = policy.check(plain.join("a.bt").to_str().unwrap()).unwrap();
+    assert!(got.starts_with(&plain));
+}
+
 #[cfg(unix)]
 #[test]
 fn path_policy_refuses_symlink_escaping_the_root() {
     let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().canonicalize().unwrap();
+    let root = beamtalk_core::paths::canonicalize(tmp.path()).unwrap();
     let outside = tempfile::tempdir().unwrap();
     std::os::unix::fs::symlink(outside.path(), root.join("link")).unwrap();
     let policy = PathPolicy::Confined(root.clone());
@@ -220,7 +235,7 @@ fn path_policy_refuses_symlink_escaping_the_root() {
 #[tokio::test]
 async fn confined_tools_refuse_paths_outside_the_project_root() {
     let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().canonicalize().unwrap();
+    let root = beamtalk_core::paths::canonicalize(tmp.path()).unwrap();
     let (_fake, mut mcp) = fake_mcp(Box::new(|_| serde_json::json!({}))).await;
     mcp.path_policy = PathPolicy::Confined(root);
     let outside = tempfile::tempdir().unwrap();
