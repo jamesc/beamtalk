@@ -12,9 +12,11 @@
 *.vsix
 
 # Cargo
-# Cargo.lock is committed (root workspace and desktop/src-tauri): both build
-# shipped binaries, so releases and CI must resolve the same dependency graph.
-# CI fails if Cargo.lock is out of date with Cargo.toml (`cargo tree --locked`).
+# Cargo.lock is committed (root workspace, desktop/src-tauri and fuzz/): the first
+# two build shipped binaries, so releases and CI must resolve the same dependency
+# graph; fuzz/ is kept so the advisory scan can audit libfuzzer-sys (BT-5114).
+# CI fails if the root or fuzz/ Cargo.lock is out of date with its Cargo.toml
+# (`cargo tree --locked`).
 .cargo/
 
 # IDEs and editors

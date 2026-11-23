@@ -11,9 +11,7 @@ name: Advisory Scan
 # the issue is closed again when a later run is clean. Dependabot (see
 # .github/dependabot.yml) is what raises the fix PRs.
 #
-# fuzz/ has no committed lockfile, so it is not scanned: its workspace crates
-# are covered by the root Cargo.lock, but its one external dependency
-# (libfuzzer-sys) resolves fresh on each run and is not audited here.
+# fuzz/Cargo.lock is committed (BT-5114), so it is scanned like the others.
 
 on:
   schedule:

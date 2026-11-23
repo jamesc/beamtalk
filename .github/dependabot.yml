@@ -117,6 +117,14 @@ updates:
     commit-message:
       prefix: "deps"
       include: "scope"
+    ignore:
+      # Must match `engines.vscode` (^1.82.0); `vsce package` rejects a newer
+      # types range (BT-5114).
+      - dependency-name: "@types/vscode"
+      # Stay on the Node major pinned in .tool-versions (22) (BT-5114).
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
     groups:
       npm-dependencies:
         patterns:
