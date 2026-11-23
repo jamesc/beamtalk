@@ -17,7 +17,8 @@
 use super::super::super::CoreErlangGenerator;
 use super::super::super::threaded_ir::{
     ACC_LIST, AccSlot, BoolArm, ConsPerCall, FOLD_RESULT_LIST_SLOT, FoldAccBody, FoldAccValue,
-    FoldCarry, FoldResultList, ThreadedStmt, bool_arm_clause as bool_arm, render_tuple,
+    FoldCarry, FoldResultList, ThreadedStmt, bool_arm_clause as bool_arm, render_bool_case,
+    render_tuple as acc_tuple,
 };
 use super::super::ThreadingPlan;
 use super::BodyKind;
@@ -129,9 +130,6 @@ impl BodyKind {
     }
 }
 
-/// `{head…, tail}` — the shared accumulator tuple renderer.
-use render_tuple as acc_tuple;
-
 /// `[item | list]` — cons `item_var` onto the accumulator list `list`.
 fn cons(item_var: &str, list: &'static str) -> Document<'static> {
     AccSlot::cons(item_var, list).render()
@@ -164,18 +162,8 @@ impl CoreErlangGenerator {
         scrutinee: Document<'static>,
         arms: [(bool, Document<'static>); 2],
     ) -> Document<'static> {
-        let [(first, first_body), (second, second_body)] = arms;
         let var = self.fresh_temp_var("_PredBad");
-        let fallback = Self::case_clause_fallback_clause(var);
-        form::case_of(
-            scrutinee,
-            [
-                bool_arm(first, first_body),
-                bool_arm(second, second_body),
-                fallback,
-            ],
-            Layout::Flat,
-        )
+        render_bool_case(scrutinee, arms, Self::case_clause_fallback_clause(var))
     }
 
     // FoldlFilter: append the predicate case expression after all statements.
@@ -247,7 +235,11 @@ impl CoreErlangGenerator {
             (!decided, acc_tuple([Document::Str("BoolAcc")], &tail)),
         ];
         let value = self.bool_case(leaf::var(cx.pv.to_string()), arms);
-        stmts.push(Self::fold_accumulator(carry, value, cx.span));
+        stmts.push(Self::fold_accumulator(
+            carry,
+            FoldAccValue::opaque(value),
+            cx.span,
+        ));
     }
 
     // FoldlDetect — update found-item accumulator on first match.
@@ -280,7 +272,11 @@ impl CoreErlangGenerator {
                 ),
             ],
         );
-        stmts.push(Self::fold_accumulator(carry, value, cx.span));
+        stmts.push(Self::fold_accumulator(
+            carry,
+            FoldAccValue::opaque(value),
+            cx.span,
+        ));
     }
 
     // FoldlCount — increment count accumulator on predicate match.
@@ -304,7 +300,11 @@ impl CoreErlangGenerator {
                 (false, acc_tuple([Document::Str("CountAcc")], &tail)),
             ],
         );
-        stmts.push(Self::fold_accumulator(carry, value, cx.span));
+        stmts.push(Self::fold_accumulator(
+            carry,
+            FoldAccValue::opaque(value),
+            cx.span,
+        ));
     }
 
     // FoldlTakeWhile — include item while predicate holds.
@@ -335,7 +335,11 @@ impl CoreErlangGenerator {
             [bool_arm(false, stop(&tail)), bool_arm(true, inner)],
             Layout::Flat,
         );
-        stmts.push(Self::fold_accumulator(carry, value, cx.span));
+        stmts.push(Self::fold_accumulator(
+            carry,
+            FoldAccValue::opaque(value),
+            cx.span,
+        ));
     }
 
     // FoldlDropWhile — drop items while predicate holds.
@@ -366,7 +370,11 @@ impl CoreErlangGenerator {
             [bool_arm(false, keep(&tail)), bool_arm(true, inner)],
             Layout::Flat,
         );
-        stmts.push(Self::fold_accumulator(carry, value, cx.span));
+        stmts.push(Self::fold_accumulator(
+            carry,
+            FoldAccValue::opaque(value),
+            cx.span,
+        ));
     }
 
     // FoldlPartition — route item to one of two lists based on predicate.
@@ -397,7 +405,11 @@ impl CoreErlangGenerator {
                 ),
             ],
         );
-        stmts.push(Self::fold_accumulator(carry, value, cx.span));
+        stmts.push(Self::fold_accumulator(
+            carry,
+            FoldAccValue::opaque(value),
+            cx.span,
+        ));
     }
 
     // FoldlGroupBy — group item by key.
@@ -453,7 +465,11 @@ impl CoreErlangGenerator {
             ),
             Layout::Flat,
         );
-        stmts.push(Self::fold_accumulator(carry, value, cx.span));
+        stmts.push(Self::fold_accumulator(
+            carry,
+            FoldAccValue::opaque(value),
+            cx.span,
+        ));
     }
 
     // FoldlSort — write the comparator's final state back to its
@@ -476,7 +492,7 @@ impl CoreErlangGenerator {
         // what the tag records as carried.
         stmts.push(Self::fold_accumulator(
             FoldCarry::StateMap,
-            form::let_in(
+            FoldAccValue::opaque(form::let_in(
                 leaf::var("_"),
                 form::call(
                     "erlang",
@@ -485,7 +501,7 @@ impl CoreErlangGenerator {
                 ),
                 leaf::var(cx.pv.to_string()),
                 Layout::Flat,
-            ),
+            )),
             cx.span,
         ));
     }
