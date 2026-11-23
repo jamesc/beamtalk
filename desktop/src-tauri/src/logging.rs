@@ -798,10 +798,12 @@ mod tests {
     /// no mode — matching that crate's own `create_writer`, internal to
     /// it) *during* `write`, not before. Real rollover works the same way:
     /// the new day's file does not exist until the write that triggers it.
+    #[cfg(unix)]
     struct FileCreatingWriter {
         path: PathBuf,
     }
 
+    #[cfg(unix)]
     impl io::Write for FileCreatingWriter {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             let mut file = std::fs::OpenOptions::new()
