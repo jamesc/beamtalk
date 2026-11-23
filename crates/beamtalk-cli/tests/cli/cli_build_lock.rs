@@ -9,9 +9,13 @@
 //! calls lost a manifest or `beamtalk.lock` entry.
 
 use crate::cli_common;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::{Command as StdCommand, Output};
+use std::process::{Command as StdCommand, Output, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
+const WAITING: &str = "waiting for another beamtalk process in";
 const HEADER: &str = "// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\n";
 
 fn git(dir: &Path, args: &[&str]) {
@@ -209,10 +213,53 @@ fn build_waits_with_message_while_lock_is_held_then_proceeds() {
         .unwrap();
     held.lock_exclusive().unwrap();
 
-    let run = spawn_beamtalk(&project, &["build"]);
-    // sleep: give the build time to reach the lock; it must still be waiting
-    std::thread::sleep(std::time::Duration::from_secs(2));
-    assert!(!run.is_finished(), "build must wait for the held lock");
+    let configured = cli_common::beamtalk();
+    let mut std_cmd = StdCommand::new(configured.get_program());
+    for (key, val) in configured.get_envs() {
+        match val {
+            Some(val) => std_cmd.env(key, val),
+            None => std_cmd.env_remove(key),
+        };
+    }
+    let mut child = std_cmd
+        .current_dir(&project)
+        .arg("build")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn beamtalk build");
+    let stderr = child.stderr.take().expect("piped stderr");
+    let (tx, rx) = mpsc::channel::<String>();
+    let reader = std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    // Release the lock only once the build reports it is waiting: the build
+    // probes OTP before taking the lock, which can be arbitrarily slow on a
+    // loaded runner, so no fixed delay is safe.
+    let mut stderr_lines = Vec::new();
+    let deadline = Instant::now() + Duration::from_mins(1);
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if let Ok(line) = rx.recv_timeout(remaining) {
+            let seen = line.contains(WAITING);
+            stderr_lines.push(line);
+            if seen {
+                break;
+            }
+        } else {
+            let _ = child.kill();
+            panic!("build never reported waiting for the lock; stderr so far: {stderr_lines:?}");
+        }
+    }
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "build must wait for the held lock"
+    );
     assert!(
         !project
             .join("_build/dev/ebin")
@@ -222,11 +269,14 @@ fn build_waits_with_message_while_lock_is_held_then_proceeds() {
     );
     held.unlock().unwrap();
 
-    let out = run.join().unwrap();
-    assert_ok("build after lock freed", &out);
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("waiting for another beamtalk process in"),
-        "expected the waiting message, got: {}",
-        String::from_utf8_lossy(&out.stderr)
+    let status = child.wait().unwrap();
+    reader.join().unwrap();
+    stderr_lines.extend(rx.try_iter());
+    let stderr = stderr_lines.join("\n");
+    assert!(status.success(), "build after lock freed failed:\n{stderr}");
+    assert_eq!(
+        stderr.matches(WAITING).count(),
+        1,
+        "expected the waiting message exactly once, got: {stderr}"
     );
 }
