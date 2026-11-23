@@ -297,7 +297,7 @@ c increment
 c count        // => 2  ✓
 
 // Only after local verification: run full suite
-Workspace test        // => TestResult (12 passed, 0 failed)
+Workspace test        // => TestResult(12 tests, 12 passed (0.1s))
 // Or target a specific test class:
 Workspace test: CounterTest
 ```

@@ -70,6 +70,10 @@ that forwards to the canonical selector.
 A compiler-checked deprecation annotation is out of scope: "deprecated" is a
 sentence in the alias's doc comment.
 
+**Decision (owner, 2026-11-21, BT-5113):** there is no deprecation mechanism and
+no compiler warning for now. `String reverse`, `Duration totalDays`,
+`Logger warn:` and `Set fromList:` stay deprecated only in their doc comments.
+
 ## Rules the test enforces
 
 | Rule | Check |

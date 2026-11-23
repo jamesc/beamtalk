@@ -9,6 +9,8 @@ Implemented (2026-06-07) — Phases 0–2 implemented 2026-02-17 (epic BT-684); 
 
 **Update (2026-06-06):** Phase 3 (Phoenix LiveView IDE) moves from deferred to **in progress**. The BT-2394 spike (`docs/research/phoenix-topology-spike.md`) settled the topology — **Attach** (Phoenix as its own BEAM node, connected over Erlang distribution + `:rpc`). Implementation is tracked by the LiveView IDE epic **BT-2398** (Waves 1–4 localhost; Wave 5 = remote auth, BT-2411). The remote auth/authz design for Phase 3 is decided in **[ADR 0091 — Connection Security for Remote Workspace Access](0091-remote-workspace-access-phoenix-authenticated-front.md)** (Phoenix as authenticated front: OIDC, per-op RBAC facade, TLS-dist behind it).
 
+**Note (2026-11-23, BT-5113):** this ADR was written when the REPL had `:load` and `:reload` commands. They no longer exist (`:load path` is a parse error). Today use `Workspace load: "path"` for one file (a directory raises `eisdir`), `ClassName reload` for one class, and `:sync` for the whole project. The decision text below is unchanged.
+
 ## Context
 
 ### Problem

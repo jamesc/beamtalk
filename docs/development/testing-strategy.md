@@ -449,7 +449,7 @@ TestCase subclass: CounterTest
 
 **REPL integration:** TestCase classes can also be run interactively:
 ```text
-> :load stdlib/test/counter_test.bt
+> Workspace load: "stdlib/test/counter_test.bt"
 > CounterTest runAll        // Run all tests in class
 > CounterTest run: #testIncrement  // Run single test
 ```

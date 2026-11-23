@@ -5,6 +5,8 @@ Implemented (2026-02-24)
 
 **Pointer update (2026-11-21, BT-5089):** implementation moved after this ADR was written; the decision text is unchanged. `stdlib/src/SystemDictionary.bt` / `beamtalk_interface.bt` became `stdlib/src/beamtalk.bt` (class `Beamtalk`); `workspace_interface.bt` became `stdlib/src/workspace.bt`; `beamtalk_interface.erl` lives at `runtime/apps/beamtalk_stdlib/src/beamtalk_interface.erl`; `beamtalk_system_dictionary.erl`, `beamtalk_workspace_config.erl` and `beamtalk_workspace_environment.erl` no longer exist (see `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_interface_primitives.erl`); the `counter.bt` example is `examples/getting-started/src/counter.bt`.
 
+**Note (2026-11-23, BT-5113):** this ADR was written when the REPL had `:load` and `:reload` commands. They no longer exist (`:load path` is a parse error). Today use `Workspace load: "path"` for one file (a directory raises `eisdir`), `ClassName reload` for one class, and `:sync` for the whole project. The decision text below is unchanged.
+
 ## Context
 
 ### Problem

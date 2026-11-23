@@ -5,6 +5,8 @@ Implemented (2026-06-03)
 
 > **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** `beamtalk_object_instances` (item 4 of the start order below) is deleted. Start order otherwise unchanged: xref, bootstrap, announcements, stdlib, then the remaining workers.
 
+**Note (2026-11-23, BT-5113):** this ADR was written when the REPL had `:load` and `:reload` commands. They no longer exist (`:load path` is a parse error). Today use `Workspace load: "path"` for one file (a directory raises `eisdir`), `ClassName reload` for one class, and `:sync` for the whole project. The decision text below is unchanged.
+
 ## Implementation Tracking
 
 **Epic:** [BT-2228](https://linear.app/beamtalk/issue/BT-2228) — Runtime: maintained selector→sites xref index for SystemNavigation queries

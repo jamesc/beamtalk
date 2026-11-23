@@ -132,7 +132,7 @@ Create a new actor instance:
 
 ```beamtalk
 > myCounter := Counter spawn
-#Actor<Counter, pid=<0.123.0>>
+Actor(Counter, 0.123.0)
 ```
 
 ### Sending Messages

@@ -2,7 +2,9 @@
 
 Every environment variable the code reads, with what it does. `scripts/ci/check_env_docs.py` (run by `just lint-env-docs`, part of `just lint`) fails when code reads a name that is not a row in a table below, and when a row names a variable nothing reads.
 
-The check scans `*.rs`, `*.erl`, `*.hrl`, `*.ex`, `*.exs` and `*.escript` for `env::var`, `env!`, `option_env!`, `os:getenv`, `System.get_env` and `*ENV*`/`*VAR*` constants. Cargo's own build-script variables (`OUT_DIR`, `CARGO_MANIFEST_DIR`, `CARGO_PKG_VERSION`, `CARGO_CFG_*`) are exempt. A variable read through some other mechanism (for example a shell script's `$VAR`) is not found by the check.
+The check scans `*.rs`, `*.erl`, `*.hrl`, `*.ex`, `*.exs` and `*.escript` for `env::var`, `env!`, `option_env!`, `os:getenv`, `System.get_env`, the helper wrappers `require_env`/`env_or*`/`env_flag*`/`read_env*`, and `*ENV*`/`*VAR*` constants. In `*.sh`/`*.bash` it finds `$NAME` / `${NAME}` only when the name starts with `BEAMTALK_`, `BT_`, `E2E_`, `VS_BENCH_` or `VD_BENCH_`. Cargo's own build-script variables (`OUT_DIR`, `CARGO_MANIFEST_DIR`, `CARGO_PKG_VERSION`, `CARGO_CFG_*`) are exempt.
+
+**What the check cannot see:** un-prefixed shell knobs (for example `SKIP_ERLANG`, `SKIP_NODE`, `SKIP_NET`, `MISE_*` and `SKILLS_INIT_*` in `scripts/setup-cloud.sh` and `scripts/cloud-doctor.sh`, `PREFIX` in `scripts/install.sh`), because a shell variable without a project prefix cannot be told from a script-local one; names built at run time; and wrappers with other names. Read the header comment of each script for those.
 
 Each row describes the read site, not an end-to-end run; rows for test knobs were checked against the code only.
 
@@ -49,6 +51,13 @@ Read by shipped binaries and the runtime. Unset means the default behaviour.
 | `BEAMTALK_VERSION` | Compile-time (`env!`) version baked into `__beamtalk_meta`; set by a build script. |
 | `BEAMTALK_DIRTY_TAG` | Compile-time (`env!`) tag that keeps dirty-tree compilers from sharing provenance; set by a build script. |
 | `BEAMTALK_SPEC_MAPPING_STAMP` | Compile-time (`env!`) stamp for the type-spec mapping; set by a build script. |
+| `BEAMTALK_NIGHTLY` | `scripts/install.sh`: `1` installs the nightly build. |
+| `BEAMTALK_EDGE` | `scripts/install.sh`: `1` installs the edge build. |
+| `BEAMTALK_PREFIX` | Install prefix for `scripts/install.sh` (default `~/.beamtalk`, same as `--prefix`) and `scripts/refresh-edge.sh` (default `/usr/local`). |
+| `BEAMTALK_INSTALLER_URL` | `scripts/refresh-edge.sh`: installer to run when the edge build is stale; its checksum is read from `<url>.sha256`. For tests; lifts the https-only rule for the installer fetches. Ignored with a warning when `CLAUDE_CODE_REMOTE=true`. |
+| `BEAMTALK_INSTALLER` | `scripts/refresh-edge.sh`: path of a local installer, run unverified; wins over the URL. Ignored with a warning when `CLAUDE_CODE_REMOTE=true`. |
+| `BEAMTALK_EDGE_BASE_URL` | `scripts/refresh-edge.sh`: download base for the tarball checksum (default: the edge release). For tests; ignored with a warning when `CLAUDE_CODE_REMOTE=true`. |
+| `BEAMTALK_PINS_REF` | `scripts/setup-cloud.sh`: git ref of `.tool-versions` fetched when the checkout has none; default `main`. |
 | `RELEASE_NODE` | Release launcher's `-sname` override; the workspace node uses it as its `workspace_id`. |
 | `ERL_EPMD_ADDRESS` | Erlang's epmd address. The REPL sets a loopback value unless an operator exported one. |
 | `ERL_EPMD_PORT` | Non-default epmd port (`crates/beamtalk-workspace/src/epmd.rs`). |
@@ -103,6 +112,13 @@ Only affect test, coverage, bless and benchmark runs. None changes shipped behav
 | `BEAMTALK_TEST_HEX_REPO_URL` | Debug builds only: unsigned Hex repository used by native-build tests. |
 | `BEAMTALK_TEST_PORT` | MCP client tests: port of a shared REPL. |
 | `BEAMTALK_TEST_COOKIE` | MCP client tests: cookie of the shared REPL. |
+| `BEAMTALK_BIN` | `desktop/e2e/attach-cycle.sh`: path of the `beamtalk` CLI; default `target/debug/beamtalk`. |
+| `BT_ATTACH_LAUNCHER` | `desktop/e2e/attach-cycle.sh`: path of the LiveView release launcher; default `dist-liveview/bin/server`. (The desktop shell's own override is `BEAMTALK_ATTACH_LAUNCHER`.) |
+| `BT_E2E_WORKSPACE_ID` | `desktop/e2e/attach-cycle.sh`: workspace id the e2e run creates; default `bt2989_desktop_e2e`. |
+| `BT_DESKTOP_BROKER_LIVE_LAUNCHER` | Ignored live-front tests in `beamtalk-desktop-broker`: launcher path; the test panics when unset. |
+| `BT_DESKTOP_BROKER_LIVE_WORKSPACE` | Ignored live-front tests: id of a running workspace. |
+| `BT_DESKTOP_BROKER_LIVE_DEAD_WORKSPACE` | Ignored live-front tests: id of a workspace whose node is stopped. |
+| `BEAMTALK_LIB` | `spikes/eep48-doc-chunks/run.sh`: lib directory of an installed runtime to use instead of a local build. |
 | `BEAMTALK_BLESS_OP_TABLE_DOC` | Rewrites the generated op-table doc instead of failing. |
 | `ADR0131_BLESS` | Rewrites the ADR 0131 phase-0 summary table. |
 | `ADR0131_MEASURE_BLESS` | Rewrites the ADR 0131 statement-measure table. |
