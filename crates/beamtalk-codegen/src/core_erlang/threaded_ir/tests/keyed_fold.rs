@@ -278,3 +278,48 @@ fn an_accumulator_the_verifier_cannot_read_is_rejected() {
         vec![VerifyError::FoldResultListOpaque { at: span() }]
     );
 }
+
+#[test]
+fn a_cons_onto_another_list_than_acc_list_is_rejected() {
+    let wrong = |value| {
+        verify_fold_result_list_declared(
+            &body_of(value, Some(filter_list())),
+            Some(filter_list()),
+            span(),
+        )
+    };
+    let base = |found| {
+        vec![VerifyError::FoldResultListWrongBase {
+            slot: FOLD_RESULT_LIST_SLOT,
+            found,
+            at: span(),
+        }]
+    };
+    assert_eq!(
+        wrong(tuple_acc(vec![AccSlot::cons("E", "MatchList")])),
+        base("MatchList")
+    );
+    // A skip arm that carries some other list drops the accumulated one too.
+    assert_eq!(
+        wrong(filter_case(
+            AccSlot::cons("E", "AccList"),
+            AccSlot::Name("Other")
+        )),
+        base("Other")
+    );
+}
+
+#[test]
+fn a_head_too_short_to_reach_the_slot_is_reported_as_missing_not_opaque() {
+    assert_eq!(
+        verify_fold_result_list_declared(
+            &body_of(tuple_acc(Vec::new()), Some(filter_list())),
+            Some(filter_list()),
+            span()
+        ),
+        vec![VerifyError::FoldResultListSlotMissing {
+            slot: FOLD_RESULT_LIST_SLOT,
+            at: span(),
+        }]
+    );
+}

@@ -20,8 +20,8 @@
 //! path remains for either family.
 
 use super::super::threaded_ir::{
-    self, AccSlot, BindOp, FoldAccValue, FoldCarry, FrameId, ThreadedStmt, ValueRef, VersionPrefix,
-    VersionedVar,
+    self, ACC_LIST, AccSlot, BindOp, FoldAccValue, FoldCarry, FrameId, ThreadedStmt, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use super::LocalWrite;
@@ -991,7 +991,7 @@ impl CoreErlangGenerator {
                     stmts.push(Self::fold_accumulator(
                         FoldCarry::StateMap,
                         FoldAccValue::tuple(
-                            vec![AccSlot::cons(&result_var, "AccList")],
+                            vec![AccSlot::cons(&result_var, ACC_LIST)],
                             leaf::var(self.current_state_var()),
                         )
                         .with_prelude(form::let_prefix(
@@ -1389,7 +1389,7 @@ impl CoreErlangGenerator {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
                     FoldAccValue::tuple(
-                        vec![AccSlot::cons(last_val, "AccList")],
+                        vec![AccSlot::cons(last_val, ACC_LIST)],
                         leaf::var(self.current_state_var()),
                     ),
                     span,
@@ -1448,7 +1448,7 @@ impl CoreErlangGenerator {
                 let ir = self.fresh_temp_var("ItemResult");
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    FoldAccValue::tuple(vec![AccSlot::cons(&ir, "AccList")], leaf::var(fs))
+                    FoldAccValue::tuple(vec![AccSlot::cons(&ir, ACC_LIST)], leaf::var(fs))
                         .with_prelude(form::let_prefix(
                             leaf::var(ir),
                             form::element(1, leaf::var(dispatch_var.to_string())),
@@ -1519,7 +1519,7 @@ impl CoreErlangGenerator {
                 let ir = self.fresh_temp_var("T2LoopVal");
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    FoldAccValue::tuple(vec![AccSlot::cons(&ir, "AccList")], leaf::var(fs))
+                    FoldAccValue::tuple(vec![AccSlot::cons(&ir, ACC_LIST)], leaf::var(fs))
                         .with_prelude(form::let_prefix(
                             leaf::var(ir),
                             form::element(1, leaf::var(tuple_var.to_string())),
@@ -1592,7 +1592,7 @@ impl CoreErlangGenerator {
                 BodyKind::FoldlCollect => {
                     stmts.push(Self::fold_accumulator(
                         plan.fold_carry(),
-                        FoldAccValue::tuple(vec![AccSlot::cons(val, "AccList")], vars_doc)
+                        FoldAccValue::tuple(vec![AccSlot::cons(val, ACC_LIST)], vars_doc)
                             .with_prelude(Document::Str(" ")),
                         span,
                     ));
@@ -1641,7 +1641,7 @@ impl CoreErlangGenerator {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
                     FoldAccValue::tuple(
-                        vec![AccSlot::cons(val, "AccList")],
+                        vec![AccSlot::cons(val, ACC_LIST)],
                         leaf::var(self.current_state_var()),
                     )
                     .with_prelude(Document::Str(" ")),
@@ -1711,7 +1711,7 @@ impl CoreErlangGenerator {
                 };
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    FoldAccValue::tuple(vec![AccSlot::cons(rhs_var, "AccList")], leaf::var(fs)),
+                    FoldAccValue::tuple(vec![AccSlot::cons(rhs_var, ACC_LIST)], leaf::var(fs)),
                     span,
                 ));
             }
@@ -1886,7 +1886,7 @@ impl CoreErlangGenerator {
                         stmts.push(Self::fold_accumulator(
                             plan.fold_carry(),
                             FoldAccValue::tuple(
-                                vec![AccSlot::cons(&result_var, "AccList")],
+                                vec![AccSlot::cons(&result_var, ACC_LIST)],
                                 vars_doc,
                             ),
                             span,
@@ -1900,7 +1900,7 @@ impl CoreErlangGenerator {
                         stmts.push(Self::fold_accumulator(
                             FoldCarry::StateMap,
                             FoldAccValue::tuple(
-                                vec![AccSlot::cons(&result_var, "AccList")],
+                                vec![AccSlot::cons(&result_var, ACC_LIST)],
                                 leaf::var(fs),
                             ),
                             span,

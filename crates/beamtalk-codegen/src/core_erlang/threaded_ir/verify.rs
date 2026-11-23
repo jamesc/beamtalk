@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use super::super::nlr::NlrArmShape;
 use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary};
-use super::fold_acc::LeafConses;
+use super::fold_acc::{ACC_LIST, LeafConses};
 use super::ir::{
     BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, ConsPerCall,
     EnsureCleanup, EnsureForeignNlr, EnsureNlrRelay, FoldAccShape, FoldCarry, FoldResultList,
@@ -178,6 +178,19 @@ pub(in crate::core_erlang) enum VerifyError {
     /// BT-5117: a result-list fold's accumulator is hand-built text (or its
     /// result-list slot is), so the cons count cannot be read off it.
     FoldResultListOpaque { at: Span },
+
+    /// BT-5117: a result-list fold's accumulator is typed but its head is too
+    /// short to reach the result-list slot.
+    FoldResultListSlotMissing { slot: usize, at: Span },
+
+    /// BT-5117: the result-list slot builds on `found` rather than the
+    /// accumulator list the lambda bound from `element(slot, Acc)`
+    /// (`ACC_LIST`), so the list accumulated so far is dropped on every call.
+    FoldResultListWrongBase {
+        slot: usize,
+        found: &'static str,
+        at: Span,
+    },
 
     /// Invariant class 3: the recursive inter-construct fallback
     /// invariant `list_op_needs_stateacc_fallback_recursive` encodes
@@ -1456,17 +1469,26 @@ pub(in crate::core_erlang) fn verify_fold_result_list_declared(
     let mut errors = Vec::new();
     for leaf in value.leaf_conses(expected.slot) {
         match leaf {
-            LeafConses::Opaque
-            | LeafConses::Tuple {
+            LeafConses::Opaque => errors.push(VerifyError::FoldResultListOpaque { at }),
+            LeafConses::Tuple {
                 slot_missing: true, ..
-            } => {
-                errors.push(VerifyError::FoldResultListOpaque { at });
-            }
+            } => errors.push(VerifyError::FoldResultListSlotMissing {
+                slot: expected.slot,
+                at,
+            }),
             LeafConses::Tuple {
                 slot_conses,
                 stray_slots,
+                slot_base,
                 ..
             } => {
+                if let Some(found) = slot_base.filter(|b| *b != ACC_LIST) {
+                    errors.push(VerifyError::FoldResultListWrongBase {
+                        slot: expected.slot,
+                        found,
+                        at,
+                    });
+                }
                 let count_ok = match expected.cons {
                     ConsPerCall::AtMostOne => slot_conses <= 1,
                     ConsPerCall::ExactlyOne => slot_conses == 1,

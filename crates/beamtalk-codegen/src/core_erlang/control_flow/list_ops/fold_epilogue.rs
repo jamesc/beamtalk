@@ -16,13 +16,13 @@
 
 use super::super::super::CoreErlangGenerator;
 use super::super::super::threaded_ir::{
-    AccSlot, BoolArm, ConsPerCall, FOLD_RESULT_LIST_SLOT, FoldAccBody, FoldAccValue, FoldCarry,
-    FoldResultList, ThreadedStmt, bool_arm_clause,
+    ACC_LIST, AccSlot, BoolArm, ConsPerCall, FOLD_RESULT_LIST_SLOT, FoldAccBody, FoldAccValue,
+    FoldCarry, FoldResultList, ThreadedStmt, bool_arm_clause as bool_arm, render_tuple,
 };
 use super::super::ThreadingPlan;
 use super::BodyKind;
 use beamtalk_cerl_doc::form::{self, Layout};
-use beamtalk_cerl_doc::{Document, docvec, join, leaf};
+use beamtalk_cerl_doc::{Document, docvec, leaf};
 use beamtalk_core::source_analysis::Span;
 
 /// What every fold epilogue reads beyond its own `BodyKind` fields: the
@@ -129,27 +129,13 @@ impl BodyKind {
     }
 }
 
-/// `{head…, tail}` — an accumulator tuple whose last slot is the epilogue's
-/// trailing state doc (`tail`).
-fn acc_tuple(
-    head: impl IntoIterator<Item = Document<'static>>,
-    tail: &Document<'static>,
-) -> Document<'static> {
-    docvec![
-        "{",
-        join(head, &Document::Str(", ")),
-        ", ",
-        tail.clone(),
-        "}"
-    ]
-}
+/// `{head…, tail}` — the shared accumulator tuple renderer.
+use render_tuple as acc_tuple;
 
 /// `[item | list]` — cons `item_var` onto the accumulator list `list`.
 fn cons(item_var: &str, list: &'static str) -> Document<'static> {
-    docvec!["[", leaf::var(item_var.to_string()), " | ", list, "]"]
+    AccSlot::cons(item_var, list).render()
 }
-
-use bool_arm_clause as bool_arm;
 
 impl CoreErlangGenerator {
     /// The `(carry, tail_state_doc)` pair every fold epilogue ends in: the
@@ -213,10 +199,10 @@ impl CoreErlangGenerator {
         let included = if fault!(FilterConsTwice) {
             AccSlot::Cons {
                 item: item_var.to_string(),
-                list: Box::new(AccSlot::cons(item_var, "AccList")),
+                list: Box::new(AccSlot::cons(item_var, ACC_LIST)),
             }
         } else {
-            AccSlot::cons(item_var, "AccList")
+            AccSlot::cons(item_var, ACC_LIST)
         };
         let arm = |value, head| {
             Box::new(BoolArm {
@@ -231,7 +217,7 @@ impl CoreErlangGenerator {
             prelude: None,
             body: FoldAccBody::BoolCase {
                 scrutinee: condition_doc,
-                arms: [arm(true, included), arm(false, AccSlot::Name("AccList"))],
+                arms: [arm(true, included), arm(false, AccSlot::Name(ACC_LIST))],
                 fallback,
             },
         };

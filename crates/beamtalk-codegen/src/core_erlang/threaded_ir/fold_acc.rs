@@ -16,6 +16,25 @@
 use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::{Document, docvec, join, leaf};
 
+/// The accumulator list a fold lambda binds from `element(FOLD_RESULT_LIST_SLOT, Acc)`;
+/// the base every cons into the result-list slot must build on.
+pub(in crate::core_erlang) const ACC_LIST: &str = "AccList";
+
+/// `{head…, tail}` — an accumulator tuple whose last slot is the epilogue's
+/// trailing state doc (`tail`). The one renderer every fold accumulator tuple uses.
+pub(in crate::core_erlang) fn render_tuple(
+    head: impl IntoIterator<Item = Document<'static>>,
+    tail: &Document<'static>,
+) -> Document<'static> {
+    docvec![
+        "{",
+        join(head, &Document::Str(", ")),
+        ", ",
+        tail.clone(),
+        "}"
+    ]
+}
+
 /// One element of an accumulator tuple's head.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum AccSlot {
@@ -35,15 +54,18 @@ impl AccSlot {
         }
     }
 
-    /// The conses stacked on this slot.
-    fn cons_depth(&self) -> usize {
+    /// The conses stacked on this slot, and the name they are consed onto.
+    fn cons_depth(&self) -> (usize, &'static str) {
         match self {
-            Self::Cons { list, .. } => list.cons_depth() + 1,
-            Self::Name(_) => 0,
+            Self::Cons { list, .. } => {
+                let (n, base) = list.cons_depth();
+                (n + 1, base)
+            }
+            Self::Name(name) => (0, name),
         }
     }
 
-    fn render(&self) -> Document<'static> {
+    pub(in crate::core_erlang) fn render(&self) -> Document<'static> {
         match self {
             Self::Cons { item, list } => {
                 docvec!["[", leaf::var(item.clone()), " | ", list.render(), "]"]
@@ -97,6 +119,8 @@ pub(in crate::core_erlang) enum LeafConses {
         stray_slots: Vec<usize>,
         /// The head has no element at the result-list slot.
         slot_missing: bool,
+        /// The list the result-list slot builds on (`None` when missing).
+        slot_base: Option<&'static str>,
     },
     /// The leaf is hand-built text.
     Opaque,
@@ -159,13 +183,7 @@ pub(in crate::core_erlang) fn bool_arm_clause(
 impl FoldAccBody {
     fn render(&self) -> Document<'static> {
         match self {
-            Self::Tuple { head, tail } => docvec![
-                "{",
-                join(head.iter().map(AccSlot::render), &Document::Str(", ")),
-                ", ",
-                tail.clone(),
-                "}"
-            ],
+            Self::Tuple { head, tail } => render_tuple(head.iter().map(AccSlot::render), tail),
             Self::BoolCase {
                 scrutinee,
                 arms,
@@ -188,11 +206,13 @@ impl FoldAccBody {
             Self::Tuple { head, .. } => {
                 let mut slot_conses = 0;
                 let mut slot_missing = true;
+                let mut slot_base = None;
                 let mut stray_slots = Vec::new();
                 for (i, s) in head.iter().enumerate() {
-                    let conses = s.cons_depth();
+                    let (conses, base) = s.cons_depth();
                     if i + 1 == slot {
                         slot_conses = conses;
+                        slot_base = Some(base);
                         slot_missing = false;
                     } else if conses > 0 {
                         stray_slots.push(i + 1);
@@ -202,6 +222,7 @@ impl FoldAccBody {
                     slot_conses,
                     stray_slots,
                     slot_missing,
+                    slot_base,
                 });
             }
             Self::BoolCase { arms, .. } => {
