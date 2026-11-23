@@ -1660,6 +1660,64 @@ fn register_extensions_adds_instance_method() {
     assert_eq!(ext.defined_in.as_str(), "String");
 }
 #[test]
+fn register_extensions_instance_side_keeps_compiled_method() {
+    // ADR 0066: on the instance side a compiled method beats an extension on
+    // the same class, so the static model keeps the compiled signature.
+    use crate::compilation::extension_index::MethodSide;
+    let mut h = ClassHierarchy::with_builtins();
+    let before = h.all_methods("String").len();
+    let index = single_extension_index(
+        "String",
+        MethodSide::Instance,
+        "size",
+        "String+Size.bt",
+        vec![],
+        Some("Boolean"),
+    );
+    h.register_extensions(&index);
+    let methods = h.all_methods("String");
+    assert_eq!(methods.len(), before);
+    let m = methods.iter().find(|m| m.selector == "size").unwrap();
+    assert_ne!(m.return_type, Some(DeclaredType::simple("Boolean")));
+}
+
+#[test]
+fn register_extensions_class_side_replaces_compiled_class_method() {
+    // BT-5061 / BT-5111: on the class side the extension is checked before the
+    // class's own class method, so the static model must carry the extension's
+    // signature, not the compiled one it shadows.
+    use crate::compilation::extension_index::MethodSide;
+    let mut h = ClassHierarchy::with_builtins();
+    let existing = h
+        .get_class("Object")
+        .unwrap()
+        .class_methods
+        .first()
+        .map(|m| (m.selector.clone(), m.arity))
+        .expect("Object has a class method");
+    let params = vec![None; existing.1];
+    let index = single_extension_index(
+        "Object",
+        MethodSide::Class,
+        &existing.0,
+        "Object+Patch.bt",
+        params,
+        Some("BtFiveOneOneOneMarker"),
+    );
+    h.register_extensions(&index);
+    let class_methods = &h.get_class("Object").unwrap().class_methods;
+    let matching: Vec<_> = class_methods
+        .iter()
+        .filter(|m| m.selector == existing.0)
+        .collect();
+    assert_eq!(matching.len(), 1, "no duplicate entry for the selector");
+    assert_eq!(
+        matching[0].return_type,
+        Some(DeclaredType::simple("BtFiveOneOneOneMarker"))
+    );
+}
+
+#[test]
 fn register_extensions_adds_class_method() {
     use crate::compilation::extension_index::MethodSide;
     let mut h = ClassHierarchy::with_builtins();

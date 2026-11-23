@@ -880,12 +880,23 @@ impl ClassHierarchy {
                     MethodSide::Instance => &mut class_info.methods,
                     MethodSide::Class => &mut class_info.class_methods,
                 };
-                // Don't add if a method with the same selector already exists
-                // (the class's own definition takes precedence over extensions).
-                let already_exists = methods.iter().any(|m| m.selector == key.selector);
-                if !already_exists {
-                    methods.push(method_info);
-                    changed = true;
+                // Instance side: the class's own definition takes precedence
+                // over an extension on the same class (ADR 0066), so the
+                // extension is not added. Class side: the extension is checked
+                // *before* the class's own class method (BT-5061), so it
+                // replaces the compiled method's static signature — the type
+                // checker must see what a send actually answers (BT-5111).
+                let existing = methods.iter().position(|m| m.selector == key.selector);
+                match (existing, &key.side) {
+                    (None, _) => {
+                        methods.push(method_info);
+                        changed = true;
+                    }
+                    (Some(i), &MethodSide::Class) => {
+                        methods[i] = method_info;
+                        changed = true;
+                    }
+                    (Some(_), &MethodSide::Instance) => {}
                 }
             }
         }
