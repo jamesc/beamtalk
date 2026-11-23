@@ -47,6 +47,11 @@ pub struct StagedApp {
     /// (`{undefined_applications, […]}`), so every one of these must end up
     /// either staged or in the release's host-app set.
     pub declared_deps: Vec<String>,
+    /// An extra `priv/` source directory to stage into `lib/<name>-<vsn>/priv/`
+    /// beyond the one beside each source ebin — the project app's own
+    /// `<project_root>/priv/` (BT-5107; its ebin lives in `_build/`, so the
+    /// sibling rule never finds it).
+    pub source_priv: Option<Utf8PathBuf>,
 }
 
 /// The computed application closure for a release build.
@@ -160,7 +165,12 @@ pub fn compute_app_closure(
     if native_ebin.is_dir() {
         project_ebins.push(native_ebin);
     }
-    staged.push(read_staged_app(&pkg.name, &project_ebins)?);
+    let mut project_app = read_staged_app(&pkg.name, &project_ebins)?;
+    let project_priv = layout.project_root().join("priv");
+    if project_priv.is_dir() {
+        project_app.source_priv = Some(project_priv);
+    }
+    staged.push(project_app);
 
     let mut host_apps = vec![
         "kernel".to_string(),
@@ -387,6 +397,7 @@ fn read_staged_app(name: &str, source_ebins: &[Utf8PathBuf]) -> Result<StagedApp
         vsn,
         source_ebins: source_ebins.to_vec(),
         declared_deps,
+        source_priv: None,
     })
 }
 
@@ -773,6 +784,7 @@ mod tests {
             vsn: "0.1.5".to_string(),
             source_ebins: vec![],
             declared_deps: vec!["kernel".to_string(), "gun".to_string()],
+            source_priv: None,
         }];
         let mut host_apps = vec!["kernel".to_string(), "stdlib".to_string()];
 
@@ -802,6 +814,7 @@ mod tests {
             vsn: "1.8.0".to_string(),
             source_ebins: vec![],
             declared_deps: vec!["ssl".to_string()],
+            source_priv: None,
         }];
         let mut host_apps = vec!["kernel".to_string()];
 

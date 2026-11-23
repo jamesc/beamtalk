@@ -332,6 +332,21 @@ pub(super) fn remove_file_if_exists(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// Remove `port.bt-staging.<n>.tmp` leftovers of a crashed port-file write.
+fn remove_staged_port_files(ws_dir: &std::path::Path) -> Result<()> {
+    let Ok(entries) = fs::read_dir(ws_dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("port.bt-staging.") && name.ends_with(".tmp") {
+            remove_file_if_exists(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
 /// Remove stale runtime files (`node.info`, `port`, `pid`, `starting`) from a workspace directory.
 ///
 /// These files are written during workspace startup and must be cleaned before
@@ -355,9 +370,13 @@ pub fn remove_stale_runtime_files(workspace_id: &str) -> Result<()> {
     let ws_dir = workspace_dir(workspace_id)?;
     remove_file_if_exists(&ws_dir.join("node.info"))?;
     remove_file_if_exists(&ws_dir.join("port"))?;
-    // Atomic port file write (beamtalk_repl_server) writes to port.tmp then
-    // renames to port.  A crash between those two steps leaves a stale tmp file.
+    // Atomic port file write (beamtalk_repl_server) stages to a unique
+    // `port.bt-staging.<n>.tmp` (`beamtalk_workspace_file:temp_path/1`), then
+    // renames to `port`. A crash between those two steps leaves a stale tmp
+    // file; sweep those, and the legacy fixed `port.tmp` of older builds
+    // (BT-5107).
     remove_file_if_exists(&ws_dir.join("port.tmp"))?;
+    remove_staged_port_files(&ws_dir)?;
     remove_file_if_exists(&ws_dir.join("pid"))?;
     remove_file_if_exists(&ws_dir.join("starting"))?;
     // NOTE: `startup.log` is deliberately NOT removed here.
@@ -602,6 +621,7 @@ mod tests {
             "node.info",
             "port",
             "port.tmp",
+            "port.bt-staging.12345.tmp",
             "pid",
             "startup.log",
             "starting",
@@ -611,7 +631,14 @@ mod tests {
 
         remove_stale_runtime_files(&ws_id).expect("remove_stale_runtime_files should not fail");
 
-        for name in &["node.info", "port", "port.tmp", "pid", "starting"] {
+        for name in &[
+            "node.info",
+            "port",
+            "port.tmp",
+            "port.bt-staging.12345.tmp",
+            "pid",
+            "starting",
+        ] {
             assert!(
                 !ws_dir.join(name).exists(),
                 "{name} should have been removed by remove_stale_runtime_files"

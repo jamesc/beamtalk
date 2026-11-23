@@ -33,6 +33,30 @@ pub fn warn_if_plaintext_url(name: &str, url: &str) {
     }
 }
 
+/// Environment variable that opts in to a plaintext (`http://`, `git://`) git
+/// URL pinned in `beamtalk.lock` (BT-5107).
+pub const ALLOW_INSECURE_LOCKED_GIT_ENV: &str = "BEAMTALK_ALLOW_INSECURE_GIT";
+
+/// Refuse a plaintext git URL that `beamtalk.lock` pins, unless `allow` is set.
+///
+/// A manifest naming `http://` only warns (the author chose it), but a
+/// committed lock file is what CI and teammates trust to reproduce a build:
+/// fetching a locked commit over a tamperable transport defeats the pin, so it
+/// needs an explicit opt-in ([`ALLOW_INSECURE_LOCKED_GIT_ENV`]).
+fn check_locked_url_transport(name: &str, url: &str, locked: bool, allow: bool) -> Result<()> {
+    if locked && !allow && is_plaintext_git_url(url) {
+        miette::bail!(
+            "Dependency '{name}' is locked to the plaintext git URL '{url}'.\n\n  \
+             http:// and git:// transports can be tampered with in transit, so a \
+             locked dependency may not use them.\n\n  \
+             Switch the dependency to an https:// or ssh:// URL and run \
+             `beamtalk deps update {name}`, or set {ALLOW_INSECURE_LOCKED_GIT_ENV}=1 \
+             to accept the risk."
+        );
+    }
+    Ok(())
+}
+
 /// Result of resolving a single git dependency.
 #[derive(Debug, Clone)]
 pub struct ResolvedGitDep {
@@ -70,6 +94,8 @@ pub struct ResolvedGitDep {
 /// - The requested tag/branch/rev does not exist
 /// - Git commands fail
 /// - A matching lock entry's SHA differs from the freshly resolved SHA
+/// - A matching lock entry pins a plaintext (`http://`, `git://`) URL and
+///   `BEAMTALK_ALLOW_INSECURE_GIT=1` is not set
 pub fn resolve_git_dep(
     name: &str,
     url: &str,
@@ -79,6 +105,13 @@ pub fn resolve_git_dep(
 ) -> Result<ResolvedGitDep> {
     let deps_dir = beamtalk_core::build_layout::BuildLayout::new(project_root).deps_dir();
     let checkout_path = deps_dir.join(name);
+
+    check_locked_url_transport(
+        name,
+        url,
+        lock_entry.is_some_and(|e| e.url == url),
+        std::env::var_os(ALLOW_INSECURE_LOCKED_GIT_ENV).is_some_and(|v| v == "1"),
+    )?;
 
     // Check if we can skip re-clone based on lockfile.
     //
@@ -342,6 +375,24 @@ mod tests {
     use super::*;
     use crate::commands::util::to_forward_slash;
     use tempfile::TempDir;
+
+    /// BT-5107: a plaintext URL pinned by the lock fails unless opted in;
+    /// unlocked (manifest-only) plaintext and any secure URL are unaffected.
+    #[test]
+    fn locked_plaintext_url_is_refused_without_opt_in() {
+        for url in ["http://example.test/r.git", "git://example.test/r.git"] {
+            let err = check_locked_url_transport("dep", url, true, false).unwrap_err();
+            assert!(
+                err.to_string().contains(ALLOW_INSECURE_LOCKED_GIT_ENV),
+                "{err}"
+            );
+            check_locked_url_transport("dep", url, true, true).unwrap();
+            check_locked_url_transport("dep", url, false, false).unwrap();
+        }
+        for url in ["https://example.test/r.git", "ssh://git@example.test/r.git"] {
+            check_locked_url_transport("dep", url, true, false).unwrap();
+        }
+    }
 
     /// Regression (BT-4016): `git clone` must not inherit the process cwd,
     /// which a concurrently running `#[serial(cwd)]` test may have pointed at

@@ -96,7 +96,9 @@ fn render_template(
     // spell another placeholder verbatim (e.g. `[release] name =
     // "__RELEASE_VSN__"`) would otherwise have its own already-substituted
     // occurrence corrupted by a later `.replace()` in the chain.
-    let placeholders: [(&str, &str); 4] = [
+    let placeholders: [(&str, &str); 5] = [
+        // A literal TAB for `launcher.cmd`'s `RELEASE_COOKIE` check (BT-5107).
+        ("__TAB__", "\t"),
         ("__RELEASE_NAME__", release_name),
         ("__RELEASE_VSN__", release_vsn),
         ("__ERTS_VERSION__", erts_version),
@@ -483,6 +485,26 @@ mod tests {
         assert!(
             !cmd.replace("\r\n", "").contains('\n'),
             "found a bare \\n not preceded by \\r"
+        );
+    }
+
+    /// BT-5107: `launcher.cmd` rejects a TAB in `RELEASE_COOKIE` like
+    /// `launcher.sh` does — the generated script carries a real TAB (never
+    /// the placeholder) and strips it in the cookie check. Not executed on
+    /// Windows from this suite (no `cmd.exe` here); the text is asserted.
+    #[test]
+    fn write_launcher_scripts_cmd_checks_tab_in_cookie() {
+        let (root, _temp) = write_scripts(true);
+        let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
+        assert!(!cmd.contains("__TAB__"), "placeholder must be substituted");
+        assert!(
+            cmd.contains("set \"TAB=\t\"\r\n"),
+            "TAB variable holds a real TAB"
+        );
+        assert!(cmd.contains("set \"CK_CHECK=!CK_CHECK:%TAB%=!\""));
+        assert!(
+            !LAUNCHER_CMD_TEMPLATE.contains('\t'),
+            "the template itself must not contain a literal TAB"
         );
     }
 
