@@ -295,9 +295,7 @@ impl CoreErlangGenerator {
                 } = target.as_ref()
                 {
                     // Verify the receiver is 'self'
-                    if let Expression::Identifier(recv_id) = receiver.as_ref()
-                        && recv_id.name == "self"
-                    {
+                    if receiver.is_self() {
                         // Field assignment: self.field := value
                         // Generate state-threaded update:
                         // let _Val = <value> in let State{n} = maps:put('field', _Val, State{n-1}) in _Val

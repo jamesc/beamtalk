@@ -216,7 +216,7 @@ impl CoreErlangGenerator {
 
     /// `self` as the receiver of a class-side access.
     pub(super) fn is_self_receiver(expr: &Expression) -> bool {
-        matches!(expr, Expression::Identifier(id) if id.name == "self")
+        expr.is_self()
     }
 
     /// BT-3762: the diagnostic for a class method naming a class variable that

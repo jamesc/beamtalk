@@ -135,7 +135,7 @@ pub(crate) fn resolve_receiver_class(
     match canonical_operand(receiver) {
         Expression::ClassReference { name, .. } => Some((name.name.clone(), true)),
         Expression::Super(_) => context.superclass_name(hierarchy),
-        Expression::Identifier(ident) if ident.name == "self" => context.self_class(),
+        expr if expr.is_self() => context.self_class(),
         // A map shape (`#{#a => 1}`, ADR 0147) resolves as its `Dictionary`.
         _ => type_of_parsed(type_map, receiver)
             .and_then(InferredType::instance_class)

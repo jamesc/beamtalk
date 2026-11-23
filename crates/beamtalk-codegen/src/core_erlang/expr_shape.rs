@@ -345,7 +345,7 @@ pub(super) fn is_own_class_reference(ctx: &ShapeCtx<'_>, expr: &Expression) -> b
 /// operand. The one place that must agree with the shared front-end rule on
 /// `(self)` itself, `error_signal_receiver_kind`, calls `is_self()` directly.
 pub(super) fn is_self_identifier(expr: &Expression) -> bool {
-    matches!(expr, Expression::Identifier(id) if id.name == "self")
+    expr.is_self()
 }
 
 /// Checks if an expression is a local variable assignment (`identifier := value`).
@@ -398,9 +398,7 @@ pub(super) fn is_actor_self_send(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool 
         if *is_cast {
             return false;
         }
-        if let Expression::Identifier(id) = receiver.as_ref() {
-            return id.name == "self";
-        }
+        return receiver.is_self();
     }
     false
 }
@@ -619,12 +617,11 @@ pub(super) fn is_self_field_at_put(ctx: &ShapeCtx<'_>, expr: &Expression) -> boo
         arguments,
         ..
     } = expr
-        && let Expression::Identifier(id) = receiver.as_ref()
     {
         // Classify via the well-known enum. The classifier
         // already guarantees the two-part keyword shape; arguments.len()
         // is checked defensively for parser-shape consistency.
-        if id.name == "self"
+        if receiver.is_self()
             && !ctx.self_var_bound
             && matches!(selector.well_known(), Some(WellKnownSelector::FieldAtPut))
             && arguments.len() == 2
@@ -651,8 +648,7 @@ pub(super) fn is_self_clear_field(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool
         arguments,
         ..
     } = expr
-        && let Expression::Identifier(id) = receiver.as_ref()
-        && id.name == "self"
+        && receiver.is_self()
         && !ctx.self_var_bound
         && matches!(selector.well_known(), Some(WellKnownSelector::ClearField))
         && arguments.len() == 1

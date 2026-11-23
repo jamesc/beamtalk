@@ -723,7 +723,7 @@ fn receiver_hint_for_expr(receiver: &Expression) -> ReceiverHint {
     let receiver = canonical_operand(receiver);
     match receiver {
         Expression::ClassReference { name, .. } => ReceiverHint::ClassReference(name.name.clone()),
-        Expression::Identifier(ident) if ident.name == "self" => ReceiverHint::SelfReceiver,
+        expr if expr.is_self() => ReceiverHint::SelfReceiver,
         Expression::Super(_) => ReceiverHint::SuperReceiver,
         _ => ReceiverHint::Expression(receiver.span()),
     }

@@ -255,9 +255,7 @@ impl CoreErlangGenerator {
         if !self.in_class_method() {
             return Ok(None);
         }
-        if let Expression::Identifier(id) = receiver
-            && id.name == "self"
-        {
+        if receiver.is_self() {
             // ADR 0118 phase 5b: reached through ordinary
             // `generate_expression`, not `threaded_expression`'s own
             // producer recognition — close the prelude inline.

@@ -729,9 +729,7 @@ fn is_effect_free(expr: &Expression) -> bool {
         Expression::Literal(..)
         | Expression::Identifier(..)
         | Expression::ClassReference { .. } => true,
-        Expression::FieldAccess { receiver, .. } => {
-            matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
-        }
+        Expression::FieldAccess { receiver, .. } => receiver.is_self(),
         _ => false,
     }
 }
