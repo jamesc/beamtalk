@@ -47,7 +47,7 @@ impl Backend {
             versions: Arc::new(Mutex::new(HashMap::new())),
             open_generation: Mutex::new(HashMap::new()),
             text_sync: Mutex::new(()),
-            publish_lock: tokio::sync::Mutex::new(()),
+            publish_lock: Arc::new(tokio::sync::Mutex::new(())),
             next_open_generation: std::sync::atomic::AtomicU64::new(0),
             dirty_files: Mutex::new(HashSet::new()),
             diagnostic_generation: Mutex::new(HashMap::new()),
@@ -1365,6 +1365,7 @@ impl Backend {
         };
         let open_paths_handle = OpenPathsHandle {
             versions: Arc::clone(&self.versions),
+            publish_lock: Arc::clone(&self.publish_lock),
         };
         let listener_handle = tokio::spawn(flush_event_listener(
             listener_client,

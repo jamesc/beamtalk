@@ -310,18 +310,14 @@ impl Backend {
                 let _sync = self.text_sync.lock_recover();
                 {
                     let mut svc = self.service.lock_recover();
-                    // BT-5078: a changed set of classes defined in this file
-                    // (e.g. `Foo` renamed to `Bar`) changes what other open
-                    // files resolve, so they must be re-checked too.
-                    let before = svc
-                        .project_index()
-                        .classes_in_file(&path)
-                        .map(<[_]>::to_vec);
+                    // BT-5078/BT-5109: a changed interface (the set of classes
+                    // defined in this file, or any class's methods, signatures
+                    // or state) changes what other open files resolve, so
+                    // they must be re-checked too. Method-body edits leave
+                    // the interface equal, so ordinary typing is unaffected.
+                    let before = svc.project_index().file_interface(&path);
                     svc.update_file(path.clone(), change.text);
-                    let after = svc
-                        .project_index()
-                        .classes_in_file(&path)
-                        .map(<[_]>::to_vec);
+                    let after = svc.project_index().file_interface(&path);
                     if before != after {
                         self.pending_interface_change
                             .lock_recover()

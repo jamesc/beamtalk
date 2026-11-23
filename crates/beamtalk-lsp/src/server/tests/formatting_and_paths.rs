@@ -273,3 +273,44 @@ fn range_format_full_range_matches_whole_document() {
 fn range_format_parse_error_returns_none() {
     assert!(range_format::format_range_edits("@@@invalid@@@", 0, 3).is_none());
 }
+
+/// BT-5109: `FormattingOptions` are deliberately ignored — one canonical
+/// style, identical to `beamtalk fmt`.
+#[tokio::test]
+async fn formatting_ignores_formatting_options() {
+    use tower_lsp::lsp_types::{
+        DocumentFormattingParams, FormattingOptions, TextDocumentIdentifier,
+    };
+    let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+    let backend: &Backend = service.inner();
+    let dir = Utf8PathBuf::from_path_buf(unique_temp_dir("bt-5109-fmt")).expect("utf8");
+    let path = dir.join("f.bt");
+    let uri = open_test_file(backend, &path, "Object subclass: Foo\n    bar =>   42\n");
+    let run = |opts: FormattingOptions| {
+        let uri = uri.clone();
+        async move {
+            backend
+                .formatting(DocumentFormattingParams {
+                    text_document: TextDocumentIdentifier { uri },
+                    options: opts,
+                    work_done_progress_params:
+                        tower_lsp::lsp_types::WorkDoneProgressParams::default(),
+                })
+                .await
+                .expect("formatting")
+        }
+    };
+    let spaces = run(FormattingOptions {
+        tab_size: 4,
+        insert_spaces: true,
+        ..Default::default()
+    })
+    .await;
+    let tabs = run(FormattingOptions {
+        tab_size: 8,
+        insert_spaces: false,
+        ..Default::default()
+    })
+    .await;
+    assert_eq!(spaces, tabs, "options must not change the output");
+}

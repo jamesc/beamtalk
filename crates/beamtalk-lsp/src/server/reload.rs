@@ -29,6 +29,10 @@ use tower_lsp::lsp_types::{DiagnosticSeverity, MessageType, Position, Range, Url
 #[derive(Clone)]
 pub(crate) struct OpenPathsHandle {
     pub(in crate::server) versions: Arc<Mutex<HashMap<Utf8PathBuf, i32>>>,
+    /// `Backend::publish_lock` (BT-5109): the listeners' reload publishes take
+    /// it too, so they are ordered against `did_close`'s clearing publish and
+    /// the editor publishes instead of racing them.
+    pub(in crate::server) publish_lock: Arc<tokio::sync::Mutex<()>>,
 }
 impl OpenPathsHandle {
     /// Returns true if `path` is currently registered as open in the LSP
@@ -227,7 +231,8 @@ pub(in crate::server) async fn reload_check_listener(
             // `republish_open_diagnostics` is guaranteed to pick it up in its
             // one, correct publish once preload completes.
             if !should_defer_reload_publish_for_preload(&service, &open_paths, &uri) {
-                publish_diagnostics_impl(&client, &service, &reload_diagnostics, &uri, None).await;
+                publish_diagnostics_impl(&client, &service, &reload_diagnostics, &open_paths, &uri)
+                    .await;
             }
         }
     }
@@ -369,7 +374,7 @@ pub(in crate::server) async fn seed_reload_diagnostics(
         // `republish_open_diagnostics` picks this seed up correctly once
         // preload completes.
         if !should_defer_reload_publish_for_preload(service, open_paths, &uri) {
-            publish_diagnostics_impl(client, service, reload_diagnostics, &uri, None).await;
+            publish_diagnostics_impl(client, service, reload_diagnostics, open_paths, &uri).await;
         }
     }
 }
@@ -384,18 +389,23 @@ pub(in crate::server) async fn seed_reload_diagnostics(
 /// shows for a URI (no incremental-append notification), so every call,
 /// whether triggered by a normal edit/save or by a reload-check push, must
 /// include both sources or one silently clobbers the other.
+///
+/// BT-5109: takes `publish_lock` and computes under it, so a reload publish
+/// is ordered against `did_close`'s clearing publish and never sends a
+/// result computed before a close after that close's clear.
 pub(in crate::server) async fn publish_diagnostics_impl(
     client: &Client,
     service: &Mutex<SimpleLanguageService>,
     reload_diagnostics: &std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>,
+    open_paths: &OpenPathsHandle,
     uri: &Url,
-    version: Option<i32>,
 ) {
+    let _publishing = open_paths.publish_lock.lock().await;
     let Some(diagnostics) = compute_publish_diagnostics(service, reload_diagnostics, uri) else {
         return;
     };
     client
-        .publish_diagnostics(uri.clone(), diagnostics, version)
+        .publish_diagnostics(uri.clone(), diagnostics, None)
         .await;
 }
 

@@ -218,7 +218,7 @@ pub struct Backend {
     /// Serialises sending `publishDiagnostics` against `did_close`'s clearing
     /// publish, so a publish racing a close cannot leave ghost diagnostics on
     /// a closed tab (BT-5078).
-    publish_lock: tokio::sync::Mutex<()>,
+    publish_lock: Arc<tokio::sync::Mutex<()>>,
     /// Source for `open_generation`'s values — monotonic and global (not
     /// per-path) is sufficient: `did_close` only ever compares one path's
     /// before/after value against itself, never across paths.
@@ -673,6 +673,11 @@ impl LanguageServer for Backend {
     }
 
     /// Formats the entire document using the Beamtalk unparser.
+    ///
+    /// `FormattingOptions` (tab size, `insertSpaces`, trim/final-newline flags)
+    /// are deliberately ignored (BT-5109): Beamtalk has one canonical style,
+    /// the same one `beamtalk fmt` and the MCP formatter produce, so an editor
+    /// setting must not make the LSP disagree with them.
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         guard_request("formatting", async move {
             Ok(self.format_document(&params.text_document.uri))

@@ -857,6 +857,27 @@ impl ProjectIndex {
         self.file_classes.get(file).map(Vec::as_slice)
     }
 
+    /// The interface `file` exports to other files (BT-5109): every class it
+    /// defines with its full `ClassInfo` (superclass, methods and their
+    /// signatures, state), sorted by class name. Two calls compare equal
+    /// exactly when nothing another file can observe has changed, so a
+    /// method added, removed or re-typed makes them differ, while an edit to
+    /// a method body does not.
+    #[must_use]
+    pub fn file_interface(
+        &self,
+        file: &Utf8PathBuf,
+    ) -> Option<Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>> {
+        let names = self.file_classes.get(file)?;
+        let hierarchy = self.file_hierarchies.get(file)?;
+        let mut infos: Vec<_> = names
+            .iter()
+            .filter_map(|n| hierarchy.get_class(n).cloned())
+            .collect();
+        infos.sort_by(|a, b| a.name.cmp(&b.name));
+        Some(infos)
+    }
+
     /// Returns `true` if `file` was loaded as part of the stdlib source set.
     ///
     /// `SimpleLanguageService::diagnostics` uses this to suppress the

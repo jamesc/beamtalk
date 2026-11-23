@@ -484,6 +484,7 @@ fn should_defer_reload_publish_for_preload_requires_open_and_in_progress() {
         Arc::new(Mutex::new(HashMap::from([(path.clone(), 1)])));
     let open_paths = OpenPathsHandle {
         versions: Arc::clone(&versions),
+        publish_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
 
     let mut service = SimpleLanguageService::new();
@@ -516,6 +517,7 @@ fn open_paths_handle_observes_late_inserts() {
     let versions: Arc<Mutex<HashMap<Utf8PathBuf, i32>>> = Arc::new(Mutex::new(HashMap::new()));
     let handle = OpenPathsHandle {
         versions: Arc::clone(&versions),
+        publish_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
     let path = Utf8PathBuf::from("/workspace/counter.bt");
     assert!(!handle.contains(&path));
@@ -530,6 +532,7 @@ fn open_paths_handle_observes_late_removes() {
     let versions: Arc<Mutex<HashMap<Utf8PathBuf, i32>>> = Arc::new(Mutex::new(HashMap::new()));
     let handle = OpenPathsHandle {
         versions: Arc::clone(&versions),
+        publish_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
     let path = Utf8PathBuf::from("/workspace/counter.bt");
     versions.lock_recover().insert(path.clone(), 1);
