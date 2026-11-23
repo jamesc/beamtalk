@@ -375,12 +375,19 @@ early_death_test_() ->
             {"noproc with metadata still present restarts the class eagerly",
                 timed(fun() -> early_death('EarlyDeathKept', {ok, some_module}, true) end)},
             {"noproc with the metadata gone (a removed class) is not resurrected",
-                timed(fun() -> early_death('EarlyDeathRemoved', not_found, false) end)}
+                timed(fun() -> early_death('EarlyDeathRemoved', not_found, false) end)},
+            {"noproc for a class a lazy recovery already restarted is left alone",
+                timed(fun() -> early_death('EarlyDeathLive', {ok, some_module}, false, self()) end)}
         ]
     end}.
 
 early_death(ClassName, MetadataLookup, ExpectRestart) ->
+    early_death(ClassName, MetadataLookup, ExpectRestart, undefined).
+
+early_death(ClassName, MetadataLookup, ExpectRestart, LivePid) ->
     meck:new(beamtalk_class_registry, [passthrough]),
+    LivePid =:= undefined orelse
+        meck:expect(beamtalk_class_registry, whereis_class, fun(_) -> LivePid end),
     meck:new(beamtalk_class_metadata, [passthrough]),
     meck:expect(beamtalk_class_metadata, lookup_module, fun
         (Name) when Name =:= ClassName -> MetadataLookup;

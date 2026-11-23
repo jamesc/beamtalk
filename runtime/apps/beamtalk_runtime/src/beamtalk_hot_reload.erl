@@ -44,14 +44,12 @@ runtime.
 -define(CHANGE_WAIT_MS, 5000).
 %% Bounds the resume after a successful change (BT-5084). The suspend and the
 %% change themselves wait without a bound: the worker, not the caller, owns the
-%% suspension, and a dead actor ends the wait.
+%% suspension, and a dead actor ends the wait. A wedged actor therefore parks the
+%% worker until it recovers or dies (BT-5110); giving up would need a resume
+%% queued behind the stale suspend, which can un-suspend a failed migration.
 -define(RESUME_TIMEOUT_MS, 60000).
 %% Re-suspends when an overlapping reload resumed the actor under us.
 -define(CHANGE_RETRIES, 3).
-%% How long a worker waits for a wedged actor to accept the suspend before it
-%% gives up (BT-5110), so a stuck actor costs a worker per reload for at most
-%% this long. Overridable with the `hot_reload_suspend_max_ms` app env (tests).
--define(SUSPEND_MAX_MS, 600000).
 
 %% Public API
 -export([
@@ -173,20 +171,15 @@ trigger_code_change(Module, Pids, Extra) ->
 
 -doc """
 The subset of `trigger_code_change/3`'s `Failures` whose actor is really left
-suspended (BT-5110): a migration that returned `{error, _}`. A `timeout` (the
-worker may still resume the actor), `retries_exhausted` (an overlapping reload
-resumed it) or `noproc` (it is dead) is not suspended and must not be reported
-as such (`instances_suspended`).
+suspended (BT-5110): a migration that returned `{error, _}`, tagged
+`{left_suspended, Reason}` by `change_then_resume/4`. A `timeout` (the worker may
+still resume the actor), `retries_exhausted` (an overlapping reload resumed it),
+`noproc` or a crash (the actor or worker is dead) is not suspended and must not be
+reported as such (`instances_suspended`).
 """.
 -spec failures_left_suspended([{pid(), term()}]) -> [{pid(), term()}].
 failures_left_suspended(Failures) ->
-    [
-        F
-     || {_Pid, Reason} = F <- Failures,
-        Reason =/= timeout,
-        Reason =/= retries_exhausted,
-        Reason =/= noproc
-    ].
+    [F || {_Pid, {left_suspended, _}} = F <- Failures].
 
 %%====================================================================
 %% Internal functions
@@ -390,7 +383,7 @@ try_change_code(Pid, Module, Extra) ->
 %% The suspend / change_code / resume sequence for one actor. Runs in the
 %% `try_change_code/3` worker.
 %%
-%% Both `sys` calls wait with `infinity`: the caller's wait is bounded on its own
+%% Both `sys` calls wait with `infinity` (still true after BT-5110): the caller's wait is bounded on its own
 %% (?CHANGE_WAIT_MS), and a dead actor exits either call with `noproc`. A timeout
 %% on the suspend must NOT queue a blind resume: when a previous reload's slow
 %% migration is still running, that resume would run after it and resume an actor
@@ -399,13 +392,11 @@ try_change_code(Pid, Module, Extra) ->
 -spec run_change(pid(), atom(), term(), non_neg_integer()) -> ok | {error, term()}.
 run_change(Pid, Module, Extra, Attempts) ->
     try
-        ok = sys:suspend(Pid, suspend_max_ms()),
+        ok = sys:suspend(Pid, infinity),
         change_then_resume(Pid, Module, Extra, Attempts)
     catch
         exit:{noproc, _} ->
             {error, noproc};
-        exit:{timeout, _} ->
-            abandon_suspend(Pid, Module);
         Class:Error:Stacktrace ->
             ?LOG_DEBUG(
                 "Code change failed for ~p: ~p:~p",
@@ -414,27 +405,6 @@ run_change(Pid, Module, Extra, Attempts) ->
             ),
             {error, {Class, Error}}
     end.
-
-%% BT-5110: the actor never answered the suspend (wedged). The suspend request
-%% stays queued in its mailbox, so queue a matching resume behind it (fire and
-%% forget: the reply goes to this dying worker and is dropped). Net effect once
-%% the actor recovers: it runs again instead of being suspended with no owner.
--spec abandon_suspend(pid(), atom()) -> {error, timeout}.
-abandon_suspend(Pid, Module) ->
-    Pid ! {system, {self(), make_ref()}, resume},
-    ?LOG_ERROR(
-        #{
-            msg => <<"actor did not accept the suspend for a code change; gave up waiting">>,
-            module => Module,
-            pid => Pid
-        },
-        #{domain => [beamtalk, runtime]}
-    ),
-    {error, timeout}.
-
--spec suspend_max_ms() -> pos_integer().
-suspend_max_ms() ->
-    application:get_env(beamtalk_runtime, hot_reload_suspend_max_ms, ?SUSPEND_MAX_MS).
 
 -spec change_then_resume(pid(), atom(), term(), non_neg_integer()) -> ok | {error, term()}.
 change_then_resume(Pid, Module, Extra, Attempts) ->
@@ -465,7 +435,7 @@ change_then_resume(Pid, Module, Extra, Attempts) ->
                 #{domain => [beamtalk, runtime]}
             ),
             {error, retries_exhausted};
-        {error, Reason} = ChangeError ->
+        {error, Reason} ->
             %% ADR 0123 §3: left suspended, state intact. Logged here because the
             %% caller may have stopped waiting; the reload also reports the pid in
             %% its `instances_suspended` finding when it is still waiting.
@@ -479,7 +449,7 @@ change_then_resume(Pid, Module, Extra, Attempts) ->
                 },
                 #{domain => [beamtalk, runtime]}
             ),
-            ChangeError
+            {error, {left_suspended, Reason}}
     end.
 
 %% Resume, swallowing a failure (the actor may have exited): a resume failure

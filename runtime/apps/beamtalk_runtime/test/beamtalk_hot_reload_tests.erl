@@ -624,10 +624,6 @@ init(State) -> {ok, State}.
 handle_call(_Msg, _From, State) -> {reply, ok, State}.
 handle_cast({set, New}, _State) ->
     {noreply, New};
-handle_cast({wedge, Ms}, State) ->
-    %% sleep: simulates an actor stuck in a long callback
-    timer:sleep(Ms),
-    {noreply, State};
 handle_cast(_, State) ->
     {noreply, State}.
 code_change(_OldVsn, _State, {crash, Reason}) ->
@@ -870,29 +866,16 @@ change_retries_exhausted_reports_not_suspended_test() ->
 failures_left_suspended_excludes_timeout_exhausted_and_dead_test() ->
     P = self(),
     ?assertEqual(
-        [{P, {error_reason, x}}],
+        [{P, {left_suspended, x}}],
         beamtalk_hot_reload:failures_left_suspended([
-            {P, timeout}, {P, retries_exhausted}, {P, noproc}, {P, {error_reason, x}}
+            {P, timeout},
+            {P, retries_exhausted},
+            {P, noproc},
+            {P, {exit, {killed, dead}}},
+            {P, {worker_crashed, boom}},
+            {P, {left_suspended, x}}
         ])
     ).
-
-%% BT-5110 (item 3): a wedged actor costs a worker only until the suspend wait
-%% runs out, and is not left suspended once it recovers.
-wedged_actor_worker_gives_up_and_actor_recovers_running_test_() ->
-    {timeout, 30, fun() ->
-        ok = application:set_env(beamtalk_runtime, hot_reload_suspend_max_ms, 300),
-        {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
-        unlink(Pid),
-        try
-            gen_server:cast(Pid, {wedge, 1500}),
-            {ok, 0, [{Pid, timeout}]} =
-                beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {mark, x}),
-            ok = beamtalk_test_wait:until(fun() -> running =:= sys_state(Pid) end, 10000)
-        after
-            application:unset_env(beamtalk_runtime, hot_reload_suspend_max_ms),
-            beamtalk_test_proc:stop(Pid)
-        end
-    end}.
 
 %% BT-5084: a migration that returns an error still leaves the actor suspended
 %% (ADR 0123 §3, state integrity); that is the one deliberate case.
@@ -992,7 +975,7 @@ try_change_code_failure_leaves_actor_suspended_and_inspectable_test() ->
         %% before returning from sys:change_code/4 — so the reported
         %% failure reason is {error, boom}, not the bare boom the callback
         %% returned.
-        ?assertEqual([{Pid, {error, boom}}], Failures),
+        ?assertEqual([{Pid, {left_suspended, {error, boom}}}], Failures),
         ?assertEqual(suspended, sys_state(Pid)),
         %% sys:get_state/1 still works on a suspended process — state is
         %% intact, not lost, not reset.
@@ -1017,7 +1000,7 @@ try_change_code_retry_after_fix_resumes_and_succeeds_test() ->
     try
         %% sys wraps the callback's {error, boom} return in its own
         %% {error, _} before returning — see the sibling test above.
-        {ok, 0, [{Pid, {error, boom}}]} =
+        {ok, 0, [{Pid, {left_suspended, {error, boom}}}]} =
             beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {fail, boom}),
         ?assertEqual(suspended, sys_state(Pid)),
         %% Retry with corrected Extra ("the author fixes the hook") — the

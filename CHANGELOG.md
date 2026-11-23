@@ -8,8 +8,7 @@
   - Not changed: 8.3 short names (`RUNNER~1`) are not expanded. A root written with one does not contain a path reached through a link, which Windows reports with the long name.
 
 - **Runtime follow-ups to the hot reload, ChangeLog and class monitor fixes (BT-5110).**
-  - Fixed: a hot reload no longer reports an actor as suspended when it is not. A change whose retries ran out (overlapping reloads kept resuming the actor) or that timed out is left out of the `instances_suspended` finding and logged as what it is. Only a migration that returned an error counts.
-  - Fixed: a reload gives up waiting for a wedged actor after 10 minutes (`hot_reload_suspend_max_ms`), instead of parking a worker per reload for as long as the actor stays stuck.
+  - Fixed: a hot reload no longer reports an actor as suspended when it is not. A change whose retries ran out (overlapping reloads kept resuming the actor) or that timed out is left out of the `instances_suspended` finding and logged as what it is. Only a migration that returned an error counts. An actor or worker that died mid-reload is not reported either.
   - Fixed: `ChangeLog retire_entries/1` waits as long as `append/1` (60 s) instead of 5 s.
   - Fixed: the class monitor restarts a class whose process died before the monitor request reached it, as long as its metadata is still there. A removed class is not brought back.
   - Documented: a future from an async send is rejected with `#future_expired` after one hour while its actor is alive (`future_watcher_cap_ms`). This bound came with BT-5084 and was not mentioned anywhere.

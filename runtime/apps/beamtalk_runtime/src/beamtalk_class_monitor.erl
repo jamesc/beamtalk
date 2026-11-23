@@ -255,9 +255,11 @@ do_watch(ClassName, Pid, #state{watched = Watched, refs = Refs} = State) ->
 %% gone (a removal erases it before the process dies, so a defined-then-removed
 %% class is not resurrected). Metadata still present means the process died early
 %% (BT-5110): treat it as a crash and restart eagerly rather than wait for the
-%% next send's lazy recovery.
+%% next send's lazy recovery. A stale pid whose class a lazy recovery already
+%% restarted is left alone, so it does not spend the restart budget.
 is_deliberate_stop(ClassName, noproc) ->
-    beamtalk_class_metadata:lookup_module(ClassName) =:= not_found;
+    beamtalk_class_metadata:lookup_module(ClassName) =:= not_found orelse
+        is_pid(beamtalk_class_registry:whereis_class(ClassName));
 is_deliberate_stop(_ClassName, Reason) ->
     beamtalk_class_registry:is_deliberate_stop(Reason).
 
