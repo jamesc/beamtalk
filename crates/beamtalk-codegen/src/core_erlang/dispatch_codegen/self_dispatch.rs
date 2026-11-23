@@ -222,10 +222,7 @@ impl CoreErlangGenerator {
         // ADR 0137 §3: a self-send in an actor closure is an ordinary message
         // to `Self` (the cell is current at home; a message to the actor away),
         // handled by the generic dispatch below.
-        if self.context == CodeGenContext::Actor
-            && !self.in_cell_closure()
-            && receiver.is_self()
-        {
+        if self.context == CodeGenContext::Actor && !self.in_cell_closure() && receiver.is_self() {
             let doc = self.generate_discarding_self_dispatch(selector, arguments)?;
             return Ok(Some(doc));
         }

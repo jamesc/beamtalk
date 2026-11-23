@@ -407,10 +407,9 @@ impl CoreErlangGenerator {
                 .map_or(ComparisonReceiver::Unknown, ComparisonReceiver::Declared),
             Expression::FieldAccess {
                 receiver, field, ..
-            } if receiver.is_self() => {
-                self.field_comparison_kinds(&field.name)
-                    .map_or(ComparisonReceiver::Unknown, ComparisonReceiver::Declared)
-            }
+            } if receiver.is_self() => self
+                .field_comparison_kinds(&field.name)
+                .map_or(ComparisonReceiver::Unknown, ComparisonReceiver::Declared),
             _ => ComparisonReceiver::Unknown,
         }
     }
