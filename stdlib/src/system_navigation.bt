@@ -638,12 +638,6 @@ sealed typed Object subclass: SystemNavigation
           ]
       ]
 
-  /// Backwards-compatible alias for `indexedSiteRecordsFrom:into:`, retained
-  /// because the `sendersOf:` migration (BT-2299) named the mapper for senders
-  /// before `referencesTo:` (BT-2302) generalised it. Delegates unchanged.
-  class indexedSenderRecordsFrom: indexedRows :: List(Dictionary) into: result :: List(Dictionary) -> List(Dictionary) =>
-    self indexedSiteRecordsFrom: indexedRows into: result
-
   /// Map the indexed `defined_selectors_bt` rows to their `#selector` Symbols,
   /// appending to `result`. Each row's `at: #selector` access is `Dynamic`, so
   /// the explicit `-> List(Symbol)` return anchors element-type inference for

@@ -94,11 +94,6 @@ TestCase subclass: SystemNavigationSendersTest
   // harness does not start the compiler port. The checks below cover the parts
   // that do not require those: that the migration's helper methods are present.
 
-  // The index-row -> result-record mapper is present (the `sendersOf:` body
-  // delegates to it for the indexed call sites).
-  testHelperIndexedSenderRecordsIsDefined =>
-    self assert: (SystemNavigation class includesSelector: #indexedSenderRecordsFrom:into:)
-
   // The owner-tag/class-side -> `#class` resolver is present (instance-side
   // hits report the class object, class-side hits the metaclass object).
   testHelperSenderClassForIsDefined =>

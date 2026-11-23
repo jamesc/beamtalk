@@ -636,10 +636,49 @@ impl ProtocolRegistry {
                 .collect();
             diagnostics.extend(self.add_pre_loaded(cross_file, hierarchy, current_package));
         }
+        // Unconditional: a cross-file protocol that `extending:`s a stdlib
+        // protocol needs its parent in this module's registry even when the
+        // module declares no protocols of its own, so every file agrees on
+        // what conformance to it requires.
+        self.seed_stdlib_parents(module, current_package);
         if !module.protocols.is_empty() {
             diagnostics.extend(self.register_module(module, hierarchy));
         }
         diagnostics
+    }
+
+    /// Registers the stdlib protocols (`Comparable`, `Enumerable`, …) that
+    /// `module`'s protocols, and the already-registered (pre-loaded)
+    /// protocols, name in `extending:` and that nothing nearer
+    /// declares, so `Protocol define: X` / `extending: Comparable` resolves
+    /// as the language docs promise (BT-5111).
+    ///
+    /// Same precedence as `uses:` resolution (BT-3915): the module's own
+    /// protocols and every carried-in protocol win; the stdlib is the last
+    /// tier, and is off while compiling the stdlib itself (`current_package`
+    /// is `stdlib`), which carries its protocols live. Parents of a seeded
+    /// protocol are seeded in turn.
+    fn seed_stdlib_parents(&mut self, module: &Module, current_package: Option<&str>) {
+        let own: std::collections::HashSet<&EcoString> =
+            module.protocols.iter().map(|p| &p.name.name).collect();
+        let mut pending: Vec<EcoString> = module
+            .protocols
+            .iter()
+            .filter_map(|p| p.extending.as_ref().map(|e| e.name.clone()))
+            .chain(self.protocols.values().filter_map(|p| p.extending.clone()))
+            .collect();
+        while let Some(parent) = pending.pop() {
+            if own.contains(&parent) || self.protocols.contains_key(&parent) {
+                continue;
+            }
+            let Some(def) = trait_expansion::resolve_stdlib_protocol(&parent, current_package)
+            else {
+                continue;
+            };
+            let info = ProtocolInfo::from_definition(def);
+            pending.extend(info.extending.clone());
+            self.protocols.insert(info.name.clone(), info);
+        }
     }
 
     /// Registers protocols from a parsed module.
@@ -1421,6 +1460,63 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("already defined as a class"));
         assert!(!registry.has_protocol("Integer"));
+    }
+
+    #[test]
+    fn extending_a_stdlib_protocol_resolves() {
+        // BT-5111: `extending: Comparable` names a stdlib protocol that no
+        // file of the package declares; it must resolve, not error.
+        let module = Module {
+            protocols: vec![make_extending_protocol(
+                "Sortable",
+                "Comparable",
+                vec![("sortKey", 0, None)],
+            )],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.seed_and_register_module(&module, vec![], &hierarchy, Some("app"));
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert!(registry.has_protocol("Comparable"));
+        assert!(registry.has_protocol("Sortable"));
+
+        // The stdlib is off while compiling the stdlib itself.
+        let mut stdlib_registry = ProtocolRegistry::new();
+        let diags =
+            stdlib_registry.seed_and_register_module(&module, vec![], &hierarchy, Some("stdlib"));
+        assert!(diags[0].message.contains("extends unknown protocol"));
+    }
+
+    #[test]
+    fn pre_loaded_protocol_extending_stdlib_protocol_seeds_parent() {
+        // BT-5111: a sibling file's `Sortable extending: Comparable` arrives
+        // pre-loaded; compiling a module with no protocols must still see
+        // `Comparable`, so conformance requires the same selectors everywhere.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let sortable = ProtocolInfo::from_definition(&make_extending_protocol(
+            "Sortable",
+            "Comparable",
+            vec![("sortKey", 0, None)],
+        ));
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.seed_and_register_module(
+            &empty_module(),
+            vec![sortable],
+            &hierarchy,
+            Some("app"),
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert!(registry.has_protocol("Comparable"));
+        let required = registry
+            .get("Sortable")
+            .unwrap()
+            .all_required_selectors(&registry);
+        assert!(required.iter().any(|s| s.as_str() == "sortKey"));
+        assert!(
+            required.iter().any(|s| s.as_str() == "<"),
+            "got {required:?}"
+        );
     }
 
     #[test]
