@@ -172,14 +172,25 @@ trigger_code_change(Module, Pids, Extra) ->
 -doc """
 The subset of `trigger_code_change/3`'s `Failures` whose actor is really left
 suspended (BT-5110): a migration that returned `{error, _}`, tagged
-`{left_suspended, Reason}` by `change_then_resume/4`. A `timeout` (the worker may
+`{left_suspended, Reason}` by `change_then_resume/4`, plus a crashed worker (it may have
+left an ownerless suspension). A `timeout` (the worker may
 still resume the actor), `retries_exhausted` (an overlapping reload resumed it),
-`noproc` or a crash (the actor or worker is dead) is not suspended and must not be
+or `noproc` (the actor is dead) is not suspended and must not be
 reported as such (`instances_suspended`).
 """.
 -spec failures_left_suspended([{pid(), term()}]) -> [{pid(), term()}].
 failures_left_suspended(Failures) ->
-    [F || {_Pid, {left_suspended, _}} = F <- Failures].
+    %% A crashed worker (killed after its suspend succeeded) may leave an ownerless
+    %% suspension, so it is reported too; an unowned suspension is what the finding exists for.
+    [
+        F
+     || {_Pid, Reason} = F <- Failures,
+        case Reason of
+            {left_suspended, _} -> true;
+            {_, worker_crashed} -> true;
+            _ -> false
+        end
+    ].
 
 %%====================================================================
 %% Internal functions
@@ -383,7 +394,7 @@ try_change_code(Pid, Module, Extra) ->
 %% The suspend / change_code / resume sequence for one actor. Runs in the
 %% `try_change_code/3` worker.
 %%
-%% Both `sys` calls wait with `infinity` (still true after BT-5110): the caller's wait is bounded on its own
+%% Both `sys` calls wait with `infinity` the caller's wait is bounded on its own
 %% (?CHANGE_WAIT_MS), and a dead actor exits either call with `noproc`. A timeout
 %% on the suspend must NOT queue a blind resume: when a previous reload's slow
 %% migration is still running, that resume would run after it and resume an actor

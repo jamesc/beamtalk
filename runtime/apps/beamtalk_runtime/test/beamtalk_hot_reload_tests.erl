@@ -866,14 +866,14 @@ change_retries_exhausted_reports_not_suspended_test() ->
 failures_left_suspended_excludes_timeout_exhausted_and_dead_test() ->
     P = self(),
     ?assertEqual(
-        [{P, {left_suspended, x}}],
+        [{P, {left_suspended, x}}, {P, {boom, worker_crashed}}],
         beamtalk_hot_reload:failures_left_suspended([
             {P, timeout},
             {P, retries_exhausted},
             {P, noproc},
             {P, {exit, {killed, dead}}},
-            {P, {worker_crashed, boom}},
-            {P, {left_suspended, x}}
+            {P, {left_suspended, x}},
+            {P, {boom, worker_crashed}}
         ])
     ).
 
