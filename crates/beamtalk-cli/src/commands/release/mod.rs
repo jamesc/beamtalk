@@ -714,6 +714,11 @@ struct ReleaseSwap {
     parked_dir: Option<Utf8PathBuf>,
     tarball: Utf8PathBuf,
     parked_tarball: Option<Utf8PathBuf>,
+    /// Whether `release_dir`/`tarball` are this build's own (absent at
+    /// `begin`, or parked away). Rollback never deletes a path it does not
+    /// own: a half-done `begin` must leave the live previous output alone.
+    owns_dir: bool,
+    owns_tarball: bool,
     committed: bool,
 }
 
@@ -738,6 +743,8 @@ impl ReleaseSwap {
             parked_dir: None,
             tarball,
             parked_tarball: None,
+            owns_dir: !dir_exists,
+            owns_tarball: !tar_exists,
             committed: false,
         };
         // From here a failed step returns early and `Drop` restores what was parked.
@@ -747,6 +754,7 @@ impl ReleaseSwap {
                 .into_diagnostic()
                 .wrap_err_with(|| format!("Failed to move the existing '{release_dir}' aside"))?;
             swap.parked_dir = Some(parked);
+            swap.owns_dir = true;
         }
         if tar_exists {
             let parked = parked_path(&swap.tarball);
@@ -756,6 +764,7 @@ impl ReleaseSwap {
                     format!("Failed to move the existing '{}' aside", swap.tarball)
                 })?;
             swap.parked_tarball = Some(parked);
+            swap.owns_tarball = true;
         }
         Ok(swap)
     }
@@ -779,8 +788,12 @@ impl ReleaseSwap {
     }
 
     fn rollback(&mut self) {
-        let _ = std::fs::remove_dir_all(self.release_dir.as_std_path());
-        let _ = std::fs::remove_file(self.tarball.as_std_path());
+        if self.owns_dir {
+            let _ = std::fs::remove_dir_all(self.release_dir.as_std_path());
+        }
+        if self.owns_tarball {
+            let _ = std::fs::remove_file(self.tarball.as_std_path());
+        }
         for (parked, original) in [
             (self.parked_dir.take(), &self.release_dir),
             (self.parked_tarball.take(), &self.tarball),
@@ -1137,6 +1150,35 @@ mod tests {
             panic!("boom");
         }));
         assert!(result.is_err());
+        assert!(target.join("old.txt").is_file());
+        assert_eq!(
+            fs::read_to_string(tarball.as_std_path()).unwrap(),
+            "old tarball"
+        );
+    }
+
+    /// A guard dropped before it parked (or owned) anything — what a `begin`
+    /// that fails part-way leaves behind — must not delete the live previous
+    /// output. (Constructed by hand: a rename failure cannot be induced
+    /// portably, e.g. permissions are ignored when running as root.)
+    #[test]
+    fn release_swap_dropped_before_parking_keeps_live_previous_output() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let target = root.join("dist");
+        let tarball = root.join("dist-1.0.0.tar.gz");
+        fs::create_dir_all(target.as_std_path()).unwrap();
+        write(&target.join("old.txt"), "old");
+        write(&tarball, "old tarball");
+        drop(ReleaseSwap {
+            release_dir: target.clone(),
+            parked_dir: None,
+            tarball: tarball.clone(),
+            parked_tarball: None,
+            owns_dir: false,
+            owns_tarball: false,
+            committed: false,
+        });
         assert!(target.join("old.txt").is_file());
         assert_eq!(
             fs::read_to_string(tarball.as_std_path()).unwrap(),
