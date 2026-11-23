@@ -83,8 +83,7 @@ Called by `beamtalk_object_class:start/2` after every successful start
 (including restarts). Synchronous on purpose: `start/2` must not return
 until the monitor has *requested* its monitor, otherwise a kill delivered
 before the watch is processed surfaces as a `noproc` 'DOWN' — indistinguishable
-from the deliberate-stop race `is_deliberate_stop(noproc)` exists for — and the
-crash would silently not be recovered. A no-op when the monitor is not
+from the deliberate-stop race `is_deliberate_stop/2` exists for. A no-op when the monitor is not
 running (EUnit suites without the runtime supervision tree).
 
 The call narrows that window; it does not close it. The monitor request
@@ -92,8 +91,9 @@ reaches `Pid` as a signal, and the BEAM orders signals only between one sender
 and one receiver, so a kill sent by a third process right after `watch/2`
 returns can overtake it (BT-5102: about 2 in 100000 watch-then-kill rounds
 on OTP 28). `Pid` is then already gone when the request arrives, the 'DOWN'
-reason is `noproc`, and there is no eager restart. That is the same loss the
-`noproc` clause accepts, and lazy recovery on the next send covers it. A test
+reason is `noproc`. While the class's metadata is still present the monitor
+treats that as a crash and restarts eagerly (BT-5110); a removed class has no
+metadata and is left alone. A test
 that kills a watched process and expects a restart must first wait until the
 process lists this monitor in `process_info(Pid, monitored_by)`.
 """.
@@ -223,7 +223,7 @@ handle_info({'DOWN', Ref, process, Pid, Reason}, #state{watched = Watched, refs 
             %% and writes, never a gen_server call, so they cannot block on
             %% this monitor.
             ok = beamtalk_class_shadow_flags:invalidate(ClassName),
-            case is_deliberate_stop(Reason) of
+            case is_deliberate_stop(ClassName, Reason) of
                 true -> {noreply, State1};
                 false -> {noreply, restart_within_budget(ClassName, Reason, State1)}
             end
@@ -250,14 +250,18 @@ do_watch(ClassName, Pid, #state{watched = Watched, refs = Refs} = State) ->
 %% `normal`/`shutdown`/`{shutdown, _}` are defined once in
 %% `beamtalk_class_registry:is_deliberate_stop/1`, which also gates
 %% `beamtalk_object_class:terminate/2`'s removal teardown (BT-4622).
-%% `noproc` is this module's own case:
-%% the pid was already dead when the watch cast was processed (e.g. defined
-%% and immediately removed in the REPL). We never saw it alive, so this is
-%% not a crash to recover from — resurrecting here would defeat a deliberate
-%% stop that raced the cast. A genuine crash in that window is still covered
-%% by lazy class_send_with_recovery on the next send.
-is_deliberate_stop(noproc) -> true;
-is_deliberate_stop(Reason) -> beamtalk_class_registry:is_deliberate_stop(Reason).
+%% `noproc` is this module's own case: the pid was already dead when the monitor
+%% request reached it. That is a deliberate stop only when the class's metadata is
+%% gone (a removal erases it before the process dies, so a defined-then-removed
+%% class is not resurrected). Metadata still present means the process died early
+%% (BT-5110): treat it as a crash and restart eagerly rather than wait for the
+%% next send's lazy recovery. A stale pid whose class a lazy recovery already
+%% restarted is left alone, so it does not spend the restart budget.
+is_deliberate_stop(ClassName, noproc) ->
+    beamtalk_class_metadata:lookup_module(ClassName) =:= not_found orelse
+        is_pid(beamtalk_class_registry:whereis_class(ClassName));
+is_deliberate_stop(_ClassName, Reason) ->
+    beamtalk_class_registry:is_deliberate_stop(Reason).
 
 restart_within_budget(
     ClassName,

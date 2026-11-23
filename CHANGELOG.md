@@ -7,6 +7,13 @@
   - Fixed: `path_inside` (MCP project-root confinement and the workspace's other "is this file under that directory?" checks) compares path components case-insensitively on Windows. Windows reports a link target in its own spelling (`c:/Users/...`), so a root reached through a symlink used to refuse a file inside it whenever the case differed, the drive letter included. It failed safe: nothing outside the root got through. Other systems still compare case-sensitively.
   - Not changed: 8.3 short names (`RUNNER~1`) are not expanded. A root written with one does not contain a path reached through a link, which Windows reports with the long name.
 
+- **Runtime follow-ups to the hot reload, ChangeLog and class monitor fixes (BT-5110).**
+  - Fixed: a hot reload no longer reports an actor as suspended when it is not. A change whose retries ran out (overlapping reloads kept resuming the actor) or that timed out is left out of the `instances_suspended` finding and logged as what it is. Only a migration that returned an error counts. A dead actor is not reported; a crashed reload worker is, since it may leave the actor suspended.
+  - Known: a wedged actor (one that never reads its mailbox) holds one parked reload worker, and one queued suspend, per reload until it recovers or dies.
+  - Fixed: `ChangeLog retire_entries/1` waits as long as `append/1` (60 s) instead of 5 s.
+  - Fixed: the class monitor restarts a class whose process died before the monitor request reached it, as long as its metadata is still there. A removed class is not brought back.
+  - Documented: a future from an async send is rejected with `#future_expired` after one hour while its actor is alive (`future_watcher_cap_ms`). This bound came with BT-5084 and was not mentioned anywhere.
+
 ## 0.6.0 — 2026-11-21
 
 ### Highlights

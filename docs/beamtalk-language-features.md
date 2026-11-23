@@ -4001,6 +4001,16 @@ assignment, as an argument, via `yourself`, or out of a collection. It is an
 ordinary send, not a statically resolved self-send, so it pays the dispatch
 cost; prefer `self` directly where that matters.
 
+### How long an async send's future can stay pending
+
+A future whose actor dies is rejected at once with `#future_expired` (BT-5020).
+While the actor stays alive the future has no deadline of its own, with one
+exception: an unsettled async-send future is rejected with `#future_expired`
+after **one hour** (BT-5084). This bound stops a future from being held open
+forever by an actor that never replies; an async send that takes longer than
+an hour is rejected even though its actor is still running. Raise it with the
+`future_watcher_cap_ms` application environment variable of `beamtalk_runtime`.
+
 ### Deadlock Prevention
 
 Because `.` sends block the caller (gen_server:call), two actors calling each other creates a deadlock. The default timeout is **5000ms**, after which a `#timeout` error is raised:

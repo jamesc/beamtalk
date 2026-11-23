@@ -145,6 +145,25 @@ append_timeout_is_an_error_test_() ->
         end}
     end}.
 
+%% BT-5110 (item 6): retire_entries/1 waits as long as append/1 (the configured
+%% bound, not gen_server's 5 s default), so the 200 ms bound set here is the one
+%% that ends the wait.
+retire_entries_honours_the_append_timeout_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(#{pid := Pid}) ->
+        {timeout, 30, fun() ->
+            ok = application:set_env(beamtalk_workspace, changelog_append_timeout_ms, 200),
+            ok = sys:suspend(Pid),
+            try
+                T0 = erlang:monotonic_time(millisecond),
+                ?assertExit({timeout, _}, beamtalk_workspace_changelog:retire_entries([1])),
+                ?assert(erlang:monotonic_time(millisecond) - T0 < 3000)
+            after
+                ok = sys:resume(Pid),
+                application:unset_env(beamtalk_workspace, changelog_append_timeout_ms)
+            end
+        end}
+    end}.
+
 %% BT-5084 item 9: removing a never-flushed new class retires its entries
 %% without claiming they were flushed.
 cancelled_new_class_is_not_reported_flushed_test_() ->

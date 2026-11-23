@@ -44,13 +44,24 @@ runtime.
 -define(CHANGE_WAIT_MS, 5000).
 %% Bounds the resume after a successful change (BT-5084). The suspend and the
 %% change themselves wait without a bound: the worker, not the caller, owns the
-%% suspension, and a dead actor ends the wait.
+%% suspension, and a dead actor ends the wait. A wedged actor therefore parks the
+%% worker until it recovers or dies (BT-5110); giving up would need a resume
+%% queued behind the stale suspend, which can un-suspend a failed migration.
 -define(RESUME_TIMEOUT_MS, 60000).
 %% Re-suspends when an overlapping reload resumed the actor under us.
 -define(CHANGE_RETRIES, 3).
 
 %% Public API
--export([code_change/3, trigger_code_change/2, trigger_code_change/3]).
+-export([
+    code_change/3,
+    trigger_code_change/2,
+    trigger_code_change/3,
+    failures_left_suspended/1
+]).
+
+-ifdef(TEST).
+-export([change_then_resume/4]).
+-endif.
 
 %%====================================================================
 %% Public API
@@ -157,6 +168,29 @@ trigger_code_change(Module, Pids, Extra) ->
             })
     end,
     Result.
+
+-doc """
+The subset of `trigger_code_change/3`'s `Failures` whose actor is really left
+suspended (BT-5110): a migration that returned `{error, _}`, tagged
+`{left_suspended, Reason}` by `change_then_resume/4`, plus a crashed worker (it may have
+left an ownerless suspension). A `timeout` (the worker may
+still resume the actor), `retries_exhausted` (an overlapping reload resumed it),
+or `noproc` (the actor is dead) is not suspended and must not be
+reported as such (`instances_suspended`).
+""".
+-spec failures_left_suspended([{pid(), term()}]) -> [{pid(), term()}].
+failures_left_suspended(Failures) ->
+    %% A crashed worker (killed after its suspend succeeded) may leave an ownerless
+    %% suspension, so it is reported too; an unowned suspension is what the finding exists for.
+    [
+        F
+     || {_Pid, Reason} = F <- Failures,
+        case Reason of
+            {left_suspended, _} -> true;
+            {_, worker_crashed} -> true;
+            _ -> false
+        end
+    ].
 
 %%====================================================================
 %% Internal functions
@@ -360,7 +394,7 @@ try_change_code(Pid, Module, Extra) ->
 %% The suspend / change_code / resume sequence for one actor. Runs in the
 %% `try_change_code/3` worker.
 %%
-%% Both `sys` calls wait with `infinity`: the caller's wait is bounded on its own
+%% Both `sys` calls wait with `infinity` the caller's wait is bounded on its own
 %% (?CHANGE_WAIT_MS), and a dead actor exits either call with `noproc`. A timeout
 %% on the suspend must NOT queue a blind resume: when a previous reload's slow
 %% migration is still running, that resume would run after it and resume an actor
@@ -398,7 +432,21 @@ change_then_resume(Pid, Module, Extra, Attempts) ->
             %% version of the module, so suspend again and re-run this migration (it
             %% reconciles against the current declared fields, so a re-run is safe).
             run_change(Pid, Module, Extra, Attempts - 1);
-        {error, Reason} = ChangeError ->
+        {error, {unknown_system_msg, _}} ->
+            %% Retries exhausted (BT-5110): overlapping reloads kept resuming the
+            %% actor. It is running, not suspended, so say so and do not report it
+            %% as an `instances_suspended` pid.
+            ?LOG_ERROR(
+                #{
+                    msg =>
+                        <<"code change gave up after repeated resumes by overlapping reloads; the actor is running on its previous shape">>,
+                    module => Module,
+                    pid => Pid
+                },
+                #{domain => [beamtalk, runtime]}
+            ),
+            {error, retries_exhausted};
+        {error, Reason} ->
             %% ADR 0123 §3: left suspended, state intact. Logged here because the
             %% caller may have stopped waiting; the reload also reports the pid in
             %% its `instances_suspended` finding when it is still waiting.
@@ -412,7 +460,7 @@ change_then_resume(Pid, Module, Extra, Attempts) ->
                 },
                 #{domain => [beamtalk, runtime]}
             ),
-            ChangeError
+            {error, {left_suspended, Reason}}
     end.
 
 %% Resume, swallowing a failure (the actor may have exited): a resume failure

@@ -622,8 +622,10 @@ test_field_migration_absent_shape_version_defaults_to_one() ->
 %% suspend-on-failure (BT-3534) paths.
 init(State) -> {ok, State}.
 handle_call(_Msg, _From, State) -> {reply, ok, State}.
-handle_cast({set, New}, _State) -> {noreply, New};
-handle_cast(_, State) -> {noreply, State}.
+handle_cast({set, New}, _State) ->
+    {noreply, New};
+handle_cast(_, State) ->
+    {noreply, State}.
 code_change(_OldVsn, _State, {crash, Reason}) ->
     exit(Reason);
 code_change(_OldVsn, _State, {fail, Reason}) ->
@@ -831,6 +833,50 @@ overlapping_reload_reruns_the_later_migration_test_() ->
         end
     end}.
 
+%% BT-5110 (item 4): the overlapping-reload retry branch, deterministically. An
+%% actor that is not suspended answers `change_code` with `unknown_system_msg`,
+%% exactly what a worker sees when another reload's resume wins the race.
+change_retries_after_a_resume_won_the_race_test() ->
+    {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+    try
+        ok = beamtalk_hot_reload:change_then_resume(Pid, ?MODULE, {mark, retried}, 1),
+        ?assertEqual(retried, maps:get(migrated, sys:get_state(Pid))),
+        ?assertEqual(running, sys_state(Pid))
+    after
+        unlink(Pid),
+        beamtalk_test_proc:stop(Pid)
+    end.
+
+%% BT-5110 (item 1): retries exhausted is not "suspended": the actor is running.
+change_retries_exhausted_reports_not_suspended_test() ->
+    {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+    try
+        ?assertEqual(
+            {error, retries_exhausted},
+            beamtalk_hot_reload:change_then_resume(Pid, ?MODULE, {mark, never}, 0)
+        ),
+        ?assertEqual(running, sys_state(Pid)),
+        ?assertEqual(error, maps:find(migrated, sys:get_state(Pid)))
+    after
+        unlink(Pid),
+        beamtalk_test_proc:stop(Pid)
+    end.
+
+%% BT-5110 (item 2): only a migration that returned an error is "suspended".
+failures_left_suspended_excludes_timeout_exhausted_and_dead_test() ->
+    P = self(),
+    ?assertEqual(
+        [{P, {left_suspended, x}}, {P, {boom, worker_crashed}}],
+        beamtalk_hot_reload:failures_left_suspended([
+            {P, timeout},
+            {P, retries_exhausted},
+            {P, noproc},
+            {P, {exit, {killed, dead}}},
+            {P, {left_suspended, x}},
+            {P, {boom, worker_crashed}}
+        ])
+    ).
+
 %% BT-5084: a migration that returns an error still leaves the actor suspended
 %% (ADR 0123 §3, state integrity); that is the one deliberate case.
 failed_migration_stays_suspended_test() ->
@@ -929,7 +975,7 @@ try_change_code_failure_leaves_actor_suspended_and_inspectable_test() ->
         %% before returning from sys:change_code/4 — so the reported
         %% failure reason is {error, boom}, not the bare boom the callback
         %% returned.
-        ?assertEqual([{Pid, {error, boom}}], Failures),
+        ?assertEqual([{Pid, {left_suspended, {error, boom}}}], Failures),
         ?assertEqual(suspended, sys_state(Pid)),
         %% sys:get_state/1 still works on a suspended process — state is
         %% intact, not lost, not reset.
@@ -954,7 +1000,7 @@ try_change_code_retry_after_fix_resumes_and_succeeds_test() ->
     try
         %% sys wraps the callback's {error, boom} return in its own
         %% {error, _} before returning — see the sibling test above.
-        {ok, 0, [{Pid, {error, boom}}]} =
+        {ok, 0, [{Pid, {left_suspended, {error, boom}}}]} =
             beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {fail, boom}),
         ?assertEqual(suspended, sys_state(Pid)),
         %% Retry with corrected Extra ("the author fixes the hook") — the
