@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Change: the workspace `port` file is parsed strictly by the CLI and the VS Code extension (BT-5112).** The port must be on the first line, ASCII digits only, 1-65535. Port `0`, `+4040`, a leading blank line, and whitespace before or after the port are now rejected by both, where the CLI and the extension used to disagree on them. The runtime never writes such a file, so only a hand-edited one is affected. The shared fixture `tests/conformance/port_file_conformance.json` now lists all of them as invalid cases. The LiveView CI workflow also runs when a file under `tests/conformance/` changes.
+
 - **Fix: a release without a `VSCE_PAT` secret no longer fails the VS Code publish job.** The Marketplace publish is skipped with a warning on the run, and the `.vsix` is still attached to the GitHub Release. With the secret set, the job now checks out `.tool-versions` for its Node.js setup (it had no checkout, so that step failed in the 0.6.0 release run).
 - **Fix: on Windows, a project root reached through a symlink contains its files (BT-5122).**
   - Fixed: `path_inside` (MCP project-root confinement and the workspace's other "is this file under that directory?" checks) compares path components case-insensitively on Windows. Windows reports a link target in its own spelling (`c:/Users/...`), so a root reached through a symlink used to refuse a file inside it whenever the case differed, the drive letter included. It failed safe: nothing outside the root got through. Other systems still compare case-sensitively.

@@ -432,11 +432,17 @@ pub fn read_port_file_under(
 /// Parse the contents of a port file: `PORT\nNONCE` (the nonce line is optional).
 ///
 /// The single parser for the port-file format; [`read_port_file`] and
-/// [`read_port_file_nonce_in`] both use it. Returns `None` when the first line
-/// is not a valid port.
+/// [`read_port_file_nonce_in`] both use it. Strict (BT-5112): the port must be
+/// on the first line, as ASCII digits only (no sign, no whitespace), in
+/// 1..=65535. Returns `None` otherwise. The nonce line is trimmed; an empty one
+/// is no nonce. Pinned to `tests/conformance/port_file_conformance.json`.
 fn parse_port_file(content: &str) -> Option<(u16, Option<String>)> {
     let mut lines = content.lines();
-    let port = lines.next()?.trim().parse::<u16>().ok()?;
+    let first = lines.next()?;
+    if first.is_empty() || !first.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let port = first.parse::<u16>().ok().filter(|p| *p != 0)?;
     let nonce = lines
         .next()
         .map(|s| s.trim().to_string())
@@ -546,9 +552,10 @@ mod tests {
         assert_eq!(parse_port_file("4040\n"), Some((4040, None)));
         assert_eq!(parse_port_file("4040\n\n"), Some((4040, None)));
         assert_eq!(
-            parse_port_file("  4040  \n  abc \n"),
+            parse_port_file("4040\n  abc \n"),
             Some((4040, Some("abc".to_string())))
         );
+        assert_eq!(parse_port_file("  4040  \n  abc \n"), None);
         assert_eq!(parse_port_file("not-a-port\nabc\n"), None);
         assert_eq!(parse_port_file(""), None);
     }

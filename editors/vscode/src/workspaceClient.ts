@@ -898,11 +898,12 @@ export type PortFileParse =
  * Parse the contents of a workspace `port` file.
  *
  * The TypeScript twin of `beamtalk_workspace::parse_port_file`; both are
- * pinned to `tests/conformance/port_file_conformance.json`. The port must be
- * decimal digits in 1..=65535; a missing or empty nonce line is `undefined`.
+ * pinned to `tests/conformance/port_file_conformance.json`. Strict (BT-5112):
+ * the port is on the first line, ASCII digits only (no sign, no whitespace),
+ * in 1..=65535. The nonce line is trimmed; a missing or empty one is `undefined`.
  */
 export function parsePortFileContent(content: string): PortFileParse {
-  const lines = content.trim().split(/\r?\n/);
+  const lines = content.split(/\r?\n/);
   const firstLine = lines[0];
   if (!/^\d+$/.test(firstLine)) {
     return { ok: false, firstLine };
