@@ -362,7 +362,7 @@
     "format:check": "biome format src/"
   },
   "dependencies": {
-    "vscode-languageclient": "^10.1.0",
+    "vscode-languageclient": "^11.0.0",
     "ws": "^8.23.0"
   },
   "devDependencies": {
