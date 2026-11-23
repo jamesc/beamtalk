@@ -636,15 +636,19 @@ impl ProtocolRegistry {
                 .collect();
             diagnostics.extend(self.add_pre_loaded(cross_file, hierarchy, current_package));
         }
+        // Unconditional: a cross-file protocol that `extending:`s a stdlib
+        // protocol needs its parent in this module's registry even when the
+        // module declares no protocols of its own, so every file agrees on
+        // what conformance to it requires.
+        self.seed_stdlib_parents(module, current_package);
         if !module.protocols.is_empty() {
-            self.seed_stdlib_parents(module, current_package);
             diagnostics.extend(self.register_module(module, hierarchy));
         }
         diagnostics
     }
 
     /// Registers the stdlib protocols (`Comparable`, `Enumerable`, …) that
-    /// `module`'s protocols name in `extending:` and that nothing nearer
+    /// `module`'s protocols and the already-registered (pre-loaded) protocols name in `extending:` and that nothing nearer
     /// declares, so `Protocol define: X` / `extending: Comparable` resolves
     /// as the language docs promise (BT-5111).
     ///
@@ -660,6 +664,7 @@ impl ProtocolRegistry {
             .protocols
             .iter()
             .filter_map(|p| p.extending.as_ref().map(|e| e.name.clone()))
+            .chain(self.protocols.values().filter_map(|p| p.extending.clone()))
             .collect();
         while let Some(parent) = pending.pop() {
             if own.contains(&parent) || self.protocols.contains_key(&parent) {
@@ -1480,6 +1485,37 @@ mod tests {
         let diags =
             stdlib_registry.seed_and_register_module(&module, vec![], &hierarchy, Some("stdlib"));
         assert!(diags[0].message.contains("extends unknown protocol"));
+    }
+
+    #[test]
+    fn pre_loaded_protocol_extending_stdlib_protocol_seeds_parent() {
+        // BT-5111: a sibling file's `Sortable extending: Comparable` arrives
+        // pre-loaded; compiling a module with no protocols must still see
+        // `Comparable`, so conformance requires the same selectors everywhere.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let sortable = ProtocolInfo::from_definition(&make_extending_protocol(
+            "Sortable",
+            "Comparable",
+            vec![("sortKey", 0, None)],
+        ));
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.seed_and_register_module(
+            &empty_module(),
+            vec![sortable],
+            &hierarchy,
+            Some("app"),
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert!(registry.has_protocol("Comparable"));
+        let required = registry
+            .get("Sortable")
+            .unwrap()
+            .all_required_selectors(&registry);
+        assert!(required.iter().any(|s| s.as_str() == "sortKey"));
+        assert!(
+            required.iter().any(|s| s.as_str() == "<"),
+            "got {required:?}"
+        );
     }
 
     #[test]
