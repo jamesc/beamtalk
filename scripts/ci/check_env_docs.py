@@ -26,9 +26,18 @@ READS = [
     re.compile(r'os:getenv\(\s*' + NAME),
     re.compile(r'System\.(?:get_env|fetch_env!?|put_env)\(\s*' + NAME),
     re.compile(r'(?:get_env|getenv)\(\s*' + NAME),
+    # Helper wrappers: any call whose name contains "env" (`require_env("X")`, `env_flag("X")`).
+    re.compile(r'\b(?:require_env|env_or\w*|env_flag\w*|read_env\w*)\(\s*' + NAME),
 ]
+# Shell: any `$NAME` / `${NAME}` whose name carries a project prefix is an environment read.
+# Un-prefixed shell knobs (`SKIP_*`, `MISE_*`, `PREFIX`, ...) are deliberately not scanned: a
+# shell variable cannot be told from an environment input without a prefix, and the page says so.
+SHELL_PREFIXED = re.compile(r'\$\{?((?:BEAMTALK|BT|E2E|VS_BENCH|VD_BENCH)_[A-Z0-9_]+)')
+SHELL_SOURCES = (".sh", ".bash")
+# Shell variables that are not environment inputs (set and used inside one script, or by the shell).
+SHELL_EXEMPT = set()
 CONST = re.compile(r'const\s+[A-Z0-9_]*(?:ENV|VAR)[A-Z0-9_]*\s*:\s*&(?:\'static\s+)?str\s*=\s*' + NAME)
-SOURCES = (".rs", ".erl", ".hrl", ".ex", ".exs", ".escript")
+SOURCES = (".rs", ".erl", ".hrl", ".ex", ".exs", ".escript", ".sh", ".bash")
 
 
 def used_names():
@@ -40,6 +49,12 @@ def used_names():
         try:
             text = open(f, encoding="utf-8").read()
         except (OSError, UnicodeDecodeError):
+            continue
+        if f.endswith(SHELL_SOURCES):
+            for rx in (SHELL_PREFIXED,):
+                for m in rx.finditer(text):
+                    if m.group(1) not in SHELL_EXEMPT:
+                        found.setdefault(m.group(1), f)
             continue
         for rx in READS + [CONST]:
             for m in rx.finditer(text):

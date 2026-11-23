@@ -325,7 +325,7 @@ cat build/counter.core
 
 # 3. Run REPL interactively
 beamtalk repl
-> :load tests/repl-protocol/fixtures/counter.bt
+> Workspace load: "tests/repl-protocol/fixtures/counter.bt"
 > Counter spawn
 > c increment
 

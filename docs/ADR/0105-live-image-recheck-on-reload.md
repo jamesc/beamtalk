@@ -4,6 +4,8 @@
 Implemented (2026-07-11) — via Epic BT-2775 (Phases 0–4,
 BT-2776…BT-2783).
 
+**Note (2026-11-23, BT-5113):** this ADR was written when the REPL had `:load` and `:reload` commands. They no longer exist (`:load path` is a parse error). Today use `Workspace load: "path"` for one file (a directory raises `eisdir`), `ClassName reload` for one class, and `:sync` for the whole project. The decision text below is unchanged.
+
 ## Implementation Tracking
 
 **Epic:** [BT-2775](https://linear.app/beamtalk/issue/BT-2775)

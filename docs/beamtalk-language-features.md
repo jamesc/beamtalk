@@ -6564,7 +6564,7 @@ and the root supervisor on `Program rootSupervisor`.
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `isAvailable` | `Boolean` | True iff a workspace is running on this node. Never raises |
-| `load: "path"` | `List(Behaviour)` or Error | Compile and load a `.bt` file or directory |
+| `load: "path"` | `List(Behaviour)` or Error | Compile and load one `.bt` file; a directory raises `eisdir` (use `sync` for a project) |
 | `newClass: source at: path` | `List(Behaviour)` | Create a brand-new class from source at `path`; logs a `kind: #'new-class'` ChangeEntry (ADR 0082) |
 | `moveClass: AClass to: "path"` | `Behaviour` | Move a class's declaration to another file (ADR 0114) |
 | `classes` | `List(Behaviour)` | All loaded user classes (those with a recorded source file) |
@@ -7218,6 +7218,7 @@ The REPL `:` commands are convenience aliases that desugar to the native message
 | REPL shortcut | Beamtalk native equivalent |
 |---------------|---------------------------|
 | `:sync` | `Workspace sync` |
+| `:unload Counter` | *(removes the class; no single message-send form)* |
 | `:test` | `Workspace test` |
 | `:test CounterTest` | `Workspace test: CounterTest` |
 | `:help Counter` | `Beamtalk help: Counter` |

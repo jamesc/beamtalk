@@ -363,7 +363,7 @@ since no xref index exists yet for `Type`-pattern/`matchExhaustive:` sites —
 see the moduledoc). Unlike `trigger_image/0`, this fires *automatically*,
 once per distinct base class gaining its first subclass. BT-2873's
 adversarial-review follow-up asks whether that automatic fan-out is a real
-cost during a bulk `:load dir` of a project with a deep class hierarchy
+cost during a bulk load of a project (`:sync`, or a `Workspace load:` per file) with a deep class hierarchy
 (finding #1), and whether a single reload introducing multiple new
 hierarchies at once pays for redundant independent sweeps (finding #2),
 following BT-2781's "measure, then decide" precedent.
@@ -463,7 +463,7 @@ work for a full from-scratch stdlib load) is real but bounded, self-healing
 (resolves once the bulk load's queued sweeps drain), and — unlike BT-2798's
 xref receiver-type-key finding — does not cause any *lost* findings or
 incorrect behaviour, only a temporary latency/contention tail. It also only
-manifests on a full/deep bulk load (`:load dir` of a whole project or a
+manifests on a full/deep bulk load (`:sync` of a whole project or a
 large chunk of it), not on the ordinary single-class-at-a-time edit loop
 interactive development mostly consists of. Implementing genuine
 cross-reload debouncing (coalescing multiple queued `{leaf_change, _}`

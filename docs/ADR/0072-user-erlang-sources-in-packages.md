@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-03-29)
 
+**Note (2026-11-23, BT-5113):** this ADR was written when the REPL had `:load` and `:reload` commands. They no longer exist (`:load path` is a parse error). Today use `Workspace load: "path"` for one file (a directory raises `eisdir`), `ClassName reload` for one class, and `:sync` for the whole project. The decision text below is unchanged.
+
 ## Context
 
 Beamtalk compiles to BEAM via Core Erlang. ADR 0055 established the `(Erlang module)` FFI protocol for calling into hand-written Erlang from Beamtalk classes, and ADR 0056 introduced the `native:` keyword for Actor subclasses backed by hand-written `gen_server` modules. Both ADRs assume the backing Erlang modules live in the Beamtalk runtime — they don't address how **user packages** author and ship native Erlang code.
