@@ -138,6 +138,66 @@ pub fn find_selector_send_sites_in<'a>(
     sites
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{SendReceiver, find_selector_send_sites};
+    use crate::queries::parse_source;
+
+    #[test]
+    fn wrapper_calls_through_on_method_body() {
+        // find_selector_send_sites takes &[ExpressionStatement] (a method body).
+        // Exercising it directly rather than find_selector_send_sites_in.
+        let source = "Object subclass: Foo\n  run => x go\n";
+        let module = parse_source(source);
+        let body = &module.classes[0].methods[0].body;
+        let sites = find_selector_send_sites(body, source, "go", "walk");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].receiver, SendReceiver::Other);
+        assert_eq!(sites[0].spans.len(), 1);
+        assert_eq!(sites[0].spans[0].new_text, "walk");
+    }
+
+    #[test]
+    fn wrapper_returns_empty_for_empty_body() {
+        let sites = find_selector_send_sites(&[], "Object subclass: Foo\n", "go", "walk");
+        assert!(sites.is_empty());
+    }
+
+    #[test]
+    fn keyword_arity_mismatch_skips_the_send() {
+        // at:put: (2 keyword parts) renamed to get: (1 keyword part) —
+        // the arity guard (MessageSelector::Keyword(_) => return) must fire.
+        let source = "Object subclass: Foo\n  run => x at: 1 put: 2\n";
+        let module = parse_source(source);
+        let body = &module.classes[0].methods[0].body;
+        let sites = find_selector_send_sites(body, source, "at:put:", "get:");
+        assert!(sites.is_empty());
+    }
+
+    #[test]
+    fn keyword_matching_arity_produces_per_part_spans() {
+        // at:put: renamed to set:to: — same arity, two keyword spans are emitted.
+        let source = "Object subclass: Foo\n  run => x at: 1 put: 2\n";
+        let module = parse_source(source);
+        let body = &module.classes[0].methods[0].body;
+        let sites = find_selector_send_sites(body, source, "at:put:", "set:to:");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].spans.len(), 2);
+        assert_eq!(sites[0].spans[0].new_text, "set:");
+        assert_eq!(sites[0].spans[1].new_text, "to:");
+    }
+
+    #[test]
+    fn self_receiver_classified_correctly() {
+        let source = "Object subclass: Foo\n  run => self go\n";
+        let module = parse_source(source);
+        let body = &module.classes[0].methods[0].body;
+        let sites = find_selector_send_sites(body, source, "go", "walk");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].receiver, SendReceiver::SelfReceiver);
+    }
+}
+
 /// Spans of every symbol literal `#old_selector` under `roots`.
 ///
 /// A symbol equal to a selector is a dynamic use of it (`perform: #go`,
