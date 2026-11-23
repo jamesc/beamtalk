@@ -54,7 +54,7 @@ Counter (Actor)
 
 **Response:**
 ```text
-#Actor<Counter,0.173.0>
+Actor(Counter, 0.173.0)
 ```
 
 ### 4. Interact with the Counter

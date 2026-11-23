@@ -471,13 +471,14 @@ Actor(Counter, 0.234.0)
 1
 ```
 
-`Workspace load:` takes a single file; passing a directory raises `Failed to read file: eisdir`. To load several files, use `:sync` (the whole project) or one `Workspace load:` per file.
+`Workspace load:` takes a single file; passing a directory raises `Failed to read file: eisdir`. To load several files, use `:sync` (the whole project) or one `Workspace load:` per file. Loading a directory is deliberately not provided (BT-5113): `:sync` is the multi-file path and understands `beamtalk.toml`, source roots and incremental reuse, which a bare directory walk would not.
 
 **`:sync`** loads (or reloads) the entire project defined by `beamtalk.toml` in the current directory. It is incremental — unchanged files are skipped:
 
 ```beamtalk
 > :sync
 Reloaded 2 of 5 files
+Classes: Counter, Greeter
 
 > :s
 Reloaded 0 of 5 files (5 unchanged)
@@ -487,10 +488,11 @@ Reloaded 0 of 5 files (5 unchanged)
 
 ```beamtalk
 > :unload MyClass
-ok
+"Class 'MyClass' removed from system"
 
 > :unload Integer
-ERROR: Cannot remove stdlib class
+Error: Cannot remove stdlib class 'Integer'
+Hint: Stdlib classes are protected and cannot be removed.
 ```
 
 #### Inspection and Documentation
@@ -590,10 +592,7 @@ x
 #(CounterTest)
 
 > :test CounterTest
-Running 1 test class...
-  ✓ testIncrement
-  ✓ testMultipleIncrements
-2 passed, 0 failed
+TestResult(2 tests, 2 passed (0.0s))
 ```
 
 #### ChangeLog and flush (ADR 0082)
@@ -819,7 +818,7 @@ Integer
 
 | Method | Description |
 |--------|-------------|
-| `load: "path"` | Compile and hot-load a file or directory |
+| `load: "path"` | Compile and hot-load one file (a directory raises `eisdir`; use `sync`) |
 | `sync` | Sync workspace with project (`beamtalk.toml`) |
 | `classes` | All loaded user classes |
 | `testClasses` | All loaded test classes |
@@ -846,7 +845,7 @@ Node facts (`actors`, `actorsOf:`, `actorAt:`, `processes`, `supervisors`) are o
 #(Actor(Counter, 0.234.0))
 
 > Workspace test
-3 passed, 0 failed
+TestResult(3 tests, 3 passed (0.0s))
 
 > Workspace bind: myActor as: #MyTool
 nil
@@ -907,7 +906,7 @@ Counter
 #(CounterTest)
 
 > :test CounterTest             // Run tests
-2 passed, 0 failed
+TestResult(2 tests, 2 passed (0.0s))
 ```
 
 #### Project Sync Workflow
@@ -917,14 +916,16 @@ For projects with `beamtalk.toml`, use `:sync` to load the whole project:
 ```beamtalk
 > :sync                         // Initial load
 Reloaded 5 of 5 files
+Classes: Counter, Greeter, Logger, Shape, Square
 
 // ... edit files ...
 
 > :s                            // Incremental reload (short alias)
 Reloaded 1 of 5 files (4 unchanged)
+Classes: Counter
 
 > :test                         // Run all tests
-10 passed, 0 failed
+TestResult(10 tests, 10 passed (0.1s))
 ```
 
 #### Prototyping with Inline Classes
@@ -1123,10 +1124,7 @@ Each test method gets a fresh instance with `setUp` → test → `tearDown` life
 #(CounterTest)
 
 > :test CounterTest
-Running 1 test class...
-  ✓ testIncrement
-  ✓ testMultipleIncrements
-2 passed, 0 failed
+TestResult(2 tests, 2 passed (0.0s))
 
 // Equivalent native API — works from compiled code too:
 > (Workspace test: CounterTest) failed

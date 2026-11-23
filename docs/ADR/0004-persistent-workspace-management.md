@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-02-15)
 
+**Note (2026-11-23, BT-5113):** this ADR was written when the REPL had `:load` and `:reload` commands. They no longer exist (`:load path` is a parse error). Today use `Workspace load: "path"` for one file (a directory raises `eisdir`), `ClassName reload` for one class, and `:sync` for the whole project. The decision text below is unchanged.
+
 ## Context
 
 Beamtalk aims to provide a **live coding** experience inspired by Smalltalk, where developers can work with long-running systems that preserve state across sessions. Currently, the REPL starts a fresh BEAM node that terminates when the session ends, killing all spawned actors and losing all state.

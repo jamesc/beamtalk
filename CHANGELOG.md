@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Docs: REPL output samples match the REPL, the env-var check sees shell scripts, and the build trap and the deprecation decision are written down (BT-5113).**
+  - Fixed: `docs/beamtalk-tooling.md`, `examples/repl-tutorial.md`, `examples/mcp-demo.md` and `docs/beamtalk-agent-native-development.md` show what the REPL prints for `:test` (`TestResult(1 tests, 1 passed (0.0s))`), `:unload`, `:sync` (with its `Classes:` line) and actor values (`Actor(Counter, 0.123.0)`); `Workspace load:` is documented as loading one file, not a directory.
+  - Changed: `scripts/ci/check_env_docs.py` also reads `$BEAMTALK_*`, `$BT_*`, `$E2E_*`, `$VS_BENCH_*` and `$VD_BENCH_*` in shell scripts and the `require_env`/`env_or*`/`env_flag*`/`read_env*` wrappers; `docs/development/environment-variables.md` gains the variables it found and states what the check still cannot see.
+  - Not changed: "deprecated" stays a doc-comment sentence with no compiler warning (decision recorded in `docs/development/stdlib-api-consistency.md`).
+
 - **Fix: a release without a `VSCE_PAT` secret no longer fails the VS Code publish job.** The Marketplace publish is skipped with a warning on the run, and the `.vsix` is still attached to the GitHub Release. With the secret set, the job now checks out `.tool-versions` for its Node.js setup (it had no checkout, so that step failed in the 0.6.0 release run).
 - **Fix: on Windows, a project root reached through a symlink contains its files (BT-5122).**
   - Fixed: `path_inside` (MCP project-root confinement and the workspace's other "is this file under that directory?" checks) compares path components case-insensitively on Windows. Windows reports a link target in its own spelling (`c:/Users/...`), so a root reached through a symlink used to refuse a file inside it whenever the case differed, the drive letter included. It failed safe: nothing outside the root got through. Other systems still compare case-sensitively.

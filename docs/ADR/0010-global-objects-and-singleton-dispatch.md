@@ -7,6 +7,8 @@ Implemented (2026-02-15). Follow-on legacy gen_server removal (BT-1093) complete
 
 > **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** `beamtalk_object_instances` is deleted and no longer a child of `beamtalk_runtime_sup`; the supervision tree below shows the structure at the time of this decision. Actors are found by scanning for the process marker.
 
+**Note (2026-11-23, BT-5113):** this ADR was written when the REPL had `:load` and `:reload` commands. They no longer exist (`:load path` is a parse error). Today use `Workspace load: "path"` for one file (a directory raises `eisdir`), `ClassName reload` for one class, and `:sync` for the whole project. The decision text below is unchanged.
+
 ## Migration Status (BT-1093)
 
 **Outcome (2026-03-05): migration complete.** BT-1108, BT-1109, BT-1110 and BT-1111 are all Done. Both Phase 1 gen_server modules were deleted. (A `beamtalk_interface.erl` exists again in `beamtalk_stdlib` today, but it is the stateless method-implementation module for the `Beamtalk` sealed Object — no gen_server process — not the legacy gen_server.) The "Current state (2026-03-04)" snapshot below is kept for history.

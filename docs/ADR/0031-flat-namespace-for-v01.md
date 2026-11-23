@@ -5,6 +5,8 @@ Superseded by [ADR 0070](0070-package-namespaces-and-dependencies.md) (2026-03-2
 
 Originally Implemented (2026-02-18). The flat global namespace shipped in v0.1 exactly as described below. [ADR 0070](0070-package-namespaces-and-dependencies.md) later added the package namespace and dependency system (`beamtalk.toml` dependencies, qualified `package@Class` names, collision-as-error), and [ADR 0071](0071-class-visibility-internal-modifier.md) added the `internal` visibility modifier. This ADR is preserved as the historical record of the v0.1 decision — its "v0.2 will introduce a module/import system" framing is now fulfilled by those ADRs.
 
+**Note (2026-11-23, BT-5113):** this ADR was written when the REPL had `:load` and `:reload` commands. They no longer exist (`:load path` is a parse error). Today use `Workspace load: "path"` for one file (a directory raises `eisdir`), `ClassName reload` for one class, and `:sync` for the whole project. The decision text below is unchanged.
+
 ## Context
 
 Beamtalk currently has a **flat global namespace**: each class is a named process registered in the Erlang process registry (with lookup utilities in `beamtalk_class_registry`) and visible to all code. There is no `import`, `export`, or namespace syntax. Every class name must be globally unique.

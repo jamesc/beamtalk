@@ -135,7 +135,7 @@ Each TCP connection to the REPL server creates an independent session with isola
     bindings :: map(),                    % Variable name (atom) -> value
     daemon_socket_path :: string(),       % Path to daemon Unix socket
     eval_counter :: non_neg_integer(),    % For unique module names
-    loaded_modules :: [atom()]            % Modules loaded via :load
+    loaded_modules :: [atom()]            % Modules loaded via Workspace load:
 }).
 ```
 
@@ -515,11 +515,11 @@ For convenience, the REPL may implicitly await certain expressions (implementati
 
 ## Loading Files
 
-The `:load` command compiles and loads a `.bt` file:
+`Workspace load:` compiles and loads one `.bt` file (there is no `:load` command; `:load path` is a parse error). It takes a single file: a directory raises `Failed to read file: eisdir`. Use `:sync` to load a whole project.
 
 ```
-> :load examples/counter.bt
-Loaded Counter
+> Workspace load: "examples/getting-started/src/counter.bt"
+#(Counter)
 ```
 
 ### Load Process
@@ -532,11 +532,11 @@ Loaded Counter
 
 ### Reloading
 
-The `:reload` command reloads the last loaded file:
+`Counter reload` recompiles one class from its source file, and `:sync` recompiles every changed file of the project (there is no `:reload` command):
 
 ```
-> :reload
-Reloaded Counter
+> Counter reload
+Counter
 ```
 
 This supports the edit-reload workflow during development.
@@ -570,8 +570,9 @@ Command history is managed by the Rust CLI using `rustyline`.
 | `:exit` | `:quit`, `:q` | Exit the REPL |
 | `:clear` | | Clear all variable bindings |
 | `:bindings` | `:b` | Show current bindings |
-| `:load <path>` | `:l` | Load a `.bt` file |
-| `:reload` | `:r` | Reload last loaded file |
+| `:sync` | `:s` | Load or reload the project in the current directory |
+| `:unload <Class>` | | Remove a user class |
+| `:test [<Class>]` | `:t` | Run tests |
 
 ---
 

@@ -444,9 +444,9 @@ the LSP has no eval affordance and is unaffected).
 
 - **`Actor subclass: Counter` / `Object subclass: Foo` echoes the bare class
   name** (`=> Counter`) — the existing, longest-standing convention. `Counter
-  reload` / `:reload Counter` echo the same bare name on a successful
+  reload` / `Counter reload` echo the same bare name on a successful
   hot-swap (`=> Counter`). **ADR 0127 §11 / BT-3593:** `Greeter reload` /
-  `:reload Greeter` on a *protocol* now echoes the same bare name too, but
+  `Greeter reload` on a *protocol* now echoes the same bare name too, but
   the reload is no longer single-module: editing a protocol file and
   reloading it atomically recompiles and reinstalls every loaded,
   source-backed, non-stdlib class that `uses:` it (`beamtalk_repl_loader:
@@ -515,7 +515,7 @@ the LSP has no eval affordance and is unaffected).
   elsewhere (e.g. `build_stdlib.rs`'s `format_stdlib_class_entry`) rather
   than stdlib's real `source_file` path (e.g. `stdlib/src/supervisor.bt`),
   since that path is an implementation detail no Beamtalk user program can
-  `:load`. Same maintainer-sign-off caveat as `Declared in: REPL` above —
+  `Workspace load:`. Same maintainer-sign-off caveat as `Declared in: REPL` above —
   flagged in BT-2938's own PR description, not yet a closed decision.
   Pinned by `tests/repl-protocol/cases/type_alias_repl.btscript`'s
   `:help SupervisionStrategy` section.
