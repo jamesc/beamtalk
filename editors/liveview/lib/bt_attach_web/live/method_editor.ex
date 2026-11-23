@@ -82,7 +82,22 @@ defmodule BtAttachWeb.Live.MethodEditor do
   alias BtAttachWeb.Live.FacadeError
   alias BtAttachWeb.Live.RequestContext
   alias BtAttachWeb.Live.SystemBrowser
+  alias BtAttachWeb.Live.MethodEditor.Refresh
+  alias BtAttachWeb.Live.MethodEditor.Signature
+  alias BtAttachWeb.Live.MethodEditor.TabHeader
   alias BtAttachWeb.WorkspaceLive
+
+  # Moved out in BT-5112; kept here so every caller keeps its call site.
+  defdelegate method_editor_shortcuts_attrs(), to: TabHeader
+  defdelegate method_editor_shortcuts_attrs(shortcuts), to: TabHeader
+  defdelegate breadcrumb(tab), to: TabHeader
+  defdelegate modifier_badges(tab), to: TabHeader
+  defdelegate synthetic_tab?(tab), to: TabHeader
+  defdelegate header_package_label(tab), to: TabHeader
+  defdelegate header_origin_class(tab), to: TabHeader
+  defdelegate header_origin_title(tab), to: TabHeader
+  defdelegate reload_reverted_def_buffers(socket, reloaded), to: Refresh
+  defdelegate refresh_after_source_change(socket), to: Refresh
 
   # ── handle_event dispatch ────────────────────────────────────────────────
   #
@@ -325,7 +340,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
 
     selector =
       case tab_id && find_tab(socket, tab_id) do
-        %{new: true} -> parse_method_signature_selector(source)
+        %{new: true} -> Signature.selector(source)
         _ -> String.trim(selector)
       end
 
@@ -509,7 +524,8 @@ defmodule BtAttachWeb.Live.MethodEditor do
   # live patch) and `runtime_only` (sourceless runtime method). `source` is
   # "" for a sourceless method / error, so opening it gives an empty
   # editable buffer rather than crashing.
-  defp method_source_info(socket, class, side, selector) do
+  @doc false
+  def method_source_info(socket, class, side, selector) do
     case Facade.dispatch(
            :browse_method_source,
            %{class: class, side: side, selector: selector},
@@ -656,7 +672,8 @@ defmodule BtAttachWeb.Live.MethodEditor do
   # comment `Beamtalk help:` renders, so the browser and `help:` agree on a
   # class' docs). `{"", nil, nil, nil, false}` if the browse fails — the tab
   # then opens empty rather than erroring.
-  defp class_definition_info(socket, class) do
+  @doc false
+  def class_definition_info(socket, class) do
     case Facade.dispatch(:browse_class_definition, %{class: class}, RequestContext.build(socket)) do
       {:value, %{} = result} ->
         definition =
@@ -824,7 +841,8 @@ defmodule BtAttachWeb.Live.MethodEditor do
   # user's OWN save must not wipe the "Saved …" banner that save just set,
   # unlike an explicit tab switch (`sync_active/2`), which should start the
   # new tab clean.
-  defp sync_active_fields(socket, tab) do
+  @doc false
+  def sync_active_fields(socket, tab) do
     assign(socket,
       edit_class: tab.class,
       edit_selector: tab.selector || "",
@@ -1374,333 +1392,6 @@ defmodule BtAttachWeb.Live.MethodEditor do
     assign(socket, :tabs, tabs)
   end
 
-  # The Class › side › selector breadcrumb label parts for the active tab.
-  # Public: `WorkspaceLive`'s render template calls it directly.
-  def breadcrumb(%{kind: :def, class: class}), do: {class, nil, "class definition"}
-  # A new-method tab has no stored selector yet (BT-2606): derive it live
-  # from the body the author is typing so the breadcrumb names the method
-  # as soon as a recognizable signature appears, falling back to the "(new
-  # method)" placeholder until then (parenthesised so it can't be mistaken
-  # for a real selector — BT-2613).
-  def breadcrumb(%{new: true, class: class, side: side, source: source}) do
-    case parse_method_signature_selector(source) do
-      "" -> {class, side, "(new method)"}
-      selector -> {class, side, selector}
-    end
-  end
-
-  def breadcrumb(%{class: class, side: side, selector: selector}), do: {class, side, selector}
-
-  # BT-2605: the colored modifier badges shown in the editor header for the
-  # active tab. Each entry is `%{label, class, title}` — `label` is the
-  # visible text, `class` the CSS modifier class (`.modifier-tag.<class>`),
-  # `title` the accessible tooltip naming the modifier. Returns `[]` when
-  # the tab carries no modifiers (an instance-side method on a plain class
-  # shows nothing). Order is stable: side (Class) first, then class
-  # modifiers (sealed/abstract), then native — mirroring the apidocs'
-  # labels (Sealed/Abstract) for docs↔IDE parity. Public: `WorkspaceLive`'s
-  # render template calls it directly.
-  def modifier_badges(tab) do
-    side_badge(tab) ++ class_modifier_badges(tab) ++ native_badge(tab)
-  end
-
-  # A class-side method gets a distinct "Class" badge; instance-side
-  # methods and class-definition tabs get none here. `:def` tabs have
-  # `side: nil`.
-  defp side_badge(%{side: "class"}) do
-    [%{label: "Class", class: "side", title: "Class-side method"}]
-  end
-
-  defp side_badge(_tab), do: []
-
-  # The reflected class-level modifiers (`sealed`, `abstract`) cached on the
-  # tab — present on every tab kind (BT-2605 threads it onto method tabs
-  # too). Labels are capitalized to match the apidocs.
-  defp class_modifier_badges(%{class_modifiers: mods}) when is_list(mods) do
-    Enum.map(mods, &class_modifier_badge/1)
-  end
-
-  # No modifier list (key absent, or `nil` from a transient fetch failure)
-  # → no class-modifier badges.
-  defp class_modifier_badges(_tab), do: []
-
-  # The canonical class-modifier badge labels/colors, keyed by the
-  # reflected modifier atom. Kept exhaustive against `class_modifiers_from/1`'s
-  # atom set so a future modifier is a compile-visible addition in both
-  # places.
-  defp class_modifier_badge(:sealed),
-    do: %{label: "Sealed", class: "sealed", title: "Cannot be subclassed by user code"}
-
-  defp class_modifier_badge(:typed),
-    do: %{
-      label: "Typed",
-      class: "typed",
-      title: "All fields and methods require type annotations"
-    }
-
-  defp class_modifier_badge(:abstract),
-    do: %{
-      label: "Abstract",
-      class: "abstract",
-      title: "Must be subclassed; not directly instantiable"
-    }
-
-  # A `native:` class (ADR 0056) gets a Native badge. The flag is
-  # `class_native` (set on every tab kind) rather than `native_module` so
-  # the badge shows on method tabs too, while `native_module` stays
-  # reserved for the :def-only native pane.
-  defp native_badge(%{class_native: true}) do
-    [%{label: "Native", class: "native", title: "Backed by an Erlang module (native: class)"}]
-  end
-
-  defp native_badge(_tab), do: []
-
-  # Parse the selector from a method's source signature (BT-2606), returning
-  # `""` when no valid signature is present yet. The author writes the full
-  # method (`selector ... => body`) in the editor body; this recovers the
-  # selector the same way the compiler's method header grammar does, so the
-  # new-method tab no longer needs a separate selector input.
-  #
-  # It is intentionally conservative: a string it can't confidently read as
-  # a header returns `""` (treated as "no signature yet"). The authoritative
-  # parse still runs server-side in the `:save` op, which rejects a selector
-  # that disagrees with the compiled body — so this client-side read only
-  # has to be right for the breadcrumb hint and the pre-flight validation,
-  # never the install key of record.
-  defp parse_method_signature_selector(source) when is_binary(source) do
-    source
-    |> strip_leading_comments()
-    |> strip_method_modifiers()
-    |> selector_from_header()
-  end
-
-  defp parse_method_signature_selector(_source), do: ""
-
-  # Drop leading blank lines and whole-line `//` / `///` comments, returning
-  # the first line that begins a real method header (mirrors the backend
-  # `skip_leading_comments/1`).
-  defp strip_leading_comments(source) do
-    trimmed = String.trim_leading(source)
-
-    if String.starts_with?(trimmed, "//") do
-      case String.split(trimmed, "\n", parts: 2) do
-        [_comment, rest] -> strip_leading_comments(rest)
-        [_comment] -> ""
-      end
-    else
-      trimmed
-    end
-  end
-
-  # Drop leading method modifiers (`class`, `internal`, `sealed`) that may
-  # precede the selector, matching the parser's `parse_method_definition`
-  # modifier loop. A modifier word is only stripped when more header text
-  # follows it — a bare `class =>` is a method *named* `class`, not the
-  # `class` modifier.
-  defp strip_method_modifiers(header) do
-    case String.split(header, ~r/\s+/, parts: 2) do
-      [word, rest] when word in ["class", "internal", "sealed"] ->
-        # `class`/`internal`/`sealed` are modifiers only when a selector
-        # follows.
-        cond do
-          # The next token opens the body (`=>`): the word itself is the
-          # (unary) selector — a method *named* `class`/`internal`/`sealed`.
-          String.starts_with?(rest, "=>") ->
-            header
-
-          # The next token is `->`. This is ambiguous without type context
-          # (BT-2625): `sealed -> Type =>` is a unary method named `sealed`
-          # with a return type, while `sealed -> arg =>` is a `sealed`
-          # *binary* method whose selector is `->`. Disambiguate by the
-          # token after `->`, matching the parser's grammar: a Capitalized
-          # token reads as a return Type (the modifier word is the unary
-          # selector, so keep the header), a lowercase token reads as a
-          # binary-selector argument (strip the modifier so `->` becomes
-          # the selector).
-          String.starts_with?(rest, "->") ->
-            if return_type_follows_arrow?(rest), do: header, else: strip_method_modifiers(rest)
-
-          true ->
-            strip_method_modifiers(rest)
-        end
-
-      _ ->
-        header
-    end
-  end
-
-  # Decide whether the text starting at a `->` is a *return-type* annotation
-  # (`-> Type`) rather than a binary selector whose argument follows (`->
-  # arg`). A return type is a Capitalized identifier (a Type name); a
-  # binary-selector parameter is a lowercase identifier. Matches the
-  # compiler's method-header grammar (BT-2625). A `->` with no following
-  # identifier is treated as a binary selector (not a return type).
-  defp return_type_follows_arrow?(rest) do
-    rest
-    |> String.replace_prefix("->", "")
-    |> String.trim_leading()
-    |> case do
-      <<first::utf8, _::binary>> -> first in ?A..?Z
-      _ -> false
-    end
-  end
-
-  # Recover the selector token(s) from the start of a method header: a
-  # keyword selector (`at:put:` from `at: i put: v => …`), a binary
-  # selector (`+`, `->`, `>>`, … from `+ other => …`), or a unary selector
-  # (`increment` from `increment => …`). Returns `""` when the head doesn't
-  # read as a header (no `=>` before the first statement break, or an
-  # empty/blank head).
-  defp selector_from_header(""), do: ""
-
-  defp selector_from_header(header) do
-    # Only the header up to the body arrow can contribute a selector — bail
-    # when there is no `=>` before the first newline.
-    head =
-      header
-      |> String.split(~r/\r?\n/, parts: 2)
-      |> List.first()
-
-    cond do
-      not String.contains?(head, "=>") ->
-        ""
-
-      true ->
-        head
-        |> String.split("=>", parts: 2)
-        |> List.first()
-        |> selector_from_signature_text()
-    end
-  end
-
-  # Extract the selector from the text *before* the `=>` arrow. Keyword
-  # selectors are the concatenation of their `keyword:` parts (parameter
-  # names, type annotations and the return type are dropped); a binary
-  # selector is its leading operator; a unary selector is its single
-  # identifier.
-  defp selector_from_signature_text(sig) do
-    sig = String.trim(sig)
-
-    # `:(?!:)` so a compact type annotation (`i::Integer`) doesn't capture
-    # `i:` as a keyword part — only a real `keyword:` (single colon)
-    # counts.
-    keyword_parts = Regex.scan(~r/([A-Za-z_][A-Za-z0-9_]*):(?!:)/, sig, capture: :all_but_first)
-
-    cond do
-      sig == "" ->
-        ""
-
-      keyword_parts != [] ->
-        keyword_parts |> Enum.map(fn [k] -> k <> ":" end) |> Enum.join()
-
-      true ->
-        case Regex.run(~r/^([A-Za-z_][A-Za-z0-9_]*)/, sig) do
-          [_, ident] ->
-            ident
-
-          nil ->
-            # Binary selector: the leading run of operator characters (e.g.
-            # `+`, `->`, `>>`, `<=`). Anything else is not a recognizable
-            # header.
-            case Regex.run(~r/^([-+*\/~<>=&|@%^?]+)/, sig) do
-              [_, op] -> op
-              nil -> ""
-            end
-        end
-    end
-  end
-
-  # BT-2588: the `id="method-editor-form"` hook wiring, shared verbatim
-  # across both cond branches that can render that id (the active-tab
-  # editor form and the no-tab empty-state form) — and by
-  # `id="native-editor-form"`, which binds the identical chord. Splatted
-  # via `{method_editor_shortcuts_attrs()}` so these renders cannot drift
-  # apart again — the original bug was exactly that drift: the empty-state
-  # form lacked `phx-hook`/`data-scope`, so opening a tab from that state
-  # added `phx-hook` to an ALREADY-mounted DOM node (same id ⇒ LiveView's
-  # morphdom patch treats it as an "updated" node, not an "added" one) and
-  # `KeyboardShortcuts#mounted()` — which attaches the window keydown
-  # listener — never ran.
-  #
-  # The empty-state form must still mount the hook (so a later transition
-  # to the active-tab form is an "updated" patch on an already-mounted
-  # hook, not another missed "added" one) but must NOT bind "mod+s" to
-  # "submit" there — otherwise ⌘S anywhere on the page while no tab is
-  # open (e.g. while typing in the Workspace eval pane) request-submits the
-  # hidden empty form and surfaces a spurious "Enter a class name to save a
-  # method." error. Callers pass `%{}` for that form; the active-tab forms
-  # use the default. Public: `WorkspaceLive`'s render template calls it
-  # directly.
-  def method_editor_shortcuts_attrs(shortcuts \\ %{"mod+s" => "submit"}) do
-    %{
-      "phx-hook" => "KeyboardShortcuts",
-      "data-scope" => "window",
-      "data-shortcuts" => Jason.encode!(shortcuts)
-    }
-  end
-
-  # BT-2714: whether the *active editor tab* was opened for a
-  # compiler-derived method (its `browse-method-source` came back
-  # `source_status: synthetic`). Such a tab has no editable body — it
-  # renders read-only (the doc block + a "compiler-derived" note) instead
-  # of a blank CodeMirror. Bracket-style pattern match so the many
-  # non-method tab kinds (class definition, native module) that never set
-  # the key read as `false` rather than raising a KeyError. Public:
-  # `WorkspaceLive`'s render template calls it directly.
-  def synthetic_tab?(%{synthetic: true}), do: true
-  def synthetic_tab?(_), do: false
-
-  # BT-2642: editor-header package/origin badge for the active tab. The tab
-  # carries `source_origin` ("stdlib" | "dependency" | "project" | nil) and
-  # `package`, snapshotted at open from the class's browse row. The header
-  # badge reuses BT-2641's vocabulary (`SystemBrowser.dependency_badge_label/1`,
-  # shared with the System Browser tree) and extends it to project (which
-  # the tree hides but the header shows): stdlib → "STDLIB", dependency →
-  # "DEP · <pkg>" (or bare "DEP"), project → the bare project package name.
-  # Returns "" when origin is unknown or a project tab carries no package,
-  # so the badge simply does not render. Public: `WorkspaceLive`'s render
-  # template calls it directly.
-  def header_package_label(%{source_origin: "stdlib"}), do: "STDLIB"
-
-  def header_package_label(%{source_origin: "dependency"} = tab),
-    do: SystemBrowser.dependency_badge_label(stringify_origin(tab))
-
-  def header_package_label(%{source_origin: "project", package: pkg})
-      when is_binary(pkg) and pkg != "",
-      do: pkg
-
-  def header_package_label(_tab), do: ""
-
-  # The CSS modifier class keying the header badge color, per origin.
-  # Mirrors `BtAttachWeb.Live.SystemBrowser`'s `source_origin_class/1` but
-  # reads the tab's atom-keyed `source_origin`. Public: `WorkspaceLive`'s
-  # render template calls it directly.
-  def header_origin_class(%{source_origin: "stdlib"}), do: "stdlib"
-  def header_origin_class(%{source_origin: "dependency"}), do: "dependency"
-  def header_origin_class(_tab), do: "project"
-
-  # The tooltip spelling out the origin for the header badge. Project gets
-  # a "Project: <pkg>" title (BT-2642 extends the bare "Project" the tree
-  # title used). Public: `WorkspaceLive`'s render template calls it
-  # directly.
-  def header_origin_title(%{source_origin: "stdlib"}), do: "Standard library"
-
-  def header_origin_title(%{source_origin: "dependency"} = tab),
-    do: "Dependency: #{SystemBrowser.package_name(stringify_origin(tab))}"
-
-  def header_origin_title(%{source_origin: "project", package: pkg})
-      when is_binary(pkg) and pkg != "",
-      do: "Project: #{pkg}"
-
-  def header_origin_title(_tab), do: "Project"
-
-  # Bridge the tab's atom-keyed origin/package onto the string-keyed map the
-  # BT-2641 browse-row helpers (`SystemBrowser.dependency_badge_label/1`,
-  # `SystemBrowser.package_name/1`) expect, so the dependency badge text
-  # stays in one place.
-  defp stringify_origin(tab),
-    do: %{"source_origin" => tab[:source_origin], "package" => tab[:package]}
-
   # The disk key a tab is cleared by: `{class, selector}` for a `:method`
   # tab, `{class, :def}` for a `:def` tab (the `:def` sentinel can't
   # collide with a real binary selector). Any other shape yields `nil`,
@@ -1729,215 +1420,6 @@ defmodule BtAttachWeb.Live.MethodEditor do
         tab
       end
     end)
-  end
-
-  # BT-2655: re-read the reverted `:def` tabs' *editable* definition buffer
-  # so the visible editor reflects the reverted class header without a
-  # close/reopen. This is the one piece the generic push refresh
-  # (`refresh_source_tab/2`) intentionally skips: it re-reads only the
-  # `:def` doc block, never the editable definition body, so a concurrent
-  # edit during another session's flush is not clobbered. A revert is the
-  # safe exception — blocked under pending edits for the reverted path
-  # (`path_has_pending_edits?/2`, BT-2598 d2), so no in-progress edit can be
-  # lost. A dirty tab is left untouched all the same (defence in depth);
-  # method tabs and tabs outside `reloaded` pass through and are handled by
-  # the refresh that follows. Public: `BtAttachWeb.Live.Dock`'s
-  # `git_revert_event/2` (BT-3295) calls it directly.
-  def reload_reverted_def_buffers(socket, reloaded) do
-    tabs =
-      Enum.map(socket.assigns.tabs, fn tab ->
-        if match?(%{kind: :def, dirty: false}, tab) and
-             MapSet.member?(reloaded, tab_disk_key(tab)) do
-          reread_reverted_def_buffer(socket, tab)
-        else
-          tab
-        end
-      end)
-
-    socket
-    |> assign(:tabs, tabs)
-    |> resync_active_tab(tabs)
-  end
-
-  # Re-read one reverted `:def` tab's editable definition skeleton (header +
-  # state) from the now-reverted live image. Only overwrite the editable
-  # buffer when the re-fetch actually returned a skeleton —
-  # `class_definition_info/2` yields `""` on a transient fetch failure, and
-  # blanking a tab the user is looking at would be worse than leaving the
-  # prior (about-to-be-correct) body until the next refresh.
-  defp reread_reverted_def_buffer(socket, tab) do
-    case class_definition_info(socket, tab.class) do
-      {"", _comment, _native_module, _class_modifiers, _is_protocol} ->
-        tab
-
-      {definition, _comment, _native_module, _class_modifiers, _is_protocol} ->
-        # Only the editable definition buffer is touched here; the doc
-        # block + badges are refreshed by `refresh_source_tab/2` in the
-        # follow-up push refresh.
-        %{tab | source: definition, base: definition, dirty: false, disk_differs: false}
-    end
-  end
-
-  # BT-2598: the live image changed (a class was (re)loaded or removed).
-  # Re-pull every source-dependent surface so open windows reflect the new
-  # image without a manual refresh: the browser class list (cross-called back
-  # on `BtAttachWeb.Live.SystemBrowser`, BT-3297) and the active ChangeLog
-  # (cross-called back on `WorkspaceLive`, which still owns the Changes
-  # pane), all open clean editor tabs (method +
-  # definition, owned here), and the git panel when it is the active dock
-  # tab (also cross-called back, `BtAttachWeb.Live.Dock` owns it). Folded
-  # together here — rather than split across callers — so every caller gets
-  # one coherent update in the same order the pre-extraction function did.
-  # Public: `BtAttachWeb.Live.Dock`'s `git_revert_event/2` (BT-3295) and
-  # `WorkspaceLive`'s coalesced `:do_source_refresh` handler both call it
-  # directly.
-  def refresh_after_source_change(socket) do
-    socket
-    |> SystemBrowser.assign_browser_classes()
-    |> WorkspaceLive.assign_changes()
-    |> refresh_open_source_tabs()
-    |> WorkspaceLive.maybe_refresh_git()
-  end
-
-  # BT-2598: re-read every open *clean* editor tab from the live image so a
-  # source change that landed out-of-band (a git revert's reload, another
-  # session's flush, an MCP edit) is reflected in the visible buffer. A
-  # `dirty` tab is left untouched — never clobber the user's in-progress
-  # work — exactly as the re-activation re-read in `open_method_tab/4` /
-  # `open_definition/2` does; this generalises that pull into a push so the
-  # user need not re-focus the tab. An empty-source fallback (a
-  # since-removed method/class, a transient facade error) keeps the
-  # existing buffer rather than blanking a tab the user is looking at.
-  defp refresh_open_source_tabs(socket) do
-    tabs = Enum.map(socket.assigns.tabs, &refresh_source_tab(socket, &1))
-
-    socket
-    |> assign(:tabs, tabs)
-    |> resync_active_tab(tabs)
-  end
-
-  # Re-read one tab's source from the image. Clean `:method`/`:def` tabs
-  # refresh; dirty tabs and any other shape pass through unchanged.
-  defp refresh_source_tab(socket, %{kind: :method, dirty: false} = tab) do
-    case method_source_info(socket, tab.class, tab.side, tab.selector) do
-      %{source: ""} ->
-        tab
-
-      info ->
-        %{
-          tab
-          | source: info.source,
-            base: info.source,
-            # Pick up *new* divergence from an out-of-band patch, but
-            # never clear a divergence already set locally (mirrors the
-            # re-activation invariant).
-            disk_differs: tab.disk_differs or info.disk_differs,
-            runtime_only: info.runtime_only,
-            disk_source: reactivation_disk_source(tab, info),
-            doc: info.doc,
-            signature: info.signature,
-            native_delegate: info.native_delegate
-        }
-    end
-  end
-
-  defp refresh_source_tab(socket, %{kind: :def, dirty: false} = tab) do
-    # Only the read-only doc block is re-read (the editable definition
-    # buffer is left untouched), matching the `:def` re-activation re-read.
-    # A failed re-fetch keeps the prior backing module rather than hiding
-    # the "Erlang backend" badge. BT-2605: the reflected modifier badges
-    # (sealed/abstract/native) are refreshed from the same fetch so a
-    # recompile-into/out-of a modifier shows on push refresh; a transient
-    # failure (native_module nil) keeps the prior native flag.
-    {_definition, comment, native_module, class_modifiers, is_protocol} =
-      class_definition_info(socket, tab.class)
-
-    resolved_native = native_module || tab.native_module
-
-    %{
-      tab
-      | doc: comment,
-        is_protocol: is_protocol,
-        native_module: resolved_native,
-        # `nil` modifiers signal a transient fetch failure — keep the
-        # prior list rather than clearing the badges (BT-2605 review).
-        class_modifiers: class_modifiers || tab.class_modifiers,
-        class_native: is_binary(resolved_native) and resolved_native != ""
-    }
-  end
-
-  defp refresh_source_tab(_socket, tab), do: tab
-
-  # Keep the rendered active-tab editor in sync after a push refresh:
-  # re-sync the active tab's fields so its breadcrumb/badges/doc block
-  # re-render from the refreshed entry. A dirty active tab is untouched
-  # above, so this never disturbs an edit.
-  #
-  # BT-2588: also decides whether to keep or clear the save/flush banners,
-  # via TWO signals combined:
-  #
-  #   * `:save_echo_pending` — a one-shot flag `compile_clean/3` arms on a
-  #     successful save. This function only READS it (never clears it —
-  #     see why below); unset ⇒ this push is definitely not our own save's
-  #     echo — clear unconditionally.
-  #   * for a `:method` tab, whether the re-read body actually changed.
-  #     Even when the flag IS set, BT-2600's coalescing can fold a
-  #     genuinely external change into the SAME debounced push as our own
-  #     save's echo (two `ClassLoaded` events landing within the same
-  #     ~60ms window collapse to one `:do_source_refresh`) — the body
-  #     comparison catches that case. Skipped for `:def`:
-  #     `refresh_source_tab/2` never re-reads a `:def` tab's editable
-  #     definition body (only its doc/modifiers), so the comparison would
-  #     be vacuously "unchanged" on every push and could never legitimately
-  #     clear a `:def` tab's banner — the flag alone decides there, same
-  #     narrow coalescing blind spot as any other single-signal check,
-  #     self-healing on the next tab switch or save.
-  #
-  # This function does NOT clear the flag (review-bot finding):
-  # `git_revert_event/2` calls `resync_active_tab/2` TWICE in one
-  # synchronous pipeline (`reload_reverted_def_buffers/2`, then
-  # `refresh_after_source_change/1`) — a read-then-clear here would let the
-  # first call spend the flag, leaving the second (which decides the
-  # actually-rendered state) always seeing it unset and wiping an unrelated
-  # tab's still-fresh banner on ANY git revert. The flag is a one-shot
-  # signal for the ASYNC push cycle specifically, so only its real owner,
-  # `WorkspaceLive`'s `handle_info(:do_source_refresh, ...)`, clears it —
-  # once, after every synchronous caller (this function included) has had
-  # its look.
-  defp resync_active_tab(socket, tabs) do
-    save_echo? = socket.assigns[:save_echo_pending]
-
-    case Enum.find(tabs, &(&1.id == socket.assigns[:active_tab])) do
-      %{dirty: false} = active ->
-        # BT-2655: if the re-read changed the active tab's *body* (a git
-        # revert, a push reconcile), bump `editor_rev` so the
-        # `phx-update="ignore"` CodeMirror host is re-keyed and remounts
-        # with the new source. A no-op re-read (same body) leaves the rev —
-        # and thus the live editor instance — untouched, so a routine
-        # refresh of an unchanged tab never disturbs the editor.
-        socket = maybe_bump_editor_rev(socket, active.source)
-
-        keep_banner? =
-          save_echo? and
-            (active.kind != :method or active.source == socket.assigns[:edit_source])
-
-        if keep_banner? do
-          sync_active_fields(socket, active)
-        else
-          sync_active(socket, active)
-        end
-
-      _ ->
-        socket
-    end
-  end
-
-  defp maybe_bump_editor_rev(socket, new_source) do
-    if new_source == socket.assigns[:edit_source] do
-      socket
-    else
-      assign(socket, :editor_rev, socket.assigns.editor_rev + 1)
-    end
   end
 
   # BT-2570: restore the method-editor doc-block expand state on a genuine
