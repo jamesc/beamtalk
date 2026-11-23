@@ -16,7 +16,8 @@
 
 use super::super::super::CoreErlangGenerator;
 use super::super::super::threaded_ir::{
-    ConsPerCall, FOLD_RESULT_LIST_SLOT, FoldCarry, FoldResultList, ThreadedStmt,
+    AccSlot, BoolArm, ConsPerCall, FOLD_RESULT_LIST_SLOT, FoldAccBody, FoldAccValue, FoldCarry,
+    FoldResultList, ThreadedStmt, bool_arm_clause,
 };
 use super::super::ThreadingPlan;
 use super::BodyKind;
@@ -148,15 +149,7 @@ fn cons(item_var: &str, list: &'static str) -> Document<'static> {
     docvec!["[", leaf::var(item_var.to_string()), " | ", list, "]"]
 }
 
-/// `<'value'> when 'true' -> body` — one boolean arm of a predicate `case`.
-fn bool_arm(value: bool, body: Document<'static>) -> Document<'static> {
-    form::clause(
-        [leaf::atom(if value { "true" } else { "false" })],
-        None,
-        body,
-        Layout::Flat,
-    )
-}
+use bool_arm_clause as bool_arm;
 
 impl CoreErlangGenerator {
     /// The `(carry, tail_state_doc)` pair every fold epilogue ends in: the
@@ -213,13 +206,35 @@ impl CoreErlangGenerator {
             leaf::var(cx.pv.to_string())
         };
         let (carry, tail) = self.epilogue_tail(cx);
-        let value = self.bool_case(
-            condition_doc,
-            [
-                (true, acc_tuple([cons(item_var, "AccList")], &tail)),
-                (false, acc_tuple([Document::Str("AccList")], &tail)),
-            ],
-        );
+        let var = self.fresh_temp_var("_PredBad");
+        let fallback = Self::case_clause_fallback_clause(var);
+        // BT-5117: typed, so the verifier counts the conses into `AccList`.
+        // Test-only fault: the included item is consed twice.
+        let included = if fault!(FilterConsTwice) {
+            AccSlot::Cons {
+                item: item_var.to_string(),
+                list: Box::new(AccSlot::cons(item_var, "AccList")),
+            }
+        } else {
+            AccSlot::cons(item_var, "AccList")
+        };
+        let arm = |value, head| {
+            Box::new(BoolArm {
+                value,
+                body: FoldAccBody::Tuple {
+                    head: vec![head],
+                    tail: tail.clone(),
+                },
+            })
+        };
+        let value = FoldAccValue {
+            prelude: None,
+            body: FoldAccBody::BoolCase {
+                scrutinee: condition_doc,
+                arms: [arm(true, included), arm(false, AccSlot::Name("AccList"))],
+                fallback,
+            },
+        };
         stmts.push(Self::fold_accumulator(carry, value, cx.span));
     }
 

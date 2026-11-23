@@ -20,7 +20,7 @@ fn threads() -> Vec<String> {
 fn accumulator(carry: FoldCarry) -> ThreadedStmt {
     ThreadedStmt::FoldAccumulator {
         carry,
-        value: docvec!["{T1, U1}"],
+        value: FoldAccValue::opaque(docvec!["{T1, U1}"]),
         span: span(),
         result_list: None,
     }

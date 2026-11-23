@@ -15,12 +15,14 @@ use std::collections::HashMap;
 
 use super::super::nlr::NlrArmShape;
 use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary};
+use super::fold_acc::LeafConses;
 use super::ir::{
-    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCleanup,
-    EnsureForeignNlr, EnsureNlrRelay, FoldAccShape, FoldCarry, FoldResultList, ForeignCleanupBody,
-    FrameId, KeyedFoldCall, LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape, OnDoCatchVars,
-    RebindFrame, RebindFrameKind, RebindLowering, RebindShape, RethrowSlot, StateAccFallbackReason,
-    ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef, VersionPrefix, VersionedVar,
+    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, ConsPerCall,
+    EnsureCleanup, EnsureForeignNlr, EnsureNlrRelay, FoldAccShape, FoldCarry, FoldResultList,
+    ForeignCleanupBody, FrameId, KeyedFoldCall, LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape,
+    OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering, RebindShape, RethrowSlot,
+    StateAccFallbackReason, ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef, VersionPrefix,
+    VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -160,6 +162,22 @@ pub(in crate::core_erlang) enum VerifyError {
         found: Option<FoldResultList>,
         at: Span,
     },
+
+    /// BT-5117: one leaf arm of a result-list fold's accumulator conses into
+    /// the result-list slot the wrong number of times, or into another slot.
+    /// `slot_conses` is the conses stacked on the result-list slot,
+    /// `stray_slots` the other (1-based) slots that cons. `AtMostOne` allows
+    /// 0 or 1 into the slot, `ExactlyOne` requires 1; no other slot may cons.
+    FoldResultListConsMismatch {
+        expected: ConsPerCall,
+        slot_conses: usize,
+        stray_slots: Vec<usize>,
+        at: Span,
+    },
+
+    /// BT-5117: a result-list fold's accumulator is hand-built text (or its
+    /// result-list slot is), so the cons count cannot be read off it.
+    FoldResultListOpaque { at: Span },
 
     /// Invariant class 3: the recursive inter-construct fallback
     /// invariant `list_op_needs_stateacc_fallback_recursive` encodes
@@ -1413,21 +1431,59 @@ pub(in crate::core_erlang) fn verify_fold_result_list_declared(
     let Some(expected) = expected else {
         return Vec::new();
     };
-    let (found, at) = match body.last() {
+    let (found, value, at) = match body.last() {
         Some(ThreadedStmt::FoldAccumulator {
-            result_list, span, ..
-        }) => (*result_list, *span),
-        _ => (None, at),
+            result_list,
+            value,
+            span,
+            ..
+        }) => (*result_list, Some(value), *span),
+        _ => (None, None, at),
     };
-    if found == Some(expected) {
-        Vec::new()
-    } else {
-        vec![VerifyError::FoldResultListUndeclared {
+    if found != Some(expected) {
+        return vec![VerifyError::FoldResultListUndeclared {
             expected,
             found,
             at,
-        }]
+        }];
     }
+    // BT-5117: the declaration is checked against the accumulator itself —
+    // every leaf arm conses into the result-list slot as often as the kind
+    // says, and into no other slot.
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    let mut errors = Vec::new();
+    for leaf in value.leaf_conses(expected.slot) {
+        match leaf {
+            LeafConses::Opaque
+            | LeafConses::Tuple {
+                slot_missing: true, ..
+            } => {
+                errors.push(VerifyError::FoldResultListOpaque { at });
+            }
+            LeafConses::Tuple {
+                slot_conses,
+                stray_slots,
+                ..
+            } => {
+                let count_ok = match expected.cons {
+                    ConsPerCall::AtMostOne => slot_conses <= 1,
+                    ConsPerCall::ExactlyOne => slot_conses == 1,
+                };
+                if !count_ok || !stray_slots.is_empty() {
+                    errors.push(VerifyError::FoldResultListConsMismatch {
+                        expected: expected.cons,
+                        slot_conses,
+                        stray_slots,
+                        at,
+                    });
+                }
+            }
+        }
+    }
+    errors.dedup();
+    errors
 }
 
 /// BT-3939, [`VerifyError::ProducerSiteNotThreaded`] over one frame's

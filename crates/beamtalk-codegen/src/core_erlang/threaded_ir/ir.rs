@@ -26,6 +26,7 @@
 
 use super::super::NlrBoundary;
 use super::super::erlang_types::ErlangVar;
+use super::fold_acc::FoldAccValue;
 use beamtalk_cerl_doc::Document;
 use beamtalk_core::source_analysis::Span;
 
@@ -943,7 +944,7 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// ADR 0131 §4 (BT-3863): a fold lambda body's last statement, the
     /// accumulator `lists:foldl` hands to the next iteration and, after the
     /// last one, to the code after the fold. `value` is that accumulator's
-    /// hand-built `Document`, rendered verbatim exactly like a
+    /// [`FoldAccValue`], rendered exactly like a
     /// [`Statement`](Self::Statement)'s; `carry` records what it threads, as
     /// typed data the verifier reads instead of the opaque text. Built by
     /// every `BodyKind` epilogue in `control_flow/body.rs`.
@@ -955,7 +956,9 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// ([`VerifyError::FoldLocalsNotCarried`](super::verify::VerifyError::FoldLocalsNotCarried)).
     FoldAccumulator {
         carry: FoldCarry,
-        value: Document<'static>,
+        /// BT-5117: typed for the result-list kinds (the verifier counts its
+        /// conses), [`FoldAccBody::Opaque`] for the rest.
+        value: FoldAccValue,
         span: Span,
         /// BT-5097: the result list this accumulator extends, and how many
         /// elements one call adds to it. Stamped once, from the fold kind

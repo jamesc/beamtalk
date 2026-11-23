@@ -20,7 +20,8 @@
 //! path remains for either family.
 
 use super::super::threaded_ir::{
-    self, BindOp, FoldCarry, FrameId, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
+    self, AccSlot, BindOp, FoldAccValue, FoldCarry, FrameId, ThreadedStmt, ValueRef, VersionPrefix,
+    VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use super::LocalWrite;
@@ -328,7 +329,7 @@ impl CoreErlangGenerator {
                 ));
             };
             stmts.push(ThreadedStmt::Return(
-                ValueRef::Doc(tail),
+                ValueRef::Doc(tail.render()),
                 last_bind.unwrap_or(gensym_seed),
                 tail_span,
             ));
@@ -365,12 +366,12 @@ impl CoreErlangGenerator {
     /// epilogue builds its accumulator through this.
     pub(in crate::core_erlang::control_flow) fn fold_accumulator(
         carry: FoldCarry,
-        value: Document<'static>,
+        value: impl Into<FoldAccValue>,
         span: Span,
     ) -> ThreadedStmt {
         ThreadedStmt::FoldAccumulator {
             carry,
-            value,
+            value: value.into(),
             span,
             result_list: None,
         }
@@ -989,16 +990,14 @@ impl CoreErlangGenerator {
                     let result_var = self.fresh_temp_var("CondVal");
                     stmts.push(Self::fold_accumulator(
                         FoldCarry::StateMap,
-                        docvec![
-                            form::let_prefix(
-                                leaf::var(result_var.clone()),
-                                form::element(1, leaf::var(tuple_var))
-                            ),
-                            form::tuple([
-                                docvec!["[", leaf::var(result_var), " | AccList]"],
-                                leaf::var(self.current_state_var())
-                            ]),
-                        ],
+                        FoldAccValue::tuple(
+                            vec![AccSlot::cons(&result_var, "AccList")],
+                            leaf::var(self.current_state_var()),
+                        )
+                        .with_prelude(form::let_prefix(
+                            leaf::var(result_var),
+                            form::element(1, leaf::var(tuple_var)),
+                        )),
                         span,
                     ));
                 }
@@ -1389,10 +1388,10 @@ impl CoreErlangGenerator {
             BodyKind::FoldlCollect => {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    form::tuple([
-                        docvec!["[", leaf::var(last_val.to_string()), " | AccList]"],
+                    FoldAccValue::tuple(
+                        vec![AccSlot::cons(last_val, "AccList")],
                         leaf::var(self.current_state_var()),
-                    ]),
+                    ),
                     span,
                 ));
             }
@@ -1449,13 +1448,11 @@ impl CoreErlangGenerator {
                 let ir = self.fresh_temp_var("ItemResult");
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![
-                        form::let_prefix(
-                            leaf::var(ir.clone()),
-                            form::element(1, leaf::var(dispatch_var.to_string()))
-                        ),
-                        form::tuple([docvec!["[", leaf::var(ir), " | AccList]"], leaf::var(fs)]),
-                    ],
+                    FoldAccValue::tuple(vec![AccSlot::cons(&ir, "AccList")], leaf::var(fs))
+                        .with_prelude(form::let_prefix(
+                            leaf::var(ir),
+                            form::element(1, leaf::var(dispatch_var.to_string())),
+                        )),
                     span,
                 ));
             }
@@ -1522,13 +1519,11 @@ impl CoreErlangGenerator {
                 let ir = self.fresh_temp_var("T2LoopVal");
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![
-                        form::let_prefix(
-                            leaf::var(ir.clone()),
-                            form::element(1, leaf::var(tuple_var.to_string()))
-                        ),
-                        form::tuple([docvec!["[", leaf::var(ir), " | AccList]"], leaf::var(fs)]),
-                    ],
+                    FoldAccValue::tuple(vec![AccSlot::cons(&ir, "AccList")], leaf::var(fs))
+                        .with_prelude(form::let_prefix(
+                            leaf::var(ir),
+                            form::element(1, leaf::var(tuple_var.to_string())),
+                        )),
                     span,
                 ));
             }
@@ -1597,13 +1592,8 @@ impl CoreErlangGenerator {
                 BodyKind::FoldlCollect => {
                     stmts.push(Self::fold_accumulator(
                         plan.fold_carry(),
-                        docvec![
-                            " ",
-                            form::tuple([
-                                docvec!["[", leaf::var(val.to_string()), " | AccList]"],
-                                vars_doc
-                            ]),
-                        ],
+                        FoldAccValue::tuple(vec![AccSlot::cons(val, "AccList")], vars_doc)
+                            .with_prelude(Document::Str(" ")),
                         span,
                     ));
                 }
@@ -1650,13 +1640,11 @@ impl CoreErlangGenerator {
             BodyKind::FoldlCollect => {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![
-                        " ",
-                        form::tuple([
-                            docvec!["[", leaf::var(val.to_string()), " | AccList]"],
-                            leaf::var(self.current_state_var())
-                        ]),
-                    ],
+                    FoldAccValue::tuple(
+                        vec![AccSlot::cons(val, "AccList")],
+                        leaf::var(self.current_state_var()),
+                    )
+                    .with_prelude(Document::Str(" ")),
                     span,
                 ));
             }
@@ -1723,10 +1711,7 @@ impl CoreErlangGenerator {
                 };
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    form::tuple([
-                        docvec!["[", leaf::var(rhs_var.to_string()), " | AccList]"],
-                        leaf::var(fs),
-                    ]),
+                    FoldAccValue::tuple(vec![AccSlot::cons(rhs_var, "AccList")], leaf::var(fs)),
                     span,
                 ));
             }
@@ -1900,10 +1885,10 @@ impl CoreErlangGenerator {
                         let vars_doc = plan.current_vars_doc(self);
                         stmts.push(Self::fold_accumulator(
                             plan.fold_carry(),
-                            form::tuple([
-                                docvec!["[", leaf::var(result_var), " | AccList]"],
+                            FoldAccValue::tuple(
+                                vec![AccSlot::cons(&result_var, "AccList")],
                                 vars_doc,
-                            ]),
+                            ),
                             span,
                         ));
                     } else {
@@ -1914,10 +1899,10 @@ impl CoreErlangGenerator {
                         };
                         stmts.push(Self::fold_accumulator(
                             FoldCarry::StateMap,
-                            form::tuple([
-                                docvec!["[", leaf::var(result_var), " | AccList]"],
+                            FoldAccValue::tuple(
+                                vec![AccSlot::cons(&result_var, "AccList")],
                                 leaf::var(fs),
-                            ]),
+                            ),
                             span,
                         ));
                     }

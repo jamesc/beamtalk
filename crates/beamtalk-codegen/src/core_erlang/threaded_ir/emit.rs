@@ -250,7 +250,7 @@ pub(in crate::core_erlang) fn render(
             }
             // BT-3863: the fold accumulator renders like a `Statement`; its
             // `carry` is for the verifier.
-            ThreadedStmt::FoldAccumulator { value, .. } => docs.push(value.clone()),
+            ThreadedStmt::FoldAccumulator { value, .. } => docs.push(value.render()),
             // BT-4015: the condition closure's `{Bool, StateAcc, ...}` pair,
             // split into the boolean and a shadowing rebind of `StateAcc`.
             ThreadedStmt::ConditionHandBack {
