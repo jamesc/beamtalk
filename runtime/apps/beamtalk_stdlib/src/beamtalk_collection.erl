@@ -207,6 +207,10 @@ the receiver's representation:
 - Array receiver → `Array` (`beamtalk_array:from_list/1`)
 - Set receiver → `Set` (`beamtalk_set:from_list/1`, deduplicating) — the
   species `Set>>collect:`/`select:` answer on the pure path (BT-3615)
+- raw-map receiver (a `Dictionary`) → a map (`maps:from_list/1`); the list must
+  be `{K, V}` pairs, as a keyed fold answers (BT-5097). A `.beam` compiled
+  before BT-5097 answers bare elements here, so running it on this runtime
+  raises `badarg`
 - anything else (already an Erlang list, or another collection) → the list as-is
 
 Called from compiler-generated Core Erlang (`list_ops`).

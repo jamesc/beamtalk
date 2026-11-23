@@ -16,12 +16,13 @@
 
 use super::super::super::CoreErlangGenerator;
 use super::super::super::threaded_ir::{
-    ConsPerCall, FOLD_RESULT_LIST_SLOT, FoldCarry, FoldResultList, ThreadedStmt,
+    ACC_LIST, AccSlot, BoolArm, ConsPerCall, FOLD_RESULT_LIST_SLOT, FoldAccBody, FoldAccValue,
+    FoldCarry, FoldResultList, ThreadedStmt, bool_arm_clause as bool_arm, render_tuple,
 };
 use super::super::ThreadingPlan;
 use super::BodyKind;
 use beamtalk_cerl_doc::form::{self, Layout};
-use beamtalk_cerl_doc::{Document, docvec, join, leaf};
+use beamtalk_cerl_doc::{Document, docvec, leaf};
 use beamtalk_core::source_analysis::Span;
 
 /// What every fold epilogue reads beyond its own `BodyKind` fields: the
@@ -128,34 +129,12 @@ impl BodyKind {
     }
 }
 
-/// `{head…, tail}` — an accumulator tuple whose last slot is the epilogue's
-/// trailing state doc (`tail`).
-fn acc_tuple(
-    head: impl IntoIterator<Item = Document<'static>>,
-    tail: &Document<'static>,
-) -> Document<'static> {
-    docvec![
-        "{",
-        join(head, &Document::Str(", ")),
-        ", ",
-        tail.clone(),
-        "}"
-    ]
-}
+/// `{head…, tail}` — the shared accumulator tuple renderer.
+use render_tuple as acc_tuple;
 
 /// `[item | list]` — cons `item_var` onto the accumulator list `list`.
 fn cons(item_var: &str, list: &'static str) -> Document<'static> {
-    docvec!["[", leaf::var(item_var.to_string()), " | ", list, "]"]
-}
-
-/// `<'value'> when 'true' -> body` — one boolean arm of a predicate `case`.
-fn bool_arm(value: bool, body: Document<'static>) -> Document<'static> {
-    form::clause(
-        [leaf::atom(if value { "true" } else { "false" })],
-        None,
-        body,
-        Layout::Flat,
-    )
+    AccSlot::cons(item_var, list).render()
 }
 
 impl CoreErlangGenerator {
@@ -213,13 +192,35 @@ impl CoreErlangGenerator {
             leaf::var(cx.pv.to_string())
         };
         let (carry, tail) = self.epilogue_tail(cx);
-        let value = self.bool_case(
-            condition_doc,
-            [
-                (true, acc_tuple([cons(item_var, "AccList")], &tail)),
-                (false, acc_tuple([Document::Str("AccList")], &tail)),
-            ],
-        );
+        let var = self.fresh_temp_var("_PredBad");
+        let fallback = Self::case_clause_fallback_clause(var);
+        // BT-5117: typed, so the verifier counts the conses into `AccList`.
+        // Test-only fault: the included item is consed twice.
+        let included = if fault!(FilterConsTwice) {
+            AccSlot::Cons {
+                item: item_var.to_string(),
+                list: Box::new(AccSlot::cons(item_var, ACC_LIST)),
+            }
+        } else {
+            AccSlot::cons(item_var, ACC_LIST)
+        };
+        let arm = |value, head| {
+            Box::new(BoolArm {
+                value,
+                body: FoldAccBody::Tuple {
+                    head: vec![head],
+                    tail: tail.clone(),
+                },
+            })
+        };
+        let value = FoldAccValue {
+            prelude: None,
+            body: FoldAccBody::BoolCase {
+                scrutinee: condition_doc,
+                arms: [arm(true, included), arm(false, AccSlot::Name(ACC_LIST))],
+                fallback,
+            },
+        };
         stmts.push(Self::fold_accumulator(carry, value, cx.span));
     }
 

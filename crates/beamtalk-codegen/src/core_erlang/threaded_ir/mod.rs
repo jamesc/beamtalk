@@ -70,6 +70,7 @@
 
 mod build;
 mod emit;
+mod fold_acc;
 mod ir;
 mod verify;
 
@@ -96,6 +97,9 @@ pub(super) use emit::{
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.
 pub(super) use ir::CallSiteLine;
 // BT-4405: the loop `fn_name`s, one source for producers and test scanners.
+pub(super) use fold_acc::{
+    ACC_LIST, AccSlot, BoolArm, FoldAccBody, FoldAccValue, bool_arm_clause, render_tuple,
+};
 pub(super) use ir::RebindFrameKind;
 #[cfg(test)]
 pub(super) use ir::STATIC_LOOP_FNS;

@@ -12,7 +12,9 @@
 //!   slot, under element 1 of the `{Acc, Family..}` wrapper exactly when the fold has family
 //!   slots);
 //! - `FoldResultListUndeclared` over the lambda body (its last accumulator declares the
-//!   result list its `BodyKind` says it extends).
+//!   result list its `BodyKind` says it extends);
+//! - BT-5117: `FoldResultListConsMismatch` / `FoldResultListOpaque` over the accumulator
+//!   itself (every leaf arm conses into the result-list slot as often as the kind says).
 //!
 //! Proved over a generated corpus, not the repro: every selector x writing-block shape x
 //! receiver x method kind compiles with a silent verifier, the keyed call is in the output, and
@@ -142,6 +144,21 @@ fn a_result_list_the_accumulator_does_not_declare_is_reported_on_every_program()
         }
     }
     assert!(unreported.is_empty(), "{}", unreported.join("\n"));
+}
+
+#[test]
+fn a_filter_that_conses_twice_is_reported_on_every_select_and_reject() {
+    let mut wrong = Vec::new();
+    for (name, src, _) in programs() {
+        let is_filter = name.contains("select:") || name.contains("reject:");
+        let report = verifier_report(&src, Some(Fault::FilterConsTwice));
+        match (is_filter, report) {
+            (true, Some(r)) if r.contains("FoldResultListConsMismatch") => {}
+            (false, None) => {}
+            (expected, other) => wrong.push(format!("{name}: filter {expected}: {other:?}")),
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 #[test]

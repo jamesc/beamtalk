@@ -171,6 +171,9 @@ mod registry {
         /// BT-5097: a fold lambda's accumulator does not declare the result
         /// list its kind extends (`FoldResultListUndeclared`).
         FoldAccumulatorOmitsResultList,
+        /// BT-5117: a `select:`/`reject:` accumulator conses the included item
+        /// onto the result list twice (`FoldResultListConsMismatch`).
+        FilterConsTwice,
         /// BT-3857: the producer's last `MapPut` rebind is rewritten into a
         /// `MapHeld` over the version that rebind would have produced, read
         /// through it. That version is never produced (a held rebind steps
