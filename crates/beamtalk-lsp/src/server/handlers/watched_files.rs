@@ -11,8 +11,9 @@
 //! Only files the preload would index (or that are already indexed) are
 //! touched, so unrelated `.bt` files elsewhere in the tree never enter the
 //! index. A deleted or renamed *directory* is not reported per file (the
-//! `**/*.bt` glob does not match directories), so files under it stay indexed
-//! until rename's on-disk check or a later event catches them.
+//! `**/*.bt` glob does not match directories), so a second, delete-only
+//! watcher reports it and every indexed, closed file under it is dropped
+//! (BT-5109).
 //! No file watcher is added to the server itself: the client does the
 //! watching and this only reacts to what it reports.
 
@@ -52,7 +53,17 @@ impl Backend {
             kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
         };
         let opts = DidChangeWatchedFilesRegistrationOptions {
-            watchers: vec![watcher("**/*.bt"), watcher("**/beamtalk.toml")],
+            watchers: vec![
+                watcher("**/*.bt"),
+                watcher("**/beamtalk.toml"),
+                // BT-5109: matches directories (and every other path), so a
+                // deleted directory is reported; the handler ignores deletes
+                // that are not a prefix of an indexed file.
+                FileSystemWatcher {
+                    glob_pattern: GlobPattern::String("**/*".to_string()),
+                    kind: Some(WatchKind::Delete),
+                },
+            ],
         };
         let registrations = vec![Registration {
             id: WATCHER_ID.to_string(),
@@ -62,6 +73,29 @@ impl Backend {
         if let Err(e) = self.client.register_capability(registrations).await {
             tracing::debug!("watched-files registration rejected: {e}");
         }
+    }
+
+    /// Indexed, closed, non-stdlib files at or under any of `dirs` (BT-5109).
+    fn indexed_files_under(
+        &self,
+        dirs: &[Utf8PathBuf],
+        open: &std::collections::HashSet<Utf8PathBuf>,
+    ) -> Vec<Utf8PathBuf> {
+        if dirs.is_empty() {
+            return Vec::new();
+        }
+        let svc = self.service.lock_recover();
+        let index = svc.project_index();
+        index
+            .indexed_files()
+            .into_iter()
+            .filter(|f| {
+                !open.contains(*f)
+                    && !index.is_stdlib_file(f)
+                    && dirs.iter().any(|d| f.starts_with(d))
+            })
+            .cloned()
+            .collect()
     }
 
     /// Applies a batch of on-disk changes to the index, then re-checks the
@@ -76,6 +110,7 @@ impl Backend {
 
         let mut manifest_changed = false;
         let mut candidates: Vec<(Utf8PathBuf, bool)> = Vec::new(); // (path, deleted)
+        let mut deleted_dirs: Vec<Utf8PathBuf> = Vec::new();
         for event in params.changes {
             let Some(path) = uri_to_path(&event.uri) else {
                 continue;
@@ -85,7 +120,17 @@ impl Backend {
                 _ if path.extension() == Some("bt") && !open.contains(&path) => {
                     candidates.push((path, event.typ == FileChangeType::DELETED));
                 }
+                // BT-5109: a delete of anything else may be a directory.
+                _ if path.extension() != Some("bt") && event.typ == FileChangeType::DELETED => {
+                    deleted_dirs.push(path);
+                }
                 _ => {}
+            }
+        }
+
+        for f in self.indexed_files_under(&deleted_dirs, &open) {
+            if !candidates.iter().any(|(p, _)| *p == f) {
+                candidates.push((f, true));
             }
         }
 

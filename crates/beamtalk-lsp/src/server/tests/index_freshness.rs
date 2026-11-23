@@ -331,3 +331,217 @@ async fn superseded_class_rename_still_republishes_dependents() {
         "the superseded rename must still re-check b.bt"
     );
 }
+
+fn replace_text(
+    uri: &Url,
+    version: i32,
+    text: &str,
+) -> tower_lsp::lsp_types::DidChangeTextDocumentParams {
+    tower_lsp::lsp_types::DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: text.to_string(),
+        }],
+    }
+}
+
+/// Whether `feed` delivers a publish for `uri` within `wait`.
+async fn saw_publish_for(
+    feed: &mut tokio::sync::mpsc::UnboundedReceiver<tower_lsp::jsonrpc::Request>,
+    uri: &Url,
+    wait: Duration,
+) -> bool {
+    while let Ok(Some(n)) = tokio::time::timeout(wait, feed.recv()).await {
+        if published(&n).is_some_and(|p| &p.uri == uri) {
+            return true;
+        }
+    }
+    false
+}
+
+/// BT-5109: adding, removing or re-typing a method in a.bt changes what b.bt
+/// resolves, so b.bt is re-checked; a method-body edit leaves it alone.
+#[tokio::test]
+async fn member_level_change_republishes_other_open_files() {
+    let root = unique_temp_dir("bt-5109-member");
+    fs::create_dir_all(root.join("src")).expect("src");
+    let a = root.join("src").join("a.bt");
+    let b = root.join("src").join("b.bt");
+    let a_src = "Object subclass: Foo\n  go => 1\n";
+    let b_src = "Object subclass: User\n\n  make => Foo new go\n";
+    fs::write(&a, a_src).expect("a");
+    fs::write(&b, b_src).expect("b");
+    let (a_uri, b_uri) = (
+        Url::from_file_path(&a).expect("uri"),
+        Url::from_file_path(&b).expect("uri"),
+    );
+
+    let (service, mut feed) = service_with_publish_feed(&root).await;
+    let backend: &Backend = service.inner();
+    real_did_open(backend, a_uri.clone(), a_src).await;
+    real_did_open(backend, b_uri.clone(), b_src).await;
+    // sleep: let the feed task forward the opens' own publishes before draining.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    while feed.try_recv().is_ok() {}
+
+    // Body-only edit: the interface is unchanged, so b.bt is not re-analysed.
+    backend
+        .did_change(replace_text(&a_uri, 2, "Object subclass: Foo\n  go => 2\n"))
+        .await;
+    assert!(
+        !saw_publish_for(&mut feed, &b_uri, Duration::from_millis(400)).await,
+        "a method-body edit must not re-check other open files"
+    );
+
+    // Adding a method changes the interface.
+    backend
+        .did_change(replace_text(
+            &a_uri,
+            3,
+            "Object subclass: Foo\n  go => 2\n  stop => 3\n",
+        ))
+        .await;
+    assert!(
+        saw_publish_for(&mut feed, &b_uri, Duration::from_secs(2)).await,
+        "adding a method must re-check b.bt"
+    );
+    while feed.try_recv().is_ok() {}
+
+    // Removing a method changes it too.
+    backend
+        .did_change(replace_text(
+            &a_uri,
+            4,
+            "Object subclass: Foo\n  stop => 3\n",
+        ))
+        .await;
+    assert!(
+        saw_publish_for(&mut feed, &b_uri, Duration::from_secs(2)).await,
+        "removing a method must re-check b.bt"
+    );
+}
+
+/// BT-5109: deleting a directory drops every indexed, closed file under it.
+#[tokio::test]
+async fn deleting_a_directory_drops_its_files_from_the_index() {
+    let (service, root) = rooted_backend("bt-5109-dir");
+    let backend: &Backend = service.inner();
+    let sub = root.join("src").join("sub");
+    fs::create_dir_all(&sub).expect("sub");
+    let (inside, outside, open) = (
+        sub.join("in.bt"),
+        root.join("src").join("out.bt"),
+        sub.join("open.bt"),
+    );
+    for (p, name) in [(&inside, "In"), (&outside, "Out"), (&open, "Open")] {
+        let text = format!("Object subclass: {name}\n");
+        fs::write(p, &text).expect("write");
+        backend.service.lock_recover().update_file(p.clone(), text);
+    }
+    backend.versions.lock_recover().insert(open.clone(), 1);
+
+    fs::remove_dir_all(&sub).expect("rm dir");
+    let dir_uri = Url::from_file_path(&sub).expect("uri");
+    backend
+        .did_change_watched_files(watched(&dir_uri, FileChangeType::DELETED))
+        .await;
+
+    let svc = backend.service.lock_recover();
+    assert!(
+        svc.file_source(&inside).is_none(),
+        "closed file under dir dropped"
+    );
+    assert!(svc.file_source(&outside).is_some(), "sibling dir untouched");
+    assert!(
+        svc.file_source(&open).is_some(),
+        "open buffers stay the truth"
+    );
+    assert!(
+        svc.project_index().classes_in_file(&inside).is_none(),
+        "its index entries are gone"
+    );
+}
+
+/// BT-5109: a reload publish is ordered against `publish_lock` (the one
+/// `did_close`'s clearing publish takes), not sent around it.
+#[tokio::test]
+async fn reload_publish_waits_for_the_publish_lock() {
+    use crate::server::reload::publish_diagnostics_impl;
+    let root = unique_temp_dir("bt-5109-lock");
+    fs::create_dir_all(root.join("src")).expect("src");
+    let path = root.join("src").join("r.bt");
+    fs::write(&path, "Object subclass: R\n").expect("write");
+    let uri = Url::from_file_path(&path).expect("uri");
+    let (service, mut feed) = service_with_publish_feed(&root).await;
+    let backend: &Backend = service.inner();
+    backend.service.lock_recover().update_file(
+        Utf8PathBuf::from_path_buf(path).expect("utf8"),
+        "Object subclass: R\n".into(),
+    );
+
+    let guard = backend.publish_lock.lock().await;
+    let handle = crate::server::reload::OpenPathsHandle {
+        versions: Arc::clone(&backend.versions),
+        publish_lock: Arc::clone(&backend.publish_lock),
+    };
+    let publish = publish_diagnostics_impl(
+        &backend.client,
+        &backend.service,
+        &backend.reload_diagnostics,
+        &handle,
+        &uri,
+    );
+    tokio::pin!(publish);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), &mut publish)
+            .await
+            .is_err(),
+        "must block while another publish holds the lock"
+    );
+    assert!(!saw_publish_for(&mut feed, &uri, Duration::from_millis(100)).await);
+    drop(guard);
+    publish.await;
+    assert!(saw_publish_for(&mut feed, &uri, Duration::from_secs(2)).await);
+}
+
+/// BT-5109: a reload publish computed while the document was open is dropped
+/// if the document closed before the send.
+#[tokio::test]
+async fn reload_publish_for_a_document_closed_meanwhile_is_dropped() {
+    use crate::server::reload::publish_diagnostics_impl;
+    let root = unique_temp_dir("bt-5109-closed");
+    fs::create_dir_all(root.join("src")).expect("src");
+    let path = Utf8PathBuf::from_path_buf(root.join("src").join("c.bt")).expect("utf8");
+    let uri = Url::from_file_path(&path).expect("uri");
+    let (service, mut feed) = service_with_publish_feed(&root).await;
+    let backend: &Backend = service.inner();
+    open_test_file(backend, &path, "Object subclass: C\n");
+    let handle = crate::server::reload::OpenPathsHandle {
+        versions: Arc::clone(&backend.versions),
+        publish_lock: Arc::clone(&backend.publish_lock),
+    };
+
+    let guard = backend.publish_lock.lock().await;
+    let publish = publish_diagnostics_impl(
+        &backend.client,
+        &backend.service,
+        &backend.reload_diagnostics,
+        &handle,
+        &uri,
+    );
+    tokio::pin!(publish);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), &mut publish)
+            .await
+            .is_err()
+    );
+    backend.versions.lock_recover().remove(&path); // the close lands
+    drop(guard);
+    publish.await;
+    assert!(!saw_publish_for(&mut feed, &uri, Duration::from_millis(300)).await);
+}

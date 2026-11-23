@@ -257,3 +257,19 @@ fn path_to_stdlib_uri_handles_nested_path() {
     assert_eq!(uri.scheme(), "beamtalk-stdlib");
     assert_eq!(uri.path(), "/collection.bt");
 }
+
+/// BT-5109: a package-qualified class hover carries the structured
+/// `class_name` and the package provenance in its rendered text.
+#[test]
+fn package_qualified_class_hover_has_class_name_and_provenance() {
+    let mut service = SimpleLanguageService::new();
+    let hover = hover_on(&mut service, "json@Parser new", "Parser");
+    assert_eq!(hover.class_name.as_deref(), Some("Parser"));
+    assert!(
+        hover
+            .contents
+            .contains("Class: `Parser` (from package `json`)"),
+        "got: {}",
+        hover.contents
+    );
+}
