@@ -508,3 +508,40 @@ async fn reload_publish_waits_for_the_publish_lock() {
     publish.await;
     assert!(saw_publish_for(&mut feed, &uri, Duration::from_secs(2)).await);
 }
+
+/// BT-5109: a reload publish computed while the document was open is dropped
+/// if the document closed before the send.
+#[tokio::test]
+async fn reload_publish_for_a_document_closed_meanwhile_is_dropped() {
+    use crate::server::reload::publish_diagnostics_impl;
+    let root = unique_temp_dir("bt-5109-closed");
+    fs::create_dir_all(root.join("src")).expect("src");
+    let path = Utf8PathBuf::from_path_buf(root.join("src").join("c.bt")).expect("utf8");
+    let uri = Url::from_file_path(&path).expect("uri");
+    let (service, mut feed) = service_with_publish_feed(&root).await;
+    let backend: &Backend = service.inner();
+    open_test_file(backend, &path, "Object subclass: C\n");
+    let handle = crate::server::reload::OpenPathsHandle {
+        versions: Arc::clone(&backend.versions),
+        publish_lock: Arc::clone(&backend.publish_lock),
+    };
+
+    let guard = backend.publish_lock.lock().await;
+    let publish = publish_diagnostics_impl(
+        &backend.client,
+        &backend.service,
+        &backend.reload_diagnostics,
+        &handle,
+        &uri,
+    );
+    tokio::pin!(publish);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), &mut publish)
+            .await
+            .is_err()
+    );
+    backend.versions.lock_recover().remove(&path); // the close lands
+    drop(guard);
+    publish.await;
+    assert!(!saw_publish_for(&mut feed, &uri, Duration::from_millis(300)).await);
+}
