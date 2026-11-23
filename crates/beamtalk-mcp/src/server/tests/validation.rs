@@ -187,6 +187,20 @@ fn path_policy_confines_to_project_root() {
         .unwrap();
 }
 
+/// BT-5108: the checked path is in the same plain form `paths::canonicalize`
+/// gives (never a Windows `\\?\` path), and a root passed in verbatim form is
+/// compared in plain form, so confinement does not miss on Windows.
+#[test]
+fn path_policy_returns_plain_canonical_paths() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = beamtalk_core::paths::canonicalize(tmp.path()).unwrap();
+    std::fs::write(root.join("a.bt"), "").unwrap();
+    let policy = PathPolicy::Confined(root.clone());
+    let got = policy.check(root.join("a.bt").to_str().unwrap()).unwrap();
+    assert_eq!(got, root.join("a.bt"));
+    assert!(!got.to_string_lossy().starts_with(r"\\?\"));
+}
+
 #[cfg(unix)]
 #[test]
 fn path_policy_refuses_symlink_escaping_the_root() {

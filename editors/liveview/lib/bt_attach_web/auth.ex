@@ -9,7 +9,8 @@ defmodule BtAttachWeb.Auth do
   The browser authenticates to Phoenix via OIDC; on success the user's verified
   claims are stored in the **session cookie** (signed *and encrypted*,
   `SameSite=Strict`, `HttpOnly` — a client-side cookie session, not a server-side
-  store, so it cannot be revoked before its TTL; no token in the URL) under the `"bt_user"` key, alongside a
+  store; logout revokes its random `live_socket_id` in `BtAttach.RevokedSessions` so a
+  copied cookie dies at logout rather than at its TTL; no token in the URL) under the `"bt_user"` key, alongside a
   `"bt_logged_in_at"` timestamp. This module is the single place that
   reads/writes that session and gates access:
 
@@ -108,7 +109,8 @@ defmodule BtAttachWeb.Auth do
   @doc "Plug: assign `:current_user` from the session, dropping an expired one."
   def fetch_current_user(conn, _opts) do
     user =
-      if session_live?(get_session(conn, @logged_in_at_key)) do
+      if session_live?(get_session(conn, @logged_in_at_key)) and
+           not BtAttach.RevokedSessions.revoked?(get_session(conn, @live_socket_id_key)) do
         get_session(conn, @session_key)
       end
 
@@ -204,14 +206,21 @@ defmodule BtAttachWeb.Auth do
   def on_mount(:require_authenticated, _params, session, socket) do
     user = session[@session_key]
     logged_in_at = session[@logged_in_at_key]
-    valid_user = if session_live?(logged_in_at), do: user
+
+    valid_user =
+      if session_live?(logged_in_at) and
+           not BtAttach.RevokedSessions.revoked?(session[@live_socket_id_key]),
+         do: user
 
     cond do
       not auth_required?() ->
-        {:cont, socket |> assign_identity(user, logged_in_at) |> assign_role(:owner)}
+        {:cont,
+         socket
+         |> assign_identity(user, logged_in_at, session[@live_socket_id_key])
+         |> assign_role(:owner)}
 
       valid_user && dev_connect_ok?(socket) ->
-        mount_authorized(socket, valid_user, logged_in_at)
+        mount_authorized(socket, valid_user, logged_in_at, session[@live_socket_id_key])
 
       true ->
         # Unauthenticated, expired, or a dev socket connecting from off-loopback.
@@ -223,14 +232,14 @@ defmodule BtAttachWeb.Auth do
   # (ADR 0091 Decision 4), and fail closed if the user maps to no role. The
   # denied path redirects to "/", which the HTTP gate answers 403 — no re-auth
   # loop, since re-authenticating would resolve to the same denied role.
-  defp mount_authorized(socket, claims, logged_in_at) do
+  defp mount_authorized(socket, claims, logged_in_at, live_socket_id) do
     case resolve_role(claims) do
       {:ok, role} ->
         BtAttach.Rbac.audit_mount(claims, role)
 
         {:cont,
          socket
-         |> assign_identity(claims, logged_in_at)
+         |> assign_identity(claims, logged_in_at, live_socket_id)
          |> assign_role(role)
          |> arm_revalidation()}
 
@@ -252,7 +261,8 @@ defmodule BtAttachWeb.Auth do
 
       Phoenix.LiveView.attach_hook(socket, :bt_revalidate, :handle_info, fn
         @revalidate_msg, socket ->
-          if session_live?(socket.assigns[:logged_in_at]) do
+          if session_live?(socket.assigns[:logged_in_at]) and
+               not BtAttach.RevokedSessions.revoked?(socket.assigns[:live_socket_id]) do
             schedule_revalidation()
             {:halt, socket}
           else
@@ -268,10 +278,11 @@ defmodule BtAttachWeb.Auth do
     end
   end
 
-  defp assign_identity(socket, user, logged_in_at) do
+  defp assign_identity(socket, user, logged_in_at, live_socket_id) do
     socket
     |> Phoenix.Component.assign(:current_user, user)
     |> Phoenix.Component.assign(:logged_in_at, logged_in_at)
+    |> Phoenix.Component.assign(:live_socket_id, live_socket_id)
   end
 
   # Dev-auth sockets must also connect from loopback (defense in depth alongside
@@ -321,13 +332,17 @@ defmodule BtAttachWeb.Auth do
   Drop the authenticated session (the `DELETE /logout` route and lifecycle
   teardown).
 
-  The session cookie is a client-side store, so this clears the browser's copy
-  but cannot invalidate a copy already exfiltrated; that expires at the TTL.
+  The session cookie is a client-side store, so clearing it removes only the
+  browser's copy. The session's `live_socket_id` is also revoked server-side
+  (`BtAttach.RevokedSessions`), so a copy exfiltrated earlier is refused too.
   """
   def log_out(conn) do
     # Tell this session's mounted LiveViews to close (BT-5070): without it a
     # tab already open keeps its workspace session until the TTL.
     if id = get_session(conn, @live_socket_id_key) do
+      # Revoke first (BT-5108): a cookie copy replayed after logout is refused
+      # until its TTL, and the broadcast closes this session's open sockets.
+      BtAttach.RevokedSessions.revoke(id, session_ttl_secs())
       BtAttachWeb.Endpoint.broadcast(id, "disconnect", %{})
     end
 
@@ -372,11 +387,12 @@ defmodule BtAttachWeb.Auth do
   # loopback peer alone proves nothing; dev-auth is refused for any request that
   # says it was forwarded. Header names are lowercase (Plug/Cowboy/Bandit).
   #
-  # Known gap: the /live socket only sees `:x_headers` (Phoenix passes just the
-  # `x-*` headers to connect_info), so a proxy that sends ONLY `Forwarded:` or
-  # `Via:` is refused on the HTTP render but not on the socket upgrade. The
-  # render is the gate that mints a dev session, so a proxied client never gets
-  # one; the socket check is defence in depth.
+  # The /live socket only sees `:x_headers` (Phoenix passes just the `x-*`
+  # headers to connect_info), so a proxy that sends ONLY `Forwarded:` or `Via:`
+  # is refused on the HTTP render but not on the socket upgrade. That is by
+  # design (BT-5108, ADR 0020): the render is the gate that mints a dev
+  # session, and it sees every header, so a proxied client never gets one. The
+  # socket check is defence in depth for a cookie replayed through a proxy.
   @spec forwarded?([{String.t(), String.t()}]) :: boolean()
   def forwarded?(headers) when is_list(headers) do
     Enum.any?(headers, fn {name, _} -> String.downcase(name) in @forwarding_headers end)
