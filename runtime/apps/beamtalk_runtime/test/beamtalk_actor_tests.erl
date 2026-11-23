@@ -2170,12 +2170,14 @@ handle_cast_fire_and_forget_with_propagated_context_test() ->
 %%% ============================================================================
 
 safe_spawn_error_from_start_link_test() ->
-    %% safe_spawn returns {error, Reason} when gen_server:start_link fails
-    %% Use a module that doesn't exist to trigger an error
+    %% safe_spawn returns {error, Reason} when gen_server:start_link fails.
+    %% BT-5051: fail init/1 (`mode => stop`) instead of spawning a module that does not
+    %% exist: that child only hits `undef` after the code server has searched every
+    %% code-path directory, which stalls on a slow disk.
     %% Suppress the expected crash report to avoid EUnit cancellation.
     beamtalk_test_log:quietly(fun() ->
-        Result = beamtalk_actor:safe_spawn(nonexistent_module_bt1958, #{}),
-        ?assertMatch({error, _}, Result)
+        Result = beamtalk_actor:safe_spawn(test_async_init_actor, #{mode => stop}),
+        ?assertEqual({error, init_refused}, Result)
     end).
 
 safe_spawn_restores_trap_exit_on_error_test() ->
@@ -2183,7 +2185,8 @@ safe_spawn_restores_trap_exit_on_error_test() ->
     OldTrap = process_flag(trap_exit, false),
     try
         beamtalk_test_log:quietly(fun() ->
-            _Result = beamtalk_actor:safe_spawn(nonexistent_module_bt1958, #{}),
+            %% BT-5051: init/1 refuses; no code-path search for a missing module.
+            _Result = beamtalk_actor:safe_spawn(test_async_init_actor, #{mode => stop}),
             ?assertEqual(false, process_flag(trap_exit, false))
         end)
     after

@@ -28,16 +28,24 @@ OTP in the supported window.
 crash_report_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
         [
-            {"gen_server terminate names Class>>selector", fun gen_server_terminate/0},
-            {"proc_lib keyword-selector frame (quoted atom) is renamed",
-                fun proc_lib_keyword_selector/0},
-            {"proc_lib crash renders initial_call and stacktrace", fun proc_lib_crash/0},
-            {"supervisor child report renders mfargs", fun supervisor_child/0},
-            {"raw MFA stays in the report term", fun raw_stays_in_report/0},
-            {"REPL eval frames are translated like the renderer treats them",
-                fun repl_eval_frame/0},
-            {"unrecognised reports pass through", fun passthrough/0},
-            {"malformed report: warn, untranslated, hook still installed", fun malformed_report/0}
+            %% BT-5051: each case gets its own timeout. A timeout around the {setup, ...}
+            %% would not reach the cases, which keep EUnit's 5 s default; that kills a case
+            %% before await/1's 5 s wait can raise its `no_report` diagnostic. 15 s bounds one
+            %% case: await/1's 5 s wait plus the translation work and slack.
+            {Title, {timeout, 15, Fun}}
+         || {Title, Fun} <- [
+                {"gen_server terminate names Class>>selector", fun gen_server_terminate/0},
+                {"proc_lib keyword-selector frame (quoted atom) is renamed",
+                    fun proc_lib_keyword_selector/0},
+                {"proc_lib crash renders initial_call and stacktrace", fun proc_lib_crash/0},
+                {"supervisor child report renders mfargs", fun supervisor_child/0},
+                {"raw MFA stays in the report term", fun raw_stays_in_report/0},
+                {"REPL eval frames are translated like the renderer treats them",
+                    fun repl_eval_frame/0},
+                {"unrecognised reports pass through", fun passthrough/0},
+                {"malformed report: warn, untranslated, hook still installed",
+                    fun malformed_report/0}
+            ]
         ]
     end}.
 
