@@ -648,7 +648,8 @@ impl ProtocolRegistry {
     }
 
     /// Registers the stdlib protocols (`Comparable`, `Enumerable`, …) that
-    /// `module`'s protocols and the already-registered (pre-loaded) protocols name in `extending:` and that nothing nearer
+    /// `module`'s protocols, and the already-registered (pre-loaded)
+    /// protocols, name in `extending:` and that nothing nearer
     /// declares, so `Protocol define: X` / `extending: Comparable` resolves
     /// as the language docs promise (BT-5111).
     ///

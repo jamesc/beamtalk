@@ -1718,6 +1718,42 @@ fn register_extensions_class_side_replaces_compiled_class_method() {
 }
 
 #[test]
+fn register_extensions_class_side_first_pass_wins_over_later_pass() {
+    // BT-5111: the current module's class-side extension is registered before
+    // the project-wide index (which may hold a stale saved copy); the later
+    // pass must not overwrite it.
+    use crate::compilation::extension_index::MethodSide;
+    let mut h = ClassHierarchy::with_builtins();
+    let (selector, arity) = h
+        .get_class("Object")
+        .unwrap()
+        .class_methods
+        .first()
+        .map(|m| (m.selector.clone(), m.arity))
+        .expect("Object has a class method");
+    let mk = |ret| {
+        single_extension_index(
+            "Object",
+            MethodSide::Class,
+            &selector,
+            "Object+Patch.bt",
+            vec![None; arity],
+            Some(ret),
+        )
+    };
+    h.register_extensions(&mk("Integer"));
+    h.register_extensions(&mk("String"));
+    let m = h
+        .get_class("Object")
+        .unwrap()
+        .class_methods
+        .iter()
+        .find(|m| m.selector == selector)
+        .unwrap();
+    assert_eq!(m.return_type, Some(DeclaredType::simple("Integer")));
+}
+
+#[test]
 fn register_extensions_adds_class_method() {
     use crate::compilation::extension_index::MethodSide;
     let mut h = ClassHierarchy::with_builtins();

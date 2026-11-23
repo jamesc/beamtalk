@@ -107,6 +107,12 @@ pub struct ClassHierarchy {
     /// `ClassInfo` methods, so `discarded-update` consults this set to learn
     /// that an extension can replace a self-answering method (BT-4788).
     updating_extensions: HashSet<(EcoString, EcoString)>,
+    /// `(class, selector)` of every class-side extension already registered
+    /// into `class_methods`. `register_extensions` runs once for the current
+    /// module and again for the project-wide index; the first registration
+    /// wins, so a later pass never overwrites an entry an earlier pass put
+    /// there (BT-5111).
+    registered_class_extensions: HashSet<(EcoString, EcoString)>,
 }
 impl ClassHierarchy {
     /// Runtime-only built-in classes (no `.bt` source), e.g. `Future`. The one
@@ -313,6 +319,7 @@ impl ClassHierarchy {
                     dependency_extensions_unknown: false,
                     shadowed_class_names: crate::semantic_analysis::ShadowedClassNames::default(),
                     updating_extensions: HashSet::new(),
+                    registered_class_extensions: HashSet::new(),
                 }
             })
             .clone()
@@ -887,16 +894,25 @@ impl ClassHierarchy {
                 // replaces the compiled method's static signature — the type
                 // checker must see what a send actually answers (BT-5111).
                 let existing = methods.iter().position(|m| m.selector == key.selector);
-                match (existing, &key.side) {
-                    (None, _) => {
+                let class_side = key.side == MethodSide::Class;
+                let pair = (key.class_name.clone(), key.selector.clone());
+                match existing {
+                    None => {
                         methods.push(method_info);
                         changed = true;
+                        if class_side {
+                            self.registered_class_extensions.insert(pair);
+                        }
                     }
-                    (Some(i), &MethodSide::Class) => {
+                    // Replace only the *compiled* class method: an entry a
+                    // previous pass registered (the current module's, before
+                    // the project index's) keeps priority.
+                    Some(i) if class_side && !self.registered_class_extensions.contains(&pair) => {
                         methods[i] = method_info;
                         changed = true;
+                        self.registered_class_extensions.insert(pair);
                     }
-                    (Some(_), &MethodSide::Instance) => {}
+                    Some(_) => {}
                 }
             }
         }

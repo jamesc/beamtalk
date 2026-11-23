@@ -1209,7 +1209,8 @@ fn register_extension_methods(
     // 2 WS1) so a same-project `ClassName >> selector` defined in another
     // file resolves instead of producing a false `Dnu` hint. Registered
     // *after* the current module's own extensions —
-    // `register_extensions` skips selectors the class already defines, so
+    // `register_extensions` skips instance-side selectors the class already
+    // defines and class-side selectors an earlier pass already registered, so
     // the current file's definitions win and an index that includes the
     // current file's own entries is harmless.
     if let Some(cross_file_extensions) = cross_file_extensions
