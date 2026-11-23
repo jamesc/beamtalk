@@ -368,7 +368,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",
     "@types/node": "^26.6.6",
-    "@types/vscode": "^1.82.0",
+    "@types/vscode": "^1.146.0",
     "@types/ws": "^8.18.2",
     "@vscode/vsce": "^4.1.1",
     "esbuild": "^0.28.2",
