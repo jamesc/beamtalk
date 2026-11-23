@@ -10,11 +10,15 @@ on:
     branches: [main]
     paths:
       - 'editors/liveview/**'
+      - 'tests/conformance/**'
+      - 'runtime/apps/beamtalk_runtime/test/fixtures/beamtalk_root_dir_conformance.json'
       - '.github/workflows/liveview.yml'
   pull_request:
     branches: [main]
     paths:
       - 'editors/liveview/**'
+      - 'tests/conformance/**'
+      - 'runtime/apps/beamtalk_runtime/test/fixtures/beamtalk_root_dir_conformance.json'
       - '.github/workflows/liveview.yml'
 
 concurrency:

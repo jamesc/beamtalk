@@ -751,6 +751,11 @@ middle "Collaborator" RBAC rung; reintroducing `inet_tls_dist` (removed PR #1401
 - **Workspace-side `beamtalk_authorized_ops` allowlist — ship in v1 or defer?**
   Cheap defense-in-depth against Phoenix app-bugs; does not contain host compromise.
 
+## Decisions recorded after acceptance (BT-5112)
+
+- **Reserved ops.** The facade declares seven ops with no `invoke/3` clause: `actors`, `info`, `kill`, `load_source`, `rotate_cookie`, `sessions` and `subscribe_actors`. They are **reserved vocabulary**, not planned work. They keep their capability class (so a future implementation cannot land with a weaker one), and an authorized call answers `{:error, {:unsupported_op, op}}`. Removing one needs its own decision; implementing one needs an issue that names the surface that calls it.
+- **Completion and hover run in the live workspace.** The LiveView front's autocomplete and hover call the workspace's `complete` and `hover` ops over distribution (`BtAttach.Workspace.complete/2`, `hover/…`), so they answer from the live image, in the caller's session, with the REPL's receiver-aware ranking. They do not use the LSP's in-process AST analysis. This is intended: the cockpit edits classes that may exist only in the image, and binding-aware completion needs the session. The cost is that a disconnected workspace has no completion; the editor degrades to none, not to a second implementation.
+
 ## References
 - Related issues: BT-2400 (this ADR), BT-2411 (Wave 5 — auth + non-localhost),
   BT-2398 (LiveView IDE epic, ADR 0017 Phase 3), BT-2394 (Attach spike),

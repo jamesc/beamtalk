@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Change: the workspace `port` file is parsed strictly by the CLI and the VS Code extension (BT-5112).** The port must be on the first line, ASCII digits only, 1-65535. Port `0`, `+4040`, a leading blank line, and whitespace before or after the port are now rejected by both, where the CLI and the extension used to disagree on them. The runtime never writes such a file, so only a hand-edited one is affected. The shared fixture `tests/conformance/port_file_conformance.json` now lists all of them as invalid cases. The LiveView CI workflow also runs when a file under `tests/conformance/` changes.
+
 - **Docs: REPL output samples match the REPL, the env-var check sees shell scripts, and the build trap and the deprecation decision are written down (BT-5113).**
   - Fixed: `docs/beamtalk-tooling.md`, `examples/repl-tutorial.md`, `examples/mcp-demo.md` and `docs/beamtalk-agent-native-development.md` show what the REPL prints for `:test` (`TestResult(1 tests, 1 passed (0.0s))`), `:unload`, `:sync` (with its `Classes:` line) and actor values (`Actor(Counter, 0.123.0)`); `Workspace load:` is documented as loading one file, not a directory.
   - Changed: `scripts/ci/check_env_docs.py` also reads `$BEAMTALK_*`, `$BT_*`, `$E2E_*`, `$VS_BENCH_*` and `$VD_BENCH_*` in shell scripts and the `require_env`/`env_or*`/`env_flag*`/`read_env*` wrappers; `docs/development/environment-variables.md` gains the variables it found and states what the check still cannot see.
