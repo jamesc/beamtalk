@@ -122,9 +122,14 @@ pub fn build_release(
     let release_dir = assembly::absolutize(&release_dir)?;
 
     ensure_clean_release_dir(&release_dir, output.is_some(), force_output, &layout)?;
-    // The previous output is set aside, not deleted, until the new release is
-    // fully assembled: a failure anywhere below restores it (BT-5071).
-    let previous = set_aside_previous_release(&release_dir)?;
+    // The previous output (directory and tarball) is set aside, not deleted,
+    // until the new release is fully assembled: any failure below — an error
+    // *or* a panic, since the guard restores on drop — puts it back
+    // (BT-5071, BT-5107).
+    let swap = ReleaseSwap::begin(
+        &release_dir,
+        release_tarball_path(&release_dir, &release_name, &release_vsn),
+    )?;
     let assembled = assemble_release(
         &parsed,
         project_root,
@@ -133,7 +138,9 @@ pub fn build_release(
         no_include_erts,
         upgrade_from,
     );
-    finish_release_swap(&release_dir, previous.as_ref(), assembled.is_ok());
+    if assembled.is_ok() {
+        swap.commit();
+    }
     assembled
 }
 
@@ -273,9 +280,7 @@ fn assemble_release(
     )?;
 
     eprintln!("Building tarball...");
-    let tar_out_dir = release_dir
-        .parent()
-        .map_or_else(|| release_dir.clone(), Utf8Path::to_path_buf);
+    let tar_out_dir = tarball_out_dir(&release_dir);
     let (tar_path, _) = assembly::make_tarball(
         &release_dir,
         &release_name,
@@ -677,43 +682,136 @@ fn ensure_clean_release_dir(
     Ok(())
 }
 
-/// Park an existing (already validated) `release_dir` in a sibling
-/// `<dir>.beamtalk-previous` so the new release can be assembled in its
-/// place; returns the parked path, or `None` if there was nothing to park.
-fn set_aside_previous_release(release_dir: &Utf8Path) -> Result<Option<Utf8PathBuf>> {
-    if !release_dir.exists() {
-        return Ok(None);
-    }
-    let parked = Utf8PathBuf::from(format!("{release_dir}{PREVIOUS_SUFFIX}"));
-    if parked.exists() {
-        miette::bail!(
-            "'{parked}' is left over from an interrupted `beamtalk release`. It holds the \
-             previous release; move or remove it, then re-run."
-        );
-    }
-    std::fs::rename(release_dir.as_std_path(), parked.as_std_path())
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to move the existing '{release_dir}' aside"))?;
-    Ok(Some(parked))
+/// Directory `systools:make_tar/2`'s tarball is written to: the release
+/// directory's parent (ADR 0125 §1.1: `_build/release/<name>-<vsn>.tar.gz`
+/// beside `<name>-<vsn>/`).
+fn tarball_out_dir(release_dir: &Utf8Path) -> Utf8PathBuf {
+    release_dir
+        .parent()
+        .map_or_else(|| release_dir.to_path_buf(), Utf8Path::to_path_buf)
 }
 
-/// Finish the swap: on success discard the parked previous release; on
-/// failure discard the partial new one and put the previous one back.
-fn finish_release_swap(release_dir: &Utf8Path, parked: Option<&Utf8PathBuf>, succeeded: bool) {
-    let Some(parked) = parked else {
-        if !succeeded {
-            let _ = std::fs::remove_dir_all(release_dir.as_std_path());
+/// Where this build's `<name>-<vsn>.tar.gz` ends up (see `assembly::make_tarball`).
+fn release_tarball_path(release_dir: &Utf8Path, name: &str, vsn: &str) -> Utf8PathBuf {
+    tarball_out_dir(release_dir).join(format!("{name}-{vsn}.tar.gz"))
+}
+
+/// `<path>.beamtalk-previous`, where a previous output is parked.
+fn parked_path(path: &Utf8Path) -> Utf8PathBuf {
+    Utf8PathBuf::from(format!("{path}{PREVIOUS_SUFFIX}"))
+}
+
+/// Transactional replacement of a previous release's output: its directory
+/// and its tarball (which lives *beside* the directory, so it is not covered
+/// by parking the directory alone).
+///
+/// [`ReleaseSwap::begin`] parks both in `<path>.beamtalk-previous` siblings.
+/// [`ReleaseSwap::commit`] discards them. Dropping the guard uncommitted —
+/// an `Err` return or a panic unwinding through the assembly — discards the
+/// partial new output and puts the previous one back.
+struct ReleaseSwap {
+    release_dir: Utf8PathBuf,
+    parked_dir: Option<Utf8PathBuf>,
+    tarball: Utf8PathBuf,
+    parked_tarball: Option<Utf8PathBuf>,
+    /// Whether `release_dir`/`tarball` are this build's own (absent at
+    /// `begin`, or parked away). Rollback never deletes a path it does not
+    /// own: a half-done `begin` must leave the live previous output alone.
+    owns_dir: bool,
+    owns_tarball: bool,
+    committed: bool,
+}
+
+impl ReleaseSwap {
+    /// Park an existing (already validated) `release_dir` and `tarball` so the
+    /// new release can be assembled in their place.
+    fn begin(release_dir: &Utf8Path, tarball: Utf8PathBuf) -> Result<Self> {
+        let dir_exists = release_dir.exists();
+        let tar_exists = tarball.exists();
+        // Refuse before moving anything if an interrupted run left either behind.
+        for (exists, path) in [(dir_exists, release_dir), (tar_exists, tarball.as_path())] {
+            let parked = parked_path(path);
+            if exists && parked.exists() {
+                miette::bail!(
+                    "'{parked}' is left over from an interrupted `beamtalk release`. It holds \
+                     the previous release; move or remove it, then re-run."
+                );
+            }
         }
-        return;
-    };
-    if succeeded {
-        if let Err(e) = std::fs::remove_dir_all(parked.as_std_path()) {
-            eprintln!("warning: could not remove the previous release at '{parked}': {e}");
+        let mut swap = Self {
+            release_dir: release_dir.to_path_buf(),
+            parked_dir: None,
+            tarball,
+            parked_tarball: None,
+            owns_dir: !dir_exists,
+            owns_tarball: !tar_exists,
+            committed: false,
+        };
+        // From here a failed step returns early and `Drop` restores what was parked.
+        if dir_exists {
+            let parked = parked_path(release_dir);
+            std::fs::rename(release_dir.as_std_path(), parked.as_std_path())
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to move the existing '{release_dir}' aside"))?;
+            swap.parked_dir = Some(parked);
+            swap.owns_dir = true;
         }
-    } else {
-        let _ = std::fs::remove_dir_all(release_dir.as_std_path());
-        if let Err(e) = std::fs::rename(parked.as_std_path(), release_dir.as_std_path()) {
-            eprintln!("error: could not restore the previous release; it is at '{parked}': {e}");
+        if tar_exists {
+            let parked = parked_path(&swap.tarball);
+            std::fs::rename(swap.tarball.as_std_path(), parked.as_std_path())
+                .into_diagnostic()
+                .wrap_err_with(|| {
+                    format!("Failed to move the existing '{}' aside", swap.tarball)
+                })?;
+            swap.parked_tarball = Some(parked);
+            swap.owns_tarball = true;
+        }
+        Ok(swap)
+    }
+
+    /// The new release is complete: discard the parked previous output.
+    fn commit(mut self) {
+        self.committed = true;
+        for parked in [self.parked_dir.take(), self.parked_tarball.take()]
+            .into_iter()
+            .flatten()
+        {
+            let result = if parked.is_dir() {
+                std::fs::remove_dir_all(parked.as_std_path())
+            } else {
+                std::fs::remove_file(parked.as_std_path())
+            };
+            if let Err(e) = result {
+                eprintln!("warning: could not remove the previous release at '{parked}': {e}");
+            }
+        }
+    }
+
+    fn rollback(&mut self) {
+        if self.owns_dir {
+            let _ = std::fs::remove_dir_all(self.release_dir.as_std_path());
+        }
+        if self.owns_tarball {
+            let _ = std::fs::remove_file(self.tarball.as_std_path());
+        }
+        for (parked, original) in [
+            (self.parked_dir.take(), &self.release_dir),
+            (self.parked_tarball.take(), &self.tarball),
+        ] {
+            let Some(parked) = parked else { continue };
+            if let Err(e) = std::fs::rename(parked.as_std_path(), original.as_std_path()) {
+                eprintln!(
+                    "error: could not restore the previous release; it is at '{parked}': {e}"
+                );
+            }
+        }
+    }
+}
+
+impl Drop for ReleaseSwap {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.rollback();
         }
     }
 }
@@ -987,31 +1085,140 @@ mod tests {
         ensure_clean_release_dir(&target, false, false, &layout).unwrap();
     }
 
-    /// A failed assembly puts the previous release back untouched; a
-    /// successful one discards it.
+    fn write(path: &Utf8Path, content: &str) {
+        fs::write(path.as_std_path(), content).unwrap();
+    }
+
+    /// A failed assembly puts the previous release (directory *and* tarball)
+    /// back untouched; a successful one discards both.
     #[test]
     fn release_swap_restores_previous_on_failure_and_discards_on_success() {
         let temp = TempDir::new().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         let target = root.join("dist");
+        let tarball = root.join("dist-1.0.0.tar.gz");
         fs::create_dir_all(target.as_std_path()).unwrap();
-        fs::write(target.join("old.txt").as_std_path(), "old").unwrap();
+        write(&target.join("old.txt"), "old");
+        write(&tarball, "old tarball");
 
-        let parked = set_aside_previous_release(&target).unwrap();
-        assert!(!target.exists());
-        fs::create_dir_all(target.as_std_path()).unwrap();
-        fs::write(target.join("partial.txt").as_std_path(), "new").unwrap();
-        finish_release_swap(&target, parked.as_ref(), false);
+        // Failure: dropping the guard uncommitted restores both.
+        {
+            let _swap = ReleaseSwap::begin(&target, tarball.clone()).unwrap();
+            assert!(!target.exists() && !tarball.exists());
+            fs::create_dir_all(target.as_std_path()).unwrap();
+            write(&target.join("partial.txt"), "new");
+            write(&tarball, "new tarball");
+        }
         assert!(target.join("old.txt").is_file());
         assert!(!target.join("partial.txt").exists());
+        assert_eq!(
+            fs::read_to_string(tarball.as_std_path()).unwrap(),
+            "old tarball"
+        );
+        assert!(!parked_path(&target).exists() && !parked_path(&tarball).exists());
 
-        let parked = set_aside_previous_release(&target).unwrap();
+        // Success: commit discards both parked outputs.
+        let swap = ReleaseSwap::begin(&target, tarball.clone()).unwrap();
         fs::create_dir_all(target.as_std_path()).unwrap();
-        fs::write(target.join("new.txt").as_std_path(), "new").unwrap();
-        finish_release_swap(&target, parked.as_ref(), true);
+        write(&target.join("new.txt"), "new");
+        write(&tarball, "new tarball");
+        swap.commit();
         assert!(target.join("new.txt").is_file());
         assert!(!target.join("old.txt").exists());
-        assert!(!Utf8PathBuf::from(format!("{target}{PREVIOUS_SUFFIX}")).exists());
+        assert_eq!(
+            fs::read_to_string(tarball.as_std_path()).unwrap(),
+            "new tarball"
+        );
+        assert!(!parked_path(&target).exists() && !parked_path(&tarball).exists());
+    }
+
+    /// BT-5107: a panic part-way through assembly must not skip the restore.
+    #[test]
+    fn release_swap_restores_previous_on_panic() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let target = root.join("dist");
+        let tarball = root.join("dist-1.0.0.tar.gz");
+        fs::create_dir_all(target.as_std_path()).unwrap();
+        write(&target.join("old.txt"), "old");
+        write(&tarball, "old tarball");
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _swap = ReleaseSwap::begin(&target, tarball.clone()).unwrap();
+            fs::create_dir_all(target.as_std_path()).unwrap();
+            write(&tarball, "new tarball");
+            panic!("boom");
+        }));
+        assert!(result.is_err());
+        assert!(target.join("old.txt").is_file());
+        assert_eq!(
+            fs::read_to_string(tarball.as_std_path()).unwrap(),
+            "old tarball"
+        );
+    }
+
+    /// A guard dropped before it parked (or owned) anything — what a `begin`
+    /// that fails part-way leaves behind — must not delete the live previous
+    /// output. (Constructed by hand: a rename failure cannot be induced
+    /// portably, e.g. permissions are ignored when running as root.)
+    #[test]
+    fn release_swap_dropped_before_parking_keeps_live_previous_output() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let target = root.join("dist");
+        let tarball = root.join("dist-1.0.0.tar.gz");
+        fs::create_dir_all(target.as_std_path()).unwrap();
+        write(&target.join("old.txt"), "old");
+        write(&tarball, "old tarball");
+        drop(ReleaseSwap {
+            release_dir: target.clone(),
+            parked_dir: None,
+            tarball: tarball.clone(),
+            parked_tarball: None,
+            owns_dir: false,
+            owns_tarball: false,
+            committed: false,
+        });
+        assert!(target.join("old.txt").is_file());
+        assert_eq!(
+            fs::read_to_string(tarball.as_std_path()).unwrap(),
+            "old tarball"
+        );
+    }
+
+    /// With no previous output, a failure leaves nothing behind.
+    #[test]
+    fn release_swap_failure_without_previous_removes_partial_output() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let target = root.join("dist");
+        let tarball = root.join("dist-1.0.0.tar.gz");
+        {
+            let _swap = ReleaseSwap::begin(&target, tarball.clone()).unwrap();
+            fs::create_dir_all(target.as_std_path()).unwrap();
+            write(&tarball, "partial");
+        }
+        assert!(!target.exists() && !tarball.exists());
+    }
+
+    /// A parked leftover from an interrupted run refuses the build before
+    /// anything is moved.
+    #[test]
+    fn release_swap_refuses_leftover_parked_tarball() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let target = root.join("dist");
+        let tarball = root.join("dist-1.0.0.tar.gz");
+        fs::create_dir_all(target.as_std_path()).unwrap();
+        write(&tarball, "current");
+        write(&parked_path(&tarball), "leftover");
+        let err = ReleaseSwap::begin(&target, tarball.clone()).err().unwrap();
+        assert!(err.to_string().contains("interrupted"), "{err}");
+        assert!(target.is_dir(), "nothing may be moved when refusing");
+        assert_eq!(
+            fs::read_to_string(tarball.as_std_path()).unwrap(),
+            "current"
+        );
     }
 
     /// A symlinked `_build` must be refused, not followed —

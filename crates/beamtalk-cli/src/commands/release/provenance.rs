@@ -140,6 +140,7 @@ mod tests {
                 vsn: "1.4.0".to_string(),
                 source_ebins: vec![],
                 declared_deps: vec![],
+                source_priv: None,
             }],
         }
     }

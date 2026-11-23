@@ -31,6 +31,7 @@ Read by shipped binaries and the runtime. Unset means the default behaviour.
 | `BEAMTALK_RUNTIME_DIR` | Explicit runtime directory; an invalid directory is a hard error (`crates/beamtalk-core/src/ffi_type_specs.rs`). |
 | `BEAMTALK_STUBS_DIR` | Overrides the sysroot-derived directory of distribution stubs; an invalid value only logs a warning. |
 | `BEAMTALK_CACHE_DIR` | Base directory of the shared OTP type-spec cache; default is the platform cache directory. |
+| `BEAMTALK_ALLOW_INSECURE_GIT` | `1` lets a dependency whose `beamtalk.lock` entry pins a plaintext (`http://`, `git://`) git URL resolve; otherwise it fails (`ALLOW_INSECURE_LOCKED_GIT_ENV`, `crates/beamtalk-cli/src/commands/deps/git.rs`). |
 | `BEAMTALK_REGISTRY` | Overrides the package registry index location (`crates/beamtalk-cli/src/commands/deps/registry.rs`). |
 | `BEAMTALK_REGISTRY_CACHE_DIR` | Overrides where a git-backed registry index is cached. |
 | `BEAMTALK_NO_FILE_LOG` | `1` disables the workspace file logger (`workspace.log`). |

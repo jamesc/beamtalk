@@ -264,6 +264,8 @@ write_port_file_to_home(WorkspaceId, Port, Nonce) ->
                                 [TmpPath, Reason],
                                 #{domain => [beamtalk, runtime]}
                             ),
+                            %% A failed write (disk full, …) can leave a partial temp file.
+                            _ = file:delete(TmpPath),
                             ok
                     end;
                 {error, Reason} ->

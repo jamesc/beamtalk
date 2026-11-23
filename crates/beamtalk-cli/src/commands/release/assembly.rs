@@ -111,10 +111,14 @@ fn stage_one_app(lib_dir: &Utf8Path, app: &StagedApp) -> Result<Utf8PathBuf> {
     // `code:priv_dir/1` resolves in the release (BT-5072). Only apps whose
     // source ebin has a sibling `priv/` get one.
     let app_dir = lib_dir.join(format!("{}-{}", app.name, app.vsn));
-    for src in &app.source_ebins {
-        let Some(priv_src) = src.parent().map(|p| p.join("priv")) else {
-            continue;
-        };
+    // The project app's own `<project_root>/priv/` is an extra source
+    // (`StagedApp::source_priv`, BT-5107): its ebin lives under `_build/`, so
+    // the sibling rule above never reaches the project root.
+    let sibling_privs = app
+        .source_ebins
+        .iter()
+        .filter_map(|src| src.parent().map(|p| p.join("priv")));
+    for priv_src in sibling_privs.chain(app.source_priv.iter().cloned()) {
         if priv_src.is_dir() {
             copy_dir_recursive(&priv_src, &app_dir.join("priv"))
                 .wrap_err_with(|| format!("Failed to stage '{priv_src}' into '{app_dir}/priv'"))?;
@@ -1222,6 +1226,7 @@ mod tests {
             vsn: vsn.to_string(),
             source_ebins: vec![ebin.to_owned()],
             declared_deps: Vec::new(),
+            source_priv: None,
         }
     }
 
@@ -1403,6 +1408,37 @@ mod tests {
         );
     }
 
+    /// BT-5107: the project app's ebin lives under `_build/`, so its
+    /// project-root `priv/` is not a sibling of the ebin and needs
+    /// `source_priv`; a sibling `priv/` is still staged as before.
+    #[test]
+    fn stage_apps_stages_source_priv_and_sibling_priv() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let ebin = root.join("_build/dev/ebin");
+        let project_priv = root.join("priv");
+        fs::create_dir_all(ebin.as_std_path()).unwrap();
+        fs::create_dir_all(project_priv.join("certs").as_std_path()).unwrap();
+        fs::write(ebin.join("orders.app").as_std_path(), "app").unwrap();
+        fs::write(project_priv.join("certs/ca.pem").as_std_path(), "pem").unwrap();
+        // A sibling `_build/dev/priv` (the OTP layout rule) is staged too.
+        fs::create_dir_all(root.join("_build/dev/priv").as_std_path()).unwrap();
+        fs::write(root.join("_build/dev/priv/lib.so").as_std_path(), "so").unwrap();
+
+        let mut staged = app("orders", "1.0.0", &ebin);
+        staged.source_priv = Some(project_priv);
+        let closure = AppClosure {
+            host_apps: vec![],
+            staged_apps: vec![staged],
+        };
+        let release_dir = root.join("release");
+        stage_apps(&release_dir, &closure).unwrap();
+
+        let priv_dir = release_dir.join("lib/orders-1.0.0/priv");
+        assert!(priv_dir.join("certs/ca.pem").is_file());
+        assert!(priv_dir.join("lib.so").is_file());
+    }
+
     #[test]
     fn stage_apps_merges_multiple_source_ebins() {
         // Mirrors beamtalk_stdlib in a dev checkout: class beams in one
@@ -1438,6 +1474,7 @@ mod tests {
                 vsn: "0.4.0".to_string(),
                 source_ebins: vec![classes, erlang],
                 declared_deps: Vec::new(),
+                source_priv: None,
             }],
         };
         stage_apps(&release_dir, &closure).unwrap();
@@ -1684,6 +1721,7 @@ mod tests {
             vsn: "1.0.0".to_string(),
             source_ebins: vec![],
             declared_deps: Vec::new(),
+            source_priv: None,
         }];
         let eval = build_assembly_eval(
             "orders",
@@ -1760,6 +1798,7 @@ mod tests {
             vsn: "1.0.0".to_string(),
             source_ebins: vec![],
             declared_deps: Vec::new(),
+            source_priv: None,
         }];
         let eval = build_assembly_eval(
             "orders",

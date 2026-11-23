@@ -73,11 +73,16 @@ rem value is never expanded where cmd.exe tokenizes operators. Each
 rem character is stripped with a substitution and the result compared with
 rem the original; any difference means the cookie held one. The checks sit
 rem at top level (not in :export_cookie) so `exit /b 2` ends the script
-rem rather than just the subroutine. A literal TAB cannot be written here
-rem reliably, so it is not checked; launcher.sh rejects it.
+rem rather than just the subroutine. A literal TAB in this template would
+rem be fragile (editors and git whitespace tooling rewrite it), so
+rem `beamtalk release` substitutes the placeholder on the next line with the
+rem real character when it writes the script (BT-5107), and TAB is stripped like
+rem the others.
+set "TAB=__TAB__"
 if not defined RELEASE_COOKIE goto :cookie_ok
 set "CK_CHECK=!RELEASE_COOKIE!"
 set "CK_CHECK=!CK_CHECK: =!"
+set "CK_CHECK=!CK_CHECK:%TAB%=!"
 set "CK_CHECK=!CK_CHECK:"=!"
 set "CK_CHECK=!CK_CHECK:'=!"
 set "CK_CHECK=!CK_CHECK:\=!"
