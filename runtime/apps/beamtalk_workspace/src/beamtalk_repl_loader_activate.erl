@@ -320,7 +320,10 @@ hot_reload_class(ModuleName, ClassName, Pids) ->
     {ok, Upgraded, Failures} = beamtalk_runtime_api:trigger_code_change(
         ModuleName, Pids, Extra
     ),
-    publish_suspended_finding(ModuleName, ClassName, Upgraded, Failures).
+    %% BT-5110: only pids really left suspended; a timed-out change may still
+    %% resume its actor, and an exhausted retry left it running.
+    Suspended = beamtalk_runtime_api:failures_left_suspended(Failures),
+    publish_suspended_finding(ModuleName, ClassName, Upgraded, Suspended).
 
 %% Best-effort publish of the `instances_suspended` finding (ADR 0123 §4 row
 %% 5) for `ClassName` through the existing reload-findings channel. Reads

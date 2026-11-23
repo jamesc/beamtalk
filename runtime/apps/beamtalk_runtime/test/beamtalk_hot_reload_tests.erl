@@ -622,8 +622,14 @@ test_field_migration_absent_shape_version_defaults_to_one() ->
 %% suspend-on-failure (BT-3534) paths.
 init(State) -> {ok, State}.
 handle_call(_Msg, _From, State) -> {reply, ok, State}.
-handle_cast({set, New}, _State) -> {noreply, New};
-handle_cast(_, State) -> {noreply, State}.
+handle_cast({set, New}, _State) ->
+    {noreply, New};
+handle_cast({wedge, Ms}, State) ->
+    %% sleep: simulates an actor stuck in a long callback
+    timer:sleep(Ms),
+    {noreply, State};
+handle_cast(_, State) ->
+    {noreply, State}.
 code_change(_OldVsn, _State, {crash, Reason}) ->
     exit(Reason);
 code_change(_OldVsn, _State, {fail, Reason}) ->
@@ -827,6 +833,63 @@ overlapping_reload_reruns_the_later_migration_test_() ->
                 20000
             )
         after
+            beamtalk_test_proc:stop(Pid)
+        end
+    end}.
+
+%% BT-5110 (item 4): the overlapping-reload retry branch, deterministically. An
+%% actor that is not suspended answers `change_code` with `unknown_system_msg`,
+%% exactly what a worker sees when another reload's resume wins the race.
+change_retries_after_a_resume_won_the_race_test() ->
+    {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+    try
+        ok = beamtalk_hot_reload:change_then_resume(Pid, ?MODULE, {mark, retried}, 1),
+        ?assertEqual(retried, maps:get(migrated, sys:get_state(Pid))),
+        ?assertEqual(running, sys_state(Pid))
+    after
+        unlink(Pid),
+        beamtalk_test_proc:stop(Pid)
+    end.
+
+%% BT-5110 (item 1): retries exhausted is not "suspended": the actor is running.
+change_retries_exhausted_reports_not_suspended_test() ->
+    {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+    try
+        ?assertEqual(
+            {error, retries_exhausted},
+            beamtalk_hot_reload:change_then_resume(Pid, ?MODULE, {mark, never}, 0)
+        ),
+        ?assertEqual(running, sys_state(Pid)),
+        ?assertEqual(error, maps:find(migrated, sys:get_state(Pid)))
+    after
+        unlink(Pid),
+        beamtalk_test_proc:stop(Pid)
+    end.
+
+%% BT-5110 (item 2): only a migration that returned an error is "suspended".
+failures_left_suspended_excludes_timeout_exhausted_and_dead_test() ->
+    P = self(),
+    ?assertEqual(
+        [{P, {error_reason, x}}],
+        beamtalk_hot_reload:failures_left_suspended([
+            {P, timeout}, {P, retries_exhausted}, {P, noproc}, {P, {error_reason, x}}
+        ])
+    ).
+
+%% BT-5110 (item 3): a wedged actor costs a worker only until the suspend wait
+%% runs out, and is not left suspended once it recovers.
+wedged_actor_worker_gives_up_and_actor_recovers_running_test_() ->
+    {timeout, 30, fun() ->
+        ok = application:set_env(beamtalk_runtime, hot_reload_suspend_max_ms, 300),
+        {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+        unlink(Pid),
+        try
+            gen_server:cast(Pid, {wedge, 1500}),
+            {ok, 0, [{Pid, timeout}]} =
+                beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {mark, x}),
+            ok = beamtalk_test_wait:until(fun() -> running =:= sys_state(Pid) end, 10000)
+        after
+            application:unset_env(beamtalk_runtime, hot_reload_suspend_max_ms),
             beamtalk_test_proc:stop(Pid)
         end
     end}.

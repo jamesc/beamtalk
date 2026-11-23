@@ -366,6 +366,44 @@ assert_no_restart_on_exit(ClassName, ExitReason) ->
     end.
 
 %%====================================================================
+%% BT-5110: a process that died before the monitor request reached it
+%%====================================================================
+
+early_death_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_Ctx) ->
+        [
+            {"noproc with metadata still present restarts the class eagerly",
+                timed(fun() -> early_death('EarlyDeathKept', {ok, some_module}, true) end)},
+            {"noproc with the metadata gone (a removed class) is not resurrected",
+                timed(fun() -> early_death('EarlyDeathRemoved', not_found, false) end)}
+        ]
+    end}.
+
+early_death(ClassName, MetadataLookup, ExpectRestart) ->
+    meck:new(beamtalk_class_registry, [passthrough]),
+    meck:new(beamtalk_class_metadata, [passthrough]),
+    meck:expect(beamtalk_class_metadata, lookup_module, fun
+        (Name) when Name =:= ClassName -> MetadataLookup;
+        (Name) -> meck:passthrough([Name])
+    end),
+    expect_restart_reports_to(self(), fun fresh_idle_pid/0),
+    try
+        Dead = beamtalk_test_proc:spawn_idle(),
+        beamtalk_test_proc:stop(Dead),
+        ok = beamtalk_class_monitor:watch(ClassName, Dead),
+        case ExpectRestart of
+            true ->
+                await_restart_called(ClassName);
+            false ->
+                ?assertEqual(ok, beamtalk_test_wait:until(fun() -> not is_watched(Dead) end)),
+                ?assertEqual(0, drain_restart_calls(ClassName))
+        end
+    after
+        meck:unload(beamtalk_class_metadata),
+        meck:unload(beamtalk_class_registry)
+    end.
+
+%%====================================================================
 %% BT-5046: crash history is dropped when the class is removed
 %%====================================================================
 

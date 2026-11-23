@@ -262,9 +262,7 @@ append(Input) when is_map(Input) ->
     %% a failure for an entry that is then recorded anyway. That is accepted over
     %% hanging an eval or load forever on a stalled disk; the caller shows the
     %% "could not be recorded" warning and the cause is logged.
-    Timeout = application:get_env(
-        beamtalk_workspace, changelog_append_timeout_ms, ?DEFAULT_APPEND_TIMEOUT_MS
-    ),
+    Timeout = call_timeout(),
     try
         gen_server:call(?MODULE, {append, Input}, Timeout)
     catch
@@ -358,7 +356,15 @@ class that was created in this session and never flushed is removed.
 retire_entries([]) ->
     ok;
 retire_entries(Seqs) when is_list(Seqs) ->
-    gen_server:call(?MODULE, {retire_entries, Seqs}).
+    %% BT-5110: the same bound as `append/1`; the server can be busy rotating.
+    gen_server:call(?MODULE, {retire_entries, Seqs}, call_timeout()).
+
+%% The caller's wait for a ChangeLog call that can queue behind a rotation.
+-spec call_timeout() -> timeout().
+call_timeout() ->
+    application:get_env(
+        beamtalk_workspace, changelog_append_timeout_ms, ?DEFAULT_APPEND_TIMEOUT_MS
+    ).
 
 -ifdef(TEST).
 -doc """
