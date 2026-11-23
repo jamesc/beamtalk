@@ -138,6 +138,34 @@ pub fn find_selector_send_sites_in<'a>(
     sites
 }
 
+/// Spans of every symbol literal `#old_selector` under `roots`.
+///
+/// A symbol equal to a selector is a dynamic use of it (`perform: #go`,
+/// `respondsTo: #go`) or an unrelated atom; either way a static rename cannot
+/// prove it names the renamed method, so callers report these as candidates.
+/// Only literals whose source text is exactly `#old_selector` are returned,
+/// so a quoted or otherwise respelled symbol is never spliced blindly.
+#[must_use]
+pub fn find_symbol_literal_sites<'a>(
+    roots: impl IntoIterator<Item = &'a Expression>,
+    source: &str,
+    old_selector: &str,
+) -> Vec<Span> {
+    let spelled = format!("#{old_selector}");
+    let mut out = Vec::new();
+    for root in roots {
+        beamtalk_core::ast_walker::walk_expression(root, &mut |expr| {
+            if let Expression::Literal(Literal::Symbol(name), span) = expr
+                && name.as_str() == old_selector
+                && source.get(span.start() as usize..span.end() as usize) == Some(spelled.as_str())
+            {
+                out.push(*span);
+            }
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::{SendReceiver, find_selector_send_sites};
@@ -196,32 +224,4 @@ mod tests {
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].receiver, SendReceiver::SelfReceiver);
     }
-}
-
-/// Spans of every symbol literal `#old_selector` under `roots`.
-///
-/// A symbol equal to a selector is a dynamic use of it (`perform: #go`,
-/// `respondsTo: #go`) or an unrelated atom; either way a static rename cannot
-/// prove it names the renamed method, so callers report these as candidates.
-/// Only literals whose source text is exactly `#old_selector` are returned,
-/// so a quoted or otherwise respelled symbol is never spliced blindly.
-#[must_use]
-pub fn find_symbol_literal_sites<'a>(
-    roots: impl IntoIterator<Item = &'a Expression>,
-    source: &str,
-    old_selector: &str,
-) -> Vec<Span> {
-    let spelled = format!("#{old_selector}");
-    let mut out = Vec::new();
-    for root in roots {
-        beamtalk_core::ast_walker::walk_expression(root, &mut |expr| {
-            if let Expression::Literal(Literal::Symbol(name), span) = expr
-                && name.as_str() == old_selector
-                && source.get(span.start() as usize..span.end() as usize) == Some(spelled.as_str())
-            {
-                out.push(*span);
-            }
-        });
-    }
-    out
 }
