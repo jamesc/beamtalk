@@ -224,8 +224,7 @@ impl CoreErlangGenerator {
         // handled by the generic dispatch below.
         if self.context == CodeGenContext::Actor
             && !self.in_cell_closure()
-            && let Expression::Identifier(id) = receiver
-            && id.name == "self"
+            && receiver.is_self()
         {
             let doc = self.generate_discarding_self_dispatch(selector, arguments)?;
             return Ok(Some(doc));

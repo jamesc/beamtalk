@@ -983,7 +983,7 @@ fn composite_literal_hover_info(expr: &Expression) -> HoverInfo {
 /// tier.
 fn identifier_hover_info(ident: &Identifier, env: &HoverEnv<'_>) -> HoverInfo {
     // Special handling for `self` - show type context
-    if ident.name == "self" {
+    if ident.name.as_str() == "self" {
         return self_hover_info(ident.span, env.context);
     }
     // Show inferred type if available

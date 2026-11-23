@@ -79,7 +79,7 @@ impl CoreErlangGenerator {
                 selector,
                 arguments,
                 ..
-            } if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+            } if receiver.is_self()
                 && matches!(selector.well_known(), Some(WellKnownSelector::Error))
                 && arguments.len() == 1
                 && matches!(&arguments[0], Expression::Literal(Literal::String(_), _))

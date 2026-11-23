@@ -353,21 +353,13 @@ impl CoreErlangGenerator {
         use beamtalk_core::ast::Literal;
         match expr {
             Expression::Literal(Literal::Integer(_) | Literal::Float(_), _) => true,
-            Expression::Identifier(id) => {
-                if id.name == "self" {
-                    matches!(self.class_name().as_str(), "Integer" | "Float")
-                } else {
-                    self.param_is_numeric(&id.name)
-                }
-            }
+            _ if expr.is_self() => matches!(self.class_name().as_str(), "Integer" | "Float"),
+            Expression::Identifier(id) => self.param_is_numeric(&id.name),
             // `self.<field>` stays bare only when the field is known numeric
             // (see doc above); every other field is guarded.
             Expression::FieldAccess {
                 receiver, field, ..
-            } => {
-                matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
-                    && self.field_is_numeric(&field.name)
-            }
+            } => receiver.is_self() && self.field_is_numeric(&field.name),
             _ => false,
         }
     }
@@ -400,7 +392,7 @@ impl CoreErlangGenerator {
     ) -> ComparisonReceiver {
         match expr {
             Expression::Literal(..) if is_comparable_literal(expr) => ComparisonReceiver::Proven,
-            Expression::Identifier(id) if id.name == "self" => {
+            _ if expr.is_self() => {
                 if matches!(
                     self.class_name().as_str(),
                     "Integer" | "Float" | "Character" | "String"
@@ -415,7 +407,7 @@ impl CoreErlangGenerator {
                 .map_or(ComparisonReceiver::Unknown, ComparisonReceiver::Declared),
             Expression::FieldAccess {
                 receiver, field, ..
-            } if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self") => {
+            } if receiver.is_self() => {
                 self.field_comparison_kinds(&field.name)
                     .map_or(ComparisonReceiver::Unknown, ComparisonReceiver::Declared)
             }

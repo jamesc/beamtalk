@@ -1185,8 +1185,7 @@ impl CoreErlangGenerator {
         // normal is_tuple branch would call sync_send(self()) which is
         // gen_server:call(self(), ...) → deadlock.
         // Use beamtalk_primitive:send(State, ...) directly instead.
-        if let Expression::Identifier(id) = receiver
-            && id.name == "self"
+        if receiver.is_self()
             && self.context == super::super::CodeGenContext::Actor
             && self.lookup_var("self").is_none()
         {
@@ -1290,8 +1289,7 @@ impl CoreErlangGenerator {
         }
         // Fast-path for `self` receiver in actor context.
         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
-        if let Expression::Identifier(id) = receiver
-            && id.name == "self"
+        if receiver.is_self()
             && self.context == super::super::CodeGenContext::Actor
             && self.lookup_var("self").is_none()
         {
@@ -1449,8 +1447,7 @@ impl CoreErlangGenerator {
         // to beamtalk_primitive:send(State, 'fieldAt:put:', ...) which
         // returns the assigned value but does NOT thread the updated
         // state back into the actor's State variable.
-        if let Expression::Identifier(id) = receiver
-            && id.name == "self"
+        if receiver.is_self()
             && self.context == super::super::CodeGenContext::Actor
             && self.lookup_var("self").is_none()
         {
@@ -1573,8 +1570,7 @@ impl CoreErlangGenerator {
         }
         // Fast-path for `self` receiver in actor instance
         // context. Avoids sync_send(self()) → deadlock.
-        if let Expression::Identifier(id) = receiver
-            && id.name == "self"
+        if receiver.is_self()
             && self.context == super::super::CodeGenContext::Actor
             && !self.in_class_method()
             && self.lookup_var("self").is_none()
@@ -1664,8 +1660,7 @@ impl CoreErlangGenerator {
         // state-threading gap fieldAt:put: has (BT-1324):
         // it does NOT thread the updated state back into the
         // actor's `State` variable.
-        if let Expression::Identifier(id) = receiver
-            && id.name == "self"
+        if receiver.is_self()
             && self.context == super::super::CodeGenContext::Actor
             && self.lookup_var("self").is_none()
         {

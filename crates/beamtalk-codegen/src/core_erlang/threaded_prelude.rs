@@ -611,7 +611,7 @@ impl CoreErlangGenerator {
                 ),
                 _ => (receiver, None),
             };
-        if !matches!(underlying_receiver, Expression::Identifier(id) if id.name == "self") {
+        if !underlying_receiver.is_self() {
             return None;
         }
         let mut all: Vec<CascadeSelfMessage<'e>> = Vec::with_capacity(messages.len() + 1);

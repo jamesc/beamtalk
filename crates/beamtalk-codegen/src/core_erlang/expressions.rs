@@ -792,9 +792,7 @@ impl CoreErlangGenerator {
         // Field access resolves against self's State/Self map. A non-self receiver
         // is not valid (Beamtalk enforces encapsulation) and is rejected with a
         // diagnostic in the fall-through below.
-        if let Expression::Identifier(recv_id) = receiver
-            && recv_id.name == "self"
-        {
+        if receiver.is_self() {
             let class_name = self.class_name();
             let is_late = self.is_late_state_field(&class_name, field.name.as_str());
             // BT-4121: inside a stateless loop that brackets its guarded
