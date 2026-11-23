@@ -28,6 +28,8 @@ defmodule BtAttach.Application do
       # tab's existing session and reaps sessions for tabs that close. Started
       # before the Endpoint so it is available to the first connected mount.
       BtAttach.SessionRegistry,
+      # Logout revocation list for the cookie session (BT-5108).
+      BtAttach.RevokedSessions,
       # Start to serve requests, typically the last entry
       BtAttachWeb.Endpoint
     ]

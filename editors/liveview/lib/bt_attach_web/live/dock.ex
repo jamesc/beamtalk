@@ -591,8 +591,26 @@ defmodule BtAttachWeb.Live.Dock do
 
   defp reject_eval(socket, _job, message), do: assign(socket, error: message)
 
+  # Cap the backlog (BT-5108): each queued entry holds its source text, and a
+  # stuck eval would otherwise let a runaway client grow the LiveView's heap
+  # without bound. Past the cap the submit is refused with a visible message.
+  @max_eval_queue 25
+
+  @doc false
+  def max_eval_queue, do: @max_eval_queue
+
   defp enqueue_eval(socket, job, pid, code) do
-    assign(socket, eval_queue: Map.get(socket.assigns, :eval_queue, []) ++ [{job, pid, code}])
+    queue = Map.get(socket.assigns, :eval_queue, [])
+
+    if length(queue) >= @max_eval_queue do
+      reject_eval(
+        socket,
+        job,
+        "Too many evaluations are waiting (#{@max_eval_queue}). Wait for the running one to finish or press Stop."
+      )
+    else
+      assign(socket, eval_queue: queue ++ [{job, pid, code}])
+    end
   end
 
   # Start the next queued eval, if any, once the running one has been folded.

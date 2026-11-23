@@ -155,7 +155,7 @@ impl PathPolicy {
     pub fn project_root_of_cwd() -> std::io::Result<Self> {
         let cwd = std::env::current_dir()?;
         let root = beamtalk_project::discover_project_root(&cwd);
-        Ok(Self::Confined(root.canonicalize()?))
+        Ok(Self::Confined(beamtalk_core::paths::canonicalize(&root)?))
     }
 
     /// Resolve `path` (relative paths against the current directory) to a
@@ -178,7 +178,7 @@ impl PathPolicy {
         let mut existing = abs.as_path();
         let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
         let mut resolved = loop {
-            if let Ok(real) = existing.canonicalize() {
+            if let Ok(real) = beamtalk_core::paths::canonicalize(existing) {
                 break real;
             }
             let name = existing
@@ -192,7 +192,14 @@ impl PathPolicy {
         resolved.extend(tail.iter().rev());
         match self {
             Self::Unconfined => Ok(resolved),
-            Self::Confined(root) if resolved.starts_with(root) => Ok(resolved),
+            // Compare plain forms: `paths::canonicalize` never yields a Windows
+            // `\\?\` path where a plain one works, so a root supplied in
+            // verbatim form must be simplified too or `starts_with` misses.
+            Self::Confined(root)
+                if resolved.starts_with(beamtalk_core::paths::simplified(root)) =>
+            {
+                Ok(resolved)
+            }
             Self::Confined(root) => Err(format!(
                 "path '{path}' is outside the project root ({}). Start beamtalk-mcp with \
                  --allow-outside-project to allow other locations.",

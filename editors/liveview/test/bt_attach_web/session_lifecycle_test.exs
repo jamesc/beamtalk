@@ -195,6 +195,50 @@ defmodule BtAttachWeb.SessionLifecycleTest do
       assert "bt_session:" <> _ = get_session(conn, "live_socket_id")
     end
 
+    test "a logged-out session's cookie copy is refused (revocation, BT-5108)", %{conn: conn} do
+      enable_oidc()
+      id = "bt_session:revoke-me"
+
+      replay = fn conn ->
+        conn
+        |> Plug.Test.init_test_session(%{
+          "bt_user" => %{"sub" => "alice", "groups" => ["beamtalk-owners"]},
+          "bt_logged_in_at" => System.system_time(:second),
+          "live_socket_id" => id
+        })
+        |> get(~p"/")
+      end
+
+      assert html_response(replay.(conn), 200)
+
+      conn
+      |> authed_conn(0)
+      |> init_csrf()
+      |> Plug.Conn.put_session("live_socket_id", id)
+      |> delete(~p"/logout")
+
+      assert redirected_to(replay.(build_conn())) == "/oidc/auth"
+
+      assert {:error, {:redirect, %{to: "/oidc/auth"}}} =
+               live(
+                 Plug.Test.init_test_session(build_conn(), %{
+                   "bt_user" => %{"sub" => "alice", "groups" => ["beamtalk-owners"]},
+                   "bt_logged_in_at" => System.system_time(:second),
+                   "live_socket_id" => id
+                 }),
+                 "/"
+               )
+    end
+
+    test "the workspace page offers a logout control only when auth is active", %{conn: conn} do
+      refute html_response(get(conn, ~p"/"), 200) =~ ~s(id="logout-form")
+
+      enable_oidc()
+      html = conn |> authed_conn(0) |> get(~p"/") |> html_response(200)
+      assert html =~ ~s(id="logout-form")
+      assert html =~ ~r/name="_method"[^>]*value="delete"/
+    end
+
     test "GET /logout is not a route (logout needs the CSRF-protected DELETE)", %{conn: conn} do
       assert get(conn, "/logout").status == 404
     end

@@ -161,6 +161,18 @@
       <% else %>
         <div class="attach"><span class="att-sess">connecting…</span></div>
       <% end %>
+      <%!-- Logout (BT-5108): only when an auth gate is active. A real form so the
+           CSRF token rides a DELETE (`/logout`); a plain link cannot. --%>
+      <.form
+        :if={assigns[:current_user] && BtAttachWeb.Auth.auth_required?()}
+        for={%{}}
+        action={~p"/logout"}
+        method="delete"
+        id="logout-form"
+        class="logout-form"
+      >
+        <button type="submit" class="logout-btn" title="End this session">Log out</button>
+      </.form>
     </div>
 
     <div

@@ -129,6 +129,30 @@ defmodule BtAttachWeb.WorkspaceEvalAsyncTest do
     assert render_async(view, 5_000) =~ "2"
   end
 
+  test "the eval queue is capped: a submit past the cap is refused with a message", %{conn: conn} do
+    view = mount_cockpit(conn)
+    cap = BtAttachWeb.Live.Dock.max_eval_queue()
+
+    view |> form("#eval-form", %{"expr" => "0"}) |> render_submit()
+    assert_receive {:eval_started, first}, 1_000
+
+    for n <- 1..cap, do: view |> form("#eval-form", %{"expr" => "#{n}"}) |> render_submit()
+    html = view |> form("#eval-form", %{"expr" => "overflow"}) |> render_submit()
+    assert html =~ "Too many evaluations are waiting"
+
+    # Drain: the running eval plus exactly `cap` queued ones run; the refused one never does.
+    Application.put_env(:bt_attach, :eval_async_eval_pid, first)
+    send(first, {:finish, {:ok, 0, "", []}})
+
+    for _ <- 1..cap do
+      assert_receive {:eval_started, next}, 2_000
+      send(next, {:finish, {:ok, 1, "", []}})
+    end
+
+    render_async(view, 5_000)
+    refute_receive {:eval_started, _}, 200
+  end
+
   test "Stop also cancels the evals queued behind the running one", %{conn: conn} do
     view = mount_cockpit(conn)
 
