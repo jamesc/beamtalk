@@ -267,4 +267,4 @@ TestCase subclass: EmptyCollectionAccessTest
         selector: #left
         hint: "already at the start of the sequence"
     ] on: Error do: [:e | e hint]
-    self assert: (hint includesSubstring: "already at the start of the sequence")
+    self assert: hint equals: "already at the start of the sequence"
