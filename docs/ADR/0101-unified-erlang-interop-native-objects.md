@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-07-01)
 
+> **Superseded in part by [ADR 0152](0152-remove-cross-file-extension-methods.md) (2026-11-24), the extension-registry layer.** Where this ADR lists the open-world extension registry as part of the `@primitive` guarded-dispatch layer, or says `native:` calls silently bypass cross-package extensions, that layer is removed along with cross-file extension methods. Type guards and error wrapping are unchanged.
+
 ## Implementation Tracking
 
 **Epic:** BT-2719

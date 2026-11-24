@@ -1117,35 +1117,6 @@ mod tests {
         assert!(paths[0].as_str().contains("utils"));
     }
 
-    /// ADR 0070 WS3 (BT-4608): a dependency's export carries its extension
-    /// methods, complete when every source file parsed cleanly.
-    #[test]
-    fn build_dep_class_index_collects_dependency_extensions() {
-        let temp = TempDir::new().unwrap();
-        let dep_dir = temp.path().join("dep_ext");
-        fs::create_dir_all(&dep_dir).unwrap();
-        write_manifest(&dep_dir, "dep_ext", "0.1.0", "");
-        write_source(
-            &dep_dir,
-            "ext.bt",
-            "Object >> shout -> Integer => 1\nInteger class >> fromShout => 2\n",
-        );
-        let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
-
-        let (_, _, _, _, _, _, extensions) =
-            build_dep_class_index(&dep_root, "dep_ext", &[]).unwrap();
-        assert!(extensions.is_complete());
-        assert_eq!(extensions.index().len(), 2);
-
-        write_source(dep_root.as_std_path(), "broken.bt", "Object >> ((( =>\n");
-        let (_, _, _, _, _, _, extensions) =
-            build_dep_class_index(&dep_root, "dep_ext", &[]).unwrap();
-        assert!(
-            !extensions.is_complete(),
-            "a parse error may have dropped an extension"
-        );
-    }
-
     /// A dependency with no `.bt` source defines no extensions at runtime
     /// either, so its (empty) extensions are complete.
     #[test]

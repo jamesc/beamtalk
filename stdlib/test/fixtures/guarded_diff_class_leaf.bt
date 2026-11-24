@@ -2,15 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-4298: a stateless, open subclass of GuardedDiffClassRoot. Class-side
-// sends to it reach the parent's class methods by inheritance, the parent's
-// class-side extensions, and its own override of `describe`.
+// sends to it reach the parent's class methods by inheritance and its own
+// override of `describe`.
 
 GuardedDiffClassRoot subclass: GuardedDiffClassLeaf
 
   class leafOnly -> Symbol => #leaf
 
   class describe -> String => "leaf"
-
-  // A class-side self-send of a selector an ancestor's class-side extension
-  // shadows (class_dispatch_differential_test.bt, BT-4307).
-  class selfShadowedByExtension -> Symbol => self shadowedByExtension
