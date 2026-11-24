@@ -1,7 +1,7 @@
 # ADR 0153: Remove Class Variables (`classState:`)
 
 ## Status
-Proposed (2026-11-24)
+Accepted (2026-11-24)
 
 The owner has decided the following; this ADR records and details it.
 - Mutable class variables are removed, with no deprecation period.
@@ -9,9 +9,9 @@ The owner has decided the following; this ADR records and details it.
 - `ClassBuilder` stays. Only its class-variable setters go.
 - ADR 0123 (versioned state migration) is frozen, not removed. Only its class-variable rule is trimmed.
 
-The points still open are in [Open Questions](#open-questions).
+The seven questions the draft left open were settled by the owner on acceptance. They are recorded under [Decisions on the open questions](#decisions-on-the-open-questions).
 
-If accepted, this **supersedes [ADR 0130](0130-class-variables-live-in-the-class-process.md)** and **[ADR 0019](0019-singleton-class-variables.md)**, supersedes **§1 of [ADR 0013](0013-class-variables-class-methods-instantiation.md)** (class variables; its class-method and instantiation sections stay), and **amends [ADR 0142](0142-class-process-owns-only-class-state.md)** (rules 1 and 2 of §1 have nothing left to test), **[ADR 0084](0084-class-side-runtime-method-fun-dispatch.md)** (`classVars:`, and where runtime funs run), **[ADR 0123](0123-versioned-state-migration.md)** (the no-class-variable rule for migrations) and **[ADR 0124](0124-slots-late-assignment-definite-assignment.md)** (`late classState:`).
+This **supersedes [ADR 0130](0130-class-variables-live-in-the-class-process.md)** and **[ADR 0019](0019-singleton-class-variables.md)**, supersedes **§1 of [ADR 0013](0013-class-variables-class-methods-instantiation.md)** (class variables; its class-method and instantiation sections stay), and **amends [ADR 0142](0142-class-process-owns-only-class-state.md)** (rules 1 and 2 of §1 have nothing left to test), **[ADR 0084](0084-class-side-runtime-method-fun-dispatch.md)** (`classVars:`, and where runtime funs run), **[ADR 0123](0123-versioned-state-migration.md)** (the no-class-variable rule for migrations) and **[ADR 0124](0124-slots-late-assignment-definite-assignment.md)** (`late classState:`).
 
 **How to read the evidence.** A claim marked *(read)* was checked by reading the cited code or document on `main` at `f1fcd5e`. *(survey)* means it comes from the owner's usage and cost survey, relayed by the session that commissioned this ADR, and was not re-checked here; the downstream repositories are outside this session's access. *(inferred)* follows from what was read but was not checked directly. Nothing in this ADR was verified by running the system.
 
@@ -64,7 +64,7 @@ A Linear search for "class variable" over the last 90 days returns 86 issues *(r
 
 - **Every compiled `on:do:`** takes a class-variable snapshot before its `try` and restores it in the catch arm: `class_var_snapshot_let_doc` (`class_var_access.rs:133-143`), emitted for `CatchEntry::ClassVarSnapshot` at `threaded_ir/emit.rs:663` *(read)*. BT-4983 counted 35 such snapshots on one HTTP request *(read: issue title)*.
 - **`Result tryDo:`** runs its block under `beamtalk_class_vars:protect/1` (`beamtalk_result.erl:228, 285`) *(read)*, and every runtime catcher that runs a block must do the same, enforced by `just lint-class-var-catchers`.
-- **Every class send** reads a guard derived from `direct_call_ok/2` (`beamtalk_class_shadow_flags.erl:655`), one of whose inputs is "the class or an ancestor declares class variables" *(read)*. BT-4987 measured that read at 15 ns of a 22-36 ns class send *(read)*. Removing class variables removes an input, not the read (Open Question 4).
+- **Every class send** reads a guard derived from `direct_call_ok/2` (`beamtalk_class_shadow_flags.erl:655`), one of whose inputs is "the class or an ancestor declares class variables" *(read)*. BT-4987 measured that read at 15 ns of a 22-36 ns class send *(read)*. Removing class variables removes an input, not the read (Decided question 4).
 
 ### The conceptual argument
 
@@ -142,7 +142,7 @@ Actor subclass: Registry
 
 The application's supervisor starts the actor under that name (a `SupervisionSpec` with a `name`), so it is restarted if it dies. In a script or at the REPL, start it once: `Registry spawnAs: #registry`.
 
-No "look up, or spawn if absent" helper is added. The downstream packages already use `named:` and `spawnAs:` directly in 21 files *(survey)*, and a lazily spawned actor is unsupervised, which is the wrong default to make easy. If the need appears, the helper is a few lines on `Actor` (Open Question 2).
+No "look up, or spawn if absent" helper is added. The downstream packages already use `named:` and `spawnAs:` directly in 21 files *(survey)*, and a lazily spawned actor is unsupervised, which is the wrong default to make easy. If a second hand-written copy of that pattern appears, the helper is a few lines on `Actor` (Decided question 2).
 
 **A counter** is an `AtomicCounter`. Create it once with `new:`, at application start, and look it up by name from any process (`stdlib/src/atomic_counter.bt:45, 56`) *(read)*. `new:` is process-bound, so the table behind the counter is created in, and owned by, `AtomicCounter`'s class process (language features, line 1352) *(reviewer, read)*. It lives until `delete` or until the node stops, whichever process asked for it.
 
@@ -204,7 +204,7 @@ Object subclass: HpackHuffman
 - **Build-once values only.** A read copies nothing. Erasing or replacing a value makes the VM scan every process's heap, and OTP has no batch erase: each `erase:` waits on every scheduler, 0.1-0.3 ms by the runtime's own measurement (`beamtalk_class_shadow_flags.erl:249-251`) *(reviewer, read)*. Use it for a table that is built once and read many times. For anything that changes, use an Actor or `Ets`.
 - **The block must be pure.** Two processes that miss at the same moment both run it. The helper reads again before storing and keeps the first value, so the second process normally answers the stored one and does not replace it. A small window remains between that read and the store; inside it, a second store of an equal value is free (OTP skips it), and a second store of a different value replaces the first and costs a global GC. So the block must also be deterministic. A block that spawns an actor or opens a resource would do so twice.
 - **If the block raises**, nothing is stored and the exception reaches the caller. The next call runs the block again.
-- **Do not store a pid, a port, an actor, a class, an `Ets` handle, or a block.** A process identity outlives its process, and a class reference carries the class process's pid (`beamtalk_class_dispatch.erl:265, 301`) *(reviewer)*. The helper cannot check this statically (a `Dynamic` value passes any type check), so it is a documented rule; whether the native module should refuse such values at run time is Open Question 5. A stored block refers to its module's code and fails once that code has been reloaded twice and purged.
+- **Do not store a pid, a port, an actor, a class, an `Ets` handle, or a block.** A process identity outlives its process, and a class reference carries the class process's pid (`beamtalk_class_dispatch.erl:265, 301`) *(reviewer)*. The helper cannot check this statically (a `Dynamic` value passes any type check). At run time the native module refuses a value that is itself a pid, an actor or a class, with a structured `#beamtalk_error{}` that names the key and says to store the name and look the process up (Decided question 5). The check runs only on a miss. A process identity nested inside a larger value is not detected and stays a documented rule. A stored block refers to its module's code and fails once that code has been reloaded twice and purged.
 - **Keys.** The helper stores under `{beamtalk_persistent_term, Key}`, so a user key cannot collide with the runtime's own `persistent_term` keys (class flags, static call keys). The wrapper makes every key a tuple; BT-4442 measured a tuple-key read at about 36 ns against 21 ns for an atom key (`beamtalk_class_shadow_flags.erl:410-416`) *(reviewer)*. That is accepted for a helper whose callers are building tables. Among users, keys are global to the node: use a package-prefixed Symbol, as `ProcessDictionary` advises.
 - **Each node has its own.** Nothing is replicated.
 - **Tests.** The store is node-global, and `TestCase` already says a class that touches `persistent_term` must run serially (`stdlib/src/test_case.bt:80-89`) *(reviewer, read)*. A test that stores under a fixed key overrides `class serial -> Boolean => true` or uses a key unique to the test. An `erase:` in `tearDown` is a global GC per test.
@@ -230,7 +230,7 @@ The file list is in Implementation. In summary:
 - The `class-state-abroad` and `class-process-ffi` lints. `class-method-process-resource` stays and loses its "or declare `classState:`" advice.
 - The error kinds `class_state_unreachable`, `class_state_read_only` and `undeclared_class_variable`.
 - Class-side reflection over class variables: `classVarNames`, `allClassVarNames` (`stdlib/src/behaviour.bt:271, 279`), and the class-side forms of `fieldAt:`, `fieldAt:put:`, `hasField:` and `clearField:` (BT-4148), with `ClassInfo::is_class_var_reflection_selector` and its conformance fixture.
-- `performLocally:withArguments:` (Open Question 3).
+- `performLocally:withArguments:` (Decided question 3).
 - The class-variable fuzz harness, agreement corpus and nightly job.
 - `beamtalk_runtime_api:set_class_var/3`.
 - **From `ClassBuilder`, only** `classVars:` and `addClassState:default:` (`stdlib/src/class_builder.bt:134, 307`), the `classState` field behind them, and their docs and tests.
@@ -387,6 +387,12 @@ A per-class table readable and writable from any process: `self.n := self.n + 1`
 - It makes class methods concurrent over shared mutable state with no owner, the opposite of the rule in Decision §1.
 - Every read copies the value. `Ets` already exists for users who want exactly this, with the table visible in their code.
 
+### `Constant named: #key ifAbsent: [...]`
+The same helper under an intent name. Rejected by the owner in favour of `PersistentTerm`.
+- `Constant` promises a language feature and hides the cost model: a value that is expensive to replace, global to the node and not rebuilt on reload.
+- `named:ifAbsent:` reads as a lookup with a default. `at:ifAbsentPut:` says that the value is stored.
+- `PersistentTerm` sits beside `ProcessDictionary`, which is named for its mechanism for the same reason.
+
 ### A helper tied to the class (`self once: #tables do: [...]`)
 The helper could key on the calling class and have the runtime erase a class's keys when it reloads. Rejected: see Decision §3, "Reload". It rebuilds the per-class bookkeeping this ADR deletes.
 
@@ -418,7 +424,7 @@ Rejected by the owner, as for ADR 0152: with no user of the feature there is nob
 
 ### Neutral
 - The class process stays, for the class object and the process-bound selectors.
-- The per-send guard read stays (Open Question 4).
+- The per-send guard read stays for now (Decided question 4).
 - An `Ets` table is owned by the process that creates it, so replacing a class-variable cache means deciding who owns it. That decision was hidden before; it is not new work. An `AtomicCounter` is owned by its class process and lives until it is deleted.
 - `ClassBuilder` keeps its API apart from two setters.
 
@@ -444,6 +450,7 @@ Produce the list Phases 2 and 3 work from.
 - `stdlib/src/persistent_term.bt` and `runtime/apps/beamtalk_stdlib/src/beamtalk_persistent_term.erl`, with the doc comment of Decision §3.
 - BUnit: build once; the block is not run on a hit; a raising block stores nothing and is retried; `erase:`; `includesKey:`; a stored `nil` counts as present; two processes missing together agree on one value. EUnit for the native module.
 - Docs: a short section in `docs/beamtalk-language-features.md`, and the stdlib reference.
+- The native module's refusal of a top-level pid, actor or class, with a BUnit test for each.
 - Follow-up issue: move beamtalk-hpack's two tables to the helper.
 
 ### Phase 2: remove `classState:` (L)
@@ -454,7 +461,7 @@ One change, with no warning period.
 - **Codegen stops emitting** `beamtalk_class_vars` calls: delete `class_var_access.rs`, `class_var_keys.rs`, the `CatchEntry::ClassVarSnapshot` entry and restore in `threaded_ir/` (`emit.rs`, `ir.rs`, `verify.rs`), `VerifyError::CatchWithoutClassVarRestore`, and block capture of class variables in `block_facts`. The PR carries `ci:corpus`. Every module's `on:do:` changes, so `ci:core-diff` shows a wide diff; review a sample.
 - **Analysis.** Delete `validators/class_state_abroad.rs`, the class-process half of `class_process_ffi_validators.rs` (the `class-process-ffi` lint), `chain_has_class_variables`, `is_class_var_reflection_selector`, the `classState:` rules in `late_slot_validators.rs`, the class-variable reflection check in `reserved_name_validators.rs`, and the ADR 0123 migration rule. `runs_class_method_in_caller` loses two of its three conditions. The `class_variables` field of `ClassInfo` and its carriers (`class_meta.rs`, `build_stdlib/metadata.rs`, `beamtalk-compiler-port/src/decode.rs`, the language service's `identifier_lookup.rs` and `references_provider.rs`) go with it.
 - **Parser, AST, unparse.** The `classState:` arm in `source_analysis/parser/declarations.rs` stays only to produce the error; the class-variable list on `ClassDefinition` is removed.
-- **Stdlib.** `ClassBuilder classVars:` / `addClassState:default:` and the `classState` field; `classVarNames` / `allClassVarNames`; the `performLocally:` method (`proto_object.bt:115`) if Open Question 3 says delete; the class-side slot branches in `system_navigation.bt` (around lines 1116-1219); the doc comments listed in Context §1.
+- **Stdlib.** `ClassBuilder classVars:` / `addClassState:default:` and the `classState` field; `classVarNames` / `allClassVarNames`; the `performLocally:` method (`proto_object.bt:115`); the class-side slot branches in `system_navigation.bt` (around lines 1116-1219); the doc comments listed in Context §1.
 - **Harness.** Delete `class_var_program.rs`, `cli_class_var_agreement.rs`, `class_var_agreement.rs`, the `class_var_*` codegen test modules, `just test-class-var-corpus`, the `class-var-corpus` job in `fuzz.yml` and its branch in `fuzz-triage.yml`.
 - **Docs.** `docs/beamtalk-language-features.md`: § Class-Side Methods (the run-in-caller rule and the two lints), the `classState:` paragraphs and the singleton example, `late`, class-side `fieldAt:`, § Class variables and blocks, `performLocally:`, the error table. Also `docs/beamtalk-native-erlang.md`, `docs/beamtalk-tooling.md`, `docs/development/erlang-guidelines.md` (the `protect/1` rule), `docs/development/debugging.md`, `docs/development/surface-parity.md`, `docs/agents/expanded.md`, and the "State-threading codegen", "Opt-in CI labels" and "Blocks into class methods" rules in `AGENTS.md`.
 - **ADRs to annotate.** 0013, 0019, 0084, 0109, 0111, 0123, 0124, 0127 (its rule that a trait body may not declare `classState:` becomes moot), 0129, 0130, 0133, 0137, 0142.
@@ -489,21 +496,23 @@ There is no deprecation period.
 | `classState: count = 0`, incremented | `AtomicCounter`, or a field of an Actor |
 | `classState: cache = #{}` | An `Ets` table owned by an Actor, or an Actor's `state:` |
 | `late classState: x :: T` | An Actor with `late state: x :: T` |
-| `Cls fieldAt: #x` | `Cls x` |
+| `Cls fieldAt: #x` | `Cls x`. `Cls fieldAt: #x` raises does-not-understand |
 | `Cls performLocally: #sel withArguments: args` | `Cls perform: #sel withArguments: args` |
 | `builder classVars: #{#x => 1}` | `builder addClassMethod: #x body: [:self | 1]` |
 
 Packages must be rebuilt with the new compiler. No downstream package needs a source change *(survey)*.
 
-## Open Questions
+## Decisions on the open questions
 
-1. **The helper's name and surface.** `PersistentTerm` with `at:ifAbsentPut:`, `at:ifAbsent:`, `includesKey:` and `erase:` is proposed. The owner's sketch was `Constant named: #key ifAbsent: [...]`. Is the mechanism name right, and is leaving out `at:put:` right?
-2. **A "named, or spawn" helper on `Actor`.** Proposed: not now. Add `namedOrSpawn:` only when a package needs it.
-3. **`performLocally:withArguments:`.** Proposed: delete it. With no class variables, `perform:withArguments:` runs in the caller for every selector that is not process-bound. The risk is a downstream caller; Phase 0 searches for one.
-4. **The per-send guard.** After this ADR and ADR 0152, the guard's remaining reasons are a runtime fun shadowing a compiled method, a method removed by a reload or `removeSelector:`, and the class process being alive. Whether the 15 ns read BT-4987 measured can then be hoisted or dropped is a follow-up. Proposed: out of scope here; open an issue when Phase 3 lands.
-5. **Checks in `PersistentTerm`.** Is the package-prefix key convention enough, or should the helper require a `{Package, Name}` key? Should the native module refuse a top-level pid, port, actor or class as a value? Proposed: convention only for keys, as for `ProcessDictionary`; refuse the top-level process identities, since the check is one guard and runs only on a miss.
-6. **A lint for the hand-rolled pattern.** Should a direct `(Erlang persistent_term) put:` in package code get a hint pointing at the helper? Proposed: no; a doc note is enough.
-7. **Class-side `fieldAt:` after removal.** `SomeClass fieldAt: #x` should answer what any object with no such field answers. Phase 2 must pin which error that is.
+The draft listed seven open questions. The owner settled all seven when accepting the ADR (2026-11-24).
+
+1. **The helper is `PersistentTerm`**, with `at:ifAbsentPut:`, `at:ifAbsent:`, `includesKey:` and `erase:`, and no `at:put:`. The alternative `Constant named: #key ifAbsent: [...]` is rejected (see Alternatives Considered).
+2. **No "named, or spawn" helper on `Actor`** until a second copy of that pattern appears.
+3. **`performLocally:withArguments:` is deleted.** `perform:withArguments:` runs in the caller for every selector that is not process-bound. Phase 0 still searches downstream for a caller before Phase 2 lands.
+4. **The per-send guard read (BT-4987) is a follow-up issue**, measured after ADR 0152 and this ADR have both landed. By then the guard's remaining reasons are a runtime fun shadowing a compiled method, a method removed by a reload or `removeSelector:`, and the class process being alive.
+5. **`PersistentTerm` refuses a top-level pid, actor or class as a value**, with a clear error. The package-prefix key convention is enough; keys are not checked.
+6. **No lint for hand-rolled `persistent_term` use.** A doc note points at the helper.
+7. **Class-side `fieldAt:` after removal raises the ordinary does-not-understand error**, as do `fieldAt:put:`, `hasField:` and `clearField:` sent to a class. Phase 2 pins this with a test.
 
 ## References
 - Related issues: BT-5141 (ADR 0152 removal, must land first), BT-4983 (dispatch overhead research), BT-4987 (per-send guard read), BT-4363 / BT-4504 (constant class methods), BT-3701 (ADR 0130 epic), BT-4297 (ADR 0142 epic), BT-3691 (lost write), BT-4148 (class-side `fieldAt:`)
