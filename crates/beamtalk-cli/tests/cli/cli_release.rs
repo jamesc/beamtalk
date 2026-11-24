@@ -1078,6 +1078,37 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
         "expected `Smoke run`'s result (42) in rpc output: {rpc_stdout}"
     );
 
+    // BT-5126: `remote_console` connects with `-remsh` while the placeholder
+    // `-setcookie` is in argv; it only reaches the node if the real cookie
+    // is adopted (from the environment) before the shell connects. Feed it
+    // one expression, then EOF, and expect the *remote* node's name back.
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        let mut rc = launcher_command(&output_dir, name)
+            .arg("remote_console")
+            .env("RELEASE_NODE", &node)
+            .env("RELEASE_COOKIE", &cookie)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn bin/<name> remote_console");
+        rc.stdin
+            .take()
+            .unwrap()
+            .write_all(b"node().\n")
+            .expect("feed remote_console");
+        let out = rc.wait_with_output().expect("remote_console output");
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            text.contains(&format!("{node}@localhost")),
+            "remote_console must reach the running node with the real cookie: \
+             stdout={text} stderr={}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
     // `rpc "Beamtalk releaseInfo"` — ADR 0125 §1.1/§1.8's other headline
     // example, verbatim (BT-3576, BT-3612): a parity-neutral reflective
     // send, always available (no compiler needed), naming the release, its

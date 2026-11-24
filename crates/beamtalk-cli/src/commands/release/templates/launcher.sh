@@ -243,8 +243,11 @@ case "$VERB" in
         # ADR 0091: same-host attach only — plain loopback distribution, no
         # further authentication beyond the cookie handshake (ADR 0058).
         export_cookie
-        eval "set -- -hidden -sname \"\$SNAME\" ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
-            -eval \"__ADOPT_COOKIE_EVAL__.\" -remsh \"\$NODE\""
+        # `-remsh` would connect during boot, before any `-eval` can swap the
+        # placeholder cookie for the real one (BT-5126), so adopt first and
+        # then start the same remote shell `-remsh` does (OTP 26+).
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
+            -eval \"__ADOPT_COOKIE_EVAL__, shell:start_interactive({'\$NODE', {shell, start, []}}).\""
         exec "$ERL" "$@"
         ;;
     eval)

@@ -297,8 +297,11 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so remote_console attaches to whichever instance was
 rem started with the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -hidden -sname "%SNAME%" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
-    -eval "__ADOPT_COOKIE_EVAL__." -remsh "%NODE%"
+rem `-remsh` would connect during boot, before any -eval can swap the
+rem placeholder cookie for the real one (BT-5126): adopt first, then start the
+rem same remote shell (OTP 26+).
+"%ERL%" -noshell -hidden -sname "%SNAME%" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+    -eval "__ADOPT_COOKIE_EVAL__, shell:start_interactive({'%NODE%', {shell, start, []}})."
 exit /b %errorlevel%
 
 :eval
