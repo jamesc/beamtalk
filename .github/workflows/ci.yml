@@ -248,6 +248,30 @@ jobs:
   # multiplied into dozens of near-identical entries that pushed the repo
   # past the Actions cache cap and evicted the caches builds rely on. PR
   # runs restore main's entries.
+  # BT-5137: the docs checks (every `just` recipe and path the contributor docs
+  # name exists; every env var the code reads is documented) must run on a
+  # docs-only PR, the very PR that can break them, so this job is NOT gated on
+  # `code`. It is cheap (no Rust, no Erlang). A docs-only push to main is
+  # docs-checks.yml's, because the `push` path list above skips it here.
+  docs-checks:
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup just
+        uses: ./.github/actions/setup-beamtalk
+        with:
+          rust: 'false'
+          erlang: 'false'
+          rust-cache: 'false'
+
+      - name: Docs reference and environment-variable checks
+        run: just lint-docs-refs lint-env-docs
+
   lint:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -302,7 +326,7 @@ jobs:
       # (test-dialyzer job), JS/Elixir formatting beyond fmt-check
       # (the liveview workflow runs lint-elixir).
       - name: Clippy, format and repo lints
-        run: just clippy fmt-check lint-repo lint-docs-refs lint-env-docs test-grammar test-github-extension
+        run: just clippy fmt-check lint-repo test-grammar test-github-extension
 
       - name: Surface parity drift check (BT-2082)
         # Verifies REPL ops × CLI × MCP × LSP coverage matches
@@ -858,7 +882,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: ${{ always() }}
-    needs: [changes, lint, test-rust, test-vscode, test-desktop, check-release-build, check-exec-windows, core-diff-modes, otp-matrix, test-beam, test-runtime, test-dialyzer, test-integration, test-install]
+    needs: [changes, docs-checks, lint, test-rust, test-vscode, test-desktop, check-release-build, check-exec-windows, core-diff-modes, otp-matrix, test-beam, test-runtime, test-dialyzer, test-integration, test-install]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
