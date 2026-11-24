@@ -23,7 +23,7 @@
 //
 // Some rows also pin what the outcome is, where ADR 0142 says it must not
 // change: the inherited class-variable error (§1 rule 2), the ancestor's
-// method being reached (extension, runtime fun), and the process-bound
+// method being reached (runtime fun), and the process-bound
 // selectors (§1 rule 3). One row pins the outcome ADR 0142 changes: the
 // re-entrant block (`testReentrantBlock`) used to raise `dispatch_error` and
 // answers a value since BT-4300 runs stateless class methods in the caller;
@@ -105,8 +105,8 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
       dynamic: [:cls | cls describe]
       on: GuardedDiffClassRoot
     // BT-4300: class-variable reflection on a class with no class variables
-    // answers the same in the caller (the stateless Leaf) as in the class
-    // process (Root, kept there by its class-side extensions).
+    // answers the same for the stateless Leaf and for its stateless parent
+    // Root.
     outcome := self
       classSend: #clearFieldInCaller
       literal: [GuardedDiffClassLeaf clearMissing == GuardedDiffClassLeaf]
@@ -211,60 +211,6 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
       on: GuardedDiffClassForgot
     self assert: (writeOutcome at: 1) equals: #raised
     self assert: (writeOutcome at: 3) equals: #undeclared_class_variable
-
-  // A class-side extension (ADR 0066) on an ancestor of the receiving class.
-  // Sent to the ancestor itself, the extension answers. Sent to a subclass,
-  // it answers too (BT-4307): a class-side send walks the chain with each
-  // ancestor's extension before its class methods, the order a class-side
-  // `super` uses (BT-4250) and ADR 0142 §2 assumes ("a class-side extension
-  // at each ancestor counts as that ancestor's method"). So an extension-only
-  // selector is understood, the extension's `self` is the receiving
-  // subclass, and an extension shadowing a compiled ancestor method wins.
-  testAncestorClassSideExtension =>
-    outcome := self
-      classSend: #ownExtension
-      literal: [GuardedDiffClassRoot rootExtension]
-      dynamic: [:cls | cls rootExtension]
-      on: GuardedDiffClassRoot
-    self assert: outcome equals: #(#returned, #fromRootExtension)
-    outcome := self
-      classSend: #ownExtensionShadowsCompiled
-      literal: [GuardedDiffClassRoot shadowedByExtension]
-      dynamic: [:cls | cls shadowedByExtension]
-      on: GuardedDiffClassRoot
-    self assert: outcome equals: #(#returned, #fromRootExtension)
-    outcome := self
-      classSend: #ancestorExtension
-      literal: [GuardedDiffClassLeaf rootExtension]
-      dynamic: [:cls | cls rootExtension]
-      on: GuardedDiffClassLeaf
-    self assert: outcome equals: #(#returned, #fromRootExtension)
-    // The extension's `self` is the receiving subclass.
-    outcome := self
-      classSend: #ancestorExtensionSelf
-      literal: [GuardedDiffClassLeaf rootExtensionReceiver]
-      dynamic: [:cls | cls rootExtensionReceiver]
-      on: GuardedDiffClassLeaf
-    self assert: outcome equals: #(#returned, #GuardedDiffClassLeaf)
-    outcome := self
-      classSend: #ancestorExtensionShadowsCompiled
-      literal: [GuardedDiffClassLeaf shadowedByExtension]
-      dynamic: [:cls | cls shadowedByExtension]
-      on: GuardedDiffClassLeaf
-    self assert: outcome equals: #(#returned, #fromRootExtension)
-    // A class-side self-send from the subclass walks the same chain.
-    outcome := self
-      classSend: #ancestorExtensionSelfSend
-      literal: [GuardedDiffClassLeaf selfShadowedByExtension]
-      dynamic: [:cls | cls selfShadowedByExtension]
-      on: GuardedDiffClassLeaf
-    self assert: outcome equals: #(#returned, #fromRootExtension)
-    // `respondsTo:` on the class side agrees with the send.
-    self assert: (GuardedDiffClassLeaf respondsTo: #rootExtension)
-    self deny: (GuardedDiffClassLeaf respondsTo: #noSuchClassSelector)
-    // So does protocol conformance.
-    self assert: (GuardedDiffClassRoot conformsTo: #GuardedDiffClassRootExtended)
-    self assert: (GuardedDiffClassLeaf conformsTo: #GuardedDiffClassRootExtended)
 
   // An ADR 0084 runtime class-method fun installed on an ancestor of the
   // receiving class shadows the ancestor's compiled method, for the
@@ -389,18 +335,18 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
       dynamic: [:cls | cls each: #(1, 2) do: [:x | cls double: x]]
       on: GuardedDiffClassLeaf
     self assert: outcome equals: #(#returned, #(2, 4))
-    // `GuardedDiffClassRoot` carries this file's class-side extensions
-    // (bottom), so ADR 0142 §1 rule 1 keeps its class methods in its class
-    // process, and re-entry still raises `dispatch_error` on both paths.
+    // `GuardedDiffClassStateful` declares class variables, so ADR 0142 §1
+    // rule 2 keeps its class methods in its class process, and re-entry still
+    // raises `dispatch_error` on both paths.
     outcome := self
-      classSend: #reentrantBlockShadowed
+      classSend: #reentrantBlockStateful
       literal: [
-        GuardedDiffClassRoot each: #(1, 2) do: [:x |
-          GuardedDiffClassRoot double: x
+        GuardedDiffClassStateful each: #(1, 2) do: [:x |
+          GuardedDiffClassStateful double: x
         ]
       ]
       dynamic: [:cls | cls each: #(1, 2) do: [:x | cls double: x]]
-      on: GuardedDiffClassRoot
+      on: GuardedDiffClassStateful
     self assert: (outcome at: 1) equals: #raised
     self assert: (outcome at: 3) equals: #dispatch_error
     // A block that does not re-enter the class is fine either way.
@@ -442,10 +388,3 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
       literal: [GuardedDiffClassSealed double: 21]
       dynamic: [:name | (self lookUp: name) double: 21]
       on: #GuardedDiffClassSealed
-
-// Class-side extensions (ADR 0066) on GuardedDiffClassRoot: two adding a
-// selector, one shadowing a compiled class method.
-GuardedDiffClassRoot class >> rootExtension -> Symbol => #fromRootExtension
-GuardedDiffClassRoot class >> rootExtensionReceiver -> Symbol => self name
-GuardedDiffClassRoot class >> shadowedByExtension -> Symbol =>
-  #fromRootExtension

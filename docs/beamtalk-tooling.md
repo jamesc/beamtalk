@@ -715,7 +715,7 @@ Classes can be defined directly at the REPL prompt without writing a `.bt` file:
 ..>   increment => self.value := self.value + 1
 ```
 
-Methods can be added or replaced on existing classes using Tonel-style standalone method definitions (`>>`):
+Methods can be added or replaced on a class whose source the workspace holds, using Tonel-style standalone method definitions (`>>`). The REPL recompiles the class from its stored source and hot-loads it:
 
 ```beamtalk
 > InlineCounter >> getValue => self.value
@@ -741,6 +741,8 @@ Actor(InlineCounter, 0.234.0)
 > c2 increment
 10
 ```
+
+This is a live edit, not a way to extend a class from another file. A stdlib class is read-only in the workspace, and a class with no stored source (a dependency class, or one made with `ClassBuilder`) fails with "Class source not available". In a `.bt` file, `Foo >> sel => ...` is valid only in the file that defines `Foo`, where it is folded into the class. In any other file it is a compile error, reported by `build`, `check`, `lint`, MCP `lint`, the LSP and `Workspace load:` (ADR 0152).
 
 ### Hot Reload
 

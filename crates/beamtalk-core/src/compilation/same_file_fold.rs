@@ -24,7 +24,8 @@
 //!   instance sends go to the backing `gen_server`. Class-side extensions fold
 //!   into the facade like any class method.
 //! * Extensions whose target class is declared elsewhere (cross-file) are left
-//!   in `module.method_definitions` unchanged.
+//!   in `module.method_definitions` unchanged; [`reject_cross_file_extensions`]
+//!   turns them into a compile error (ADR 0152).
 
 use crate::ast::{ClassDefinition, Module};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
@@ -86,6 +87,56 @@ pub fn fold_same_file_extensions(module: &mut Module) -> Vec<Diagnostic> {
     diagnostics
 }
 
+/// Rejects every standalone `X >> m => ...` / `X class >> m => ...` whose target
+/// is not defined in `module` (ADR 0152: cross-file extension methods were
+/// removed).
+///
+/// This is the one place the rule "a `>>` target must be defined in this file"
+/// lives. Call it from every **file-compile** entry point, after
+/// [`fold_same_file_extensions`], so that only foreign targets are left in
+/// `module.method_definitions`. It must **not** run on the live-definition path
+/// (a lone `Foo >> sel => ...` typed at the REPL, or `Class compile:source:`),
+/// where the target's source is held by the workspace rather than the file.
+///
+/// A protocol declared in the same file counts as defined here, matching
+/// [`declared_class_names`] for classes.
+#[must_use]
+pub fn reject_cross_file_extensions(module: &Module) -> Vec<Diagnostic> {
+    module
+        .method_definitions
+        .iter()
+        .filter(|def| {
+            !module
+                .protocols
+                .iter()
+                .any(|p| p.name.name == def.class_name.name)
+        })
+        .map(|def| {
+            let target = match &def.package {
+                Some(pkg) => format!("{}@{}", pkg.name, def.class_name.name),
+                None => def.class_name.name.to_string(),
+            };
+            let side = if def.is_class_method { " class" } else { "" };
+            Diagnostic::error(
+                format!(
+                    "`{target}{side} >> {}` adds a method to {target}, which is not defined in \
+                     this file; cross-file extension methods were removed (ADR 0152)",
+                    def.method.selector.name(),
+                ),
+                def.method.head_span(),
+            )
+            .with_hint(
+                "Define the method in the file that defines the class (in the class body, or \
+                 as a `>>` next to it), or, for a class loaded in a workspace, define it live \
+                 from the REPL or the IDE. For a class you cannot edit, write a method on a \
+                 class of your own that takes the value."
+                    .to_string(),
+            )
+            .with_category(DiagnosticCategory::Type)
+        })
+        .collect()
+}
+
 /// The names of the classes declared in `module`. A standalone method
 /// definition whose target is in this set is a same-file extension; this is the
 /// one place that rule lives (codegen and analysis both use it).
@@ -126,6 +177,29 @@ mod tests {
         assert!(diags.is_empty());
         assert_eq!(m.method_definitions.len(), 1);
         assert_eq!(m.classes[0].methods.len(), 1);
+    }
+
+    #[test]
+    fn rejects_cross_file_extensions_only() {
+        let mut m = parse_ok(
+            "Object subclass: Foo\n  foo => 1\n\nFoo >> bar => 2\nString >> shout => 3\nInteger class >> make => 4\n",
+        );
+        assert!(fold_same_file_extensions(&mut m).is_empty());
+        let diags = reject_cross_file_extensions(&m);
+        assert_eq!(diags.len(), 2, "{diags:?}");
+        assert!(diags[0].message.contains("String >> shout"), "{diags:?}");
+        assert!(diags[0].message.contains("ADR 0152"));
+        assert!(
+            diags[1].message.contains("Integer class >> make"),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn same_file_extension_is_not_rejected() {
+        let mut m = parse_ok("Object subclass: Foo\n  foo => 1\n\nFoo >> bar => 2\n");
+        assert!(fold_same_file_extensions(&mut m).is_empty());
+        assert!(reject_cross_file_extensions(&m).is_empty());
     }
 
     #[test]

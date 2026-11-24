@@ -16,6 +16,7 @@
 //! | Fixture                      | Regression context |
 //! |------------------------------|--------------------|
 //! | `cross_file_class`           | cross-file class extraction |
+//! | `cross_file_extension`       | ADR 0152 cross-file `>>` error |
 //! | `sealed_subclass`            | Sealed subclass error |
 //! | `stdlib_mode`                | package-mode cross-file lookup |
 //! | `protocol_cross_file`        | cross-file Protocol use |
@@ -191,6 +192,19 @@ fn corpus_cases() -> Vec<CorpusCase> {
             why: "BT-2052: cross-file class type annotation must lint clean on every surface",
         },
         CorpusCase {
+            name: "cross_file_extension",
+            lsp_target: "src/ext.bt",
+            lint_target: "",
+            expected: ExpectedCounts {
+                cli_lint: 1,
+                mcp_lint: 1,
+                mcp_summary: 1,
+                lsp: 1,
+            },
+            unreadable_files: &[],
+            why: "ADR 0152: a cross-file `>>` is a compile error on every surface",
+        },
+        CorpusCase {
             name: "sealed_subclass",
             lsp_target: "src/bad_integer.bt",
             lint_target: "",
@@ -346,7 +360,7 @@ struct LintVerdictCase {
 
 fn lint_verdict_cases() -> Vec<LintVerdictCase> {
     vec![
-        // A cross-file extension, alias and protocol lint clean in
+        // A cross-file class, alias and protocol lint clean in
         // `greeter.bt`; `caller.bt` misuses them: a DNU, a value that does
         // not conform to the sibling protocol, and one outside the sibling
         // alias. The last two need the pre-loaded protocol and alias infos

@@ -399,6 +399,10 @@ pub(crate) fn analyse_source_with_bindings(
         diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
             &mut module,
         ));
+        // ADR 0152: a `>>` whose target this file does not define is an error.
+        diagnostics.extend(beamtalk_core::compilation::reject_cross_file_extensions(
+            &module,
+        ));
         (source, module, diagnostics)
     };
 

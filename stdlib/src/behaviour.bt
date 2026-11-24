@@ -493,12 +493,17 @@ abstract Object subclass: Behaviour
   /// directly with the body value so a quote char or multi-line body never has
   /// to be escaped back into source.
   ///
-  /// The patch installs in memory immediately. If this class is backed by an
-  /// in-project `.bt` source file, the ChangeLog entry is intended `flushable`
-  /// and a later `Workspace flush` can splice the body back to disk; for stdlib /
-  /// dynamic / dependency classes the entry is intended `flushable: false` and
-  /// flush skips it (the patch is still live in memory). ChangeLog append is
-  /// best-effort and does not block or undo the successful in-memory install —
+  /// The patch recompiles this class from the source the workspace holds for
+  /// it, so it needs a class with stored source. A stdlib class is refused
+  /// ("built-in methods are read-only in the workspace"), and a class with no
+  /// stored source (a dependency class, or a dynamic class made with
+  /// ClassBuilder) fails with "Class source not available"; in both cases
+  /// nothing is installed. Otherwise the patch installs in memory immediately.
+  /// If the class is backed by an in-project `.bt` source file, the ChangeLog
+  /// entry is intended `flushable` and a later `Workspace flush` can splice the
+  /// body back to disk; if its file is missing or outside the project the entry
+  /// is intended `flushable: false` and flush skips it (the patch is still live
+  /// in memory). ChangeLog append is best-effort and does not block or undo the successful in-memory install —
   /// the install still succeeds even if logging fails. Returns the receiver class.
   ///
   /// ## Examples

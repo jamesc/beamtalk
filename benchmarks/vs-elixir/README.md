@@ -317,8 +317,9 @@ share of each figure.
   read of the call target's key, whose value is the class reference passed as
   `ClassSelf`: see `results/bench-bt4316.md` for the current figures.
   `results/bench-bt4431.md` measures a static site whose key is never
-  installed (rows 3g-3j: +21 to +32 reductions on top of the `class_send`
-  fallback). It also measures `invalidate/1` over a hierarchy: one
+  installed (rows 3g-3j at the time: +21 to +32 reductions on top of the
+  `class_send` fallback; 3i and 3j were removed with cross-file extension
+  methods, ADR 0152). It also measures `invalidate/1` over a hierarchy: one
   `persistent_term` erase per warmed key, 0.1 to 0.5 ms each here. Since
   BT-4442 a class's targets share one key (an atom whose value maps each
   call-site key to the class reference), so an erase costs at most two

@@ -1,0 +1,12 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Diagnostic-parity fixture (ADR 0152): a cross-file `>>` extension method.
+# Every surface should report the same compile error.
+
+[package]
+name = "cross_file_extension"
+version = "0.1.0"
+description = "Cross-file extension method parity fixture"
+
+[dependencies]

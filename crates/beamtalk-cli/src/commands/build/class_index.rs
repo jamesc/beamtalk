@@ -721,6 +721,11 @@ pub(crate) fn scan_source_file(
     diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
         &mut module,
     ));
+    // ADR 0152: a `>>` whose target this file does not define is an error. The
+    // diagnostics ride with the cached Pass 1 AST into the file's compile.
+    diagnostics.extend(beamtalk_core::compilation::reject_cross_file_extensions(
+        &module,
+    ));
 
     // Extract full ClassInfo for cross-file hierarchy resolution.
     let mut class_infos =

@@ -76,6 +76,15 @@ pub(crate) fn parse_and_check_expression(
     parse_diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
         &mut module,
     ));
+    // ADR 0152: an inline class/protocol definition may not carry a `>>` for a
+    // class it does not define. A lone `Foo >> sel => ...` (no class in the
+    // input) is a live method definition and is routed to the recompile path
+    // by `handle_compile_expression`, so it is deliberately not checked here.
+    if !module.classes.is_empty() || !module.protocols.is_empty() {
+        parse_diagnostics.extend(beamtalk_core::compilation::reject_cross_file_extensions(
+            &module,
+        ));
+    }
 
     let known_var_refs: Vec<&str> = known_vars.iter().map(String::as_str).collect();
     // REPL input — a bare expression or an inline class/protocol typed at
@@ -186,19 +195,10 @@ pub(crate) fn handle_compile_expression_with_options(
     // If the parsed module contains class definitions, use compile path
     if !module.classes.is_empty() {
         let referenced_aliases = analysis.referenced_aliases.clone();
-        // `handle_inline_class_definition` merges any standalone
-        // `module.method_definitions` into their target class *after* this
-        // point — a method the type checker saw as a standalone extension
-        // during `analysis` above. `infer_method_return_types`/writeback key
-        // return types by `(ClassName, Selector, IsClassMethod)` regardless
-        // of whether the method AST lives standalone or inside
-        // `class.methods`, so the map itself stays valid across the merge —
-        // but only thread `analysis` through when there's no merge about to
-        // happen at all, so this call site never has to reason about it:
-        // codegen's own no-analysis-supplied fallback (still correct, just
-        // not the fast path) covers the rarer "class def + inline standalone
-        // method in the same eval" REPL pattern.
-        let analysis = module.method_definitions.is_empty().then_some(analysis);
+        // A standalone `>>` that survives the same-file fold in an inline
+        // class definition is rejected in `parse_and_check_expression`
+        // (ADR 0152), so `analysis` is never stale here.
+        let analysis = Some(analysis);
         return handle_inline_class_definition(
             module,
             &source,

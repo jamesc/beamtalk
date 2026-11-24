@@ -4,4 +4,4 @@ expression: output
 ---
 Warnings (2):
   - non-exhaustive match: `#west` is not handled (residual type: `#west`)
-  - Method 'bt2746MixedOperators' in Object declares return type Never, but body returns Object
+  - Method 'bt2746MixedOperators' in SetTheoreticOperatorsCase declares return type Never, but body returns SetTheoreticOperatorsCase

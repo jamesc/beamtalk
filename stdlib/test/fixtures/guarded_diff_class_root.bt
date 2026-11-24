@@ -42,6 +42,3 @@ Object subclass: GuardedDiffClassRoot
   // class process calling itself, which raises `dispatch_error`.
   class each: items :: List do: aBlock :: Block -> List =>
     items collect: [:x | aBlock value: x]
-
-  // Shadowed by a class-side extension (class_dispatch_differential_test.bt).
-  class shadowedByExtension -> Symbol => #compiled
