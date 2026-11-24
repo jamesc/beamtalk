@@ -72,11 +72,6 @@ Value subclass: JsonMapping
   /// Apply the mapping to `anObject` and answer a Dictionary of wire key to
   /// (converted) field value. Fields that are not mapped are omitted. A mapped
   /// field the object does not have raises an error.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// (JsonMapping new mapField: #x) encode: 5   // => _
-  /// ```
   encode: anObject :: Object -> Dictionary =>
     self.entries
       inject: (Dictionary new)

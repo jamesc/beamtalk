@@ -65,5 +65,5 @@ TestCase subclass: JsonMappingTest
     self assert: base entries size equals: 0
     self assert: more entries size equals: 1
 
-  testProtocolRequiresClassSideMapping =>
+  testJsonMappableIsProtocol =>
     self assert: (Protocol isProtocol: #JsonMappable)
