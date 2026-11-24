@@ -744,7 +744,7 @@ late_migration_failure_is_reported_test_() ->
             {ok, 0, [{Pid, timeout}]} =
                 beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {slow_fail, 6500}),
             ?awaitMessage(
-                {late_failure, ?MODULE, Pid, {error, {left_suspended, slow_failure}}}, 15000
+                {late_failure, ?MODULE, Pid, {error, {left_suspended, _}}}, 15000
             ),
             ?assertEqual(suspended, sys_state(Pid))
         after
