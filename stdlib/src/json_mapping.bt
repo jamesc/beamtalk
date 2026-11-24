@@ -61,22 +61,39 @@ Value subclass: JsonMapping
   /// conversion. The converter's result is itself encoded recursively, so it
   /// may answer another mapped object.
   ///
+  /// Raises an error if `key` is already mapped, so a typo cannot silently
+  /// drop a field from the wire schema.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// (JsonMapping new mapField: #at to: "created_at" using: [:v | v printString]) entries size   // => 1
   /// ```
   mapField: fieldName :: Symbol to: key :: String using: converter :: Block | Nil -> JsonMapping =>
+    (self.entries anySatisfy: [:e |
+      (e at: #key) =:= key
+    ]) ifTrue: [
+      self error: "JsonMapping: duplicate wire key " ++ key printString
+    ]
     entry := #{#field => fieldName, #key => key, #using => converter}
     self withEntries: (self.entries add: entry)
 
   /// Apply the mapping to `anObject` and answer a Dictionary of wire key to
   /// (converted) field value. Fields that are not mapped are omitted. A mapped
-  /// field the object does not have raises an error.
+  /// field the object does not have (or has not assigned) raises an error.
   encode: anObject :: Object -> Dictionary =>
     self.entries
       inject: (Dictionary new)
       into: [:acc :entry |
-        raw := anObject perform: #fieldAt: withArguments: (#() add: (entry at: #field))
+        name := entry at: #field
+        (anObject perform: #hasField: withArguments: (#() add: name))
+          ifFalse: [
+            self
+              error: "JsonMapping: "
+                ++ anObject class name asString
+                ++ " has no assigned field "
+                ++ name printString
+          ]
+        raw := anObject perform: #fieldAt: withArguments: (#() add: name)
         converter := entry at: #using
         value := converter isNil ifTrue: [raw] ifFalse: [converter value: raw]
         acc at: (entry at: #key) put: value
