@@ -381,6 +381,7 @@ note_reply_warning(Text) ->
 
 -spec guarded_warning(atom(), atom(), fun(() -> ok)) -> ok.
 guarded_warning(Selector, Class, Fun) ->
+    %% bt-catcher-audit: not-applicable-no-block - Fun is a runtime warning probe, never a Beamtalk block
     try
         Fun()
     catch
