@@ -27,10 +27,9 @@
 //! contribute results. A completely unparseable source returns an empty list.
 //! Callers treat "no senders found" identically to "could not parse".
 
-use super::selector_span;
-use beamtalk_core::ast::MessageSelector;
+use super::selector_line;
 use beamtalk_core::ast_walker::walk_sends;
-use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
+use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
 /// Used to translate line numbers from wrapped-source to input-source space.
@@ -76,16 +75,6 @@ pub fn find_senders_in_source(method_source: &str, selector_name: &str) -> Vec<u
         .into_iter()
         .map(|line| line.saturating_sub(PREFIX_LINES).max(1))
         .collect()
-}
-
-/// Determine the line number to report for a matching send. Uses the span of
-/// the selector keywords when available (so the line points at the selector
-/// token rather than the receiver, for multi-line sends) and falls back to
-/// the enclosing message-send span otherwise.
-fn selector_line(selector: &MessageSelector, fallback: Span, source: &str) -> u32 {
-    selector_span(selector)
-        .unwrap_or(fallback)
-        .line_number(source)
 }
 
 #[cfg(test)]

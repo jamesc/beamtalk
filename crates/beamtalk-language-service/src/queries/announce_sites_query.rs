@@ -48,7 +48,7 @@
 //! Parse errors are tolerated: any sub-trees that parsed successfully still
 //! contribute results. A completely unparseable source returns an empty list.
 
-use super::selector_span;
+use super::selector_line;
 use beamtalk_core::announce_selectors::is_announce_selector;
 use beamtalk_core::ast::{Expression, MessageSelector};
 use beamtalk_core::ast_walker::walk_sends;
@@ -171,16 +171,6 @@ fn push_announce(
         line: selector_line(selector, span, source),
         announcement_class,
     });
-}
-
-/// Determine the line number to report for an emission. Uses the span of the
-/// selector keywords when available (so the line points at the selector token
-/// rather than the receiver, for multi-line sends) and falls back to the
-/// enclosing message-send span otherwise.
-fn selector_line(selector: &MessageSelector, fallback: Span, source: &str) -> u32 {
-    selector_span(selector)
-        .unwrap_or(fallback)
-        .line_number(source)
 }
 
 #[cfg(test)]
