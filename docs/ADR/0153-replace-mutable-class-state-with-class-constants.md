@@ -58,7 +58,7 @@ A Linear search for "class variable" over the last 90 days returns 86 issues *(r
 
 - **Every compiled `on:do:`** takes a class-variable snapshot before its `try` and restores it in the catch arm: `class_var_snapshot_let_doc` (`class_var_access.rs:133-143`), emitted for `CatchEntry::ClassVarSnapshot` at `threaded_ir/emit.rs:663` *(read)*. BT-4983 counted 35 such snapshots on one HTTP request *(read: issue title)*.
 - **`Result tryDo:`** runs its block under `beamtalk_class_vars:protect/1` (`beamtalk_result.erl:228, 285`) *(read)*, and every runtime catcher that runs a block must do the same, enforced by `just lint-class-var-catchers`.
-- **Every class send** reads a guard, `direct_call_ok/2` (`beamtalk_class_shadow_flags.erl:655`), one of whose three inputs is "the class or an ancestor declares class variables" *(read)*. BT-4987 measured that read at 15 ns of a 22-36 ns class send *(read)*. Removing class variables removes an input, not the read: see Open Question 5.
+- **Every class send** reads a guard derived from `direct_call_ok/2` (`beamtalk_class_shadow_flags.erl:655`), one of whose inputs is "the class or an ancestor declares class variables" *(read)*. BT-4987 measured that read at 15 ns of a 22-36 ns class send *(read)*. Removing class variables removes an input, not the read: see Open Question 5.
 
 ### The conceptual argument
 
@@ -179,7 +179,7 @@ For a computed constant the method is, in effect:
 
 ```erlang
 class_tokenPattern(_ClassSelf) ->
-    Key = {beamtalk_constant, 'bt@app@http_status', tokenPattern, <<"3f9a…">>},
+    Key = {beamtalk_constant, 'bt@app@http_status', tokenPattern, 16#3f9a52c1},
     case persistent_term:get(Key, '$beamtalk_constant_unset') of
         '$beamtalk_constant_unset' ->
             beamtalk_constants:compute(Key, fun() -> <initialiser> end);
@@ -189,7 +189,7 @@ class_tokenPattern(_ClassSelf) ->
 ```
 
 - `beamtalk_constants` is a new leaf runtime module of a few dozen lines: `compute/2` (cycle check, evaluate, `persistent_term:put/2`, answer) and `erase_module/2`. It is the only writer of these keys, so no rule crosses the Rust and Erlang boundary beyond the key shape, which codegen emits and the runtime never rebuilds.
-- The last key element is a hash of the class's source, baked in at compile time. Old and new code of a reloaded class therefore use different keys (§5).
+- The last key element is an integer hash of the class's source, baked in at compile time. Old and new code of a reloaded class therefore use different keys (§5).
 - Codegen builds this with the `Document` / `form` API like any other method body (ADR 0089).
 
 **Why `persistent_term` and not the alternatives.**
@@ -317,7 +317,7 @@ Summarised from the languages' documentation; not re-checked for this ADR.
 
 ## User Impact
 
-- **Newcomer.** One fewer concept, and the one that is left is the familiar one: a named constant. The error for `classState:` says what to use. They no longer need to know what a class process is before writing a class method.
+- **Newcomer.** One fewer concept, and the one that is left is the familiar one: a named constant. The error for `classState:` says what to use. They no longer need to know what a class process is before writing a class method. The cost: a newcomer who wants "one shared counter" must now meet Actors or `AtomicCounter` first, so the tutorial needs that example early.
 - **Smalltalk developer.** Loses class variables and class-side instance variables, which is a real departure. Keeps the idiom Smalltalk code already uses for constants (a class-side accessor), and gets inheritance and overriding by the ordinary method rules. The singleton pattern becomes a named Actor, which is where a Smalltalk developer on the BEAM ends up anyway.
 - **Erlang / Elixir developer.** Gets what they expect: no module-level mutable state, constants that compile to literals or `persistent_term`, and class methods that are always plain functions in the caller (apart from the constructors). A constant is `Mod:class_name(ClassRef)` from Erlang.
 - **Operator.** No class process serialising calls for any user class. Computed constants are visible with `persistent_term:get()` under `{beamtalk_constant, Module, Name, _}`. Reloading a class with computed constants costs a global GC; a release upgrade that reloads many such classes should expect one pass.
@@ -374,6 +374,13 @@ Rejected. Nothing uses it (Context §1), and code that does not use it pays for 
 
 ### Keep mutable `classState:`, backed by an Actor transparently
 The compiler would generate a hidden actor per class and turn `self.x := v` into a message to it. Rejected.
+
+```beamtalk
+Object subclass: Tally
+  classState: n = 0
+  class bump => self.n := self.n + 1   // would compile to: read from the hidden actor, add, write back
+```
+
 - It is what ADR 0130 already is, with the class process as the hidden actor, and it brought all the rules listed under "The conceptual argument".
 - Each read becomes a call to another process (microseconds), or else the method must run inside the actor, which is the execution-mode split this ADR removes.
 - A read-modify-write across two messages is a race the syntax hides. A user who writes an Actor sees the message boundary.
@@ -385,7 +392,7 @@ The compiler would generate a hidden actor per class and turn `self.x := v` into
 - The cost of the syntax is small because it lowers to a class method.
 
 ### ETS-backed `classState:`
-A per-class table readable and writable from any process. Rejected, for ADR 0130's reasons and one more.
+A per-class table readable and writable from any process: `self.n := self.n + 1` becomes `ets:lookup` then `ets:insert`. Rejected, for ADR 0130's reasons and one more.
 - A write is visible at once to every process, so a class method that fails half way leaves torn state, and two callers race on read-modify-write.
 - It makes class methods concurrent over shared mutable state with no owner, which is the opposite of the rule in Decision §1.
 - Every read copies the value. `Ets` already exists for users who want exactly this, with the table visible in their code.
@@ -405,7 +412,7 @@ Rejected by the owner, as for ADR 0152: with no user of the feature there is nob
 - One rule for shared mutable state: an Actor (or a process-owned counter or table).
 - One execution mode for ordinary class methods. A class method is a function in the caller.
 - `on:do:` and `Result tryDo:` lose the snapshot and restore. The catcher audit and its lint go away.
-- About 3,400 lines of dedicated source, about 6,500 lines of dedicated tests and harness *(read: the `wc -l` figures in Context)*, a nightly job and three error kinds are deleted.
+- About 3,000 lines of dedicated source, about 7,500 lines of dedicated tests and harness *(read: the `wc -l` figures in Context)*, a nightly job and three error kinds are deleted.
 - Lookup tables get a declarative, copy-free home.
 - Constants are inherited, which class variables were not.
 - A migration method can read a constant.
@@ -442,6 +449,7 @@ Produce the list Phases 2 and 3 work from.
   - That the build stamp forces a recompile of dependency BEAMs and workspace-persisted BEAMs (see Phase 3).
 
 ### Phase 1: add `constant:` (M)
+- **First, a spike.** Hand-write one module with the computed-constant method of Decision §4 and measure: the read cost against a plain class method; the pause of a reload-time erase on a node with many processes holding the value; and concurrent first reads. If the numbers contradict Decision §4 or §5, revise the storage before building the rest.
 - **Parser, AST, unparse, formatter.** A `constant:` declaration in `source_analysis/parser/declarations.rs`, beside `classState:`. A `ConstantDeclaration` node (name, optional type, initialiser, doc comment, `@expect`), not a `StateDeclaration` with a new `SlotKind`: a constant is not a slot.
 - **Semantic analysis.** The declaration contributes a class-side method to `ClassInfo`. New checks: missing initialiser, duplicate of a class method, self-reference, process-identity type, `late constant:`. The type checker gives the method its return type.
 - **Codegen.** The generated class method (three shapes, Decision §4), the `computed_constants` and source-hash entries in `__beamtalk_meta/0` (`class_meta.rs`), and the literal case feeding `constant_class_methods`.
@@ -495,7 +503,7 @@ There is no deprecation period.
 | `self.x` in a class method | `self x` |
 | `Cls fieldAt: #x` | `Cls x`, or `Cls perform: #x` |
 | `Cls performLocally: #sel withArguments: args` | `Cls perform: #sel withArguments: args` |
-| `builder classVars: #{#x => 1}` | `builder addClassMethod: #x body: [:cls | 1]` |
+| `builder classVars: #{#x => 1}` | `builder addClassMethod: #x body: [:self | 1]` |
 
 Packages must be rebuilt with the new compiler. No downstream package needs a source change *(survey)*.
 
