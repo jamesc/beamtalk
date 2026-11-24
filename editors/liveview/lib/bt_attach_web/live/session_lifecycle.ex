@@ -544,7 +544,11 @@ defmodule BtAttachWeb.Live.SessionLifecycle do
   # does the same via its fresh assigns on Reconnect.
   @doc false
   def reset_session_ui(socket) do
+    # Cancel the in-flight eval task too: its late completion would otherwise
+    # clear `eval_running` while a post-Reconnect eval runs and start a second
+    # concurrent one.
     socket
+    |> Phoenix.LiveView.cancel_async(:eval)
     |> Phoenix.LiveView.stream(:transcript, [], reset: true)
     |> Phoenix.LiveView.stream(:repl, [], reset: true)
     |> assign(
