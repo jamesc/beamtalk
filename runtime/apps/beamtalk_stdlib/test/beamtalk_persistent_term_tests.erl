@@ -117,7 +117,7 @@ getOrPut_refusal_names_key_test() ->
             error:Wrapped ->
                 #{error := #beamtalk_error{hint = Hint, details = Details}} = Wrapped,
                 ?assertEqual(#{key => Key}, Details),
-                ?assertNotEqual(nomatch, binary:match(iolist_to_binary([Hint]), <<"pt_test">>))
+                ?assertNotEqual(nomatch, binary:match(element(2, Hint), <<"pt_test">>))
         end
     end).
 
