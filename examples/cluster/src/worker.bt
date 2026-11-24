@@ -1,0 +1,56 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Worker — does the work; runs on every node of the cluster.
+///
+/// The coordinator creates workers on other nodes with `spawnOn:` /
+/// `spawnWith:on:` / `spawnAs:on:`. A remote spawn creates no link back to
+/// the coordinator (ADR 0126 §3), so a remote worker is *not* supervised by
+/// anything: if it or its node dies, nothing restarts it. The workers a
+/// node's own `NodeSupervisor` starts are supervised locally.
+Actor subclass: Worker
+  state: label :: String = "worker"
+  state: done :: Integer = 0
+  state: notes = #()
+
+  class supervisionPolicy -> #permanent | #transient | #temporary => #permanent
+
+  /// Free-form tag given at spawn time (`spawnWith:on:`).
+  label => self.label
+
+  /// The node this worker is running on.
+  where => Node current name
+
+  /// How many jobs this worker has finished.
+  done => self.done
+
+  /// Do one job. Both the Job argument and the JobResult reply are Values
+  /// that cross the wire by copy.
+  process: job =>
+    self.done := self.done + 1
+    JobResult
+      jobId: job id
+      value: job square
+      node: Node current name
+
+  /// A slow job: gives a caller time to be mid-call when something goes wrong.
+  processSlowly: job =>
+    Timer sleep: 300
+    self process: job
+
+  /// Take the whole node down while a call is in flight (`erlang:halt`: no
+  /// OTP shutdown, no reply). The caller sees the node disappear mid-call.
+  dieMidCall: _job => System halt: 1
+
+  /// Cast target: remember a note. Cast with `!`, read back with a sync send.
+  note: text => self.notes := self.notes add: text
+
+  notes => self.notes
+
+  /// Look up the cluster-wide Ledger from *this* node (`scope: #global`)
+  /// and record a result there. Proves a global name resolves from a node
+  /// other than the one that registered it.
+  reportToLedger: result =>
+    ledger := (Ledger named: #ledger scope: #global) unwrap
+    ledger add: result
+    true

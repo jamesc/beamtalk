@@ -110,6 +110,10 @@ jobs:
       # A shared runtime fixture, or a Rust crate that reads one, changed:
       # test-rust runs the corpus-tier fixture readers (BT-5033).
       fixture_readers: ${{ steps.filter.outputs.fixture_readers }}
+      # examples/cluster, the distribution runtime modules or the actor send
+      # path changed: test-cluster runs the three-node end-to-end scenario
+      # (BT-5143). Always true on a push to main.
+      cluster: ${{ steps.filter.outputs.cluster }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -127,7 +131,7 @@ jobs:
             {
               echo "desktop=false"
               echo "code=true"
-              for k in core_diff_modes learn runtime rust exec vscode fixture_readers; do echo "$k=true"; done
+              for k in core_diff_modes learn runtime rust exec vscode fixture_readers cluster; do echo "$k=true"; done
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -212,6 +216,23 @@ jobs:
               'crates/beamtalk-core/*' 'crates/beamtalk-codegen/*' 'crates/beamtalk-repl/*' \
               Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml '.github/actions/*')
 
+          # BT-5143: the three-node example run. Its own sources, the runtime
+          # modules ADR 0126 distribution lives in (remote spawn, the actor
+          # send path, the wire codec, shape migration, node events, the
+          # future protocol), the stdlib classes it calls, and the generated
+          # actor callbacks the wire decodes into.
+          cluster=$(flag matches 'examples/cluster/*' \
+              'runtime/apps/beamtalk_runtime/src/beamtalk_actor*' \
+              'runtime/apps/beamtalk_runtime/src/beamtalk_node*' \
+              runtime/apps/beamtalk_runtime/src/beamtalk_wire.erl \
+              runtime/apps/beamtalk_runtime/src/beamtalk_shape_migration.erl \
+              runtime/apps/beamtalk_runtime/src/beamtalk_future.erl \
+              runtime/apps/beamtalk_runtime/src/beamtalk_pid.erl \
+              runtime/apps/beamtalk_runtime/src/beamtalk_announcements.erl \
+              stdlib/src/actor.bt stdlib/src/node.bt \
+              'crates/beamtalk-codegen/src/core_erlang/gen_server/*' \
+              Justfile .github/workflows/ci.yml '.github/actions/*')
+
           # The desktop app's own paths (the crate, the workspace crates it
           # links, the root manifest and lockfile those crates take their
           # `.workspace = true` deps from, the recipe and this workflow).
@@ -231,6 +252,7 @@ jobs:
             echo "exec=$exec"
             echo "vscode=$vscode"
             echo "fixture_readers=$fixture_readers"
+            echo "cluster=$cluster"
           } >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
@@ -817,6 +839,39 @@ jobs:
             cat "$f"
           done
 
+  # ─── Multi-node example, end to end (BT-5143) ──────────────────────────
+  # examples/cluster runs on three release nodes on this runner: remote spawn,
+  # sync sends and casts, Values on the wire, a cluster-wide name, NodeUp /
+  # NodeDown, and a worker node halted mid-call with its job reassigned. The
+  # script removes every node it starts and fails if one is left running or
+  # registered with epmd. `timeout` bounds the whole job; the scenario itself
+  # is bounded to 120 s inside the script.
+  test-cluster:
+    needs: changes
+    if: needs.changes.outputs.cluster == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
+        with:
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
+
+      - name: Build
+        run: just build
+
+      - name: Three-node cluster scenario
+        run: just test-cluster
+
+      - name: Dump epmd state on failure
+        if: failure()
+        run: epmd -names || true
+
   # ─── Installed-layout smoke test from a clean checkout (BT-4119) ───────
   # `just install` once shipped no stdlib class beams (bt@stdlib@*) from a
   # fresh checkout, and nothing caught it: `just test-install` only ran in
@@ -858,7 +913,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: ${{ always() }}
-    needs: [changes, lint, test-rust, test-vscode, test-desktop, check-release-build, check-exec-windows, core-diff-modes, otp-matrix, test-beam, test-runtime, test-dialyzer, test-integration, test-install]
+    needs: [changes, lint, test-rust, test-vscode, test-desktop, check-release-build, check-exec-windows, core-diff-modes, otp-matrix, test-beam, test-runtime, test-dialyzer, test-integration, test-cluster, test-install]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
