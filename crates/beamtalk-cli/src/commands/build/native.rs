@@ -433,7 +433,7 @@ pub(crate) fn aggregate_native_dependencies(
         if !manifest_path.exists() {
             continue;
         }
-        let Ok(parsed) = manifest::parse_manifest_full(&manifest_path) else {
+        let Ok(parsed) = manifest::parse_dependency_manifest_full(&manifest_path) else {
             debug!(
                 dep = %dep.name,
                 "Failed to parse manifest for native dep aggregation — skipping"

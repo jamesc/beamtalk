@@ -496,13 +496,19 @@ fn discover_deps(
                 // Always resolve via resolve_git_dep so existing checkouts are
                 // verified against the lockfile SHA / requested ref. The function
                 // already skips re-cloning when verify_checkout matches.
-                check_source_conflict(
+                // A diamond: the same source already resolved and discovered
+                // by another requirer. Re-resolving would re-verify/clone the
+                // checkout and push a duplicate lock entry (BT-5133).
+                if check_source_conflict(
                     ctx,
                     dep_name,
                     SourceId::Git(url.clone(), reference.clone()),
                     &format!("git: {url}"),
                     parent_name,
-                )?;
+                )? && ctx.graph.contains_key(dep_name)
+                {
+                    continue;
+                }
                 let lock_entry = ctx.lockfile.get(dep_name);
                 let resolved = super::git::resolve_git_dep(
                     dep_name,
@@ -536,13 +542,16 @@ fn discover_deps(
                 )?;
             }
             DependencySource::Registry { version } => {
-                check_source_conflict(
+                if check_source_conflict(
                     ctx,
                     dep_name,
                     SourceId::Registry(version.clone()),
                     &format!("registry: {version}"),
                     parent_name,
-                )?;
+                )? && ctx.graph.contains_key(dep_name)
+                {
+                    continue;
+                }
                 let checkout_root = resolve_registry_dep(ctx, dep_name, version, parent_name)?;
 
                 discover_single_dep(
@@ -712,7 +721,7 @@ fn discover_single_dep(
         );
     }
 
-    let dep_manifest = manifest::parse_manifest_full(&dep_manifest_path)
+    let dep_manifest = manifest::parse_dependency_manifest_full(&dep_manifest_path)
         .wrap_err_with(|| format!("Failed to parse manifest for dependency '{dep_name}'"))?;
 
     // Validate package name matches dependency key
