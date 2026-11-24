@@ -7,6 +7,15 @@
 /// through the ordinary `asJson` hook (see `JsonRepresentable`), so no runtime
 /// change is involved, and nested mapped objects convert recursively.
 ///
+/// A class that `uses: JsonMappable` without defining `class jsonMapping` gets a
+/// does-not-understand diagnostic for `jsonMapping` at compile time (an error
+/// when warnings are errors, as in the stdlib build). If that diagnostic is not
+/// treated as an error, `asJson` (and so `Json generate:`) raises
+/// `does_not_understand` at runtime.
+///
+/// It works on Actors as well as Values (`encode:` reads fields via same-process
+/// self-sends, so it does not re-enter the actor).
+///
 /// A hand-written `asJson` in the class body wins over the provided one
 /// (ADR 0127 §3a).
 ///

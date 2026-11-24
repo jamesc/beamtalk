@@ -67,3 +67,26 @@ TestCase subclass: JsonMappingTest
 
   testJsonMappableIsProtocol =>
     self assert: (Protocol isProtocol: #JsonMappable)
+
+  testDuplicateWireKeyRaises =>
+    self should: [
+      JsonMapping new |> mapField: #a to: "id" |> mapField: #b to: "id"
+    ] raise: #user_error
+
+  testSameFieldTwiceUnderDifferentKeysIsAllowed =>
+    m := JsonMapping new |> mapField: #seq to: "a" |> mapField: #seq to: "b"
+    self assert: (m encode: (JsonMappedEvent eventType: #x seq: 4)) equals: #{
+      "a" => 4,
+      "b" => 4
+    }
+
+  testMissingFieldRaises =>
+    self
+      should: [
+        (JsonMapping new mapField: #nope) encode: (JsonMappedEvent eventType: #x seq: 1)
+      ]
+      raise: #user_error
+
+  testActorUsingJsonMappable =>
+    a := JsonMappedActor spawn
+    self assert: (Json generate: a) equals: (Json generate: JsonStatusActor spawn)
