@@ -557,6 +557,11 @@ export class WorkspaceClient {
    * Subscribe to connection state changes (connected / disconnected / reconnecting).
    * Returns a disposal function that removes the handler.
    */
+  /** Current connection state. */
+  get state(): ConnectionState {
+    return this.connectionState;
+  }
+
   onConnectionChange(handler: (state: ConnectionState) => void): () => void {
     this.connectionHandlers.push(handler);
     return () => {
@@ -927,23 +932,78 @@ export function parsePortFileContent(content: string): PortFileParse {
  * never receives the cookie. Old files without a nonce/pid stay accepted.
  */
 function assertPortFileFresh(wsDir: string, port: number, fileNonce: string | undefined): void {
-  let info: { port?: unknown; pid?: unknown; nonce?: unknown };
+  let raw: string;
   try {
-    info = JSON.parse(fs.readFileSync(path.join(wsDir, "node.info"), "utf8"));
+    raw = fs.readFileSync(path.join(wsDir, "node.info"), "utf8");
   } catch {
-    return; // no node.info: nothing to cross-check (CLI trusts the probe here)
+    // Decided (BT-5130): no node.info means an old node or one still starting;
+    // there is nothing to cross-check (the CLI trusts its TCP probe here).
+    return;
+  }
+  let info: { port?: unknown; pid?: unknown; nonce?: unknown; start_time?: unknown };
+  try {
+    info = JSON.parse(raw);
+  } catch {
+    // Decided (BT-5130): fail closed. A node.info we cannot parse is either
+    // mid-write (the caller retries / re-arms on the next node.info change)
+    // or corrupt; neither is a reason to hand over the cookie.
+    throw new Error(`Stale port file in ${wsDir}: node.info is unreadable (will retry)`);
   }
   if (typeof info.port === "number" && info.port !== port) {
     throw new Error(`Stale port file in ${wsDir}: node.info port ${info.port} != ${port}`);
   }
-  if (typeof info.nonce === "string" && fileNonce !== undefined && info.nonce !== fileNonce) {
-    throw new Error(`Stale port file in ${wsDir}: nonce mismatch`);
+  if (typeof info.nonce === "string") {
+    // node.info records a nonce: the port file must carry the same one.
+    if (fileNonce === undefined) {
+      throw new Error(`Stale port file in ${wsDir}: port file has no nonce but node.info does`);
+    }
+    if (info.nonce !== fileNonce) {
+      throw new Error(`Stale port file in ${wsDir}: nonce mismatch`);
+    }
   }
-  if (typeof info.pid === "number" && !pidAlive(info.pid)) {
-    throw new Error(
-      `Stale port file in ${wsDir}: node pid ${info.pid} is not running, or its process is not visible from where the extension runs. If the node is running, this can happen when BEAMTALK_HOME is shared across containers or pid namespaces.`
-    );
+  if (typeof info.pid === "number") {
+    if (!pidAlive(info.pid)) {
+      throw new Error(
+        `Stale port file in ${wsDir}: node pid ${info.pid} is not running, or its process is not visible from where the extension runs. If the node is running, this can happen when BEAMTALK_HOME is shared across containers or pid namespaces.`
+      );
+    }
+    // Same rule as the CLI's `still_same_process` / `start_time_matches`.
+    const expected = typeof info.start_time === "number" ? info.start_time : undefined;
+    if (!startTimeMatches(expected, procStartTime(info.pid))) {
+      throw new Error(
+        `Stale port file in ${wsDir}: pid ${info.pid} is alive but its start time differs from node.info (pid reused)`
+      );
+    }
   }
+}
+
+/**
+ * Process start time (Linux `/proc/<pid>/stat` field 22, as the CLI's
+ * `proc_start_time`). `undefined` where it cannot be read (other platforms).
+ */
+export function procStartTime(pid: number): number | undefined {
+  if (process.platform !== "linux") return undefined;
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    const rest = stat
+      .slice(stat.lastIndexOf(")") + 1)
+      .trim()
+      .split(/\s+/);
+    const value = Number(rest[19]);
+    return Number.isFinite(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Twin of `beamtalk_workspace::pid_liveness::start_time_matches`. */
+export function startTimeMatches(
+  expected: number | undefined,
+  actual: number | undefined
+): boolean {
+  if (expected === undefined) return true;
+  if (actual === undefined) return process.platform !== "linux"; // cannot observe elsewhere: trust liveness
+  return expected === actual;
 }
 
 // ─── Beamtalk source-literal helpers ────────────────────────────────────────
@@ -977,10 +1037,10 @@ export function btSymbol(name: string): string {
   if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
     return `#${name}`;
   }
-  if (/['\\\p{Cc}]/u.test(name)) {
+  if (/[\\\p{Cc}]/u.test(name)) {
     throw new Error(`Unrepresentable symbol name: ${JSON.stringify(name)}`);
   }
-  return `#'${name}'`;
+  return `#'${name.replace(/'/g, "''")}'`;
 }
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
