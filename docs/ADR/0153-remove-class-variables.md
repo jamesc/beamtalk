@@ -144,10 +144,10 @@ The application's supervisor starts the actor under that name (a `SupervisionSpe
 
 No "look up, or spawn if absent" helper is added. The downstream packages already use `named:` and `spawnAs:` directly in 21 files *(survey)*, and a lazily spawned actor is unsupervised, which is the wrong default to make easy. If the need appears, the helper is a few lines on `Actor` (Open Question 2).
 
-**A counter** is an `AtomicCounter`. The process that should own it creates it once with `new:` (the table behind it belongs to that process and dies with it), and any process then looks it up by name (`stdlib/src/atomic_counter.bt:45, 56`) *(read)*:
+**A counter** is an `AtomicCounter`. Create it once with `new:`, at application start, and look it up by name from any process (`stdlib/src/atomic_counter.bt:45, 56`) *(read)*. `new:` is process-bound, so the table behind the counter is created in, and owned by, `AtomicCounter`'s class process (language features, line 1352) *(reviewer, read)*. It lives until `delete` or until the node stops, whichever process asked for it.
 
 ```beamtalk
-AtomicCounter new: #ordersCreated                 // once, in the owner (an Actor's initialize, or application start)
+AtomicCounter new: #ordersCreated                 // once, at application start
 (AtomicCounter named: #ordersCreated) increment   // anywhere
 ```
 
@@ -167,7 +167,7 @@ Object subclass: HttpStatus
 => "Not Found"
 ```
 
-A dictionary or list literal whose elements are literals is also a single constant-pool term *(inferred: check in Phase 0 that codegen emits a literal collection as a literal and not as a call that builds it; if it does not, that is a small codegen fix worth more than any new syntax)*.
+A dictionary literal `#{...}` or list literal `#(...)` whose elements are literals is emitted as a Core Erlang map or list literal (`crates/beamtalk-codegen/src/core_erlang/expressions.rs:507-570`), which `erlc` folds into one constant-pool term. An array literal `#[...]` is a call to `beamtalk_array:from_list` (`expressions.rs:577-596`) and is rebuilt on every call, so a constant table should be a list or a dictionary *(reviewer, read)*.
 
 ### 3. `PersistentTerm`: the helper for computed constants
 
@@ -182,7 +182,7 @@ Object subclass: HpackHuffman
 ```beamtalk
 >> PersistentTerm at: #demo_squares ifAbsentPut: [(1 to: 5) collect: [:n | n * n]]
 => #(1, 4, 9, 16, 25)
->> PersistentTerm at: #demo_squares ifAbsentPut: [self error: "not run"]
+>> PersistentTerm at: #demo_squares ifAbsentPut: [Error signal: "not run"]
 => #(1, 4, 9, 16, 25)
 >> PersistentTerm erase: #demo_squares
 => true
@@ -193,7 +193,7 @@ Object subclass: HpackHuffman
 | `class at: key ifAbsentPut: block` | The stored value. On a miss it runs `block`, stores the result and answers it |
 | `class at: key ifAbsent: block` | The stored value, or the block's value. Stores nothing |
 | `class includesKey: key` | Whether a value is stored |
-| `class erase: key` | `true` if a value was removed. **Forces a global GC** |
+| `class erase: key` | `true` if a value was removed (a Boolean, as `persistent_term:erase/1` answers; `ProcessDictionary erase:` answers the previous value). **Forces a global GC** |
 
 **Why this name and this API.**
 - It is named for the BEAM mechanism, like `ProcessDictionary`, because the mechanism's cost model is the thing a user must know. A name such as `Constant` would promise a language feature and hide that an update is expensive.
@@ -207,14 +207,15 @@ Object subclass: HpackHuffman
 - **Do not store a pid, a port, an actor, a class, an `Ets` handle, or a block.** A process identity outlives its process, and a class reference carries the class process's pid (`beamtalk_class_dispatch.erl:265, 301`) *(reviewer)*. The helper cannot check this statically (a `Dynamic` value passes any type check), so it is a documented rule; whether the native module should refuse such values at run time is Open Question 5. A stored block refers to its module's code and fails once that code has been reloaded twice and purged.
 - **Keys.** The helper stores under `{beamtalk_persistent_term, Key}`, so a user key cannot collide with the runtime's own `persistent_term` keys (class flags, static call keys). The wrapper makes every key a tuple; BT-4442 measured a tuple-key read at about 36 ns against 21 ns for an atom key (`beamtalk_class_shadow_flags.erl:410-416`) *(reviewer)*. That is accepted for a helper whose callers are building tables. Among users, keys are global to the node: use a package-prefixed Symbol, as `ProcessDictionary` advises.
 - **Each node has its own.** Nothing is replicated.
+- **Tests.** The store is node-global, and `TestCase` already says a class that touches `persistent_term` must run serially (`stdlib/src/test_case.bt:80-89`) *(reviewer, read)*. A test that stores under a fixed key overrides `class serial -> Boolean => true` or uses a key unique to the test. An `erase:` in `tearDown` is a global GC per test.
 
 **Reload: nothing is cleared.** A value stays until `erase:` or until the node stops. The helper is not tied to a class, so reloading the class whose method built the value does not rebuild it.
 - Tying keys to a class would need the runtime to track which class owns which key and erase on its reload. That is class-level state with reload rules, the thing this ADR removes.
 - Erasing on every reload would cost a global GC per reloaded class, including for classes whose tables did not change.
 - When the built value's shape changes, change the key (`#hpack_huffman_tables_v2`), which is the usual Erlang practice. During development, `PersistentTerm erase:` from the REPL rebuilds it on the next read.
-- This is a real limit and is listed under Consequences.
+- **This is a deliberate exception to principles §4.** After the builder method is edited at the REPL the stored value is stale, while `beamtalk run` builds it fresh, so the value can differ between surfaces until the key is changed or erased. It is listed under Consequences.
 
-**Implementation.** `stdlib/src/persistent_term.bt` plus a native module `beamtalk_persistent_term.erl` of a few dozen lines. The class declares no state and its selectors are not process-bound, so its methods run in the caller. Type signatures follow `ProcessDictionary`'s (`key :: Object`, `block :: Block(Object) -> Object`).
+**Implementation.** `stdlib/src/persistent_term.bt` plus a native module `beamtalk_persistent_term.erl` of a few dozen lines. The class is `sealed typed`, like `ProcessDictionary`. It declares no state and its selectors are not process-bound, so its methods, and the block passed to them, run in the caller. Type signatures follow `ProcessDictionary`'s (`key :: Object`, `block :: Block(Object) -> Object`).
 
 **Follow-up:** move beamtalk-hpack's `class tables` and `class fastTables` to the helper (a change in that repository).
 
@@ -239,6 +240,8 @@ The file list is in Implementation. In summary:
 A class method runs in the caller unless its selector is process-bound. That is the whole rule.
 
 **ClassBuilder and ADR 0084 runtime funs keep working, and run in the caller.** Today a class whose own class methods are runtime funs (every class built with `ClassBuilder classMethods:`) runs them in the class process, because a runtime fun shadows the class's compiled methods (language features, line 4120) *(read)*. ADR 0142 already applies an *ancestor's* runtime fun in the caller (`beamtalk_class_dispatch:apply_class_method_body/7`) *(read: the amendment note at the top of ADR 0084)*. Phase 3 extends that to the receiving class's own funs.
+- **Nothing in the funs assumes the class process** *(reviewer, read)*. They are stored in the public ETS table `beamtalk_class_method_funs`, which any process reads without calling the class process (`beamtalk_class_metadata.erl:361-371, 1823-1835`), and they are applied as `apply(Fun, [ClassSelf | Args])` with no wrapping (`beamtalk_class_dispatch.erl:1803`).
+- **The guard must be split, not relaxed.** Today one verdict, `direct_call_ok/2`, declines whenever `runtime_fun` is set (`beamtalk_class_shadow_flags.erl:642-660`), and the same verdict feeds both the in-caller owner memo and `static_call_target/4` (`beamtalk_class_dispatch.erl:356-360`, `beamtalk_class_shadow_flags.erl:771-790`). `run_in_caller/7` also skips the fun store when the defining class is the receiver (`beamtalk_class_dispatch.erl:528-540`). Phase 3 therefore makes "runs in the caller" require only that the class is ready, keeps "no `runtime_fun`" as an extra condition for installing a static call key, and has `run_in_caller/7` always go through `apply_class_method_body/7`. Relaxing the one gate without this split would bind a static call key to the compiled function while a fun shadows it.
 - Installing a fun still goes through the class process, which owns the method table. Only execution moves.
 - A `classMethods:` block that used class variables (`[:self | self.total := self.total + 1]`, the example at `class_builder.bt:103`) has no class variable to use. Its doc example is rewritten.
 - The `runtime_fun` shadow flag stays. A static call site still needs it, to know that a fun and not the compiled function answers the selector.
@@ -263,7 +266,7 @@ The class process itself stays, as the owner of the class object: registration, 
 | 0019 | Superseded. Singleton access is a named Actor. The stdlib stopped using class-variable singletons with ADR 0129 *(inferred: `stdlib/src` declares none)* |
 | 0048 | None. The `class` modifier stays |
 | 0084 | `classVars:` removed. Runtime class-method funs stay and run in the caller (§5) |
-| 0123 | **Frozen; one rule trimmed.** The compile error "a `migrateFromVN:` method may not access class variables" and its validator are removed, because class-side `self.x` is now an error everywhere and the special case has nothing to add. The `with_snapshot/2` wrapper inside `beamtalk_object_class:local_call/3` is removed; `local_call/3` itself stays, because the migration runner calls it (`beamtalk_shape_migration.erl:306`) *(read)*. `shapeVersion:`, `migrateFromVN:` and instance-state migration are unchanged |
+| 0123 | **Frozen; the class-variable parts trimmed.** Also withdrawn, because they only existed for the class process: §2's `Base performLocally: #migrateFromV1: withArguments:` idiom and its caveat that an ancestor step is serialised through `Base`'s process where class variables are visible (`0123-versioned-state-migration.md:304-318`), the recorded refinement of lowering `migrateFromVN:` sends to `local_call/3`, and the rationale about `local_call/3` passing empty class variables (`:405-417`) *(reviewer, read)*. An ancestor step becomes an ordinary in-caller class send. The compile error "a `migrateFromVN:` method may not access class variables" and its validator are removed, because class-side `self.x` is now an error everywhere and the special case has nothing to add. The `with_snapshot/2` wrapper inside `beamtalk_object_class:local_call/3` is removed; `local_call/3` itself stays, because the migration runner calls it (`beamtalk_shape_migration.erl:306`) *(read)*. `shapeVersion:`, `migrateFromVN:` and instance-state migration are unchanged |
 | 0124 | `late classState:` removed. `late state:` unchanged. The five compile-time errors in the language docs lose their `classState:` halves |
 | 0130 | Superseded in full |
 | 0142 | §1 rules 1 and 2, the chain-wide amendment and the descendant-flag erasure for class-variable changes have nothing to act on. Rule 3 (process-bound selectors), the guarded static call and the static call keys stay |
@@ -416,7 +419,7 @@ Rejected by the owner, as for ADR 0152: with no user of the feature there is nob
 ### Neutral
 - The class process stays, for the class object and the process-bound selectors.
 - The per-send guard read stays (Open Question 4).
-- `AtomicCounter` and `Ets` tables are owned by the process that creates them, so replacing a class-variable counter means deciding who owns it. That decision was hidden before; it is not new work.
+- An `Ets` table is owned by the process that creates it, so replacing a class-variable cache means deciding who owns it. That decision was hidden before; it is not new work. An `AtomicCounter` is owned by its class process and lives until it is deleted.
 - `ClassBuilder` keeps its API apart from two setters.
 
 ## Implementation
@@ -430,7 +433,7 @@ Produce the list Phases 2 and 3 work from.
 - **Benchmarks**: `benchmarks/vs-elixir/beamtalk/src/vb_stateful_math.bt`, `vb_late_state_math.bt`, `vb_bench.bt`, `benchmarks/dispatch-overhead/beamtalk/src/vd_stateful_math.bt`, `runtime/perf/self_send_bench/src/ssb_class_var_class.bt`, `ssb_class_var_threaded_loop_class.bt`, `ssb_on_do_raise_class.bt`, and the harness rows that drive them (`vs_bench.erl`, `vd_bench.erl`). Recorded result files under `benchmarks/vs-elixir/results/` are history and are not edited.
 - **Rust and Erlang files that mention class variables**: 145 and 60 *(read)*. Each gets a disposition.
 - **ClassBuilder.** List the tests and docs that use `classVars:`, `addClassState:default:` or a class variable inside a `classMethods:` block.
-- **Rewrite guidance.** `AtomicCounter` and named `Ets` tables are node-global names, so a fixture rewritten to use one needs a name unique to its test, or parallel test runs collide. A table created inside a class method now belongs to the calling process and dies with it; create it in the test's `setUp` or in an Actor *(reviewer)*.
+- **Rewrite guidance.** `AtomicCounter` and named `Ets` tables are node-global names, so a fixture rewritten to use one needs a name unique to its test, or parallel test runs collide. An `Ets` table created inside a class method belongs to the calling process and dies with it; create it in the test's `setUp` or in an Actor. An `AtomicCounter` belongs to its class process and must be deleted in `tearDown` *(reviewer)*.
 - **Downstream.** Re-run the `classState:`, `performLocally:`, `classVarNames` and `classVars:` searches over the 13 packages and beamtalk-uat immediately before Phase 2.
 - **Checks to make.**
   - That a literal dictionary, list or tuple in a method body compiles to one constant-pool term (Decision §2).
@@ -467,7 +470,7 @@ After Phase 2 nothing the compiler emits calls `beamtalk_class_vars`.
 | Access, ABI, errors | `beamtalk_class_vars.erl`, `beamtalk_class_var_abi.erl`, `beamtalk_class_var_errors.erl`, `include/beamtalk_class_vars_keys.hrl`, `beamtalk_class_vars_test_support.erl`, and their EUnit suites |
 | The class-variable home | The install / read-back / uninstall in `invoke_class_method/7` (`beamtalk_class_dispatch.erl:1635`) and the `class_state` field of `#class_state{}`; `get_class_var` / `set_class_var` (`beamtalk_object_class.erl:316, 1213-1215`) and `beamtalk_runtime_api:set_class_var/3`; the class-side reflection selectors and `class_var_reflection_selectors_conformance.json`; `register/1`'s read of the builder's `classState` key (`beamtalk_class_builder.erl:429-430`; the rest of `register/1` is untouched) |
 | The execution-mode input | `set_class_vars/2` and the `class_vars` value of the derived flag in `beamtalk_class_shadow_flags.erl`; `chain_has_class_variables/1` and `put_class_variables/2` in `beamtalk_class_metadata.erl`; the descendant-flag erasure that a class-variable change triggers |
-| Runtime funs in the caller | The dynamic path applies the receiving class's own ADR 0084 funs through `apply_class_method_body/7`, as it does an ancestor's (Decision §5) |
+| Runtime funs in the caller | Split the guard and route `run_in_caller/7` through `apply_class_method_body/7` (Decision §5). Tests: a ClassBuilder class whose fun shadows nothing, one whose fun shadows a compiled method reached by a static send, and one installed while a caller loops |
 | Catch boundaries | `protect/1` in `beamtalk_result.erl:228, 285`, `beamtalk_supervisor.erl:391`, `beamtalk_telemetry.erl:317`, `beamtalk_test_case.erl:76`, `beamtalk_test_assert.erl:48` and `beamtalk_repl_eval.erl:842`, and the snapshot / restore pair in `beamtalk_erlang_proxy.erl:436, 511-520` *(reviewer; Phase 0 confirms the list with the catcher lint before it is deleted)*; `scripts/ci/lint-class-var-catchers.escript`, its fixtures, the Justfile recipe and `docs/development/class-var-catcher-audit.md` |
 | Snapshots | `with_snapshot/2` in `beamtalk_supervisor_class_call.erl:63`, `beamtalk_supervisor_init_config.erl:135` and `local_call/3` (`beamtalk_object_class.erl:474`) *(read)*; the class-state snapshot rows in `beamtalk_class_registry.erl` |
 | `performLocally:` | The intrinsic and its tests (`stdlib/test/perform_locally_test.bt`, `tests/repl-protocol/cases/perform_locally.btscript`). `local_call/3` stays as an internal function for the migration runner |
