@@ -79,6 +79,7 @@ that the Behaviour/Class libraries can rely on.
     selectorProviderFromName/2,
     overridesCollectionSelectorFromName/1,
     speciesConstructionOverriddenFromName/2,
+    speciesDependentThroughCollectionFromName/2,
     classFieldNames/1,
     classAllFieldNames/1,
     classAllFieldNamesByName/1,
@@ -504,6 +505,26 @@ speciesConstructionOverriddenFromName(ClassName, Selector) ->
                                         {cont, false}
                                 end
                         end
+                end
+            end,
+            false
+        ).
+
+-doc """
+Whether `Selector` is one of the species-dependent messages and the class gets
+it from `Collection`'s own provision, so the pure path answers
+`self species withAll:` (BT-5136). The stateful fold rebuilds only the
+receivers `beamtalk_collection:from_list_like/2` knows, so it refuses the rest.
+""".
+-spec speciesDependentThroughCollectionFromName(atom(), atom()) -> boolean().
+speciesDependentThroughCollectionFromName(ClassName, Selector) ->
+    lists:member(Selector, beamtalk_collection_selectors:species_dependent()) andalso
+        walk_hierarchy(
+            ClassName,
+            fun(CN, CPid, _Acc) ->
+                case defines_selector_locally(CN, CPid, Selector) of
+                    true -> {halt, CN =:= 'Collection'};
+                    false -> {cont, false}
                 end
             end,
             false

@@ -945,6 +945,17 @@ impl CoreErlangGenerator {
         recv_var: &str,
         msg_var: &str,
     ) -> Document<'static> {
+        self.error_kind_raise_doc("user_error", recv_var, msg_var)
+    }
+
+    /// The raise of `object_error_raise_doc` with a chosen error `kind`
+    /// (BT-5136: `type_error` for a non-number counted-loop step or limit).
+    pub(in crate::core_erlang) fn error_kind_raise_doc(
+        &mut self,
+        kind: &'static str,
+        recv_var: &str,
+        msg_var: &str,
+    ) -> Document<'static> {
         let class_var = self.fresh_temp_var("Class");
         let err0 = self.fresh_temp_var("Err");
         let err1 = self.fresh_temp_var("Err");
@@ -954,7 +965,7 @@ impl CoreErlangGenerator {
             " = call 'beamtalk_primitive':'class_of'(",
             leaf::var(recv_var.to_string()),
             ") in ",
-            BeamtalkErrorChain::new("user_error", leaf::var(class_var))
+            BeamtalkErrorChain::new(kind, leaf::var(class_var))
                 .message(leaf::var(msg_var.to_string()))
                 .build(
                     vec![ErrorBinding::plain(err0), ErrorBinding::plain(err1.clone()),],

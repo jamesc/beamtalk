@@ -31,6 +31,9 @@ Durability (BT-5017): `write_temp/2` `fsync`s the staged bytes before
 renamed over an empty file. The containing directory is not fsynced: OTP has
 no portable directory sync, and the worst outcome of skipping it is that the
 rename is lost and the previous, whole file is still there. This helper is
+Confirmed as the intended durability level (BT-5136): every file this helper
+writes is re-derivable from the in-memory ChangeLog and the source tree, and a
+lost rename leaves the previous whole file. This helper is
 the one place the workspace syncs; its callers (flush, ChangeLog bodies,
 `metadata.json`, native saves) add no sync of their own.
 

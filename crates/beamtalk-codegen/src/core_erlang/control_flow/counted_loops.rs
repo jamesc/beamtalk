@@ -199,6 +199,41 @@ impl CoreErlangGenerator {
         self.generate_counted_stateful_loop(&frame, body, &plan)
     }
 
+    /// BT-5136: `do case is_number(Step) and is_number(Limit) of 'false' ->
+    /// raise type_error`. A nil or other non-number would otherwise be
+    /// term-ordered by `erlang:>`/`<` and the loop would silently do nothing.
+    fn number_guard_doc(
+        &mut self,
+        recv_var: &str,
+        step_var: &str,
+        end_var: &str,
+    ) -> Document<'static> {
+        let checks = [
+            (step_var, "Interval step must be a number"),
+            (end_var, "Interval limit must be a number"),
+        ];
+        let mut guards = Vec::new();
+        for (var, text) in checks {
+            let msg_var = self.fresh_temp_var("NumMsg");
+            let raise = form::let_in(
+                leaf::var(msg_var.clone()),
+                leaf::binary_lit(text),
+                self.error_kind_raise_doc("type_error", recv_var, &msg_var),
+                Layout::Flat,
+            );
+            let is_number = form::call("erlang", "is_number", [leaf::var(var.to_string())]);
+            guards.push(form::do_prefix(form::case_of(
+                is_number,
+                [
+                    form::clause([leaf::atom("true")], None, leaf::atom("ok"), Layout::Flat),
+                    form::clause([leaf::atom("false")], None, raise, Layout::Flat),
+                ],
+                Layout::Flat,
+            )));
+        }
+        Document::Vec(guards)
+    }
+
     /// BT-5098: `do case Step =:= 0 of 'true' -> raise 'false' -> 'ok' end`.
     /// The raise is the one `Object>>error:` lowering (`object_error_raise_doc`)
     /// that the stdlib `Integer>>to:by:do:` reaches through `self error:`, so
@@ -214,7 +249,7 @@ impl CoreErlangGenerator {
         );
         let is_zero = form::call(
             "erlang",
-            "=:=",
+            "==",
             [leaf::var(step_var.to_string()), leaf::int_lit(0)],
         );
         form::do_prefix(form::case_of(
@@ -245,6 +280,7 @@ impl CoreErlangGenerator {
         let step_code = self.expression_doc(step)?;
         // BT-5098: a step of 0 raises, as `Integer>>to:by:do:` does. Checked
         // once here in the preamble (not per iteration).
+        let number_guard = self.number_guard_doc(&start_var, &step_var, &end_var);
         let zero_step_guard = self.zero_step_guard_doc(&start_var, &step_var);
         // gensym the loop counter (the block param is aliased to it).
         let counter = self.fresh_temp_var("loopidx");
@@ -266,6 +302,7 @@ impl CoreErlangGenerator {
                 " = ",
                 step_code,
                 " in ",
+                number_guard,
                 zero_step_guard,
             ],
             fn_name: threaded_ir::COUNTED_LOOP_FN.to_string(),

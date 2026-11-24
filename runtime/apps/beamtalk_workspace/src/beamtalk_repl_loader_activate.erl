@@ -17,7 +17,8 @@ Module activation for the loader: loading a compiled class module into the class
     activate_module/2,
     activate_module/3,
     activate_module/4,
-    register_class_module/1
+    register_class_module/1,
+    report_late_suspended/3
 ]).
 
 %% Exported for testing (only in test builds)
@@ -334,6 +335,21 @@ hot_reload_class(ModuleName, ClassName, Pids) ->
 %% `hot_reload_class/3`'s doc). Never raises: any internal failure is logged
 %% and swallowed — this is advisory plumbing on the reload's own response
 %% path, never a gate on the reload having already succeeded.
+-doc """
+Publish the `instances_suspended` finding for a migration that failed after the
+reload stopped waiting for it (BT-5136). The reload had already answered
+`timeout`, so this is the only report the user gets. The class is looked up from
+its module; a module no class owns any more is skipped.
+""".
+-spec report_late_suspended(atom(), pid(), {error, term()}) -> ok.
+report_late_suspended(ModuleName, Pid, {error, _} = Failure) ->
+    case beamtalk_class_registry:class_name_for_module(ModuleName) of
+        not_found ->
+            ok;
+        {ok, ClassName} ->
+            publish_suspended_finding(ModuleName, ClassName, 0, [{Pid, Failure}])
+    end.
+
 -spec publish_suspended_finding(atom(), atom(), non_neg_integer(), [{pid(), term()}]) -> ok.
 publish_suspended_finding(_ModuleName, _ClassName, _Upgraded, []) ->
     ok;

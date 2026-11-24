@@ -51,6 +51,38 @@ TestCase subclass: ToByDoZeroStepTest
       do: [:i | s := s + i]
     s
 
+  // BT-5136: untyped step/limit so a Float or nil reaches the loop.
+  pureAny: step from: from to: to =>
+    from
+      to: to
+      by: step
+      do: [:i | i]
+
+  writingAny: step from: from to: to =>
+    s := 0
+    from
+      to: to
+      by: step
+      do: [:i | s := s + i]
+    s
+
+  // --- BT-5136: a Float zero step and non-number step/limit raise on both paths ---
+  testFloatZeroStepRaisesOnBothPaths =>
+    self should: [self pureAny: 0.0 from: 1 to: 10] raise: #user_error
+    self should: [self writingAny: 0.0 from: 1 to: 10] raise: #user_error
+
+  testNilStepRaisesTypeErrorOnBothPaths =>
+    self should: [self pureAny: nil from: 1 to: 10] raise: #type_error
+    self should: [self writingAny: nil from: 1 to: 10] raise: #type_error
+
+  testNilLimitRaisesTypeErrorOnBothPaths =>
+    self should: [self pureAny: 1 from: 1 to: nil] raise: #type_error
+    self should: [self writingAny: 1 from: 1 to: nil] raise: #type_error
+
+  testStringStepRaisesTypeErrorOnBothPaths =>
+    self should: [self pureAny: "x" from: 1 to: 10] raise: #type_error
+    self should: [self writingAny: "x" from: 1 to: 10] raise: #type_error
+
   // --- pure block (real send, not inlined) ---
   testPureLiteralZeroPositiveRange =>
     self should: [self pureLiteralZeroUp] raise: #user_error

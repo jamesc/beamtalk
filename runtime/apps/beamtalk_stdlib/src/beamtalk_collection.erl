@@ -424,7 +424,7 @@ guard_writing_fold(Recv, Selector) ->
                         )
                     of
                         false ->
-                            ok;
+                            guard_species_rebuild(Recv, Class, Selector);
                         true ->
                             refuse_writing_fold(
                                 Class,
@@ -453,6 +453,34 @@ guard_writing_fold(Recv, Selector) ->
                 ]
             )
     end.
+
+%% BT-5136: a species-built `collect:`/`select:`/`reject:` answers
+%% `self species withAll:` on the pure path. `from_list_like/2` rebuilds only
+%% Array and Set (String, Binary and Dictionary never reach here); a Bag or a
+%% user `Collection` would answer a raw List, so refuse instead.
+-spec guard_species_rebuild(term(), atom(), atom()) -> ok.
+guard_species_rebuild(#{?BT_CLASS_TAG_KEY := Tag}, _Class, _Selector) when
+    Tag =:= 'Array'; Tag =:= 'Set'
+->
+    ok;
+guard_species_rebuild(Recv, Class, Selector) when is_map(Recv) ->
+    case beamtalk_primitive:is_object(Recv) andalso
+         beamtalk_behaviour_intrinsics:speciesDependentThroughCollectionFromName(Class, Selector) of
+        true ->
+            refuse_writing_fold(
+                Class,
+                Selector,
+                [
+                    <<" builds its '">>,
+                    atom_to_binary(Selector, utf8),
+                    <<"' answer with 'species withAll:', which the in-place fold would answer as a List">>
+                ]
+            );
+        false ->
+            ok
+    end;
+guard_species_rebuild(_Recv, _Class, _Selector) ->
+    ok.
 
 -spec refuse_writing_fold(atom(), atom(), iodata()) -> no_return().
 refuse_writing_fold(Class, Selector, Reason) ->
