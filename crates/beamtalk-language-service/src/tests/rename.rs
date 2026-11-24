@@ -530,3 +530,61 @@ fn find_references_skips_references_qualified_by_another_package() {
         .collect();
     assert_eq!(lines, ["a => Json new", "c => mine@Json new"], "{refs:?}");
 }
+
+#[test]
+fn protocol_rename_covers_uses_clause_and_native_declaration() {
+    let (svc, file, pos) = setup(&[
+        (
+            "/p/Prot.bt",
+            "Protocol define: Pri@@ntable\n  show -> String\n",
+        ),
+        (
+            "/p/Widget.bt",
+            "Object subclass: Widget\n  uses: Printable\n  go => 1\n",
+        ),
+        (
+            "/p/stubs/ffi.bt",
+            "declare native: lists\n  wrap: x :: Printable -> Printable\n",
+        ),
+    ]);
+    let plan = svc.plan_rename(&file, pos, "Showable").expect("plan");
+    assert_eq!(
+        apply(&svc, "/p/Widget.bt", &plan.confirmed),
+        "Object subclass: Widget\n  uses: Showable\n  go => 1\n"
+    );
+    assert_eq!(
+        apply(&svc, "/p/stubs/ffi.bt", &plan.confirmed),
+        "declare native: lists\n  wrap: x :: Showable -> Showable\n"
+    );
+}
+
+#[test]
+fn selector_rename_never_edits_read_only_files() {
+    let (mut svc, file, pos) = setup(&[
+        ("/p/A.bt", "Object subclass: A\n  g@@o => 1\n"),
+        (
+            "/std/S.bt",
+            "Object subclass: S\n  run: a :: A => a go\n  sym => #go\n",
+        ),
+    ]);
+    svc.mark_stdlib_file(Utf8PathBuf::from("/std/S.bt"));
+    let plan = svc.plan_rename(&file, pos, "walk").expect("plan");
+    assert!(plan.confirmed.iter().all(|e| e.file != "/std/S.bt"));
+    assert!(
+        plan.candidates
+            .iter()
+            .flatten()
+            .all(|e| e.file != "/std/S.bt")
+    );
+}
+
+#[test]
+fn selector_rename_refuses_when_a_read_only_descendant_overrides_it() {
+    let (mut svc, file, pos) = setup(&[
+        ("/p/A.bt", "Object subclass: A\n  g@@o => 1\n"),
+        ("/std/B.bt", "A subclass: B\n  go => 2\n"),
+    ]);
+    svc.mark_stdlib_file(Utf8PathBuf::from("/std/B.bt"));
+    let err = svc.plan_rename(&file, pos, "walk").unwrap_err();
+    assert!(err.message.contains("overrides"), "{}", err.message);
+}

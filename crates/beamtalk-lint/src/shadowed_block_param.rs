@@ -373,12 +373,27 @@ mod tests {
         assert!(diags.is_empty(), "Expected no lints, got: {diags:?}");
     }
 
-    /// Variables from one method do not leak into the next method.
+    /// `check_method` leaves the scope it was given exactly as it found it
+    /// (BT-5132). Run against a *shared* scope, a method's parameter and
+    /// locals must not survive into the next method: the pass calls it on
+    /// fresh scopes today, but the invariant is what keeps methods isolated,
+    /// and a leak here makes the second lint below fire.
     #[test]
-    fn method_locals_do_not_leak_into_other_methods() {
-        let src = "Object subclass: Foo\n  a => x := 1. x\n  b => items do: [:x | x]";
-        let diags = lint(src);
-        assert!(diags.is_empty(), "Expected no lints, got: {diags:?}");
+    fn check_method_does_not_leave_bindings_in_a_shared_scope() {
+        let src = "Object subclass: Foo\n  a: x => y := 1. y\n  b => items do: [:x | x]. items do: [:y | y]";
+        let (module, parse_diags) = parse(lex_with_eof(src));
+        assert!(parse_diags.is_empty(), "{parse_diags:?}");
+        let mut scope = LintScope::new();
+        let mut diags = Vec::new();
+        for method in module.all_methods() {
+            check_method(method, &mut scope, &mut diags);
+        }
+        assert!(
+            diags.is_empty(),
+            "bindings leaked across methods: {diags:?}"
+        );
+        assert_eq!(scope.levels.len(), 1, "scope depth restored");
+        assert!(scope.levels[0].is_empty(), "root scope untouched");
     }
 
     /// Match-arm pattern variables are in scope for blocks in the arm body.
