@@ -238,11 +238,18 @@ fn open_and_lock(
             // without lock support) would never clear by waiting, so report it
             // as what it is rather than printing "waiting…" and then failing.
             if !is_contention(&e) {
+                // The opt-out only covers the project build lock.
+                let hint = if what == "build" {
+                    format!(
+                        "\nSet {NO_BUILD_LOCK_ENV}=1 to build without the project lock \
+                         (concurrent beamtalk processes are then not serialised)."
+                    )
+                } else {
+                    String::new()
+                };
                 return Err(miette::miette!(
                     "Failed to take the {what} lock '{}': {e}\n\
-                     The filesystem may not support advisory file locks. Set \
-                     {NO_BUILD_LOCK_ENV}=1 to build without the project lock \
-                     (concurrent beamtalk processes are then not serialised).",
+                     The filesystem may not support advisory file locks.{hint}",
                     lock_path.display()
                 ));
             }
