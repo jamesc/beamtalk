@@ -75,6 +75,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Interval"
             | "IoDevice"
             | "Json"
+            | "JsonMapping"
             | "List"
             | "Logger"
             | "Metaclass"
@@ -2786,6 +2787,50 @@ fn class_info_Json() -> ClassInfo {
                 MethodInfo { selector: "parse:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Json".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::simple("JsonValue"), DeclaredType::simple("Error")])), param_types: vec![Some(DeclaredType::simple("String"))], doc: Some("Parse a JSON string into a Beamtalk value (class method).\n\nJSON objects become Dictionaries with String keys, arrays become\nLists, strings become Strings, numbers become Integer or Float,\nbooleans stay as true/false, null becomes nil.\n\n## Examples\n```beamtalk\n(Json parse: \"[1, 2, 3]\") unwrap   // => #(1, 2, 3)\n(Json parse: \"42\") unwrap          // => 42\n(Json parse: \"null\") unwrap        // => nil\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
                 MethodInfo { selector: "generate:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Json".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Generate a JSON string from a Beamtalk value (class method).\n\nDictionaries become JSON objects, Lists become arrays, Strings\nbecome JSON strings, Integer/Float become numbers, true/false\nbecome JSON booleans, nil becomes null. Custom objects that\nimplement `asJson` are converted via that hook (see the class\ncomment for the convention).\n\n## Examples\n```beamtalk\nJson generate: #(1, 2, 3)          // => [1,2,3]\nJson generate: nil                 // => null\nJson generate: 42                  // => 42\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
                 MethodInfo { selector: "prettyPrint:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Json".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Generate a pretty-printed JSON string with indentation (class method).\n\n## Examples\n```beamtalk\nJson prettyPrint: #{\"name\" => \"Ada\", \"age\" => 36}\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+    }
+}
+
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_JsonMapping() -> ClassInfo {
+    ClassInfo {
+            name: "JsonMapping".into(),
+            superclass: Some("Value".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: true,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            in_caller_new1: false,
+            is_module_less: false,
+            auto_ctors: Some(AutoConstructors { keyword_constructor: Some("entries:".into()) }),
+            state: vec!["entries".into()],
+            state_types: HashMap::from([("entries".into(), DeclaredType::simple("List"))]),
+            state_has_default: HashMap::from([("entries".into(), true)]),
+            state_kinds: HashMap::from([("entries".into(), SlotKind::Eager)]),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: true,
+            methods: vec![
+                MethodInfo { selector: "mapField:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "JsonMapping".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("JsonMapping")), param_types: vec![Some(DeclaredType::simple("Symbol"))], doc: Some("Map `fieldName` to a wire key of the same name.\n\n## Examples\n```beamtalk\n(JsonMapping new mapField: #title) entries size   // => 1\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
+                MethodInfo { selector: "mapField:to:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "JsonMapping".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("JsonMapping")), param_types: vec![Some(DeclaredType::simple("Symbol")), Some(DeclaredType::simple("String"))], doc: Some("Map `fieldName` to the wire key `key`.\n\n## Examples\n```beamtalk\n(JsonMapping new mapField: #issueId to: \"issue_id\") entries size   // => 1\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
+                MethodInfo { selector: "mapField:to:using:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "JsonMapping".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("JsonMapping")), param_types: vec![Some(DeclaredType::simple("Symbol")), Some(DeclaredType::simple("String")), Some(DeclaredType::union(vec![DeclaredType::simple("Block"), DeclaredType::simple("Nil")]))], doc: Some("Map `fieldName` to the wire key `key`, passing the field's value through\n`converter` (a one-argument block) first. A nil converter means no\nconversion. The converter's result is itself encoded recursively, so it\nmay answer another mapped object.\n\n## Examples\n```beamtalk\n(JsonMapping new mapField: #at to: \"created_at\" using: [:v | v printString]) entries size   // => 1\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
+                MethodInfo { selector: "encode:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "JsonMapping".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Dictionary")), param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Apply the mapping to `anObject` and answer a Dictionary of wire key to\n(converted) field value. Fields that are not mapped are omitted. A mapped\nfield the object does not have raises an error.\n\n## Examples\n```beamtalk\n(JsonMapping new mapField: #x) encode: 5   // => _\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
+                MethodInfo { selector: "entries".into(), arity: 0, kind: MethodKind::Primary, defined_in: "JsonMapping".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("List")), param_types: vec![], doc: Some("Returns the `entries` field value. Default: `#()`.\n\n*(compiler-generated)*".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
+                MethodInfo { selector: "withEntries:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "JsonMapping".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::SelfType), param_types: vec![Some(DeclaredType::simple("List"))], doc: Some("Returns a new `JsonMapping` with `entries` set to the given value.\n\n*(compiler-generated)*".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "entries:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "JsonMapping".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("JsonMapping")), param_types: vec![Some(DeclaredType::simple("List"))], doc: Some("Creates a new `JsonMapping`. Args: entries (default: #()).\n\n*(compiler-generated)*".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
             ],
             class_variables: vec![],
             type_params: vec![],
@@ -6246,6 +6291,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     classes.insert("Interval".into(), class_info_Interval());
     classes.insert("IoDevice".into(), class_info_IoDevice());
     classes.insert("Json".into(), class_info_Json());
+    classes.insert("JsonMapping".into(), class_info_JsonMapping());
     classes.insert("List".into(), class_info_List());
     classes.insert("Logger".into(), class_info_Logger());
     classes.insert("Metaclass".into(), class_info_Metaclass());
@@ -6357,5 +6403,6 @@ pub(super) fn generated_stdlib_protocol_files() -> Vec<(&'static str, &'static s
     vec![
         ("stdlib/src/comparable.bt", include_str!("../../../../../stdlib/src/comparable.bt")),
         ("stdlib/src/enumerable.bt", include_str!("../../../../../stdlib/src/enumerable.bt")),
+        ("stdlib/src/json_mappable.bt", include_str!("../../../../../stdlib/src/json_mappable.bt")),
     ]
 }

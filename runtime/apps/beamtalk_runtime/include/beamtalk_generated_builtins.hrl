@@ -68,6 +68,7 @@
     'Interval',
     'IoDevice',
     'Json',
+    'JsonMapping',
     'List',
     'Logger',
     'Metaclass',

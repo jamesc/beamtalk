@@ -1,0 +1,69 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2819: JsonMapping / JsonMappable. Fixtures: fixtures/json_mapped_fixtures.bt
+
+TestCase subclass: JsonMappingTest
+
+  testEncodeRenamesAndOmitsUnmapped =>
+    e := JsonMappedRunningEntry
+      issueId: "a"
+      issueIdentifier: "BT-1"
+      state: "run"
+      turnCount: 3
+      tokens: nil
+      internalNote: "x"
+    d := JsonMappedRunningEntry jsonMapping encode: e
+    self assert: (d at: "issue_id") equals: "a"
+    self assert: (d at: "turn_count") equals: 3
+    self deny: (d includesKey: "internalNote")
+    self deny: (d includesKey: "internal_note")
+    self assert: d size equals: 5
+
+  testEncodeAnswersDictionary =>
+    self assert: (JsonMappedTokenUsage inputTokens: 1 outputTokens: 2) asJson equals: #{
+      "input_tokens" => 1,
+      "output_tokens" => 2
+    }
+
+  testRunningEntryMatchesHandWrittenJson =>
+    hand := JsonHandRunningEntry
+      issueId: "a"
+      issueIdentifier: "BT-1"
+      state: "run"
+      turnCount: 3
+      tokens: (JsonHandTokenUsage inputTokens: 10 outputTokens: 20)
+    mapped := JsonMappedRunningEntry
+      issueId: "a"
+      issueIdentifier: "BT-1"
+      state: "run"
+      turnCount: 3
+      tokens: (JsonMappedTokenUsage inputTokens: 10 outputTokens: 20)
+      internalNote: "ignored"
+    self assert: (Json generate: mapped) equals: (Json generate: hand)
+    self assert: (Json prettyPrint: mapped) equals: (Json prettyPrint: hand)
+
+  testConverterMatchesHandWrittenJson =>
+    self assert: (Json generate: (JsonMappedEvent eventType: #completed seq: 7)) equals: (Json generate: (JsonHandEvent eventType: #completed seq: 7))
+
+  testMappedObjectsInsideCollections =>
+    xs := #((JsonMappedEvent eventType: #a seq: 1), (JsonMappedEvent eventType: #b seq: 2))
+    self assert: (Json generate: xs) equals: (Json generate: #((JsonHandEvent eventType: #a seq: 1), (JsonHandEvent eventType: #b seq: 2)))
+
+  testHandWrittenAsJsonWins =>
+    self assert: (JsonOverridingMapped name: "n") asJson equals: #{
+      "custom" => "n"
+    }
+
+  testConformance =>
+    self assert: (JsonMappedEvent conformsTo: #JsonRepresentable)
+    self assert: (JsonMappedEvent protocols includes: #JsonMappable)
+
+  testMapFieldIsNonMutating =>
+    base := JsonMapping new
+    more := base mapField: #x
+    self assert: base entries size equals: 0
+    self assert: more entries size equals: 1
+
+  testProtocolRequiresClassSideMapping =>
+    self assert: (Protocol isProtocol: #JsonMappable)
