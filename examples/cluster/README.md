@@ -69,7 +69,7 @@ RELEASE_NODE=coord   $R foreground
 RELEASE_NODE=coord $R rpc "Demo main: worker1@localhost worker2@localhost"
 ```
 
-Expected output, one line per check, ending with `RESULT 34 ok, 0 failed`.
+Expected output, one line per check, ending with `RESULT 33 ok, 0 failed`.
 `worker2` goes down during the run (phase 7); `worker1` and `coord` stay up.
 
 Stop what is left:

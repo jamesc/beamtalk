@@ -22,10 +22,7 @@ Object subclass: Demo
         tries =:= 0
           ifTrue: [false]
           ifFalse: [
-            // `connect` returns before OTP's `global` has synced names with the new
-            // peer; without this a name registered now may not be visible from a peer
-            // for ~200 ms (see README "Things To Know").
-            Erlang global sync
+            Timer sleep: 50
             self waitUntil: cond tries: tries - 1
           ]
       ]
@@ -142,9 +139,9 @@ Object subclass: Demo
     report check: "every result is right" is: (results inject: true into: [:ok :r |
       ok and: [r value =:= r jobId * r jobId]
     ])
-    report check: "no result came from the dead node after the kill" is: ((results select: [:r |
-      r node =:= w2 name
-    ]) size < 6)
+    report check: "no job at or after the kill point ran on the dead node" is: ((results select: [:r |
+      r node =:= w2 name and: [r jobId >= 4]
+    ]) isEmpty)
     report check: "survivor stayed connected" is: w1 isConnected
     report check: "the failed call surfaced as node_down" is: (farm lostKinds =:= #(#node_down))
     report check: "one live worker left" is: farm liveCount =:= 1
@@ -160,8 +157,10 @@ Object subclass: Demo
 
   /// Try an async (Future) send to a remote actor through the runtime's
   /// entry point. ADR 0126 (BT-4989) says it must raise `unsupported_operation`
-  /// at once; a regression would leave the future pending forever, which
-  /// the 2 s bound turns into `#hung`.
+  /// at once. If that regresses, the send is accepted (`#accepted`) and the
+  /// check fails. This is a test-only probe: it calls runtime-internal
+  /// `beamtalk_actor` / `beamtalk_future` through FFI because no Beamtalk
+  /// syntax reaches a remote async send. Do not copy it into application code.
   class tryRemoteAsync: remote =>
     future := (Erlang beamtalk_future) new
     futurePid := (Erlang beamtalk_future) pid: future

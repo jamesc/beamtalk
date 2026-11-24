@@ -49,10 +49,10 @@ cleanup() {
   done
   # Anything that ignored a graceful stop: kill by the unique node name.
   for _ in 1 2 3 4 5; do
-    pgrep -f "sname ($coord|$w1|$w2)( |$)" >/dev/null || break
+    pgrep -f "sname ($coord|$w1|$w2)@" >/dev/null || break
     sleep 1
   done
-  pkill -9 -f "sname ($coord|$w1|$w2)( |$)" 2>/dev/null
+  pkill -9 -f "sname ($coord|$w1|$w2)@" 2>/dev/null
   # Verify nothing of ours is left registered with epmd or running. epmd drops
   # a killed node's name a moment after the socket closes, so give it a few
   # seconds before calling that a leak.
@@ -66,7 +66,7 @@ cleanup() {
     epmd -names >&2
     leaked=true
   fi
-  if pgrep -f "sname ($coord|$w1|$w2)( |$)" >/dev/null; then
+  if pgrep -f "sname ($coord|$w1|$w2)@" >/dev/null; then
     echo "e2e: node process still running after cleanup" >&2
     leaked=true
   fi
