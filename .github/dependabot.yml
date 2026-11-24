@@ -68,12 +68,17 @@ updates:
           - "minor"
           - "patch"
 
+  # Not covered, on purpose (BT-5137): Dependabot has no rebar3 ecosystem, so
+  # runtime/rebar.lock is bumped by hand (and keys the Erlang caches); spikes/*
+  # are throwaway experiments that ship nothing.
+
   # GitHub Actions: workflows live under .github/workflows (found from `/`); the composite actions under .github/actions are separate directories (BT-5087).
   - package-ecosystem: "github-actions"
     directories:
       - "/"
       - "/.github/actions/claude-triage"
       - "/.github/actions/install-nextest"
+      - "/.github/actions/setup-beamtalk"
       - "/.github/actions/test-desktop"
       - "/.github/actions/vs-elixir-bench"
     schedule:
@@ -143,7 +148,9 @@ updates:
 
   # Elixir/Mix: LiveView IDE (BT-5087).
   - package-ecosystem: "mix"
-    directory: "/editors/liveview"
+    directories:
+      - "/editors/liveview"
+      - "/benchmarks/vs-elixir/elixir"
     schedule:
       interval: "weekly"
       day: "monday"

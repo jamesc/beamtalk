@@ -4,8 +4,8 @@
 # VS Code Extension Release Pipeline
 # ====================================
 # Packages a single universal .vsix file and publishes to the VS Code Marketplace
-# when the VSCE_PAT secret is set; without it the publish is skipped with a
-# warning and the .vsix is only attached to the GitHub Release.
+# when the VSCE_PAT secret is set; a publish requested without it still attaches
+# the .vsix to the GitHub Release, then fails the run.
 #
 # The extension no longer bundles a platform-specific beamtalk-lsp binary.
 # Instead, it discovers beamtalk-lsp at runtime via `beamtalk --print-sysroot`,
@@ -105,10 +105,10 @@ jobs:
       - name: Build extension
         run: |
           cd editors/vscode
-          npm install --quiet
+          npm ci --quiet
           npm run bundle
           ln -sf ../../LICENSE LICENSE
-          npx --yes @vscode/vsce package --out "../../beamtalk-vscode-${{ steps.version.outputs.version }}.vsix"
+          npx --no-install vsce package --out "../../beamtalk-vscode-${{ steps.version.outputs.version }}.vsix"
           rm -f LICENSE
 
       - name: Upload VSIX artifact
@@ -125,7 +125,9 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
-    if: inputs.publish
+    # BT-5137: either input runs the job; each step below gates on its own input,
+    # so `attach_to_release` works without `publish`.
+    if: inputs.publish || inputs.attach_to_release
     # Mapped at job level: a step's `if:` is evaluated before that step's own
     # `env:` is applied, so a secret mapped only on the step is always empty
     # in the condition (BT-5094).
@@ -152,33 +154,42 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
-      # Marketplace publishing is optional: with no VSCE_PAT the release still
-      # passes (the .vsix is attached above) and this warning says the
-      # Marketplace was skipped, so it is visible on the run summary.
-      - name: Skip VS Code Marketplace (no VSCE_PAT)
-        if: env.VSCE_PAT == ''
-        run: |
-          echo "::warning::VSCE_PAT is not set: the VS Code Marketplace publish was skipped. The .vsix is still attached to the release."
-
-      # This job has no other checkout; setup-node reads the Node version
-      # from .tool-versions, so fetch just that file. Into a subdirectory:
-      # a checkout into the workspace root would clean away the .vsix
-      # downloaded above.
+      # This job has no other checkout; setup-node reads the Node version from
+      # .tool-versions, and `vsce` is the pinned devDependency of
+      # editors/vscode (BT-5137), so fetch just those files. Into a
+      # subdirectory: a checkout into the workspace root would clean away the
+      # .vsix downloaded above.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: env.VSCE_PAT != ''
+        if: inputs.publish && env.VSCE_PAT != ''
         with:
           path: .node-version-src
           sparse-checkout: |
             .tool-versions
+            editors/vscode/package.json
+            editors/vscode/package-lock.json
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
       - name: Setup Node.js
-        if: env.VSCE_PAT != ''
+        if: inputs.publish && env.VSCE_PAT != ''
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
           node-version-file: .node-version-src/.tool-versions
 
+      - name: Install vsce (locked)
+        if: inputs.publish && env.VSCE_PAT != ''
+        working-directory: .node-version-src/editors/vscode
+        run: npm ci --quiet --ignore-scripts
+
       - name: Publish to VS Code Marketplace
-        if: env.VSCE_PAT != ''
-        run: npx --yes @vscode/vsce publish --packagePath "$VSIX_NAME"
+        if: inputs.publish && env.VSCE_PAT != ''
+        working-directory: .node-version-src/editors/vscode
+        run: npx --no-install vsce publish --packagePath "$GITHUB_WORKSPACE/$VSIX_NAME"
+
+      # A release that was asked to publish must not go green without doing so
+      # (BT-5137). Last, so the .vsix is already attached to the release.
+      - name: Fail when VSCE_PAT is missing
+        if: inputs.publish && env.VSCE_PAT == ''
+        run: |
+          echo "::error::VSCE_PAT is not set: the VS Code Marketplace publish did not run (the .vsix is attached to the release). Set the secret and re-run, or dispatch with publish=false."
+          exit 1

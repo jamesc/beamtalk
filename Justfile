@@ -986,6 +986,7 @@ lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-repo lint-doc
 lint-repo: \
     check-lint-parity \
     check-pins \
+    check-dependabot \
     lint-banned-patterns \
     lint-beamtalk-stdlib \
     lint-binary-literal-encoding \
@@ -1431,6 +1432,11 @@ clippy:
 # Fail if a downloaded build tool is floating, or a pin repeated across CI / setup disagrees (BT-5087)
 check-pins:
     @python3 scripts/ci/check-pins.py
+
+# Fail if a directory holding a composite `action.yml` is missing from dependabot.yml's
+# github-actions directories (BT-5137): the central action pins live in those files.
+check-dependabot:
+    @python3 scripts/ci/check_dependabot.py
 
 # Fail if fuzz/ or desktop/src-tauri/ drift from the root [workspace.lints] (BT-5087)
 check-lint-parity:
@@ -3092,7 +3098,7 @@ dist-vscode-platform target:
     fi
     cd editors/vscode
     npm ci --quiet
-    npx --yes @vscode/vsce package --target "{{target}}" --out "../../beamtalk-{{target}}.vsix"
+    npx --no-install vsce package --target "{{target}}" --out "../../beamtalk-{{target}}.vsix"
     echo "✅ VS Code extension: beamtalk-{{target}}.vsix"
 
 # Usage: just dist-vscode-platform win32-x64
@@ -3102,7 +3108,7 @@ dist-vscode-platform target:
     @echo "📦 Building VS Code extension for {{target}}..."
     if (!(Get-Command npm -ErrorAction SilentlyContinue)) { Write-Error "npm not found"; exit 1 }
     Push-Location editors\vscode; try { npm ci --quiet; if ($LASTEXITCODE -ne 0) { throw "npm ci failed" } } finally { Pop-Location }
-    Push-Location editors\vscode; try { npx --yes @vscode/vsce package --target "{{target}}" --out "..\..\beamtalk-{{target}}.vsix"; if ($LASTEXITCODE -ne 0) { throw "vsce package failed" } } finally { Pop-Location }
+    Push-Location editors\vscode; try { npx --no-install vsce package --target "{{target}}" --out "..\..\beamtalk-{{target}}.vsix"; if ($LASTEXITCODE -ne 0) { throw "vsce package failed" } } finally { Pop-Location }
     @echo "✅ VS Code extension: beamtalk-{{target}}.vsix"
 
 # Unix-only: depends on the Unix-only install recipe
