@@ -456,8 +456,9 @@ guard_writing_fold(Recv, Selector) ->
 
 %% BT-5136: a species-built `collect:`/`select:`/`reject:` answers
 %% `self species withAll:` on the pure path. `from_list_like/2` rebuilds only
-%% Array and Set (String, Binary and Dictionary never reach here); a Bag or a
-%% user `Collection` would answer a raw List, so refuse instead.
+%% Array and Set (String, Binary and Dictionary never reach here); a Bag would
+%% answer a raw List instead of a Bag, so refuse. A user `Collection` with the
+%% default `species` answers a List on both paths and is allowed.
 -spec guard_species_rebuild(term(), atom(), atom()) -> ok.
 guard_species_rebuild(#{?BT_CLASS_TAG_KEY := Tag}, _Class, _Selector) when
     Tag =:= 'Array'; Tag =:= 'Set'

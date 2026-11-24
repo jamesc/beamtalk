@@ -326,15 +326,6 @@ hot_reload_class(ModuleName, ClassName, Pids) ->
     Suspended = beamtalk_runtime_api:failures_left_suspended(Failures),
     publish_suspended_finding(ModuleName, ClassName, Upgraded, Suspended).
 
-%% Best-effort publish of the `instances_suspended` finding (ADR 0123 §4 row
-%% 5) for `ClassName` through the existing reload-findings channel. Reads
-%% the just-installed `ToVersion` directly off `ModuleName`'s own meta
-%% (cheap, already-loaded local call) rather than the shape store, since
-%% this runs for descendants too, which the shape store never primes/captures
-%% (their own module is not recompiled by this reload — see
-%% `hot_reload_class/3`'s doc). Never raises: any internal failure is logged
-%% and swallowed — this is advisory plumbing on the reload's own response
-%% path, never a gate on the reload having already succeeded.
 -doc """
 Publish the `instances_suspended` finding for a migration that failed after the
 reload stopped waiting for it (BT-5136). The reload had already answered
@@ -350,6 +341,15 @@ report_late_suspended(ModuleName, Pid, {error, _} = Failure) ->
             publish_suspended_finding(ModuleName, ClassName, 0, [{Pid, Failure}])
     end.
 
+%% Best-effort publish of the `instances_suspended` finding (ADR 0123 §4 row
+%% 5) for `ClassName` through the existing reload-findings channel. Reads
+%% the just-installed `ToVersion` directly off `ModuleName`'s own meta
+%% (cheap, already-loaded local call) rather than the shape store, since
+%% this runs for descendants too, which the shape store never primes/captures
+%% (their own module is not recompiled by this reload — see
+%% `hot_reload_class/3`'s doc). Never raises: any internal failure is logged
+%% and swallowed — this is advisory plumbing on the reload's own response
+%% path, never a gate on the reload having already succeeded.
 -spec publish_suspended_finding(atom(), atom(), non_neg_integer(), [{pid(), term()}]) -> ok.
 publish_suspended_finding(_ModuleName, _ClassName, _Upgraded, []) ->
     ok;
