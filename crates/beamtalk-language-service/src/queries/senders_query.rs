@@ -77,7 +77,6 @@ pub fn find_senders_in_source(method_source: &str, selector_name: &str) -> Vec<u
         .collect()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

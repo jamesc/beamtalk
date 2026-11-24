@@ -173,7 +173,6 @@ fn push_announce(
     });
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
