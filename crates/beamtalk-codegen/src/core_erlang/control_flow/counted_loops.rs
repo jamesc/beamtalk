@@ -218,7 +218,7 @@ impl CoreErlangGenerator {
             let raise = form::let_in(
                 leaf::var(msg_var.clone()),
                 leaf::binary_lit(text),
-                self.error_kind_raise_doc("type_error", recv_var, &msg_var),
+                self.type_error_raise_doc(recv_var, &msg_var),
                 Layout::Flat,
             );
             let is_number = form::call("erlang", "is_number", [leaf::var(var.to_string())]);
