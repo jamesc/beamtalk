@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for BT-2819 (JsonMappable / JsonMapping); see json_mapping_test.bt.
+// Mirrors beamtalk-symphony / beamtalk-exdura classes; the Hand* twins are the
+// hand-written asJson equivalents used for byte-identical comparison.
+
+Value subclass: JsonHandTokenUsage
+  field: inputTokens = 0
+  field: outputTokens = 0
+
+  asJson =>
+    #{"input_tokens" => self.inputTokens, "output_tokens" => self.outputTokens}

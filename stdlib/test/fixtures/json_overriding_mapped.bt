@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for BT-2819 (JsonMappable / JsonMapping); see json_mapping_test.bt.
+// Mirrors beamtalk-symphony / beamtalk-exdura classes; the Hand* twins are the
+// hand-written asJson equivalents used for byte-identical comparison.
+
+Value subclass: JsonOverridingMapped
+  uses: JsonMappable
+  field: name = ""
+
+  class jsonMapping -> JsonMapping => JsonMapping new |> mapField: #name
+
+  asJson => #{"custom" => self.name}

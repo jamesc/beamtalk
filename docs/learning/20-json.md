@@ -94,6 +94,29 @@ Json generate: #(1, 2, 3)  // => [1,2,3]
 Json generate: #()         // => []
 ```
 
+## Custom classes: `asJson` and `JsonMappable`
+
+`Json generate:` converts your own classes by sending them `asJson`. Write it
+by hand, or declare the wire schema and let `JsonMappable` provide it:
+
+```beamtalk
+Value subclass: Issue
+  uses: JsonMappable
+  field: issueId = ""
+  field: title = ""
+  field: secret = "x"
+
+  class jsonMapping -> JsonMapping =>
+    JsonMapping new
+      |> mapField: #issueId to: "issue_id"
+      |> mapField: #title
+```
+
+`mapField:to:using:` also takes a converter block. Unmapped fields (`secret`)
+are omitted. Chain the entries with `|>`, not a cascade: `JsonMapping` is a
+Value, and a cascade drops every update but the last. A hand-written `asJson`
+in the class body still wins over the provided one.
+
 ## Pretty printing
 
 `Json prettyPrint:` adds indentation for readability:

@@ -1,0 +1,83 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+/// JsonMapping — a declarative field-to-wire-key schema (BT-2819).
+///
+/// A `JsonMapping` lists which fields of an object go on the wire, under
+/// which key, and through which optional converter block. `encode:` applies
+/// it to an object and answers a Dictionary. Unmapped fields are omitted, so
+/// the mapping is the whole wire schema. Modelled on Pharo's NeoJSON mapper.
+///
+/// A class opts in with `uses: JsonMappable` and a class-side `jsonMapping`
+/// (see `JsonMappable`). Keys are written out explicitly — nothing is
+/// inferred from field names.
+///
+/// `JsonMapping` is a Value: `mapField:` and its variants answer a **new**
+/// mapping and leave the receiver alone. Chain them with a pipeline (`|>`),
+/// not a cascade. A cascade sends every message to the original receiver and
+/// drops all but the last update (ADR 0145).
+///
+/// ## Examples
+/// ```beamtalk
+/// Value subclass: Point
+///   field: px = 0
+///   field: py = 0
+///
+/// mapping := JsonMapping new
+///   |> mapField: #px to: "x"
+///   |> mapField: #py to: "y" using: [:v | v * 10]
+/// mapping encode: (Point px: 1 py: 2)   // => #{"x" => 1, "y" => 20}
+/// ```
+Value subclass: JsonMapping
+  /// The recorded entries, in declaration order. Each entry is a Dictionary
+  /// with `#field` (Symbol), `#key` (String) and `#using` (Block or nil).
+  field: entries :: List = #()
+
+  /// Map `fieldName` to a wire key of the same name.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (JsonMapping new mapField: #title) entries size   // => 1
+  /// ```
+  mapField: fieldName :: Symbol -> JsonMapping =>
+    self
+      mapField: fieldName
+      to: fieldName asString
+      using: nil
+
+  /// Map `fieldName` to the wire key `key`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (JsonMapping new mapField: #issueId to: "issue_id") entries size   // => 1
+  /// ```
+  mapField: fieldName :: Symbol to: key :: String -> JsonMapping =>
+    self
+      mapField: fieldName
+      to: key
+      using: nil
+
+  /// Map `fieldName` to the wire key `key`, passing the field's value through
+  /// `converter` (a one-argument block) first. A nil converter means no
+  /// conversion. The converter's result is itself encoded recursively, so it
+  /// may answer another mapped object.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (JsonMapping new mapField: #at to: "created_at" using: [:v | v printString]) entries size   // => 1
+  /// ```
+  mapField: fieldName :: Symbol to: key :: String using: converter :: Block | Nil -> JsonMapping =>
+    entry := #{#field => fieldName, #key => key, #using => converter}
+    self withEntries: (self.entries add: entry)
+
+  /// Apply the mapping to `anObject` and answer a Dictionary of wire key to
+  /// (converted) field value. Fields that are not mapped are omitted. A mapped
+  /// field the object does not have raises an error.
+  encode: anObject :: Object -> Dictionary =>
+    self.entries
+      inject: (Dictionary new)
+      into: [:acc :entry |
+        raw := anObject perform: #fieldAt: withArguments: (#() add: (entry at: #field))
+        converter := entry at: #using
+        value := converter isNil ifTrue: [raw] ifFalse: [converter value: raw]
+        acc at: (entry at: #key) put: value
+      ]

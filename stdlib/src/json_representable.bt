@@ -12,6 +12,9 @@
 /// JsonRepresentable objects, and is typically a Dictionary with explicit
 /// wire-format keys (BT-2818).
 ///
+/// To derive `asJson` from a declarative field-to-key schema instead of writing
+/// it by hand, `uses: JsonMappable` (see `JsonMapping`, BT-2819).
+///
 /// ## Examples
 /// ```beamtalk
 /// Value subclass: User

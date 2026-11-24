@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+/// JsonMappable — derive `asJson` from a declarative `JsonMapping` (BT-2819).
+///
+/// A using class implements the class-side `jsonMapping`, and `asJson` is
+/// provided: `self class jsonMapping encode: self`. `Json generate:` finds it
+/// through the ordinary `asJson` hook (see `JsonRepresentable`), so no runtime
+/// change is involved, and nested mapped objects convert recursively.
+///
+/// A hand-written `asJson` in the class body wins over the provided one
+/// (ADR 0127 §3a).
+///
+/// ## Examples
+/// ```beamtalk
+/// Value subclass: Issue
+///   uses: JsonMappable
+///   field: issueId = ""
+///   field: title = ""
+///
+///   class jsonMapping -> JsonMapping =>
+///     JsonMapping new
+///       |> mapField: #issueId to: "issue_id"
+///       |> mapField: #title
+/// ```
+Protocol define: JsonMappable
+  /// Required — the wire schema for instances of the using class.
+  class jsonMapping -> JsonMapping
+
+  /// The mapped Dictionary for the receiver.
+  asJson -> Object => self class jsonMapping encode: self

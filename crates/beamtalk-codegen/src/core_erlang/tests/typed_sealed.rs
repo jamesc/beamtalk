@@ -1326,6 +1326,7 @@ const KNOWN_TAGGED_BUILTINS: &[&str] = &[
     "InspectorField",
     "Interval",
     "Json",
+    "JsonMapping",
     "Logger",
     "Node",
     "NodeDown",
