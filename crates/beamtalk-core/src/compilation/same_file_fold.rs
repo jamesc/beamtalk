@@ -112,10 +112,11 @@ pub fn reject_cross_file_extensions(module: &Module) -> Vec<Diagnostic> {
                 None => def.class_name.name.to_string(),
             };
             let side = if def.is_class_method { " class" } else { "" };
-            if module
-                .protocols
-                .iter()
-                .any(|p| p.name.name == def.class_name.name)
+            if def.package.is_none()
+                && module
+                    .protocols
+                    .iter()
+                    .any(|p| p.name.name == def.class_name.name)
             {
                 return Diagnostic::error(
                     format!(
@@ -215,6 +216,18 @@ mod tests {
         assert!(diags[0].message.contains("protocol P"), "{diags:?}");
         assert!(
             !diags[0].message.contains("not defined in this file"),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn package_qualified_target_next_to_a_protocol_gets_the_cross_file_message() {
+        let mut m = parse_ok("Protocol define: P\n  size -> Integer\n\nother@P >> extra => 1\n");
+        assert!(fold_same_file_extensions(&mut m).is_empty());
+        let diags = reject_cross_file_extensions(&m);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("not defined in this file"),
             "{diags:?}"
         );
     }
