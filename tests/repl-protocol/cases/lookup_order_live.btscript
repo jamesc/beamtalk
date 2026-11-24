@@ -18,8 +18,10 @@ Erlang beamtalk_extensions register: #Bt5060LiveBase selector: #greet fun: [:a :
 // => Result ok: nil
 
 // Subclasses loaded AFTER the extension was registered.
+// The extension is not seen by a direct value subclass loaded after it: the
+// load's reply warns, naming the class, the selector and the owner (BT-5060).
 :load tests/repl-protocol/fixtures/bt5060_live_mid.bt
-// => Loaded: Bt5060LiveMid
+// => WARNING: Class 'Bt5060LiveMid' will not see extension 'greet' on its superclass 'Bt5060LiveBase'
 
 :load tests/repl-protocol/fixtures/bt5060_live_leaf.bt
 // => Loaded: Bt5060LiveLeaf
@@ -37,8 +39,9 @@ Bt5060LiveMid new perform: #greet
 // => compiledV1
 
 // Hot reload of the owner keeps the extension in force below it.
+// The reload of the owner recomputes the named set from the classes loaded now.
 :load tests/repl-protocol/fixtures/bt5060_live_base_v2.bt
-// => Loaded: Bt5060LiveBase
+// => WARNING: direct value subclasses Bt5060LiveMid still answer the compiled method
 
 Bt5060LiveLeaf new perform: #greet
 // => fromExt

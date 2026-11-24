@@ -104,7 +104,16 @@ sync_project(Path, Options) ->
                     <<"Provide a directory path containing beamtalk.toml">>
                 )};
         true ->
-            do_sync_project(AbsPath, IncludeTests, Force, SessionPid, PackageName)
+            %% BT-5060: the sync reply also carries the one-hop extension warnings
+            %% queued while the project loaded.
+            Since = erlang:monotonic_time(millisecond),
+            case do_sync_project(AbsPath, IncludeTests, Force, SessionPid, PackageName) of
+                {ok, #{warnings := Warnings} = Result} ->
+                    Extra = beamtalk_runtime_api:take_extension_warnings(Since),
+                    {ok, Result#{warnings := Warnings ++ Extra}};
+                Other ->
+                    Other
+            end
     end.
 
 -doc "Core sync logic, called after validating beamtalk.toml exists.".

@@ -42,6 +42,8 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     ensure_class_warnings_table/0,
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
+    record_extension_warning/1,
+    take_extension_warnings/1,
     record_pending_load_error/2,
     drain_pending_load_errors_by_names/1,
     clear_pending_load_errors_by_names/1,
@@ -398,6 +400,76 @@ drain_class_warnings_by_names(ClassNames) ->
                 ClassNames
             )
     end.
+
+-doc """
+BT-5060: queue a warning about an extension a direct value subclass will not
+see (ADR 0066, the one-hop route), for the next load/eval/sync reply to carry.
+
+Registration runs from a module's `on_load` (a process the code server spawns),
+so a per-process queue cannot reach the reply; the shared warnings table can.
+Each row carries its monotonic timestamp so `take_extension_warnings/1` hands a
+reply only what was queued since that reply's operation began. Rows older than
+a minute are dropped on insert, so a registration made outside any reply (boot,
+a package load) cannot surface in a much later one. The logger line stays the
+fallback there.
+""".
+-spec record_extension_warning(binary()) -> ok.
+record_extension_warning(Text) when is_binary(Text) ->
+    ensure_class_warnings_table(),
+    Now = erlang:monotonic_time(millisecond),
+    Cutoff = Now - 60000,
+    _ = ets:select_delete(beamtalk_class_warnings, [
+        {{{undefined, '$extension_warning'}, one_hop, {'$1', '_'}}, [{'<', '$1', Cutoff}], [true]}
+    ]),
+    ets:insert(
+        beamtalk_class_warnings,
+        {{undefined, '$extension_warning'}, one_hop, {Now, Text}}
+    ),
+    ok.
+
+-doc """
+BT-5060: remove and return the extension warnings queued at or after `Since`
+(an `erlang:monotonic_time(millisecond)` taken when the operation began),
+oldest first and without duplicates.
+""".
+-spec take_extension_warnings(integer()) -> [binary()].
+take_extension_warnings(Since) when is_integer(Since) ->
+    case ets:info(beamtalk_class_warnings) of
+        undefined ->
+            [];
+        _ ->
+            Rows = ets:select(beamtalk_class_warnings, [
+                {
+                    {{undefined, '$extension_warning'}, one_hop, {'$1', '$2'}},
+                    [{'>=', '$1', Since}],
+                    [{{'$1', '$2'}}]
+                }
+            ]),
+            lists:foreach(
+                fun({At, Text}) ->
+                    ets:delete_object(
+                        beamtalk_class_warnings,
+                        {{undefined, '$extension_warning'}, one_hop, {At, Text}}
+                    )
+                end,
+                Rows
+            ),
+            dedupe([Text || {_At, Text} <- lists:sort(Rows)])
+    end.
+
+-spec dedupe([binary()]) -> [binary()].
+dedupe(Texts) ->
+    {Out, _} = lists:foldl(
+        fun(T, {Acc, Seen}) ->
+            case sets:is_element(T, Seen) of
+                true -> {Acc, Seen};
+                false -> {[T | Acc], sets:add_element(T, Seen)}
+            end
+        end,
+        {[], sets:new([{version, 2}])},
+        Texts
+    ),
+    lists:reverse(Out).
 
 -ifdef(TEST).
 -doc """

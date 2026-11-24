@@ -92,6 +92,7 @@ never an `{error, _}` result: it propagates unchanged.
     inherited_target/2,
     inherited_value_ext/5,
     one_hop_children_missing_extension/2,
+    one_hop_parent_extensions_missing/1,
     invoke_resolved/6,
     responds_to/2,
     invoke_extension/6,
@@ -351,6 +352,35 @@ one_hop_children_missing_extension(Class, Selector) ->
                     []
             end;
         not_found ->
+            []
+    end.
+
+-doc """
+BT-5060: the extensions on `Child`'s direct superclass that `Child` will not
+see: `{Selector, Owner}` pairs where the superclass is a value class whose
+module compiles `Selector`, has an extension for it, and `Child` is a value
+class that neither defines `Selector` itself nor has an extension for it. The
+mirror of `one_hop_children_missing_extension/2`, for a child loaded (or
+hot-reloaded) after the extension was registered. Computed from the live
+tables, so it reflects the classes loaded now.
+""".
+-spec one_hop_parent_extensions_missing(class_name()) -> [{selector(), class_name()}].
+one_hop_parent_extensions_missing(Child) ->
+    case beamtalk_class_metadata:lookup_superclass(Child) of
+        {ok, Super} when is_atom(Super), Super =/= none, Super =/= nil ->
+            case is_value_class(Child) andalso beamtalk_class_metadata:lookup_module(Super) of
+                {ok, Module} ->
+                    [
+                        {Selector, Super}
+                     || {Selector, _Owner} <- beamtalk_extensions:list(Super),
+                        owner_convention(Module, Selector) =:= value,
+                        not defines_locally(Child, Selector),
+                        check_extension(Child, Selector) =:= not_found
+                    ];
+                _ ->
+                    []
+            end;
+        _ ->
             []
     end.
 

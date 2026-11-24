@@ -413,3 +413,83 @@ TestCase subclass: LookupOrderMatrixTest
     // Actors and class-side tags honour the extension.
     self assert: (self affected: #Bt5060ActorC0 selector: #s0) equals: #()
     self assert: (self affected: #'Bt5060ValueC0 class' selector: #s0) equals: #()
+
+  // === the BT-5060 reply warnings ===
+  //
+  // The warnings a registration, a class load and a hot reload queue for the
+  // reply of the operation that caused them (`take_extension_warnings/1`).
+  queuedSince: since =>
+    Erlang beamtalk_class_registry take_extension_warnings: since
+
+  testRegistrationWarningIsQueuedForTheReply =>
+    since := Erlang erlang monotonic_time: #millisecond
+    [
+      Erlang beamtalk_extensions
+        register: #Bt5060ValueC0
+        selector: #s0
+        fun: [:args :receiver | #ext]
+        owner: #bt5060
+      warnings := self queuedSince: since
+      self assert: warnings size equals: 1
+      self assert: ((warnings at: 1) includesSubstring: "Bt5060ValueC1") equals: true
+      self assert: ((warnings at: 1) includesSubstring: "s0") equals: true
+      // Taking drains: a second take for the same operation is empty.
+      self assert: (self queuedSince: since) equals: #()
+    ] ensure: [Erlang beamtalk_extensions unregister: #Bt5060ValueC0 selector: #s0]
+
+  testLoadingADirectChildAfterTheExtensionWarns =>
+    before := Erlang erlang monotonic_time: #millisecond
+    [
+      Erlang beamtalk_extensions
+        register: #Bt5060ValueC0
+        selector: #s0
+        fun: [:args :receiver | #ext]
+        owner: #bt5060
+      // Drop the registration-time warning so only the class load's is left.
+      self queuedSince: before
+      since := Erlang erlang monotonic_time: #millisecond
+      // What activating the child's module does after its load.
+      Erlang beamtalk_extensions warn_one_hop_for_class: #Bt5060ValueC1
+      warnings := self queuedSince: since
+      self assert: warnings size equals: 1
+      self assert: ((warnings at: 1) includesSubstring: "Bt5060ValueC1") equals: true
+      self assert: ((warnings at: 1) includesSubstring: "s0") equals: true
+      self assert: ((warnings at: 1) includesSubstring: "Bt5060ValueC0") equals: true
+    ] ensure: [Erlang beamtalk_extensions unregister: #Bt5060ValueC0 selector: #s0]
+
+  testHotReloadOfTheOwnerRecomputesTheNamedSet =>
+    since := Erlang erlang monotonic_time: #millisecond
+    [
+      Erlang beamtalk_extensions
+        register: #Bt5060ValueC0
+        selector: #s0
+        fun: [:args :receiver | #ext]
+        owner: #bt5060
+      // Drop the registration-time warning, then reload the owner: the set is
+      // recomputed from the classes loaded now.
+      self queuedSince: since
+      mark := Erlang erlang monotonic_time: #millisecond
+      Erlang beamtalk_extensions warn_one_hop_for_class: #Bt5060ValueC0
+      reloaded := self queuedSince: mark
+      self assert: reloaded size equals: 1
+      self assert: ((reloaded at: 1) includesSubstring: "Bt5060ValueC1") equals: true
+      // A child that gains its own extension for the selector no longer skips it.
+      Erlang beamtalk_extensions
+        register: #Bt5060ValueC1
+        selector: #s0
+        fun: [:args :receiver | #own]
+        owner: #bt5060
+      mark2 := Erlang erlang monotonic_time: #millisecond
+      Erlang beamtalk_extensions warn_one_hop_for_class: #Bt5060ValueC0
+      self assert: (self queuedSince: mark2) equals: #()
+    ] ensure: [
+      Erlang beamtalk_extensions unregister: #Bt5060ValueC1 selector: #s0
+      Erlang beamtalk_extensions unregister: #Bt5060ValueC0 selector: #s0
+    ]
+
+  testNoWarningWhenNothingIsSkipped =>
+    since := Erlang erlang monotonic_time: #millisecond
+    // No extension on C0 for s0: loading either class warns about nothing.
+    Erlang beamtalk_extensions warn_one_hop_for_class: #Bt5060ValueC0
+    Erlang beamtalk_extensions warn_one_hop_for_class: #Bt5060ValueC1
+    self assert: (self queuedSince: since) equals: #()

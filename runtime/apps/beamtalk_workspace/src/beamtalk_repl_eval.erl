@@ -131,6 +131,7 @@ warning in this process (`beamtalk_refactor_support:note_changelog_result/1`).
     Result :: tuple().
 with_changelog_warnings(Fun) ->
     ok = beamtalk_refactor_support:begin_changelog_warnings(),
+    Since = erlang:monotonic_time(millisecond),
     %% bt-catcher-audit: not-applicable-reraises - the catch only clears the
     %% collection marker and re-raises, so the next boundary restores class variables.
     Result =
@@ -142,7 +143,13 @@ with_changelog_warnings(Fun) ->
                 _ = beamtalk_refactor_support:end_changelog_warnings(),
                 erlang:raise(Class, Reason, Stack)
         end,
-    case beamtalk_refactor_support:end_changelog_warnings() of
+    %% BT-5060: one-hop extension warnings queued while this eval ran (a module's
+    %% on_load registers extensions in another process, so they travel via the
+    %% shared warnings table, not the process dictionary).
+    case
+        beamtalk_refactor_support:end_changelog_warnings() ++
+            beamtalk_runtime_api:take_extension_warnings(Since)
+    of
         [] -> Result;
         Extra -> setelement(4, Result, element(4, Result) ++ Extra)
     end.
