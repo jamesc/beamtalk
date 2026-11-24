@@ -93,6 +93,7 @@ TestCase subclass: PersistentTermTest
       PersistentTerm at: #ptTestActor ifAbsentPut: [actor]
     ] raise: #type_error
     self deny: (PersistentTerm includesKey: #ptTestActor)
+    actor stop
 
   testRefusesClass =>
     self should: [

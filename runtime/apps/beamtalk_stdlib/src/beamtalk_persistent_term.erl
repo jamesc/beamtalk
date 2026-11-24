@@ -111,8 +111,8 @@ refuse(Key, What) ->
         What,
         <<" under key ">>,
         io_lib:format("~tp", [Key]),
-        <<": a process identity outlives its process. Store the registered name ">>,
-        <<"and look the process up instead.">>
+        <<": a process or actor reference (a registered one included) is refused. ">>,
+        <<"Store the registered name as a Symbol and look the process up instead.">>
     ]),
     beamtalk_error:raise(
         beamtalk_error:with_details(
