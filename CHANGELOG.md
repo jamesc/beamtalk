@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **New: `PersistentTerm` — a sealed stdlib helper for values that are expensive to build (BT-5146, ADR 0153 Phase 1).** Class-side `at:ifAbsentPut:`, `at:ifAbsent:`, `includesKey:` and `erase:` over `persistent_term`, stored under `{beamtalk_persistent_term, Key}`. There is no `at:put:`. A miss whose value is itself a pid, an actor or a class raises a `type_error`. `erase:` answers a Boolean and forces a global GC.
+
 - **Change: the workspace `port` file is parsed strictly by the CLI and the VS Code extension (BT-5112).** The port must be on the first line, ASCII digits only, 1-65535. Port `0`, `+4040`, a leading blank line, and whitespace before or after the port are now rejected by both, where the CLI and the extension used to disagree on them. The runtime never writes such a file, so only a hand-edited one is affected. The shared fixture `tests/conformance/port_file_conformance.json` now lists all of them as invalid cases. The LiveView CI workflow also runs when a file under `tests/conformance/` changes.
 
 - **Docs: REPL output samples match the REPL, the env-var check sees shell scripts, and the build trap and the deprecation decision are written down (BT-5113).**

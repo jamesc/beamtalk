@@ -69,9 +69,7 @@ sealed typed Object subclass: PersistentTerm
   /// PersistentTerm at: #doc_once ifAbsentPut: [42]   // => 42
   /// PersistentTerm at: #doc_once ifAbsentPut: [99]   // => 42
   /// ```
-  @expect type
   class at: key :: Object ifAbsentPut: block :: Block(Object) -> Object =>
-    @expect class_method_process_resource "reads and writes the node-global persistent_term store by design"
     (Erlang beamtalk_persistent_term) getOrPut: key block: block
 
   /// Answer the value stored under `key`, or the result of evaluating
@@ -81,9 +79,7 @@ sealed typed Object subclass: PersistentTerm
   /// ```beamtalk
   /// PersistentTerm at: #doc_nothing_here ifAbsent: [0]   // => 0
   /// ```
-  @expect type
   class at: key :: Object ifAbsent: block :: Block(Object) -> Object =>
-    @expect class_method_process_resource "reads the node-global persistent_term store by design"
     (Erlang beamtalk_persistent_term) getOrElse: key block: block
 
   /// Answer whether a value is stored under `key`. A stored `nil` counts.
@@ -92,9 +88,7 @@ sealed typed Object subclass: PersistentTerm
   /// ```beamtalk
   /// PersistentTerm includesKey: #doc_nothing_here   // => false
   /// ```
-  @expect type
   class includesKey: key :: Object -> Boolean =>
-    @expect class_method_process_resource "reads the node-global persistent_term store by design"
     (Erlang beamtalk_persistent_term) includesKey: key
 
   /// Remove the value stored under `key`. Answers `true` if a value was
@@ -105,7 +99,5 @@ sealed typed Object subclass: PersistentTerm
   /// ```beamtalk
   /// PersistentTerm erase: #doc_nothing_here   // => false
   /// ```
-  @expect type
   class erase: key :: Object -> Boolean =>
-    @expect class_method_process_resource "erases from the node-global persistent_term store by design"
     (Erlang beamtalk_persistent_term) erase: key
