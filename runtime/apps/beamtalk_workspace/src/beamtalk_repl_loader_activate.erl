@@ -138,6 +138,7 @@ activate_module(ModuleName, Classes, SourcePath, NewlyNonLeafSuperclasses) ->
     case register_class_module(ModuleName) of
         ok ->
             trigger_hot_reload(ModuleName, Classes),
+            warn_one_hop_gaps(Classes),
             beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
             beamtalk_workspace_meta:update_activity(),
             beamtalk_repl_loader_recheck:spawn_shape_recheck(Classes),
@@ -147,6 +148,21 @@ activate_module(ModuleName, Classes, SourcePath, NewlyNonLeafSuperclasses) ->
             %% class that did not register.
             Error
     end.
+
+%% BT-5060: name the extensions a just-(re)loaded class will not see, and the
+%% direct value subclasses of a just-(re)loaded class that will not see one of
+%% its extensions. They join this process's reply queue.
+-spec warn_one_hop_gaps([map()]) -> ok.
+warn_one_hop_gaps(Classes) ->
+    lists:foreach(
+        fun(ClassMap) ->
+            case resolve_class_name(ClassMap) of
+                undefined -> ok;
+                Name -> beamtalk_extensions:warn_one_hop_for_class(Name)
+            end
+        end,
+        Classes
+    ).
 
 -doc """
 Register a loaded module's classes by calling its `register_class/0`.

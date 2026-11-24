@@ -2272,3 +2272,94 @@ test_inherited_target_unregistered() ->
         [],
         ets:lookup(beamtalk_class_derived_cache, {inherited_target, 'Bt4280NoSuchClass', anything})
     ).
+
+%% BT-5060: a module's `register_class/0` (its on_load) files warnings under the
+%% load scope of the process that is loading it; the scope returns exactly those,
+%% deduplicated and in order. Anything filed outside such a hook, or outside a
+%% scope, is dropped.
+extension_warning_scope_test() ->
+    beamtalk_class_registry:ensure_class_warnings_table(),
+    ?assertEqual(ok, beamtalk_class_registry:record_extension_warning(<<"outside">>)),
+    {done, Warnings} = beamtalk_class_registry:with_extension_warning_scope(
+        ?MODULE, fun() -> run_register_class() end
+    ),
+    ?assertEqual([<<"first">>, <<"second">>], Warnings),
+    %% A different module's hook is not this scope's load: nothing is filed.
+    {done, []} = beamtalk_class_registry:with_extension_warning_scope(
+        'some_other_module', fun() -> run_register_class() end
+    ),
+    %% The scope is closed: a later hook files nothing.
+    {done, []} = beamtalk_class_registry:with_extension_warning_scope(
+        ?MODULE, fun() -> done end
+    ).
+
+%% A holder killed mid-load leaves its scope and warning rows behind; the next
+%% scope clears them and still collects.
+extension_warning_scope_survives_killed_holder_test() ->
+    beamtalk_class_registry:ensure_class_warnings_table(),
+    Self = self(),
+    Holder = spawn(fun() ->
+        beamtalk_class_registry:with_extension_warning_scope(?MODULE, fun() ->
+            Self ! {in_scope, self()},
+            receive
+                never -> ok
+            end
+        end)
+    end),
+    receive
+        {in_scope, Holder} -> ok
+    after 5000 -> ?assert(false)
+    end,
+    exit(Holder, kill),
+    {done, Warnings} = beamtalk_class_registry:with_extension_warning_scope(
+        ?MODULE, fun() -> run_register_class() end
+    ),
+    ?assertEqual([<<"first">>, <<"second">>], Warnings).
+
+%% Scopes of different modules do not block each other: a slow load of one
+%% module (here, one that never finishes) leaves another module's scope free.
+extension_warning_scope_does_not_block_other_modules_test() ->
+    beamtalk_class_registry:ensure_class_warnings_table(),
+    Self = self(),
+    Holder = spawn(fun() ->
+        beamtalk_class_registry:with_extension_warning_scope('slow_module_5060', fun() ->
+            Self ! {in_scope, self()},
+            receive
+                never -> ok
+            end
+        end)
+    end),
+    receive
+        {in_scope, Holder} -> ok
+    after 5000 -> ?assert(false)
+    end,
+    {done, Warnings} = beamtalk_class_registry:with_extension_warning_scope(
+        ?MODULE, fun() -> run_register_class() end
+    ),
+    exit(Holder, kill),
+    ?assertEqual([<<"first">>, <<"second">>], Warnings).
+
+run_register_class() ->
+    true = register(bt5060_scope_test, self()),
+    spawn_link(fun() -> register_class() end),
+    Result =
+        receive
+            registered -> done
+        after 5000 -> timeout
+        end,
+    true = unregister(bt5060_scope_test),
+    Result.
+
+%% Stands in for a generated module's on_load hook (the stack frame is what
+%% `record_extension_warning/1` recognises).
+register_class() ->
+    %% As `beamtalk_extensions:register/5` does on entry.
+    ok = beamtalk_class_registry:begin_registration(),
+    ok = beamtalk_class_registry:record_extension_warning(<<"first">>),
+    ok = beamtalk_class_registry:record_extension_warning(<<"second">>),
+    ok = beamtalk_class_registry:record_extension_warning(<<"first">>),
+    bt5060_scope_test ! registered,
+    ok.
+
+one_hop_parent_extensions_missing_unknown_class_test() ->
+    ?assertEqual([], beamtalk_dispatch:one_hop_parent_extensions_missing('NoSuchClass5060')).

@@ -79,6 +79,7 @@ itself.
     init/0,
     register/4,
     register/5,
+    warn_one_hop_for_class/1,
     unregister/2,
     unregister/3,
     with_shadow_lock/2,
@@ -223,6 +224,17 @@ register(Class, Selector, Fun, Owner, Source) when
     is_atom(Owner),
     (Source =:= undefined orelse is_binary(Source))
 ->
+    %% BT-5060: before anything deepens the stack (see `begin_registration/0`);
+    %% cleared again even if the registration raises.
+    ok = beamtalk_class_registry:begin_registration(),
+    try
+        do_register(Class, Selector, Fun, Owner, Source)
+    after
+        ok = beamtalk_class_registry:end_registration()
+    end.
+
+-spec do_register(atom(), atom(), function(), atom(), binary() | undefined) -> ok.
+do_register(Class, Selector, Fun, Owner, Source) ->
     Key = {Class, Selector},
     ok = validate_class_side_arity(Class, Selector, Fun),
     %% BT-4473: raised before the row can be seen, so a reader that misses
@@ -302,23 +314,92 @@ register(Class, Selector, Fun, Owner, Source) when
 %% registration.
 -spec warn_one_hop_children(atom(), atom()) -> ok.
 warn_one_hop_children(Class, Selector) ->
-    try beamtalk_dispatch:one_hop_children_missing_extension(Class, Selector) of
-        [] ->
-            ok;
-        Children ->
-            ?LOG_WARNING(
-                "Extension '~p' on '~p' replaces a compiled method, but its direct value "
-                "subclasses ~p still answer the compiled method: their sends will not see "
-                "the extension (BT-5060)",
-                [Selector, Class, Children],
-                #{domain => [beamtalk, runtime]}
-            ),
-            ok
+    guarded_warning(Selector, Class, fun() ->
+        case beamtalk_dispatch:one_hop_children_missing_extension(Class, Selector) of
+            [] -> ok;
+            Children -> emit_child_warning(Class, Selector, Children)
+        end
+    end).
+
+-doc """
+BT-5060: warn about every one-hop gap that involves `Class` as it stands now,
+in both directions: extensions on `Class` its direct value subclasses will not
+see, and extensions on its superclass `Class` will not see. Called when a class
+is loaded or hot-reloaded, so a subclass loaded after the extension, and the
+set after a reload of the owner, are named from the classes loaded at that
+moment (`register/5` only sees the children present at registration).
+""".
+-spec warn_one_hop_for_class(atom()) -> ok.
+warn_one_hop_for_class(Class) when is_atom(Class) ->
+    lists:foreach(
+        fun({Selector, _Owner}) -> warn_one_hop_children(Class, Selector) end,
+        list(Class)
+    ),
+    guarded_warning('<class load>', Class, fun() ->
+        lists:foreach(
+            fun({Selector, Super}) -> emit_parent_warning(Class, Selector, Super) end,
+            beamtalk_dispatch:one_hop_parent_extensions_missing(Class)
+        )
+    end).
+
+-spec emit_child_warning(atom(), atom(), [atom()]) -> ok.
+emit_child_warning(Class, Selector, Children) ->
+    ?LOG_WARNING(
+        "Extension '~p' on '~p' replaces a compiled method, but its direct value "
+        "subclasses ~p still answer the compiled method: their sends will not see "
+        "the extension (BT-5060)",
+        [Selector, Class, Children],
+        #{domain => [beamtalk, runtime]}
+    ),
+    note_reply_warning(
+        iolist_to_binary(
+            io_lib:format(
+                "Extension '~ts' on '~ts' replaces a compiled method, but its direct value "
+                "subclasses ~ts still answer the compiled method: their sends will not see "
+                "the extension (ADR 0066)",
+                [Selector, Class, lists:join(", ", [atom_to_list(C) || C <- Children])]
+            )
+        )
+    ).
+
+-spec emit_parent_warning(atom(), atom(), atom()) -> ok.
+emit_parent_warning(Class, Selector, Owner) ->
+    ?LOG_WARNING(
+        "Class '~p' will not see extension '~p' on its superclass '~p': a direct value "
+        "subclass still answers the compiled method (BT-5060)",
+        [Class, Selector, Owner],
+        #{domain => [beamtalk, runtime]}
+    ),
+    note_reply_warning(
+        iolist_to_binary(
+            io_lib:format(
+                "Class '~ts' will not see extension '~ts' on its superclass '~ts': a direct "
+                "value subclass still answers the compiled method (ADR 0066)",
+                [Class, Selector, Owner]
+            )
+        )
+    ).
+
+%% The warning goes to this process's reply queue when it is serving an
+%% operation (activation, a class-side call), else to the open load scope when
+%% this is a module's `on_load` (`register_class/0`).
+-spec note_reply_warning(binary()) -> ok.
+note_reply_warning(Text) ->
+    case beamtalk_refactor_support:collecting_warnings() of
+        true -> beamtalk_refactor_support:note_reply_warning(Text);
+        false -> beamtalk_class_registry:record_extension_warning(Text)
+    end.
+
+-spec guarded_warning(atom(), atom(), fun(() -> ok)) -> ok.
+guarded_warning(Selector, Class, Fun) ->
+    %% bt-catcher-audit: not-applicable-no-block - Fun is a runtime warning probe, never a Beamtalk block
+    try
+        Fun()
     catch
         Kind:Reason ->
-            %% The predicate tolerates missing tables itself (bootstrap answers
-            %% `[]`), so anything raised here is a bug: do not lose the warning
-            %% silently.
+            %% The predicates tolerate missing tables themselves (bootstrap
+            %% answers `[]`), so anything raised here is a bug: do not lose the
+            %% warning silently.
             ?LOG_WARNING(
                 "BT-5060 one-hop warning skipped for '~p' on '~p': ~p:~p",
                 [Selector, Class, Kind, Reason],
