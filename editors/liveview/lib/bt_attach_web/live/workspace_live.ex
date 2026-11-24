@@ -702,6 +702,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       domain: [:beamtalk, :liveview]
     )
 
+    # BT-5129: also drop every surface tied to the dead session (streams, queued
+    # evals) — a stale `eval_running` would hide Stop and wedge the queue.
+    socket =
+      if socket.assigns[:repl_seq], do: SessionLifecycle.reset_session_ui(socket), else: socket
+
     {:noreply, assign(socket, session_monitor: nil, workspace_lost: reason)}
   end
 

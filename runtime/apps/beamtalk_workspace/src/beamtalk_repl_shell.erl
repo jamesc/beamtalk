@@ -244,7 +244,7 @@ row. Re-attaching (a `resume`) within that period cancels the countdown.
 A cast, so a client that races a dying shell never crashes; ordering with a later
 `lifecycle_state/1` call from the same process is preserved.
 """.
--spec attach(pid(), pid()) -> ok | gone.
+-spec attach(pid(), pid()) -> ok | gone | timeout.
 attach(SessionPid, ClientPid) when is_pid(ClientPid) ->
     %% A call, not a cast (BT-5084): a shell whose idle timeout is already queued
     %% stops before it handles the attach, and the caller must learn that instead
@@ -252,6 +252,10 @@ attach(SessionPid, ClientPid) when is_pid(ClientPid) ->
     try
         gen_server:call(SessionPid, {attach, ClientPid}, 5000)
     catch
+        %% BT-5129: a busy shell that does not answer in time is still alive —
+        %% report that distinctly so the caller keeps resuming its live session
+        %% instead of discarding it as `gone`.
+        exit:{timeout, _} -> timeout;
         exit:_ -> gone
     end.
 
@@ -842,12 +846,22 @@ touch_unattached() ->
 -spec attach_client(pid()) -> ok.
 attach_client(ClientPid) ->
     #{clients := Clients} = lifecycle(),
-    Ref = erlang:monitor(process, ClientPid),
-    cancel_idle_timer(),
-    put(?LIFECYCLE_KEY, (lifecycle())#{
-        clients => Clients#{Ref => ClientPid}, ever_attached => true, deadline => undefined
-    }),
-    ok.
+    %% BT-5129: idempotent per client pid — a resume attaches from the
+    %% registry probe and again from `bind_session`, which used to leave two
+    %% monitors (and so two DOWNs) for one LiveView.
+    case lists:member(ClientPid, maps:values(Clients)) of
+        true ->
+            ok;
+        false ->
+            Ref = erlang:monitor(process, ClientPid),
+            cancel_idle_timer(),
+            put(?LIFECYCLE_KEY, (lifecycle())#{
+                clients => Clients#{Ref => ClientPid},
+                ever_attached => true,
+                deadline => undefined
+            }),
+            ok
+    end.
 
 -spec detach_client(reference()) -> ok.
 detach_client(Ref) ->

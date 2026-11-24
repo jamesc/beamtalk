@@ -589,7 +589,27 @@ defmodule BtAttachWeb.Live.Dock do
   defp reject_eval(socket, %{kind: :repl, expr: expr}, message),
     do: repl_append_error(socket, expr, message)
 
+  defp reject_eval(socket, %{kind: :fold, reject: reject}, message) when is_function(reject, 2),
+    do: reject.(socket, message)
+
   defp reject_eval(socket, _job, message), do: assign(socket, error: message)
+
+  @doc """
+  Run `code` in the session off the LiveView process and fold the raw
+  `Facade.dispatch(:eval, …)` result back with `fold.(socket, result)` on the
+  LiveView (BT-5129). The single off-process eval path for every non-dock site
+  (method editor, inspector pokes, class modals, git revert): it shares the
+  dock's serialisation, timeout-then-interrupt, Stop control and `DOWN` reset,
+  so a hung eval never freezes the tab and is stoppable from anywhere.
+
+  `reject` (optional, `(socket, message -> socket)`) renders a refusal when the
+  eval cannot start (workspace lost, queue full); the default shows the
+  message in the dock's error line.
+  """
+  def eval_async(socket, pid, code, fold, reject \\ nil) when is_function(fold, 2) do
+    job = %{kind: :fold, fold: fold, reject: reject}
+    start_eval(socket, job, pid, code)
+  end
 
   # Cap the backlog (BT-5108): each queued entry holds its source text, and a
   # stuck eval would otherwise let a runaway client grow the LiveView's heap
@@ -599,17 +619,31 @@ defmodule BtAttachWeb.Live.Dock do
   @doc false
   def max_eval_queue, do: @max_eval_queue
 
+  # ...and the queued source text too (BT-5129): 25 entries of a huge paste
+  # would still pin megabytes of heap.
+  @max_eval_queue_bytes 1_000_000
+
   defp enqueue_eval(socket, job, pid, code) do
     queue = Map.get(socket.assigns, :eval_queue, [])
+    queued_bytes = Enum.reduce(queue, 0, fn {_job, _pid, c}, acc -> acc + byte_size(c) end)
 
-    if length(queue) >= @max_eval_queue do
-      reject_eval(
-        socket,
-        job,
-        "Too many evaluations are waiting (#{@max_eval_queue}). Wait for the running one to finish or press Stop."
-      )
-    else
-      assign(socket, eval_queue: queue ++ [{job, pid, code}])
+    cond do
+      length(queue) >= @max_eval_queue ->
+        reject_eval(
+          socket,
+          job,
+          "Too many evaluations are waiting (#{@max_eval_queue}). Wait for the running one to finish or press Stop."
+        )
+
+      queued_bytes + byte_size(code) > @max_eval_queue_bytes ->
+        reject_eval(
+          socket,
+          job,
+          "The waiting evaluations are too large. Wait for the running one to finish or press Stop."
+        )
+
+      true ->
+        assign(socket, eval_queue: queue ++ [{job, pid, code}])
     end
   end
 
@@ -646,6 +680,8 @@ defmodule BtAttachWeb.Live.Dock do
 
   defp eval_timed_out?({:error, {:unreachable, :timeout}, _output, _warnings}), do: true
   defp eval_timed_out?(_result), do: false
+
+  defp fold_eval(socket, %{kind: :fold, fold: fold}, result), do: fold.(socket, result)
 
   defp fold_eval(socket, %{kind: :eval, action: action, expr: expr}, result) do
     case result do

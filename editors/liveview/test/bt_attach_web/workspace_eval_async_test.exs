@@ -225,4 +225,23 @@ defmodule BtAttachWeb.WorkspaceEvalAsyncTest do
       0 -> :ok
     end
   end
+
+  test "workspace DOWN clears the REPL stream and eval state", %{conn: conn} do
+    view = mount_cockpit(conn)
+
+    view |> form("#eval-form", %{"expr" => "1"}) |> render_submit()
+    assert_receive {:eval_started, _task}, 1_000
+    assert render(view) =~ ~s(id="eval-stop")
+
+    state = :sys.get_state(view.pid)
+    ref = state.socket.assigns.session_monitor
+    send(view.pid, {:DOWN, ref, :process, self(), :killed})
+
+    html = render(view)
+    refute html =~ ~s(id="eval-stop")
+    assigns = :sys.get_state(view.pid).socket.assigns
+    assert assigns.eval_queue == []
+    assert assigns.eval_running == false
+    assert assigns.repl_seq == 0
+  end
 end
