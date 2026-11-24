@@ -113,7 +113,7 @@ TestCase subclass: ActorIntrinsicDispatchTest
     a := self spawnPlain: Bt4995Recorder
     a onExit: [:reason | self.table at: #exitReason put: reason]
     err := [a stopThenRaise] on: Error do: [:e | e]
-    self deny: err isNil
+    self assert: (err isKindOf: Error)
     self assert: (self seen: #exitReason) equals: #requested
     self waitDead: a
 
@@ -292,13 +292,13 @@ TestCase subclass: ActorIntrinsicDispatchTest
   testMonitorFromAnotherProcessSeesTheStop =>
     a := self spawnPlain: Bt4995Plain
     ref := a monitor
-    self deny: ref isNil
+    self assert: ref class equals: Reference
     a stop
     self waitDead: a
 
   testPidAndIsAliveAreUnchanged =>
     a := self spawnPlain: Bt4995Plain
-    self deny: a pid isNil
+    self assert: a pid class equals: Pid
     self assert: a isAlive
     a stop
     self waitDead: a
