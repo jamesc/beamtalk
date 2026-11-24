@@ -435,7 +435,9 @@ TestCase subclass: LookupOrderMatrixTest
       self assert: ((warnings at: 1) includesSubstring: "s0") equals: true
       // Taking drains: a second take for the same operation is empty.
       self assert: (self queuedSince: since) equals: #()
-    ] ensure: [Erlang beamtalk_extensions unregister: #Bt5060ValueC0 selector: #s0]
+    ] ensure: [
+      Erlang beamtalk_extensions unregister: #Bt5060ValueC0 selector: #s0
+    ]
 
   testLoadingADirectChildAfterTheExtensionWarns =>
     before := Erlang erlang monotonic_time: #millisecond
@@ -455,7 +457,9 @@ TestCase subclass: LookupOrderMatrixTest
       self assert: ((warnings at: 1) includesSubstring: "Bt5060ValueC1") equals: true
       self assert: ((warnings at: 1) includesSubstring: "s0") equals: true
       self assert: ((warnings at: 1) includesSubstring: "Bt5060ValueC0") equals: true
-    ] ensure: [Erlang beamtalk_extensions unregister: #Bt5060ValueC0 selector: #s0]
+    ] ensure: [
+      Erlang beamtalk_extensions unregister: #Bt5060ValueC0 selector: #s0
+    ]
 
   testHotReloadOfTheOwnerRecomputesTheNamedSet =>
     since := Erlang erlang monotonic_time: #millisecond
@@ -482,10 +486,11 @@ TestCase subclass: LookupOrderMatrixTest
       mark2 := Erlang erlang monotonic_time: #millisecond
       Erlang beamtalk_extensions warn_one_hop_for_class: #Bt5060ValueC0
       self assert: (self queuedSince: mark2) equals: #()
-    ] ensure: [
-      Erlang beamtalk_extensions unregister: #Bt5060ValueC1 selector: #s0
-      Erlang beamtalk_extensions unregister: #Bt5060ValueC0 selector: #s0
     ]
+      ensure: [
+        Erlang beamtalk_extensions unregister: #Bt5060ValueC1 selector: #s0
+        Erlang beamtalk_extensions unregister: #Bt5060ValueC0 selector: #s0
+      ]
 
   testNoWarningWhenNothingIsSkipped =>
     since := Erlang erlang monotonic_time: #millisecond
