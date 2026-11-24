@@ -545,3 +545,195 @@ async fn reload_publish_for_a_document_closed_meanwhile_is_dropped() {
     publish.await;
     assert!(!saw_publish_for(&mut feed, &uri, Duration::from_millis(300)).await);
 }
+
+/// BT-5131: a panic mid-preload (caught by `guard_notification`) must not
+/// leave `preload_in_progress` set, or diagnostics stay off all session.
+#[tokio::test]
+async fn panic_during_preload_clears_the_flag_and_diagnostics_publish_after() {
+    let root = unique_temp_dir("bt-5131-preload-panic");
+    fs::create_dir_all(root.join("src")).expect("src");
+    let a = root.join("src").join("a.bt");
+    let a_src = "Object subclass: Foo\n  go => 1\n";
+    fs::write(&a, a_src).expect("a");
+    let a_uri = Url::from_file_path(&a).expect("uri");
+
+    let (service, mut feed) = service_with_publish_feed(&root).await;
+    let backend: &Backend = service.inner();
+
+    guard_notification("test/preload-panic", async {
+        let _guard = crate::server::core::PreloadGuard::begin(&backend.service);
+        assert!(backend.service.lock_recover().is_preload_in_progress());
+        panic!("injected preload panic");
+    })
+    .await;
+    assert!(
+        !backend.service.lock_recover().is_preload_in_progress(),
+        "unwind must clear the preload flag"
+    );
+
+    real_did_open(backend, a_uri.clone(), a_src).await;
+    assert!(
+        saw_publish_for(&mut feed, &a_uri, Duration::from_secs(2)).await,
+        "diagnostics must publish after a caught preload panic"
+    );
+}
+
+/// Drains the opens' own publishes so a later assertion sees only new ones.
+async fn open_two(
+    backend: &Backend,
+    feed: &mut tokio::sync::mpsc::UnboundedReceiver<tower_lsp::jsonrpc::Request>,
+    (a_uri, a_src): (&Url, &str),
+    (b_uri, b_src): (&Url, &str),
+) {
+    real_did_open(backend, a_uri.clone(), a_src).await;
+    real_did_open(backend, b_uri.clone(), b_src).await;
+    // sleep: let the feed task forward the opens' own publishes before draining.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    while feed.try_recv().is_ok() {}
+}
+
+/// BT-5131: closing a buffer whose unsaved edits changed its interface
+/// reverts the index to disk, which must re-check the other open files.
+#[tokio::test]
+async fn did_close_that_reverts_the_interface_republishes_other_open_files() {
+    let root = unique_temp_dir("bt-5131-close");
+    fs::create_dir_all(root.join("src")).expect("src");
+    let a = root.join("src").join("a.bt");
+    let b = root.join("src").join("b.bt");
+    let a_disk = "Object subclass: Foo\n  go => 1\n";
+    let b_src = "Object subclass: User\n\n  make => Foo new go\n";
+    fs::write(&a, a_disk).expect("a");
+    fs::write(&b, b_src).expect("b");
+    let (a_uri, b_uri) = (
+        Url::from_file_path(&a).expect("uri"),
+        Url::from_file_path(&b).expect("uri"),
+    );
+    let (service, mut feed) = service_with_publish_feed(&root).await;
+    let backend: &Backend = service.inner();
+    open_two(backend, &mut feed, (&a_uri, a_disk), (&b_uri, b_src)).await;
+
+    // Unsaved edit adds a method; b is re-checked for that (drained below).
+    backend
+        .did_change(replace_text(
+            &a_uri,
+            2,
+            "Object subclass: Foo\n  go => 1\n  stop => 2\n",
+        ))
+        .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    while feed.try_recv().is_ok() {}
+
+    backend
+        .did_close(tower_lsp::lsp_types::DidCloseTextDocumentParams {
+            text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri: a_uri.clone() },
+        })
+        .await;
+    assert!(
+        saw_publish_for(&mut feed, &b_uri, Duration::from_secs(2)).await,
+        "reverting a.bt to disk must re-check b.bt"
+    );
+}
+
+/// BT-5131: opening a buffer that differs from the indexed (preloaded) text
+/// in its interface re-checks the other open files.
+#[tokio::test]
+async fn did_open_that_changes_the_interface_republishes_other_open_files() {
+    let root = unique_temp_dir("bt-5131-open");
+    fs::create_dir_all(root.join("src")).expect("src");
+    let a = root.join("src").join("a.bt");
+    let b = root.join("src").join("b.bt");
+    let a_disk = "Object subclass: Foo\n  go => 1\n";
+    let b_src = "Object subclass: User\n\n  make => Foo new go\n";
+    fs::write(&a, a_disk).expect("a");
+    fs::write(&b, b_src).expect("b");
+    let (a_uri, b_uri) = (
+        Url::from_file_path(&a).expect("uri"),
+        Url::from_file_path(&b).expect("uri"),
+    );
+    let (service, mut feed) = service_with_publish_feed(&root).await;
+    let backend: &Backend = service.inner();
+    // As preload would have.
+    backend.service.lock_recover().update_file(
+        Utf8PathBuf::from_path_buf(a.clone()).expect("utf8"),
+        a_disk.to_string(),
+    );
+    real_did_open(backend, b_uri.clone(), b_src).await;
+    // sleep: let the feed task forward the open's own publish before draining.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    while feed.try_recv().is_ok() {}
+
+    real_did_open(
+        backend,
+        a_uri.clone(),
+        "Object subclass: Foo\n  go => 1\n  stop => 2\n",
+    )
+    .await;
+    assert!(
+        saw_publish_for(&mut feed, &b_uri, Duration::from_secs(2)).await,
+        "opening a differing buffer must re-check b.bt"
+    );
+}
+
+/// BT-5131: an unreadable (here non-UTF-8) file keeps its indexed copy
+/// instead of being removed.
+#[tokio::test]
+async fn watched_read_error_keeps_the_indexed_file() {
+    let (service, root) = rooted_backend("bt-5131-readerr");
+    let backend: &Backend = service.inner();
+    let path = root.join("src").join("a.bt");
+    fs::write(&path, [0xff, 0xfe, 0xfd]).expect("write non-utf8");
+    backend
+        .service
+        .lock_recover()
+        .update_file(path.clone(), "Object subclass: Foo\n".to_string());
+    let uri = Url::from_file_path(&path).expect("uri");
+    backend
+        .did_change_watched_files(watched(&uri, FileChangeType::CHANGED))
+        .await;
+    assert_eq!(
+        backend.service.lock_recover().file_source(&path).as_deref(),
+        Some("Object subclass: Foo\n"),
+        "a read error must not evict the indexed file"
+    );
+}
+
+/// BT-5131: a directory renamed into place gets no per-file create events;
+/// its `.bt` files are indexed from the directory's create event.
+#[tokio::test]
+async fn watched_created_directory_indexes_its_files() {
+    let (service, root) = rooted_backend("bt-5131-dir-create");
+    let backend: &Backend = service.inner();
+    let sub = root.join("src").join("moved");
+    fs::create_dir_all(sub.join("deep")).expect("sub");
+    let (f1, f2) = (sub.join("one.bt"), sub.join("deep").join("two.bt"));
+    fs::write(&f1, "Object subclass: One\n").expect("one");
+    fs::write(&f2, "Object subclass: Two\n").expect("two");
+    let uri = Url::from_file_path(&sub).expect("uri");
+    backend
+        .did_change_watched_files(watched(&uri, FileChangeType::CREATED))
+        .await;
+    let svc = backend.service.lock_recover();
+    assert!(
+        svc.file_source(&f1).is_some(),
+        "file in renamed dir indexed"
+    );
+    assert!(svc.file_source(&f2).is_some(), "nested file indexed");
+}
+
+/// BT-5131: a guard that already finished must not clear a later load's flag
+/// when it drops (it can outlive `root_load_lock`).
+#[tokio::test]
+async fn finished_preload_guard_does_not_clear_a_later_loads_flag() {
+    let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+    let backend: &Backend = service.inner();
+    let mut first = crate::server::core::PreloadGuard::begin(&backend.service);
+    first.finish();
+    let second = crate::server::core::PreloadGuard::begin(&backend.service);
+    drop(first);
+    assert!(
+        backend.service.lock_recover().is_preload_in_progress(),
+        "dropping a finished guard must leave the second load's flag set"
+    );
+    drop(second);
+    assert!(!backend.service.lock_recover().is_preload_in_progress());
+}
