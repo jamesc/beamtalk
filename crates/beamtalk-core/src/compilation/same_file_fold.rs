@@ -112,6 +112,22 @@ pub fn reject_cross_file_extensions(module: &Module) -> Vec<Diagnostic> {
                 None => def.class_name.name.to_string(),
             };
             let side = if def.is_class_method { " class" } else { "" };
+            if module
+                .protocols
+                .iter()
+                .any(|p| p.name.name == def.class_name.name)
+            {
+                return Diagnostic::error(
+                    format!(
+                        "`{target}{side} >> {}` cannot add a method to protocol {target} from \
+                         outside its definition (ADR 0152)",
+                        def.method.selector.name(),
+                    ),
+                    def.method.head_span(),
+                )
+                .with_hint("Put the provided method in the `Protocol define:` body.".to_string())
+                .with_category(DiagnosticCategory::Type);
+            }
             Diagnostic::error(
                 format!(
                     "`{target}{side} >> {}` adds a method to {target}, which is not defined in \
@@ -196,6 +212,11 @@ mod tests {
         assert!(fold_same_file_extensions(&mut m).is_empty());
         let diags = reject_cross_file_extensions(&m);
         assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(diags[0].message.contains("protocol P"), "{diags:?}");
+        assert!(
+            !diags[0].message.contains("not defined in this file"),
+            "{diags:?}"
+        );
     }
 
     #[test]
