@@ -1073,6 +1073,8 @@ just web <name>   # Start the LiveView IDE, connecting to workspace <name>
 - **System Browser backend** — browse ops (`browse-classes`, `browse-protocols`, `browse-method-source`, `browse-class-definition`, `browse-native-source`, `browse-native-modules`, `browse-type-aliases`, `browse-alias-source`, `browse-categories`) through `beamtalk_repl_ops` — pure reflection, Observer-grantable `:read` capability (ADR 0096)
 - **Per-tab session isolation** — each browser tab gets its own workspace-supervised session via a per-tab `sessionStorage` token; bindings and loaded classes persist across evals
 - **Session resume** — reconnecting tabs (LiveView reconnect, page reload) resume their existing session within a grace window instead of starting fresh
+- **Logout and session revocation** — when an auth gate (OIDC / dev-auth) is active the top bar shows a "Log out" button. Logging out revokes the session server-side, so a copied cookie stops working immediately (revocations are ETS-tracked and swept after the session TTL)
+- **Eval queue cap** — at most 25 evaluations may be queued per tab; a 26th is refused with a visible error
 - **Hot-reload coherence** — a method saved in one tab is immediately visible to evals in all tabs (inherent to the shared workspace node in the Attach topology)
 
 **Packaging:** The IDE ships on its own release lane (separate from the `beamtalk` toolchain bundle). Three installation paths:

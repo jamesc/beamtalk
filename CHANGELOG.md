@@ -14,6 +14,18 @@
   - Fixed: `path_inside` (MCP project-root confinement and the workspace's other "is this file under that directory?" checks) compares path components case-insensitively on Windows. Windows reports a link target in its own spelling (`c:/Users/...`), so a root reached through a symlink used to refuse a file inside it whenever the case differed, the drive letter included. It failed safe: nothing outside the root got through. Other systems still compare case-sensitively.
   - Not changed: 8.3 short names (`RUNNER~1`) are not expanded. A root written with one does not contain a path reached through a link, which Windows reports with the long name.
 
+- **Fix: `Protocol define:` with `extending: Comparable` (or another stdlib protocol) no longer fails with "extends unknown protocol" (BT-5111).** Class-side extension methods now carry the extension's static signature instead of the compiled method's; removed the unused `SystemNavigation >> indexedSenderRecordsFrom:into:`.
+- **Fix: release and build packaging (BT-5107).**
+  - A dependency whose `beamtalk.lock` entry pins an `http://` or `git://` URL now fails to resolve unless `BEAMTALK_ALLOW_INSECURE_GIT=1` is set (was: warn only).
+  - A failed `beamtalk release` restores the previous tarball and release directory, including on panic.
+  - The project-root `priv/` directory is included in staged release apps.
+  - Port-file staging temp files are cleaned up on failure.
+- **LiveView IDE: logout, session revocation and eval queue cap (BT-5108).**
+  - A "Log out" button appears in the top bar when an auth gate (OIDC / dev-auth) is active.
+  - Logging out revokes the session server-side (ETS-tracked, swept after TTL), so a copied cookie is invalidated immediately.
+  - A 26th queued eval per tab is refused with an error message.
+  - MCP `PathPolicy` now canonicalises Windows `\\?\` verbatim paths so the prefix cannot bypass `starts_with` checks.
+- **LSP: recheck on member-level changes, directory deletes (BT-5109).** Adding, removing or changing a method's signature now triggers a cross-file recheck; body-only edits do not. Deleting a directory drops its indexed files from the project index. The reload-check and seed publishes are ordered against `did_close`.
 - **Runtime follow-ups to the hot reload, ChangeLog and class monitor fixes (BT-5110).**
   - Fixed: a hot reload no longer reports an actor as suspended when it is not. A change whose retries ran out (overlapping reloads kept resuming the actor) or that timed out is left out of the `instances_suspended` finding and logged as what it is. Only a migration that returned an error counts. A dead actor is not reported; a crashed reload worker is, since it may leave the actor suspended.
   - Known: a wedged actor (one that never reads its mailbox) holds one parked reload worker, and one queued suspend, per reload until it recovers or dies.
