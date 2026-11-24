@@ -32,8 +32,6 @@ concurrency:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -116,6 +114,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Only the deploy job publishes (BT-5137).
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

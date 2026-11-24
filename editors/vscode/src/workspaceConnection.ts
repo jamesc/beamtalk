@@ -53,11 +53,14 @@ function formatLogEntry(entry: LogEntry): string {
 
 // ─── Auto-connect via port file watcher ──────────────────────────────────────
 
+const MAX_CONNECT_RETRIES = 3;
+const CONNECT_RETRY_MS = 500;
+
 /**
  * Connect the WorkspaceClient to the workspace identified by `workspaceId`.
  * Disposes any existing connection first.
  */
-function connectWorkspace(workspaceId: string): void {
+function connectWorkspace(workspaceId: string, attempt = 0): void {
   // Always dispose the previous connection — even if the workspace ID matches,
   // the port number may have changed (workspace restart overwrites the port file).
   if (state.workspaceWsClient) {
@@ -76,6 +79,15 @@ function connectWorkspace(workspaceId: string): void {
     state.outputChannel?.warn(
       `Failed to create WorkspaceClient for workspace ${workspaceId}: ${msg}`
     );
+    // node.info is written separately from the port file and may lag a restart
+    // or be mid-write; retry briefly (BT-5130). A later node.info change also
+    // re-arms via the watcher.
+    if (attempt < MAX_CONNECT_RETRIES) {
+      state.portDebounceTimer = setTimeout(() => {
+        state.portDebounceTimer = null;
+        connectWorkspace(workspaceId, attempt + 1);
+      }, CONNECT_RETRY_MS);
+    }
     return;
   }
 
@@ -104,6 +116,10 @@ function connectWorkspace(workspaceId: string): void {
 
   // Subscribe to log streaming once connected (BT-1433).
   newClient.onConnectionChange((connectionState) => {
+    if (connectionState === "reconnecting") {
+      // A same-client reconnect may land on a restarted node: its actors are gone.
+      InspectorPanel.closeActorPanels();
+    }
     if (connectionState === "connected") {
       const config = vscode.workspace.getConfiguration("beamtalk");
       const level = config.get<string>("logs.level", "warning");
@@ -173,6 +189,16 @@ export async function handlePortFileAppeared(portUri: vscode.Uri): Promise<void>
     return;
   }
 
+  // node.info changes only matter when we have no live client for this
+  // workspace (a stale node.info after a crash: re-arm once it is rewritten);
+  // never tear down a healthy connection because node.info was touched.
+  if (
+    path.basename(portUri.fsPath) === "node.info" &&
+    state.workspaceWsClient?.id === workspaceId
+  ) {
+    return;
+  }
+
   // Debounce: wait briefly for the cookie file to be written before reading.
   if (state.portDebounceTimer !== null) {
     clearTimeout(state.portDebounceTimer);
@@ -185,6 +211,9 @@ export async function handlePortFileAppeared(portUri: vscode.Uri): Promise<void>
 
 /** Called when a port file is removed (workspace stopped or timed out). */
 function handlePortFileRemoved(portUri: vscode.Uri): void {
+  if (path.basename(portUri.fsPath) !== "port") {
+    return; // node.info removal alone does not mean the workspace stopped
+  }
   const workspaceId = path.basename(path.dirname(portUri.fsPath));
   if (state.workspaceWsClient?.id !== workspaceId) {
     return;
@@ -216,7 +245,7 @@ export function setupAutoConnect(context: vscode.ExtensionContext): void {
     return;
   }
 
-  const pattern = new vscode.RelativePattern(vscode.Uri.file(workspacesDir), "*/port");
+  const pattern = new vscode.RelativePattern(vscode.Uri.file(workspacesDir), "*/{port,node.info}");
   const watcher = vscode.workspace.createFileSystemWatcher(pattern);
   context.subscriptions.push(watcher);
 

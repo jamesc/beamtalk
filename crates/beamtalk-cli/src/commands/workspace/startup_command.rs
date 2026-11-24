@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::commands::util::to_forward_slash;
+use crate::commands::cookie_env;
 
 use beamtalk_cli::repl_startup::{BeamPaths, beam_pa_args, pa_args};
 
@@ -22,28 +22,6 @@ use std::os::windows::process::CommandExt;
 
 #[cfg(unix)]
 use std::os::unix::process::CommandExt as _;
-
-use miette::{Result, miette};
-
-/// Write an Erlang args file containing the cookie for secure distribution.
-///
-/// Uses `-args_file` instead of `-setcookie` on the command line to prevent
-/// the cookie from being visible in `ps aux` / `/proc/{pid}/cmdline`.
-/// The file is created with mode 0600 on Unix for owner-only access.
-pub(super) fn write_cookie_args_file(workspace_id: &str, cookie: &str) -> Result<PathBuf> {
-    let args_file_path = super::storage::workspace_dir(workspace_id)?.join("vm.args");
-    let content = format!("-setcookie {cookie}\n");
-    super::storage::write_private_atomic(&args_file_path, content.as_bytes())
-        .map_err(|e| miette!("Failed to write cookie args file: {e}"))?;
-    Ok(args_file_path)
-}
-
-/// Convert a Windows path to Unix-style forward slashes for Erlang.
-///
-/// Erlang on Windows expects forward slashes in `-pa` arguments, not backslashes.
-pub(super) fn path_to_erlang_arg(path: &Path) -> String {
-    to_forward_slash(&path.to_string_lossy())
-}
 
 /// Build a `Command` for starting a detached BEAM workspace node.
 ///
@@ -54,14 +32,17 @@ pub(super) fn path_to_erlang_arg(path: &Path) -> String {
 ///
 /// - **Environment allowlist**: `env_clear()` prevents leaking sensitive env vars
 ///   (`AWS_*`, `DATABASE_URL`, `SSH_AUTH_SOCK`, etc.) to the BEAM node.
-/// - **Cookie via args file**: Uses `-args_file` instead of `-setcookie` so the
-///   cookie is not visible in `ps aux` / `/proc/{pid}/cmdline`.
+/// - **Cookie via the environment** (BT-5126): `-setcookie`, `ERL_AFLAGS` and
+///   `-args_file` all expand into the emulator's argv, so the cookie travels
+///   in `BEAMTALK_ERL_COOKIE` (owner-only `/proc/<pid>/environ`) and the node
+///   adopts it on boot; argv carries only a random placeholder. See
+///   `commands::cookie_env`.
 /// - **Umask**: Set to 0077 on Unix so workspace files are owner-only.
 /// - **setsid**: Creates a new session on Unix for proper daemon detachment.
 #[allow(clippy::too_many_lines)] // BEAM node command construction is necessarily verbose
 pub(super) fn build_detached_node_command(
     node_name: &str,
-    cookie_args_file: &Path,
+    cookie: &str,
     beam_paths: &BeamPaths,
     extra_code_paths: &[PathBuf],
     eval_cmd: &str,
@@ -80,7 +61,7 @@ pub(super) fn build_detached_node_command(
         ("-sname", node_name.to_string())
     };
 
-    // Build the initial (non-path) args: detach flags, node name, cookie file.
+    // Build the initial (non-path) args: detach flags, node name.
     let initial_args = vec![
         // On Windows, don't use -detached - it doesn't work reliably from Rust spawn
         // Instead, we'll use CREATE_NO_WINDOW flag to prevent console popup
@@ -89,9 +70,6 @@ pub(super) fn build_detached_node_command(
         "-noshell".to_string(),
         node_flag.to_string(),
         node_arg,
-        // Cookie via args file instead of -setcookie (not visible in ps)
-        "-args_file".to_string(),
-        path_to_erlang_arg(cookie_args_file),
     ];
 
     let mut cmd = Command::new("erl");
@@ -99,23 +77,27 @@ pub(super) fn build_detached_node_command(
     // Add initial args, then BEAM code paths via the canonical beam_pa_args helper
     // (same ordering as the foreground REPL startup).
     cmd.args(&initial_args)
+        // Throwaway `-setcookie`: the real cookie is adopted from the
+        // environment by the first `-eval` below (BT-5126).
+        .args(cookie_env::placeholder_args())
         .args(beamtalk_workspace::loopback_dist_args())
         .args(beam_pa_args(beam_paths));
 
     // Add extra code paths (e.g. package ebin from auto-compile)
     cmd.args(pa_args(extra_code_paths));
 
-    cmd.arg("-eval").arg(eval_cmd);
+    cmd.arg("-eval").arg(cookie_env::adopt_then(eval_cmd));
 
     // Security: clear inherited environment, then allowlist only required vars.
     // Prevents leaking AWS_*, DATABASE_URL, SSH_AUTH_SOCK, etc.
     cmd.env_clear();
+    cookie_env::hand_over(&mut cmd, cookie);
 
     // Erlang needs PATH to find epmd and other tools
     if let Ok(path) = std::env::var("PATH") {
         cmd.env("PATH", path);
     }
-    // HOME is needed for Erlang's ~/.erlang.cookie fallback and epmd
+    // HOME is needed by epmd and Erlang's home-relative lookups
     if let Ok(home) = std::env::var("HOME") {
         cmd.env("HOME", home);
     }
@@ -220,60 +202,12 @@ pub(super) fn build_detached_node_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::test_support::WorkspaceFixture;
+    use crate::commands::util::to_forward_slash;
     use std::ffi::OsStr;
-
-    // --- write_cookie_args_file ---
-
-    #[test]
-    fn write_cookie_args_file_writes_setcookie_line() {
-        let fixture = WorkspaceFixture::new("startup-cmd-cookie-args", 0, 1);
-        let path = write_cookie_args_file(&fixture.id, "my-secret-cookie").unwrap();
-
-        assert_eq!(path.file_name().unwrap(), OsStr::new("vm.args"));
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "-setcookie my-secret-cookie\n");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn write_cookie_args_file_is_owner_only_on_unix() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let fixture = WorkspaceFixture::new("startup-cmd-cookie-perms", 0, 1);
-        let path = write_cookie_args_file(&fixture.id, "cookie").unwrap();
-
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "cookie args file must be owner-only");
-    }
-
-    #[test]
-    fn write_cookie_args_file_errors_for_unknown_workspace() {
-        // No such workspace directory exists to write `vm.args` into, so the
-        // underlying `write_private_atomic` open() must fail rather than
-        // silently creating the missing parent directory.
-        let _guard = crate::commands::test_support::real_home_guard();
-        let result = write_cookie_args_file("__bt3401_nonexistent_ws__", "cookie");
-        assert!(result.is_err());
-    }
-
-    // --- path_to_erlang_arg ---
-
-    #[test]
-    fn path_to_erlang_arg_passes_through_on_unix() {
-        // On non-Windows, this is a plain lossy-to-string conversion — no
-        // separator rewriting.
-        #[cfg(not(windows))]
-        {
-            let path = Path::new("/some/nested/path");
-            assert_eq!(path_to_erlang_arg(path), "/some/nested/path");
-        }
-    }
 
     /// Helper: build a test command and return its env vars and args.
     fn build_test_command() -> Command {
         let tmp = std::env::temp_dir();
-        let cookie_file = tmp.join("test_cookie_args");
         let beam_dir = tmp.join("test_beam");
         let paths = beamtalk_cli::repl_startup::BeamPaths {
             runtime_ebin: beam_dir.clone(),
@@ -289,7 +223,7 @@ mod tests {
         };
         build_detached_node_command(
             "test_node@localhost",
-            &cookie_file,
+            "test-cookie",
             &paths,
             &[],
             "ok.",
@@ -364,16 +298,31 @@ mod tests {
             "must include -eval arg"
         );
         assert!(
-            args.contains(&OsStr::new("ok.")),
-            "must include the eval command"
+            args.contains(&OsStr::new("beamtalk_ws_cookie:adopt_env_cookie(), ok.")),
+            "must include the eval command, prefixed by the cookie adoption"
         );
+    }
+
+    /// BT-5126: the cookie is in the child's environment and nowhere in argv.
+    #[test]
+    fn test_build_command_hands_cookie_over_in_env_not_argv() {
+        let cmd = build_test_command();
+        assert!(
+            cmd.get_args()
+                .all(|a| !a.to_string_lossy().contains("test-cookie")),
+            "the cookie must not appear in argv"
+        );
+        let env = cmd
+            .get_envs()
+            .find(|(k, _)| *k == OsStr::new(cookie_env::COOKIE_ENV))
+            .and_then(|(_, v)| v);
+        assert_eq!(env, Some(OsStr::new("test-cookie")));
     }
 
     // --- node_flag / node_arg selection ---
 
     fn build_with_node_name(node_name: &str) -> Command {
         let tmp = std::env::temp_dir();
-        let cookie_file = tmp.join("test_cookie_args");
         let beam_dir = tmp.join("test_beam");
         let paths = beamtalk_cli::repl_startup::BeamPaths {
             runtime_ebin: beam_dir.clone(),
@@ -387,7 +336,7 @@ mod tests {
             stdlib_ebin: beam_dir.clone(),
             stdlib_erlang_ebin: beam_dir,
         };
-        build_detached_node_command(node_name, &cookie_file, &paths, &[], "ok.", &tmp)
+        build_detached_node_command(node_name, "test-cookie", &paths, &[], "ok.", &tmp)
     }
 
     #[test]
@@ -442,7 +391,6 @@ mod tests {
     #[test]
     fn extra_code_paths_are_each_appended_as_a_pa_flag() {
         let tmp = std::env::temp_dir();
-        let cookie_file = tmp.join("test_cookie_args");
         let beam_dir = tmp.join("test_beam");
         let paths = beamtalk_cli::repl_startup::BeamPaths {
             runtime_ebin: beam_dir.clone(),
@@ -459,7 +407,7 @@ mod tests {
         let extra = vec![tmp.join("extra1"), tmp.join("extra2")];
         let cmd = build_detached_node_command(
             "node@localhost",
-            &cookie_file,
+            "test-cookie",
             &paths,
             &extra,
             "ok.",
@@ -467,8 +415,8 @@ mod tests {
         );
         let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy()).collect();
 
-        let extra1 = path_to_erlang_arg(&tmp.join("extra1"));
-        let extra2 = path_to_erlang_arg(&tmp.join("extra2"));
+        let extra1 = to_forward_slash(&tmp.join("extra1").to_string_lossy());
+        let extra2 = to_forward_slash(&tmp.join("extra2").to_string_lossy());
         let pa_positions: Vec<usize> = args
             .iter()
             .enumerate()

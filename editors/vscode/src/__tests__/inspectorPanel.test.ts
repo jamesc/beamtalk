@@ -44,7 +44,35 @@ function fakeClient(value: unknown): WorkspaceClient {
   return {
     bindingValue: vi.fn().mockResolvedValue(value),
     inspect: vi.fn().mockResolvedValue({}),
+    state: "connected",
+    onConnectionChange: () => () => {},
   } as unknown as WorkspaceClient;
+}
+
+/** A client that is still connecting when handed to `setClient` (BT-5130). */
+function connectingClient(value: unknown) {
+  const handlers: Array<(s: string) => void> = [];
+  const bindingValue = vi.fn().mockImplementation(async () => {
+    if (client.state !== "connected") throw new Error("Not connected to workspace");
+    return value;
+  });
+  const client = {
+    bindingValue,
+    inspect: vi.fn(),
+    state: "reconnecting",
+    onConnectionChange: (h: (s: string) => void) => {
+      handlers.push(h);
+      return () => handlers.splice(handlers.indexOf(h), 1);
+    },
+  } as unknown as WorkspaceClient & { state: string };
+  return {
+    client,
+    bindingValue,
+    connect: () => {
+      client.state = "connected";
+      for (const h of [...handlers]) h("connected");
+    },
+  };
 }
 
 const flush = async () => {
@@ -86,5 +114,54 @@ describe("InspectorPanel.setClient (BT-5082)", () => {
     InspectorPanel.show(a, { kind: "actor", info: { pid: "<0.2.0>", class: "Foo" } });
     InspectorPanel.setClient(a);
     expect(panels[0].disposed).toBe(false);
+  });
+});
+
+describe("InspectorPanel reconnect (BT-5130)", () => {
+  beforeEach(() => {
+    InspectorPanel.disposeAll();
+    panels.length = 0;
+  });
+
+  it("does not fetch until the new client connects, then refetches", async () => {
+    InspectorPanel.show(fakeClient("old"), {
+      kind: "binding",
+      name: "x",
+      value: "",
+      sessionId: "s1",
+    });
+    await flush();
+    const next = connectingClient("fresh");
+    InspectorPanel.setClient(next.client);
+    await flush();
+    expect(next.bindingValue).not.toHaveBeenCalled();
+    expect(JSON.stringify(panels[0].posted)).not.toContain("Not connected");
+
+    next.connect();
+    await flush();
+    expect(next.bindingValue).toHaveBeenCalledWith("s1", "x");
+    expect(JSON.stringify(panels[0].posted)).toContain("fresh");
+  });
+
+  it("shows a session-ended state when the session is gone after a reconnect", async () => {
+    InspectorPanel.show(fakeClient("old"), {
+      kind: "binding",
+      name: "x",
+      value: "",
+      sessionId: "gone",
+    });
+    await flush();
+    const next = connectingClient("unused");
+    next.bindingValue.mockRejectedValue(new Error("no such session"));
+    InspectorPanel.setClient(next.client);
+    next.connect();
+    await flush();
+    expect(JSON.stringify(panels[0].posted)).toContain("Session ended");
+  });
+
+  it("closes actor panels on closeActorPanels", () => {
+    InspectorPanel.show(fakeClient(1), { kind: "actor", info: { pid: "<0.9.0>", class: "Foo" } });
+    InspectorPanel.closeActorPanels();
+    expect(panels[0].disposed).toBe(true);
   });
 });
