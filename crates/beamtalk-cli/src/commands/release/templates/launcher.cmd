@@ -65,9 +65,9 @@ if defined RELEASE_NODE (
     )
 )
 
-rem BT-5077: reject a RELEASE_COOKIE that erl would split or mis-parse inside
-rem ERL_AFLAGS (see :export_cookie below), exactly as launcher.sh's
-rem `export_cookie` does for whitespace, quotes and backslashes. Delayed
+rem BT-5077: reject a RELEASE_COOKIE containing whitespace, quotes or
+rem backslashes (see :export_cookie below), exactly as launcher.sh's
+rem `export_cookie` does. Delayed
 rem expansion only, for the same reason as the RELEASE_NODE check above: the
 rem value is never expanded where cmd.exe tokenizes operators. Each
 rem character is stripped with a substitution and the result compared with
@@ -186,15 +186,16 @@ for /d %%D in ("%ROOT%\lib\*") do (
 exit /b 0
 
 :export_cookie
-rem BT-5067: pass the cookie via ERL_AFLAGS (process environment), never as
-rem `-setcookie` on the command line, which other local users can read from
-rem the process list. See launcher.sh's `export_cookie`.
+rem BT-5126: pass the cookie through the process environment, never argv.
+rem `-setcookie`, ERL_AFLAGS and -args_file all expand into the emulator's
+rem command line, which other local users can read from the process list.
+rem erl gets a random throwaway -setcookie (so OTP never touches
+rem %USERPROFILE%\.erlang.cookie) and the node adopts the real cookie from
+rem __COOKIE_ENV__ on boot. See launcher.sh's `export_cookie`.
+set "PLACEHOLDER_ARGS="
 if defined RELEASE_COOKIE (
-    if defined ERL_AFLAGS (
-        set "ERL_AFLAGS=!ERL_AFLAGS! -setcookie !RELEASE_COOKIE!"
-    ) else (
-        set "ERL_AFLAGS=-setcookie !RELEASE_COOKIE!"
-    )
+    set "__COOKIE_ENV__=!RELEASE_COOKIE!"
+    set "PLACEHOLDER_ARGS=-setcookie bt!RANDOM!!RANDOM!!RANDOM!!RANDOM!!RANDOM!!RANDOM!!RANDOM!!RANDOM!"
 )
 exit /b 0
 
@@ -234,7 +235,7 @@ rem interactive shell attaches stdin, so a supervisor with no tty
 rem (a Windows service, a container) does not make the node see EOF
 rem and terminate right after boot. Console output is unaffected.
 "%ERL%" -noshell -noinput -boot "%CONFIG_DIR%\start" -boot_var RELEASE_DIR "%ROOT%" ^
-    -sname "%THIS_NODE%" ^
+    -sname "%THIS_NODE%" %PLACEHOLDER_ARGS% ^
     -config "%CONFIG_DIR%\sys" -args_file "%CONFIG_DIR%\vm.args"
 exit /b %errorlevel%
 
@@ -258,7 +259,8 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so stop targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" %BOOT_ARGS% %PA_ARGS% ^
+"%ERL%" -noshell -hidden -sname "%SNAME%" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+    -eval "__ADOPT_COOKIE_EVAL__." ^
     -eval "beamtalk_release_launcher:stop_client_main()." -extra "%NODE%"
 exit /b %errorlevel%
 
@@ -276,13 +278,15 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so ping targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" %BOOT_ARGS% %PA_ARGS% ^
+"%ERL%" -noshell -hidden -sname "%SNAME%" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+    -eval "__ADOPT_COOKIE_EVAL__." ^
     -eval "beamtalk_release_launcher:ping_client_main()." -extra "%NODE%"
 exit /b %errorlevel%
 
 :remote_console
 call :check_otp_window
 if errorlevel 1 exit /b 1
+call :lib_pa_args
 call :export_cookie
 call :minimal_boot_args
 call :node_sname
@@ -293,7 +297,11 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so remote_console attaches to whichever instance was
 rem started with the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -hidden -sname "%SNAME%" %BOOT_ARGS% -remsh "%NODE%"
+rem `-remsh` would connect during boot, before any -eval can swap the
+rem placeholder cookie for the real one (BT-5126): adopt first, then start the
+rem same remote shell (OTP 26+).
+"%ERL%" -noshell -hidden -sname "%SNAME%" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+    -eval "__ADOPT_COOKIE_EVAL__, shell:start_interactive({'%NODE%', {shell, start, []}})."
 exit /b %errorlevel%
 
 :eval
@@ -339,7 +347,8 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so rpc targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" %BOOT_ARGS% %PA_ARGS% ^
+"%ERL%" -noshell -hidden -sname "%SNAME%" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+    -eval "__ADOPT_COOKIE_EVAL__." ^
     -eval "beamtalk_release_launcher:rpc_client_main()." ^
     -extra "%NODE%" "%CLASS%" "%SELECTOR%" %ENTRY_REST%
 exit /b %errorlevel%

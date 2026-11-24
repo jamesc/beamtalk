@@ -92,6 +92,7 @@ pub(crate) mod build_stamp;
 pub mod build_stdlib;
 pub mod check;
 pub mod clean;
+pub(crate) mod cookie_env;
 pub mod deps;
 pub(crate) mod dir_lock;
 pub mod doc;

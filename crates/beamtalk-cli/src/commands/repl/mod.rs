@@ -342,7 +342,6 @@ pub fn run(
         let ForegroundNode {
             mut child,
             cookie: fg_cookie,
-            cookie_dir,
         } = start_beam_node(
             node_name.as_ref(),
             &project_root,
@@ -370,10 +369,7 @@ pub fn run(
         };
 
         (
-            Some(BeamChildGuard {
-                child,
-                _cookie_dir: Some(cookie_dir),
-            }),
+            Some(BeamChildGuard { child }),
             true,
             None,
             fg_host,
@@ -1036,10 +1032,7 @@ mod tests {
 
         // Wrap in guard and drop it
         {
-            let _guard = BeamChildGuard {
-                child,
-                _cookie_dir: None,
-            };
+            let _guard = BeamChildGuard { child };
             // Guard is dropped here
         }
 

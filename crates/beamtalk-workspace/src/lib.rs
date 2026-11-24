@@ -35,6 +35,11 @@ pub mod pid_liveness;
 #[doc(hidden)]
 pub mod test_cwd;
 
+/// Test helper asserting a secret is absent from a process's argv (BT-5126).
+/// Test-only for the same reason as [`test_cwd`].
+#[doc(hidden)]
+pub mod test_argv;
+
 /// Returns the Cargo workspace root for the calling crate: two levels up from
 /// [`CARGO_MANIFEST_DIR`](std::env::var), which cargo sets to the manifest
 /// directory of the crate being compiled or tested.
