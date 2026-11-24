@@ -92,7 +92,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0063](0063-remove-file-path-sandbox.md) | Remove File Path Sandbox | Implemented | 2026-03-16 |
 | [0064](0064-runtime-logging-control-and-observability-api.md) | Runtime Logging Control and Observability API | Implemented | 2026-03-17 |
 | [0065](0065-complete-otp-primitives-actor-lifecycle.md) | Complete OTP Primitives for Actor Lifecycle and Supervision | Implemented (error contract amended by 0134) | 2026-03-17 |
-| [0066](0066-open-class-extension-methods.md) | Open Class Extension Methods (`>>` Syntax) | Implemented | 2026-03-18 |
+| [0066](0066-open-class-extension-methods.md) | Open Class Extension Methods (`>>` Syntax) | Implemented (superseded in part by 0152, 2026-11-24) | 2026-03-18 |
 | [0067](0067-separate-state-field-keywords-by-class-kind.md) | Separate state:/field: Keywords by Class Kind | Implemented | 2026-03-18 |
 | [0068](0068-parametric-types-and-protocols.md) | Parametric Types and Protocols | Accepted \| Implemented | 2026-03-20 |
 | [0069](0069-actor-observability-and-tracing.md) | Actor Observability and Tracing | Implemented (amended 2026-10-21: `Telemetry` application events, BT-4025) | 2026-03-21 |
@@ -178,7 +178,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0149](0149-eep48-doc-chunks-for-beamtalk-modules.md) | EEP-48 Doc Chunks for Beamtalk Modules | Deferred (2026-11-14) | 2026-11-14 |
 | [0150](0150-actor-registry-off-the-start-path.md) | Actor Registration Off the Start Path | Implemented (2026-11-16) | 2026-11-15 |
 | [0151](0151-elixir-interop-and-mix-backed-packages.md) | Elixir Interop and Mix-Backed Packages | Proposed (2026-11-16) | 2026-11-16 |
-| [0152](0152-remove-cross-file-extension-methods.md) | Remove Cross-File Extension Methods (Supersedes ADR 0066 in Part) | Proposed | 2026-11-24 |
+| [0152](0152-remove-cross-file-extension-methods.md) | Remove Cross-File Extension Methods (Supersedes ADR 0066 in Part) | Accepted | 2026-11-24 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

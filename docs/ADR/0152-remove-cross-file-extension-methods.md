@@ -1,11 +1,11 @@
 # ADR 0152: Remove Cross-File Extension Methods
 
 ## Status
-Proposed (2026-11-24)
+Accepted (2026-11-24)
 
-If accepted, this **supersedes the cross-file part of [ADR 0066](0066-open-class-extension-methods.md)**: a `Class >> selector => ...` definition in a file that does not define `Class`. Superseded: §2 (the `Class+Feature.bt` file convention), §3 (ETS dispatch with interleaved lookup), §4 (compile-time conflict detection and type metadata), §6 (load order), §7 (ETS table lifecycle), and the BT-5002, BT-5060 and BT-5061 lookup-order amendments. Kept: the `>>` syntax (§1) for same-file methods and for live method definition, and the sealed-class policy (§5) as far as those two forms reach.
+This **supersedes the cross-file part of [ADR 0066](0066-open-class-extension-methods.md)**: a `Class >> selector => ...` definition in a file that does not define `Class`. Superseded: §2 (the `Class+Feature.bt` file convention), §3 (ETS dispatch with interleaved lookup), §4 (compile-time conflict detection and type metadata), §6 (load order), §7 (ETS table lifecycle), and the BT-5002, BT-5060 and BT-5061 lookup-order amendments. Kept: the `>>` syntax (§1) for same-file methods and for live method definition, and the sealed-class policy (§5) as far as those two forms reach.
 
-The first draft of this ADR proposed replacing cross-file `>>` with retroactive protocol implementations (`Proto implementFor: Class`). The owner decided to remove first and defer the replacement until a concrete need appears. That design is kept under [Future direction](#future-direction-retroactive-protocol-implementations).
+The first draft of this ADR proposed replacing cross-file `>>` with retroactive protocol implementations (`Proto implementFor: Class`). The owner decided to remove first and defer the replacement until a concrete need appears, and to remove without a deprecation period, because no package uses the feature. That design is kept under [Future direction](#future-direction-retroactive-protocol-implementations).
 
 **How to read the evidence.** A claim marked *(read)* was checked by reading the cited code on `main` at `9dcf825`. A claim marked *(inferred)* follows from that reading but was not checked directly. A claim marked *(reviewer)* was reported by an adversarial review pass and spot-checked, not read in full. Nothing in this ADR was verified by running the system.
 
@@ -31,7 +31,7 @@ The compiler registers the method in a runtime table when the declaring module l
 | buccaneer, catalina, http, oauth, mint, hpack, yaml, linear, agents, announcements (about 400 `.bt` files) | 0 (reported by the owner's survey; not re-checked here) |
 | beamtalk-symphony (48 `.bt` files), beamtalk-exdura (92) | 0. Every `>>` is a `Class>>selector` reference in a comment (checked by the parent session, and by `gh api search/code` here) |
 | beamtalk-watcher, beamtalk-collections | 0. Same comment-only pattern in the search fragments returned (code search shows a few fragments per file, so this is strong but not exhaustive) |
-| beamtalk-liquid, beamtalk-registry | 0 hits for `>>` in `.bt` files |
+| beamtalk-liquid (32 `.bt` files), beamtalk-registry | 0 hits for `>>` in `.bt` files (liquid also checked by the parent session). With liquid, every dependency of symphony and exdura is covered |
 | beamtalk-uat | 1 file: a UAT fixture with `SomeActor >> bumpBy:` and `SomeActor >> tallyPlusTen`, written to exercise the feature (BT-2452) |
 | `stdlib/test` | 11 files, 16 target classes *(read)* |
 | `tests/parity` | 3 files *(read)* |
@@ -90,7 +90,7 @@ Two things, and the decision has to own both.
 - A compiled method must be the only thing that can answer a send, apart from the ADR 0084 runtime class-method funs, which are a separate, deliberate mechanism.
 - The meaning must be the same in the REPL, `beamtalk run`, `beamtalk test` and a release (`docs/beamtalk-principles.md` §4).
 - Live patching is a message send (`docs/beamtalk-principles.md` §11). Anything this ADR removes from that surface is a regression against a stated principle and has to be named.
-- Changing a REPL error message or reply needs the owner's sign-off (AGENTS.md, "REPL output").
+- Changing a REPL error message or reply needs the owner's sign-off (AGENTS.md, "REPL output"). The owner's decision to make cross-file `>>` an error at the REPL is that sign-off for the two changes named in Decision §1.
 
 ## Decision
 
@@ -104,7 +104,7 @@ Two things, and the decision has to own both.
 | `Foo >> sel => ...` and `Foo class >> sel => ...` at the REPL | Unchanged. Recompiles the class from its stored source and hot-loads it. |
 | `Class compile: #sel source: "..."`, IDE and MCP `save_method` | Unchanged. Same recompile path. |
 | `Proto >> sel => ...` at the REPL (ADR 0127 §11) | Unchanged. Patches the provision and re-expands users. |
-| `Foo >> #sel` reflection | Unchanged. |
+| **The `>>` reflection operator**, `Foo >> #sel`, which answers a `CompiledMethod` | **Unchanged.** Only `>>` as a cross-file method *definition* is removed. Code built on the operator, such as exdura's `self runActivity: OrderActivities >> #reserveInventory:`, is not affected |
 | `Foo >> sel => ...` in a file that does not define `Foo`, **including another file of the same package** | Removed. A compile error. |
 | `pkg@Foo >> sel => ...` (ADR 0070) | Removed with it. |
 | `beamtalk_extensions:register/4,5` called through FFI | Removed. The module is deleted. |
@@ -125,8 +125,11 @@ String >> shout => self uppercase ++ "!"
 ```text
 error: `String >> shout` adds a method to String, which is not defined in this file.
   = cross-file extension methods were removed (ADR 0152).
-  hint: write a method on a class of your own that takes the String,
-        or, if you own String's file, move the method there.
+  hint: define the method in the file that defines the class (in the class
+        body, or as `String >> shout` next to it), or, for a class loaded in
+        a workspace, define it live from the REPL or the IDE.
+        For a class you cannot edit, write a method on a class of your own
+        that takes the String.
 ```
 
 At the REPL, a live definition on a class with source works as before:
@@ -137,7 +140,9 @@ At the REPL, a live definition on a class with source works as before:
 => 6
 ```
 
-A live definition on a class without stored source already fails, with "Class source not available for Integer" (`beamtalk_repl_loader.erl:241-246`), and `Class compile:source:` refuses a stdlib class outright (`beamtalk_repl_eval.erl:1062-1073`) *(read; not run)*. So `Integer >> double => self * 2`, the REPL example in ADR 0066 §1, fails today as far as the code shows. This ADR does not change that behaviour. Rewording the message to mention this ADR is a REPL-output change for the owner to approve.
+A live definition on a class without stored source already fails, with "Class source not available for Integer" (`beamtalk_repl_loader.erl:241-246`), and `Class compile:source:` refuses a stdlib class outright (`beamtalk_repl_eval.erl:1062-1073`) *(read; not run)*. So `Integer >> double => self * 2`, the REPL example in ADR 0066 §1, fails today as far as the code shows. This ADR does not change that behaviour.
+
+There is no deprecation period. `Workspace load:` of a file with a cross-file `>>` fails with the compile error above, and an inline REPL eval that mixes a class definition with a foreign `X >> m`, which today drops the method with a warning (`inline_definitions.rs:90-97`) *(read)*, fails with the same error. These are changes to REPL output, made by this decision.
 
 ### 2. Lookup order after removal
 
@@ -149,11 +154,11 @@ The class side follows the same order over class methods, with one existing addi
 
 There is no extension step at any level, on either side. The BT-5060 one-hop gap disappears because there is nothing to skip. `respondsTo:`, `canUnderstand:`, `perform:` and `super` follow the same order because they have nothing else to consult.
 
-**The guarantee, once Phase 2 lands.** Loading a package cannot change which method answers a send to an existing class. It holds only after removal; during the deprecation phase the extension table still exists and an extension can still outrank a compiled method.
+**The guarantee, once the runtime pieces are deleted (Phase 2).** Loading a package cannot change which method answers a send to an existing class. Between Phase 1 and Phase 2 the table still exists, but nothing the compiler accepts can fill it.
 
 ### 3. What is deleted
 
-The full list, with files, is in Implementation Phase 2. In summary:
+The full list, with files, is in Implementation. In summary:
 
 - The runtime extension registry, `beamtalk_extensions.erl`, with its three ETS tables, last-writer-wins policy and conflict history.
 - The extension lookups interleaved in dispatch, in generated code and in `beamtalk_dispatch.erl`.
@@ -177,7 +182,7 @@ What the code supports today, and so what remains:
 
 Cross-file extensions were the only way to change the last two rows from a file. For the instance side nobody relied on it. For the class side, BT-5061 kept "extension first" on purpose, because a class-side extension was "the documented way to patch a class method of a running class" (`docs/beamtalk-language-features.md`, "Hot-patching and direct calls"), and BT-4133, BT-3700, BT-4270, BT-4301, BT-4316 and BT-4317 built the shadow flags and static call keys to honour it.
 
-After this ADR, a class method of a class without stored source can be replaced only by an ADR 0084 runtime fun or by redeploying the class. That is a regression against principle 11. It is the one open question that gates part of the removal (Open Question 1), and Phase 2 is ordered so the class-side pieces go last.
+After this ADR, a class method of a class without stored source can be replaced only by an ADR 0084 runtime fun or by redeploying the class. That is a regression against principle 11. It is the one open question (Open Question 1). The implementation proceeds on that question's stated default, and Phase 2 is ordered so the class-side pieces go last and can be held back if the owner chooses otherwise.
 
 ### 5. What to do instead, until there is a replacement
 
@@ -336,7 +341,7 @@ Leave the runtime and tell people not to use it. Rejected: the cost is in the di
 - There is no way to add a method to a class you cannot edit, sealed primitives included. ADR 0066 called extensions "the only way to add methods to sealed primitives"; after this ADR there is none.
 - `asJson` on a foreign class is not possible until a replacement exists. The workaround is a converter in the holder's mapping (Decision §5).
 - A class method of a class without stored source can no longer be replaced from a file, against principle 11 (Decision §4, Open Question 1).
-- This is a breaking language change. The survey found no user code affected, but it could not see private packages.
+- This is a breaking language change with no deprecation period. The survey found no user code affected, but it could not see private packages; such a package breaks at its next build.
 - 19 test files that use cross-file `>>`, and 23 `stdlib/test` files that call `beamtalk_extensions` through FFI, need rewriting or deleting. Some of them use an extension as a convenient way to set up a different scenario, and need another way to do that.
 - If a replacement is added later, the miss-path, registration and tooling work is done again from a clean base, not adapted from the code deleted here.
 - Deleting about 2,700 lines across dispatch, codegen and the type checker carries regression risk in exactly the code paths that had the bugs.
@@ -364,18 +369,21 @@ Produce the list that Phases 1 and 2 work from. Known so far:
 
 Exit: the list is complete and each item has a disposition.
 
-### Phase 1: deprecate (M)
-- **Compile-time warning** on every cross-file `>>`, from the single check after the fold, in `build`, `check`, `lint`, `test`, MCP lint and the LSP. The text is the error text of Decision §1 with "will be removed".
-- **REPL.** `Workspace load:` of a file with a cross-file `>>` shows the same warning in its reply. An inline eval that mixes a class definition with a foreign `X >> m` already drops the method with "Standalone method targets unknown class" (`inline_definitions.rs:90-97`) *(read)*; the warning text is aligned. Both are REPL-output changes for the owner to approve.
-- **Runtime.** `beamtalk_extensions:register/5` logs a deprecation warning once per owner.
-- **Migrate the tests** from the Phase 0 list, so that Phase 2 deletes code with no test depending on it. Tests that pin extension precedence are deleted with a note of what they pinned.
-- **Docs.** Mark the feature deprecated; update `docs/development/surface-parity.md`.
-- **Must pass:** `just ci` with the warning promoted to an error for this repository's own sources.
+### Phase 1: make cross-file `>>` an error, and migrate (M)
+There is no deprecation warning. One change does all of this:
 
-### Phase 2: remove (L)
-Three steps, in this order, each its own PR.
+- **The compiler rejects cross-file `>>`** from the single check after the fold, in `build`, `check`, `lint`, `test`, the REPL compiler port (`Workspace load:` and inline evals), MCP lint and the LSP, with the message in Decision §1.
+- **Migrate the tests and the fixture** from the Phase 0 list: the 19 test files, the Rust tests that embed cross-file `>>` source, and the `beamtalk-uat` fixture (a change in that repository, landed together). Tests that pin extension precedence are deleted with a note of what they pinned. Tests that register through `beamtalk_extensions` FFI keep working until Phase 2 deletes the module, and are migrated here if they are in the way.
+- **Stop emitting registrations.** With no cross-file `>>` accepted, `register_class/0` no longer contains `beamtalk_extensions:register` calls; delete `gen_server/extensions.rs`.
+- **Docs and release notes.** Update the docs from the Phase 0 list and `docs/development/surface-parity.md`. Add a **breaking change** entry to `CHANGELOG.md` and the release notes: cross-file `>>` method definitions are removed; the `>>` reflection operator, same-file `>>` and live method definition are unchanged. Annotate the ADRs listed in Phase 0.
+- **Must pass:** `just ci`, `just test-corpus` (the PR carries `ci:corpus`, because codegen changes), and the parity projects reporting the new error identically on CLI, MCP and LSP.
 
-**2a. The compiler rejects cross-file `>>`.** The warning becomes the error. Delete `extension_index.rs`, `extension_conflicts.rs`, `ClassHierarchy::register_extensions` (`class_hierarchy/mod.rs:850`) and its class-side "extension replaces signature" rule (BT-5061, BT-5111), `gen_server/extensions.rs` and the registration it emits in `register_class/0`, the `pkg@Target >>` qualifier, and the WS3 plumbing: `crates/beamtalk-project/src/dependency_extensions.rs`, the `dependency_extensions_unknown` guard (`class_hierarchy/mod.rs`, `receiver_knowledge.rs`), and its carriers in `beamtalk-package` (`dependency_classes.rs`, `lint_pipeline.rs`, `manifest.rs`), `beamtalk-mcp` (`server/lint.rs`) and the CLI build commands. LSP and language-service code that indexes extension locations goes with it.
+### Phase 2: delete the machinery (L)
+Three steps, in this order, each its own PR. Phases 1 and 2a may be one PR if that is cleaner.
+
+**Compiled code from before Phase 1.** A package built by an older compiler may still call `beamtalk_extensions:register/5` from its `register_class/0` when it loads. Until step 2c deletes the module that call succeeds, and the row is never consulted once 2b lands. After 2c the call fails with `undef`. Packages are rebuilt against the compiler they ship with, and the survey found no package with a cross-file extension, so this is accepted; 2c must make the failure legible (a clear load error naming the package and this ADR, not a bare `undef`) *(inferred: how module activation reports an `on_load` failure was not checked)*.
+
+**2a. Compiler.** Delete `extension_index.rs`, `extension_conflicts.rs`, `ClassHierarchy::register_extensions` (`class_hierarchy/mod.rs:850`) and its class-side "extension replaces signature" rule (BT-5061, BT-5111), the `pkg@Target >>` qualifier, and the WS3 plumbing: `crates/beamtalk-project/src/dependency_extensions.rs`, the `dependency_extensions_unknown` guard (`class_hierarchy/mod.rs`, `receiver_knowledge.rs`, `consulted.rs`), and its carriers in `beamtalk-package` (`dependency_classes.rs`, `lint_pipeline.rs`, `manifest.rs`), `beamtalk-language-service`, `beamtalk-mcp` (`server/lint.rs`) and the CLI build commands. LSP and language-service code that indexes extension locations goes with it.
 
 **2b. Instance-side runtime.**
 
@@ -387,7 +395,7 @@ Three steps, in this order, each its own PR.
 | Guards against an extension overriding a known selector | The `String`-extension gate on the Binary fast path (`binary_or_string_module/2`, `beamtalk_primitive.erl:1005-1010`); the per-level extension probe behind the `equals:` shortcut (`beamtalk_equality.erl:120-140`); `beamtalk_collection_selectors.erl:90-127` (BT-3951); `beamtalk_default_method:note_override/2` on registration *(inferred: each needs checking that the extension case is its only reason)* |
 | Reflection and tooling | `respondsTo:` and `canUnderstand:` extension checks (`beamtalk_behaviour_intrinsics.erl`); the extension-first step of `removeSelector:` and `purge_extensions` (`beamtalk_class_refactor.erl`, `beamtalk_class_lifecycle.erl:127-132`); `SystemNavigation extendersOf:` / `extensionsBy:`; the browse `extension` provenance (`beamtalk_repl_ops_browse_origin.erl`); extension xref rows and ChangeLog entries |
 
-**2c. Class-side runtime, gated on Open Question 1.**
+**2c. Class-side runtime.** Proceeds on the default of Open Question 1; held back if the owner chooses option (b) there.
 
 | Piece | Where |
 |---|---|
@@ -397,7 +405,7 @@ Three steps, in this order, each its own PR.
 | The registry itself | `beamtalk_extensions.erl`, deleted last, with `beamtalk_test_extensions.erl` |
 
 **Tests that must still pass after each step:**
-- `just test`, `just test-corpus` and `just verify-threaded-ir`. Steps 2a and 2b change dispatch codegen, so their PRs carry `ci:corpus`. `ci:core-diff` is expected to show a diff on every module in 2b; review a sample.
+- `just test`, `just test-corpus` and `just verify-threaded-ir`. Phase 1 and step 2b change codegen, so their PRs carry `ci:corpus`. `ci:core-diff` is expected to show a diff on every module in 2b; review a sample.
 - `stdlib/test/lookup_order_matrix_test.bt`, reduced to the order in Decision §2, for actors, value types, primitives and class-side sends through a literal send, `perform:`, `respondsTo:` and `super`.
 - The same-file fold tests (BT-4721, BT-4489, BT-4799) and `tests/repl-protocol/cases/same_file_extension_redefine.btscript`.
 - Live patching: `load_method_patch.btscript`, `hot_reload_actors.btscript`, `protocol_live_patch.btscript`, and the `Class compile:source:` and `removeSelector:` tests.
@@ -408,7 +416,7 @@ A benchmark run (`docs/development/benchmarks.md`) before and after 2b records w
 
 ## Migration Path
 
-A cross-file extension has no direct replacement.
+A cross-file extension has no direct replacement, and there is no deprecation period.
 
 | You have | Do this |
 |---|---|
@@ -418,7 +426,7 @@ A cross-file extension has no direct replacement.
 | A class-side extension used to patch a deployed class | An ADR 0084 runtime fun, or redeploy (Open Question 1) |
 | `Foo asJson` on a foreign `Foo` | A `using:` converter in the holder's `JsonMapping` (Decision §5) |
 
-Known affected code outside this repository: the `beamtalk-uat` fixture only. The Phase 1 warning is the real check for packages the survey could not see.
+Known affected code outside this repository: the `beamtalk-uat` fixture only, which is migrated with Phase 1. There is no warning period: a package the survey could not see gets the compile error on its next build, with the hint above. The change is listed as breaking in `CHANGELOG.md` and the release notes.
 
 ## Future direction: retroactive protocol implementations
 
@@ -599,9 +607,17 @@ A first implementation step would be a wire check: register a hand-written fun i
 
 ## Open Questions
 
-1. **Patching a class method of a class with no stored source (gates Phase 2c).** After removal, such a method can be replaced only by an ADR 0084 runtime fun or a redeploy (Decision §4). Options: (a) accept the loss; (b) keep the class-side extension path until the workspace can store dependency class source, so `Foo class >> sel => ...` recompiles a dependency class as it does a project class; (c) document the ADR 0084 runtime fun as the supported hot-patch for this case and give it a first-class entry point. Related: should MCP `save_method` and `Class compile:source:` gain a class-side form, since `install_method/9` already supports it?
-2. **Deprecation length.** How many releases between the Phase 1 warning and the Phase 2a error, given no known external users? Could Phases 1 and 2a ship in the same release for this repository's own code?
-3. **REPL wording.** The error for a live `>>` on a class without source, and the load-time warning, are REPL output. Does the owner want them reworded to point at this ADR?
+1. **Patching a class method of a class with no stored source.** After removal, such a method can be replaced only by an ADR 0084 runtime fun or a redeploy (Decision §4). Options:
+   - **(a) Accept the loss, and name ADR 0084 as the route.** Remove the class-side extension path with the rest (step 2c). Document the ADR 0084 runtime class-method fun as the supported way to hot-patch a class method of a class without source, and file a follow-up to give MCP `save_method` and `Class compile:source:` a class-side form, since `install_method/9` already supports it.
+   - **(b) Keep the class-side extension path** until the workspace can store dependency class source, so `Foo class >> sel => ...` recompiles a dependency class as it does a project class.
+
+   **Default taken by the implementation: (a).** The reasons: no package uses a class-side extension; keeping (b) keeps the `extension` shadow flag, the extension-first order and the registry alive, which is most of the class-side cost this ADR exists to remove; and the stdlib is read-only in the workspace either way. Whether a user can reach the ADR 0084 runtime fun without FFI was not checked; if not, the follow-up includes an entry point. The owner can switch to (b) at any time before step 2c lands.
+
+**Decided, and recorded here:**
+
+- **Sequencing.** Remove cross-file `>>` now; defer `implementFor:` until a concrete need appears (Future direction).
+- **Deprecation.** None. Cross-file `>>` becomes an error in one step, because no package in the survey uses it.
+- **REPL output.** A file load or inline eval containing a cross-file `>>` fails with the compile error of Decision §1.
 
 ## References
 - Related issues: BT-5060 (#5718), BT-5002, BT-5061, BT-5062, BT-4307, BT-4588, BT-4250, BT-4133, BT-3951, BT-4503, BT-3920, BT-4260, BT-4280, BT-4800, BT-4984, BT-4721, BT-4610, BT-4608, BT-4611, BT-4658, BT-4923, BT-2819 (`JsonMapping`, `JsonMappable`; #5717, #5719), BT-2452
