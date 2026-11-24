@@ -135,12 +135,16 @@ client_sname() {
     printf '%s_%s_%s' "$RELEASE_NAME" "$1" "$$"
 }
 
-# BT-5067: hand the cookie to erl through `ERL_AFLAGS` (read from the
-# process environment, which is only visible to the same user and root via
-# `/proc/<pid>/environ`) — never `-setcookie` on the command line, which any
-# local user can read from `ps` / `/proc/<pid>/cmdline`. The release cookie is
-# both the distribution and console cookie, so exposing it is code execution
-# as the service user. Mirrors the dev workspace's `-args_file` approach.
+# BT-5126: hand the cookie to erl through the process *environment*, never
+# argv. `-setcookie`, `ERL_AFLAGS` and `-args_file` all expand into the
+# emulator's command line, which any local user can read from `ps` /
+# `/proc/<pid>/cmdline`; `/proc/<pid>/environ` is readable only by the owner.
+# The release cookie is both the distribution and console cookie, so exposing
+# it is code execution as the service user. erl is started with a random
+# throwaway `-setcookie` (`COOKIE_PLACEHOLDER`, so OTP never touches
+# `~/.erlang.cookie`) and the node adopts the real cookie from
+# `__COOKIE_ENV__` on boot: client verbs via a leading `-eval`, the foreground
+# node in `beamtalk_workspace_app:start/2`.
 # Must run in the main shell (not a `$(...)` subshell) so the export sticks.
 export_cookie() {
     [ -n "${RELEASE_COOKIE:-}" ] || return 0
@@ -150,8 +154,10 @@ export_cookie() {
             exit 2
             ;;
     esac
-    ERL_AFLAGS="${ERL_AFLAGS:+$ERL_AFLAGS }-setcookie $RELEASE_COOKIE"
-    export ERL_AFLAGS
+    __COOKIE_ENV__="$RELEASE_COOKIE"
+    export __COOKIE_ENV__
+    COOKIE_PLACEHOLDER=$(od -An -N24 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')
+    [ -n "$COOKIE_PLACEHOLDER" ] || COOKIE_PLACEHOLDER="bt$$x$(date +%s)"
 }
 
 # This node's own `-sname`: `RELEASE_NODE` if set, else the release name
@@ -196,7 +202,7 @@ case "$VERB" in
         # `1> ` prompt reading from stdin.
         export_cookie
         exec "$ERL" -noshell -noinput -boot "$CONFIG_DIR/start" -boot_var RELEASE_DIR "$ROOT" \
-            -sname "$(node_sname)" \
+            -sname "$(node_sname)" ${COOKIE_PLACEHOLDER:+-setcookie "$COOKIE_PLACEHOLDER"} \
             -config "$CONFIG_DIR/sys" -args_file "$CONFIG_DIR/vm.args"
         ;;
     stop)
@@ -207,7 +213,8 @@ case "$VERB" in
         # with the same value).
         NODE=$(node_sname)
         export_cookie
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" $(minimal_boot_args) $(lib_pa_args) \
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
+            -eval \"__ADOPT_COOKIE_EVAL__.\" \
             -eval \"beamtalk_release_launcher:stop_client_main().\" \
             -extra \"\$NODE\""
         exec "$ERL" "$@"
@@ -220,7 +227,8 @@ case "$VERB" in
         # with the same value).
         NODE=$(node_sname)
         export_cookie
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" $(minimal_boot_args) $(lib_pa_args) \
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
+            -eval \"__ADOPT_COOKIE_EVAL__.\" \
             -eval \"beamtalk_release_launcher:ping_client_main().\" \
             -extra \"\$NODE\""
         exec "$ERL" "$@"
@@ -235,7 +243,8 @@ case "$VERB" in
         # ADR 0091: same-host attach only — plain loopback distribution, no
         # further authentication beyond the cookie handshake (ADR 0058).
         export_cookie
-        eval "set -- -hidden -sname \"\$SNAME\" $(minimal_boot_args) -remsh \"\$NODE\""
+        eval "set -- -hidden -sname \"\$SNAME\" ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
+            -eval \"__ADOPT_COOKIE_EVAL__.\" -remsh \"\$NODE\""
         exec "$ERL" "$@"
         ;;
     eval)
@@ -281,7 +290,8 @@ case "$VERB" in
         # with the same value).
         NODE=$(node_sname)
         export_cookie
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" $(minimal_boot_args) $(lib_pa_args) \
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
+            -eval \"__ADOPT_COOKIE_EVAL__.\" \
             -eval \"beamtalk_release_launcher:rpc_client_main().\" \
             -extra \"\$NODE\" \"\$CLASS\" \"\$SELECTOR\" \"\$@\""
         exec "$ERL" "$@"

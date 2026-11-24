@@ -911,6 +911,12 @@ fn spawn_foreground_and_wait_for_ping(
              foreground stderr so far={fg_stderr:?}"
         );
     }
+    // BT-5126: `ping` only succeeded because the node adopted `RELEASE_COOKIE`
+    // from its environment; assert the running BEAM's own argv (`ps` and
+    // `/proc/<pid>/cmdline`) never carried it — not via `-setcookie`,
+    // `ERL_AFLAGS` or `-args_file`.
+    #[cfg(unix)]
+    beamtalk_workspace::test_argv::assert_not_in_argv(foreground.0.id(), cookie);
     foreground
 }
 

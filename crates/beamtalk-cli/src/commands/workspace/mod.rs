@@ -1711,6 +1711,23 @@ mod tests {
         );
     }
 
+    /// BT-5126: a real detached workspace node authenticates with its cookie
+    /// (the WebSocket health check inside `is_node_running` uses it) while the
+    /// cookie is absent from the node's `ps` / `/proc/<pid>/cmdline`.
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
+    fn test_detached_node_cookie_not_visible_in_ps_integration() {
+        let (tw, node_info, _guard) = start_test_node("integ_cookie_ps");
+        let cookie = read_workspace_cookie(&tw.id).unwrap();
+        assert!(
+            is_node_running(&node_info, Some(&tw.id)),
+            "the node must have adopted the cookie (authenticated health check)"
+        );
+        beamtalk_workspace::test_argv::assert_not_in_argv(node_info.pid, &cookie);
+    }
+
     #[test]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
