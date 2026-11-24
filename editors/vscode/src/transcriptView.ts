@@ -5,6 +5,8 @@ import type * as vscode from "vscode";
 import type { PushEvent, WorkspaceClient } from "./workspaceClient";
 
 const MAX_LINES = 10_000;
+/** Character bound as well, so a few enormous lines cannot grow accumText without limit. */
+const MAX_CHARS = 2_000_000;
 const TRIM_TO = Math.floor(MAX_LINES * 0.9);
 
 /**
@@ -120,11 +122,15 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
     if (this.view) this.pendingText += text; // no view: resolveWebviewView rebuilds from accumText
     this.lineCount += (text.match(/\n/g) ?? []).length;
 
-    if (this.lineCount > MAX_LINES) {
+    if (this.lineCount > MAX_LINES || this.accumText.length > MAX_CHARS) {
       const lines = this.accumText.split("\n");
       const start = lines.length > TRIM_TO ? lines.length - TRIM_TO : 0;
-      const kept = lines.slice(start);
+      let kept = lines.slice(start);
       this.accumText = kept.join("\n");
+      if (this.accumText.length > MAX_CHARS) {
+        this.accumText = this.accumText.slice(-Math.floor(MAX_CHARS * 0.9));
+        kept = this.accumText.split("\n");
+      }
       this.lineCount = kept.length - 1;
       this.needsReplace = true;
     }

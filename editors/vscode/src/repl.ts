@@ -11,7 +11,25 @@ export function setReplRunning(value: boolean): void {
   void vscode.commands.executeCommand("setContext", "beamtalk.replRunning", value);
 }
 
-const SESSION_ID_PATTERN = /\[beamtalk\] session: ([A-Za-z0-9_-]+)(?![^\s])/;
+const SESSION_ID_PATTERN = /\[beamtalk\] session: ([A-Za-z0-9_-]+)(?=\s)/;
+
+/**
+ * Feed one terminal chunk to the session-id scraper (BT-5130). The id must be
+ * followed by whitespace within the buffered text, so a marker split across
+ * chunks is never accepted as a prefix; the incomplete tail is carried over.
+ */
+export function scanSessionChunk(
+  tail: string,
+  chunk: string
+): { sessionId: string | undefined; tail: string } {
+  const text = tail + chunk;
+  const match = SESSION_ID_PATTERN.exec(text);
+  if (match) {
+    return { sessionId: match[1], tail: "" };
+  }
+  // Keep the last 80 chars to catch markers spanning chunk boundaries.
+  return { sessionId: undefined, tail: text.length > 80 ? text.slice(-80) : text };
+}
 
 /**
  * Read chunks from a shell execution until the session ID is found.
@@ -27,10 +45,10 @@ async function captureSessionId(
   let tail = "";
   try {
     for await (const chunk of execution.read()) {
-      const text = tail + chunk;
-      const match = SESSION_ID_PATTERN.exec(text);
-      if (match) {
-        const sessionId = match[1];
+      const scanned = scanSessionChunk(tail, chunk);
+      const sessionId = scanned.sessionId;
+      tail = scanned.tail;
+      if (sessionId !== undefined) {
         state.outputChannel?.info(`Captured session ID: ${sessionId}`);
         // Only act if this is still our active REPL terminal.
         if (state.replTerminal !== terminal) {
@@ -40,10 +58,6 @@ async function captureSessionId(
         state.workspaceTreeProvider?.setSessionId(sessionId);
         // Don't break — keep reading. The REPL may reconnect and emit a new
         // session ID (BT-1021); we need to pick up the updated value.
-        tail = "";
-      } else {
-        // Keep the last 80 chars to catch markers spanning chunk boundaries.
-        tail = text.length > 80 ? text.slice(-80) : text;
       }
     }
   } catch {

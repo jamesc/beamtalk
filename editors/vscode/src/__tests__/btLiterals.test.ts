@@ -10,6 +10,7 @@ import {
   assertSessionId,
   btString,
   btSymbol,
+  procStartTime,
   WorkspaceClient,
 } from "../workspaceClient";
 
@@ -30,8 +31,11 @@ describe("btSymbol", () => {
     expect(btSymbol("foo_1")).toBe("#foo_1");
     expect(btSymbol("a b")).toBe("#'a b'");
   });
+  it("doubles embedded single quotes like the lexer's quoted symbol", () => {
+    expect(btSymbol("a'b")).toBe("#'a''b'");
+  });
   it("rejects names a quoted symbol cannot hold", () => {
-    expect(() => btSymbol("a'b")).toThrow();
+    expect(() => btSymbol("a\\b")).toThrow();
   });
 });
 
@@ -72,6 +76,25 @@ describe("fromFiles stale port file (BT-5069)", () => {
   it("rejects a nonce mismatch", () => {
     const base = setup({ ...live, nonce: "other" });
     expect(() => WorkspaceClient.fromFiles("ws1", { baseDir: base })).toThrow(/nonce/);
+  });
+  it("rejects a pid whose start time differs (pid reuse)", () => {
+    if (process.platform !== "linux") return;
+    const base = setup({ ...live, start_time: 1 });
+    expect(() => WorkspaceClient.fromFiles("ws1", { baseDir: base })).toThrow(/start time/);
+  });
+  it("accepts the matching start time", () => {
+    const st = procStartTime(process.pid);
+    const base = setup({ ...live, ...(st === undefined ? {} : { start_time: st }) });
+    expect(() => WorkspaceClient.fromFiles("ws1", { baseDir: base })).not.toThrow();
+  });
+  it("rejects a port file without a nonce when node.info has one", () => {
+    const base = setup(live, "4000");
+    expect(() => WorkspaceClient.fromFiles("ws1", { baseDir: base })).toThrow(/no nonce/);
+  });
+  it("fails closed on an unparseable node.info", () => {
+    const base = setup(null);
+    fs.writeFileSync(path.join(base, "ws1", "node.info"), "{trunc");
+    expect(() => WorkspaceClient.fromFiles("ws1", { baseDir: base })).toThrow(/unreadable/);
   });
   it("rejects a port mismatch", () => {
     const base = setup({ ...live, port: 4001 });
