@@ -397,8 +397,13 @@ try_change_code(Pid, Module, Extra) ->
             _ ->
                 %% The worker finished in the same instant and is sending its
                 %% result: that is the real outcome.
+                %% Bounded: if the worker died between its claim and the send,
+                %% report a timeout rather than block the reloading process.
                 receive
                     {Alias, LateResult} -> LateResult
+                after ?CHANGE_WAIT_MS ->
+                    unalias(Alias),
+                    {error, timeout}
                 end
         end
     end.
