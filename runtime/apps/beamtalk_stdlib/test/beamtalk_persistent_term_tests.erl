@@ -16,8 +16,6 @@ node-global.
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
--define(COUNTER_KEY, '$bt_pt_test_counter').
-
 %% Run Fun(Key) with a key unique to this call, erasing it afterwards.
 with_key(Fun) ->
     Key = {pt_test, make_ref()},
