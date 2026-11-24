@@ -83,6 +83,26 @@ pub(crate) fn package_identity(
         .or_else(|| stdlib_mode.then_some(beamtalk_language_service::STDLIB_PACKAGE_MARKER))
 }
 
+/// The project root a build of `path` uses: `path` itself for a directory,
+/// its parent for a single file.
+pub(crate) fn project_root_of(path: &str) -> Utf8PathBuf {
+    let source_path = Utf8PathBuf::from(path);
+    if source_path.is_dir() {
+        source_path
+    } else {
+        source_path
+            .parent()
+            .map_or_else(|| Utf8PathBuf::from("."), Utf8Path::to_path_buf)
+    }
+}
+
+/// Whether a build of `path` is a package build (a `beamtalk.toml` sits in its
+/// project root) and so takes the project build lock. A cheap stat, so the
+/// lock can be taken before the manifest is parsed.
+pub(crate) fn is_package_build(path: &str) -> bool {
+    project_root_of(path).join("beamtalk.toml").exists()
+}
+
 /// Phase 1-3: Discover source files, resolve the project root and manifest,
 /// and create the build output directory.
 pub(crate) fn setup_build_environment(path: &str) -> Result<BuildEnvironment> {
@@ -100,13 +120,7 @@ pub(crate) fn setup_build_environment(path: &str) -> Result<BuildEnvironment> {
     debug!("Building {} file(s)", source_files.len());
 
     // Determine project root (for directory input, use the path; for file input, use parent)
-    let project_root = if source_path.is_dir() {
-        source_path.clone()
-    } else {
-        source_path
-            .parent()
-            .map_or_else(|| Utf8PathBuf::from("."), Utf8Path::to_path_buf)
-    };
+    let project_root = project_root_of(path);
 
     // Look for package manifest (full parse includes dependencies for
     // transitive dep tracking — ADR 0070 Phase 3)

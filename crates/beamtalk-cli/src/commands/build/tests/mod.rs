@@ -49,6 +49,7 @@ pub(crate) fn default_options() -> beamtalk_core::CompilerOptions {
 
 mod build_basics;
 mod build_cache_keys;
+mod build_lock;
 mod consulted_surface;
 mod cross_file_resolution;
 mod flattened_provision_reporting;
