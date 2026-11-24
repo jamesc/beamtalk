@@ -173,3 +173,16 @@ fn live_method_definition_is_not_a_cross_file_error() {
         "{response:?}"
     );
 }
+
+/// ADR 0152: a `>>` on a protocol is not a same-file extension (nothing folds it
+/// into the protocol), so it is rejected in a file and in an inline definition
+/// that also holds a class.
+#[test]
+fn extension_on_same_file_protocol_is_an_error() {
+    let source = "Object subclass: Adr152Host\n  base => 1\n\nProtocol define: Adr152Proto\n  size -> Integer\n\nAdr152Proto >> extra => 1\n";
+    assert_error_containing(&handle_compile(&compile_request(source)), "ADR 0152");
+    assert_error_containing(
+        &handle_compile_expression(&compile_expression_request(source)),
+        "ADR 0152",
+    );
+}

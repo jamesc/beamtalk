@@ -147,19 +147,13 @@ impl CoreErlangGenerator {
     }
 
     /// The class the current class method belongs to: the `ClassBuilder`
-    /// class, else the extension target, else the class being compiled
-    /// (BT-3762). It names the class whose class variables the method sees and
-    /// keys a class-side `super` send (`class_super_dispatch/4`, BT-4001). The
-    /// innermost scope wins (BT-3804): a builder `classMethods:` block nested
-    /// in a class-side extension sees the builder's `classVars:`, not the
-    /// extension target's variables.
+    /// class, else the class being compiled (BT-3762). It names the class
+    /// whose class variables the method sees and keys a class-side `super`
+    /// send (`class_super_dispatch/4`, BT-4001). The innermost scope wins
+    /// (BT-3804): a builder `classMethods:` block sees the builder's
+    /// `classVars:`.
     pub(in crate::core_erlang) fn class_var_home(&self) -> String {
         self.builder_class_method_class()
-            .or_else(|| {
-                self.class_context
-                    .as_ref()
-                    .and_then(|ctx| ctx.extension_target_class.clone())
-            })
             .unwrap_or_else(|| self.class_name())
     }
 

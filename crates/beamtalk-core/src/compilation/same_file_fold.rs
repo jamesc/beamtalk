@@ -98,19 +98,14 @@ pub fn fold_same_file_extensions(module: &mut Module) -> Vec<Diagnostic> {
 /// (a lone `Foo >> sel => ...` typed at the REPL, or `Class compile:source:`),
 /// where the target's source is held by the workspace rather than the file.
 ///
-/// A protocol declared in the same file counts as defined here, matching
-/// [`declared_class_names`] for classes.
+/// Only a class declared in this file is a valid target. A `>>` on a protocol
+/// declared in the same file is rejected too: nothing folds it into the
+/// protocol, so accepting it would compile it to nothing.
 #[must_use]
 pub fn reject_cross_file_extensions(module: &Module) -> Vec<Diagnostic> {
     module
         .method_definitions
         .iter()
-        .filter(|def| {
-            !module
-                .protocols
-                .iter()
-                .any(|p| p.name.name == def.class_name.name)
-        })
         .map(|def| {
             let target = match &def.package {
                 Some(pkg) => format!("{}@{}", pkg.name, def.class_name.name),
@@ -193,6 +188,14 @@ mod tests {
             diags[1].message.contains("Integer class >> make"),
             "{diags:?}"
         );
+    }
+
+    #[test]
+    fn rejects_extension_on_same_file_protocol() {
+        let mut m = parse_ok("Protocol define: P\n  size -> Integer\n\nP >> extra => 1\n");
+        assert!(fold_same_file_extensions(&mut m).is_empty());
+        let diags = reject_cross_file_extensions(&m);
+        assert_eq!(diags.len(), 1, "{diags:?}");
     }
 
     #[test]

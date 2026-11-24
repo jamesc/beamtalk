@@ -196,8 +196,9 @@ pub(crate) fn handle_compile_expression_with_options(
     if !module.classes.is_empty() {
         let referenced_aliases = analysis.referenced_aliases.clone();
         // A standalone `>>` that survives the same-file fold in an inline
-        // class definition is rejected in `parse_and_check_expression`
-        // (ADR 0152), so `analysis` is never stale here.
+        // definition (class or protocol) is rejected in
+        // `parse_and_check_expression` (ADR 0152), so `analysis` is never
+        // stale here.
         let analysis = Some(analysis);
         return handle_inline_class_definition(
             module,
