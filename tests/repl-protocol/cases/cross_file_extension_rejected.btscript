@@ -44,3 +44,6 @@ Adr152Host class >> make => Adr152Host new
 
 Adr152Host make live
 // => 3
+
+File delete: _adr152Path
+// => Result ok: nil
