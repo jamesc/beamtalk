@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # ADR 0153 Phase 0: `classState:` removal inventory
 
-> **One-off document.** It is the work list for BT-5148 to BT-5163 and nothing keeps it in step with the code. It was written against `main` at `b464155` (2026-11-24). **The final deletion issue (BT-5163, "mark ADR 0153 Implemented") deletes this file.** If the counts below disagree with a fresh `grep`, trust the `grep` and fix the list in the issue that finds out.
+> **One-off document.** It is the work list for BT-5148 to BT-5163 and nothing keeps it in step with the code. It was written against `main` at `b464155` (2026-11-24), file lists refreshed after merging BT-5141. **The final deletion issue (BT-5163, "mark ADR 0153 Implemented") deletes this file.** If the counts below disagree with a fresh `grep`, trust the `grep` and fix the list in the issue that finds out.
 >
 > Spec: [ADR 0153](../ADR/0153-remove-class-variables.md) § Implementation Phase 0. Issue: BT-5145, epic BT-5144. This change adds documents only; it edits no source, test or fixture.
 
@@ -18,12 +18,12 @@ SPDX-License-Identifier: Apache-2.0
 | `test-package-compiler/cases` that declare `classState:` | 10 cases, 12 snapshot files (plus 1 mention-only case, 1 snapshot) | see § 4 |
 | Benchmark / perf `.bt` files that declare `classState:` | 5 | see § 5 |
 | `stdlib/src`, `examples/`, 13 downstream packages, `beamtalk-uat` declarations | 0 | none to migrate |
-| Rust files that mention class variables | 210 (80 under test paths) | 10 delete, 136 edit, 63 comments only, 1 keep |
+| Rust files that mention class variables | 208 | 10 delete, 134 edit, 63 comments only, 1 keep |
 | Erlang files (`.erl`, `.hrl`) that mention class variables | 63 (27 test or test-support) | 7 delete, 49 edit, 7 comments only |
 | `ClassBuilder` `classVars:` / `addClassState:default:` users | listed in § 7 | see § 7 |
 | Downstream hits | `performLocally:` in `beamtalk-exdura` (1 source file, 8 test files) | **report before Phase 2 starts** (§ 9) |
 
-The ADR counted 118 declaring files in `stdlib/test`, `tests/repl-protocol` and `test-package-compiler/cases` (90 + 18 + 10). The tree has 119: 91 fixtures here, not 90. It counted "145 Rust and 60 Erlang files". `grep -liE 'class[ _-]?var(iable)?s?|classState'` gives **210 and 63** on this commit, and none of the patterns tried on `f1fcd5e` (the ADR's commit) gives 145 or 60 either, so the ADR's pattern is unknown. The tables below use the pattern in § 8, listed file by file, so the later issues do not depend on a count.
+The ADR counted 118 declaring files in `stdlib/test`, `tests/repl-protocol` and `test-package-compiler/cases` (90 + 18 + 10). The tree has 119: 91 fixtures here, not 90. It counted "145 Rust and 60 Erlang files". `grep -liE 'class[ _-]?var(iable)?s?|classState'` gives **208 and 63** on this commit, and none of the patterns tried on `f1fcd5e` (the ADR's commit) gives 145 or 60 either, so the ADR's pattern is unknown. The tables below use the pattern in § 8, listed file by file, so the later issues do not depend on a count.
 
 **Owners.** Every row names the issue that owns it.
 
@@ -306,7 +306,7 @@ Pattern (case-insensitive), run over `crates/**/*.rs` and `runtime/**/*.{erl,hrl
 class[ _-]?var(iable)?s?|classState
 ```
 
-210 Rust files and 63 Erlang files match. "Hits" is the matching line count. Dispositions:
+208 Rust files and 63 Erlang files match. "Hits" is the matching line count. Dispositions:
 
 - **delete**: the file exists only for class variables.
 - **edit**: code changes (an arm, a field, a parameter, a test row goes).
@@ -315,7 +315,7 @@ class[ _-]?var(iable)?s?|classState
 
 The disposition is a first reading from the pattern, the file's role and a read of the matching lines of the small files. It is not a per-line audit; the owner reads the file when it takes it. The owner column is the issue that does the work. Where one file needs edits from two issues, the later one's share is named in § 8.3.
 
-### 8.1 Rust (210)
+### 8.1 Rust (208)
 
 | File | Hits | Disposition | Owner |
 |---|--:|---|---|
@@ -351,21 +351,20 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/mod.rs` | 18 | edit | BT-5154 |
 | `crates/beamtalk-codegen/src/core_erlang/threaded_ir/verify.rs` | 18 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/tests/gen_server/late_field_read.rs` | 18 | edit | BT-5153 |
-| `crates/beamtalk-codegen/src/core_erlang/tests/gen_server/class_var_not_inherited.rs` | 18 | delete | BT-5153 |
 | `crates/beamtalk-cli/src/commands/build_stdlib/generators.rs` | 18 | edit | BT-5154 |
 | `crates/beamtalk-lint/src/actor_state_abroad.rs` | 17 | edit | BT-5154 |
-| `crates/beamtalk-codegen/src/core_erlang/generator/accessors.rs` | 16 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/class_registry.rs` | 16 | edit | BT-5153 |
 | `crates/beamtalk-core/src/source_analysis/parser/tests/expression_tests.rs` | 15 | edit | BT-5152 |
 | `crates/beamtalk-codegen/src/core_erlang/generator/mod.rs` | 15 | edit | BT-5153 |
-| `crates/beamtalk-codegen/src/core_erlang/generator/context.rs` | 15 | edit | BT-5153 |
 | `crates/beamtalk-core/src/test_helpers/class_var_program.rs` | 14 | delete | BT-5151 |
 | `crates/beamtalk-core/src/semantic_analysis/facts.rs` | 14 | edit | BT-5154 |
 | `crates/beamtalk-codegen/src/core_erlang/threaded_ir/ir.rs` | 14 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/tests/racing_operand_corpus.rs` | 14 | edit | BT-5153 |
+| `crates/beamtalk-codegen/src/core_erlang/tests/gen_server/class_var_not_inherited.rs` | 14 | delete | BT-5153 |
+| `crates/beamtalk-codegen/src/core_erlang/generator/accessors.rs` | 14 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/expressions.rs` | 14 | edit | BT-5153 |
-| `crates/beamtalk-codegen/src/core_erlang/tests/gen_server/extensions.rs` | 13 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/sequencing.rs` | 13 | edit | BT-5153 |
+| `crates/beamtalk-codegen/src/core_erlang/generator/context.rs` | 13 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/threaded_ir/tests/catch_boundary.rs` | 12 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/tests/gen_server/state_threading_loops.rs` | 12 | edit | BT-5153 |
 | `crates/beamtalk-core/src/test_helpers.rs` | 11 | edit | BT-5151 |
@@ -378,7 +377,6 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | `crates/beamtalk-codegen/src/core_erlang/threaded_prelude.rs` | 10 | edit (comments only) | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/tests/control_flow/list_and_loop_value_threading.rs` | 10 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/tests/class_side_operand_producer_corpus.rs` | 10 | edit | BT-5153 |
-| `crates/beamtalk-codegen/src/core_erlang/gen_server/extensions.rs` | 10 | edit | BT-5153 |
 | `crates/beamtalk-core/src/semantic_analysis/validators/late_slot_validators.rs` | 9 | edit | BT-5154 |
 | `crates/beamtalk-core/src/semantic_analysis/tests/adr0123_shape_version_and_migrations.rs` | 9 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/tests/expressions.rs` | 9 | edit | BT-5153 |
@@ -626,7 +624,7 @@ The disposition is a first reading from the pattern, the file's role and a read 
 
 | Term | Declarations | Other hits |
 |---|---|---|
-| `classState:` | **0** in any `src/` | `AGENTS.md` of 15 repositories (the shared sentence "Class variables shared by all instances are declared with `classState:`"); `beamtalk-buccaneer` `src/exchange.bt` and `spikes/engine_spikes/src/spike_exchange.bt` (doc comment: "a class method with no classState: runs in the caller's process") |
+| `classState:` | **0** in any `src/` | `AGENTS.md` of 15 repositories (the shared sentence "Class variables shared by all instances are declared with `classState:`"); `beamtalk-buccaneer` `src/exchange.bt` and its engine spike `spike_exchange.bt` (doc comment: "a class method with no classState: runs in the caller's process") |
 | `classVarNames`, `classVars:` | 0 | none |
 | `performLocally:` | 0 declarations | **`beamtalk-exdura`: `src/workflow/workflow_runner.bt` (doc comment recommending `performLocally:` "to avoid class object contention") and 8 tests: `test/workflow/{replay_proof,versioning,child_workflow,workflow_engine,workflow_options}_test.bt`, `test/event_store/snapshot_test.bt`, `test/timer/durable_timer_test.bt`** (all `WorkflowRunner performLocally: #await:timeout: withArguments: #(semName, 10000)`) |
 | `beamtalk-uat` | 0 for all four | none |
