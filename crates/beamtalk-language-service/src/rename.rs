@@ -589,6 +589,52 @@ impl SimpleLanguageService {
         (!q.is_empty()).then_some(q)
     }
 
+    /// A descendant override in the standard library or a dependency cannot be
+    /// renamed with the rest, so renaming would silently detach it (BT-5132).
+    fn refuse_read_only_override(
+        &self,
+        old: &str,
+        side: MethodSide,
+        class: &str,
+        subtree: &HashSet<String>,
+        defs: &[DefSite<'_>],
+    ) -> Result<(), RenameRefusal> {
+        match defs.iter().find(|d| {
+            d.side == side
+                && d.class != class
+                && subtree.contains(d.class)
+                && self.is_readonly_file(d.file)
+        }) {
+            Some(d) => Err(RenameRefusal::new(format!(
+                "Cannot rename #{old}: {} overrides it in the standard library or a \
+                 dependency, which cannot be edited.",
+                d.class
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// `#old` literals (`perform: #old`, `respondsTo: #old`, ...): a dynamic
+    /// use cannot be proven to name this method, so candidates only. Read-only
+    /// files never receive edits.
+    fn symbol_literal_candidates(&self, old: &str, new: &str) -> Vec<Vec<RenameEdit>> {
+        let mut out = Vec::new();
+        for ctx in self
+            .body_contexts()
+            .into_iter()
+            .filter(|c| !self.is_readonly_file(c.file))
+        {
+            for span in find_symbol_literal_sites(ctx.roots.iter().copied(), ctx.source, old) {
+                out.push(vec![RenameEdit {
+                    file: ctx.file.clone(),
+                    span,
+                    new_text: format!("#{new}"),
+                }]);
+            }
+        }
+        out
+    }
+
     fn plan_selector_rename(
         &self,
         old: &str,
@@ -640,6 +686,7 @@ impl SimpleLanguageService {
         let overridden = defs
             .iter()
             .any(|d| d.side == side && d.class != class && subtree.contains(d.class));
+        self.refuse_read_only_override(old, side, class, &subtree, &defs)?;
 
         let mut plan = RenamePlan::default();
         // The definition itself.
@@ -662,6 +709,7 @@ impl SimpleLanguageService {
         let mut contexts = self.body_contexts();
         contexts.sort_by(|a, b| a.file.cmp(b.file));
         for ctx in contexts {
+            let readonly = self.is_readonly_file(ctx.file);
             for SelectorSendSite { receiver, spans } in
                 find_selector_send_sites_in(ctx.roots.iter().copied(), ctx.source, old, new)
             {
@@ -678,24 +726,23 @@ impl SimpleLanguageService {
                     && ctx
                         .owner
                         .is_some_and(|(c, s)| s == side && subtree.contains(c));
-                if is_confirmed {
+                if is_confirmed && readonly {
+                    return Err(RenameRefusal::new(format!(
+                        "Cannot rename #{old}: a call in {} is in the standard library or a \
+                         dependency, so it cannot be rewritten. Nothing was changed.",
+                        ctx.file
+                    )));
+                } else if readonly {
+                    // Read-only files never receive edits, not even candidates.
+                } else if is_confirmed {
                     plan.confirmed.extend(edits);
                 } else {
                     plan.candidates.push(edits);
                 }
             }
         }
-        // `#old` literals (`perform: #old`, `respondsTo: #old`, ...): a dynamic
-        // use cannot be proven to name this method, so candidates only.
-        for ctx in self.body_contexts() {
-            for span in find_symbol_literal_sites(ctx.roots.iter().copied(), ctx.source, old) {
-                plan.candidates.push(vec![RenameEdit {
-                    file: ctx.file.clone(),
-                    span,
-                    new_text: format!("#{new}"),
-                }]);
-            }
-        }
+        plan.candidates
+            .extend(self.symbol_literal_candidates(old, new));
         plan.confirmed
             .sort_by(|a, b| (&a.file, a.span.start()).cmp(&(&b.file, b.span.start())));
         plan.candidates

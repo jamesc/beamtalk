@@ -74,6 +74,13 @@ pub fn find_class_references<'a>(
             collect_protocol_definition_refs(protocol, class_name, file_path, &mut results);
         }
 
+        // `declare native:` signatures mention class names in type annotations.
+        for native in &module.native_declarations {
+            for sig in &native.method_signatures {
+                collect_protocol_method_signature_refs(sig, class_name, file_path, &mut results);
+            }
+        }
+
         // Type alias definitions: declaration name and any reference to
         // `class_name` inside the RHS annotation — e.g. `type B = A | #z`
         // referencing alias `A`, or an alias RHS referencing a real class
@@ -129,6 +136,18 @@ fn collect_class_definition_refs(
     // State and class-variable type annotations — e.g. `state: x :: Printable = nil`.
     for state in class.state.iter().chain(class.class_variables.iter()) {
         collect_state_type_annotation_refs(state, name, file_path, results);
+    }
+
+    // `uses: Protocol(TypeArgs)` lines (BT-5132): the protocol name and any
+    // type arguments. `excluding:`/`overriding:` entries are selectors, not
+    // class names, so they are not visited.
+    for used in &class.uses {
+        if used.protocol.name == name {
+            results.push(Location::new(file_path.clone(), used.protocol.span));
+        }
+        for arg in &used.type_args {
+            collect_type_annotation_refs(arg, name, file_path, results);
+        }
     }
 
     // Method signature type annotations (parameters and return type). The
@@ -374,26 +393,12 @@ pub fn find_selector_send_sites<'a>(
     let mut results = Vec::new();
 
     for (file_path, module) in files {
-        // Top-level expressions
-        for stmt in &module.expressions {
-            collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
-        }
-
-        // Class method bodies (instance + class side)
-        for class in &module.classes {
-            for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for stmt in &method.body {
-                    collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
-                }
-            }
-        }
-
-        // Standalone method bodies
-        for smd in &module.method_definitions {
-            for stmt in &smd.method.body {
-                collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
-            }
-        }
+        // Every expression root, the same iterator rename and class
+        // references use: statements, method bodies, state and
+        // class-variable defaults, protocol provided-method bodies (BT-5132).
+        for_each_root_expr(module, |expr| {
+            collect_selector_refs(expr, selector_name, file_path, &mut results);
+        });
     }
 
     results
@@ -425,26 +430,10 @@ pub fn find_selector_references<'a>(
             }
         }
 
-        // Message sends and cascades in expressions
-        for stmt in &module.expressions {
-            collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
-        }
-
-        // Message sends and cascades in class method bodies
-        for class in &module.classes {
-            for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for stmt in &method.body {
-                    collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
-                }
-            }
-        }
-
-        // Message sends and cascades in standalone method bodies
-        for smd in &module.method_definitions {
-            for stmt in &smd.method.body {
-                collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
-            }
-        }
+        // Message sends and cascades in every expression root.
+        for_each_root_expr(module, |expr| {
+            collect_selector_refs(expr, selector_name, file_path, &mut results);
+        });
     }
 
     results
@@ -560,15 +549,12 @@ fn collect_selector_refs(
     results[first..].sort_by_key(|location| location.span.start());
 }
 
-/// Get the span covering a selector's keywords (for keyword messages)
-/// or None for unary/binary selectors (whose span is part of the message send).
+/// The span of a keyword selector's first keyword part (BT-5132: not the
+/// first-to-last merge, which also covered the arguments between the parts),
+/// or `None` for unary/binary selectors, whose reference is the whole send.
 fn selector_reference_span(selector: &beamtalk_core::ast::MessageSelector) -> Option<Span> {
     match selector {
-        beamtalk_core::ast::MessageSelector::Keyword(parts) if !parts.is_empty() => {
-            let first = parts.first().unwrap().span;
-            let last = parts.last().unwrap().span;
-            Some(first.merge(last))
-        }
+        beamtalk_core::ast::MessageSelector::Keyword(parts) => parts.first().map(|p| p.span),
         _ => None,
     }
 }
