@@ -1878,3 +1878,22 @@ ns per call):
 The compiled method has no `make_ref` (the frame stays gone). A two-branch
 guard or a tail conditional on a declared comparison is not covered by the
 helper and keeps its frame again.
+
+## ADR 0153 baseline: class variables, before removal (BT-5145)
+
+The "before" run for removing `classState:` (epic BT-5144). It records what the class-variable snapshot before every compiled `on:do:`, `protect/1` in `Result tryDo:` and the class-variable input to the per-send class guard cost, so the "after" run (BT-5164, and the ADR 0153 Phase 3 gate) has something to compare against.
+
+Full tables, the exact commands and the conditions are in [`benchmarks/vs-elixir/results/bench-bt5145-baseline.md`](../../benchmarks/vs-elixir/results/bench-bt5145-baseline.md). Measured at `main` `b464155` with the dev compiler on a 4-core cloud container (OTP 28, Elixir 1.20.1); reductions and words are exact, time is noisy.
+
+| Row | Operation | BT red | BT words | BT ns |
+|---|---|--:|--:|--:|
+| vs-elixir 3a-3c | class send, guarded direct call | 3.0 | 0 | 20-26 |
+| vs-elixir 3d | class in a variable | 24.1 | 42 | 608 |
+| vs-elixir 3f | class with `classState:` (control; removed by BT-5150) | 140 | 167 | 6518 |
+| vs-elixir 8a | `on: Error do:` without a raise | 5.0 | 0 | 67.7 |
+| vs-elixir 8b | `on: Error do:` with a raise | 99.1 | 167 | 2210 |
+| dispatch e1 | `on: Error do:` without a raise | 5.0 | n/a | 65.5 |
+| dispatch e2 | `ensure:` without a raise | 4.0 | n/a | 2.0 |
+| `beamtalk_result:tryDo/1`, block answers | direct timing, no benchmark row exists | n/a | n/a | 23.0 (bare `try`: 8.4) |
+
+The inventory that drives the removal is [`class-state-removal-inventory.md`](class-state-removal-inventory.md), a one-off file deleted by the last issue of the epic.
