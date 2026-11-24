@@ -1094,11 +1094,20 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
             .stderr(std::process::Stdio::piped())
             .spawn()
             .expect("spawn bin/<name> remote_console");
-        rc.stdin
-            .take()
-            .unwrap()
-            .write_all(b"node().\n")
-            .expect("feed remote_console");
+        // Dropping stdin sends EOF; a watchdog fails the test instead of
+        // hanging CI if the console never exits.
+        let mut stdin = rc.stdin.take().unwrap();
+        stdin.write_all(b"node().\n").expect("feed remote_console");
+        drop(stdin);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while rc.try_wait().expect("poll remote_console").is_none() {
+            if std::time::Instant::now() > deadline {
+                let _ = rc.kill();
+                let _ = rc.wait();
+                panic!("remote_console did not exit within 30s of stdin EOF");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100)); // sleep: poll for exit under the watchdog
+        }
         let out = rc.wait_with_output().expect("remote_console output");
         let text = String::from_utf8_lossy(&out.stdout);
         assert!(
