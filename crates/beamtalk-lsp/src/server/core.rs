@@ -12,6 +12,7 @@ use super::convert::{
     offset_to_position, path_to_stdlib_uri, path_to_uri, position_to_offset, uri_to_path,
 };
 use super::flush::flush_event_listener;
+use super::guard::guard_notification;
 use super::nav::{bt_locations_to_lsp, runtime_site_to_lsp_location};
 use super::range_format::format_range_edits;
 use super::reload::{
@@ -945,10 +946,14 @@ impl Backend {
         let started = std::time::Instant::now();
 
         let root_load_guard = self.root_load_lock.lock().await;
-        {
-            let mut svc = self.service.lock_recover();
-            svc.set_preload_in_progress(true);
-        }
+        // Clears the flag on every exit, including a panic caught by
+        // `guard_notification` (BT-5131), and unregisters the root unless the
+        // load completes so the next `did_open` retries it.
+        let mut preload_guard = PreloadGuard::begin(&self.service);
+        let mut unregister = UnregisterRootOnDrop {
+            roots: &self.workspace_roots,
+            root: Some(root.clone()),
+        };
         let all_roots = self.workspace_roots_snapshot();
         self.load_root_packages(&all_roots).await;
 
@@ -964,11 +969,8 @@ impl Backend {
                     root = %root.display(),
                     "package root preload walk failed; unregistering it for retry"
                 );
-                self.workspace_roots.lock_recover().retain(|r| r != &root);
-                {
-                    let mut svc = self.service.lock_recover();
-                    svc.set_preload_in_progress(false);
-                }
+                drop(unregister); // unregisters the root for retry
+                preload_guard.finish();
                 drop(root_load_guard);
                 self.republish_open_diagnostics().await;
                 return;
@@ -1000,10 +1002,8 @@ impl Backend {
         }
         self.load_type_cache(&all_roots).await;
         self.load_diagnostics_table(&all_roots).await;
-        {
-            let mut svc = self.service.lock_recover();
-            svc.set_preload_in_progress(false);
-        }
+        unregister.root = None; // load succeeded: keep the root registered
+        preload_guard.finish();
         drop(root_load_guard);
         debug!(
             root = %root.display(),
@@ -1367,17 +1367,23 @@ impl Backend {
             versions: Arc::clone(&self.versions),
             publish_lock: Arc::clone(&self.publish_lock),
         };
-        let listener_handle = tokio::spawn(flush_event_listener(
-            listener_client,
-            listener_roots,
-            open_paths_handle.clone(),
-            flush_rx,
+        let listener_handle = tokio::spawn(guard_notification(
+            "flush_event_listener",
+            flush_event_listener(
+                listener_client,
+                listener_roots,
+                open_paths_handle.clone(),
+                flush_rx,
+            ),
         ));
 
         // Drains class-loaded / method-installed push events so the runtime
         // client's channel stays open (BT-5080: the former nav cache that
         // consumed them cached nothing and was removed).
-        let class_changed_handle = tokio::spawn(class_changed_listener(class_changed_rx));
+        let class_changed_handle = tokio::spawn(guard_notification(
+            "class_changed_listener",
+            class_changed_listener(class_changed_rx),
+        ));
 
         let reload_check_handle = self.spawn_reload_check_listener(
             client.clone(),
@@ -1586,4 +1592,47 @@ fn root_type_registry(
         &dependency_stubs,
     )
     .registry
+}
+
+/// Clears `preload_in_progress` when dropped, so a panic (caught by
+/// `guard_notification`) or early return mid-preload cannot leave
+/// diagnostics suppressed for the rest of the session (BT-5131).
+pub(in crate::server) struct PreloadGuard {
+    service: Arc<Mutex<SimpleLanguageService>>,
+}
+
+impl PreloadGuard {
+    pub(in crate::server) fn begin(service: &Arc<Mutex<SimpleLanguageService>>) -> Self {
+        service.lock_recover().set_preload_in_progress(true);
+        Self {
+            service: Arc::clone(service),
+        }
+    }
+
+    /// Clears the flag now (so a following republish can send); `Drop` is
+    /// then a harmless repeat.
+    pub(in crate::server) fn finish(&mut self) {
+        self.service.lock_recover().set_preload_in_progress(false);
+    }
+}
+
+impl Drop for PreloadGuard {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+/// Removes a speculatively registered package root on drop unless disarmed
+/// (`root = None`), so a failed or panicked load is retried on the next open.
+struct UnregisterRootOnDrop<'a> {
+    roots: &'a Mutex<Vec<PathBuf>>,
+    root: Option<PathBuf>,
+}
+
+impl Drop for UnregisterRootOnDrop<'_> {
+    fn drop(&mut self) {
+        if let Some(root) = self.root.take() {
+            self.roots.lock_recover().retain(|r| r != &root);
+        }
+    }
 }

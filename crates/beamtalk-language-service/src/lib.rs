@@ -77,7 +77,7 @@ mod tests;
 mod value_objects;
 
 // Re-export value objects at the module level
-pub use project_index::{ProjectIndex, STDLIB_PACKAGE_MARKER};
+pub use project_index::{FileInterface, ProjectIndex, STDLIB_PACKAGE_MARKER};
 pub use rename::{FileMove, PreparedRename, RenameEdit, RenameKind, RenamePlan, RenameRefusal};
 pub use runtime_delegate::{
     NavQuery, NavQueryResponse, NavSite, NavSymbolClass, NavSymbolMethod, NavSymbolsResponse,
