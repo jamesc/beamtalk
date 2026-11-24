@@ -43,7 +43,9 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
     record_extension_warning/1,
-    with_extension_warning_scope/1,
+    with_extension_warning_scope/2,
+    begin_registration/0,
+    end_registration/0,
     record_pending_load_error/2,
     drain_pending_load_errors_by_names/1,
     clear_pending_load_errors_by_names/1,
@@ -414,9 +416,9 @@ serialised by a lock (the code server serialises loads anyway), so a row can
 only belong to the scope that is open. Nothing is queued without a scope: a
 registration outside a caller's load keeps only its logger line.
 """.
--spec with_extension_warning_scope(fun(() -> Result)) -> {Result, [binary()]} when
+-spec with_extension_warning_scope(module(), fun(() -> Result)) -> {Result, [binary()]} when
     Result :: term().
-with_extension_warning_scope(Fun) ->
+with_extension_warning_scope(Module, Fun) ->
     ensure_class_warnings_table(),
     Pid = self(),
     ScopeKey = {undefined, '$extension_scope'},
@@ -424,11 +426,18 @@ with_extension_warning_scope(Fun) ->
     global:trans(
         {beamtalk_extension_warning_scope, Pid},
         fun() ->
-            ets:insert(beamtalk_class_warnings, {ScopeKey, scope, Pid}),
+            %% Under the lock, any scope or warning row is a leftover from a holder
+            %% killed mid-load (its `after` never ran): clear it, or a bag with two
+            %% scope rows would turn the feature off for the whole workspace.
+            _ = ets:delete(beamtalk_class_warnings, ScopeKey),
+            _ = ets:match_delete(
+                beamtalk_class_warnings, {{undefined, {'$extension_warning', '_'}}, '_', '_'}
+            ),
+            ets:insert(beamtalk_class_warnings, {ScopeKey, scope, Pid, Module}),
             try Fun() of
                 Result -> {Result, take_scope_rows(RowKey)}
             after
-                ets:delete_object(beamtalk_class_warnings, {ScopeKey, scope, Pid})
+                ets:delete_object(beamtalk_class_warnings, {ScopeKey, scope, Pid, Module})
             end
         end,
         [node()]
@@ -441,9 +450,10 @@ take_scope_rows(RowKey) ->
 
 -doc """
 BT-5060: file a one-hop extension warning for the load scope that is open. Only
-a registration run by a module's `register_class/0` (the `on_load` hook) is
-filed, so an unrelated process cannot land in someone else's scope. Without an
-open scope the warning is dropped (the logger line is the report).
+the `on_load` of the module that scope is loading (its `register_class/0`
+frame, `{Module, register_class, 0}`) is filed, so a registration by any other
+process cannot land in someone else's reply. Without an open scope the warning
+is dropped (the logger line is the report).
 """.
 -spec record_extension_warning(binary()) -> ok.
 record_extension_warning(Text) when is_binary(Text) ->
@@ -451,30 +461,63 @@ record_extension_warning(Text) when is_binary(Text) ->
         undefined ->
             ok;
         _ ->
-            case
-                in_register_class() andalso
-                    ets:lookup(beamtalk_class_warnings, {undefined, '$extension_scope'})
-            of
-                [{_, scope, Pid}] ->
-                    Order = erlang:unique_integer([monotonic]),
-                    ets:insert(
-                        beamtalk_class_warnings,
-                        {{undefined, {'$extension_warning', Pid}}, one_hop, {Order, Text}}
-                    ),
-                    ok;
+            case ets:lookup(beamtalk_class_warnings, {undefined, '$extension_scope'}) of
+                [{_, scope, Pid, Module}] ->
+                    case in_register_class(Module) of
+                        true ->
+                            Order = erlang:unique_integer([monotonic]),
+                            ets:insert(
+                                beamtalk_class_warnings,
+                                {{undefined, {'$extension_warning', Pid}}, one_hop, {Order, Text}}
+                            ),
+                            ok;
+                        false ->
+                            ok
+                    end;
                 _ ->
                     ok
             end
     end.
 
--spec in_register_class() -> boolean().
-in_register_class() ->
-    case erlang:process_info(self(), current_stacktrace) of
-        {current_stacktrace, Frames} ->
-            lists:any(fun({_M, F, A, _}) -> F =:= register_class andalso A =:= 0 end, Frames);
-        _ ->
-            false
-    end.
+%% The module whose `register_class/0` (an `on_load`) is running this registration,
+%% captured by `begin_registration/0` at `register/5` entry.
+-define(REGISTRAR_KEY, '$beamtalk_extension_registrar').
+
+-spec in_register_class(module()) -> boolean().
+in_register_class(Module) ->
+    erlang:get(?REGISTRAR_KEY) =:= Module.
+
+-doc """
+BT-5060: called first thing in `beamtalk_extensions:register/5`, while the stack
+is still shallow (`register/5` called from `register_class/0`): remember which
+module's `register_class/0` is running this registration, or none, for
+`record_extension_warning/1`. Reading the stack here rather than deep inside the
+warning code keeps the answer independent of `backtrace_depth`.
+""".
+-spec begin_registration() -> ok.
+begin_registration() ->
+    Registrar =
+        case erlang:process_info(self(), current_stacktrace) of
+            {current_stacktrace, Frames} ->
+                case
+                    [
+                        M
+                     || {M, register_class, 0, _} <- lists:sublist(Frames, 4)
+                    ]
+                of
+                    [M | _] -> M;
+                    [] -> undefined
+                end;
+            _ ->
+                undefined
+        end,
+    _ = erlang:put(?REGISTRAR_KEY, Registrar),
+    ok.
+
+-spec end_registration() -> ok.
+end_registration() ->
+    _ = erlang:erase(?REGISTRAR_KEY),
+    ok.
 
 -spec dedupe([binary()]) -> [binary()].
 dedupe(Texts) ->

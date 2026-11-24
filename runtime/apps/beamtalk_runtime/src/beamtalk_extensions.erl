@@ -225,6 +225,8 @@ register(Class, Selector, Fun, Owner, Source) when
     (Source =:= undefined orelse is_binary(Source))
 ->
     Key = {Class, Selector},
+    %% BT-5060: before anything deepens the stack (see `begin_registration/0`).
+    ok = beamtalk_class_registry:begin_registration(),
     ok = validate_class_side_arity(Class, Selector, Fun),
     %% BT-4473: raised before the row can be seen, so a reader that misses
     %% the flag cannot also see the extension.
@@ -295,7 +297,7 @@ register(Class, Selector, Fun, Owner, Source) when
     %% is already the metaclass tag in that case) — see its doc.
     index_extension_xref(Class, Selector, Source),
     warn_one_hop_children(Class, Selector),
-    ok.
+    ok = beamtalk_class_registry:end_registration().
 
 %% BT-5060: an extension that replaces a method a value class compiles is not
 %% seen by that class's direct value subclasses (ADR 0066, the one-hop route).

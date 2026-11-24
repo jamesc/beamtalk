@@ -81,9 +81,10 @@ handle_term(<<"load-source">>, Params, _Msg, SessionPid) ->
             {error,
                 beamtalk_repl_errors:empty_expression(<<"Enter Beamtalk source code to compile.">>)};
         _ ->
-            Result = beamtalk_repl_shell:load_source(SessionPid, Source),
-            %% BT-5060: one-hop extension warnings queued by this session's load.
-            Extension = beamtalk_repl_shell:take_reply_warnings(SessionPid),
+            %% BT-5060: the one-hop extension warnings come back with the load.
+            {Result, Extension} = beamtalk_repl_shell:load_source_with_warnings(
+                SessionPid, Source
+            ),
             case Result of
                 {ok, Classes} ->
                     Warnings =

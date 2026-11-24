@@ -92,7 +92,7 @@ operation that loaded it carries them. Every REPL load goes through here.
 -spec load_binary_noting_warnings(atom(), string(), binary()) ->
     {module, atom()} | {error, term()}.
 load_binary_noting_warnings(ModuleName, LoadPath, Binary) ->
-    {Result, Warnings} = beamtalk_runtime_api:with_extension_warning_scope(fun() ->
+    {Result, Warnings} = beamtalk_runtime_api:with_extension_warning_scope(ModuleName, fun() ->
         code:load_binary(ModuleName, LoadPath, Binary)
     end),
     lists:foreach(fun beamtalk_refactor_support:note_reply_warning/1, Warnings),

@@ -104,23 +104,8 @@ sync_project(Path, Options) ->
                     <<"Provide a directory path containing beamtalk.toml">>
                 )};
         true ->
-            %% BT-5060: the sync reply also carries the one-hop extension warnings
-            %% queued while the project loaded.
-            case do_sync_project(AbsPath, IncludeTests, Force, SessionPid, PackageName) of
-                {ok, #{warnings := Warnings} = Result} ->
-                    Extra = take_session_warnings(SessionPid),
-                    {ok, Result#{warnings := Warnings ++ Extra}};
-                Other ->
-                    Other
-            end
+            do_sync_project(AbsPath, IncludeTests, Force, SessionPid, PackageName)
     end.
-
-%% BT-5060: one-hop extension warnings the session process queued while loading.
--spec take_session_warnings(pid() | undefined) -> [binary()].
-take_session_warnings(SessionPid) when is_pid(SessionPid) ->
-    beamtalk_repl_shell:take_reply_warnings(SessionPid);
-take_session_warnings(_) ->
-    [].
 
 -doc "Core sync logic, called after validating beamtalk.toml exists.".
 -spec do_sync_project(string(), boolean(), boolean(), pid() | undefined, binary() | undefined) ->
@@ -313,10 +298,11 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid, PackageName) ->
     record_file_mtimes_from_snapshot(SuccessfulErlMtimes),
     SortedChanged = sort_bt_files_by_deps(ChangedBt),
     PreLoadMtimes = snapshot_file_mtimes(SortedChanged),
-    {AllClasses, BtErrors} =
+    {AllClasses, BtErrors, LoadWarnings} =
         case SessionPid of
             undefined ->
-                load_files_stateless(SortedChanged);
+                {StatelessClasses, StatelessErrors} = load_files_stateless(SortedChanged),
+                {StatelessClasses, StatelessErrors, []};
             _ ->
                 load_files_sequential(SortedChanged, SessionPid)
         end,
@@ -357,7 +343,8 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid, PackageName) ->
         classes => ClassNames,
         errors => Errors,
         dep_errors => DepErrorMsgs,
-        warnings => CollisionWarnings,
+        %% BT-5060: one-hop extension warnings come back with each file's load.
+        warnings => CollisionWarnings ++ LoadWarnings,
         summary => build_incremental_summary(
             ChangedCount, TotalFiles, UnchangedCount, DeletedCount
         ),
@@ -512,31 +499,53 @@ files referencing fixture classes). The original optimisation of
 building indexes once caused "Undefined function" errors when test files
 were compiled before their fixture dependencies were visible in the index.
 """.
--spec load_files_sequential([string()], pid()) -> {[map()], [map()]}.
+-spec load_files_sequential([string()], pid()) -> {[map()], [map()], [binary()]}.
 load_files_sequential(Files, SessionPid) ->
     %% BT-4378: every compile of this batch carries the same `project_batch'
     %% token (merged into the compile options with the indexes), so the
     %% compiler port verifies the project scope once per load, not per file.
     Batch = new_project_batch(),
     Indexes0 = maps:merge(beamtalk_repl_compiler:build_class_indexes(), Batch),
-    {RevClasses, RevErrors, _} =
+    {RevClasses, RevErrors, RevWarnings, _} =
         lists:foldl(
-            fun(Path, {ClassesAcc, ErrorsAcc, Indexes}) ->
-                case beamtalk_repl_shell:load_file(SessionPid, Path, Indexes) of
+            fun(Path, {ClassesAcc, ErrorsAcc, WarningsAcc, Indexes}) ->
+                {Loaded, Warnings} =
+                    beamtalk_repl_shell:load_file_with_warnings(SessionPid, Path, Indexes),
+                NewWarningsAcc = lists:reverse(Warnings, WarningsAcc),
+                case Loaded of
                     {ok, Classes} ->
                         NewIndexes = maps:merge(
                             beamtalk_repl_compiler:build_class_indexes(), Batch
                         ),
-                        {lists:reverse(Classes, ClassesAcc), ErrorsAcc, NewIndexes};
+                        {lists:reverse(Classes, ClassesAcc), ErrorsAcc, NewWarningsAcc, NewIndexes};
                     {error, Reason} ->
                         ErrMaps = structured_file_errors(Path, Reason),
-                        {ClassesAcc, lists:reverse(ErrMaps, ErrorsAcc), Indexes}
+                        {ClassesAcc, lists:reverse(ErrMaps, ErrorsAcc), NewWarningsAcc, Indexes}
                 end
             end,
-            {[], [], Indexes0},
+            {[], [], [], Indexes0},
             Files
         ),
-    {lists:reverse(RevClasses), lists:reverse(RevErrors)}.
+    {
+        lists:reverse(RevClasses),
+        lists:reverse(RevErrors),
+        dedupe_warnings(lists:reverse(RevWarnings))
+    }.
+
+-spec dedupe_warnings([binary()]) -> [binary()].
+dedupe_warnings(Warnings) ->
+    lists:reverse(
+        lists:foldl(
+            fun(W, Acc) ->
+                case lists:member(W, Acc) of
+                    true -> Acc;
+                    false -> [W | Acc]
+                end
+            end,
+            [],
+            Warnings
+        )
+    ).
 
 -doc """
 Load files without a session.
