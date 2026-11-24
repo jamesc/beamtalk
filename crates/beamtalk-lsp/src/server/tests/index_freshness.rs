@@ -719,3 +719,21 @@ async fn watched_created_directory_indexes_its_files() {
     );
     assert!(svc.file_source(&f2).is_some(), "nested file indexed");
 }
+
+/// BT-5131: a guard that already finished must not clear a later load's flag
+/// when it drops (it can outlive `root_load_lock`).
+#[tokio::test]
+async fn finished_preload_guard_does_not_clear_a_later_loads_flag() {
+    let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+    let backend: &Backend = service.inner();
+    let mut first = crate::server::core::PreloadGuard::begin(&backend.service);
+    first.finish();
+    let second = crate::server::core::PreloadGuard::begin(&backend.service);
+    drop(first);
+    assert!(
+        backend.service.lock_recover().is_preload_in_progress(),
+        "dropping a finished guard must leave the second load's flag set"
+    );
+    drop(second);
+    assert!(!backend.service.lock_recover().is_preload_in_progress());
+}

@@ -1599,6 +1599,9 @@ fn root_type_registry(
 /// diagnostics suppressed for the rest of the session (BT-5131).
 pub(in crate::server) struct PreloadGuard {
     service: Arc<Mutex<SimpleLanguageService>>,
+    /// Set by `finish()`: after it, `Drop` must not touch the flag, which a
+    /// later load (holding `root_load_lock` once ours is released) may own.
+    finished: bool,
 }
 
 impl PreloadGuard {
@@ -1606,13 +1609,17 @@ impl PreloadGuard {
         service.lock_recover().set_preload_in_progress(true);
         Self {
             service: Arc::clone(service),
+            finished: false,
         }
     }
 
-    /// Clears the flag now (so a following republish can send); `Drop` is
-    /// then a harmless repeat.
+    /// Clears the flag now (so a following republish can send). Idempotent;
+    /// `Drop` clears only if this never ran (early return or unwind).
     pub(in crate::server) fn finish(&mut self) {
-        self.service.lock_recover().set_preload_in_progress(false);
+        if !self.finished {
+            self.finished = true;
+            self.service.lock_recover().set_preload_in_progress(false);
+        }
     }
 }
 
