@@ -48,6 +48,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     drain_class_warnings_by_names/1,
     record_extension_warning/1,
     with_extension_warning_scope/2,
+    dedupe_warnings/1,
     begin_registration/0,
     end_registration/0,
     record_pending_load_error/2,
@@ -418,7 +419,10 @@ caller; the registering process files its warning under that caller
 (`record_extension_warning/1`, which accepts it only from that module's own
 `register_class/0`), and the caller takes exactly its own rows atomically
 afterwards. Scopes of different modules are independent, so there is no lock and
-a slow `on_load` stalls nobody else. A row left by a holder that was killed
+a slow `on_load` stalls nobody else. Like `load_binary_scoped/4`, this assumes no
+concurrent load of the same module: two overlapping scopes for one module can
+file a warning under the wrong caller (the text describes shared workspace
+state, never anything private to a session). A row left by a holder that was killed
 mid-load is replaced by the next scope for the same module. Nothing is queued
 without a scope: a registration outside a caller's load keeps only its logger
 line.
@@ -444,7 +448,7 @@ with_extension_warning_scope(Module, Fun) ->
 -spec take_scope_rows(term()) -> [binary()].
 take_scope_rows(RowKey) ->
     Rows = ets:take(beamtalk_class_warnings, RowKey),
-    dedupe([Text || {_Order, Text} <- lists:sort([Cell || {_, one_hop, Cell} <- Rows])]).
+    dedupe_warnings([Text || {_Order, Text} <- lists:sort([Cell || {_, one_hop, Cell} <- Rows])]).
 
 -doc """
 BT-5060: file a one-hop extension warning for the load scope of the module whose
@@ -466,13 +470,27 @@ record_extension_warning(Text) when is_binary(Text) ->
                             {undefined, {'$extension_scope', Module}}
                         )
                     of
-                        [{_, scope, Pid}] ->
-                            Order = erlang:unique_integer([monotonic]),
-                            ets:insert(
-                                beamtalk_class_warnings,
-                                {{undefined, {'$extension_warning', Pid}}, one_hop, {Order, Text}}
-                            ),
-                            ok;
+                        [{_, scope, Pid}] when is_pid(Pid) ->
+                            case is_process_alive(Pid) of
+                                true ->
+                                    Order = erlang:unique_integer([monotonic]),
+                                    ets:insert(
+                                        beamtalk_class_warnings,
+                                        {
+                                            {undefined, {'$extension_warning', Pid}},
+                                            one_hop,
+                                            {Order, Text}
+                                        }
+                                    ),
+                                    ok;
+                                false ->
+                                    %% A holder killed mid-load: drop its stale scope.
+                                    _ = ets:delete_object(
+                                        beamtalk_class_warnings,
+                                        {{undefined, {'$extension_scope', Module}}, scope, Pid}
+                                    ),
+                                    ok
+                            end;
                         _ ->
                             ok
                     end;
@@ -508,8 +526,9 @@ end_registration() ->
     _ = erlang:erase(?REGISTRAR_KEY),
     ok.
 
--spec dedupe([binary()]) -> [binary()].
-dedupe(Texts) ->
+-doc "The one order-preserving de-duplication of reply warning texts.".
+-spec dedupe_warnings([binary()]) -> [binary()].
+dedupe_warnings(Texts) ->
     {Out, _} = lists:foldl(
         fun(T, {Acc, Seen}) ->
             case sets:is_element(T, Seen) of

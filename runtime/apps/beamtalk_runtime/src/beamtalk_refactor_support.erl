@@ -341,18 +341,7 @@ take_changelog_warnings() ->
         List ->
             %% BT-5060: one text once per reply (a class's register_class/0 can
             %% run both as its on_load and again on activation).
-            lists:reverse(
-                lists:foldl(
-                    fun(W, Acc) ->
-                        case lists:member(W, Acc) of
-                            true -> Acc;
-                            false -> [W | Acc]
-                        end
-                    end,
-                    [],
-                    lists:reverse(List)
-                )
-            )
+            beamtalk_class_registry:dedupe_warnings(lists:reverse(List))
     end.
 
 %% Resolve the audit author for the current patch. ADR 0082 distinguishes

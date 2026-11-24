@@ -344,7 +344,7 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid, PackageName) ->
         errors => Errors,
         dep_errors => DepErrorMsgs,
         %% BT-5060: one-hop extension warnings come back with each file's load.
-        warnings => CollisionWarnings ++ LoadWarnings,
+        warnings => CollisionWarnings ++ beamtalk_runtime_api:dedupe_warnings(LoadWarnings),
         summary => build_incremental_summary(
             ChangedCount, TotalFiles, UnchangedCount, DeletedCount
         ),

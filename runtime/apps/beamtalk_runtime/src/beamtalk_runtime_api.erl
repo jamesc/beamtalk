@@ -38,6 +38,7 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
     is_class_name/1,
     drain_class_warnings_by_names/1,
     with_extension_warning_scope/2,
+    dedupe_warnings/1,
     drain_pending_load_errors_by_names/1,
     clear_pending_load_errors_by_names/1,
     get_method_return_type/2,
@@ -197,6 +198,10 @@ drain_class_warnings_by_names(Names) ->
 -spec with_extension_warning_scope(module(), fun(() -> R)) -> {R, [binary()]} when R :: term().
 with_extension_warning_scope(Module, Fun) ->
     beamtalk_class_registry:with_extension_warning_scope(Module, Fun).
+
+-spec dedupe_warnings([binary()]) -> [binary()].
+dedupe_warnings(Texts) ->
+    beamtalk_class_registry:dedupe_warnings(Texts).
 
 -spec drain_pending_load_errors_by_names([atom()]) -> [{atom(), #beamtalk_error{}}].
 drain_pending_load_errors_by_names(Names) ->
