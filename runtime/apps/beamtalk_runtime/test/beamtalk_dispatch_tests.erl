@@ -2273,23 +2273,35 @@ test_inherited_target_unregistered() ->
         ets:lookup(beamtalk_class_derived_cache, {inherited_target, 'Bt4280NoSuchClass', anything})
     ).
 
-%% BT-5060: the extension warnings queued for a reply are returned once, oldest
-%% first, only for an operation that began before they were queued.
-extension_warning_queue_test() ->
+%% BT-5060: a module's `register_class/0` (its on_load) files warnings under the
+%% load scope of the process that is loading it; the scope returns exactly those,
+%% deduplicated and in order. Anything filed outside such a hook, or outside a
+%% scope, is dropped.
+extension_warning_scope_test() ->
     beamtalk_class_registry:ensure_class_warnings_table(),
-    Since = erlang:monotonic_time(millisecond),
+    {ok, Outside} = {ok, beamtalk_class_registry:record_extension_warning(<<"outside">>)},
+    ?assertEqual(ok, Outside),
+    {done, Warnings} = beamtalk_class_registry:with_extension_warning_scope(fun() ->
+        true = register(bt5060_scope_test, self()),
+        spawn_link(fun() -> register_class() end),
+        receive
+            registered -> done
+        after 5000 -> timeout
+        end
+    end),
+    true = unregister(bt5060_scope_test),
+    ?assertEqual([<<"first">>, <<"second">>], Warnings),
+    %% The scope is closed: a later hook files nothing.
+    {done, []} = beamtalk_class_registry:with_extension_warning_scope(fun() -> done end).
+
+%% Stands in for a generated module's on_load hook (the stack frame is what
+%% `record_extension_warning/1` recognises).
+register_class() ->
     ok = beamtalk_class_registry:record_extension_warning(<<"first">>),
     ok = beamtalk_class_registry:record_extension_warning(<<"second">>),
     ok = beamtalk_class_registry:record_extension_warning(<<"first">>),
-    ?assertEqual(
-        [<<"first">>, <<"second">>], beamtalk_class_registry:take_extension_warnings(Since)
-    ),
-    ?assertEqual([], beamtalk_class_registry:take_extension_warnings(Since)),
-    %% An operation that began after the warning was queued does not see it.
-    ok = beamtalk_class_registry:record_extension_warning(<<"old">>),
-    Later = erlang:monotonic_time(millisecond) + 1000,
-    ?assertEqual([], beamtalk_class_registry:take_extension_warnings(Later)),
-    ?assertEqual([<<"old">>], beamtalk_class_registry:take_extension_warnings(Since)).
+    bt5060_scope_test ! registered,
+    ok.
 
 one_hop_parent_extensions_missing_unknown_class_test() ->
     ?assertEqual([], beamtalk_dispatch:one_hop_parent_extensions_missing('NoSuchClass5060')).

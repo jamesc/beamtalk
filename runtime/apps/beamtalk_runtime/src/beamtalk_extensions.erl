@@ -340,7 +340,7 @@ emit_child_warning(Class, Selector, Children) ->
         [Selector, Class, Children],
         #{domain => [beamtalk, runtime]}
     ),
-    beamtalk_class_registry:record_extension_warning(
+    note_reply_warning(
         iolist_to_binary(
             io_lib:format(
                 "Extension '~ts' on '~ts' replaces a compiled method, but its direct value "
@@ -359,7 +359,7 @@ emit_parent_warning(Class, Selector, Owner) ->
         [Class, Selector, Owner],
         #{domain => [beamtalk, runtime]}
     ),
-    beamtalk_class_registry:record_extension_warning(
+    note_reply_warning(
         iolist_to_binary(
             io_lib:format(
                 "Class '~ts' will not see extension '~ts' on its superclass '~ts': a direct "
@@ -368,6 +368,16 @@ emit_parent_warning(Class, Selector, Owner) ->
             )
         )
     ).
+
+%% The warning goes to this process's reply queue when it is serving an
+%% operation (activation, a class-side call), else to the open load scope when
+%% this is a module's `on_load` (`register_class/0`).
+-spec note_reply_warning(binary()) -> ok.
+note_reply_warning(Text) ->
+    case beamtalk_refactor_support:collecting_warnings() of
+        true -> beamtalk_refactor_support:note_reply_warning(Text);
+        false -> beamtalk_class_registry:record_extension_warning(Text)
+    end.
 
 -spec guarded_warning(atom(), atom(), fun(() -> ok)) -> ok.
 guarded_warning(Selector, Class, Fun) ->

@@ -131,7 +131,6 @@ warning in this process (`beamtalk_refactor_support:note_changelog_result/1`).
     Result :: tuple().
 with_changelog_warnings(Fun) ->
     ok = beamtalk_refactor_support:begin_changelog_warnings(),
-    Since = erlang:monotonic_time(millisecond),
     %% bt-catcher-audit: not-applicable-reraises - the catch only clears the
     %% collection marker and re-raises, so the next boundary restores class variables.
     Result =
@@ -143,13 +142,7 @@ with_changelog_warnings(Fun) ->
                 _ = beamtalk_refactor_support:end_changelog_warnings(),
                 erlang:raise(Class, Reason, Stack)
         end,
-    %% BT-5060: one-hop extension warnings queued while this eval ran (a module's
-    %% on_load registers extensions in another process, so they travel via the
-    %% shared warnings table, not the process dictionary).
-    case
-        beamtalk_refactor_support:end_changelog_warnings() ++
-            beamtalk_runtime_api:take_extension_warnings(Since)
-    of
+    case beamtalk_refactor_support:end_changelog_warnings() of
         [] -> Result;
         Extra -> setelement(4, Result, element(4, Result) ++ Extra)
     end.
@@ -192,7 +185,7 @@ do_eval_expression(Expression, State, Subscriber) ->
         {ok, type_alias_definition, AliasInfo, Warnings} ->
             handle_type_alias_definition(AliasInfo, Warnings, NewState);
         {ok, Binary, #{assigned_var := AssignedVar}, Warnings} ->
-            case code:load_binary(ModuleName, "", Binary) of
+            case beamtalk_repl_loader_support:load_binary_noting_warnings(ModuleName, "", Binary) of
                 {module, ModuleName} ->
                     eval_loaded_module(
                         ModuleName,
@@ -572,7 +565,7 @@ do_eval_trace_expression(Expression, State) ->
 
     case beamtalk_repl_compiler:compile_expression_trace(Expression, ModuleName, Bindings) of
         {ok, Binary, #{step_assignments := StepAssignments}, Warnings} ->
-            case code:load_binary(ModuleName, "", Binary) of
+            case beamtalk_repl_loader_support:load_binary_noting_warnings(ModuleName, "", Binary) of
                 {module, ModuleName} ->
                     CaptureRef = beamtalk_io_capture:start(undefined),
                     EvalResult =
@@ -832,7 +825,7 @@ run_self_eval_module(ModuleName, Binary, Bindings) ->
     %% Fully unload any module left in this process's recycled eval slot before
     %% loading the new one, so a prior call's code never lingers.
     purge_eval_module(ModuleName),
-    case code:load_binary(ModuleName, "", Binary) of
+    case beamtalk_repl_loader_support:load_binary_noting_warnings(ModuleName, "", Binary) of
         {module, ModuleName} ->
             %% bt-catcher-audit: converted - the eval runs under protect/1, which restores on
             %% error (BT-3728)
@@ -1281,7 +1274,11 @@ handle_class_definition(
             {ok, ClassName, <<>>, Warnings, NewState2};
         {ok, _ClassName, {trailing, TrailingModName, TrailingBinary}, NewState2} ->
             %% Eval trailing expressions after class load
-            case code:load_binary(TrailingModName, "", TrailingBinary) of
+            case
+                beamtalk_repl_loader_support:load_binary_noting_warnings(
+                    TrailingModName, "", TrailingBinary
+                )
+            of
                 {module, TrailingModName} ->
                     %% The text is a class definition followed by trailing
                     %% expressions, never a single `name := ...` statement, so

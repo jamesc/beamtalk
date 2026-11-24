@@ -46,6 +46,7 @@ bindings while sharing access to actors and loaded modules.
     load_file/2,
     load_file/3,
     load_source/2,
+    take_reply_warnings/1,
     remove_from_tracker/2,
     get_module_tracker/1,
     show_codegen/2
@@ -330,6 +331,12 @@ load_file(SessionPid, Path, PrebuiltIndexes) ->
     gen_server:call(SessionPid, {load_file, Path, PrebuiltIndexes}, 30000).
 
 -doc "Load Beamtalk source from an inline binary string.".
+%% BT-5060: the warnings queued in the session process by the loads it ran since
+%% the last take (the one-hop extension warnings), oldest first. Clears the queue.
+-spec take_reply_warnings(pid()) -> [binary()].
+take_reply_warnings(SessionPid) ->
+    gen_server:call(SessionPid, take_reply_warnings, 30000).
+
 -spec load_source(pid(), binary()) -> {ok, [map()]} | {error, term()}.
 load_source(SessionPid, Source) ->
     gen_server:call(SessionPid, {load_source, Source}, 30000).
@@ -498,6 +505,7 @@ handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
     announce_bindings_cleared(SessionId, ClearedKeys),
     {reply, ok, {SessionId, NewState, Worker}};
 handle_call({load_file, Path}, _From, {SessionId, State, Worker}) ->
+    ok = beamtalk_refactor_support:ensure_collecting_warnings(),
     case beamtalk_repl_loader:handle_load(Path, State) of
         {ok, LoadedModules, NewState} ->
             {reply, {ok, LoadedModules}, {SessionId, NewState, Worker}};
@@ -505,6 +513,7 @@ handle_call({load_file, Path}, _From, {SessionId, State, Worker}) ->
             {reply, {error, Reason}, {SessionId, NewState, Worker}}
     end;
 handle_call({load_file, Path, PrebuiltIndexes}, _From, {SessionId, State, Worker}) ->
+    ok = beamtalk_refactor_support:ensure_collecting_warnings(),
     case beamtalk_repl_loader:handle_load(Path, State, PrebuiltIndexes) of
         {ok, LoadedModules, NewState} ->
             {reply, {ok, LoadedModules}, {SessionId, NewState, Worker}};
@@ -512,12 +521,15 @@ handle_call({load_file, Path, PrebuiltIndexes}, _From, {SessionId, State, Worker
             {reply, {error, Reason}, {SessionId, NewState, Worker}}
     end;
 handle_call({load_source, Source}, _From, {SessionId, State, Worker}) ->
+    ok = beamtalk_refactor_support:ensure_collecting_warnings(),
     case beamtalk_repl_loader:handle_load_source(Source, "<editor>", State) of
         {ok, LoadedModules, NewState} ->
             {reply, {ok, LoadedModules}, {SessionId, NewState, Worker}};
         {error, Reason, NewState} ->
             {reply, {error, Reason}, {SessionId, NewState, Worker}}
     end;
+handle_call(take_reply_warnings, _From, {SessionId, State, Worker}) ->
+    {reply, beamtalk_refactor_support:end_changelog_warnings(), {SessionId, State, Worker}};
 handle_call(get_module_tracker, _From, {SessionId, State, Worker}) ->
     Tracker = beamtalk_repl_state:get_module_tracker(State),
     {reply, {ok, Tracker}, {SessionId, State, Worker}};

@@ -44,6 +44,9 @@ verbatim.
     note_changelog_result/1,
     take_changelog_warnings/0,
     begin_changelog_warnings/0,
+    note_reply_warning/1,
+    collecting_warnings/0,
+    ensure_collecting_warnings/0,
     end_changelog_warnings/0,
     %% Shared by the class-rename and method-rename pipelines (BT-4703).
     raise_if_colliding/2,
@@ -304,6 +307,25 @@ note_changelog_result({warning, Text}) when is_binary(Text) ->
     end;
 note_changelog_result(_) ->
     ok.
+
+%% BT-5060: queue a warning for the reply of the operation this process is
+%% running (same queue as the ChangeLog warnings). A no-op outside one.
+-spec note_reply_warning(binary()) -> ok.
+note_reply_warning(Text) when is_binary(Text) ->
+    note_changelog_result({warning, Text}).
+
+-spec collecting_warnings() -> boolean().
+collecting_warnings() ->
+    erlang:get(?CHANGELOG_EVAL_KEY) =:= true.
+
+%% Start collecting unless already collecting (a session process serving a load
+%% keeps its queue until the handler takes it).
+-spec ensure_collecting_warnings() -> ok.
+ensure_collecting_warnings() ->
+    case erlang:get(?CHANGELOG_EVAL_KEY) of
+        true -> ok;
+        _ -> begin_changelog_warnings()
+    end.
 
 %% Start collecting in this process (an eval worker): clears any stale queue and
 %% marks the process so `note_changelog_result/1` queues. Pair with

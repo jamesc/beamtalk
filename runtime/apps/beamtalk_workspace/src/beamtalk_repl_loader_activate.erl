@@ -151,7 +151,7 @@ activate_module(ModuleName, Classes, SourcePath, NewlyNonLeafSuperclasses) ->
 
 %% BT-5060: name the extensions a just-(re)loaded class will not see, and the
 %% direct value subclasses of a just-(re)loaded class that will not see one of
-%% its extensions. The reply carries them (`beamtalk_class_registry:take_extension_warnings/1`).
+%% its extensions. They join this process's reply queue.
 -spec warn_one_hop_gaps([map()]) -> ok.
 warn_one_hop_gaps(Classes) ->
     lists:foreach(

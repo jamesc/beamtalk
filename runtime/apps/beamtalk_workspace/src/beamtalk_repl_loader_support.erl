@@ -20,6 +20,7 @@ Shared leaf helpers for the loader modules: class-name atom extraction, scoped b
     class_name_atoms/1,
     is_stdlib_path/1,
     load_binary_scoped/4,
+    load_binary_noting_warnings/3,
     load_class_binary/4,
     maybe_add_loaded_module/2,
     normalize_class_source_key/1,
@@ -81,7 +82,21 @@ autoload) is discarded first instead of being blamed on this load's real cause.
     {module, atom()} | {error, term()}.
 load_binary_scoped(ModuleName, LoadPath, Binary, Classes) ->
     ok = beamtalk_runtime_api:clear_pending_load_errors_by_names(class_name_atoms(Classes)),
-    code:load_binary(ModuleName, LoadPath, Binary).
+    load_binary_noting_warnings(ModuleName, LoadPath, Binary).
+
+-doc """
+`code:load_binary/3` that hands the one-hop extension warnings (BT-5060) the
+module's `on_load` registered to this process's reply queue, so the reply of the
+operation that loaded it carries them. Every REPL load goes through here.
+""".
+-spec load_binary_noting_warnings(atom(), string(), binary()) ->
+    {module, atom()} | {error, term()}.
+load_binary_noting_warnings(ModuleName, LoadPath, Binary) ->
+    {Result, Warnings} = beamtalk_runtime_api:with_extension_warning_scope(fun() ->
+        code:load_binary(ModuleName, LoadPath, Binary)
+    end),
+    lists:foreach(fun beamtalk_refactor_support:note_reply_warning/1, Warnings),
+    Result.
 
 -doc "Check if a file path refers to a stdlib file (under stdlib/src/ directory).".
 -spec is_stdlib_path(string()) -> boolean().

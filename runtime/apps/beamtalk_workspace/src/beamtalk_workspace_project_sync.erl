@@ -106,15 +106,21 @@ sync_project(Path, Options) ->
         true ->
             %% BT-5060: the sync reply also carries the one-hop extension warnings
             %% queued while the project loaded.
-            Since = erlang:monotonic_time(millisecond),
             case do_sync_project(AbsPath, IncludeTests, Force, SessionPid, PackageName) of
                 {ok, #{warnings := Warnings} = Result} ->
-                    Extra = beamtalk_runtime_api:take_extension_warnings(Since),
+                    Extra = take_session_warnings(SessionPid),
                     {ok, Result#{warnings := Warnings ++ Extra}};
                 Other ->
                     Other
             end
     end.
+
+%% BT-5060: one-hop extension warnings the session process queued while loading.
+-spec take_session_warnings(pid() | undefined) -> [binary()].
+take_session_warnings(SessionPid) when is_pid(SessionPid) ->
+    beamtalk_repl_shell:take_reply_warnings(SessionPid);
+take_session_warnings(_) ->
+    [].
 
 -doc "Core sync logic, called after validating beamtalk.toml exists.".
 -spec do_sync_project(string(), boolean(), boolean(), pid() | undefined, binary() | undefined) ->

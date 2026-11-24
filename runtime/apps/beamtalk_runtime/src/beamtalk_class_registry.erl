@@ -43,7 +43,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
     record_extension_warning/1,
-    take_extension_warnings/1,
+    with_extension_warning_scope/1,
     record_pending_load_error/2,
     drain_pending_load_errors_by_names/1,
     clear_pending_load_errors_by_names/1,
@@ -402,59 +402,78 @@ drain_class_warnings_by_names(ClassNames) ->
     end.
 
 -doc """
-BT-5060: queue a warning about an extension a direct value subclass will not
-see (ADR 0066, the one-hop route), for the next load/eval/sync reply to carry.
+BT-5060: run `Fun` (a `code:load_binary/3` of one module) in an extension-warning
+scope owned by the calling process, and return its result with the one-hop
+extension warnings the module's `on_load` registered meanwhile.
 
-Registration runs from a module's `on_load` (a process the code server spawns),
-so a per-process queue cannot reach the reply; the shared warnings table can.
-Each row carries its monotonic timestamp so `take_extension_warnings/1` hands a
-reply only what was queued since that reply's operation began. Rows older than
-a minute are dropped on insert, so a registration made outside any reply (boot,
-a package load) cannot surface in a much later one. The logger line stays the
-fallback there.
+Registration runs from `register_class/0` in a process the code server spawns,
+so it cannot see the caller. The scope row names the caller; the registering
+process files its warning under that caller (`record_extension_warning/1`), and
+the caller takes exactly its own rows atomically afterwards. Scopes are
+serialised by a lock (the code server serialises loads anyway), so a row can
+only belong to the scope that is open. Nothing is queued without a scope: a
+registration outside a caller's load keeps only its logger line.
+""".
+-spec with_extension_warning_scope(fun(() -> Result)) -> {Result, [binary()]} when
+    Result :: term().
+with_extension_warning_scope(Fun) ->
+    ensure_class_warnings_table(),
+    Pid = self(),
+    ScopeKey = {undefined, '$extension_scope'},
+    RowKey = {undefined, {'$extension_warning', Pid}},
+    global:trans(
+        {beamtalk_extension_warning_scope, Pid},
+        fun() ->
+            ets:insert(beamtalk_class_warnings, {ScopeKey, scope, Pid}),
+            try Fun() of
+                Result -> {Result, take_scope_rows(RowKey)}
+            after
+                ets:delete_object(beamtalk_class_warnings, {ScopeKey, scope, Pid})
+            end
+        end,
+        [node()]
+    ).
+
+-spec take_scope_rows(term()) -> [binary()].
+take_scope_rows(RowKey) ->
+    Rows = ets:take(beamtalk_class_warnings, RowKey),
+    dedupe([Text || {_Order, Text} <- lists:sort([Cell || {_, one_hop, Cell} <- Rows])]).
+
+-doc """
+BT-5060: file a one-hop extension warning for the load scope that is open. Only
+a registration run by a module's `register_class/0` (the `on_load` hook) is
+filed, so an unrelated process cannot land in someone else's scope. Without an
+open scope the warning is dropped (the logger line is the report).
 """.
 -spec record_extension_warning(binary()) -> ok.
 record_extension_warning(Text) when is_binary(Text) ->
-    ensure_class_warnings_table(),
-    Now = erlang:monotonic_time(millisecond),
-    Cutoff = Now - 60000,
-    _ = ets:select_delete(beamtalk_class_warnings, [
-        {{{undefined, '$extension_warning'}, one_hop, {'$1', '_'}}, [{'<', '$1', Cutoff}], [true]}
-    ]),
-    ets:insert(
-        beamtalk_class_warnings,
-        {{undefined, '$extension_warning'}, one_hop, {Now, Text}}
-    ),
-    ok.
-
--doc """
-BT-5060: remove and return the extension warnings queued at or after `Since`
-(an `erlang:monotonic_time(millisecond)` taken when the operation began),
-oldest first and without duplicates.
-""".
--spec take_extension_warnings(integer()) -> [binary()].
-take_extension_warnings(Since) when is_integer(Since) ->
     case ets:info(beamtalk_class_warnings) of
         undefined ->
-            [];
+            ok;
         _ ->
-            Rows = ets:select(beamtalk_class_warnings, [
-                {
-                    {{undefined, '$extension_warning'}, one_hop, {'$1', '$2'}},
-                    [{'>=', '$1', Since}],
-                    [{{'$1', '$2'}}]
-                }
-            ]),
-            lists:foreach(
-                fun({At, Text}) ->
-                    ets:delete_object(
+            case
+                in_register_class() andalso
+                    ets:lookup(beamtalk_class_warnings, {undefined, '$extension_scope'})
+            of
+                [{_, scope, Pid}] ->
+                    Order = erlang:unique_integer([monotonic]),
+                    ets:insert(
                         beamtalk_class_warnings,
-                        {{undefined, '$extension_warning'}, one_hop, {At, Text}}
-                    )
-                end,
-                Rows
-            ),
-            dedupe([Text || {_At, Text} <- lists:sort(Rows)])
+                        {{undefined, {'$extension_warning', Pid}}, one_hop, {Order, Text}}
+                    ),
+                    ok;
+                _ ->
+                    ok
+            end
+    end.
+
+-spec in_register_class() -> boolean().
+in_register_class() ->
+    case erlang:process_info(self(), current_stacktrace) of
+        {current_stacktrace, Frames} ->
+            lists:any(fun({_M, F, A, _}) -> F =:= register_class andalso A =:= 0 end, Frames);
+        _ ->
+            false
     end.
 
 -spec dedupe([binary()]) -> [binary()].
