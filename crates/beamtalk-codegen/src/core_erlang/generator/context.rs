@@ -258,12 +258,6 @@ pub(in crate::core_erlang) struct ClassContext {
     /// `class_super_dispatch` for `super`) keyed on this class name, not
     /// through a direct module call.
     pub builder_class_method_class: Option<String>,
-    /// BT-3762: the class-side extension's *target* class while its method is
-    /// lowered (the extension module's own class identity is not the target).
-    /// Read through [`CoreErlangGenerator::class_var_home`]: it names the class
-    /// in the "class variables are per class" diagnostic and keys a class-side
-    /// `super` send (BT-4001).
-    pub extension_target_class: Option<String>,
 }
 
 /// ADR 0084: Snapshot of the class-method-relevant `ClassContext`
@@ -318,7 +312,6 @@ impl ClassContext {
             in_class_method: false,
             stdlib_mode: false,
             builder_class_method_class: None,
-            extension_target_class: None,
         }
     }
 }

@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-08-15) — shipped via Epic BT-3183, Phases 1–5 (BT-3184–BT-3190)
 
+> **Superseded in part by [ADR 0152](0152-remove-cross-file-extension-methods.md) (2026-11-24), extension removal.** The rule that `removeSelector:` removes a shadowing extension first, the extension-removal gaps, and the extender-file attribution of such a removal no longer apply, because there are no extension methods. `removeSelector:` removes the class's own method, as for any other selector.
+
 ## Context
 
 ### Problem

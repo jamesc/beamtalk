@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0152: a `Class >> sel => ...` in a loaded file that does not define
+// `Class` is a compile error (it used to be dropped with a warning), while the
+// same definition typed live at the prompt, for a class the workspace holds
+// the source of, still succeeds.
+
+_adr152Uid := (Erlang erlang) unique_integer asString
+// => _
+
+_adr152Path := File tempDirectory ++ "/Adr152Host" ++ _adr152Uid ++ ".bt"
+// => _
+
+File writeAll: _adr152Path contents: "Value subclass: Adr152Host
+  base => 1
+Adr152Host >> sameFile => 2
+String >> adr152Shout => self"
+// => Result ok: nil
+
+Workspace load: _adr152Path
+// => ERROR: cross-file extension methods were removed (ADR 0152)
+
+File writeAll: _adr152Path contents: "Value subclass: Adr152Host
+  base => 1
+Adr152Host >> sameFile => 2"
+// => Result ok: nil
+
+Workspace load: _adr152Path
+// => ["Adr152Host"]
+
+Adr152Host new sameFile
+// => 2
+
+// Live definition on a class the workspace holds the source of is untouched.
+Adr152Host >> live => 3
+// => "Adr152Host>>live"
+
+Adr152Host new live
+// => 3
+
+Adr152Host class >> make => Adr152Host new
+// => "Adr152Host>>make"
+
+Adr152Host make live
+// => 3
+
+File delete: _adr152Path
+// => Result ok: nil

@@ -1,12 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// ArrayExtensionsHost — host class for the file's `Array >>` extensions.
-/// Class-shape flavour: file extending a stdlib class (`Array`).
+/// ArrayExtensionsHost — a helper class that works on `Array` values.
+/// Class-shape flavour: file whose class methods take a stdlib value
+/// (`Array`), the way to add behaviour to a class you do not own (ADR 0152).
 Object subclass: ArrayExtensionsHost
 
   class label -> String => "array-extensions-host"
 
-Array >> doubled => self collect: [:e | e]
+  class doubled: items :: Array => items collect: [:e | e]
 
-Array >> isEmptyClone => self isEmpty
+  class isEmptyClone: items :: Array => items isEmpty

@@ -230,26 +230,7 @@ TestCase subclass: Adr0133EnumerableUserTest
     ] raise: #stateful_block_dispatch
     self assert: (Adr0133EnumerableUser doWrite: c) equals: 6
 
-  // --- BT-3951: a runtime extension, or `species`, the pure send runs through ---
-  // The compile-time flag cannot see an extension registered at run time, so the
-  // guard also asks the extension registry for every class on the chain.
-  testExtensionInjectRefusesCollectWrite =>
-    c := Adr0133EnumerableExtInject new: #{#items => #(1, 2, 3)}
-    self should: [
-      Adr0133EnumerableUser collectWrite: c
-    ] raise: #stateful_block_dispatch
-    self should: [
-      Adr0133EnumerableUser selectWrite: c
-    ] raise: #stateful_block_dispatch
-    self assert: (Adr0133EnumerableUser doWrite: c) equals: 6
-
-  // An extension that is not a collection message changes nothing.
-  testNonCollectionExtensionStillFolds =>
-    c := Adr0133EnumerableExtPlain new: #{#items => #(1, 2, 3)}
-    self assert: c bt3951Harmless equals: #harmless
-    self assert: (Adr0133EnumerableUser collectWrite: c) equals: #[#(10, 20, 30), 3]
-    self assert: (Adr0133EnumerableUser selectWrite: c) equals: #[#(2, 3), 3]
-
+  // --- BT-3951: `species`, the pure send runs through ---
   // `species` defaults to `self class`, so a collection usually overrides the
   // class-side `withAll:` the stdlib's `collect:`/`select:` end in.
   testOwnClassSideWithAllRefusesCollectWrite =>
@@ -281,12 +262,6 @@ TestCase subclass: Adr0133EnumerableUserTest
     self assert: (Adr0133EnumerableUser selectWrite: c) equals: #[#(2, 3), 3]
     self assert: (Adr0133EnumerableUser detectWrite: c) equals: #[2, 2]
     self assert: (Adr0133EnumerableUser anySatisfyWrite: c) equals: #[true, 3]
-
-  testExtensionClassSideWithAllRefusesCollectWrite =>
-    c := Adr0133EnumerableExtWithAll new: #{#items => #(1, 2, 3)}
-    self should: [
-      Adr0133EnumerableUser collectWrite: c
-    ] raise: #stateful_block_dispatch
 
   testOwnSpeciesRefusesCollectWrite =>
     c := Adr0133EnumerableOwnSpecies new: #{#items => #(1, 2, 3)}
@@ -380,10 +355,3 @@ TestCase subclass: Adr0133EnumerableUserTest
       ] raise: #stateful_block_dispatch
       self assert: (Adr0133EnumerableUser doWrite: a) equals: 6
     ] ensure: [a stop]
-
-Adr0133EnumerableExtInject >> inject: initial :: Object into: _block :: Block(Object, Object, Object) -> Object =>
-  initial
-
-Adr0133EnumerableExtPlain >> bt3951Harmless => #harmless
-
-Adr0133EnumerableExtWithAll class >> withAll: list :: List -> List => list

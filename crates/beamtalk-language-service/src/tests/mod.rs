@@ -12,6 +12,7 @@ mod common;
 
 mod adr0144_protocol_metatypes;
 mod alias_and_cross_file_diagnostics;
+mod file_interface;
 mod find_references_click_rejection;
 mod goto_definition_navigation;
 mod identifier_lookup_type_annotations;

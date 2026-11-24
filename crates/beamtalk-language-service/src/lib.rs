@@ -77,7 +77,7 @@ mod tests;
 mod value_objects;
 
 // Re-export value objects at the module level
-pub use project_index::{ProjectIndex, STDLIB_PACKAGE_MARKER};
+pub use project_index::{FileInterface, ProjectIndex, STDLIB_PACKAGE_MARKER};
 pub use rename::{FileMove, PreparedRename, RenameEdit, RenameKind, RenamePlan, RenameRefusal};
 pub use runtime_delegate::{
     NavQuery, NavQueryResponse, NavSite, NavSymbolClass, NavSymbolMethod, NavSymbolsResponse,
@@ -955,9 +955,7 @@ impl SimpleLanguageService {
         // module is folded, so the fold's own diagnostics (an instance-side
         // extension on a `native:` actor) are kept with the parse diagnostics:
         // analysis of the folded module cannot rediscover them.
-        diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
-            &mut module,
-        ));
+        diagnostics.extend(fold_and_check_extensions(&mut module));
 
         // Build class hierarchy for the project index.
         // This is intentionally lightweight (ClassHierarchy::build only, not full
@@ -1689,4 +1687,16 @@ impl Default for SimpleLanguageService {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The same-file fold (BT-4721) followed by the ADR 0152 cross-file check: the
+/// file-compile rule the language service shares with the build.
+fn fold_and_check_extensions(
+    module: &mut beamtalk_core::ast::Module,
+) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
+    let mut diagnostics = beamtalk_core::compilation::fold_same_file_extensions(module);
+    diagnostics.extend(beamtalk_core::compilation::reject_cross_file_extensions(
+        module,
+    ));
+    diagnostics
 }

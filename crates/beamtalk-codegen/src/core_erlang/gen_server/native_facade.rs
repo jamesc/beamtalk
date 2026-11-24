@@ -805,11 +805,6 @@ impl CoreErlangGenerator {
 
         let try_body = Self::build_short_circuit_chain(&class_docs);
 
-        // Foreign extensions register before the chain. Same-file extensions
-        // never reach codegen as extensions: the front end folded them into the
-        // class (BT-4721).
-        let foreign_ext_doc = self.generate_foreign_extension_registrations(module)?;
-        let try_body = docvec![foreign_ext_doc, try_body];
         let of_clause = Document::Str("of RegResult -> RegResult");
 
         let doc = Self::register_class_fn_doc(try_body, of_clause);

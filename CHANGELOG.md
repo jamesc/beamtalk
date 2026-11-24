@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Breaking: cross-file `>>` extension methods are removed (ADR 0152, BT-5141).** A `Class >> selector => ...` or `Class class >> selector => ...` definition in a file that does not define `Class` is now a compile error in `beamtalk build`, `check`, `lint`, `test`, `run`, `Workspace load:`, `:sync`, an inline REPL eval, MCP lint and the LSP, with no deprecation period. `pkg@Class >> selector => ...` goes with it. Nothing in the stdlib, the examples or the downstream packages checked used the feature; only tests did.
+  - Unchanged: `Foo >> sel => ...` in the file that defines `Foo` (folded into the class), live method definition at the REPL (`Foo >> sel => ...`, `Foo class >> sel => ...`, `Class compile:source:`, IDE and MCP `save_method`), and the `Foo >> #sel` reflection operator that answers a `CompiledMethod`.
+  - Migration: put the method in the file that defines the class; for a class you cannot edit, write the operation on a class of your own that takes the value (`Shout of: aString` in place of `aString shout`); for JSON of a foreign class, give the holder's `JsonMapping` a `using:` converter. The error message carries the same advice.
+  - Changed: `Workspace load:` of a file with a cross-file `>>`, and an inline REPL eval that mixes a class definition with a `>>` for another class, fail with the compile error. They used to drop the method with the warning "Standalone method targets unknown class".
+  - Removed: the build no longer emits `beamtalk_extensions:register` calls. The runtime registry itself is deleted in a follow-up.
+
 - **Change: the workspace `port` file is parsed strictly by the CLI and the VS Code extension (BT-5112).** The port must be on the first line, ASCII digits only, 1-65535. Port `0`, `+4040`, a leading blank line, and whitespace before or after the port are now rejected by both, where the CLI and the extension used to disagree on them. The runtime never writes such a file, so only a hand-edited one is affected. The shared fixture `tests/conformance/port_file_conformance.json` now lists all of them as invalid cases. The LiveView CI workflow also runs when a file under `tests/conformance/` changes.
 
 - **Docs: REPL output samples match the REPL, the env-var check sees shell scripts, and the build trap and the deprecation decision are written down (BT-5113).**

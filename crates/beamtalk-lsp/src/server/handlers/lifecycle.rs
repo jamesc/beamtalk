@@ -11,6 +11,7 @@ use super::super::config::{
     configured_stdlib_source_dirs, preload_covers, workspace_roots,
 };
 use super::super::convert::uri_to_path;
+use super::super::core::PreloadGuard;
 use crate::server::lock::LockRecover;
 use std::fs;
 
@@ -176,10 +177,7 @@ impl Backend {
             // this sequence defers its own `publish_diagnostics` to the
             // self-healing republish below instead of racing it to be the
             // last notification sent — see `is_preload_in_progress`'s doc.
-            {
-                let mut svc = self.service.lock_recover();
-                svc.set_preload_in_progress(true);
-            }
+            let mut preload_guard = PreloadGuard::begin(&self.service);
             // load each workspace root's real beamtalk.toml
             // [package] name before preload indexes files under that root,
             // so first-time stamping is already correct. This
@@ -200,10 +198,7 @@ impl Backend {
             // change again from this startup sequence) — clear the flag
             // *before* republishing below, so republish's own
             // `publish_diagnostics` calls actually send.
-            {
-                let mut svc = self.service.lock_recover();
-                svc.set_preload_in_progress(false);
-            }
+            preload_guard.finish();
             drop(root_load_guard);
 
             // Re-publish diagnostics for every open file after preload
@@ -269,6 +264,7 @@ impl Backend {
                 let mut versions = self.versions.lock_recover();
                 versions.insert(path.clone(), params.text_document.version);
             }
+            let mut interface_changed = false;
             if uri.scheme() != "beamtalk-stdlib" {
                 // BT-4967: the file's FFI registry goes in *before* its text,
                 // so no diagnostics pass can see the file without it.
@@ -284,7 +280,13 @@ impl Backend {
                         == Some(params.text_document.version);
                     if still_current {
                         let mut svc = self.service.lock_recover();
+                        // BT-5131: an open whose buffer differs from the
+                        // preloaded (disk) text can change what other open
+                        // files resolve, like a `did_change` would.
+                        let before = svc.project_index().file_interface(&path);
                         svc.update_file(path.clone(), params.text_document.text);
+                        let after = svc.project_index().file_interface(&path);
+                        interface_changed = before.unwrap_or_default() != after.unwrap_or_default();
                     }
                 }
                 // BT-4158: resolve this file's own package root (nearest
@@ -293,6 +295,9 @@ impl Backend {
                 self.ensure_package_root_loaded(&path).await;
             }
             self.publish_diagnostics(&uri).await;
+            if interface_changed {
+                self.republish_other_open_diagnostics(&uri).await;
+            }
         }
     }
 
@@ -436,6 +441,7 @@ impl Backend {
             // `did_open`'s insert simply blocks until we release it (after
             // our own write below completes), so its own `update_file` call
             // is guaranteed to run after — and therefore win over — ours.
+            let mut interface_changed = false;
             let reopened = {
                 let mut open_generation = self.open_generation.lock_recover();
                 let reopened = open_generation.get(&path).copied() != generation_before;
@@ -445,10 +451,16 @@ impl Backend {
                         versions.remove(&path);
                     } else {
                         let mut svc = self.service.lock_recover();
+                        // BT-5131: reverting an edited buffer to disk (or
+                        // dropping the file) can change what other open
+                        // files resolve.
+                        let before = svc.project_index().file_interface(&path);
                         match disk_content {
                             Some(content) => svc.update_file(path.clone(), content),
                             None => svc.remove_file(&path),
                         }
+                        let after = svc.project_index().file_interface(&path);
+                        interface_changed = before.unwrap_or_default() != after.unwrap_or_default();
                         let mut versions = self.versions.lock_recover();
                         versions.remove(&path);
                     }
@@ -472,7 +484,12 @@ impl Backend {
                 // later one sees the document closed), so nothing re-adds
                 // diagnostics after this clear.
                 let _publishing = self.publish_lock.lock().await;
-                self.client.publish_diagnostics(uri, Vec::new(), None).await;
+                self.client
+                    .publish_diagnostics(uri.clone(), Vec::new(), None)
+                    .await;
+            }
+            if interface_changed {
+                self.republish_other_open_diagnostics(&uri).await;
             }
         }
     }

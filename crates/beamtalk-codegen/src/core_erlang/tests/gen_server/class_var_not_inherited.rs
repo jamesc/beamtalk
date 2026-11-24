@@ -84,34 +84,6 @@ fn compiled_subclass_rejects_inherited_class_variable_and_lint_agrees() {
 }
 
 #[test]
-fn class_side_extension_rejects_inherited_class_variable() {
-    let infos =
-        ClassHierarchy::extract_class_infos(&parse_module(&format!("{BASE}Base subclass: Sub\n")));
-    for (what, body) in ACCESSES {
-        let ext = parse_module(&format!("Sub class >> touch => {body}\n"));
-        let err = generate_module(
-            &ext,
-            CodegenOptions::new("bt@ext@sub_ext").with_class_hierarchy(infos.clone()),
-        )
-        .expect_err(&format!(
-            "extension {what} of an inherited class variable must fail"
-        ));
-        assert_per_class_error(&format!("{err}"), &format!("extension {what}"));
-    }
-
-    // The target's own declaration is accepted.
-    let own = ClassHierarchy::extract_class_infos(&parse_module(&format!(
-        "{BASE}Base subclass: Sub\n  classState: n = 0\n"
-    )));
-    let ext = parse_module("Sub class >> touch => self.n := 1\n");
-    generate_module(
-        &ext,
-        CodegenOptions::new("bt@ext@sub_ext").with_class_hierarchy(own),
-    )
-    .expect("extension on the class that declares n must compile");
-}
-
-#[test]
 fn class_builder_class_methods_reject_inherited_class_variable() {
     for (what, body) in ACCESSES {
         // `n` belongs to the superclass `Base`, not to this builder's
@@ -152,31 +124,4 @@ fn assert_generic_builder_error(err: &str, what: &str) {
         !err.contains("per class"),
         "{what}: must not be the per-class message. Got: {err}"
     );
-}
-
-/// BT-3804: a `ClassBuilder` `classMethods:` block nested in a class-side
-/// extension is a builder scope (innermost wins): the missing variable is in
-/// the builder's `classVars:`, so the error is the generic one and does not
-/// name the extension target.
-#[test]
-fn class_builder_nested_in_class_side_extension_gets_generic_error() {
-    let infos =
-        ClassHierarchy::extract_class_infos(&parse_module(&format!("{BASE}Base subclass: Sub\n")));
-    for (what, body) in ACCESSES {
-        let ext = parse_module(&format!(
-            "Sub class >> make =>\n  Object classBuilder name: #SubB; superclass: Base; \
-             classMethods: #{{ #touch => [:self | {body}] }}; register\n"
-        ));
-        let err = generate_module(
-            &ext,
-            CodegenOptions::new("bt@ext@sub_ext").with_class_hierarchy(infos.clone()),
-        )
-        .expect_err(&format!("nested builder {what} must fail"))
-        .to_string();
-        assert_generic_builder_error(&err, &format!("nested builder {what}"));
-        assert!(
-            !err.contains("'Sub'"),
-            "nested builder {what}: must not name the extension target. Got: {err}"
-        );
-    }
 }
