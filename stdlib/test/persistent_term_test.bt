@@ -1,0 +1,78 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for PersistentTerm (ADR 0153 Phase 1, BT-5146).
+// persistent_term is node-global, so this class runs serially and every test
+// uses its own key.
+
+TestCase subclass: PersistentTermTest
+  class serial -> Boolean => true
+
+  tearDown =>
+    PersistentTerm erase: #ptTestBuild
+    PersistentTerm erase: #ptTestHit
+    PersistentTerm erase: #ptTestRaise
+    PersistentTerm erase: #ptTestErase
+    PersistentTerm erase: #ptTestIncludes
+    PersistentTerm erase: #ptTestNil
+    PersistentTerm erase: #ptTestRace
+    PersistentTerm erase: #ptTestIfAbsent
+    PersistentTerm erase: #ptTestPid
+    PersistentTerm erase: #ptTestActor
+    PersistentTerm erase: #ptTestClass
+
+  testBuildsOnce =>
+    self assert: (PersistentTerm at: #ptTestBuild ifAbsentPut: [(1 to: 5) collect: [:n | n * n]]) equals: #(1, 4, 9, 16, 25)
+    self assert: (PersistentTerm at: #ptTestBuild ifAbsentPut: [#(0)]) equals: #(1, 4, 9, 16, 25)
+
+  testBlockNotRunOnHit =>
+    PersistentTerm at: #ptTestHit ifAbsentPut: [1]
+    self assert: (PersistentTerm at: #ptTestHit ifAbsentPut: [Error signal: "not run"]) equals: 1
+
+  testRaisingBlockStoresNothingAndIsRetried =>
+    self assert: ([PersistentTerm at: #ptTestRaise ifAbsentPut: [Error signal: "boom"]] on: Error do: [:e | #failed]) equals: #failed
+    self deny: (PersistentTerm includesKey: #ptTestRaise)
+    self assert: (PersistentTerm at: #ptTestRaise ifAbsentPut: [7]) equals: 7
+
+  testEraseAnswersBoolean =>
+    PersistentTerm at: #ptTestErase ifAbsentPut: [1]
+    self assert: (PersistentTerm erase: #ptTestErase) equals: true
+    self assert: (PersistentTerm erase: #ptTestErase) equals: false
+    self assert: (PersistentTerm at: #ptTestErase ifAbsentPut: [2]) equals: 2
+
+  testIncludesKey =>
+    self deny: (PersistentTerm includesKey: #ptTestIncludes)
+    PersistentTerm at: #ptTestIncludes ifAbsentPut: [1]
+    self assert: (PersistentTerm includesKey: #ptTestIncludes)
+
+  testStoredNilCountsAsPresent =>
+    self assert: (PersistentTerm at: #ptTestNil ifAbsentPut: [nil]) equals: nil
+    self assert: (PersistentTerm includesKey: #ptTestNil)
+    self assert: (PersistentTerm at: #ptTestNil ifAbsentPut: [Error signal: "not run"]) equals: nil
+    self assert: (PersistentTerm at: #ptTestNil ifAbsent: [9]) equals: nil
+
+  testAtIfAbsentStoresNothing =>
+    self assert: (PersistentTerm at: #ptTestIfAbsent ifAbsent: [3]) equals: 3
+    self deny: (PersistentTerm includesKey: #ptTestIfAbsent)
+    PersistentTerm at: #ptTestIfAbsent ifAbsentPut: [4]
+    self assert: (PersistentTerm at: #ptTestIfAbsent ifAbsent: [3]) equals: 4
+
+  testProcessesMissingTogetherAgree =>
+    blocks := ((1 to: 8) asList) collect: [:i | [PersistentTerm at: #ptTestRace ifAbsentPut: [#built]]]
+    results := (Parallel all: blocks) collect: [:r | r unwrap]
+    self assert: results size equals: 8
+    self assert: (results select: [:v | v =:= #built]) size equals: 8
+    self assert: (PersistentTerm at: #ptTestRace ifAbsentPut: [#other]) equals: #built
+
+  testRefusesPid =>
+    self should: [PersistentTerm at: #ptTestPid ifAbsentPut: [Erlang erlang self]] raise: #type_error
+    self deny: (PersistentTerm includesKey: #ptTestPid)
+
+  testRefusesActor =>
+    actor := PersistentTermProbeActor spawn
+    self should: [PersistentTerm at: #ptTestActor ifAbsentPut: [actor]] raise: #type_error
+    self deny: (PersistentTerm includesKey: #ptTestActor)
+
+  testRefusesClass =>
+    self should: [PersistentTerm at: #ptTestClass ifAbsentPut: [Integer]] raise: #type_error
+    self deny: (PersistentTerm includesKey: #ptTestClass)
