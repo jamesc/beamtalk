@@ -98,7 +98,8 @@ pub(super) use emit::{
 pub(super) use ir::CallSiteLine;
 // BT-4405: the loop `fn_name`s, one source for producers and test scanners.
 pub(super) use fold_acc::{
-    ACC_LIST, AccSlot, BoolArm, FoldAccBody, FoldAccValue, bool_arm_clause, render_tuple,
+    ACC_LIST, AccSlot, BoolArm, FoldAccBody, FoldAccValue, bool_arm_clause, render_bool_case,
+    render_tuple,
 };
 pub(super) use ir::RebindFrameKind;
 #[cfg(test)]

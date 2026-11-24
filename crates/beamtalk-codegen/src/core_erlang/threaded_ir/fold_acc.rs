@@ -126,12 +126,6 @@ pub(in crate::core_erlang) enum LeafConses {
     Opaque,
 }
 
-impl From<Document<'static>> for FoldAccValue {
-    fn from(doc: Document<'static>) -> Self {
-        Self::opaque(doc)
-    }
-}
-
 impl FoldAccValue {
     pub(in crate::core_erlang) fn opaque(doc: Document<'static>) -> Self {
         Self {
@@ -180,6 +174,27 @@ pub(in crate::core_erlang) fn bool_arm_clause(
     )
 }
 
+/// `case scrutinee of <'a'> when 'true' -> … <'b'> when 'true' -> … fallback end` — the
+/// two-boolean-arm predicate `case`, arms in the order given (the generated
+/// text depends on it). The one renderer both the typed [`FoldAccBody::BoolCase`]
+/// and the opaque predicate epilogues build through.
+pub(in crate::core_erlang) fn render_bool_case(
+    scrutinee: Document<'static>,
+    arms: [(bool, Document<'static>); 2],
+    fallback: Document<'static>,
+) -> Document<'static> {
+    let [(first, first_body), (second, second_body)] = arms;
+    form::case_of(
+        scrutinee,
+        [
+            bool_arm_clause(first, first_body),
+            bool_arm_clause(second, second_body),
+            fallback,
+        ],
+        Layout::Flat,
+    )
+}
+
 impl FoldAccBody {
     fn render(&self) -> Document<'static> {
         match self {
@@ -188,14 +203,13 @@ impl FoldAccBody {
                 scrutinee,
                 arms,
                 fallback,
-            } => form::case_of(
+            } => render_bool_case(
                 scrutinee.clone(),
                 [
-                    bool_arm_clause(arms[0].value, arms[0].body.render()),
-                    bool_arm_clause(arms[1].value, arms[1].body.render()),
-                    fallback.clone(),
+                    (arms[0].value, arms[0].body.render()),
+                    (arms[1].value, arms[1].body.render()),
                 ],
-                Layout::Flat,
+                fallback.clone(),
             ),
             Self::Opaque(doc) => doc.clone(),
         }

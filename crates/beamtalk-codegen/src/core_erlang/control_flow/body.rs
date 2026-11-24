@@ -366,12 +366,12 @@ impl CoreErlangGenerator {
     /// epilogue builds its accumulator through this.
     pub(in crate::core_erlang::control_flow) fn fold_accumulator(
         carry: FoldCarry,
-        value: impl Into<FoldAccValue>,
+        value: FoldAccValue,
         span: Span,
     ) -> ThreadedStmt {
         ThreadedStmt::FoldAccumulator {
             carry,
-            value: value.into(),
+            value,
             span,
             result_list: None,
         }
@@ -981,7 +981,7 @@ impl CoreErlangGenerator {
                     // do: discards the result value, returns state only
                     stmts.push(Self::fold_accumulator(
                         FoldCarry::StateMap,
-                        leaf::var(self.current_state_var()),
+                        FoldAccValue::opaque(leaf::var(self.current_state_var())),
                         span,
                     ));
                 }
@@ -1030,7 +1030,7 @@ impl CoreErlangGenerator {
                     let result_var = self.fresh_temp_var("CondVal");
                     stmts.push(Self::fold_accumulator(
                         FoldCarry::StateMap,
-                        docvec![
+                        FoldAccValue::opaque(docvec![
                             form::let_prefix(
                                 leaf::var(result_var.clone()),
                                 form::element(1, leaf::var(tuple_var))
@@ -1039,7 +1039,7 @@ impl CoreErlangGenerator {
                                 leaf::var(result_var),
                                 leaf::var(self.current_state_var())
                             ]),
-                        ],
+                        ]),
                         span,
                     ));
                 }
@@ -1381,7 +1381,7 @@ impl CoreErlangGenerator {
             BodyKind::FoldlDo => {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    leaf::var(self.current_state_var()),
+                    FoldAccValue::opaque(leaf::var(self.current_state_var())),
                     span,
                 ));
             }
@@ -1417,10 +1417,10 @@ impl CoreErlangGenerator {
             BodyKind::FoldlInject => {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![form::tuple([
+                    FoldAccValue::opaque(docvec![form::tuple([
                         leaf::var(last_val.to_string()),
                         leaf::var(self.current_state_var())
-                    ]),],
+                    ]),]),
                     span,
                 ));
             }
@@ -1439,7 +1439,7 @@ impl CoreErlangGenerator {
             BodyKind::FoldlDo => {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    leaf::var(self.current_state_var()),
+                    FoldAccValue::opaque(leaf::var(self.current_state_var())),
                     span,
                 ));
             }
@@ -1480,13 +1480,13 @@ impl CoreErlangGenerator {
                 let ar = self.fresh_temp_var("AccResult");
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![
+                    FoldAccValue::opaque(docvec![
                         form::let_prefix(
                             leaf::var(ar.clone()),
                             form::element(1, leaf::var(dispatch_var.to_string()))
                         ),
                         form::tuple([leaf::var(ar), leaf::var(fs)]),
-                    ],
+                    ]),
                     span,
                 ));
             }
@@ -1510,7 +1510,7 @@ impl CoreErlangGenerator {
             BodyKind::FoldlDo => {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    leaf::var(self.current_state_var()),
+                    FoldAccValue::opaque(leaf::var(self.current_state_var())),
                     span,
                 ));
             }
@@ -1551,13 +1551,13 @@ impl CoreErlangGenerator {
                 let ar = self.fresh_temp_var("T2LoopVal");
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![
+                    FoldAccValue::opaque(docvec![
                         form::let_prefix(
                             leaf::var(ar.clone()),
                             form::element(1, leaf::var(tuple_var.to_string()))
                         ),
                         form::tuple([leaf::var(ar), leaf::var(fs)]),
-                    ],
+                    ]),
                     span,
                 ));
             }
@@ -1585,7 +1585,7 @@ impl CoreErlangGenerator {
                 BodyKind::FoldlDo => {
                     stmts.push(Self::fold_accumulator(
                         plan.fold_carry(),
-                        plan.acc_repack_doc(self),
+                        FoldAccValue::opaque(plan.acc_repack_doc(self)),
                         span,
                     ));
                 }
@@ -1619,7 +1619,10 @@ impl CoreErlangGenerator {
                 BodyKind::FoldlInject => {
                     stmts.push(Self::fold_accumulator(
                         plan.fold_carry(),
-                        docvec![" ", form::tuple([leaf::var(val.to_string()), vars_doc]),],
+                        FoldAccValue::opaque(docvec![
+                            " ",
+                            form::tuple([leaf::var(val.to_string()), vars_doc]),
+                        ]),
                         span,
                     ));
                 }
@@ -1633,7 +1636,7 @@ impl CoreErlangGenerator {
             BodyKind::FoldlDo => {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![" ", leaf::var(self.current_state_var())],
+                    FoldAccValue::opaque(docvec![" ", leaf::var(self.current_state_var())]),
                     span,
                 ));
             }
@@ -1670,13 +1673,13 @@ impl CoreErlangGenerator {
             BodyKind::FoldlInject => {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![
+                    FoldAccValue::opaque(docvec![
                         " ",
                         form::tuple([
                             leaf::var(val.to_string()),
                             leaf::var(self.current_state_var())
                         ]),
-                    ],
+                    ]),
                     span,
                 ));
             }
@@ -1699,7 +1702,7 @@ impl CoreErlangGenerator {
             BodyKind::FoldlDo => {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    leaf::var(self.current_state_var()),
+                    FoldAccValue::opaque(leaf::var(self.current_state_var())),
                     span,
                 ));
             }
@@ -1742,7 +1745,10 @@ impl CoreErlangGenerator {
                 };
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![form::tuple([leaf::var(rhs_var.to_string()), leaf::var(fs)]),],
+                    FoldAccValue::opaque(docvec![form::tuple([
+                        leaf::var(rhs_var.to_string()),
+                        leaf::var(fs)
+                    ]),]),
                     span,
                 ));
             }
@@ -1843,14 +1849,18 @@ impl CoreErlangGenerator {
                         // `FoldLocalsNotCarried` (BT-3839: a nested loop the
                         // statement classifier missed answered its raw value).
                         let doc = self.expression_doc(expr)?;
-                        stmts.push(Self::fold_accumulator(FoldCarry::Value, doc, span));
+                        stmts.push(Self::fold_accumulator(
+                            FoldCarry::Value,
+                            FoldAccValue::opaque(doc),
+                            span,
+                        ));
                     }
                     if threads_here {
                         if plan.use_tuple_acc {
                             // Repack threaded locals as tuple.
                             stmts.push(Self::fold_accumulator(
                                 plan.fold_carry(),
-                                plan.acc_repack_doc(self),
+                                FoldAccValue::opaque(plan.acc_repack_doc(self)),
                                 span,
                             ));
                         } else {
@@ -1861,7 +1871,7 @@ impl CoreErlangGenerator {
                             };
                             stmts.push(Self::fold_accumulator(
                                 FoldCarry::StateMap,
-                                leaf::var(fs),
+                                FoldAccValue::opaque(leaf::var(fs)),
                                 span,
                             ));
                         }
@@ -1951,7 +1961,7 @@ impl CoreErlangGenerator {
                         let vars_doc = plan.current_vars_doc(self);
                         stmts.push(Self::fold_accumulator(
                             plan.fold_carry(),
-                            form::tuple([leaf::var(acc_var), vars_doc]),
+                            FoldAccValue::opaque(form::tuple([leaf::var(acc_var), vars_doc])),
                             span,
                         ));
                     } else {
@@ -1962,7 +1972,10 @@ impl CoreErlangGenerator {
                         };
                         stmts.push(Self::fold_accumulator(
                             FoldCarry::StateMap,
-                            docvec![form::tuple([leaf::var(acc_var), leaf::var(fs)]),],
+                            FoldAccValue::opaque(docvec![form::tuple([
+                                leaf::var(acc_var),
+                                leaf::var(fs)
+                            ]),]),
                             span,
                         ));
                     }
