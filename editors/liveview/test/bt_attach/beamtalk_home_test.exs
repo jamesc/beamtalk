@@ -90,4 +90,52 @@ defmodule BtAttach.BeamtalkHomeTest do
     refute script =~ "${HOME}/.beamtalk"
     refute script =~ ~s(sed -n 's/.*"node_name")
   end
+
+  describe "bin/server executed against a stub release (BT-5128)" do
+    # A real `bin/bt_attach eval` boots config/runtime.exs, which raises when
+    # SECRET_KEY_BASE is unset. The stub reproduces exactly that precondition.
+    @stub """
+    #!/bin/sh
+    if [ -z "${SECRET_KEY_BASE:-}" ]; then
+      echo "environment variable SECRET_KEY_BASE is missing" >&2
+      exit 1
+    fi
+    case "$1" in
+      eval) printf 'bt_node@host\nsecret-cookie\n' ;;
+      start) echo "started node=${BT_WORKSPACE_NODE} cookie=${BT_WORKSPACE_COOKIE} skb=${SECRET_KEY_BASE}" ;;
+    esac
+    """
+
+    setup do
+      root = Path.join(System.tmp_dir!(), "bt5128-#{System.unique_integer([:positive])}")
+      bin = Path.join(root, "bin")
+      File.mkdir_p!(bin)
+      File.cp!(Path.expand("../../rel/overlays/bin/server", __DIR__), Path.join(bin, "server"))
+      File.write!(Path.join(bin, "bt_attach"), @stub)
+      File.chmod!(Path.join(bin, "server"), 0o755)
+      File.chmod!(Path.join(bin, "bt_attach"), 0o755)
+      on_exit(fn -> File.rm_rf!(root) end)
+      {:ok, bin: Path.join(bin, "server")}
+    end
+
+    test "zero-config `bin/server <id>` generates SECRET_KEY_BASE before the resolving eval",
+         %{bin: bin} do
+      env = [{"SECRET_KEY_BASE", nil}]
+      {out, status} = System.cmd("sh", [bin, "ws1"], env: env, stderr_to_stdout: true)
+      assert status == 0, out
+      assert out =~ "started node=bt_node@host cookie=secret-cookie skb="
+      refute out =~ "skb=\n"
+    end
+
+    test "an explicit SECRET_KEY_BASE is passed through untouched", %{bin: bin} do
+      {out, 0} =
+        System.cmd("sh", [bin, "ws1"],
+          env: [{"SECRET_KEY_BASE", "explicit"}],
+          stderr_to_stdout: true
+        )
+
+      assert out =~ "skb=explicit"
+      refute out =~ "generated an ephemeral"
+    end
+  end
 end
