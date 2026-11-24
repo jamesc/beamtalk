@@ -202,7 +202,10 @@ retire_timeout_does_not_append_remove_class_test_() ->
             end,
             %% The queued retire has run; nothing was appended after it.
             _ = beamtalk_workspace_changelog:epoch(),
-            Kinds = [beamtalk_workspace_changelog:entry_kind(En) || En <- beamtalk_workspace_changelog:entries()],
+            Kinds = [
+                beamtalk_workspace_changelog:entry_kind(En)
+             || En <- beamtalk_workspace_changelog:entries()
+            ],
             ?assertEqual(['new-class'], Kinds)
         end}
     end}.

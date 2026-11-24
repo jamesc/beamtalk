@@ -16,7 +16,9 @@ Tests hot code reloading, actor migration, and module replacement.
 %% gen_server callbacks for a minimal test actor used to exercise
 %% trigger_code_change/2,3 success paths via sys:change_code/4.
 -behaviour(gen_server).
--export([init/1, handle_call/3, handle_cast/2, code_change/3, log/2, report_late_hot_reload_failure/3]).
+-export([
+    init/1, handle_call/3, handle_cast/2, code_change/3, log/2, report_late_hot_reload_failure/3
+]).
 
 %%====================================================================
 %% Tests for beamtalk_hot_reload domain service
@@ -741,7 +743,9 @@ late_migration_failure_is_reported_test_() ->
         try
             {ok, 0, [{Pid, timeout}]} =
                 beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {slow_fail, 6500}),
-            ?awaitMessage({late_failure, ?MODULE, Pid, {error, {left_suspended, slow_failure}}}, 15000),
+            ?awaitMessage(
+                {late_failure, ?MODULE, Pid, {error, {left_suspended, slow_failure}}}, 15000
+            ),
             ?assertEqual(suspended, sys_state(Pid))
         after
             ok = beamtalk_workspace_callback:unregister(),

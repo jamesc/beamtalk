@@ -464,8 +464,10 @@ guard_species_rebuild(#{?BT_CLASS_TAG_KEY := Tag}, _Class, _Selector) when
 ->
     ok;
 guard_species_rebuild(Recv, Class, Selector) when is_map(Recv) ->
-    case beamtalk_primitive:is_object(Recv) andalso
-         beamtalk_behaviour_intrinsics:speciesDependentThroughCollectionFromName(Class, Selector) of
+    case
+        beamtalk_primitive:is_object(Recv) andalso
+            beamtalk_behaviour_intrinsics:speciesDependentThroughCollectionFromName(Class, Selector)
+    of
         true ->
             refuse_writing_fold(
                 Class,
