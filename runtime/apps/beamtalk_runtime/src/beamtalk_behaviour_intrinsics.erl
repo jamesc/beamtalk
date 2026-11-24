@@ -512,21 +512,18 @@ speciesConstructionOverriddenFromName(ClassName, Selector) ->
 
 -doc """
 Whether `Selector` is one of the species-dependent messages and the class gets
-it from `Collection`'s own provision, so the pure path answers
-`self species withAll:` (BT-5136). The stateful fold rebuilds only the
-receivers `beamtalk_collection:from_list_like/2` knows, so it refuses the rest.
+it from `Collection`'s own provision, for a `Bag` (BT-5136): the pure path
+answers a Bag, which `beamtalk_collection:from_list_like/2` cannot rebuild, so
+the stateful fold refuses it. A user `Collection` with the default `species`
+and `withAll:` answers a List on both paths.
 """.
 -spec speciesDependentThroughCollectionFromName(atom(), atom()) -> boolean().
 speciesDependentThroughCollectionFromName(ClassName, Selector) ->
     lists:member(Selector, beamtalk_collection_selectors:species_dependent()) andalso
+        reached_through_collection(ClassName, Selector) andalso
         walk_hierarchy(
             ClassName,
-            fun(CN, CPid, _Acc) ->
-                case defines_selector_locally(CN, CPid, Selector) of
-                    true -> {halt, CN =:= 'Collection'};
-                    false -> {cont, false}
-                end
-            end,
+            fun(CN, _CPid, Acc) -> {cont, Acc orelse CN =:= 'Bag'} end,
             false
         ).
 

@@ -234,7 +234,7 @@ impl CoreErlangGenerator {
         Document::Vec(guards)
     }
 
-    /// BT-5098: `do case Step =:= 0 of 'true' -> raise 'false' -> 'ok' end`.
+    /// BT-5098: `do case Step == 0 of 'true' -> raise 'false' -> 'ok' end`.
     /// The raise is the one `Object>>error:` lowering (`object_error_raise_doc`)
     /// that the stdlib `Integer>>to:by:do:` reaches through `self error:`, so
     /// both paths raise the same `user_error` (class from the receiver). Emitted
@@ -852,10 +852,11 @@ mod tests {
         );
         assert_eq!(
             code.matches("'with_message'").count(),
-            1,
-            "exactly one guard. Got:\n{code}"
+            3,
+            "step-number, limit-number and zero-step guards. Got:\n{code}"
         );
         assert!(code.contains("'user_error'"), "Got:\n{code}");
+        assert!(code.contains("'type_error'"), "Got:\n{code}");
         assert!(
             code.contains("'beamtalk_primitive':'class_of'"),
             "class comes from the receiver, as `self error:`. Got:\n{code}"
