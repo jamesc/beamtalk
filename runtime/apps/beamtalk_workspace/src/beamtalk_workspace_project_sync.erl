@@ -529,23 +529,8 @@ load_files_sequential(Files, SessionPid) ->
     {
         lists:reverse(RevClasses),
         lists:reverse(RevErrors),
-        dedupe_warnings(lists:reverse(RevWarnings))
+        lists:reverse(RevWarnings)
     }.
-
--spec dedupe_warnings([binary()]) -> [binary()].
-dedupe_warnings(Warnings) ->
-    lists:reverse(
-        lists:foldl(
-            fun(W, Acc) ->
-                case lists:member(W, Acc) of
-                    true -> Acc;
-                    false -> [W | Acc]
-                end
-            end,
-            [],
-            Warnings
-        )
-    ).
 
 -doc """
 Load files without a session.

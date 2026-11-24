@@ -2316,6 +2316,29 @@ extension_warning_scope_survives_killed_holder_test() ->
     ),
     ?assertEqual([<<"first">>, <<"second">>], Warnings).
 
+%% Scopes of different modules do not block each other: a slow load of one
+%% module (here, one that never finishes) leaves another module's scope free.
+extension_warning_scope_does_not_block_other_modules_test() ->
+    beamtalk_class_registry:ensure_class_warnings_table(),
+    Self = self(),
+    Holder = spawn(fun() ->
+        beamtalk_class_registry:with_extension_warning_scope('slow_module_5060', fun() ->
+            Self ! {in_scope, self()},
+            receive
+                never -> ok
+            end
+        end)
+    end),
+    receive
+        {in_scope, Holder} -> ok
+    after 5000 -> ?assert(false)
+    end,
+    {done, Warnings} = beamtalk_class_registry:with_extension_warning_scope(
+        ?MODULE, fun() -> run_register_class() end
+    ),
+    exit(Holder, kill),
+    ?assertEqual([<<"first">>, <<"second">>], Warnings).
+
 run_register_class() ->
     true = register(bt5060_scope_test, self()),
     spawn_link(fun() -> register_class() end),
