@@ -443,11 +443,17 @@ FuturePid
 Every compiled actor class generates its own `dispatch/4`: a `case` on the
 selector, one clause per method the class defines, and a final clause for any
 other selector. That final clause tries, in order, the memoised inherited
-compiled method, an extension method, the superclass walk
+compiled method, an extension-registry lookup, the superclass walk
 (`beamtalk_dispatch:super`), and the class's own `doesNotUnderstand:args:`
 method if it defines one. If none applies it returns a
 `does_not_understand` `#beamtalk_error{}` (`dispatch(Selector, Args, Self, State)`
 returns `{reply, Result, NewState}` or `{error, Error, State}`).
+
+The extension-registry step is a leftover of cross-file extension methods, which
+ADR 0152 removed: the compiler now rejects a `Class >> selector => ...` in a file
+that does not define `Class`, so nothing it accepts registers an extension. The
+probe itself is deleted in a later phase of that ADR, after which the order is
+the compiled method, the superclass walk, then `doesNotUnderstand:args:`.
 
 ### doesNotUnderstand: Metaprogramming
 

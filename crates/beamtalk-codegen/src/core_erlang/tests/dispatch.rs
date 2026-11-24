@@ -4463,44 +4463,6 @@ fn test_class_method_behaviour_protocol_self_send_uses_class_self_send() {
     assert_all_compile_through_erlc(&rows);
 }
 
-/// BT-4001: a `super` send in a class-side extension (`Target class >> sel`)
-/// is keyed on the extension's *target*, not on the class (if any) whose file
-/// hosts the extension, so the walk starts at the target's superclass.
-#[test]
-fn test_class_side_extension_super_is_keyed_on_the_target() {
-    let hosts = ["", "Object subclass: Host\n  foo => 1\n"];
-    let bodies = [
-        "Target class >> run => super peek: 1",
-        "Target class >> run => #(1, 2) collect: [:x | super peek: x]",
-    ];
-    let mut rows = Vec::new();
-    for host in hosts {
-        for body in bodies {
-            let src = format!("{host}{body}\n");
-            let code = super::compile(&src)
-                .unwrap_or_else(|e| panic!("class-side extension super must compile: {e}\n{src}"));
-            assert_has(
-                &format!("extension `super` must be keyed on the target class:\n{src}"),
-                &code,
-                &["call 'beamtalk_class_dispatch':'class_super_dispatch'('Target', 'peek:', ["],
-            );
-            assert_lacks(
-                &format!(
-                    "extension `super` must not use the host class or the instance path:\n{src}"
-                ),
-                &code,
-                &[
-                    "class_super_dispatch'('Host'",
-                    "'beamtalk_dispatch':'super'",
-                    "'beamtalk_dispatch':'super_reply'",
-                ],
-            );
-            rows.push((src, code));
-        }
-    }
-    assert_all_compile_through_erlc(&rows);
-}
-
 /// A builder cascade lexically inside a block still lowers the fun as a class
 /// method's own top frame (`block_depth` is reset and restored around it).
 #[test]

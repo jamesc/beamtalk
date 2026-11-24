@@ -322,9 +322,8 @@ fn ffi_receiver_of_state_threading_actor_conditional_compiles() {
 
 #[test]
 fn typed_comparison_guard_on_every_method_kind_has_no_frame() {
-    // BT-4452: class-side, a String-literal left operand, and a foreign
-    // extension method all lower the comparison bare, so every guard shape
-    // compiles as a direct return.
+    // BT-4452: class-side and a String-literal left operand both lower the
+    // comparison bare, so every guard shape compiles as a direct return.
     let class_side = codegen(
         "Object subclass: K\n\
          \x20 class sealed one => 1\n\
@@ -349,14 +348,6 @@ fn typed_comparison_guard_on_every_method_kind_has_no_frame() {
         !literal_left.contains("beamtalk_guard_return"),
         "{literal_left}"
     );
-
-    let extension = codegen(
-        "Integer >> bt4452Pick: x :: Integer =>\n\
-         \x20   0 < x ifTrue: [^self abs]\n\
-         \x20   2\n",
-    );
-    assert!(extension.contains("bt4452Pick"), "{extension}");
-    assert_no_nlr_frame(&extension);
 }
 
 #[test]

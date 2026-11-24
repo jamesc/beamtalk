@@ -20,3 +20,11 @@ Object subclass: GuardedDiffClassStateful
   class ownLiteralPeek -> Integer => GuardedDiffClassStateful peek
 
   class peekOf: cls -> Integer => cls peek
+
+  // Runs `aBlock` on each element in the class process. A block that sends
+  // back to this class re-enters it: the class process cannot call itself, so
+  // that raises `dispatch_error` (class_dispatch_differential_test.bt).
+  class each: items :: List do: aBlock :: Block -> List =>
+    items collect: [:x | aBlock value: x]
+
+  class double: n :: Integer -> Integer => n * 2

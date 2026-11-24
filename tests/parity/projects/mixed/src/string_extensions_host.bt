@@ -1,13 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// StringExtensionsHost — owns the file's `String >>` extensions so the
-/// fixture has a concrete top-level class for the parity harness to count.
-/// Class-shape flavour: file with extension methods on an existing class.
+/// StringExtensionsHost — a helper class that works on `String` values.
+/// Class-shape flavour: file whose class methods take a stdlib value
+/// (`String`), the way to add behaviour to a class you do not own (ADR 0152).
 Object subclass: StringExtensionsHost
 
   class label -> String => "string-extensions-host"
 
-String >> shoutLouder => self uppercase ++ "!"
+  class shoutLouder: text :: String => text uppercase ++ "!"
 
-String >> exclaimWith: suffix :: String -> String => self ++ "!" ++ suffix
+  class exclaim: text :: String with: suffix :: String -> String => text ++ "!" ++ suffix

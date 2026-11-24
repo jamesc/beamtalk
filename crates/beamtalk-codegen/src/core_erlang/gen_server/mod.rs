@@ -28,7 +28,6 @@
 
 mod callbacks;
 mod dispatch;
-mod extensions;
 mod methods;
 mod native_facade;
 mod spawn;

@@ -305,7 +305,7 @@ Every actor has a compiled `format_status/1` that applies the declarations:
 - The body must be a **literal list of symbols**: the compiler reads it at compile time and bakes it into the actor module, so no user code runs while OTP formats a status or crash report. Anything else is a compile error. A `secretState` name that is not a state slot, or a `secretSelectors` name the class does not understand, is a compile warning. Calling `SessionStore secretState` still answers the class's own list.
 - The crash **reason** and its stacktrace are not redacted, in either crash report. Don't raise an error whose message or value carries a secret. A raw Erlang error inside a method (a failed match, a `function_clause`) can also carry slot values in its reason or stacktrace.
 - Native actors (`native:`, ADR 0056) are not covered: their backing gen_server is hand-written, so declaring either method on one is a warning. Implement `format_status/1` in the backing module instead.
-- Declare both methods in the class's own file. A `SessionStore class >> secretState` extension in another file still answers at runtime, but the compiler cannot bake it in, so it is a warning and nothing is redacted.
+- Declare both methods in the class's own file (in the class body, or as a same-file `SessionStore class >> secretState => ...`). The compiler bakes the list in from that file; a `class >> secretState` in another file is a compile error (cross-file extension methods were removed, ADR 0152).
 - `sys:get_state`, `sys:log(Pid, get)`, `sys:log(Pid, print)`, `sys:trace`, and the raw process dictionary and debug terms `sys:get_status` returns beside the formatted status show raw values; they are debugging tools with full access to the process. Beamtalk's own `inspect` and `actor_stats` are not covered either.
 
 ### Three Class Kinds (ADR 0067)
@@ -503,11 +503,11 @@ Report subclass: SalesReport
 
 This holds for instance-side sends on actors and value classes, for class-side sends (`class foo` / `self foo` inside a class method), and for a protocol's provided methods flattened into a class whose subclass overrides a required selector.
 
-`super` is the exception by design — it is always bound to the superclass of the class that *contains* the method. A `sealed` class cannot be subclassed, so its instance-side self-sends are compiled as direct calls (no lookup); class-side self-sends take the guarded direct call described below, sealed or not. Inside a class method, `super foo` resolves against the superclass's *class* methods (the metaclass chain), not its instance methods, and the compiler checks it there: a selector only the superclass's instances understand is reported as not understood (BT-4001). The lookup starts at the superclass and never consults the sending class, so a class-side extension override (`C class >> peek: x => (super peek: x) + 1`) reaches the superclass's `peek:` instead of itself; at each ancestor a class-side extension counts as one of its class methods, so `super` finds a superclass method whether its class body or an extension defined it. The superclass method runs with the live receiver, so a subclass inheriting the method keeps its own class variables. When no class method on the chain answers the selector, `self` and `super` sends from a class method fall through to the class object's own protocol (`Class` → `Behaviour` → …), exactly as an outside send to the class does: `self name`, `super name` and `super superclass` answer what `C name` and `C superclass` answer, for the receiving class (BT-4252).
+`super` is the exception by design — it is always bound to the superclass of the class that *contains* the method. A `sealed` class cannot be subclassed, so its instance-side self-sends are compiled as direct calls (no lookup); class-side self-sends take the guarded direct call described below, sealed or not. Inside a class method, `super foo` resolves against the superclass's *class* methods (the metaclass chain), not its instance methods, and the compiler checks it there: a selector only the superclass's instances understand is reported as not understood (BT-4001). The lookup starts at the superclass and never consults the sending class, so `super peek: x` reaches the superclass's `peek:`, never the sending class's own; a same-file `>>` method counts as one of its class's methods, so `super` finds a superclass method whether its class body or a same-file `>>` defined it. The superclass method runs with the live receiver, so a subclass inheriting the method keeps its own class variables. When no class method on the chain answers the selector, `self` and `super` sends from a class method fall through to the class object's own protocol (`Class` → `Behaviour` → …), exactly as an outside send to the class does: `self name`, `super name` and `super superclass` answer what `C name` and `C superclass` answer, for the receiving class (BT-4252).
 
 Implementation notes: an actor self-send dispatches through the module named by the instance's own `'__class_mod__'` state key (a per-send map lookup); a class-side self-send to a selector the class defines, sealed or not, calls the compiled method directly when the receiver is the defining class and nothing shadows it (`beamtalk_class_dispatch:class_self_direct_ok/4`), and otherwise walks the class hierarchy from the receiving class (`beamtalk_class_dispatch:class_self_send/3`). A class-side self-send runs wherever its calling method runs: in the caller when the class's chain has no class variables, in the class process otherwise ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md)). Every path passes the real class reference as `self` (BT-4037 retired the old `nil`). Only `self foo` late-binds. A class literal always denotes that class: naming the class explicitly (`Base foo`) runs `Base`'s `foo` with `self` bound to `Base`, even inside a class method that a subclass `C` inherits and is running, exactly as the same send does from anywhere else and as in Smalltalk. So inside `foo`, `self name` answers `#Base`, class variables are `Base`'s, and `Base new` builds a `Base`; `self` sends nested inside it late-bind from `Base`, not `C` ([BT-4317](https://linear.app/beamtalk/issue/BT-4317)). When the running receiver is `Base` itself, the send calls the method directly in the current process, behind the same guard; otherwise it is the ordinary class send to `Base`: in the caller for a stateless chain, in `Base`'s class process for one with class variables. Class variables live in the class process and are read and written in place (ADR 0130), so a write is visible to every later read wherever it happens: at a class method's top level, inside bare blocks, loops, conditionals, `ensure:`/`on:do:` bodies, and in a stored closure invoked by a later statement. Nothing is threaded through class-side self-sends. A write made inside a catch boundary (`on:do:`, `Result tryDo:`) whose block then raises is discarded with the rest of that protected region (ADR 0130 §4); writes made before entering the boundary are kept. A selector declared `class sealed` cannot be overridden; its sends compile to the same guarded direct call as any other own selector.
 
-**Cost:** every non-sealed actor self-send does a `maps:get('__class_mod__', State, Module)` lookup (tens of nanoseconds). A class-side `self foo` is a guarded direct call, sealed or not: when the receiver is the defining class itself and no class-side extension or runtime-installed method shadows `foo`, it calls the compiled `class_foo` directly after one `persistent_term` read of the shadow flag (`class_self_direct_ok/4`); when the receiver is a subclass it walks the class hierarchy (microseconds). Sealing the class or the selector no longer changes this (ADR 0142).
+**Cost:** every non-sealed actor self-send does a `maps:get('__class_mod__', State, Module)` lookup (tens of nanoseconds). A class-side `self foo` is a guarded direct call, sealed or not: when the receiver is the defining class itself and no runtime-installed method (ADR 0084) shadows `foo`, it calls the compiled `class_foo` directly after one `persistent_term` read of the shadow flag (`class_self_direct_ok/4`); when the receiver is a subclass it walks the class hierarchy (microseconds). Sealing the class or the selector no longer changes this (ADR 0142).
 
 ### Value subclass: in Depth
 
@@ -740,7 +740,7 @@ on every path (BT-4739) is not an update either: a value cannot mutate itself
 (`TestCase` can assign its own slots, so a body with `self.x := …` always
 counts as an update), so `store: v`, `send: data` or `checkHeaders: h` that ends in `self` (or
 `^ self`) works through a side effect or only to raise, and a call to it is
-never flagged unless a subclass override, or an extension in another file or a loaded dependency (`Handle >> store: v => …`), supplies the same selector with a body that does not answer its receiver: the call may then reach an update, so it warns (BT-4788). Every `^` in such a body must return `self` or raise
+never flagged unless a subclass override supplies the same selector with a body that does not answer its receiver: the call may then reach an update, so it warns (BT-4788). Every `^` in such a body must return `self` or raise
 (`^ self error: "…"`). A method that ends in a new value (`self withX: 1`),
 has a `^` that answers something else, or is a bare `@primitive` still counts
 as an update. To discard a result on purpose, assign it to an
@@ -1190,7 +1190,7 @@ Both containers use `=:=` for identity, so they agree with each other and with `
 
 The line is searching versus keying: a linear search can afford to ask each element, while membership in a keyed container — or deduplication — needs an order or a hash that a user-defined `equals:` cannot supply. This is the same constraint Java's `equals`/`hashCode` contract expresses.
 
-An `equals:` override must agree with `=:=` wherever `=:=` holds: it may only make *more* values equal, never fewer. The searches rely on that to try raw equality first and dispatch only on a miss, and so does an `equals:` send to a primitive receiver (`Integer`, `Binary`, `String`, `Symbol`, …): a raw hit answers `true` without dispatch, and a raw miss answers `false` without dispatch unless the receiver's class chain overrides `equals:` (for a primitive, through an extension).
+An `equals:` override must agree with `=:=` wherever `=:=` holds: it may only make *more* values equal, never fewer. The searches rely on that to try raw equality first and dispatch only on a miss, and so does an `equals:` send to a primitive receiver (`Integer`, `Binary`, `String`, `Symbol`, …): a raw hit answers `true` without dispatch, and a raw miss answers `false` without dispatch unless the receiver's class chain overrides `equals:`.
 
 Where the two notions of equality are genuinely different questions, prefer a domain-specific name to overriding `equals:` — `DateTime` keeps `equals:` structural and offers `sameInstant:` for instant-based comparison.
 
@@ -1350,7 +1350,7 @@ Common uses:
   **Where a class method runs (ADR 0142).** A class method runs in the *caller's* process, like a function in an Erlang module, unless the class needs its process. The class's gen_server (the class process) runs it only when:
   - **the class or any class in its superclass chain declares class variables** (`classState:`). The rule is chain-wide: a subclass holds its ancestors' class variables in its own process, and its own methods reach them through `self` sends, so it keeps its process for every class method, including ones it defines itself; or
   - **the selector is process-bound**: `new`, `new:`, `startLink`, `startLink:`, `spawn`, `spawnWith:`, `supervise`, `spawnAs:`, `spawnWith:as:`, and the `TestCase` run selectors `runAll`, `runAll:`, `run:` and `run:method:`. These keep their routing whatever the class declares, even when a class defines a class method of that name. Two constructor shapes build in the caller anyway, behind the same run-time guard: a `Value`'s synthesized `new`/`new:`, and a class-side `new` whose whole body is a plain FFI forward (`class new => (Erlang erlang) make_ref`, only literal arguments, and not one of the process-sensitive calls in the curated table the `class-process-ffi` and `class-method-process-resource` lints read, such as `ets new:`, `spawn_link`, `gen_udp open:` or a link or monitor: those stay in the class process; FFI outside that table runs in the caller, as for any in-caller class method) or `self delegate` on a `native:` class, on a concrete class with no class variables in its chain (BT-4464: `Reference new`, `Random new`, `Queue new`, `Announcer new`). A class-side `new:` runs in the caller like an ordinary class method when its whole body forwards to one of the class's own in-caller class methods with its parameter or literals, and that method's own body is a plain FFI forward or its selector primitive (`class new: elements => self withAll: elements`), or is such an FFI forward, on the same kind of class (BT-4475: `List new:`, `Set new:`, `Array new:`, `Tuple new:`; not `AtomicCounter new:`, whose ETS table belongs to the process that creates it). The class-variable reflection sends `hasField:`, `clearField:`, `fieldAt:` and `fieldAt:put:` are answered by the class process itself; or
-  - **something shadows the receiving class's own methods**: a class-side extension (ADR 0066) or an ADR 0084 runtime class-method fun installed on that class clears its direct-call flag, and its class process applies the shadow, as before. A runtime fun on an *ancestor* counts as that ancestor's method and is applied in the caller.
+  - **something shadows the receiving class's own methods**: an ADR 0084 runtime class-method fun installed on that class clears its direct-call flag, and its class process applies the shadow, as before. A runtime fun on an *ancestor* counts as that ancestor's method and is applied in the caller.
 
   `sealed` and `class sealed` play no part. The rule is decided once, in the compiler (`ClassHierarchy::runs_class_method_in_caller`), and re-checked at run time by one `persistent_term` flag read (`beamtalk_class_shadow_flags:direct_call_ok/2`), so it holds however the method is reached: a literal send, a class in a variable, `perform:`, `Beamtalk classNamed:`, a class passed as an argument, or an Erlang caller of `class_send`. A class that needs a serialising home declares `classState:` or delegates to an Actor. For a pure wrapper the difference is invisible; it matters for FFI that depends on which process runs it, and for resources the method creates, which now belong to the caller and die with it. Two lints, split on that one rule, warn at a direct `(Erlang mod) fn …` call in a class method, or at an `Ets` constructor send (a call gets at most one of them):
   - **`class-process-ffi`** — the class or an ancestor declares class variables, so the method runs in the class process, and the call depends on the *calling* process: `(Erlang gen_tcp) accept:` blocks the shared class process (every caller queues behind it), and `controlling_process`, `file:sendfile`, `erlang:self`, the process dictionary, `link` and `monitor` act on the class process, not the caller (`not_owner` failures for sockets the caller owns). An ETS table from `Ets new:type:`, `newOrExisting:type:`, `private:` or `protected:` is owned by the class process and lives as long as it; callers get `access_denied` on every access to a `private:` one and on writes to a `protected:` one (BT-4587). The hint names the class (or ancestor) that declares the class variables and says to move the call into an instance method or an Actor. Suppress deliberate serialisation with `@expect class_process_ffi`, or package-wide with `class-process-ffi = "off"` under `[diagnostics]`.
@@ -1374,7 +1374,7 @@ sealed Object subclass: MyRegistry
 
 `classState:` is distinct from `state:` (per-instance actor state) and `field:` (per-instance immutable data). It stores values at the class level, analogous to Smalltalk class variables.
 
-**Class variables are per class and are not inherited.** A class method may touch only the class variables its own class declares with `classState:`. Reading or writing a variable that only an ancestor declares is a compile error in a class body and in a class-side extension (`Sub class >> m => ...`); a `ClassBuilder` `classMethods:` block only sees the variables its own `classVars:` declares, so it is rejected too (with the generic "cannot access instance field" message). Redeclare it in the subclass:
+**Class variables are per class and are not inherited.** A class method may touch only the class variables its own class declares with `classState:`. Reading or writing a variable that only an ancestor declares is a compile error in a class body and in a same-file class-side `>>` method (`Sub class >> m => ...`); a `ClassBuilder` `classMethods:` block only sees the variables its own `classVars:` declares, so it is rejected too (with the generic "cannot access instance field" message). Redeclare it in the subclass:
 
 ```beamtalk
 Object subclass: Base
@@ -1452,7 +1452,7 @@ also auto-indexed for `SystemNavigation` source-text queries.
 
 **Class-side live edit.** A registered class's class method can be live-edited
 with the same `>>` patcher used for instance methods (see *Live Patching* and
-*Extension Methods* below), e.g. `Counter class >> reset => self.opened := 0`.
+*Same-File Extension Methods* below), e.g. `Counter class >> reset => self.opened := 0`.
 The class-side dispatch path picks up the new class method immediately (ADR 0084).
 Separately, a runtime class-method fun (a builder `classMethods:` fun, or one
 installed from Erlang with `beamtalk_object_class:put_class_method/3,4`) is
@@ -1745,7 +1745,7 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 
 **Re-raising unchanged: `pass` vs `signal` (BT-4057).** `e signal` on a caught exception raises a fresh `error` with a new stacktrace, so a caught `ExitError` or `ThrowError` comes back out as an error. `e pass` re-raises with the original Erlang class (`error`, `exit` or `throw`), reason and call sites, so an outer handler (or the process) sees the original failure: `exit: #normal` still ends the process normally. It re-raises the stacktrace captured when the exception was caught, with each frame's argument values reduced to its arity, as `e stackTrace` shows them. On an exception that was never caught (`Exception new pass`), `pass` behaves like `signal`.
 
-**Where a class-side signal raises (BT-4115, BT-4270).** `Error signal: m`, `MyError signal`, `Error signal: m reason: r` and `Exception signalKind:class:selector:hint:` sent to a class *literal* raise in the calling process: when the compiler sees that the class method resolves to one of `Exception`'s class-side signal primitives, which need nothing from the class but its name, the call site raises through the primitive directly instead of going through the class's process. The exception is the same as a dynamic send (`cls signal: m`) raises. The shortcut is checked at run time, with the same static call key as other static class sends ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md) §2, BT-4316): it is taken only while the send still resolves to `Exception`'s compiled primitive. A `class signal:` override (in a subclass, or added later by hot reload), a class-side extension of `signal:` on the receiving class, or a runtime class-method fun that replaces it takes the ordinary class send instead, so the override runs, also from call sites compiled before it. A class-side extension of `signal:` on an *ancestor* of the receiving class counts as that ancestor's method, so it takes the ordinary class send too, and runs with the receiving class as `self` (BT-4307). `e stackTrace` builds its `StackFrame` objects each time it is read, not when the exception is caught, so class names are resolved at read time.
+**Where a class-side signal raises (BT-4115, BT-4270).** `Error signal: m`, `MyError signal`, `Error signal: m reason: r` and `Exception signalKind:class:selector:hint:` sent to a class *literal* raise in the calling process: when the compiler sees that the class method resolves to one of `Exception`'s class-side signal primitives, which need nothing from the class but its name, the call site raises through the primitive directly instead of going through the class's process. The exception is the same as a dynamic send (`cls signal: m`) raises. The shortcut is checked at run time, with the same static call key as other static class sends ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md) §2, BT-4316): it is taken only while the send still resolves to `Exception`'s compiled primitive. A `class signal:` override (in a subclass, or added later by hot reload) or a runtime class-method fun that replaces it takes the ordinary class send instead, so the override runs, also from call sites compiled before it. An override on an *ancestor* of the receiving class counts as that ancestor's method, so it takes the ordinary class send too, and runs with the receiving class as `self` (BT-4307). `e stackTrace` builds its `StackFrame` objects each time it is read, not when the exception is caught, so class names are resolved at read time.
 
 ```beamtalk
 [(Erlang erlang) exit: #shutdown] on: Exception do: [:e | e pass]  // exits with #shutdown
@@ -2919,24 +2919,23 @@ definition ("assert conformance here"); conformance itself stays structural
 
 ### Which mechanism to use
 
-Beamtalk has three ways to share behaviour, and each answers a different
+Beamtalk has two ways to share behaviour, and each answers a different
 question:
 
 | Mechanism | Answers | Example |
 |---|---|---|
 | **Superclass** (`X subclass: Y`) | "What *is* this?" — shares representation, state, and a place in the class hierarchy | `Integer`/`Float` are `Number`s |
 | **Protocol with provisions** (`uses:`) | "What *capability* does this have?" — derived from a few required methods, usable across unrelated classes and class kinds | `DateTime`, `Duration`, `Uuid`, `String` all `uses: Comparable` despite sharing no common ancestor below `Object` |
-| **Extension method** (`Class >> sel => body`) | "This one class I don't own needs one more method" | A one-off addition to a stdlib or dependency class |
 
 A superclass spends the class's *one* superclass slot and claims a kinship
 ("`DateTime` is-a `Magnitude`") that may not be true — `DateTime`, a
 `Duration`, and a `Uuid` share only that they can be ordered, not what they
 *are*. A protocol with provisions gives capabilities their own home and
 works across the class-kind wall (an `Actor` can use a trait a `Value` also
-uses, `Enumerable` above being one). Reach for an extension method only for
-a single class, typically one you don't own — it isn't reusable the way a
-trait is (two extensions repeating the same body on two classes is exactly
-the duplication traits remove).
+uses, `Enumerable` above being one). A method added to a class you do not own
+is not a fourth mechanism: cross-file extension methods were removed
+([ADR 0152](ADR/0152-remove-cross-file-extension-methods.md)), so write the
+operation on a class of your own that takes the value (`Shout of: aString`).
 
 ### Traits across the class kinds
 
@@ -3667,7 +3666,7 @@ t := Twice twice: [t + 1]
 
 This departs from Pharo, where `Twice twice: [t := t + 1]` answers 2: it relies on a heap shared between a block and its home method, which the BEAM does not have (see `docs/beamtalk-principles.md` §4). Reads of captured variables, and `^` from any block, are unaffected. The same diagnostic is reported by `beamtalk build`, the REPL, the LSP and MCP.
 
-**Your own collection classes.** The collection messages above (`do:`, `inject:into:`, `collect:`, `select:`, `detect:ifNone:`, `anySatisfy:`, …) thread a writing block literal for any receiver that implements `do:`, including your own class or actor: the compiler runs the block in place as a fold over the receiver's `do:`, whether that `do:` forwards to an inner `List` or walks by hand, and whether the other messages are the stdlib's or absent (ADR 0133, BT-3903). The exception is an actor's `self do:` (or `super do:`, or any of these messages) from inside its own method: that is a message to the actor's own method, so the block escapes and writing a captured local in it is a compile error (BT-3918). Every message but `do:` is checked first, at run time, against the receiver's class, and the write threads only when the class defines no collection message of its own: the sent message must resolve to the stdlib's own method, or to a provision of a stdlib trait such as `Enumerable` (judged by where the method comes from, not by the class that `uses:` it), **and** none of the collection messages above except `do:` may be a method outside the stdlib. The stdlib's `collect:`, `select:`, `count:`, `eachWithIndex:` and `do:separatedBy:` run through `self inject:into:` (and `reject:` through `select:`), so a class with its own `inject:into:` would have that override run by the plain send but skipped by the in-place fold. Any such override in the class or a package-local trait, or an extension method for the message actually sent, makes a writing send of any of these messages raise `stateful_block_dispatch` rather than silently running the fold over `do:` in its place (known gap: an extension registered at run time that overrides a *different* collection message is not yet detected, [BT-3951](https://linear.app/beamtalk/issue/BT-3951)); a receiver that does not respond to the message raises `does_not_understand`, as the plain send does (BT-3916). To thread a write through such a class, `uses: Enumerable` (the stdlib's provisions thread), define only `do:`, or compute the value without assigning from the block. A block passed to a message of your own (`orders sumOf: [:o | total := ...]`) is not covered; return the value from the block instead.
+**Your own collection classes.** The collection messages above (`do:`, `inject:into:`, `collect:`, `select:`, `detect:ifNone:`, `anySatisfy:`, …) thread a writing block literal for any receiver that implements `do:`, including your own class or actor: the compiler runs the block in place as a fold over the receiver's `do:`, whether that `do:` forwards to an inner `List` or walks by hand, and whether the other messages are the stdlib's or absent (ADR 0133, BT-3903). The exception is an actor's `self do:` (or `super do:`, or any of these messages) from inside its own method: that is a message to the actor's own method, so the block escapes and writing a captured local in it is a compile error (BT-3918). Every message but `do:` is checked first, at run time, against the receiver's class, and the write threads only when the class defines no collection message of its own: the sent message must resolve to the stdlib's own method, or to a provision of a stdlib trait such as `Enumerable` (judged by where the method comes from, not by the class that `uses:` it), **and** none of the collection messages above except `do:` may be a method outside the stdlib. The stdlib's `collect:`, `select:`, `count:`, `eachWithIndex:` and `do:separatedBy:` run through `self inject:into:` (and `reject:` through `select:`), so a class with its own `inject:into:` would have that override run by the plain send but skipped by the in-place fold. Any such override in the class or a package-local trait makes a writing send of any of these messages raise `stateful_block_dispatch` rather than silently running the fold over `do:` in its place; a receiver that does not respond to the message raises `does_not_understand`, as the plain send does (BT-3916). To thread a write through such a class, `uses: Enumerable` (the stdlib's provisions thread), define only `do:`, or compute the value without assigning from the block. A block passed to a message of your own (`orders sumOf: [:o | total := ...]`) is not covered; return the value from the block instead.
 
 ### Field Mutations
 
@@ -4117,7 +4116,7 @@ MyClass performLocally: #add:to: withArguments: #(3, 7)
 
 **Most class methods run in the caller, and so do their blocks ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md)).** When the class's superclass chain declares no class variables and the selector is not process-bound, the class method runs in the caller's process, however it is reached: statically, through a variable, `perform:`, `Beamtalk classNamed:`, or a class passed as an argument. A block passed into it runs where it was written (inside an actor, that is at home in the [ADR 0137](ADR/0137-actor-closures-see-live-state.md) sense), `self()` and the process dictionary are the caller's, links, monitors, timers and FFI resources it creates belong to the caller, there is no `class_send` timeout, an `exit` inside the method exits the caller, and messaging the same class from inside does not raise `dispatch_error`. Calls are no longer serialised through the class process: two callers run the method at once. `self` is still the class object (the real class reference, even for an inherited method), so `self new`, `self new:`, `self spawn`, `self spawnWith:`, `self class` and class-side self-sends behave as in any other class method (BT-4029).
 
-**When there is a hop.** A class method runs in the class object's gen_server process when the class or any ancestor declares class variables (`classState:`), when the selector is process-bound (`new`, `new:`, `spawn`, `startLink`, ...), or when a class-side extension or runtime fun shadows the receiving class's own methods. A block passed *into* such a method runs there too, not where it was written ([BT-3022](https://linear.app/beamtalk/issue/BT-3022)):
+**When there is a hop.** A class method runs in the class object's gen_server process when the class or any ancestor declares class variables (`classState:`), when the selector is process-bound (`new`, `new:`, `spawn`, `startLink`, ...), or when a runtime fun (ADR 0084) shadows the receiving class's own methods. A block passed *into* such a method runs there too, not where it was written ([BT-3022](https://linear.app/beamtalk/issue/BT-3022)):
 
 ```beamtalk
 Object subclass: Driver
@@ -4135,7 +4134,7 @@ Arguments and return values cross that boundary as copies, so blocks that comput
 
 Non-local return (`^`) *does* cross the boundary: the signal is relayed back and unwinds the enclosing method as it would without the hop. A `^` is not an error, so a class variable written before the block escaped keeps its write ([ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md) §4).
 
-**Hot-patching and direct calls.** A literal send of a class method the class itself defines compiles to a *guarded* direct call: it reads one `persistent_term` key for that call target, holding the class reference the method receives, which the runtime installs only while the class's direct-call flag holds (`beamtalk_class_shadow_flags:direct_call_ok/2`), a dynamic send would run that same compiled method in the caller, the method is still exported and the class process is alive; otherwise it falls back to the ordinary class send, which answers what a dynamic send answers. An inherited method sent to a literal receiver takes the dynamic path, which also runs in the caller, so no call site names a superclass module. Reloading a class, giving it or an ancestor class variables, re-parenting it, `removeSelector:`, a class-side extension, a runtime class-method fun or the class process going down all erase the flag and those keys, so code compiled earlier follows the change without being recompiled. A reload erases them while the old code is still current, so a static send of a method the reload dropped answers what a dynamic send answers, never `undef`. The key also names the class, so after `renameTo:` (or when a removed class's module name is reused) a call site that still names the old class does not reach the new one. A descendant's flag is erased just after an ancestor's change is written, so for a moment a descendant's static send can still run in the caller: the same window a reload has for its own new code.
+**Hot-patching and direct calls.** A literal send of a class method the class itself defines compiles to a *guarded* direct call: it reads one `persistent_term` key for that call target, holding the class reference the method receives, which the runtime installs only while the class's direct-call flag holds (`beamtalk_class_shadow_flags:direct_call_ok/2`), a dynamic send would run that same compiled method in the caller, the method is still exported and the class process is alive; otherwise it falls back to the ordinary class send, which answers what a dynamic send answers. An inherited method sent to a literal receiver takes the dynamic path, which also runs in the caller, so no call site names a superclass module. Reloading a class, giving it or an ancestor class variables, re-parenting it, `removeSelector:`, a runtime class-method fun or the class process going down all erase the flag and those keys, so code compiled earlier follows the change without being recompiled. A reload erases them while the old code is still current, so a static send of a method the reload dropped answers what a dynamic send answers, never `undef`. The key also names the class, so after `renameTo:` (or when a removed class's module name is reused) a call site that still names the old class does not reach the new one. A descendant's flag is erased just after an ancestor's change is written, so for a moment a descendant's static send can still run in the caller: the same window a reload has for its own new code.
 
 The `new`/`new:` direct-construction verdicts of `Value` classes are still baked into each compiled module. If a class gains a class-side `new:`, the runtime logs a warning naming every subclass that still builds `new:` directly and so bypasses the new override (BT-4126). Recompile the code the warning names. A release upgrade recompiles everything, so this only affects targeted hot-patches.
 
@@ -5663,14 +5662,14 @@ protocol (`await`, `whenResolved:`, …) and the byte-level selectors `String`
 shares with `Binary` (`byteAt:`, `asHex`, …). The exact lists are the
 `special_selectors` of the `String` and `Pid` rows in the routing fixture
 (`tagged_map_routing_conformance.json`), which the runtime conformance tests
-check against `beamtalk_primitive`. A `String`
-extension never moves any other selector: it is looked up inside `String`'s
+check against `beamtalk_primitive`. A method added to
+`String` never moves any other selector: it is looked up inside `String`'s
 module, so a typed call site sees it at once. `Binary`, `Boolean`,
 `Bitstring` and `Character` receivers, abstract classes, `Object`, `Value`,
 actors, and the supervisor and exception families always send
 dynamically. The result is always what a dynamic send answers
 ([ADR 0025](ADR/0025-gradual-typing-and-protocols.md) amendment). Live patches
-(`Point >> sel => …`), `removeSelector:`, extensions and a reload into the same
+(`Point >> sel => …`), `removeSelector:` and a reload into the same
 module all reach typed call sites at once, because they act inside that
 module. Two development-time operations do not until the calling code is
 recompiled, because the call site names the module the compiler saw:
@@ -5684,7 +5683,7 @@ recompiled, because the call site names the module the compiler saw:
   sites keep calling the class module's `dispatch/3` directly.
 
 Built-in receivers have no such caveat: a stdlib class can be neither removed
-nor redefined into another module, and extensions on it act inside its
+nor redefined into another module, and a live patch of it acts inside its
 module's `dispatch/3`.
 
 ### Saving live edits back to disk — `compile:source:`, ChangeLog, and `flush` (ADR 0082)
@@ -5831,7 +5830,7 @@ Counter class removeSelector: #ofSize:      // class-side: touches class_methods
 ```
 
 **Receiver side follows the existing `Counter` vs `Counter class` convention**
-already used to pick a side for `>>` extension definitions — there is no
+already used to pick a side for live `>>` definitions — there is no
 boolean parameter. Both forms return the receiver (`Behaviour`) on success, so
 removals chain the same way patches do: `Counter removeSelector: #a; removeSelector: #b`.
 
@@ -5851,20 +5850,14 @@ Counter removeSelector: #initialize
 Counter new                    // prints 'base init' — no restart needed
 ```
 
-`removeSelector:` also reaches extension methods (ADR 0066 open classes) —
-sent to the *target* class, the same way an extension is installed via `>>`:
-
-```beamtalk
-String >> shout => self uppercase ++ "!"
-"hi" shout                     // => "HI!"
-String removeSelector: #shout
-"hi" respondsTo: #shout        // => false
-```
+`removeSelector:` removes a method defined on the receiving class itself,
+including one added by a live `>>` patch or folded in from a same-file `>>`;
+there is no separate extension layer to remove from (ADR 0152).
 
 On the class side, `removeSelector:` also removes a runtime class-method fun
 (ADR 0084) installed with `beamtalk_object_class:put_class_method/3,4`. It
-checks the extension registry first, then the runtime fun, then the compiled
-class method: the order dispatch resolves them. Removing the fun gives the
+checks the runtime fun first, then the compiled class method: the order
+dispatch resolves them. Removing the fun gives the
 selector back what it had before the first fun replaced it: the class's
 compiled method, or nothing, so the send falls through to an inherited method
 or `does_not_understand`. A static send compiled while the fun was installed
@@ -5929,7 +5922,7 @@ Workspace flush                            // skips it: not flushable (stdlib)
 ```
 
 See [ADR 0112](ADR/0112-method-level-removal-language-primitive.md) for the
-full design, including extension-removal edge cases, dangling-sender risk,
+full design, including dangling-sender risk,
 and the `side` field's role in the ChangeLog schema.
 
 #### `autoflush`
@@ -6363,48 +6356,48 @@ Beamtalk-callable method — and the reload-time tooling findings (§4).
 
 ---
 
-## Extension Methods (Open Classes)
+## Same-File Extension Methods (`>>`)
 
-The `>>` syntax adds methods to existing classes without redefining them (ADR 0066).
-Extensions work on any class including built-in value types.
+The `>>` syntax defines a method on a class from outside its body (ADR 0066, narrowed by [ADR 0152](ADR/0152-remove-cross-file-extension-methods.md)). It is valid only where the class's source is at hand: in the file that defines the class, or as a live edit at the REPL or from the IDE / MCP (`save_method`, `Class compile:source:`). A `>>` definition in a file that does not define its target class is a compile error; see *Cross-file extensions were removed* below.
 
 A method body, in a class or an extension, sees only `self`, its parameters, its own locals and `true`/`false`/`nil`. Top-level bindings and REPL variables are not visible inside it: pass them as arguments or store them in a field (BT-4665).
 
 ```beamtalk
+// point.bt — Pt is defined in this file
+Value subclass: Pt
+  field: x :: Integer = 0
+
+  getX => self.x
+
 // Instance method
-String >> shout => self uppercase ++ "!"
+Pt >> isZero => self.x =:= 0
 
 // Class-side method
-String class >> fromJson: s => // ...parse JSON string
+Pt class >> make => Pt x: 9
 
 // Keyword method with typed parameter
-Array >> chunksOf: n :: Integer => // ...split into n-sized chunks
+Pt >> extra: n :: Integer => self.x + n
 
 // Binary method
-Point >> + other :: Point => Point x: self x + other x y: self y + other y
+Pt >> + other :: Pt => Pt x: self.x + other getX
 ```
 
 ### Type annotations on extensions
 
-Extensions support the same `-> ReturnType` annotation as regular methods.
+Same-file extensions support the same `-> ReturnType` annotation as regular methods.
 Additionally, extensions accept `:: -> ReturnType` as a visual separator between
 the selector and return type — especially useful on unary methods where there
 are no parameters to carry `::` annotations.
 
 ```beamtalk
 // Standard return type syntax (same as inside a class)
-String >> reversed -> String => self reverse
+Pt >> doubled -> Pt => Pt x: self.x * 2
 
 // Extension-style: `:: ->` separates selector from return type
-Integer >> factorial :: -> Integer =>
-  self <= 1
-    ifTrue: [1]
-    ifFalse: [self * (self - 1) factorial]
-
-String >> words :: -> Array => self split: " "
+Pt >> negated :: -> Pt => Pt x: 0 - self.x
 
 // Typed parameters with :: -> return type
-Map >> at: key :: String put: value :: Integer :: -> Map => // ...
+Pt >> shiftBy: n :: Integer :: -> Pt => Pt x: self.x + n
 ```
 
 Both forms are equivalent — the return type flows to the type checker identically.
@@ -6418,8 +6411,7 @@ or `Pt class >> make => ...` next to `Value subclass: Pt`) is part of `Pt`.
 The compiler folds it into the class before analysis and codegen, in `beamtalk
 build`, `run`, `test` and the REPL alike. A folded method is an ordinary method
 of the class: it gets a dispatch arm, static and direct calls, type checking and
-reflection, and it does not appear in extension listings, browse or LSP
-grouping.
+reflection, and it is not treated as an extension by browse or LSP grouping.
 
 - Defining the same selector in the class body and in a same-file extension
   (instance or class side) is a duplicate method definition, the same error as
@@ -6430,52 +6422,26 @@ grouping.
 - Reloading the file replaces the whole class, folded methods included, so no
   stale row survives a reload.
 
-### Cross-file extensions
+### Cross-file extensions were removed (ADR 0152)
 
-Extensions can target classes defined in other files or in stdlib. The compiler
-registers each foreign extension at module load. Class-side extensions register
-under the metaclass tag (`String class`).
+A `Class >> selector => ...` or `Class class >> selector => ...` in a file that does not define `Class` (including another file of the same package, and `pkg@Class >> ...`) is a compile error:
 
-On hot reload, a reload re-registers the extensions the file still declares but
-does not unregister one you deleted: the old extension keeps answering until
-`removeSelector:` or a restart.
-
-```beamtalk
-// In helpers.bt — String is defined in stdlib, not this file
-String >> shoutIt => super printString uppercase ++ "!"
-
-// Class-side foreign extension
-String class >> banner => "=== String ==="
+```text
+error: `String >> shout` adds a method to String, which is not defined in this file.
+  = cross-file extension methods were removed (ADR 0152).
 ```
 
-A class-side extension is inherited the way a class method is: at each class
-up the chain, its class-side extensions are checked before its own class
-methods, so `Sub banner` answers an extension registered on `Base class`, with
-`Sub` as `self`, and an extension on `Base class` shadows a compiled class
-method of `Base` for `Sub` too (unless `Sub` itself defines the method). This
-differs from the instance side, where a method written in the class body beats
-an extension on that same class: on the class side an extension on `Sub class`
-also beats `Sub`'s own compiled class method, which is what lets you patch a
-class method of a running class ([ADR 0066](ADR/0066-open-class-extension-methods.md), BT-5061). An
-outside send, a dynamic send, a class-side `self` send, `super`,
-`respondsTo:` and protocol conformance all agree (BT-4307). So does `Sub new:
-aDictionary`: an extension of `new:` on `Base class` answers it, exactly as a
-compiled `class new:` on `Base` would (BT-4588). `new` follows the same rule
-with one consequence: every class has its own synthesized `new`, and a class's
-own method is found before an ancestor's extension, so an extension of `new` on
-`Base class` answers `Base new` but not `Sub new`. A compiled `class new` on
-`Base` is different: it is `Base`'s own constructor, so a subclass that defines
-no `new` inherits it, and `Sub new` runs it (BT-4479). `Announcer subclass:
-MyAnnouncer` then `MyAnnouncer new` therefore mints a working announcer carrying
-its `ref`, and `MyAnnouncer new class` is `MyAnnouncer`. A subclass that defines
-its own `class new` still wins; the root `new` of `Value` and `Actor` is not an
-inherited user constructor. A class-side `self new` follows the same rule (BT-4738): it runs
-the nearest ancestor's `class new` in the calling process, so an inherited
-factory (`Base class >> make => self new`, sent as `Sub make`) builds what
-`Sub new` builds, with `Sub` as `self`. The compiler rejects `self new` in an
-Object subclass's class methods only when neither the class nor an ancestor
-defines a `new`. One exception remains:
-`performLocally:withArguments:` applies compiled class methods only.
+There is no deprecation period. What stays: a `>>` in the file that defines the class (above), a live `Foo >> sel => ...` / `Foo class >> sel => ...` at the REPL, IDE / MCP `save_method` and `Class compile:source:`, and the `Foo >> #sel` reflection operator, which answers a `CompiledMethod` and is not a definition.
+
+Lookup is therefore closed: the receiver's compiled method, then each ancestor's compiled method (on the class side, the class methods; ADR 0084 runtime class-method funs count as the class's own methods), then `doesNotUnderstand:args:`. There is no extension step on either side, so loading a package cannot change which method answers a send to an existing class.
+
+Migration:
+
+- **You own the class:** put the method in the class's file, in the body or as a same-file `>>`.
+- **You do not own the class:** write the operation on a class of your own that takes the value (`Shout of: aString` instead of `aString shout`). To override behaviour, subclass (if the class is not sealed) or wrap.
+- **JSON for a foreign class:** convert at the boundary with a `using:` converter in the holder's `JsonMapping` (`mapField:to:using:`) instead of giving the foreign class an `asJson`.
+
+See [ADR 0152](ADR/0152-remove-cross-file-extension-methods.md) for the full design and migration table.
 
 ---
 
@@ -8141,7 +8107,7 @@ Internal class 'TokenBuffer' appears in public signature of 'Parser >> tokenize:
   help: 'TokenBuffer' is declared 'internal' — make it public, or change the type
 ```
 
-All methods on an internal class are effectively internal. The method-level modifier is only meaningful on public classes. The check applies equally to a standalone extension method (`Parser >> tokenize: …`), wherever it is declared.
+All methods on an internal class are effectively internal. The method-level modifier is only meaningful on public classes. The check applies equally to a same-file `>>` method (`Parser >> tokenize: …`) and to a live `>>` patch.
 
 #### Metadata
 

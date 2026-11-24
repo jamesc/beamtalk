@@ -114,8 +114,9 @@ Source code lives in the **filesystem**, not in a binary image.
 **A file is one compilation unit for its class.** A same-file extension
 (`X >> m` next to `X`'s declaration) is part of `X`: the compiler folds it into
 the class before codegen, so the REPL, `run`, `test` and builds give the same
-answer, and a duplicate selector is a compile error. Only extensions from
-another file go through the extension registry.
+answer, and a duplicate selector is a compile error. An `X >> m` in a file
+that does not define `X` is a compile error (ADR 0152); in the REPL a live
+`X >> m` edits the class from its stored source.
 
 ## 6. Messages All The Way Down
 

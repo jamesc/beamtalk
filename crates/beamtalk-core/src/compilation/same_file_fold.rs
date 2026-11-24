@@ -24,7 +24,8 @@
 //!   instance sends go to the backing `gen_server`. Class-side extensions fold
 //!   into the facade like any class method.
 //! * Extensions whose target class is declared elsewhere (cross-file) are left
-//!   in `module.method_definitions` unchanged.
+//!   in `module.method_definitions` unchanged; [`reject_cross_file_extensions`]
+//!   turns them into a compile error (ADR 0152).
 
 use crate::ast::{ClassDefinition, Module};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
@@ -50,6 +51,12 @@ pub fn fold_same_file_extensions(module: &mut Module) -> Vec<Diagnostic> {
     }
     let defs = std::mem::take(&mut module.method_definitions);
     for def in defs {
+        // A package-qualified target (`pkg@Foo >> m`) names another package's
+        // class, even next to a local `Foo`: leave it for the cross-file error.
+        if def.package.is_some() {
+            module.method_definitions.push(def);
+            continue;
+        }
         let Some(class) = module
             .classes
             .iter_mut()
@@ -84,6 +91,68 @@ pub fn fold_same_file_extensions(module: &mut Module) -> Vec<Diagnostic> {
         }
     }
     diagnostics
+}
+
+/// Rejects every standalone `X >> m => ...` / `X class >> m => ...` whose target
+/// is not defined in `module` (ADR 0152: cross-file extension methods were
+/// removed).
+///
+/// This is the one place the rule "a `>>` target must be defined in this file"
+/// lives. Call it from every **file-compile** entry point, after
+/// [`fold_same_file_extensions`], so that only foreign targets are left in
+/// `module.method_definitions`. It must **not** run on the live-definition path
+/// (a lone `Foo >> sel => ...` typed at the REPL, or `Class compile:source:`),
+/// where the target's source is held by the workspace rather than the file.
+///
+/// Only a class declared in this file is a valid target. A `>>` on a protocol
+/// declared in the same file is rejected too: nothing folds it into the
+/// protocol, so accepting it would compile it to nothing.
+#[must_use]
+pub fn reject_cross_file_extensions(module: &Module) -> Vec<Diagnostic> {
+    module
+        .method_definitions
+        .iter()
+        .map(|def| {
+            let target = match &def.package {
+                Some(pkg) => format!("{}@{}", pkg.name, def.class_name.name),
+                None => def.class_name.name.to_string(),
+            };
+            let side = if def.is_class_method { " class" } else { "" };
+            if def.package.is_none()
+                && module
+                    .protocols
+                    .iter()
+                    .any(|p| p.name.name == def.class_name.name)
+            {
+                return Diagnostic::error(
+                    format!(
+                        "`{target}{side} >> {}` cannot add a method to protocol {target} from \
+                         outside its definition (ADR 0152)",
+                        def.method.selector.name(),
+                    ),
+                    def.method.head_span(),
+                )
+                .with_hint("Put the provided method in the `Protocol define:` body.".to_string())
+                .with_category(DiagnosticCategory::Type);
+            }
+            Diagnostic::error(
+                format!(
+                    "`{target}{side} >> {}` adds a method to {target}, which is not defined in \
+                     this file; cross-file extension methods were removed (ADR 0152)",
+                    def.method.selector.name(),
+                ),
+                def.method.head_span(),
+            )
+            .with_hint(
+                "Define the method in the file that defines the class (in the class body, or \
+                 as a `>>` next to it), or, for a class loaded in a workspace, define it live \
+                 from the REPL or the IDE. For a class you cannot edit, write a method on a \
+                 class of your own that takes the value."
+                    .to_string(),
+            )
+            .with_category(DiagnosticCategory::Type)
+        })
+        .collect()
 }
 
 /// The names of the classes declared in `module`. A standalone method
@@ -126,6 +195,64 @@ mod tests {
         assert!(diags.is_empty());
         assert_eq!(m.method_definitions.len(), 1);
         assert_eq!(m.classes[0].methods.len(), 1);
+    }
+
+    #[test]
+    fn rejects_cross_file_extensions_only() {
+        let mut m = parse_ok(
+            "Object subclass: Foo\n  foo => 1\n\nFoo >> bar => 2\nString >> shout => 3\nInteger class >> make => 4\n",
+        );
+        assert!(fold_same_file_extensions(&mut m).is_empty());
+        let diags = reject_cross_file_extensions(&m);
+        assert_eq!(diags.len(), 2, "{diags:?}");
+        assert!(diags[0].message.contains("String >> shout"), "{diags:?}");
+        assert!(diags[0].message.contains("ADR 0152"));
+        assert!(
+            diags[1].message.contains("Integer class >> make"),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_extension_on_same_file_protocol() {
+        let mut m = parse_ok("Protocol define: P\n  size -> Integer\n\nP >> extra => 1\n");
+        assert!(fold_same_file_extensions(&mut m).is_empty());
+        let diags = reject_cross_file_extensions(&m);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(diags[0].message.contains("protocol P"), "{diags:?}");
+        assert!(
+            !diags[0].message.contains("not defined in this file"),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn package_qualified_target_next_to_a_protocol_gets_the_cross_file_message() {
+        let mut m = parse_ok("Protocol define: P\n  size -> Integer\n\nother@P >> extra => 1\n");
+        assert!(fold_same_file_extensions(&mut m).is_empty());
+        let diags = reject_cross_file_extensions(&m);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("not defined in this file"),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn package_qualified_target_next_to_a_local_class_is_not_folded() {
+        let mut m = parse_ok("Object subclass: Foo\n  foo => 1\n\nother@Foo >> bar => 2\n");
+        assert!(fold_same_file_extensions(&mut m).is_empty());
+        assert_eq!(m.classes[0].methods.len(), 1);
+        let diags = reject_cross_file_extensions(&m);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(diags[0].message.contains("other@Foo"), "{diags:?}");
+    }
+
+    #[test]
+    fn same_file_extension_is_not_rejected() {
+        let mut m = parse_ok("Object subclass: Foo\n  foo => 1\n\nFoo >> bar => 2\n");
+        assert!(fold_same_file_extensions(&mut m).is_empty());
+        assert!(reject_cross_file_extensions(&m).is_empty());
     }
 
     #[test]

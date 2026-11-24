@@ -130,6 +130,16 @@ pub(crate) fn is_dependency_checkout_file(file: &Utf8Path) -> bool {
     dependency_package_for_path(file).is_some()
 }
 
+/// What a file exports to the rest of the project; see
+/// [`ProjectIndex::file_interface`].
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FileInterface {
+    classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// `(name, expansion, is_internal, package)`, span-free.
+    aliases: Vec<(EcoString, DeclaredType, bool, Option<EcoString>)>,
+    protocols: Vec<ProtocolInfo>,
+}
+
 /// Cross-file project index holding a merged class hierarchy.
 ///
 /// **DDD Context:** Language Service — Aggregate Root
@@ -838,8 +848,15 @@ impl ProjectIndex {
             if others.is_empty() {
                 continue;
             }
-            others.sort();
-            let winner = others[0].min(file).clone();
+            // BT-5131: a project file outranks a dependency checkout copy
+            // (`_build/deps/...`), whatever the paths sort like.
+            let rank = |p: &Utf8PathBuf| (is_dependency_checkout_file(p), p.clone());
+            others.sort_by_key(|p| rank(p));
+            let winner = if rank(file) < rank(others[0]) {
+                file.clone()
+            } else {
+                others[0].clone()
+            };
             out.push((name.clone(), others[0].clone(), winner));
         }
         out
@@ -857,25 +874,65 @@ impl ProjectIndex {
         self.file_classes.get(file).map(Vec::as_slice)
     }
 
-    /// The interface `file` exports to other files (BT-5109): every class it
-    /// defines with its full `ClassInfo` (superclass, methods and their
-    /// signatures, state), sorted by class name. Two calls compare equal
-    /// exactly when nothing another file can observe has changed, so a
-    /// method added, removed or re-typed makes them differ, while an edit to
-    /// a method body does not.
+    /// The interface `file` exports to other files (BT-5109, BT-5131): every
+    /// class it defines with its full `ClassInfo` (superclass, methods and
+    /// their signatures, state), plus its type aliases and protocols, sorted
+    /// by name. Two calls compare equal exactly when nothing another file can
+    /// observe has changed, so a method added, removed or re-typed, an alias
+    /// re-pointed or a protocol requirement edited makes them differ, while
+    /// an edit to a method body, or merely moving a declaration, does not.
+    ///
+    /// Cross-file `>>` extension methods are deliberately not covered:
+    /// ADR 0152 removes them.
     #[must_use]
-    pub fn file_interface(
-        &self,
-        file: &Utf8PathBuf,
-    ) -> Option<Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>> {
-        let names = self.file_classes.get(file)?;
-        let hierarchy = self.file_hierarchies.get(file)?;
-        let mut infos: Vec<_> = names
-            .iter()
-            .filter_map(|n| hierarchy.get_class(n).cloned())
+    pub fn file_interface(&self, file: &Utf8PathBuf) -> Option<FileInterface> {
+        let classes = match (self.file_classes.get(file), self.file_hierarchies.get(file)) {
+            (Some(names), Some(hierarchy)) => {
+                let mut infos: Vec<_> = names
+                    .iter()
+                    .filter_map(|n| hierarchy.get_class(n).cloned())
+                    .collect();
+                infos.sort_by(|a, b| a.name.cmp(&b.name));
+                infos
+            }
+            _ => Vec::new(),
+        };
+        let aliases_indexed = self.file_aliases.get(file);
+        let protocols_indexed = self.file_protocols.get(file);
+        if !self.file_classes.contains_key(file)
+            && aliases_indexed.is_none()
+            && protocols_indexed.is_none()
+        {
+            return None;
+        }
+        let mut aliases: Vec<_> = aliases_indexed
+            .into_iter()
+            .flatten()
+            .map(|i| {
+                (
+                    i.name.clone(),
+                    DeclaredType::from(&i.annotation),
+                    i.is_internal,
+                    i.package.clone(),
+                )
+            })
             .collect();
-        infos.sort_by(|a, b| a.name.cmp(&b.name));
-        Some(infos)
+        aliases.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut protocols: Vec<ProtocolInfo> = protocols_indexed
+            .into_iter()
+            .flatten()
+            .cloned()
+            .map(|mut p| {
+                p.span = beamtalk_core::span::Span::default();
+                p
+            })
+            .collect();
+        protocols.sort_by(|a, b| a.name.cmp(&b.name));
+        Some(FileInterface {
+            classes,
+            aliases,
+            protocols,
+        })
     }
 
     /// Returns `true` if `file` was loaded as part of the stdlib source set.

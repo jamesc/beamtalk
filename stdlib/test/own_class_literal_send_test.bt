@@ -6,9 +6,8 @@
 // a subclass that inherits it: a class literal always denotes that class.
 // `self foo` still late-binds to the receiver.
 //
-// Three shapes: a stateless chain (the send runs in the caller), a chain
-// with class variables (the send goes to `Base`'s class process), and a
-// class-side extension shadowing `foo` (the dynamic fallback).
+// Two shapes: a stateless chain (the send runs in the caller) and a chain
+// with class variables (the send goes to `Base`'s class process).
 //
 // Fixtures: stdlib/test/fixtures/bt4317own_literal_*.bt
 
@@ -53,14 +52,3 @@ TestCase subclass: OwnClassLiteralSendTest
     self should: [
       Bt4317OwnLiteralForgot readLabelViaSelf
     ] raise: #undeclared_class_variable
-
-  // === Class-side extension shadowing the sent selector ===
-  testShadowedOwnReceiver =>
-    self assert: Bt4317OwnLiteralShadowed who equals: #Bt4317OwnLiteralShadowed
-
-  testShadowedSubclassSelfIsBase =>
-    self assert: Bt4317OwnLiteralShadowedChild who equals: #Bt4317OwnLiteralShadowed
-
-// Shadows the compiled `tag`, so `Bt4317OwnLiteralShadowed tag` falls back to
-// the dynamic lookup. Its `self name` shows which class it runs for.
-Bt4317OwnLiteralShadowed class >> tag -> Symbol => self name

@@ -275,7 +275,12 @@ pub fn parse_package_sources(
         // One compilation unit per class (BT-4721): class infos see the file's
         // own extensions as methods of the class. The fold's own diagnostics
         // join the file's diagnostics below, after the parse-error check.
-        let fold_diagnostics = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
+        let mut fold_diagnostics =
+            beamtalk_core::compilation::fold_same_file_extensions(&mut module);
+        // ADR 0152: a `>>` whose target this file does not define is an error.
+        fold_diagnostics.extend(beamtalk_core::compilation::reject_cross_file_extensions(
+            &module,
+        ));
 
         // A file with parse errors may have an under-recovered method
         // surface — mark its classes so the receiver-knowledge classifier

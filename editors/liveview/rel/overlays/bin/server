@@ -41,6 +41,19 @@ if [ "$#" -gt 1 ]; then
     exit 64
 fi
 
+# Generated before any bin/bt_attach call: even the workspace-resolving `eval`
+# below boots the release config (config/runtime.exs), which raises when
+# SECRET_KEY_BASE is unset (BT-5128).
+if [ -z "${SECRET_KEY_BASE:-}" ]; then
+    if command -v openssl >/dev/null 2>&1; then
+        SECRET_KEY_BASE=$(openssl rand -base64 48)
+    else
+        SECRET_KEY_BASE=$(head -c 48 /dev/urandom | base64 | tr -d '\n')
+    fi
+    export SECRET_KEY_BASE
+    echo "⚠️  SECRET_KEY_BASE not set — generated an ephemeral one (sessions reset on restart)." >&2
+fi
+
 if [ "$#" -eq 1 ]; then
     # Resolve the workspace's node name and cookie through the front's own
     # BtAttach.BeamtalkHome (BT-5081) — the one implementation of "where is
@@ -56,16 +69,6 @@ if [ "$#" -eq 1 ]; then
     BT_WORKSPACE_COOKIE=$(printf '%s\n' "${ws_env}" | sed -n '2p')
     export BT_WORKSPACE_NODE BT_WORKSPACE_COOKIE
     echo "🌐 LiveView IDE → ${BT_WORKSPACE_NODE} (workspace must be running)"
-fi
-
-if [ -z "${SECRET_KEY_BASE:-}" ]; then
-    if command -v openssl >/dev/null 2>&1; then
-        SECRET_KEY_BASE=$(openssl rand -base64 48)
-    else
-        SECRET_KEY_BASE=$(head -c 48 /dev/urandom | base64 | tr -d '\n')
-    fi
-    export SECRET_KEY_BASE
-    echo "⚠️  SECRET_KEY_BASE not set — generated an ephemeral one (sessions reset on restart)." >&2
 fi
 
 cd -P -- "$(dirname -- "$0")/.."

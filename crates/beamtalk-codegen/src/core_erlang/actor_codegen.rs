@@ -78,10 +78,7 @@ impl CoreErlangGenerator {
         let has_classes = !module.classes.is_empty();
         // Protocol-only files also need register_class/0 for protocol registration
         let has_protocols = !module.protocols.is_empty();
-        // Pure-extension files (only `Target >> sel`, no host class) need
-        // register_class/0 + on_load to register their foreign extensions at load.
-        let has_foreign_extensions = Self::has_foreign_extensions(module);
-        let needs_register_class = has_classes || has_protocols || has_foreign_extensions;
+        let needs_register_class = has_classes || has_protocols;
         // Build sealed method exports
         let sealed_export_doc = self.build_sealed_export_doc(module);
         // Build class method exports
@@ -384,10 +381,9 @@ impl CoreErlangGenerator {
             docs.push(self.generate_meta_function(module, needs_spec_synthesis));
             // Generate register_class/0 for class system registration
             docs.push(self.generate_register_class(module, needs_spec_synthesis)?);
-        } else if has_protocols || has_foreign_extensions {
-            // Protocol-only and pure-extension modules need
-            // register_class/0 (for protocol registration and/or foreign
-            // extension registration) even though there are no classes.
+        } else if has_protocols {
+            // Protocol-only modules need register_class/0 for protocol
+            // registration even though there are no classes.
             docs.push(Document::Str("\n"));
             docs.push(self.generate_register_class(module, false)?);
         }

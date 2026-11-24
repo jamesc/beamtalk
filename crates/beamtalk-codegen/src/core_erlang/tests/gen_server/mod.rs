@@ -99,7 +99,6 @@ mod class_var_capture_catch;
 mod class_var_not_inherited;
 mod direct_class_self;
 mod dispatch_and_lifecycle;
-mod extensions;
 mod late_field_read;
 mod native_facade;
 mod new_spawn_unknown_field;

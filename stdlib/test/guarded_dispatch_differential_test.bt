@@ -242,20 +242,6 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       ]
       on: p
 
-  // Extension-registry selectors (ADR 0066), resolved inside `dispatch/3`.
-  testExtensions =>
-    p := self point
-    self
-      send: #extension
-      typed: [:r :: GuardedDiffPoint | r diffExtended]
-      dynamic: [:r | r diffExtended]
-      on: p
-    self
-      send: #extensionOverridesInherited
-      typed: [:r :: GuardedDiffPoint | r shadowedByExtension]
-      dynamic: [:r | r shadowedByExtension]
-      on: p
-
   // `doesNotUnderstand:args:` answers every unknown selector.
   testDoesNotUnderstandArgs =>
     px := GuardedDiffProxy new
@@ -763,16 +749,6 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       args: #(#noSuchSelector, #())
       on: p
       in: m
-    self
-      armOutcome: #diffExtended
-      args: #()
-      on: p
-      in: m
-    self
-      armOutcome: #shadowedByExtension
-      args: #()
-      on: p
-      in: m
 
   // `removeSelector:` of an extension re-exposes the inherited method, and
   // an extension registered at run time (the in-memory half of a live patch)
@@ -827,8 +803,3 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       typed: [:r :: GuardedDiffPoint | r shadowedThenRemoved]
       dynamic: [:r | r shadowedThenRemoved]
       on: p
-
-// Extension-registry selectors (ADR 0066), resolved inside `dispatch/3`: one
-// adding a selector, one overriding a selector GuardedDiffBase defines.
-GuardedDiffPoint >> diffExtended -> Integer => self sum * 10
-GuardedDiffPoint >> shadowedByExtension -> Symbol => #fromExtension
