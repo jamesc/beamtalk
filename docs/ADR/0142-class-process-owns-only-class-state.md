@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-10-30); accepted 2026-10-29. Epic BT-4297.
 
+> **Superseded in part by [ADR 0152](0152-remove-cross-file-extension-methods.md) (2026-11-24), the BT-4307 resolution.** The resolution that an ancestor's class-side extension counts as that ancestor's method, with the owner memo declining when one answers first, no longer applies: class-side extensions are removed, so the owner memo has no extension verdict. A runtime class-method fun installed through the class still counts as the class's method.
+
 > **Implemented note (2026-10-30).** What shipped differs from the text below in these ways:
 >
 > - **Rule 2 is chain-wide (deviation from §1).** A class keeps its class process when it *or any class in its superclass chain* declares class variables, not only when the resolved method's defining class does. A subclass that declares none of its own holds its ancestors' class variables in its own process, and a method it defines itself reaches them through a class-side `self` send, which would raise `class_state_unreachable` in the caller. The runtime rule is `beamtalk_class_metadata:chain_has_class_variables/1`, the compile-time rule `ClassHierarchy::runs_class_method_in_caller` (Rust), and the derived `direct_call_ok/2` flag folds the class-variable facts over the whole chain (BT-4300, BT-4301).

@@ -2201,36 +2201,6 @@ mod tests {
         assert!(!complete);
     }
 
-    /// ADR 0070 WS3 (BT-4608): a test file's hierarchy registers the
-    /// package's own `src/` extensions and its dependencies', as `build`
-    /// does, and says whether every dependency's were loaded.
-    #[test]
-    fn merged_class_indexes_carry_package_and_dependency_extensions() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let consumer = crate::commands::deps::test_support::consumer_with_fresh_path_dependency(
-            &root,
-            &[("ext.bt", "Object >> fromDependency -> Integer => 1\n")],
-            "",
-            &[("own.bt", "Object >> fromPackage -> Integer => 2\n")],
-        );
-        let manifest = manifest::parse_manifest_full(&consumer.join("beamtalk.toml"))
-            .unwrap()
-            .package;
-
-        let (_, _, _, _, _, _, extensions, complete) =
-            build_merged_class_indexes(&[(consumer, manifest)]);
-
-        let selectors: HashSet<String> = extensions
-            .entries()
-            .keys()
-            .map(|key| key.selector.to_string())
-            .collect();
-        assert!(selectors.contains("fromPackage"), "{selectors:?}");
-        assert!(selectors.contains("fromDependency"), "{selectors:?}");
-        assert!(complete);
-    }
-
     /// Pins the summary line's display format. See [`summary_line`] for the
     /// format's history and why it's still worth pinning.
     #[test]

@@ -146,29 +146,14 @@ impl CoreErlangGenerator {
             .map_or(&*EMPTY, |ctx| &ctx.class_var_names)
     }
 
-    /// Sets the class-side extension's target class (BT-3762), returning the
-    /// previous value so the caller can restore it.
-    pub(in crate::core_erlang) fn replace_extension_target_class(
-        &mut self,
-        value: Option<String>,
-    ) -> Option<String> {
-        std::mem::replace(&mut self.class_context_mut().extension_target_class, value)
-    }
-
     /// The class the current class method belongs to: the `ClassBuilder`
-    /// class, else the extension target, else the class being compiled
-    /// (BT-3762). It names the class whose class variables the method sees and
-    /// keys a class-side `super` send (`class_super_dispatch/4`, BT-4001). The
-    /// innermost scope wins (BT-3804): a builder `classMethods:` block nested
-    /// in a class-side extension sees the builder's `classVars:`, not the
-    /// extension target's variables.
+    /// class, else the class being compiled (BT-3762). It names the class
+    /// whose class variables the method sees and keys a class-side `super`
+    /// send (`class_super_dispatch/4`, BT-4001). The innermost scope wins
+    /// (BT-3804): a builder `classMethods:` block sees the builder's
+    /// `classVars:`.
     pub(in crate::core_erlang) fn class_var_home(&self) -> String {
         self.builder_class_method_class()
-            .or_else(|| {
-                self.class_context
-                    .as_ref()
-                    .and_then(|ctx| ctx.extension_target_class.clone())
-            })
             .unwrap_or_else(|| self.class_name())
     }
 
@@ -502,31 +487,6 @@ impl CoreErlangGenerator {
         }
         self.current_class_field_types = fields;
         self.current_class_var_types = classify_fields(&class.class_variables);
-    }
-
-    /// Populates instance-field facts for an **extension** method from the
-    /// *target* class's declared state types, resolved via the class hierarchy
-    /// (the target's AST is unavailable at extension-codegen time). Declared
-    /// fields — own or inherited, unions included — record their type, exactly
-    /// like the in-class path; untyped fields get no fact (their writers are
-    /// not visible here) and are guarded. Class-variable facts are cleared, so
-    /// class-side `self.<name>` reads in an extension are guarded too.
-    pub(in crate::core_erlang) fn set_extension_target_field_types(&mut self, target_class: &str) {
-        let field_types: Vec<(String, FieldTypeFact)> = self
-            .class_hierarchy
-            .as_ref()
-            .map(|h| {
-                h.all_state(target_class)
-                    .iter()
-                    .filter_map(|name| {
-                        h.state_field_type(target_class, name)
-                            .map(|ty| (name.to_string(), FieldTypeFact::Declared(ty)))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        self.current_class_field_types = field_types.into_iter().collect();
-        self.current_class_var_types.clear();
     }
 
     /// The comparison kinds of a `self.<name>` read when its field is declared

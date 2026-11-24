@@ -95,20 +95,6 @@ pub(super) fn class_registered_name(class_name: &str) -> String {
     s
 }
 
-/// Builds a stable, self-contained extension binding name `"_Ext{idx}"`.
-///
-/// Using the per-module loop index keeps snapshot values stable across unrelated
-/// codegen changes that would otherwise shift the global temp-var counter.
-/// Collision with `fresh_var("Ext")` (yielding `_Ext1`, `_Ext2`, …) is not a
-/// concern in practice because no call site uses `"Ext"` as a `fresh_var` base.
-pub(super) fn ext_var(idx: usize) -> String {
-    // "_Ext" is 4 bytes; reserve a few more for the digits.
-    let mut s = String::with_capacity(8);
-    s.push_str("_Ext");
-    let _ = write!(s, "{idx}");
-    s
-}
-
 /// Generate a `'beamtalk_class' = [{...}]` attribute fragment for the
 /// module attributes section. Returns `Document::Nil` when classes is empty.
 pub(super) fn beamtalk_class_attribute(classes: &[ClassDefinition]) -> Document<'static> {
@@ -559,13 +545,6 @@ mod tests {
         assert_eq!(metaclass_tag("Array"), "Array class");
         assert_eq!(metaclass_tag("Object"), "Object class");
         assert_eq!(metaclass_tag("MyApp"), "MyApp class");
-    }
-
-    #[test]
-    fn test_ext_var_formats_index() {
-        assert_eq!(ext_var(0), "_Ext0");
-        assert_eq!(ext_var(1), "_Ext1");
-        assert_eq!(ext_var(42), "_Ext42");
     }
 
     #[test]

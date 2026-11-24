@@ -69,22 +69,6 @@ fn same_file_extension_calls_the_backing_module() {
 }
 
 #[test]
-fn cross_file_extension_is_a_plain_send_of_delegate() {
-    // Codegen contract the BT-4930 error relies on: no `native_call` to `host_backing`; `delegate` is sent
-    // to the receiver (`bt@xf@host:dispatch('delegate', [], Self)` when it is
-    // a Host, else `beamtalk_message_dispatch:send`). At run time that reaches
-    // the `Object>>delegate` sentinel, which raises `user_error`
-    // "delegate called on a non-native Object".
-    let code = compile("Host >> cross -> Integer => self delegate\n", Some(HOST));
-    assert!(
-        code.contains("'beamtalk_extensions':'register'('Host', 'cross'"),
-        "{code}"
-    );
-    assert!(!code.contains(NATIVE_CALL), "{code}");
-    assert!(code.contains("'delegate', []"), "{code}");
-}
-
-#[test]
 fn native_class_meta_carries_the_native_flag_and_others_do_not() {
     // `decode.rs` reads this key back so a compiled dependency's class is
     // native for the validators. Non-native classes emit no key at all.

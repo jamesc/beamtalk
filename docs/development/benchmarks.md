@@ -1748,6 +1748,8 @@ compiles to and the functions it calls. Run it with `just bench-vs-elixir`.
 Method, results (main at `dc216bf52`), the analysis and the effect of BT-4065
 and BT-4071 are in [`benchmarks/vs-elixir/README.md`](../../benchmarks/vs-elixir/README.md).
 
+The rows that measured a static call site shadowed by a class-side extension (3i and 3j, BT-4431) were removed with cross-file extension methods (ADR 0152), along with their `vb_shadowed_math*.bt` fixtures. Rows 3g and 3h stay. The old result files under `benchmarks/vs-elixir/results/` keep those rows as history.
+
 ## BT-4416: `equals:` on a primitive receiver
 
 `a equals: b` compiles to `beamtalk_message_dispatch:send/3`. For a primitive

@@ -91,10 +91,6 @@ rows() ->
             50000, 'lateStateClassMethod:', none, [{remote_call, none}]},
         {"3h", dispatch, "as 3g, class in a variable / mod.fun(arg)", 50000, 'dynClassMethod:c:',
             late_state_math_class, [{dyn_remote_call, late_state_math_class}, {remote_call, none}]},
-        {"3i", dispatch, "class method shadowed by a class-side extension / Mod.fun(arg)", 50000,
-            'shadowedClassMethod:', none, [{remote_call, none}]},
-        {"3j", dispatch, "as 3i, class in a variable / mod.fun(arg)", 50000, 'dynClassMethod:c:',
-            shadowed_math_class, [{dyn_remote_call, shadowed_math_class}, {remote_call, none}]},
         {"3k", dispatch, "integer class-side constant: Errs protocolError / Mod.const()", 200000,
             'intConstant:', none, [{remote_const_int, none}, {module_attr_int, none}]},
         {"3l", dispatch, "string class-side constant: Errs name / Mod.const()", 200000,
@@ -260,7 +256,6 @@ fixtures() ->
         tuple => {Bt(tuple), ?EX:tuple()},
         math_class => {Bt(openMathClass), ?EX:math_module()},
         late_state_math_class => {Bt(lateStateMathClass), ?EX:math_module()},
-        shadowed_math_class => {Bt(shadowedMathClass), ?EX:math_module()},
         bt_ok => {Bt(okResult), none},
         ex_ok => {none, ?EX:ok_result()},
         bt_counter => {Bt(counter), none},
@@ -597,10 +592,6 @@ compiles_to("3g") ->
     "guarded direct call whose key is never installed: no target in the class's static call map -> static_call_target/4 declines (class variables) -> whereis_class + class_send: gen_server:call (BT-4431)";
 compiles_to("3h") ->
     "send(C, 'double:', [21]) -> class_send: gen_server:call (control for 3g, BT-4431)";
-compiles_to("3i") ->
-    "guarded direct call whose key is never installed: no target in the class's static call map -> static_call_target/4 declines (extension) -> whereis_class + class_send runs the extension (BT-4431)";
-compiles_to("3j") ->
-    "send(C, 'double:', [21]) -> class_send runs the extension (control for 3i, BT-4431)";
 compiles_to("3k") ->
     "folded constant: one persistent_term:get of the class's static call key, its {constant_value, 1, Mod, Fun, Tag} key matched in the map, then the literal 1 in place (BT-4363)";
 compiles_to("3l") ->

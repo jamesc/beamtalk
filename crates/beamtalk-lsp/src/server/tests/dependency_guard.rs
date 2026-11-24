@@ -4,15 +4,15 @@
 //! ADR 0070 WS3 in the editor (BT-4611): the LSP preloads every declared
 //! dependency's source — path dependencies included — and lifts ADR 0100's
 //! pre-WS3 dependency guard only when that loading was complete, with the
-//! CLI's rule. A missing selector then reports does-not-understand, and a
-//! selector a dependency's extension defines does not.
+//! CLI's rule. A missing selector then reports does-not-understand. (ADR 0152
+//! removed cross-file extension methods, so a dependency contributes classes
+//! only.)
 
 use super::super::config::{DependencyLoad, collect_preload_files, root_dependencies};
 use super::*;
 
-/// The producer: a class and an extension on `Object`.
+/// The producer: one class.
 const PRODUCER_CLASS: &str = "Object subclass: Codec\n  encode: x => x\n";
-const PRODUCER_EXTENSION: &str = "Object >> shout => 1\n";
 
 /// How the consumer reaches the producer.
 #[derive(Clone, Copy)]
@@ -89,56 +89,31 @@ fn dnu_for<'a>(messages: &'a [String], selector: &str) -> Vec<&'a String> {
         .collect()
 }
 
-fn producer_with_extension() -> Vec<(&'static str, &'static str)> {
-    vec![("codec.bt", PRODUCER_CLASS), ("ext.bt", PRODUCER_EXTENSION)]
-}
-
-const USES_SHOUT: &str = "Object subclass: Main\n  run => Codec new shout\n";
 const USES_WHISPER: &str = "Object subclass: Main\n  run => Codec new whisper\n";
 
 async fn assert_guard_lifted(kind: DepKind, label: &str) {
     let temp = unique_temp_dir(&format!("beamtalk_lsp_dep_guard_{label}"));
 
-    let app = consumer_with_dependency(&temp.join("shout"), kind, &producer_with_extension());
-    let messages = diagnostics_for_main(&app, USES_SHOUT).await;
-    assert!(
-        dnu_for(&messages, "shout").is_empty(),
-        "{label}: a selector the dependency's extension defines must not be reported, \
-         got {messages:?}"
-    );
-
-    let app = consumer_with_dependency(&temp.join("whisper"), kind, &producer_with_extension());
+    let app =
+        consumer_with_dependency(&temp.join("whisper"), kind, &[("codec.bt", PRODUCER_CLASS)]);
     let messages = diagnostics_for_main(&app, USES_WHISPER).await;
     assert_eq!(
         dnu_for(&messages, "whisper").len(),
         1,
         "{label}: a missing selector must report does-not-understand once the \
-         dependency's extensions are loaded, got {messages:?}"
-    );
-
-    // Without the producer's extension, `shout` is not understood either.
-    let app = consumer_with_dependency(
-        &temp.join("no_extension"),
-        kind,
-        &[("codec.bt", PRODUCER_CLASS)],
-    );
-    let messages = diagnostics_for_main(&app, USES_SHOUT).await;
-    assert_eq!(
-        dnu_for(&messages, "shout").len(),
-        1,
-        "{label}: removing the dependency's extension brings the DNU back, got {messages:?}"
+         dependency's classes are loaded, got {messages:?}"
     );
 
     let _ = fs::remove_dir_all(&temp);
 }
 
 #[tokio::test]
-async fn path_dependency_extensions_lift_the_guard() {
+async fn path_dependency_lifts_the_guard() {
     assert_guard_lifted(DepKind::Path, "path").await;
 }
 
 #[tokio::test]
-async fn fetched_git_dependency_extensions_lift_the_guard() {
+async fn fetched_git_dependency_lifts_the_guard() {
     assert_guard_lifted(DepKind::Git, "git").await;
 }
 
@@ -219,13 +194,16 @@ fn root_dependencies_finds_path_dependencies_transitively() {
 #[test]
 fn collect_preload_files_preloads_path_dependency_sources() {
     let temp = unique_temp_dir("beamtalk_lsp_preload_path_dep");
-    let app = consumer_with_dependency(&temp, DepKind::Path, &producer_with_extension());
+    let app = consumer_with_dependency(&temp, DepKind::Path, &[("codec.bt", PRODUCER_CLASS)]);
     let loaded = collect_preload_files(PreloadConfig {
         roots: vec![app],
         stdlib_dirs: vec![],
     });
     assert!(
-        loaded.user_files.iter().any(|(p, _)| p.ends_with("ext.bt")),
+        loaded
+            .user_files
+            .iter()
+            .any(|(p, _)| p.ends_with("codec.bt")),
         "a path dependency's source must be preloaded, got {:?}",
         loaded.user_files
     );

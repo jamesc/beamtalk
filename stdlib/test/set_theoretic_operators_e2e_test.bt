@@ -84,5 +84,7 @@ TestCase subclass: SetTheoreticOperatorsE2eTest
         ]
       ]
     self assert: result equals: "matched-b"
-Object >> bt2746TagWithoutFoo -> Symbol \ #foo => #bar
-Object >> bt2746Describe: n :: Integer & Printable -> String => n asString
+
+  bt2746TagWithoutFoo -> Symbol \ #foo => #bar
+
+  bt2746Describe: n :: Integer & Printable -> String => n asString

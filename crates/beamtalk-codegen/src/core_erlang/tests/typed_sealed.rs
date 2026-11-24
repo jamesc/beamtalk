@@ -1336,6 +1336,7 @@ const KNOWN_TAGGED_BUILTINS: &[&str] = &[
     "ObjectStateChanged",
     "Package",
     "Parallel",
+    "PersistentTerm",
     "ProcessDictionary",
     "ProcessNavigation",
     "Program",
