@@ -79,7 +79,8 @@ Value subclass: JsonMapping
 
   /// Apply the mapping to `anObject` and answer a Dictionary of wire key to
   /// (converted) field value. Fields that are not mapped are omitted. A mapped
-  /// field the object does not have (or has not assigned) raises an error.
+  /// field the object does not have (or has not assigned) raises a `user_error`
+  /// naming the class and field, not the runtime's `fieldAt:` error kind.
   encode: anObject :: Object -> Dictionary =>
     self.entries
       inject: (Dictionary new)
