@@ -509,7 +509,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     {view, _html, class} = open_fresh_def_tab(conn)
     trace_source_refreshes(view)
 
-    save_html =
+    _ =
       view
       |> form("form[phx-submit='save_method']")
       |> render_submit(%{
@@ -691,7 +691,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # through the same `evaluate` op the REPL `:remove-method` meta-command,
     # the MCP `remove_method` tool, and the LSP `beamtalk.removeMethod`
     # command all use — no dedicated workspace-side op (ADR 0112).
-    remove_html =
+    _ =
       view
       |> element(~s(button[phx-click="remove_method"]))
       |> render_click()
@@ -750,7 +750,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # Click "Remove Class": dispatches `#{class} removeFromSystem` through the
     # same `evaluate` op the REPL `:remove-class` meta-command and the MCP
     # `remove_class` tool use — no dedicated workspace-side op (ADR 0113).
-    remove_html =
+    _ =
       view
       |> element(~s(button[phx-click="remove_class"]))
       |> render_click()
@@ -837,7 +837,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # file (eval-defined, no project tree in the test workspace), so its
     # entry is `flushable: false` — a safe no-op to flush, not a real
     # delete; it must not error.
-    flush_html =
+    _ =
       view
       |> element(~s(button[phx-click="flush_destructive"][phx-value-class="#{class}"]))
       |> render_click()
@@ -887,7 +887,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     assert open_html =~ "rename-new-name"
 
-    rename_html =
+    _ =
       view
       |> form("#rename-form")
       |> render_submit(%{"new_name" => new_name})
@@ -970,7 +970,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     assert open_modal_html =~ "rename-new-name"
 
-    rename_html =
+    _ =
       view
       |> form("#rename-form")
       |> render_submit(%{"new_name" => "tripled"})
@@ -1067,7 +1067,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # tree's selected class.
     view |> element(~s(button[phx-click="open_rename"])) |> render_click()
 
-    rename_html =
+    _ =
       view
       |> form("#rename-form")
       |> render_submit(%{"new_name" => new_name})
@@ -1142,7 +1142,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # file (eval-defined, no project tree in the test workspace), so its
     # entry is `flushable: false` — a safe no-op to flush, not a real
     # rewrite; it must not error.
-    flush_html =
+    _ =
       view
       |> element(
         ~s(button[phx-click="flush_destructive"][phx-value-class="#{new_name}"][phx-value-kind="rename-class"])
