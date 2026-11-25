@@ -380,3 +380,33 @@ register_right_after_connect_test_() ->
             beamtalk_dist_test_helper:stop_peer(Peer)
         end
     end}.
+
+%%====================================================================
+%% Connect to an already-connected node still syncs (BT-5179)
+%%====================================================================
+
+connect_after_raw_connect_sees_peer_global_name_test_() ->
+    {timeout, 60, fun() ->
+        {ok, Peer, PeerNode} = beamtalk_dist_test_helper:start_peer("bt5179_connect"),
+        try
+            %% Drop the link, register a name on the peer alone, then
+            %% reconnect through `net_kernel` (no explicit sync) so the
+            %% node is already connected when `Node connect` runs.
+            true = erlang:disconnect_node(PeerNode),
+            Name = beamtalk_test_unique:atom("bt5179_peername"),
+            {ok, PeerPid} = peer:call(
+                Peer, beamtalk_actor_registry, 'spawnAsGlobal', [Name, test_counter, 0]
+            ),
+            true = net_kernel:connect_node(PeerNode),
+            ?assert(lists:member(PeerNode, nodes(connected))),
+            ?assertMatch(
+                {ok, _},
+                beamtalk_result:to_tagged_tuple(
+                    beamtalk_node:connect(beamtalk_node:from_atom(PeerNode))
+                )
+            ),
+            ?assertEqual(PeerPid, global:whereis_name(Name))
+        after
+            beamtalk_dist_test_helper:stop_peer(Peer)
+        end
+    end}.

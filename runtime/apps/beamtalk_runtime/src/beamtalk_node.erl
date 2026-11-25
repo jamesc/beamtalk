@@ -80,7 +80,7 @@ selectors (ADR 0126 Phase 2) apply the same rule rather than re-deriving it.
 -type t() :: #{?BT_CLASS_TAG_KEY := 'Node', name := node()}.
 -export_type([t/0]).
 
-%% Upper bound on the `global:sync/0` a fresh `connect` waits for (BT-5173).
+%% Upper bound on the `global:sync/0` every successful `connect` waits for (BT-5173, BT-5179).
 -define(GLOBAL_SYNC_TIMEOUT_MS, 5000).
 -define(INVALID_NAME_HINT, <<"expected name@host">>).
 -define(INSECURE_HINT, <<"configure TLS distribution (ADR 0091) or use a tunnel">>).
@@ -135,14 +135,13 @@ Establish a connection to this node, applying the §9 host policy first
 connection answers `Result error:` with `kind = insecure_distribution`; an
 unreachable node (or a local node that is not itself distributed) answers
 `kind = node_down`. Connecting to the current node is a no-op success.
-A new connection answers only after OTP `global` has synced names with the
-peer (so a `scope: #global` name registered next is visible from it at
-once, BT-5156), but waits at most 5 seconds for that: on timeout a warning
-is logged and `connect` still answers ok (BT-5173). A node that is already
-connected skips the sync, so a node first connected by `ping`, Erlang's
-auto-connect or raw `net_kernel` is not synced by a later `connect`. `ping`
-never syncs: it is a liveness probe, so call `connect` (on a node not yet
-connected) when `global` names must be visible immediately.
+Every successful `connect` answers only after OTP `global` has synced names
+with the peer (so a `scope: #global` name registered on it is visible at
+once, BT-5156), including when the node was already connected by `ping`,
+Erlang's auto-connect or raw `net_kernel` (BT-5179). The wait is bounded at
+5 seconds: on timeout a warning is logged and `connect` still answers ok
+(BT-5173). `ping` never syncs: it is a liveness probe. Callers that call
+`connect` in a tight loop can check `isConnected` first to skip the sync.
 """.
 -spec connect(t()) -> beamtalk_result:t().
 connect(#{?BT_CLASS_TAG_KEY := 'Node', name := Name} = Self) ->
@@ -542,20 +541,16 @@ tls_distribution() ->
 
 -spec do_connect(t(), node()) -> {ok, t()} | {error, #beamtalk_error{}}.
 do_connect(Self, Name) ->
-    AlreadyConnected = lists:member(Name, nodes(connected)),
     case net_kernel:connect_node(Name) of
         true ->
             %% OTP `global` shares names with a new peer in the background;
             %% wait for that (bounded) so a `scope: #global` name is visible
             %% from the peer as soon as `connect` answers (BT-5156, BT-5173).
-            %% Skipped when already connected (BT-5173): an earlier `connect` synced,
-            %% but a connection made by `ping`/auto-connect/FFI did not (known gap).
+            %% Always run, even when already connected (BT-5179): a connection
+            %% made by `ping`/auto-connect/FFI did not wait for the sync.
             %% A sync failure or timeout does not undo the connection, so
             %% still answer ok.
-            case AlreadyConnected of
-                true -> ok;
-                false -> bounded_sync(fun global:sync/0, ?GLOBAL_SYNC_TIMEOUT_MS)
-            end,
+            bounded_sync(fun global:sync/0, ?GLOBAL_SYNC_TIMEOUT_MS),
             {ok, Self};
         false ->
             {error,
