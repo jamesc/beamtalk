@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { test } from "node:test";
+import { LIMITS } from "../src/protocol.js";
 import { createTokenizer } from "../src/tokenize.js";
 
 const require = createRequire(import.meta.url);
@@ -149,4 +150,48 @@ test("offsets are UTF-16 indices", () => {
   const line = '"héllo 🎉" foo';
   const [tokens] = tokenizer.tokenizeLines([line], true);
   assert.equal(line.slice(tokens[0][0], tokens[0][1]), '"héllo 🎉"');
+});
+
+// --- bounds (BT-5194) -------------------------------------------------------
+
+test("every line is tokenized under the per-line time limit", async (t) => {
+  // vscode-textmate stops a line once `Date.now()` passes its time limit; a
+  // clock that jumps a second per read makes every line run out at once.
+  let clock = 0;
+  t.mock.method(Date, "now", () => (clock += 1000));
+  const unbounded = await tokenizerWithClock(() => 0);
+  const [tokens] = unbounded.tokenizeLines(['x := "never coloured"'], true);
+  assert.deepEqual(tokens, [], "a line out of time must not be tokenized to the end");
+});
+
+/** A tokenizer whose request-budget clock is `now`. */
+function tokenizerWithClock(now) {
+  return createTokenizer({
+    wasm: readFileSync(require.resolve("vscode-oniguruma/release/onig.wasm")),
+    grammar: JSON.parse(
+      readFileSync(new URL("../../vscode/syntaxes/beamtalk.tmLanguage.json", import.meta.url))
+    ),
+    now,
+  });
+}
+
+test("an over-long line gets no tokens", () => {
+  const long = `"${"x".repeat(LIMITS.maxLineLength)}"`;
+  assert.deepEqual(tokenizer.tokenizeLines([long, '"short"'], true), [[], [[0, 7, "string"]]]);
+});
+
+test("lines after the request budget runs out get no tokens", async () => {
+  const lines = ["x := 1", "y := 2"];
+  const inTime = await tokenizerWithClock(() => 0);
+  const done = inTime.tokenizeBlocks([{ lines, continuous: true }]);
+  assert.ok(done.blocks[0].every((t) => t.length > 0));
+  assert.deepEqual(done.incomplete, []);
+
+  // The first read sets the deadline; every later read is past it.
+  let reads = 0;
+  const late = await tokenizerWithClock(() => (reads++ === 0 ? 0 : LIMITS.requestBudgetMs + 1));
+  assert.deepEqual(late.tokenizeBlocks([{ lines, continuous: true }]), {
+    blocks: [[[], []]],
+    incomplete: [0],
+  });
 });

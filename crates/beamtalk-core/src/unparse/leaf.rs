@@ -49,6 +49,13 @@ pub(super) fn int_lit(value: i64) -> Document<'static> {
     Document::Owned(value.to_string())
 }
 
+/// A number literal in a source spelling the caller has checked reads back
+/// as the same value (`16rFF`, `1e10`; BT-5183). Emitted verbatim.
+#[must_use]
+pub(super) fn number_spelling(spelling: impl AsRef<str>) -> Document<'static> {
+    Document::Owned(spelling.as_ref().to_string())
+}
+
 /// A non-negative integer rendered in decimal — e.g. a binary-segment unit size
 /// (`:8`). Distinct from [`int_lit`] only in the source type it accepts.
 #[must_use]
@@ -145,13 +152,21 @@ pub(super) fn string_content(s: impl AsRef<str>) -> Document<'static> {
     Document::Owned(result)
 }
 
-/// The *inner* content of a symbol literal (`#name`, `#'with spaces'`).
+/// The *inner* content of an unquoted symbol literal (`#name`, `#at:put:`).
 ///
-/// The caller emits the `#` sigil and any surrounding quotes; the symbol name
-/// itself is emitted verbatim (no escaping).
+/// The caller emits the `#` sigil and has checked that the name lexes back
+/// unquoted; the name is emitted verbatim.
 #[must_use]
 pub(super) fn symbol_content(s: impl AsRef<str>) -> Document<'static> {
     Document::Owned(s.as_ref().to_string())
+}
+
+/// The *inner* content of a quoted symbol literal (`#'with spaces'`), with
+/// each embedded `'` doubled (`#'it''s'`), the lexer's only escape inside a
+/// quoted symbol (BT-5183). The caller emits the `#'` and `'` delimiters.
+#[must_use]
+pub(super) fn quoted_symbol_content(s: impl AsRef<str>) -> Document<'static> {
+    Document::Owned(s.as_ref().replace('\'', "''"))
 }
 
 /// A class reference, optionally package-qualified (`Foo` or `pkg@Foo`).
@@ -268,6 +283,13 @@ mod tests {
     fn symbol_content_is_verbatim() {
         assert_eq!(render(&symbol_content("foo")), "foo");
         assert_eq!(render(&symbol_content("with spaces")), "with spaces");
+    }
+
+    #[test]
+    fn quoted_symbol_content_doubles_quotes() {
+        assert_eq!(render(&quoted_symbol_content("with spaces")), "with spaces");
+        assert_eq!(render(&quoted_symbol_content("it's")), "it''s");
+        assert_eq!(render(&quoted_symbol_content("''")), "''''");
     }
 
     #[test]

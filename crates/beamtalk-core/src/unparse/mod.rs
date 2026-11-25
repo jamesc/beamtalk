@@ -34,9 +34,13 @@ mod comments;
 mod declarations;
 mod expressions;
 mod leaf;
+mod round_trip;
 mod signature_text;
 mod types;
 
+pub use round_trip::FormatError;
+#[cfg(any(test, feature = "test"))]
+pub(crate) use round_trip::debug_without_layout;
 pub use signature_text::{
     SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
 };
@@ -50,7 +54,9 @@ use crate::ast::{
     ProtocolMethodSignature, ProtocolUse, ShapeField, SlotKind, StandaloneMethodDefinition,
     StateDeclaration, StringSegment, TypeAliasDefinition, TypeAnnotation,
 };
-use crate::source_analysis::{Severity, binary_binding_power, lex_with_eof, parse, parse_method};
+use crate::source_analysis::{
+    Severity, TokenKind, binary_binding_power, lex_with_eof, line_ending, parse, parse_method,
+};
 use crate::span::Span;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{DEFAULT_LINE_WIDTH, Document, break_, concat, group, line, nest, nil};
@@ -178,33 +184,89 @@ pub fn reindent_method_source(base_indent: &str, source: &str) -> String {
 
 /// Strips the shared leading indentation from `source` and re-prepends
 /// `base_indent` to every non-blank line, preserving relative indentation. Blank
-/// lines stay empty (no indent, no trailing whitespace). This is the pure
-/// whitespace shift — used to apply an already-correct layout's indentation, and
-/// as the fallback in [`reindent_method_source`] when re-layout is not possible.
+/// lines stay empty (no indent, no trailing whitespace; a CRLF blank line keeps
+/// its `\r`). This is the pure whitespace shift — used to apply an
+/// already-correct layout's indentation, and as the fallback in
+/// [`reindent_method_source`] when re-layout is not possible.
+///
+/// A line that starts inside a token — the continuation lines of a raw
+/// multi-line string literal (or quoted symbol) — is part of that token's
+/// value, so it is copied verbatim and plays no part in the shared indent
+/// (BT-5183). The source need not parse; the lexer alone finds such lines.
 #[must_use]
 fn shift_method_indent(base_indent: &str, source: &str) -> String {
+    let inside_token = lines_starting_inside_a_token(source);
     let min_indent = source
         .split('\n')
-        .filter(|line| !is_blank_line(line))
-        .map(leading_ws_len)
+        .enumerate()
+        .filter(|(i, line)| !inside_token.contains(i) && !is_blank_line(line))
+        .map(|(_, line)| leading_ws_len(line))
         .min()
         .unwrap_or(0);
 
     let mut out = String::with_capacity(source.len() + source.len() / 8);
-    let mut first = true;
-    for line in source.split('\n') {
-        if !first {
+    for (i, line) in source.split('\n').enumerate() {
+        if i > 0 {
             out.push('\n');
         }
-        first = false;
+        if inside_token.contains(&i) {
+            out.push_str(line);
+            continue;
+        }
         if is_blank_line(line) {
-            // Blank lines stay empty — no base indent, no trailing whitespace.
+            // Blank lines stay empty — no base indent, no trailing whitespace —
+            // but keep a CRLF line ending's `\r`.
+            if line.ends_with('\r') {
+                out.push('\r');
+            }
             continue;
         }
         out.push_str(base_indent);
         // `min_indent` counts ASCII whitespace bytes, which are single-byte, so
         // the byte slice is always on a char boundary.
         out.push_str(&line[min_indent..]);
+    }
+    out
+}
+
+/// The indices of the `\n`-separated lines of `source` whose first byte lies
+/// strictly inside a string or symbol literal (a raw multi-line string's
+/// continuation lines).
+fn lines_starting_inside_a_token(source: &str) -> std::collections::HashSet<usize> {
+    // Tokens come out of the lexer in source order and do not overlap, so
+    // one forward walk over them serves every line start.
+    // Only literal tokens hold source text as their value. An unterminated
+    // string lexes as an error token running to the end of the input; the
+    // lines after it are still code to re-indent.
+    let spans: Vec<Span> = lex_with_eof(source)
+        .iter()
+        .filter(|t| {
+            matches!(
+                t.kind(),
+                TokenKind::String(_)
+                    | TokenKind::StringStart(_)
+                    | TokenKind::StringSegment(_)
+                    | TokenKind::StringEnd(_)
+                    | TokenKind::Symbol(_)
+            )
+        })
+        .map(crate::source_analysis::Token::span)
+        .collect();
+    let mut next = 0usize;
+    let mut out = std::collections::HashSet::new();
+    let mut line_start = 0usize;
+    for (i, line) in source.split('\n').enumerate() {
+        let offset = u32::try_from(line_start).unwrap_or(u32::MAX);
+        while next < spans.len() && spans[next].end() <= offset {
+            next += 1;
+        }
+        if spans
+            .get(next)
+            .is_some_and(|span| span.start() < offset && offset < span.end())
+        {
+            out.insert(i);
+        }
+        line_start += line.len() + 1;
     }
     out
 }
@@ -216,8 +278,10 @@ fn leading_ws_len(line: &str) -> usize {
         .count()
 }
 
-/// Whether `line` is blank: empty or only spaces/tabs.
+/// Whether `line` is blank: empty or only spaces/tabs, allowing the `\r` of
+/// a CRLF line ending.
 fn is_blank_line(line: &str) -> bool {
+    let line = line.strip_suffix('\r').unwrap_or(line);
     leading_ws_len(line) == line.len()
 }
 
@@ -233,21 +297,28 @@ pub fn unparse_method_display_signature(method: &MethodDefinition) -> String {
 /// Formats a Beamtalk source string using the unparser.
 ///
 /// Runs the full pipeline: lex → parse → error-check → unparse → ensure
-/// trailing newline. Returns `None` if the source has any `Severity::Error`
-/// diagnostic (formatting a broken file could corrupt it). Otherwise returns
-/// the formatted string, which is either empty or ends with a trailing
-/// newline.
+/// trailing newline → verify. Returns [`FormatError::ParseErrors`] if the
+/// source has any `Severity::Error` diagnostic (formatting a broken file
+/// could corrupt it). Otherwise the formatted text is checked against the
+/// input before it is returned (BT-5183): it must re-parse cleanly, keep
+/// every comment and parse to the same program. If any check fails the
+/// formatter has a bug, and the error says what would have been lost, so
+/// callers never write a lossy result to disk.
 ///
-/// This function is idempotent: formatting an already-formatted string
-/// produces the same output.
-#[must_use]
-pub fn format_source(source: &str) -> Option<String> {
+/// The output is either empty or ends with a trailing newline. This function
+/// is idempotent: formatting an already-formatted string produces the same
+/// output.
+///
+/// # Errors
+///
+/// See [`FormatError`].
+pub fn format_source(source: &str) -> Result<String, FormatError> {
     let tokens = lex_with_eof(source);
     let (module, diags) = parse(tokens);
 
     let has_errors = diags.iter().any(|d| d.severity == Severity::Error);
     if has_errors {
-        return None;
+        return Err(FormatError::ParseErrors);
     }
 
     let formatted = unparse_module(&module);
@@ -256,8 +327,74 @@ pub fn format_source(source: &str) -> Option<String> {
     } else {
         format!("{formatted}\n")
     };
+    let formatted = apply_line_endings(&formatted, layout_line_ending(source));
 
-    Some(formatted)
+    round_trip::verify_round_trip(source, &module, &formatted)?;
+    Ok(formatted)
+}
+
+/// The line ending of `source`'s layout (BT-5183): the shared
+/// [`line_ending`] rule applied to the text outside multi-line literal
+/// tokens, so a CRLF written inside a string or quoted symbol of an LF file
+/// does not make the file count as CRLF.
+fn layout_line_ending(source: &str) -> &'static str {
+    let mut layout = String::with_capacity(source.len());
+    for piece in split_at_multiline_tokens(source) {
+        if let SourcePiece::Layout(text) = piece {
+            layout.push_str(text);
+        }
+    }
+    line_ending(&layout)
+}
+
+/// Rewrites every line break of the printer's output to `eol` (`"\n"` or
+/// `"\r\n"`, from [`layout_line_ending`]; BT-5183).
+///
+/// The printer emits `\n` for its own layout but copies comment text
+/// verbatim, so a CRLF file's comments arrive with a `\r` still attached.
+/// String literals print CR and LF as `\r` and `\n` escapes, but a quoted
+/// symbol (`#'a<newline>b'`) keeps its raw line break, which is part of its
+/// value: a break inside such a token is copied unchanged.
+fn apply_line_endings(printed: &str, eol: &str) -> String {
+    let mut out = String::with_capacity(printed.len() + printed.len() / 16);
+    for piece in split_at_multiline_tokens(printed) {
+        match piece {
+            SourcePiece::Layout(text) => {
+                let lf = text.replace("\r\n", "\n");
+                if eol == "\n" {
+                    out.push_str(&lf);
+                } else {
+                    out.push_str(&lf.replace('\n', eol));
+                }
+            }
+            SourcePiece::Token(text) => out.push_str(text),
+        }
+    }
+    out
+}
+
+/// A piece of source text: layout (code, whitespace and comments) or the
+/// whole of a token whose value holds a raw line break.
+enum SourcePiece<'a> {
+    Layout(&'a str),
+    Token(&'a str),
+}
+
+/// `text` cut into alternating [`SourcePiece`]s, in order.
+fn split_at_multiline_tokens(text: &str) -> Vec<SourcePiece<'_>> {
+    let mut pieces = Vec::new();
+    let mut copied = 0usize;
+    for span in lex_with_eof(text)
+        .iter()
+        .map(crate::source_analysis::Token::span)
+        .filter(|span| text[span.as_range()].contains('\n'))
+    {
+        pieces.push(SourcePiece::Layout(&text[copied..span.start() as usize]));
+        pieces.push(SourcePiece::Token(&text[span.as_range()]));
+        copied = span.end() as usize;
+    }
+    pieces.push(SourcePiece::Layout(&text[copied..]));
+    pieces
 }
 
 /// Escapes an arbitrary string for embedding inside a Beamtalk double-quoted

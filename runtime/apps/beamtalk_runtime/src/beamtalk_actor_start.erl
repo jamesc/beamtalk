@@ -617,7 +617,7 @@ register_native_started({global, Name} = Registration, Pid) ->
 %% the backing module already wrote is left alone. A backing process that does
 %% not answer the system message within a second stays untimed until it drains
 %% its queue, and meanwhile behaves as before BT-4956: the other side wins, or
-%% `random_exit_name/3` if neither has one. The stamp it then writes still
+%% the lower-node tie-break if neither has one. The stamp it then writes still
 %% carries the registration time, taken before the request.
 -spec record_native_start_time(pid()) -> ok.
 

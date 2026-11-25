@@ -181,6 +181,13 @@
 %% its own literal (AGENTS.md "No duplicate implementations").
 -define(BT_REMOTE_CALL_TIMEOUT, 5000).
 
+%% @doc BT-5231 (ADR 0126 BT-5193 amendment): timeout (ms) for
+%% `beamtalk_actor_registry:actor_started_at/1`'s remote start-time read.
+%% `global`'s resolver runs it while a heal's name exchange waits, so it is
+%% shorter than `?BT_REMOTE_CALL_TIMEOUT`; a read that times out is
+%% `unreachable` and takes the resolver's lower-node tie-break.
+-define(BT_GLOBAL_CONFLICT_READ_TIMEOUT, 1000).
+
 %% BT-4701: the module peers are addressed by in `erpc:call/5`s that reach a
 %% `beamtalk_actor` function on another node (remote spawn/lookup, class
 %% candidates, the `global` conflict resolver's start-time read). The code
