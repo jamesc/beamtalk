@@ -765,7 +765,7 @@ impl CoreErlangGenerator {
         if self.in_class_method() {
             return Err(CodeGenError::UnsupportedFeature {
                 feature: format!(
-                    "cannot access instance field '{}' in a class method",
+                    "cannot access instance field '{}' in a class method: a class has no slots (ADR 0153 removed class variables)",
                     field.name
                 ),
                 span: Some(field.span),
@@ -867,6 +867,21 @@ impl CoreErlangGenerator {
         })
     }
 
+    /// ADR 0153: a field write in a class method. Semantic analysis rejects
+    /// `self.x := v` there; this is the codegen backstop, shared by the closed
+    /// and open lowerings.
+    pub(super) fn class_side_field_write_error(
+        field_name: &str,
+        span: beamtalk_core::source_analysis::Span,
+    ) -> CodeGenError {
+        CodeGenError::UnsupportedFeature {
+            feature: format!(
+                "cannot assign to instance field '{field_name}' in a class method: a class has no slots (ADR 0153 removed class variables)"
+            ),
+            span: Some(span),
+        }
+    }
+
     /// Generates code for a field assignment (`self.field := value`).
     ///
     /// Uses threading to simulate mutation in Core Erlang. The generated pattern varies
@@ -892,19 +907,6 @@ impl CoreErlangGenerator {
     /// un-rendered-`Bind`-push consumption style) all share, instead of
     /// three independently hand-duplicated `maps:put` emissions — the
     /// missing abstraction the ADR 0110/0111 bug family traced back to.
-    /// ADR 0153: a field write in a class method. Semantic analysis rejects
-    /// `self.x := v` there; this is the codegen backstop, shared by the closed
-    /// and open lowerings.
-    pub(super) fn class_side_field_write_error(
-        field_name: &str,
-        span: beamtalk_core::source_analysis::Span,
-    ) -> CodeGenError {
-        CodeGenError::UnsupportedFeature {
-            feature: format!("cannot assign to instance field '{field_name}' in a class method"),
-            span: Some(span),
-        }
-    }
-
     pub(super) fn generate_field_assignment(
         &mut self,
         field_name: &str,
