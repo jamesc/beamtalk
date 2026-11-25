@@ -4155,9 +4155,9 @@ The `new`/`new:` direct-construction verdicts of `Value` classes are still baked
 
 | Error kind | Raised when |
 |---|---|
-| `abi_mismatch` | The loader refuses a compiled class module built with a different class-variable calling convention. See below. |
+| `abi_mismatch` | The loader refuses a compiled class module built for an older class calling convention (every module compiled before ADR 0153 included): recompile. See below. |
 
-**Class-module ABI.** Every compiled class module records its class-variable calling convention as `class_var_abi` in `__beamtalk_meta/0`. The loader (class registration, hot reload, and the release upgrade preflight) refuses a module whose `class_var_abi` is missing or differs from the running runtime's, including every module compiled before ADR 0130, with a structured `abi_mismatch` error that names the module and says to recompile. Hot upgrades across the release that changed the convention are not supported: restart the node and recompile every package.
+**Class-module ABI.** Until the ADR 0153 Phase 3 issues replace this gate, every compiled class module records its calling convention as `class_var_abi` in `__beamtalk_meta/0`. The loader (class registration, hot reload, and the release upgrade preflight) refuses a module whose `class_var_abi` is missing or differs from the running runtime's, including every module compiled before ADR 0130 or ADR 0153, with a structured `abi_mismatch` error that names the module and says to recompile. Hot upgrades across the release that changed the convention are not supported: restart the node and recompile every package.
 
 ### Actor-to-Actor Coordination
 

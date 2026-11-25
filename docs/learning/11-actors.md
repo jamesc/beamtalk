@@ -306,15 +306,18 @@ TestCase subclass: Ch11SharedState
 
   testSharedCounter =>
     AtomicCounter new: #ch11_orders_created
-    (AtomicCounter named: #ch11_orders_created) increment
-    counter := AtomicCounter named: #ch11_orders_created
-    self assert: counter increment equals: 2
-    counter delete
+    [
+      (AtomicCounter named: #ch11_orders_created) increment
+      counter := AtomicCounter named: #ch11_orders_created
+      self assert: counter increment equals: 2
+    ] ensure: [(AtomicCounter named: #ch11_orders_created) delete]
 
   testNamedActorSingleton =>
-    Ch11Registry spawnAs: #ch11_registry
-    Ch11Registry current register: #a as: 1
-    self assert: (Ch11Registry current lookup: #a) equals: 1
+    registry := (Ch11Registry spawnAs: #ch11_registry) unwrap
+    [
+      Ch11Registry current register: #a as: 1
+      self assert: (Ch11Registry current lookup: #a) equals: 1
+    ] ensure: [registry stop]
 ```
 
 Use an actor when the state is more than a number or needs behaviour, `Ets`
