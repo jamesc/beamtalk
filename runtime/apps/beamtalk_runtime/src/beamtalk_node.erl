@@ -575,7 +575,7 @@ is logged. Always answers `ok` — a failed sync never fails `connect`.
 bounded_sync(SyncFun, TimeoutMs) ->
     {Pid, Ref} = spawn_monitor(fun() ->
         _ = SyncFun(),
-        exit(normal)
+        ok
     end),
     receive
         {'DOWN', Ref, process, Pid, normal} ->
