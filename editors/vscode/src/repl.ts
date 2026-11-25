@@ -73,6 +73,11 @@ export async function captureSessionId(
   // process exited. A thrown read (shell integration dropped) says nothing
   // about the REPL, which may still be running (BT-5199).
   let executionEnded = false;
+  // Only the first marker of a run is the REPL's own startup line. Later
+  // markers may come from user output (`Transcript show:` of a marker-shaped
+  // string), so they move the sidebar as before but never pick the session
+  // `close` ends (BT-5199).
+  let closeTargetRecorded = false;
   try {
     for await (const chunk of execution.read()) {
       const scanned = scanSessionChunk(tail, chunk);
@@ -85,7 +90,10 @@ export async function captureSessionId(
           break;
         }
         setReplRunning(true);
-        state.replSessionId = sessionId;
+        if (!closeTargetRecorded) {
+          closeTargetRecorded = true;
+          state.replSessionId = sessionId;
+        }
         state.workspaceTreeProvider?.setSessionId(sessionId);
         // Don't break — keep reading. The REPL may reconnect and emit a new
         // session ID (BT-1021); we need to pick up the updated value.

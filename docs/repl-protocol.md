@@ -421,7 +421,7 @@ Get the internal state of an actor process.
 
 #### `kill` — Kill Actor
 
-Terminate an actor process. A system actor (one the runtime started, such as `Transcript`) is refused with a `system_actor` error.
+Terminate an actor process. The reply comes once the process has exited. A system actor (one the runtime started, such as `Transcript`) is refused with a `system_actor` error; a pid that is not a live actor is refused (`unknown_actor` from the `actor` param check, or `actor_not_alive` / `not_an_actor` if it stopped or was never an actor by the time the kill runs).
 
 Senders: the "Kill Actor" action in the VS Code inspector and the "Kill actor" button in the LiveView Inspector (Owner role only), each after a confirmation and followed by a fresh actor list (BT-5199).
 

@@ -105,14 +105,9 @@ handle_term(<<"kill">>, Params, _Msg, _SessionPid) ->
                             <<"System actors are started by the runtime; use :actors to find user actors.">>
                         )};
                 {error, not_found} ->
-                    %% BT-5199: it stopped between the client's view and the
-                    %% kill — say so rather than report a kill that never ran.
-                    {error,
-                        beamtalk_repl_errors:make(
-                            actor_not_alive,
-                            'Actor',
-                            iolist_to_binary([<<"Actor is not alive: ">>, PidBin])
-                        )};
+                    %% BT-5199: no longer an actor between the param check and
+                    %% here — refuse rather than report a kill that never ran.
+                    {error, not_killable_error(Pid, PidBin)};
                 {ok, _} ->
                     kill_and_wait(Pid),
                     {status, ok}
@@ -160,4 +155,24 @@ kill_and_wait(Pid) ->
     after ?KILL_WAIT_MS ->
         erlang:demonitor(MRef, [flush]),
         ok
+    end.
+
+%% Why `kill` refuses a pid the actor scan does not list: it has stopped, or it
+%% is a live process that is not an actor (BT-5199).
+-spec not_killable_error(pid(), binary()) -> beamtalk_error:error().
+not_killable_error(Pid, PidBin) ->
+    case is_process_alive(Pid) of
+        true ->
+            beamtalk_repl_errors:make(
+                not_an_actor,
+                'Actor',
+                iolist_to_binary([<<"Not an actor: ">>, PidBin]),
+                <<"Use :actors to find actors.">>
+            );
+        false ->
+            beamtalk_repl_errors:make(
+                actor_not_alive,
+                'Actor',
+                iolist_to_binary([<<"Actor is not alive: ">>, PidBin])
+            )
     end.

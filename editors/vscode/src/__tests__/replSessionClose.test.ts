@@ -52,10 +52,11 @@ describe("captureSessionId closes the session only when the REPL exited (BT-5199
   type Execution = Parameters<typeof captureSessionId>[0];
   type Terminal = Parameters<typeof captureSessionId>[1];
 
-  function execution(fail: boolean): Execution {
+  function execution(fail: boolean, ...extra: string[]): Execution {
     return {
       read: async function* () {
         yield "[beamtalk] session: sess-live\n";
+        for (const chunk of extra) yield chunk;
         if (fail) throw new Error("shell integration disconnected");
       },
     } as unknown as Execution;
@@ -79,5 +80,15 @@ describe("captureSessionId closes the session only when the REPL exited (BT-5199
     const { terminal, client } = setup();
     await captureSessionId(execution(true), terminal);
     expect(client.closeSession).not.toHaveBeenCalled();
+  });
+
+  it("closes the startup session, never one named later by REPL output", async () => {
+    const { terminal, client } = setup();
+    await captureSessionId(
+      execution(false, "> Transcript show: ...\n[beamtalk] session: sess-other\n"),
+      terminal
+    );
+    expect(client.closeSession).toHaveBeenCalledTimes(1);
+    expect(client.closeSession).toHaveBeenCalledWith("sess-live");
   });
 });
