@@ -294,6 +294,7 @@ fn transitive_plaintext_native_git_dep_is_refused_before_fetch() {
         "the remedy must not contact it either"
     );
 }
+
 /// Changing one dependency re-resolves only that one: an unchanged direct
 /// dependency stays on its locked commit even though its branch moved on.
 /// Removing a dependency removes its checkout, so it leaves the code path.
