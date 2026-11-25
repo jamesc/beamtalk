@@ -1325,12 +1325,13 @@ impl ReleaseSwap {
         let dir_exists = release_dir.exists();
         let tar_exists = tarball.exists();
         // Refuse before moving anything if an interrupted run left anything
-        // behind (recovery has already run, so this means a concurrent run).
+        // behind. (Recovery has already run, so normally there is none;
+        // concurrent runs on one output are not detected — BT-5230.)
         let journal = journal_path(release_dir);
         if journal.symlink_metadata().is_ok() {
             miette::bail!(
-                "'{journal}' exists: another `beamtalk release` is writing this output. Wait \
-                 for it to finish, then re-run."
+                "'{journal}' is left over from an interrupted `beamtalk release` (or another run is \
+                 writing this output); re-run once no other run is active and it is recovered."
             );
         }
         for (exists, path) in [(dir_exists, release_dir), (tar_exists, tarball.as_path())] {
@@ -2431,8 +2432,8 @@ mod tests {
         }
     }
 
-    /// A journal present at `begin` (recovery has already run) means another
-    /// run is writing the same output: refuse without moving anything.
+    /// A journal still present at `begin` (recovery normally consumed it)
+    /// refuses the run without moving anything.
     #[test]
     fn release_swap_refuses_while_a_journal_exists() {
         let temp = TempDir::new().unwrap();
@@ -2451,10 +2452,7 @@ mod tests {
         )
         .unwrap();
         let err = ReleaseSwap::begin(&target, tarball).err().unwrap();
-        assert!(
-            err.to_string().contains("another `beamtalk release`"),
-            "{err}"
-        );
+        assert!(err.to_string().contains("interrupted"), "{err}");
         assert!(target.is_dir());
     }
 
