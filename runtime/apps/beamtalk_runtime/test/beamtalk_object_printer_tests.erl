@@ -286,10 +286,8 @@ structural_from_state_nested_test() ->
 %% hierarchy walk keyed on live class pids, not on the field list handed to
 %% `structural/2` directly, so a bare `#{'$beamtalk_class' => ...}` map (as
 %% every other test above uses) always degrades to "no late fields" and
-%% never exercises `unassigned_late_fields/2`. Mirrors
-%% `beamtalk_object_class_tests.erl`'s `get_class_var_declared_late_
-%% unassigned_errors_without_crashing_test_` — a real meta-carrying module
-%% built via `beamtalk_test_module`, registered as a live class with
+%% never exercises `unassigned_late_fields/2`. So a real meta-carrying module
+%% is built via `beamtalk_test_module` and registered as a live class with
 %% `beamtalk_object_class:start_link/1`.
 
 setup() ->

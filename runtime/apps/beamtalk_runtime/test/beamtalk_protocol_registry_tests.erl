@@ -285,8 +285,7 @@ class_method_conforms_test() ->
         #{
             superclass => none,
             module => bt_test_class_method_class_mod,
-            class_methods => #{'fromString:' => <<>>},
-            class_state => #{}
+            class_methods => #{'fromString:' => <<>>}
         }
     ),
     try

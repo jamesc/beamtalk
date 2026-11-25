@@ -46,7 +46,7 @@ class_self_dispatch_chain(ClassName, Selector, Args, Found, ClassSelf) ->
     case Found of
         {ok, DefiningClass, DefiningModule} ->
             %% Route through the same internal helper the gen_server path uses
-            %% (`invoke_class_method/7`), so both paths share error classification
+            %% (`invoke_class_method/6`), so both paths share error classification
             %% and the TestCase `test_spawn` guard. Unwrap to the raw result and
             %% raise structured errors on dispatch/body failures so callers see
             %% proper `#beamtalk_error{}` instead of a bare `undef`.
