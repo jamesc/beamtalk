@@ -261,9 +261,10 @@ fn output_within(cmd: &mut Command, timeout: std::time::Duration) -> Option<Vec<
         .ok()?;
     let mut stdout = child.stdout.take()?;
     // Drain on a thread so a chatty child cannot block on a full pipe.
-    let reader = std::thread::spawn(move || {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
         let mut buf = Vec::new();
-        stdout.read_to_end(&mut buf).ok().map(|_| buf)
+        let _ = tx.send(stdout.read_to_end(&mut buf).ok().map(|_| buf));
     });
     let deadline = std::time::Instant::now() + timeout;
     let status = loop {
@@ -279,11 +280,17 @@ fn output_within(cmd: &mut Command, timeout: std::time::Duration) -> Option<Vec<
             }
         }
     };
-    let buf = reader.join().ok()??;
+    // A grandchild holding the pipe open must not stall us past the deadline.
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    let buf = rx
+        .recv_timeout(remaining.max(std::time::Duration::from_millis(200)))
+        .ok()??;
     status.success().then_some(buf)
 }
 
-/// [`installed_erl_on_path`] for an explicit `PATH` value.
+/// The `erl` on `PATH`, when it already is an installation's own launcher
+/// (its canonical path is `<root>/bin/erl` with a `<root>/releases`
+/// directory): no shim, so no probe is needed.
 fn installed_erl_in(path: &OsStr) -> Option<OsString> {
     let name = if cfg!(windows) { "erl.exe" } else { "erl" };
     // The first entry the OS itself would run: it skips non-executables.
@@ -442,7 +449,7 @@ mod tests {
             "echo @ERL@; exit 1",        // non-zero exit
             "echo ''",                   // empty
             "echo /bin/sh",              // executable, not `erl`
-            "sleep 30",                  // timeout
+            "exec sleep 30",             // timeout
         ] {
             let shim = fake_shim("mise", body);
             let started = std::time::Instant::now();
