@@ -119,6 +119,11 @@ const PARSER_DUMP_CASES: &[&str] = &[
     "set_theoretic_operators",
 ];
 
+/// Cases whose source is rejected by analysis and that codegen refuses too: the
+/// codegen test pins the refusal instead of the Core Erlang, and there is no
+/// `erlc` run.
+const CODEGEN_REJECTED_CASES: &[&str] = &["class_side_self_field_removed"];
+
 /// Parser check for a given test case.
 ///
 /// * Allowlisted cases ([`PARSER_DUMP_CASES`]): full AST dump + diagnostics.
@@ -183,6 +188,15 @@ fn test_parser_check(case_name: &str) {
 
 /// Test the Core Erlang codegen output for a given test case
 fn test_codegen_snapshot(case_name: &str) {
+    if CODEGEN_REJECTED_CASES.contains(&case_name) {
+        let refusal = generated_cases()
+            .get(case_name)
+            .unwrap_or_else(|| panic!("unknown test case '{case_name}'"))
+            .as_ref()
+            .expect_err("codegen should refuse this case");
+        insta::assert_snapshot!(format!("{case_name}_codegen_refused"), refusal);
+        return;
+    }
     let (_module_name, core_erlang) = generate_core_erlang(case_name);
     insta::assert_snapshot!(format!("{}_codegen", case_name), core_erlang);
 }
@@ -291,6 +305,9 @@ fn test_codegen_compiles(case_name: &str) {
         return;
     }
 
+    if CODEGEN_REJECTED_CASES.contains(&case_name) {
+        return;
+    }
     let (module_name, core_erlang) = generate_core_erlang(case_name);
 
     // The batch is only the fast path: `erlc` stops at the first failing file

@@ -189,7 +189,7 @@ async fn resolve_port_and_cookie(
     // project (never another project's). BT-5132: the liveness probe runs
     // here, so a stale port file left by a dead workspace neither attaches to
     // nothing nor bypasses `--start`.
-    match workspace::discover_any_port_cookie_and_id() {
+    match workspace::discover_any_port_cookie_and_id().await {
         Ok(Some((port, cookie, ws_id))) => {
             if cookie.trim().is_empty() {
                 return Err(

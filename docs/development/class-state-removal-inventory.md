@@ -289,7 +289,7 @@ The two setters go (`stdlib/src/class_builder.bt:134` `classVars:`, `:307` `addC
 | `stdlib/src/class_builder.bt` doc comments (lines 103, 125-134, 298-307) | the `classMethods:` example `[:self \| self.total := self.total + 1]` (line 103) and the two setters' docs |
 | `crates/beamtalk-codegen/src/core_erlang/class_builder_source.rs:329-395, 954-976` | recognises `classVars:` / `addClassState:default:` cascade keys as class-variable names; its tests (lines 954-976) |
 | `crates/beamtalk-codegen/src/core_erlang/tests/dispatch.rs:4318, 4509` | cascades with `classVars: #{ #runs => 0 }` |
-| `crates/beamtalk-codegen/src/core_erlang/tests/gen_server/class_var_capture_catch.rs:426`, `class_var_not_inherited.rs:118, 159` | go with those test files (delete) |
+| class_var_capture_catch.rs (deleted by BT-5152), `class_var_not_inherited.rs:118, 159` | go with those test files (delete) |
 | `crates/beamtalk-compiler-port/src/tests/expression_assignment.rs:375` | cascade with `classVars: #{ #opened => 0 }` |
 | `crates/beamtalk-core/.../class_hierarchy/generated_builtins.rs:1312, 1325` | generated: regenerate after the stdlib change |
 | `crates/beamtalk-codegen/src/core_erlang/generator/{accessors.rs:163, context.rs:368}`, `class_method_codegen.rs:172` | comments about the builder's `classVars:` keys |
@@ -321,10 +321,10 @@ The disposition is a first reading from the pattern, the file's role and a read 
 |---|--:|---|---|
 | `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs` | 143 | edit | BT-5154 |
 | `crates/beamtalk-codegen/src/core_erlang/class_var_access.rs` | 116 | delete | BT-5153 |
-| `crates/beamtalk-core/src/semantic_analysis/tests/class_state_abroad.rs` | 65 | delete | BT-5154 |
-| `crates/beamtalk-codegen/src/core_erlang/tests/gen_server/class_var_capture_catch.rs` | 50 | delete | BT-5153 |
+| class_state_abroad.rs (deleted by BT-5152) | 65 | delete | BT-5154 |
+| class_var_capture_catch.rs (deleted by BT-5152) | 50 | delete | BT-5153 |
 | `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/tests.rs` | 47 | edit | BT-5154 |
-| `crates/beamtalk-codegen/src/core_erlang/tests/gen_server/class_var_access.rs` | 47 | delete | BT-5153 |
+| class_var_access.rs (deleted by BT-5152) | 47 | delete | BT-5153 |
 | `crates/beamtalk-core/src/semantic_analysis/validators/class_state_abroad.rs` | 45 | delete | BT-5154 |
 | `crates/beamtalk-core/src/semantic_analysis/validators/class_process_ffi_validators.rs` | 43 | edit | BT-5154 |
 | `crates/beamtalk-codegen/src/core_erlang/tests/dispatch.rs` | 40 | edit | BT-5153 |
@@ -357,7 +357,7 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | `crates/beamtalk-core/src/semantic_analysis/facts.rs` | 14 | edit | BT-5154 |
 | `crates/beamtalk-codegen/src/core_erlang/threaded_ir/ir.rs` | 14 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/tests/racing_operand_corpus.rs` | 14 | edit | BT-5153 |
-| `crates/beamtalk-codegen/src/core_erlang/tests/gen_server/class_var_not_inherited.rs` | 14 | delete | BT-5153 |
+| class_var_not_inherited.rs (deleted by BT-5152) | 14 | delete | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/generator/accessors.rs` | 14 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/expressions.rs` | 14 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/sequencing.rs` | 13 | edit | BT-5153 |
@@ -389,7 +389,7 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | `crates/beamtalk-core/src/source_analysis/parser/mod.rs` | 7 | edit | BT-5152 |
 | `crates/beamtalk-core/src/semantic_analysis/validators/local_threading/walker.rs` | 7 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/threaded_ir/emit.rs` | 7 | edit | BT-5153 |
-| `crates/beamtalk-codegen/src/core_erlang/tests/while_condition_class_method.rs` | 7 | edit | BT-5153 |
+| while_condition_class_method.rs (deleted by BT-5152) | 7 | delete | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/runtime_export_contract_tests.rs` | 7 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/gen_server/native_facade.rs` | 7 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/control_flow/plan.rs` | 7 | edit (comments only) | BT-5153 |

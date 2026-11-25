@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0153: `classState:` and `late classState:` are compile errors, and so is
+// `self.x` in a class method.
+
+Object subclass: Adr153Counter
+  classState: total = 0
+  class value => 1
+// => ERROR: `classState:` was removed (ADR 0153)
+
+Object subclass: Adr153Late
+  late classState: current :: Integer
+  class value => 1
+// => ERROR: `classState:` was removed (ADR 0153)
+
+Object subclass: Adr153SelfSlot
+  class value => self.total
+// => ERROR: `self.total` in a class method: a class has no slots.

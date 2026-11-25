@@ -392,12 +392,11 @@ total := orders select: [:o | o isPaid]  // paid only
 [:e | e |> foo bar] value: 1
 ";
 
-/// State and class-state initialisers are outside any method, so they record
+/// State initialisers are outside any method, so they record
 /// `|>` on the module too.
 const PIPELINE_INITIALISERS: &str = "\
 Actor subclass: Holder
   state: items = #(3, 1, 2) |> asSortedList |> first
-  classState: count = #(1, 2) |> size
 ";
 
 #[test]

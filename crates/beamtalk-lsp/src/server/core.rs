@@ -8,16 +8,12 @@
 use super::config::{
     PRELOAD_MAX_FILES, PreloadConfig, PreloadedFiles, collect_preload_files_within,
 };
-use super::convert::{
-    offset_to_position, path_to_stdlib_uri, path_to_uri, position_to_offset, uri_to_path,
-};
+use super::convert::{offset_to_position, position_to_offset, uri_to_path};
 use super::flush::flush_event_listener;
-use super::guard::guard_notification;
 use super::nav::{bt_locations_to_lsp, runtime_site_to_lsp_location};
 use super::range_format::{format_range_edits, log_format_refusal};
 use super::reload::{
-    OpenPathsHandle, class_changed_listener, compute_publish_diagnostics, reload_check_listener,
-    seed_reload_diagnostics,
+    OpenPathsHandle, class_changed_listener, reload_check_listener, seed_reload_diagnostics,
 };
 use super::{Backend, FetchContentParams, FetchContentResult, LoadedTypeCache};
 use crate::server::lock::LockRecover;
@@ -42,19 +38,28 @@ use tracing::debug;
 impl Backend {
     /// Creates a new `Backend` with the given LSP client handle.
     pub fn new(client: Client) -> Self {
-        Self {
-            client,
+        let publisher = super::publish::Publisher {
+            client: client.clone(),
             service: Arc::new(Mutex::new(SimpleLanguageService::new())),
             versions: Arc::new(Mutex::new(HashMap::new())),
+            stdlib_paths: Arc::new(Mutex::new(HashSet::new())),
+            reload_diagnostics: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            publish_lock: Arc::new(tokio::sync::Mutex::new(())),
+        };
+        Self {
+            client,
+            service: Arc::clone(&publisher.service),
+            versions: Arc::clone(&publisher.versions),
             open_generation: Mutex::new(HashMap::new()),
             text_sync: Mutex::new(()),
-            publish_lock: Arc::new(tokio::sync::Mutex::new(())),
+            publish_lock: Arc::clone(&publisher.publish_lock),
             next_open_generation: std::sync::atomic::AtomicU64::new(0),
             dirty_files: Mutex::new(HashSet::new()),
             diagnostic_generation: Mutex::new(HashMap::new()),
-            pending_interface_change: Mutex::new(HashSet::new()),
+            interface_baselines: Mutex::new(HashMap::new()),
             preload_config: Mutex::new(None),
-            stdlib_paths: Mutex::new(HashSet::new()),
+            startup_preload_failures: std::sync::atomic::AtomicU32::new(0),
+            stdlib_paths: Arc::clone(&publisher.stdlib_paths),
             rename_caps: Mutex::new(super::handlers::RenameClientCaps::default()),
             workspace_roots: Mutex::new(Vec::new()),
             root_load_lock: tokio::sync::Mutex::new(()),
@@ -63,6 +68,10 @@ impl Backend {
             preload_coverage_partial: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             fail_next_root_walk: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            panic_next_preload: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            fail_next_watched_batch: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             type_cache_extractions: Mutex::new(Vec::new()),
             #[cfg(test)]
@@ -73,7 +82,9 @@ impl Backend {
             class_changed_listener: tokio::sync::Mutex::new(None),
             delegate_to_runtime: std::sync::atomic::AtomicBool::new(false),
             reload_check_listener: tokio::sync::Mutex::new(None),
-            reload_diagnostics: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            reload_diagnostics: Arc::clone(&publisher.reload_diagnostics),
+            cross_file_republish: super::publish::CrossFileRepublish::default(),
+            publisher,
         }
     }
 
@@ -318,60 +329,10 @@ impl Backend {
         guard.remove(path);
     }
 
-    pub(in crate::server) fn file_version_for_uri(&self, uri: &Url) -> Option<i32> {
-        let path = self.resolve_path_for_uri(uri)?;
-        let versions = self.versions.lock_recover();
-        versions.get(&path).copied()
-    }
-
-    /// True while the editor has `uri` open (it has a recorded version).
-    pub(in crate::server) fn is_open_uri(&self, uri: &Url) -> bool {
-        self.resolve_path_for_uri(uri)
-            .is_some_and(|path| self.versions.lock_recover().contains_key(&path))
-    }
-
-    /// Resolves a URI to an internal path key used by the language service.
-    ///
-    /// - For `file://` URIs: returns the real filesystem path.
-    /// - For `untitled:` URIs: returns a synthetic `__untitled__/` path key.
-    /// - For `beamtalk-stdlib:///ClassName.bt` URIs: looks up the real path
-    ///   from `stdlib_paths`. Returns `None` for unknown class names, invalid
-    ///   URI form, or ambiguous filenames.
+    /// Resolves a URI to an internal path key used by the language service
+    /// (see [`super::publish::Publisher::resolve_path_for_uri`]).
     pub(in crate::server) fn resolve_path_for_uri(&self, uri: &Url) -> Option<Utf8PathBuf> {
-        if uri.scheme() == "beamtalk-stdlib" {
-            self.stdlib_uri_to_path(uri)
-        } else {
-            uri_to_path(uri)
-        }
-    }
-
-    /// Looks up the real filesystem path for a `beamtalk-stdlib:///ClassName.bt` URI.
-    ///
-    /// Returns `None` for invalid URI form, unknown class names, or ambiguous filenames.
-    pub(in crate::server) fn stdlib_uri_to_path(&self, uri: &Url) -> Option<Utf8PathBuf> {
-        // Only canonical form: no host, no query, no fragment.
-        if uri.host().is_some() || uri.query().is_some() || uri.fragment().is_some() {
-            return None;
-        }
-        let path = uri.path().trim_start_matches('/');
-        // Require non-empty, no sub-paths, .bt extension only.
-        if path.is_empty()
-            || path.contains('/')
-            || !std::path::Path::new(path)
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("bt"))
-        {
-            return None;
-        }
-
-        let stdlib_paths = self.stdlib_paths.lock_recover();
-        let mut matches = stdlib_paths.iter().filter(|p| p.file_name() == Some(path));
-        let first = matches.next()?.clone();
-        // Ambiguous: multiple files with the same name → None.
-        if matches.next().is_some() {
-            return None;
-        }
-        Some(first)
+        self.publisher.resolve_path_for_uri(uri)
     }
 
     /// Searches workspace roots, OTP lib dirs, and dependency paths for an Erlang
@@ -923,6 +884,7 @@ impl Backend {
         };
         let all_roots = self.workspace_roots_snapshot();
         self.load_root_packages(&all_roots).await;
+        self.inject_preload_panic();
 
         let loaded = match self.walk_package_root(root.clone()).await {
             Ok(loaded) => loaded,
@@ -1005,6 +967,21 @@ impl Backend {
         })
         .await
     }
+
+    /// Test seam (BT-5188): panics once when `panic_next_preload` is set.
+    #[cfg(test)]
+    pub(in crate::server) fn inject_preload_panic(&self) {
+        if self
+            .panic_next_preload
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            panic!("injected preload panic");
+        }
+    }
+
+    #[cfg(not(test))]
+    #[allow(clippy::unused_self, reason = "test seam; a no-op in production")]
+    pub(in crate::server) fn inject_preload_panic(&self) {}
 
     /// The session-wide preload file budget still unspent (BT-4383).
     ///
@@ -1160,34 +1137,37 @@ impl Backend {
     }
 
     /// Formats only the top-level constructs overlapping `range` (BT-5080).
+    ///
+    /// Also returns how many changes inside those constructs could not be
+    /// applied on their own (BT-5188, see [`super::range_format::RangeEdits`]).
     pub(in crate::server) fn format_document_range(
         &self,
         uri: &Url,
         range: Range,
-    ) -> Option<Vec<TextEdit>> {
+    ) -> Option<(Vec<TextEdit>, usize)> {
         if uri.scheme() == "beamtalk-stdlib" {
             return None;
         }
-        let path = uri_to_path(uri)?;
+        let path = self.resolve_path_for_uri(uri)?;
         let source = {
             let svc = self.service.lock_recover();
             svc.file_source(&path)?
         };
         let start = position_to_offset(range.start, &source);
         let end = position_to_offset(range.end, &source);
-        let edits = format_range_edits(&source, start, end)?;
-        Some(
-            edits
-                .into_iter()
-                .map(|e| TextEdit {
-                    range: Range {
-                        start: offset_to_position(e.start, &source),
-                        end: offset_to_position(e.end, &source),
-                    },
-                    new_text: e.new_text,
-                })
-                .collect(),
-        )
+        let formatted = format_range_edits(&source, start, end)?;
+        let edits = formatted
+            .edits
+            .into_iter()
+            .map(|e| TextEdit {
+                range: Range {
+                    start: offset_to_position(e.start, &source),
+                    end: offset_to_position(e.end, &source),
+                },
+                new_text: e.new_text,
+            })
+            .collect();
+        Some((edits, formatted.unapplied))
     }
 
     /// Republishes diagnostics for every currently-open file.
@@ -1206,40 +1186,15 @@ impl Backend {
     /// `file://`, which would bypass the stdlib early-return and leak
     /// diagnostics for sources the user never opened.
     pub(in crate::server) async fn republish_open_diagnostics(&self) {
-        self.republish_open_diagnostics_except(None).await;
+        self.publisher.republish_open().await;
     }
 
-    /// Re-publishes diagnostics for every open file other than `edited`
-    /// (BT-5078): after a file's class set changes, its dependents elsewhere
-    /// must be re-checked without waiting for them to be edited.
-    pub(in crate::server) async fn republish_other_open_diagnostics(&self, edited: &Url) {
-        self.republish_open_diagnostics_except(self.resolve_path_for_uri(edited))
-            .await;
-    }
-
-    async fn republish_open_diagnostics_except(&self, skip: Option<Utf8PathBuf>) {
-        let paths: Vec<Utf8PathBuf> = {
-            let versions = self.versions.lock_recover();
-            versions
-                .keys()
-                .filter(|p| skip.as_ref() != Some(*p))
-                .cloned()
-                .collect()
-        };
-        for path in paths {
-            let is_stdlib = {
-                let stdlib_paths = self.stdlib_paths.lock_recover();
-                stdlib_paths.contains(&path)
-            };
-            let uri = if is_stdlib {
-                path_to_stdlib_uri(&path)
-            } else {
-                path_to_uri(&path)
-            };
-            if let Some(uri) = uri {
-                self.publish_diagnostics(&uri).await;
-            }
-        }
+    /// Asks for every open file to be re-checked soon (BT-5078, BT-5188):
+    /// after a file's interface changes, its dependents elsewhere must be
+    /// re-checked without waiting for them to be edited. Requests are
+    /// coalesced, so a burst of them costs one pass over the open files.
+    pub(in crate::server) fn request_cross_file_republish(&self) {
+        self.cross_file_republish.request(&self.publisher);
     }
 
     /// Publishes diagnostics for a file after every change.
@@ -1336,22 +1291,29 @@ impl Backend {
             versions: Arc::clone(&self.versions),
             publish_lock: Arc::clone(&self.publish_lock),
         };
-        let listener_handle = tokio::spawn(guard_notification(
+        // BT-5188: supervised, so a panic restarts the listener (with
+        // backoff) instead of ending it for the rest of the session.
+        let flush_rx = super::listeners::shared(flush_rx);
+        let listener_open_paths = open_paths_handle.clone();
+        let listener_handle = tokio::spawn(super::listeners::supervise(
             "flush_event_listener",
-            flush_event_listener(
-                listener_client,
-                listener_roots,
-                open_paths_handle.clone(),
-                flush_rx,
-            ),
+            move || {
+                flush_event_listener(
+                    listener_client.clone(),
+                    listener_roots.clone(),
+                    listener_open_paths.clone(),
+                    Arc::clone(&flush_rx),
+                )
+            },
         ));
 
         // Drains class-loaded / method-installed push events so the runtime
         // client's channel stays open (BT-5080: the former nav cache that
         // consumed them cached nothing and was removed).
-        let class_changed_handle = tokio::spawn(guard_notification(
+        let class_changed_rx = super::listeners::shared(class_changed_rx);
+        let class_changed_handle = tokio::spawn(super::listeners::supervise(
             "class_changed_listener",
-            class_changed_listener(class_changed_rx),
+            move || class_changed_listener(Arc::clone(&class_changed_rx)),
         ));
 
         let reload_check_handle = self.spawn_reload_check_listener(
@@ -1417,14 +1379,25 @@ impl Backend {
             let roots = self.workspace_roots.lock_recover();
             roots.clone()
         };
-        tokio::spawn(reload_check_listener(
-            self.client.clone(),
-            runtime_client,
-            roots,
-            Arc::clone(&self.service),
-            Arc::clone(&self.reload_diagnostics),
-            reload_check_rx,
-            open_paths,
+        let client = self.client.clone();
+        let service = Arc::clone(&self.service);
+        let reload_diagnostics = Arc::clone(&self.reload_diagnostics);
+        let reload_check_rx = super::listeners::shared(reload_check_rx);
+        // BT-5188: supervised like the other listeners (each event also runs
+        // under its own guard, BT-5131).
+        tokio::spawn(super::listeners::supervise(
+            "reload_check_listener",
+            move || {
+                reload_check_listener(
+                    client.clone(),
+                    runtime_client.clone(),
+                    roots.clone(),
+                    Arc::clone(&service),
+                    Arc::clone(&reload_diagnostics),
+                    Arc::clone(&reload_check_rx),
+                    open_paths.clone(),
+                )
+            },
         ))
     }
 
@@ -1473,63 +1446,10 @@ impl Backend {
         svc.set_file_native_types(path, registry);
     }
 
+    /// Publishes diagnostics for an open document (see
+    /// [`super::publish::Publisher::publish`]).
     pub(in crate::server) async fn publish_diagnostics(&self, uri: &Url) {
-        // a didOpen/didChange/didSave racing the LSP's startup
-        // workspace preload can compute diagnostics against a partially-
-        // populated `ProjectIndex` (e.g. a sibling class not yet indexed),
-        // producing a false `Unresolved class` warning. Sending it would
-        // race `republish_open_diagnostics` — the self-healing pass the
-        // startup sequence runs once preload completes — to be the last
-        // `publishDiagnostics` notification the client sees for this URI,
-        // and that race is not guaranteed to resolve in the correct
-        // notification's favor. Skip the send entirely: every caller of
-        // this method (`did_open`/`did_change`/`did_save`, plus
-        // `republish_open_diagnostics` itself) has already recorded this
-        // path as open (in `Backend::versions`) before calling here, so
-        // `republish_open_diagnostics` is guaranteed to (re)publish it
-        // once, correctly, after preload finishes — see
-        // `is_preload_in_progress`'s doc for why this check and that
-        // recording never race each other.
-        //
-        // This check lives here, not in the shared `publish_diagnostics_impl`
-        // below, precisely because that invariant does *not* unconditionally
-        // hold for its other two callers, `reload_check_listener` and
-        // `seed_reload_diagnostics` — both target URIs that need not be open
-        // in the editor (see their own comments), and unconditionally gating
-        // their sends here would silently and permanently drop a
-        // reload-induced diagnostic for a *closed* file, with nothing left to
-        // resend it. Those two callers instead gate themselves conditionally
-        // via `should_defer_reload_publish_for_preload`: deferring only when
-        // the target URI is *also* open, so the same
-        // guarantee this method relies on — `republish_open_diagnostics`
-        // resends every open path once preload completes — covers them too.
-        {
-            let svc = self.service.lock_recover();
-            if svc.is_preload_in_progress() {
-                return;
-            }
-        }
-        let version = self.file_version_for_uri(uri);
-        // BT-5078: analysis runs outside the lock; only the open-check plus
-        // the send is serialised with `did_close`'s clearing publish, so a
-        // publish that raced a close can't resurrect diagnostics on the
-        // closed tab, and a slow analysis never blocks a close.
-        let Some(diagnostics) =
-            compute_publish_diagnostics(&self.service, &self.reload_diagnostics, uri)
-        else {
-            return;
-        };
-        let _publishing = self.publish_lock.lock().await;
-        // The document may have closed, or moved to a newer version (whose own
-        // publish is now ahead of or behind us), while we analysed. Sending
-        // this older result could overwrite newer diagnostics for a client
-        // that ignores versions, so drop it; the newer edit publishes its own.
-        if !self.is_open_uri(uri) || self.file_version_for_uri(uri) != version {
-            return;
-        }
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, version)
-            .await;
+        self.publisher.publish(uri).await;
     }
 }
 

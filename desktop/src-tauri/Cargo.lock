@@ -332,8 +332,10 @@ name = "beamtalk-repl-protocol"
 version = "0.6.0"
 dependencies = [
  "beamtalk-build",
+ "beamtalk-workspace",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
 ]
 
 [[package]]

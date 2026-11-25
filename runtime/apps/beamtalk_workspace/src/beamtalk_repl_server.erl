@@ -230,11 +230,11 @@ write_port_file_to_home(WorkspaceId, Port, Nonce) ->
                         {ok, TmpPath} ->
                             case file:rename(TmpPath, PortFilePath) of
                                 ok ->
+                                    %% The nonce is never logged: it proves this
+                                    %% node's identity to clients (BT-5188).
                                     ?LOG_DEBUG(
-                                        "Wrote port file: ~s (port ~p, nonce ~s)",
-                                        [
-                                            PortFilePath, Port, Nonce
-                                        ],
+                                        "Wrote port file: ~s (port ~p)",
+                                        [PortFilePath, Port],
                                         #{domain => [beamtalk, runtime]}
                                     ),
                                     ok;
@@ -252,8 +252,8 @@ write_port_file_to_home(WorkspaceId, Port, Nonce) ->
                                     case file:write_file(PortFilePath, Content) of
                                         ok ->
                                             ?LOG_DEBUG(
-                                                "Wrote port file (fallback): ~s (port ~p, nonce ~s)",
-                                                [PortFilePath, Port, Nonce],
+                                                "Wrote port file (fallback): ~s (port ~p)",
+                                                [PortFilePath, Port],
                                                 #{domain => [beamtalk, runtime]}
                                             ),
                                             ok;

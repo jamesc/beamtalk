@@ -314,14 +314,6 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         docs.push(nest(2, docvec![line(), unparse_state_declaration(state)]));
     }
 
-    // Class variables
-    for state in &class.class_variables {
-        docs.push(nest(
-            2,
-            docvec![line(), unparse_class_state_declaration(state)],
-        ));
-    }
-
     // Blank line before first method (always, regardless of whether state is present)
     if !class.methods.is_empty() || !class.class_methods.is_empty() {
         docs.push(line());
@@ -894,15 +886,6 @@ pub(super) fn unparse_keyword_part(part: &KeywordPart) -> Document<'static> {
 /// Emits non-doc comments, doc comment, then `state: name [: Type] [= default]`.
 #[must_use]
 pub(crate) fn unparse_state_declaration(state: &StateDeclaration) -> Document<'static> {
-    unparse_state_declaration_inner(state, false)
-}
-
-/// Builds a [`Document`] for a class-variable declaration.
-fn unparse_class_state_declaration(state: &StateDeclaration) -> Document<'static> {
-    unparse_state_declaration_inner(state, true)
-}
-
-fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
 
     // Non-doc leading comments
@@ -943,11 +926,7 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
         docs.push(line());
     }
 
-    let keyword = if is_class {
-        "classState: "
-    } else {
-        state.declared_keyword.as_str()
-    };
+    let keyword = state.declared_keyword.as_str();
     let mut decl: Vec<Document<'static>> = Vec::new();
     // ADR 0124 §1: `late` precedes the declaration keyword, matching the
     // class-header modifier position.

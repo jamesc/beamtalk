@@ -7,8 +7,18 @@
 //! resolves its class object in a prologue, and a sibling self-send passes
 //! `ClassSelf` itself.
 
-use super::class_var_access::function_text;
 use super::*;
+
+/// Compiles `src` and returns the Core Erlang text of the function whose
+/// header starts with `header`, up to the next top-level definition.
+fn function_text<'a>(code: &'a str, header: &str) -> &'a str {
+    let start = code
+        .find(header)
+        .unwrap_or_else(|| panic!("{header} not found in:\n{code}"));
+    let rest = &code[start..];
+    let end = rest[1..].find("\n'").map_or(rest.len(), |e| e + 1);
+    &rest[..end]
+}
 
 const SRC: &str = concat!(
     "sealed Value subclass: Pt\n",
