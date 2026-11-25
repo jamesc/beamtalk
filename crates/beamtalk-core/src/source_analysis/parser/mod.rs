@@ -771,7 +771,10 @@ impl DiagnosticCategory {
     /// `@expect` pass consults it.
     #[must_use]
     pub fn is_expect_suppressible(self) -> bool {
-        !matches!(self, Self::MisplacedExtension)
+        // `InternalVerifier` is emitted by codegen, after the `@expect` pass,
+        // so it never meets a directive today; listing it keeps its own
+        // "not suppressible by `@expect`" promise true if that ever changes.
+        !matches!(self, Self::MisplacedExtension | Self::InternalVerifier)
     }
 }
 

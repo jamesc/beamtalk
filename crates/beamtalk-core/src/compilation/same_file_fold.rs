@@ -328,6 +328,7 @@ mod tests {
     #[test]
     fn misplaced_extension_category_is_not_expect_suppressible() {
         assert!(!DiagnosticCategory::MisplacedExtension.is_expect_suppressible());
+        assert!(!DiagnosticCategory::InternalVerifier.is_expect_suppressible());
         assert!(DiagnosticCategory::Type.is_expect_suppressible());
     }
 

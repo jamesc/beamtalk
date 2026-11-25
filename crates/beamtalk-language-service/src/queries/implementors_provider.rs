@@ -15,8 +15,8 @@
 //! Walks every indexed file's `module.classes` and emits one [`Location`] per
 //! `MethodDefinition` whose selector matches. A same-file `Foo >> sel` is
 //! folded into `Foo`'s body before indexing; a cross-file one is a compile
-//! error (ADR 0152) and is dropped from the indexed module, so it is never an
-//! implementor.
+//! error (ADR 0152) and stays in `module.method_definitions`, which this
+//! provider does not walk, so it is never an implementor.
 //! Mirrors `SystemNavigation implementorsOf:` semantics:
 //!
 //! * **Local methods only.** Inherited (un-overridden) methods are *not*
