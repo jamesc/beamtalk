@@ -1056,10 +1056,18 @@ pub fn check_leaked_method_visibility(
         }
     }
 
+    if by_class.is_empty() {
+        return;
+    }
+    // Sorted by name so the errors come out in a stable order: the registry
+    // is a `HashMap` (BT-5184).
+    let mut protocols: Vec<_> = protocol_registry.protocols().collect();
+    protocols.sort_unstable_by(|a, b| a.0.cmp(b.0));
+
     for (class_name, internal_instance, internal_class) in &by_class {
         // Check each protocol the class might conform to
         // (Protocols don't have is_internal yet, so all protocols are treated as public)
-        for (_proto_name, proto_info) in protocol_registry.protocols() {
+        for (_proto_name, proto_info) in &protocols {
             // Use the protocol registry's conformance check so we stay consistent
             // with DNU-bypass, cross-file-parent, and inherited method handling.
             if protocol_registry
@@ -2282,5 +2290,57 @@ mod tests {
             e0402.is_empty(),
             "Public method should not trigger leaked visibility error, got: {e0402:?}"
         );
+    }
+
+    /// BT-5184: the protocol registry is a `HashMap`, so walking it unsorted
+    /// emitted one class's E0402 errors in a different order on each run.
+    /// Every fresh registry gets a fresh hash seed, so rebuilding it per run
+    /// is the "different seeds" check.
+    #[test]
+    fn e0402_errors_are_in_protocol_name_order_on_every_run() {
+        use std::fmt::Write as _;
+        let names = [
+            "Golf", "Alpha", "Echo", "Charlie", "Foxtrot", "Delta", "Bravo",
+        ];
+        let mut source = String::new();
+        for name in names {
+            let sel = name.to_lowercase();
+            let _ = write!(source, "Protocol define: {name}\n  {sel} -> Integer\n\n");
+        }
+        source.push_str("Object subclass: Leaky\n");
+        for name in names {
+            let _ = writeln!(source, "  internal {} -> Integer => 1", name.to_lowercase());
+        }
+        let run = || {
+            let (module, hierarchy) =
+                crate::semantic_analysis::test_helpers::parse_and_build(&source);
+            let mut registry = ProtocolRegistry::new();
+            let _ = registry.register_module(&module, &hierarchy);
+            let mut diagnostics = Vec::new();
+            check_leaked_method_visibility(
+                &module,
+                &hierarchy,
+                &registry,
+                Some("my_pkg"),
+                &mut diagnostics,
+            );
+            diagnostics
+                .iter()
+                .map(|d| d.message.to_string())
+                .collect::<Vec<_>>()
+        };
+        let first = run();
+        assert_eq!(first.len(), names.len(), "{first:?}");
+        let mut sorted_names = names;
+        sorted_names.sort_unstable();
+        for (message, name) in first.iter().zip(sorted_names) {
+            assert!(
+                message.contains(&format!("protocol '{name}'")),
+                "out of order: {first:?}"
+            );
+        }
+        for _ in 0..20 {
+            assert_eq!(run(), first);
+        }
     }
 }

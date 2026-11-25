@@ -145,6 +145,31 @@ TestCase subclass: NodeTest
     self assert: e localVersion equals: 1
     self assert: e remoteVersion equals: 2
 
+  // ===== NodeVersionSkew =====
+  testNodeVersionSkewCarriesFields =>
+    e := NodeVersionSkew
+      node: Node current
+      localWireVersion: 1
+      remoteWireVersion: 2
+      localBeamtalkVersion: "0.6.0"
+      remoteBeamtalkVersion: "0.5.0"
+    self assert: (e isKindOf: Announcement)
+    self assert: e node =:= Node current
+    self assert: e localWireVersion equals: 1
+    self assert: e remoteWireVersion equals: 2
+    self assert: e localBeamtalkVersion equals: "0.6.0"
+    self assert: e remoteBeamtalkVersion equals: "0.5.0"
+
+  testNodeVersionSkewAcceptsNilRemoteFields =>
+    e := NodeVersionSkew
+      node: Node current
+      localWireVersion: 1
+      remoteWireVersion: nil
+      localBeamtalkVersion: "0.6.0"
+      remoteBeamtalkVersion: nil
+    self assert: e remoteWireVersion isNil
+    self assert: e remoteBeamtalkVersion isNil
+
   // ===== Node>>shapeManifest =====
   testShapeManifestOnCurrentIsOk =>
     result := Node current shapeManifest

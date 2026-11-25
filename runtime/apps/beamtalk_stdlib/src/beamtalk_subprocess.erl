@@ -32,7 +32,8 @@ this module only exports `start_link/1` and gen_server callbacks.
   {stderr, waiting} => From | {timer, From, TimerRef} | undefined,
   exit_code     => nil | non_neg_integer(),
   port_closed   => boolean(),
-  child_exited  => boolean()
+  child_exited  => boolean(),
+  stdin_dropped => binary()     % only once the exec port dropped a write
 }
 ```
 
@@ -228,9 +229,10 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             buffer_and_maybe_reply(stderr, Data, State);
         {exit, _ChildId, Code} ->
             ?LOG_INFO("Subprocess exited", #{exit_code => Code, domain => [beamtalk, stdlib]}),
-            %% The beamtalk-exec binary joins its reader threads before sending
-            %% this exit event, so all stdout/stderr data is guaranteed
-            %% to have arrived.  Flush any partial line and close the port now.
+            %% `exit` is the child's last event: beamtalk-exec sends it once
+            %% the output pipes close, or after a bounded drain if a
+            %% grandchild holds them (BT-5195), and drops anything later.
+            %% Flush any partial line and close the port now.
             S0 = flush_pending(stdout, State),
             S1 = flush_pending(stderr, S0),
             (try
@@ -242,6 +244,19 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             S2 = maybe_reply_eof(stdout, NewState),
             S3 = maybe_reply_eof(stderr, S2),
             {noreply, S3};
+        {error, _ChildId, write_stdin, Reason} ->
+            %% A line was not delivered (the child is not reading its input,
+            %% or closed it): every later writeLine: fails, since the stream
+            %% the child sees is broken.
+            ?LOG_WARNING("Subprocess stdin write dropped", #{
+                reason => Reason, domain => [beamtalk, stdlib]
+            }),
+            {noreply, State#{stdin_dropped => Reason}};
+        {error, _ChildId, Command, Reason} ->
+            ?LOG_WARNING("Subprocess command refused by exec port", #{
+                command => Command, reason => Reason, domain => [beamtalk, stdlib]
+            }),
+            {noreply, State};
         _Other ->
             {noreply, State}
     end;
@@ -412,6 +427,13 @@ unwrap_text_entry(Value) ->
 %% BT-4173: a String arrives tagged — unwrap to bytes (a tuple is not iodata).
 handle_writeLine({beamtalk_string, Bin}, State) when is_binary(Bin) ->
     handle_writeLine(Bin, State);
+handle_writeLine(_Data, #{stdin_dropped := Reason} = State) ->
+    %% BT-5195: an earlier line could not be delivered (the child is not
+    %% reading its input, or closed it), so the stream it sees is broken.
+    Err = beamtalk_error:new(runtime_error, 'Subprocess', 'writeLine:', <<
+        "stdin write failed: ", Reason/binary
+    >>),
+    {reply, {error, Err}, State};
 handle_writeLine(Data, State) ->
     #{port := Port, child_id := ChildId, port_closed := PortClosed, child_exited := ChildExited} =
         State,

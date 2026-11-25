@@ -374,8 +374,9 @@ run_git_in(Selector, Args, Dir) ->
     end.
 
 %% Receive-loop accumulating raw stdout/stderr bytes until the child exits.
-%% The beamtalk-exec binary joins its reader threads before sending the exit
-%% event, so by the time we see {exit, ...} all output has arrived.
+%% {exit, ...} is the child's last event: beamtalk-exec sends it once the
+%% output pipes close, or once they have been quiet for 2 s if a grandchild
+%% holds them (BT-5195), and drops any output after it.
 -spec collect(atom(), port(), non_neg_integer()) ->
     {ok, binary(), non_neg_integer()} | {error, #beamtalk_error{}}.
 collect(Selector, Port, ChildId) ->
@@ -393,6 +394,13 @@ collect(Selector, Port, ChildId, Stdout, Stderr) ->
                     collect(Selector, Port, ChildId, Stdout, <<Stderr/binary, Data/binary>>);
                 {exit, ChildId, Code} when is_integer(Code) ->
                     finish(Selector, Code, Stdout, Stderr);
+                {error, ChildId, _Command, Reason} when is_binary(Reason) ->
+                    %% The exec port refused a command (e.g. a failed spawn,
+                    %% which is followed by `{exit, ChildId, -1}`): keep its
+                    %% reason with git's own stderr.
+                    collect(
+                        Selector, Port, ChildId, Stdout, <<Stderr/binary, $\n, Reason/binary, $\n>>
+                    );
                 _Other ->
                     collect(Selector, Port, ChildId, Stdout, Stderr)
             end;
