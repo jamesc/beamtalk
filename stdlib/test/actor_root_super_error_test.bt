@@ -8,26 +8,25 @@
 // Fixtures: stdlib/test/fixtures/bt4592base.bt, bt4592actor.bt
 
 TestCase subclass: ActorRootSuperErrorTest
+  field: a
+
+  setUp =>
+    self.a := Bt4592Actor spawn
+
+  tearDown =>
+    self.a isNil ifFalse: [self.a stop]
 
   testRootSuperErrorFromObject =>
-    a := Bt4592Actor spawn
-    self assert: ([a rootSuper] on: Error do: [:e | e message]) equals: "x"
-    a stop
+    self assert: ([self.a rootSuper] on: Error do: [:e | e message]) equals: "x"
 
   testRootSuperErrorNotLastStatement =>
-    a := Bt4592Actor spawn
     self assert: ([
-      a rootSuperNotLast
+      self.a rootSuperNotLast
     ] on: Error do: [:e | e message]) equals: "x"
-    a stop
 
   testRootSuperErrorFromCompiledActorSuperclass =>
-    a := Bt4592Actor spawn
-    self assert: ([a boom] on: Error do: [:e | e message]) equals: "base"
-    a stop
+    self assert: ([self.a boom] on: Error do: [:e | e message]) equals: "base"
 
   testActorSurvivesRootSuperError =>
-    a := Bt4592Actor spawn
-    [a boom] on: Error do: [:e | e message]
-    self assert: a count equals: 0
-    a stop
+    [self.a boom] on: Error do: [:e | e message]
+    self assert: self.a count equals: 0
