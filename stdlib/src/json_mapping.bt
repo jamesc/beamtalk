@@ -81,7 +81,7 @@ Value subclass: JsonMapping
 
   /// Raise a `user_error` if `aClass` inherits `class jsonMapping` and
   /// declares fields its defining ancestor does not have.
-  class checkInheritedMappingOf: aClass -> Nil =>
+  class internal checkInheritedMappingOf: aClass -> Nil =>
     definer := (aClass allSuperclasses addFirst: aClass) detect: [:c |
       c class includesSelector: #jsonMapping
     ] ifNone: [aClass]
@@ -132,7 +132,7 @@ Value subclass: JsonMapping
             self
               error: "JsonMapping: malformed entry "
                 ++ entry printString
-                ++ " (expected #field Symbol, #key String, #using Block or nil)"
+                ++ " (expected #field Symbol, #key String or Symbol, #using Block or nil)"
           ]
         // Compare by wire name: #id and "id" are written as the same key.
         key := (entry at: #key) asString
@@ -145,12 +145,12 @@ Value subclass: JsonMapping
 
   /// Whether `key` can be a wire key: a String, or a Symbol (which
   /// `Json generate:` writes as its name).
-  isWireKey: key :: Object -> Boolean =>
+  internal isWireKey: key :: Object -> Boolean =>
     (key isKindOf: String) or: [key isKindOf: Symbol]
 
   /// Whether `entry` is a Dictionary with a Symbol `#field`, a String (or
   /// Symbol) `#key` and a Block or nil `#using`.
-  isWellFormedEntry: entry :: Object -> Boolean =>
+  internal isWellFormedEntry: entry :: Object -> Boolean =>
     (entry isKindOf: Dictionary) ifFalse: [^false]
     using := entry at: #using ifAbsent: [nil]
     ((entry at: #field ifAbsent: [nil]) isKindOf: Symbol)
