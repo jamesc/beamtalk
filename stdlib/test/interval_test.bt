@@ -164,6 +164,41 @@ TestCase subclass: IntervalTest
   testNilStepRaisesTypeError =>
     self should: [self intervalBy: nil] raise: #type_error
 
+  // BT-5245: the limit follows the step rule — an Interval holds integers
+  // only, so `to:` / `to:by:` reject a non-Integer limit with a TypeError.
+  // `to:do:` / `to:by:do:` loops keep accepting any Number limit.
+  intervalTo: limit => 1 to: limit
+
+  intervalToBy: limit => 1 to: limit by: 1
+
+  testFloatLimitOnToRaisesTypeError =>
+    self should: [self intervalTo: 2.5] raise: #type_error
+
+  testFloatLimitOnToByRaisesTypeError =>
+    self should: [self intervalToBy: 2.5] raise: #type_error
+
+  testWholeFloatLimitRaisesTypeError =>
+    self should: [self intervalTo: 3.0] raise: #type_error
+    self should: [self intervalToBy: 3.0] raise: #type_error
+
+  testNilLimitRaisesTypeError =>
+    self should: [self intervalTo: nil] raise: #type_error
+    self should: [self intervalToBy: nil] raise: #type_error
+
+  testFloatLimitMessageIsIntervalLimitMustBeAnInteger =>
+    msg1 := [self intervalTo: 2.5] on: TypeError do: [:e | e message]
+    self assert: msg1 equals: "Interval limit must be an Integer"
+    msg2 := [self intervalToBy: 2.5] on: TypeError do: [:e | e message]
+    self assert: msg2 equals: "Interval limit must be an Integer"
+
+  loopTo: limit =>
+    seen := #()
+    1 to: limit do: [:i | seen := seen add: i]
+    seen
+
+  testFloatLimitStillLoopsWithToDo =>
+    self assert: (self loopTo: 2.5) equals: #(1, 2)
+
   testFloatStepStillLoopsWithToByDo =>
     seen := #()
     1

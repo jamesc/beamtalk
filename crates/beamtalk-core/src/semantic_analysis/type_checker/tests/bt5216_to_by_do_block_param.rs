@@ -53,21 +53,56 @@ typed Value subclass: TvSum
     );
 }
 
-/// With an Integer step the parameter is still `Number` (the checker does
-/// not special-case a statically-Integer step, per BT-5216), so `Number`
-/// protocol is clean...
+/// BT-5246: with an `Integer` start and a statically-`Integer` step every
+/// value is an Integer, so the parameter is `Integer` and Integer-only sends
+/// do not warn.
+#[test]
+fn bt5246_integer_step_block_param_is_integer() {
+    let source = r"
+typed Value subclass: TvInt
+  run: xs :: List(Integer) -> Nil =>
+    1 to: 10 by: 2 do: [:i | xs at: i]
+    1 to: 10 by: 2 do: [:i | i bitAnd: 1]
+    1 to: 10 by: 2 do: [:i | i isEven]
+    1 to: 10 by: 2 do: [:i | 1 to: i do: [:j | j]]
+";
+    let diags = diags_parse_ok(source);
+    assert!(
+        diags.is_empty(),
+        "got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// A step typed `Number` (not statically Integer) keeps the `Number`
+/// parameter, so the BT-5216 warning still fires.
+#[test]
+fn bt5246_number_step_keeps_number_param() {
+    let source = r"
+typed Value subclass: TvNum
+  run: step :: Number -> Nil =>
+    1 to: 10 by: step do: [:x | x bitAnd: 1]
+";
+    let dnus = dnu_messages(source);
+    assert!(
+        dnus.iter()
+            .any(|m| m.contains("Number does not understand 'bitAnd:'")),
+        "got: {dnus:?}"
+    );
+}
+
+/// `Number` protocol stays clean for an Integer step too.
 #[test]
 fn bt5216_integer_step_number_protocol_has_no_warning() {
     let source = r"
-typed Value subclass: TvInt
+typed Value subclass: TvIntNum
   run -> Nil =>
     1 to: 10 by: 2 do: [:i | i isPositive]
 ";
     assert_eq!(dnu_messages(source), Vec::<String>::new());
 }
 
-/// ...and an `Integer`-only method needs a typed parameter, which is
-/// accepted as a narrowing of `Number`.
+/// An explicit `:: Integer` annotation is still accepted.
 #[test]
 fn bt5216_integer_step_with_integer_annotation_has_no_warning() {
     let source = r"

@@ -1049,6 +1049,14 @@ impl TypeChecker {
                                 Self::resolve_type_param(p, &class_subst, &method_subst, hierarchy)
                             })
                             .collect();
+                        let mut block_param_types = block_param_types;
+                        Self::narrow_to_by_do_param(
+                            selector_name,
+                            class_name,
+                            is_class_side_send,
+                            &arg_types,
+                            &mut block_param_types,
+                        );
 
                         arg_types[i] = self.infer_block_with_typed_params(
                             block,
@@ -1082,6 +1090,35 @@ impl TypeChecker {
         }
 
         arg_types
+    }
+
+    /// BT-5246: `Integer>>to:by:do:` declares its block `Block(Number, Object)`
+    /// because a Float step passes Floats (BT-5216). When the receiver (the
+    /// start) and the step are both statically `Integer`, every value is an
+    /// `Integer`, so the block parameter is narrowed to `Integer`. Any other
+    /// step type (`Float`, `Number`, `Dynamic`, ...) keeps the declared
+    /// `Number`. A narrow rule for this one selector, not a general
+    /// type-variable mechanism.
+    fn narrow_to_by_do_param(
+        selector_name: &str,
+        receiver_class: &str,
+        is_class_side_send: bool,
+        arg_types: &[InferredType],
+        block_param_types: &mut [InferredType],
+    ) {
+        let integer = WellKnownClass::Integer.as_str();
+        let step_is_integer = arg_types
+            .get(1)
+            .and_then(InferredType::as_known)
+            .is_some_and(|c| c.as_str() == integer);
+        if selector_name == "to:by:do:"
+            && !is_class_side_send
+            && receiver_class == integer
+            && step_is_integer
+            && let Some(first) = block_param_types.first_mut()
+        {
+            *first = InferredType::known(integer);
+        }
     }
 
     /// The Phase-1 stand-in for a literal block argument, before Phase 2
