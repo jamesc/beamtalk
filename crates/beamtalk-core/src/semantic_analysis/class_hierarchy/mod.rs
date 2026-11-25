@@ -406,10 +406,9 @@ impl ClassHierarchy {
     /// (`beamtalk_class_dispatch`'s in-caller owner memo); nothing keeps a
     /// second copy. Since ADR 0153 removed class variables the chain plays no
     /// part: the selector must not be process-bound
-    /// ([`ClassInfo::is_process_bound_class_selector`]) and, until the runtime
-    /// stops intercepting them (BT-5160), not a class-variable reflection send
-    /// ([`ClassInfo::is_class_var_reflection_selector`]), which the class
-    /// process answers itself. The runtime's own fail-closed chain check
+    /// ([`ClassInfo::is_process_bound_class_selector`]). A class method named
+    /// `fieldAt:`, `hasField:` etc. is no exception: since BT-5155 the class
+    /// process no longer intercepts those selectors. The runtime's own fail-closed chain check
     /// (`beamtalk_class_metadata:chain_has_class_variables/1`) outlives this
     /// one until BT-5158; the guard of every static direct call re-checks it.
     /// A class's own explicit `new:` of the in-caller shape
@@ -441,7 +440,6 @@ impl ClassHierarchy {
             return true;
         }
         !ClassInfo::is_process_bound_class_selector(selector)
-            && !ClassInfo::is_class_var_reflection_selector(selector)
     }
 
     /// Whether a send of the class-side `selector` to the class *reference*

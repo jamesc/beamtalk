@@ -63,22 +63,14 @@ TestCase subclass: ClassMethodInCallerTest
     self assert: InCallerProbe meVia == InCallerProbe
     self assert: (InCallerProbe meVia double: 2) equals: 4
 
-  // `clearField:` and `hasField:` on a class with no class variables answer
-  // as they did in the class process.
-  testClassVariableReflectionOnAStatelessClass =>
-    self assert: InCallerProbe clearMissing == InCallerProbe
-    self assert: InCallerProbeSub clearMissing == InCallerProbeSub
-    self deny: InCallerProbe hasMissing
-
-  // `performLocally:` resolves through the receiving class's class-method
-  // chain: a parent-only selector is found from an inherited method and
-  // from outside, and a subclass override is the one reached.
-  testPerformLocallyWalksTheReceivingClassChain =>
-    self assert: InCallerProbeSub viaLocally equals: #parent
-    self assert: InCallerProbeSub viaLocallyOverridden equals: #sub
-    self assert: InCallerProbe viaLocallyOverridden equals: #parent
-    self assert: (InCallerProbeSub performLocally: #parentOnly withArguments: #()) equals: #parent
-    self assert: (InCallerProbeSub performLocally: #overridden withArguments: #()) equals: #sub
+  // `perform:withArguments:` resolves through the receiving class's
+  // class-method chain, as `performLocally:` did before ADR 0153 removed it:
+  // a parent-only selector is found and a subclass override is the one
+  // reached.
+  testPerformWalksTheReceivingClassChain =>
+    self assert: (InCallerProbeSub perform: #parentOnly withArguments: #()) equals: #parent
+    self assert: (InCallerProbeSub perform: #overridden withArguments: #()) equals: #sub
+    self assert: (InCallerProbe perform: #overridden withArguments: #()) equals: #parent
 
   // Errors keep the value they had through the class process.
   testErrorsAreUnchanged =>

@@ -33,8 +33,7 @@ has the same value on both paths.
     testScriptExit => #{arity => 0},
     testNlrThrow => #{arity => 0},
     'testWith:' => #{arity => 1},
-    'run:' => #{arity => 1},
-    'hasField:' => #{arity => 1}
+    'run:' => #{arity => 1}
 }).
 
 %% The generated process-bound list every compiled class carries (ADR 0142 §1
@@ -190,9 +189,12 @@ in_caller_test_() ->
                 )
             end)
         end},
-        {"a class-variable reflection selector keeps the class process", fun() ->
+        {"an instance-field reflection selector a class does not define is DNU", fun() ->
             with_class('Bt4300Reflect', none, #{}, fun(Pid) ->
-                ?assertEqual(false, send(Pid, 'hasField:', [count])),
+                %% ADR 0153 decision 7 (BT-5155): a class has no fields; no
+                %% class method answers it, so the owner memo declines and
+                %% the `Class` protocol fallthrough refuses it.
+                ?assertBtError(does_not_understand, send(Pid, 'hasField:', [count])),
                 ?assertEqual(
                     decline,
                     beamtalk_class_derived_cache:fetch(

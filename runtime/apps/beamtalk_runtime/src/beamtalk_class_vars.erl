@@ -607,7 +607,7 @@ mirror(Tag, Name) ->
 
 %% No registered class process is a class-level condition, not a variable-level
 %% one, so it uses the name-less message and hint (the block-oriented hint of the
-%% named variant does not fit supervisor-init or `performLocally:` callers).
+%% named variant does not fit supervisor-init or `local_call/3` callers).
 -spec live_class_pid(atom()) -> pid().
 live_class_pid(Class) ->
     case beamtalk_class_registry:whereis_class(Class) of

@@ -157,10 +157,6 @@ const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
         "class-method-process-resource",
         DiagnosticCategory::ClassMethodProcessResource,
     ),
-    (
-        "class-var-reflection-shadowing",
-        DiagnosticCategory::ClassVarReflectionShadowing,
-    ),
     ("actor-state-abroad", DiagnosticCategory::ActorStateAbroad),
     ("ffi-nested-string", DiagnosticCategory::FfiNestedString),
     (
@@ -228,10 +224,16 @@ fn value_type_name(value: &toml::Value) -> &'static str {
 }
 
 /// `[diagnostics]` keys of lints that no longer exist (ADR 0153 removed
-/// `class-state-abroad` and `class-process-ffi` with class variables). A
-/// manifest that still sets one keeps building: the key is ignored, as the
-/// matching `@expect` name is accepted and reported stale.
-const REMOVED_DIAGNOSTIC_KEYS: &[&str] = &["class-state-abroad", "class-process-ffi"];
+/// `class-state-abroad` and `class-process-ffi` with class variables, and
+/// `class-var-reflection-shadowing` once a class's own `fieldAt:` method
+/// answered on every route, BT-5155). A manifest that still sets one keeps
+/// building: the key is ignored, as the matching `@expect` name is accepted
+/// and reported stale.
+const REMOVED_DIAGNOSTIC_KEYS: &[&str] = &[
+    "class-state-abroad",
+    "class-process-ffi",
+    "class-var-reflection-shadowing",
+];
 
 /// Parse and validate the `[diagnostics]` section of a manifest (ADR 0100 Rule 3).
 ///
@@ -647,7 +649,6 @@ fn expect_category_unchecked(
         | ExpectCategory::Sendability
         | ExpectCategory::MatchArmBlock
         | ExpectCategory::ClassMethodProcessResource
-        | ExpectCategory::ClassVarReflectionShadowing
         | ExpectCategory::FfiNestedString
         | ExpectCategory::BinaryStringCompare
         | ExpectCategory::CascadeDropsUpdate
@@ -657,7 +658,8 @@ fn expect_category_unchecked(
         | ExpectCategory::StoredClosure
         // Deprecated, parse-only (ADR 0153): the lints were removed.
         | ExpectCategory::ClassStateAbroad
-        | ExpectCategory::ClassProcessFfi => false,
+        | ExpectCategory::ClassProcessFfi
+        | ExpectCategory::ClassVarReflectionShadowing => false,
     }
 }
 
@@ -991,10 +993,6 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     Some(DiagnosticCategory::ClassMethodProcessResource)
                 )
                 | (
-                    ExpectCategory::ClassVarReflectionShadowing,
-                    Some(DiagnosticCategory::ClassVarReflectionShadowing)
-                )
-                | (
                     ExpectCategory::ActorStateAbroad,
                     Some(DiagnosticCategory::ActorStateAbroad)
                 )
@@ -1183,7 +1181,6 @@ definite-assignment = "error"
 unguarded-late-read = "error"
 match-arm-block = "off"
 class-method-process-resource = "off"
-class-var-reflection-shadowing = "off"
 actor-state-abroad = "off"
 ffi-nested-string = "off"
 binary-string-compare = "off"
@@ -1491,7 +1488,8 @@ dnu = "error"
     #[test]
     fn removed_class_variable_lint_keys_are_ignored() {
         let value: toml::Value = toml::from_str(
-            "class-state-abroad = \"off\"\nclass-process-ffi = \"off\"\ndnu = \"off\"",
+            "class-state-abroad = \"off\"\nclass-process-ffi = \"off\"\n\
+             class-var-reflection-shadowing = \"off\"\ndnu = \"off\"",
         )
         .unwrap();
         let table = parse_diagnostics_table(Some(&value)).unwrap();
@@ -1502,7 +1500,11 @@ dnu = "error"
     /// still parse and are reported stale, like `stored_closure`.
     #[test]
     fn expect_removed_class_variable_lint_names_parse_and_are_reported_stale() {
-        for name in ["class_state_abroad", "class_process_ffi"] {
+        for name in [
+            "class_state_abroad",
+            "class_process_ffi",
+            "class_var_reflection_shadowing",
+        ] {
             let source = format!("@expect {name}\n42");
             let (module, parse_diags) = parse(lex_with_eof(&source));
             assert!(parse_diags.is_empty(), "{name}: {parse_diags:?}");

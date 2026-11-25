@@ -31,7 +31,6 @@ typed Actor subclass: ClassBuilder
   state: methodSource :: Dictionary = #{}
   state: classMethods :: Dictionary = #{}
   state: classMethodSource :: Dictionary = #{}
-  state: classState :: Dictionary = #{}
   state: methodSignatures :: Dictionary = #{}
   state: classMethodSignatures :: Dictionary = #{}
   state: methodReturnTypes :: Dictionary = #{}
@@ -95,12 +94,12 @@ typed Actor subclass: ClassBuilder
   ///
   /// Each value is a class-method block whose body the compiler lowers with
   /// the class-method calling convention (`fun(ClassSelf, ...)`), so
-  /// class-variable reads and writes happen in place and `super`/`self` resolve.
-  /// The runtime installs them as runtime class-method funs (BT-2266).
+  /// `super`/`self` resolve. The runtime installs them as runtime class-method
+  /// funs (BT-2266).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// builder classMethods: #{ #bump => [:self | self.total := self.total + 1] }
+  /// builder classMethods: #{ #doubled: => [:self :n | n * 2] }
   /// ```
   classMethods: aDict :: Dictionary -> Dictionary => self.classMethods := aDict
 
@@ -115,23 +114,10 @@ typed Actor subclass: ClassBuilder
   ///
   /// ## Examples
   /// ```beamtalk
-  /// builder classMethodSource: #{ #bump => "bump => self.total := self.total + 1" }
+  /// builder classMethodSource: #{ #doubled: => "doubled: n => n * 2" }
   /// ```
   classMethodSource: aDict :: Dictionary -> Dictionary =>
     self.classMethodSource := aDict
-
-  /// Set class-variable initial values (ADR 0084, BT-2267).
-  ///
-  /// The class-side counterpart of `fields:`. Named `classVars:` rather than
-  /// `classState:` because `classState:` is a reserved class-variable
-  /// declaration keyword (it cannot be a method selector), mirroring how the
-  /// instance-side setter is `fields:`, not the reserved `field:`/`state:`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// builder classVars: #{ #total => 0 }
-  /// ```
-  classVars: aDict :: Dictionary -> Dictionary => self.classState := aDict
 
   /// Set instance-method display signatures as a `selector => signature` map
   /// (ADR 0084, BT-2268).
@@ -283,29 +269,14 @@ typed Actor subclass: ClassBuilder
   /// `classMethods` map, so a class can gain class methods one at a time before
   /// `register`. In a `classBuilder … register` cascade the compiler lowers the
   /// block with the class-method calling convention (`fun(ClassSelf, …)`) so
-  /// class-variable reads and writes happen in place and `super`/`self` resolve,
-  /// just like a `classMethods:` map value.
+  /// `super`/`self` resolve, just like a `classMethods:` map value.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// builder addClassMethod: #bump body: [:self | self.total := self.total + 1]
+  /// builder addClassMethod: #limit body: [:self | 100]
   /// ```
   addClassMethod: aSelector :: Symbol body: aBlock :: Object -> Dictionary =>
     self.classMethods := self.classMethods at: aSelector put: aBlock
-
-  /// Add a single class variable with a default value (ADR 0084, BT-2267).
-  ///
-  /// The incremental counterpart of `classVars:`. It writes the same
-  /// `classState` map. Named `addClassState:default:` rather than
-  /// `addClassVar:default:` for symmetry with the `classState:` declaration
-  /// keyword used on file-defined classes.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// builder addClassState: #total default: 0
-  /// ```
-  addClassState: aName :: Symbol default: aValue :: Object -> Dictionary =>
-    self.classState := self.classState at: aName put: aValue
 
   /// Remove a single instance method before `register` (live-editing parity).
   ///
@@ -326,7 +297,7 @@ typed Actor subclass: ClassBuilder
   ///
   /// ## Examples
   /// ```beamtalk
-  /// builder removeClassMethod: #bump
+  /// builder removeClassMethod: #limit
   /// ```
   removeClassMethod: aSelector :: Symbol -> Dictionary =>
     self.classMethods := self.classMethods removeKey: aSelector
