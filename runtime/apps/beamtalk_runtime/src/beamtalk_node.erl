@@ -39,6 +39,7 @@ selectors (ADR 0126 Phase 2) apply the same rule rather than re-deriving it.
 """.
 
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 %% Class methods (`self delegate` calls the first keyword, colon stripped)
 -export([current/0, named/1, connected/0]).
@@ -70,12 +71,15 @@ selectors (ADR 0126 Phase 2) apply the same rule rather than re-deriving it.
     name/1,
     connect_policy/2,
     tls_distribution/0,
-    remote_shape_manifest/1
+    remote_shape_manifest/1,
+    bounded_sync/2
 ]).
 
 -type t() :: #{?BT_CLASS_TAG_KEY := 'Node', name := node()}.
 -export_type([t/0]).
 
+%% Upper bound on the `global:sync/0` a fresh `connect` waits for (BT-5173).
+-define(GLOBAL_SYNC_TIMEOUT_MS, 5000).
 -define(INVALID_NAME_HINT, <<"expected name@host">>).
 -define(INSECURE_HINT, <<"configure TLS distribution (ADR 0091) or use a tunnel">>).
 
@@ -129,8 +133,12 @@ Establish a connection to this node, applying the §9 host policy first
 connection answers `Result error:` with `kind = insecure_distribution`; an
 unreachable node (or a local node that is not itself distributed) answers
 `kind = node_down`. Connecting to the current node is a no-op success.
-Answers only after OTP `global` has synced names with the peer, so a
-`scope: #global` name registered next is visible from it at once (BT-5156).
+A new connection answers only after OTP `global` has synced names with the
+peer (so a `scope: #global` name registered next is visible from it at
+once, BT-5156), but waits at most 5 seconds for that: on timeout a warning
+is logged and `connect` still answers ok (BT-5173). A node that is already
+connected skips the sync. `ping` never syncs: it is a liveness probe, so use
+`connect` when `global` names must be visible immediately.
 """.
 -spec connect(t()) -> beamtalk_result:t().
 connect(#{?BT_CLASS_TAG_KEY := 'Node', name := Name} = Self) ->
@@ -175,7 +183,8 @@ isCurrent(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) ->
 `net_adm:ping/1` — `true` iff the node answered (and is now connected). The
 current node always answers. Because a ping auto-connects, it applies the
 same §9 host policy as `connect`: an off-host node without TLS distribution
-answers `false` without touching the network.
+answers `false` without touching the network. It does not wait for
+`global` to sync names (unlike `connect`, BT-5173).
 """.
 -spec ping(t()) -> boolean().
 ping(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) ->
@@ -529,14 +538,19 @@ tls_distribution() ->
 
 -spec do_connect(t(), node()) -> {ok, t()} | {error, #beamtalk_error{}}.
 do_connect(Self, Name) ->
+    AlreadyConnected = lists:member(Name, nodes(connected)),
     case net_kernel:connect_node(Name) of
         true ->
             %% OTP `global` shares names with a new peer in the background;
-            %% wait for that so a `scope: #global` name is visible from the
-            %% peer as soon as `connect` answers (BT-5156).
-            %% A sync failure (e.g. bad `global_groups` config) does not undo
-            %% the connection, so still answer ok.
-            _ = global:sync(),
+            %% wait for that (bounded) so a `scope: #global` name is visible
+            %% from the peer as soon as `connect` answers (BT-5156, BT-5173).
+            %% Skipped when already connected: the names were synced then.
+            %% A sync failure or timeout does not undo the connection, so
+            %% still answer ok.
+            case AlreadyConnected of
+                true -> ok;
+                false -> bounded_sync(fun global:sync/0, ?GLOBAL_SYNC_TIMEOUT_MS)
+            end,
             {ok, Self};
         false ->
             {error,
@@ -550,6 +564,36 @@ do_connect(Self, Name) ->
                     Name,
                     <<"This node is not distributed; start it with a node name (--sname/--name)">>
                 )}
+    end.
+
+-doc """
+Run `SyncFun` in a monitored process and wait at most `TimeoutMs` for it.
+On timeout the process is killed and a warning logged; on a crash a warning
+is logged. Always answers `ok` — a failed sync never fails `connect`.
+""".
+-spec bounded_sync(fun(() -> term()), non_neg_integer()) -> ok.
+bounded_sync(SyncFun, TimeoutMs) ->
+    {Pid, Ref} = spawn_monitor(fun() ->
+        _ = SyncFun(),
+        exit(normal)
+    end),
+    receive
+        {'DOWN', Ref, process, Pid, normal} ->
+            ok;
+        {'DOWN', Ref, process, Pid, Reason} ->
+            ?LOG_WARNING(
+                "Node connect: global:sync() failed",
+                #{reason => Reason, domain => [beamtalk, runtime]}
+            ),
+            ok
+    after TimeoutMs ->
+        exit(Pid, kill),
+        erlang:demonitor(Ref, [flush]),
+        ?LOG_WARNING(
+            "Node connect: global:sync() did not finish; answering ok anyway",
+            #{timeout_ms => TimeoutMs, domain => [beamtalk, runtime]}
+        ),
+        ok
     end.
 
 -spec node_down_error(node(), binary()) -> #beamtalk_error{}.
