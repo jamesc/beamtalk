@@ -7,6 +7,8 @@
 
 - **New: `PersistentTerm` — a sealed stdlib helper for values that are expensive to build (BT-5146, ADR 0153 Phase 1).** Class-side `at:ifAbsentPut:`, `at:ifAbsent:`, `includesKey:` and `erase:` over `persistent_term`, stored under `{beamtalk_persistent_term, Key}`. There is no `at:put:`. A miss whose value is itself a pid, an actor or a class raises a `type_error`. `erase:` answers a Boolean and forces a global GC.
 
+- **New: `JsonMapping` and `JsonMappable` — declarative JSON field mapping (BT-2819).** `JsonMapping` is a Value that describes which fields go on the wire: `mapField:`, `mapField:to:` and `mapField:to:using:` (a converter block). Unmapped fields are omitted. `encode:` applies a mapping and returns a Dictionary. Chain with `|>`, not cascades, because `JsonMapping` is a Value (ADR 0145). `JsonMappable` is a protocol: implement class-side `jsonMapping -> JsonMapping` and `asJson` is provided. A hand-written `asJson` in the class body wins (ADR 0127 §3a). Works on Actors as well as Values. A duplicate key in `mapField:to:` raises at build time; a field missing from the object raises at encode time.
+
 - **Breaking: cross-file `>>` extension methods are removed (ADR 0152, BT-5141).** A `Class >> selector => ...` or `Class class >> selector => ...` definition in a file that does not define `Class` is now a compile error in `beamtalk build`, `check`, `lint`, `test`, `run`, `Workspace load:`, `:sync`, an inline REPL eval, MCP lint and the LSP, with no deprecation period. `pkg@Class >> selector => ...` goes with it. Nothing in the stdlib, the examples or the downstream packages checked used the feature; only tests did.
   - Unchanged: `Foo >> sel => ...` in the file that defines `Foo` (folded into the class), live method definition at the REPL (`Foo >> sel => ...`, `Foo class >> sel => ...`, `Class compile:source:`, IDE and MCP `save_method`), and the `Foo >> #sel` reflection operator that answers a `CompiledMethod`.
   - Migration: put the method in the file that defines the class; for a class you cannot edit, write the operation on a class of your own that takes the value (`Shout of: aString` in place of `aString shout`); for JSON of a foreign class, give the holder's `JsonMapping` a `using:` converter. The error message carries the same advice.
@@ -43,6 +45,19 @@
   - Fixed: `ChangeLog retire_entries/1` waits as long as `append/1` (60 s) instead of 5 s.
   - Fixed: the class monitor restarts a class whose process died before the monitor request reached it, as long as its metadata is still there. A removed class is not brought back.
   - Documented: a future from an async send is rejected with `#future_expired` after one hour while its actor is alive (`future_watcher_cap_ms`). This bound came with BT-5084 and was not mentioned anywhere.
+
+- **Fix: `Bag collect:`/`select:`/`reject:` with a stateful block now raises `stateful_block_dispatch` (BT-5136).** The writing variants on a Bag that need to build a new collection via a stateful block are rejected; use `asList` first if you need to filter with side-effects.
+- **Fix: `to:by:do:` and `to:by:` now raise on a zero `Float` step, a `nil` step or limit, and a non-number step or limit (BT-5136).** `0.0` as a step raises the same error as integer `0`. A nil or non-number step or limit raises `TypeError`.
+- **Change: `Workspace load:`, `:sync` and REPL eval replies now surface a warning when a same-file `>>` extension method has a one-hop lookup gap (BT-5060).** The warning names the class whose dispatch table was not refreshed and the selector that may resolve to the old method until a full rebuild.
+- **Fix: build lock escape hatch and improved lock error reporting (BT-5133).** Set `BEAMTALK_NO_BUILD_LOCK=1` to disable the build lock (for CI or scripting where advisory locking is unavailable). Lock errors now name the lock file and the stale holder.
+- **Security: the Erlang cookie is no longer visible in `ps` output (BT-5126).** `beamtalk run`, `repl`, `workspace` and `release` launchers pass the cookie via the `ERL_COOKIE_FILE` mechanism instead of `-setcookie`. The `-setcookie` flag carries a throwaway value.
+- **Change: all dev, REPL and LiveView nodes pin Erlang distribution to loopback; WebSocket connections are capped; proxied hosts are allowlisted (BT-5127).** Set `BEAMTALK_DIST_BIND` to override loopback for multi-host distribution. `BEAMTALK_WS_ALLOWED_HOSTS` controls the WebSocket `Origin`/`Host` allowlist. Connections per origin are capped at 32.
+- **Fix: dependency manifests accept 4-segment hex.pm versions and tolerate unknown keys from newer toolchains (BT-5133).**
+- **Fix: LSP rename in read-only files, keyword-send reference spans, MCP stale port-file bypass (BT-5132).**
+- **Fix: LSP preload recovery after failure, improved file-watch reliability for new directories (BT-5131).**
+- **Fix: VS Code inspector panel reconnect, session-id parsing, stale port-file detection (BT-5130).**
+- **Fix: LiveView IDE unified eval path with timeout/interrupt, graceful session close on shutdown (BT-5129).**
+- **Fix: LiveView release `SECRET_KEY_BASE` is generated before the workspace-resolving eval (BT-5128).**
 
 ## 0.6.0 — 2026-11-21
 

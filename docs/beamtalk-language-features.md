@@ -8225,6 +8225,7 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 | **Subprocess**, **ReactiveSubprocess** | OS process execution ([ADR 0051](ADR/0051-subprocess-execution.md)) |
 | **OS**, **System** | Platform info and system operations |
 | **Json** | Data serialisation (JSON) |
+| **JsonMapping**, **JsonMappable** | Declarative JSON field mapping (BT-2819) — see [§ JsonMapping](#jsonmapping--declarative-json-field-mapping) |
 | **Regex** | Regular expression matching |
 | **DateTime**, **Time**, **Duration** | Date/time operations (`DateTime>>weekday` → ISO Monday=1..Sunday=7) |
 | **Random** | Random number generation |
@@ -8625,6 +8626,8 @@ An `Interval` represents an arithmetic sequence of integers without materialisin
 (1 to: 5) collect: [:x | x * x]                 // => #(1, 4, 9, 16, 25)
 ```
 
+A step of `0` or `0.0` raises, and a step or limit that is `nil` or not a number raises `TypeError`. The compiled counted-loop path (`to:by:do:`) raises the same errors.
+
 ### Bag(E) — Multisets
 
 `Bag(E)` is an unordered collection that allows duplicate elements. It is backed by a `Dictionary(E, Integer)` mapping elements to occurrence counts. Like other collections, Bag is immutable — mutating operations return a new Bag.
@@ -8658,6 +8661,8 @@ Bag new anyOne                          // raises empty_collection
 `Set` and `Dictionary` are unordered the same way and follow the same rule —
 see "Accessing an Empty Collection" above for the full `first`/`last`/`anyOne`
 split.
+
+`Bag collect:`, `select:` and `reject:` with a stateful (outer-local–writing) block raise `stateful_block_dispatch`. Use `asList` first if you need to filter with side-effects.
 
 ### Stream — Lazy Pipelines
 
@@ -8928,6 +8933,27 @@ s asList
 ```
 
 If you need immediate side effects, use the eager collection method (`List do:`) or call a terminal operation right away.
+
+### JsonMapping — Declarative JSON Field Mapping
+
+`JsonMapping` describes which fields of an object go on the wire, under which key, and through which optional converter block. `encode:` applies the mapping and answers a Dictionary. Unmapped fields are omitted.
+
+`JsonMappable` is a protocol: implement class-side `jsonMapping -> JsonMapping` and `asJson` is provided. `Json generate:` finds it through the ordinary `asJson` hook, so nested mapped objects convert recursively. A hand-written `asJson` in the class body wins (ADR 0127 §3a).
+
+```beamtalk
+Value subclass: Issue
+  uses: JsonMappable
+  field: issueId = ""
+  field: title = ""
+  field: secret = "x"
+
+  class jsonMapping -> JsonMapping =>
+    JsonMapping new
+      |> mapField: #issueId to: "issue_id"
+      |> mapField: #title
+```
+
+`mapField:to:using:` takes a converter block for custom encoding. Chain entries with `|>`, not a cascade — `JsonMapping` is a Value and a cascade drops every update but the last (ADR 0145). A duplicate key in `mapField:to:` raises at build time; a field missing from the object raises at encode time. Works on Actors as well as Values.
 
 ### Diagnostic Suppression (`@expect`)
 
