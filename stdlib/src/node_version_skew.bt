@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// NodeVersionSkew — system event announced when a newly connected peer runs
+/// a different wire-format or Beamtalk version (ADR 0126 §5.3, Amendment
+/// (BT-5193) D3).
+///
+/// Published on `SystemAnnouncer current` by the runtime's
+/// `beamtalk_node_monitor` once per connect, alongside `NodeShapeSkew`. A
+/// peer too old to report its versions is announced too, with `nil`
+/// remote fields. The connection is never refused: a Beamtalk version
+/// mismatch is the normal state of a rolling upgrade (ADR 0125). The
+/// per-message wire-version check (`wire_version_unsupported`, ADR 0126
+/// §5.2) stays the safety net.
+///
+/// ## Examples
+/// ```beamtalk
+/// SystemAnnouncer current when: NodeVersionSkew do: [:e |
+///   Transcript showCr: e node name asString ++ " runs " ++ e remoteBeamtalkVersion printString
+/// ]
+/// ```
+sealed typed Announcement subclass: NodeVersionSkew
+  field: node :: Node
+  field: localWireVersion :: Integer
+  field: remoteWireVersion :: Integer | Nil = nil
+  field: localBeamtalkVersion :: String
+  field: remoteBeamtalkVersion :: String | Nil = nil

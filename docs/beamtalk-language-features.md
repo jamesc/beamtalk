@@ -7836,6 +7836,10 @@ SystemAnnouncer current when: NodeShapeSkew do: [:e |
   Transcript showCr: e node name asString, ": ", e className asString,
     " local v", e localVersion printString, " remote v", e remoteVersion printString
 ]
+SystemAnnouncer current when: NodeVersionSkew do: [:e |
+  Transcript showCr: e node name asString, " runs Beamtalk ",
+    e remoteBeamtalkVersion printString, " wire v", e remoteWireVersion printString
+]
 ```
 
 - **`NodeUp`** / **`NodeDown`** fire for every visible node join/leave
@@ -7852,7 +7856,16 @@ SystemAnnouncer current when: NodeShapeSkew do: [:e |
   visible before the first send actually fails on it (the per-message check
   above is the real safety net). `aNode shapeSkew` (below) surfaces the same
   information as a point-in-time, queryable snapshot rather than only a
-  live event stream.
+  live event stream. The count is kept on both sides: when one node reloads
+  a class, both it and the peer announce `NodeShapeSkew` and update their
+  counts. A peer that disconnects drops out of the count.
+- **`NodeVersionSkew`** is announced once per connect when the peer runs a
+  different wire-format version (`localWireVersion` / `remoteWireVersion`)
+  or Beamtalk version (`localBeamtalkVersion` / `remoteBeamtalkVersion`).
+  A peer too old to report its versions is announced too, with `nil` remote
+  fields. Like `NodeShapeSkew`, it **never refuses the connection**: a
+  Beamtalk version mismatch is the normal state of a rolling upgrade. The
+  per-message `wire_version_unsupported` check stays the safety net.
 
 **Supervision-tree introspection reaches across nodes too:**
 `ProcessNavigation on: aNode` snapshots the *target* node's `default`-scope

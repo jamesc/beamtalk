@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5232 fixture: registered on both nodes of `beamtalk_dist_shape_skew_tests`
+// at matching versions, then reloaded on the *peer* only, so the test can
+// check that both nodes' skew tallies and announcements follow the reload.
+
+Actor subclass: ShapeSkewPeerReloadCart
+  state: qty :: Integer = 0

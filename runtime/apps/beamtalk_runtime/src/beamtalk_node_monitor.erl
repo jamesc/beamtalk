@@ -76,6 +76,28 @@ per class it checks, kept in `#state.skew` (a per-peer set of currently-
 skewed class names) and read back via `skew_count/1` (`Node>>shapeSkew`) — the tally is
 exactly "what this module's own checks have found and not yet found
 resolved again", not a re-derivation of `NodeShapeSkew`'s own criteria.
+
+The tally only holds entries for connected peers: `nodeup` (and `init/1`,
+for peers already connected) opens an empty entry, `nodedown` removes it,
+and a `skew_detected` cast for a node with no entry is dropped — so a check
+that finishes after its peer has gone cannot bring the entry back (BT-5232).
+
+A reload-time check updates **both** sides: after comparing its own entry
+with a peer's, the reloading node casts the pair to the peer's monitor
+(`{peer_class_checked, ...}` with the reloader's new entry), which re-reads
+its own entry and runs the same `announce_if_skewed/4` against its own tally
+and bus. A peer too old to know the message ignores
+it (`handle_cast/2`'s catch-all).
+
+## Version skew at connect (ADR 0126 Amendment (BT-5193) D3)
+
+On `nodeup` a second spawned check reads the peer's
+`beamtalk_version:dist_versions/0` (`{wireVersion, beamtalkVersion}`) and
+compares it with this node's. On a mismatch it announces one
+`NodeVersionSkew`. A peer that cannot answer (too old to export the
+function, or any other `erpc` failure) is announced too, with `nil` remote
+fields: that is the rolling-upgrade case the event exists for. The
+connection is never refused.
 """.
 
 -include("beamtalk.hrl").
@@ -84,7 +106,12 @@ resolved again", not a re-derivation of `NodeShapeSkew`'s own criteria.
 %% API
 -export([start_link/0, skew_count/1]).
 -ifdef(TEST).
--export([normalize_reason/1]).
+-export([
+    normalize_reason/1,
+    check_shape_skew_on_reload/2,
+    check_version_skew_on_connect/1,
+    version_skew_fields/3
+]).
 -endif.
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
@@ -105,8 +132,8 @@ resolved again", not a re-derivation of `NodeShapeSkew`'s own criteria.
     %% sync by the same fault-isolated `announce_if_skewed/4` check that
     %% fires the `NodeShapeSkew` announcement below — the `nodes` surface op
     %% needs a snapshot to *read*, not just the fire-and-forget event stream
-    %% `NodeShapeSkew` already is. Cleared per-peer on `nodedown` (a
-    %% disconnected peer has no meaningful skew count).
+    %% `NodeShapeSkew` already is. An entry exists exactly while the peer is
+    %% connected: opened on `nodeup`, removed on `nodedown` (BT-5232).
     skew = #{} :: #{node() => sets:set(atom())}
 }).
 
@@ -152,7 +179,10 @@ init([]) ->
             true -> node();
             false -> undefined
         end,
-    {ok, #state{own_name = OwnName, class_loaded_sub = ClassLoadedSub}}.
+    %% Peers already connected when the monitor (re)starts get a tally entry
+    %% too, or their skew casts would be dropped until they reconnect.
+    Skew = maps:from_list([{Peer, empty_skew_set()} || Peer <- nodes()]),
+    {ok, #state{own_name = OwnName, class_loaded_sub = ClassLoadedSub, skew = Skew}}.
 
 handle_call({skew_count, Node}, _From, #state{skew = Skew} = State) ->
     {reply, sets:size(skew_set_for(Node, Skew)), State};
@@ -160,8 +190,14 @@ handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
 handle_cast({skew_detected, Node, ClassName}, #state{skew = Skew} = State) ->
-    Updated = sets:add_element(ClassName, skew_set_for(Node, Skew)),
-    {noreply, State#state{skew = Skew#{Node => Updated}}};
+    case maps:find(Node, Skew) of
+        {ok, Existing} ->
+            {noreply, State#state{skew = Skew#{Node => sets:add_element(ClassName, Existing)}}};
+        error ->
+            %% Not connected (BT-5232): a check that outlived its peer's
+            %% `nodedown` must not bring the entry back.
+            {noreply, State}
+    end;
 handle_cast({skew_cleared, Node, ClassName}, #state{skew = Skew} = State) ->
     case maps:find(Node, Skew) of
         {ok, Existing} ->
@@ -169,12 +205,25 @@ handle_cast({skew_cleared, Node, ClassName}, #state{skew = Skew} = State) ->
         error ->
             {noreply, State}
     end;
+handle_cast({peer_class_checked, PeerNode, ClassName, PeerEntry}, State) when
+    is_atom(PeerNode), is_atom(ClassName), is_map(PeerEntry)
+->
+    %% `PeerNode` reloaded `ClassName` (BT-5232): compare its new entry with
+    %% this node's *current* one, re-read here rather than trusting the copy
+    %% the peer saw (this side may have reloaded since). Spawned, like the
+    %% other checks, so this gen_server never computes a shape entry inline.
+    spawn(fun() -> check_peer_reload(PeerNode, ClassName, PeerEntry) end),
+    {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
 -spec skew_set_for(node(), #{node() => sets:set(atom())}) -> sets:set(atom()).
 skew_set_for(Node, Skew) ->
-    maps:get(Node, Skew, sets:new([{version, 2}])).
+    maps:get(Node, Skew, empty_skew_set()).
+
+-spec empty_skew_set() -> sets:set(atom()).
+empty_skew_set() ->
+    sets:new([{version, 2}]).
 
 handle_info({nodeup, Node, _Info}, State) when Node =:= node() ->
     %% This VM just became distributed. Remember the name: by the time the
@@ -183,12 +232,14 @@ handle_info({nodeup, Node, _Info}, State) when Node =:= node() ->
     %% tracked, not a history, so a later genuine peer that reuses an old
     %% self-name still announces normally.
     {noreply, State#state{own_name = Node}};
-handle_info({nodeup, Node, _Info}, State) ->
+handle_info({nodeup, Node, _Info}, #state{skew = Skew} = State) ->
     announce('NodeUp', #{node => beamtalk_node:from_atom(Node)}),
-    %% Spawned, not inline: the skew check's erpc round trip must never
+    %% Spawned, not inline: the skew checks' erpc round trips must never
     %% delay this gen_server's delivery of another node's NodeUp/NodeDown.
+    %% Two processes, so a peer slow to answer one read never delays the other.
+    spawn(fun() -> check_version_skew_on_connect(Node) end),
     spawn(fun() -> check_shape_skew_on_connect(Node) end),
-    {noreply, State};
+    {noreply, State#state{skew = Skew#{Node => skew_set_for(Node, Skew)}}};
 handle_info({nodedown, Node, _Info}, #state{own_name = Node} = State) ->
     %% Own pending self-nodedown — clear it, not a membership change.
     {noreply, State#state{own_name = undefined}};
@@ -330,22 +381,25 @@ Reload-time re-check (ADR 0126 §5.3): re-runs the comparison for exactly
 entirely — no `erpc` calls at all — when `Peers` is empty (the common case:
 most class loads happen before any peer is connected, e.g. every stdlib
 class at boot) or when `ClassName` is not one of this node's own
-project-scope classes (`beamtalk_release:shape_manifest/0` already excludes
-stdlib, ADR 0098 — a stdlib class reload is not this feature's concern).
+project-scope classes (`beamtalk_release:project_class_shape_entry/1`
+answers `undefined` for stdlib, ADR 0098 — a stdlib class reload is not this
+feature's concern). Only that one class's entry is computed, never the full
+manifest.
 """.
 -spec check_shape_skew_on_reload(atom(), [node()]) -> ok.
 check_shape_skew_on_reload(_ClassName, []) ->
     ok;
 check_shape_skew_on_reload(ClassName, Peers) ->
     try
-        case maps:find(ClassName, beamtalk_release:shape_manifest()) of
-            {ok, LocalEntry} ->
+        %% Just this class's entry, not the whole manifest (BT-5232).
+        case beamtalk_release:project_class_shape_entry(ClassName) of
+            undefined ->
+                ok;
+            LocalEntry ->
                 lists:foreach(
                     fun(PeerNode) -> check_one_peer_class(PeerNode, ClassName, LocalEntry) end,
                     Peers
-                );
-            error ->
-                ok
+                )
         end
     catch
         Class:Reason:Stacktrace ->
@@ -358,6 +412,102 @@ check_shape_skew_on_reload(ClassName, Peers) ->
             })
     end,
     ok.
+
+-doc """
+The receiving side of a peer's reload check (BT-5232): compare `PeerNode`'s
+new `PeerEntry` for `ClassName` with this node's current entry, updating
+this node's tally and bus. Silent when the class is not a project class
+here. Fault-isolated like the other checks.
+""".
+-spec check_peer_reload(node(), atom(), beamtalk_release_shapes:shape_entry()) -> ok.
+check_peer_reload(PeerNode, ClassName, PeerEntry) ->
+    try
+        case beamtalk_release:project_class_shape_entry(ClassName) of
+            undefined -> ok;
+            OwnEntry -> announce_if_skewed(PeerNode, ClassName, OwnEntry, PeerEntry)
+        end
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_WARNING("Shape-skew check failed for a peer's reload", #{
+                domain => [beamtalk, runtime],
+                node => PeerNode,
+                className => ClassName,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            })
+    end,
+    ok.
+
+-doc """
+Connect-time version comparison (ADR 0126 Amendment (BT-5193) D3): read
+`PeerNode`'s `beamtalk_version:dist_versions/0` and announce one
+`NodeVersionSkew` when it differs from this node's. Any `erpc` failure —
+including `undef` from a peer too old to export the function — is logged
+and announced with `nil` remote fields, never dropped. Fault-isolated like
+the shape check: it must never crash the spawned connect process before
+the shape check runs.
+""".
+-spec check_version_skew_on_connect(node()) -> ok.
+check_version_skew_on_connect(PeerNode) ->
+    try
+        Remote =
+            case
+                beamtalk_call_failure:erpc(
+                    PeerNode, beamtalk_version, dist_versions, [], ?BT_REMOTE_CALL_TIMEOUT
+                )
+            of
+                {ok, #{wireVersion := W, beamtalkVersion := V}} when is_integer(W), is_binary(V) ->
+                    {W, V};
+                Other ->
+                    ?LOG_WARNING("Could not read peer versions on connect", #{
+                        domain => [beamtalk, runtime],
+                        node => PeerNode,
+                        reason => Other
+                    }),
+                    unknown
+            end,
+        case version_skew_fields(PeerNode, beamtalk_version:dist_versions(), Remote) of
+            none -> ok;
+            Fields -> announce('NodeVersionSkew', Fields)
+        end
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_WARNING("Version-skew check failed on connect", #{
+                domain => [beamtalk, runtime],
+                node => PeerNode,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            })
+    end,
+    ok.
+
+-doc """
+The `NodeVersionSkew` fields for `PeerNode`, or `none` when the local and
+remote `{wireVersion, beamtalkVersion}` pairs match. `unknown` (the peer
+could not answer) always differs, with `nil` remote fields.
+""".
+-spec version_skew_fields(
+    node(),
+    #{wireVersion := pos_integer(), beamtalkVersion := binary()},
+    {integer(), binary()} | unknown
+) -> map() | none.
+version_skew_fields(_PeerNode, #{wireVersion := W, beamtalkVersion := V}, {W, V}) ->
+    none;
+version_skew_fields(PeerNode, #{wireVersion := LocalW, beamtalkVersion := LocalV}, Remote) ->
+    {RemoteW, RemoteV} =
+        case Remote of
+            {W, V} -> {W, beamtalk_primitive:string_from_binary(V)};
+            unknown -> {nil, nil}
+        end,
+    #{
+        node => beamtalk_node:from_atom(PeerNode),
+        localWireVersion => LocalW,
+        remoteWireVersion => RemoteW,
+        localBeamtalkVersion => beamtalk_primitive:string_from_binary(LocalV),
+        remoteBeamtalkVersion => RemoteV
+    }.
 
 -doc """
 Re-query `PeerNode`'s entry for exactly `ClassName`
@@ -384,7 +534,17 @@ check_one_peer_class(PeerNode, ClassName, LocalEntry) ->
         {ok, undefined} ->
             ok;
         {ok, RemoteEntry} when is_map(RemoteEntry) ->
-            announce_if_skewed(PeerNode, ClassName, LocalEntry, RemoteEntry);
+            announce_if_skewed(PeerNode, ClassName, LocalEntry, RemoteEntry),
+            %% Tell the peer, so its tally and bus see the reload too
+            %% (BT-5232). Skipped if it has gone: a send would re-dial it.
+            case lists:member(PeerNode, nodes()) of
+                true ->
+                    gen_server:cast(
+                        {?MODULE, PeerNode}, {peer_class_checked, node(), ClassName, LocalEntry}
+                    );
+                false ->
+                    ok
+            end;
         {error, Reason} ->
             ?LOG_WARNING("Could not fetch peer class shape entry on reload", #{
                 domain => [beamtalk, runtime],

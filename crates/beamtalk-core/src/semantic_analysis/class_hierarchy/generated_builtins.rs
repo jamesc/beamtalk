@@ -83,6 +83,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "NodeDown"
             | "NodeShapeSkew"
             | "NodeUp"
+            | "NodeVersionSkew"
             | "Number"
             | "OS"
             | "Object"
@@ -3180,6 +3181,41 @@ fn class_info_NodeUp() -> ClassInfo {
             state_types: HashMap::from([("node".into(), DeclaredType::simple("Node"))]),
             state_has_default: HashMap::from([("node".into(), false)]),
             state_kinds: HashMap::from([("node".into(), SlotKind::Eager)]),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+    }
+}
+
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_NodeVersionSkew() -> ClassInfo {
+    ClassInfo {
+            name: "NodeVersionSkew".into(),
+            superclass: Some("Announcement".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            in_caller_new1: false,
+            is_module_less: false,
+            auto_ctors: Some(AutoConstructors { keyword_constructor: Some("node:localWireVersion:remoteWireVersion:localBeamtalkVersion:remoteBeamtalkVersion:".into()) }),
+            state: vec!["node".into(), "localWireVersion".into(), "remoteWireVersion".into(), "localBeamtalkVersion".into(), "remoteBeamtalkVersion".into()],
+            state_types: HashMap::from([("node".into(), DeclaredType::simple("Node")), ("localWireVersion".into(), DeclaredType::simple("Integer")), ("remoteWireVersion".into(), DeclaredType::union(vec![DeclaredType::simple("Integer"), DeclaredType::simple("Nil")])), ("localBeamtalkVersion".into(), DeclaredType::simple("String")), ("remoteBeamtalkVersion".into(), DeclaredType::union(vec![DeclaredType::simple("String"), DeclaredType::simple("Nil")]))]),
+            state_has_default: HashMap::from([("node".into(), false), ("localWireVersion".into(), false), ("remoteWireVersion".into(), true), ("localBeamtalkVersion".into(), false), ("remoteBeamtalkVersion".into(), true)]),
+            state_kinds: HashMap::from([("node".into(), SlotKind::Eager), ("localWireVersion".into(), SlotKind::Eager), ("remoteWireVersion".into(), SlotKind::Eager), ("localBeamtalkVersion".into(), SlotKind::Eager), ("remoteBeamtalkVersion".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
             has_dynamic_field_writer: false,
             methods: vec![],
@@ -6322,6 +6358,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     classes.insert("NodeDown".into(), class_info_NodeDown());
     classes.insert("NodeShapeSkew".into(), class_info_NodeShapeSkew());
     classes.insert("NodeUp".into(), class_info_NodeUp());
+    classes.insert("NodeVersionSkew".into(), class_info_NodeVersionSkew());
     classes.insert("Number".into(), class_info_Number());
     classes.insert("OS".into(), class_info_OS());
     classes.insert("Object".into(), class_info_Object());
