@@ -28,6 +28,7 @@ other while keeping both DRY.
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -export([
     flush_and_collect/2,
@@ -42,6 +43,7 @@ other while keeping both DRY.
     await_write/2,
     write_queued/1,
     write_dropped/3,
+    stdin_dropped_error/2,
     fail_pending_writes/2
 ]).
 
@@ -214,15 +216,24 @@ write_queued(State) ->
     end.
 
 -doc """
+The `runtime_error` a `writeLine:` raises once the exec port has dropped a
+write: kind and hint (`Reason` from the port) shared by the dropped call and
+every later one.
+""".
+-spec stdin_dropped_error(atom(), binary()) -> #beamtalk_error{}.
+stdin_dropped_error(Class, Reason) ->
+    beamtalk_error:new(
+        runtime_error, Class, 'writeLine:', <<"stdin write failed: ", Reason/binary>>
+    ).
+
+-doc """
 The oldest parked write was dropped: its caller gets a `runtime_error` saying
 the line was not written. Every later `writeLine:` raises too.
 """.
 -spec write_dropped(atom(), binary(), map()) -> map().
 write_dropped(Class, Reason, State) ->
     Err = beamtalk_error:with_message(
-        beamtalk_error:new(
-            runtime_error, Class, 'writeLine:', <<"stdin write failed: ", Reason/binary>>
-        ),
+        stdin_dropped_error(Class, Reason),
         <<"writeLine: failed: the line was not written">>
     ),
     S1 =

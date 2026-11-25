@@ -368,9 +368,7 @@ handle_writeLine({beamtalk_string, B}, From, State) when is_binary(B) ->
 handle_writeLine(_Data, _From, #{stdin_dropped := Reason} = State) ->
     %% BT-5195: an earlier line could not be delivered (the child is not
     %% reading its input, or closed it), so the stream it sees is broken.
-    Err = beamtalk_error:new(runtime_error, 'ReactiveSubprocess', 'writeLine:', <<
-        "stdin write failed: ", Reason/binary
-    >>),
+    Err = beamtalk_subprocess_port:stdin_dropped_error('ReactiveSubprocess', Reason),
     {reply, {error, Err}, State};
 handle_writeLine(Data, From, State) ->
     #{port := Port, child_id := ChildId, port_closed := PortClosed} = State,
