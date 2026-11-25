@@ -321,19 +321,18 @@ pub(super) fn inject_method_source(
 }
 
 /// ADR 0084: Recognise a `ClassBuilder` construction cascade that
-/// carries a `classMethods:` setter, returning `(ClassName, ClassVarNames)` for
-/// the codegen that lowers the class-method block literals into funs.
+/// carries a `classMethods:` setter, returning the class name for the codegen
+/// that lowers the class-method block literals into funs.
 ///
-/// `ClassName` comes from a **literal** `name:` symbol (required — it keys the
-/// runtime self/`super` dispatch the funs emit); `ClassVarNames` are the keys of
-/// the `classVars:` map (used to recognise `self.cvar` as class-variable access).
+/// The name comes from a **literal** `name:` symbol (required — it keys the
+/// runtime self/`super` dispatch the funs emit).
 /// Returns `None` when the cascade is not a recognised `ClassBuilder`
 /// construction, lacks a terminal `register`, has no `classMethods:` setter, or
 /// has no literal `name:`.
 pub(super) fn builder_class_method_context(
     receiver: &Expression,
     messages: &[CascadeMessage],
-) -> Option<(String, Vec<String>)> {
+) -> Option<String> {
     let (underlying, first_msg): (&Expression, Option<(&MessageSelector, &[Expression])>) =
         match receiver {
             Expression::MessageSend {
@@ -350,7 +349,6 @@ pub(super) fn builder_class_method_context(
     }
 
     let mut class_name: Option<String> = None;
-    let mut class_var_names: Vec<String> = Vec::new();
     let mut has_class_methods = false;
     let mut last_is_register = false;
 
@@ -366,38 +364,12 @@ pub(super) fn builder_class_method_context(
             // Later setters win in a cascade — keep the last value, and a later
             // non-literal setter clears an earlier literal one (the effective
             // setter is non-literal, so it must not enable lowering with a stale
-            // class name / var set).
+            // class name).
             "name:" => {
                 if let [Expression::Literal(Literal::Symbol(sym), _)] = args {
                     class_name = Some(sym.to_string());
                 } else {
                     class_name = None;
-                }
-            }
-            "classVars:" => {
-                if let Some(pairs) = single_map_literal(args) {
-                    class_var_names = pairs
-                        .iter()
-                        .filter_map(|p| match &p.key {
-                            Expression::Literal(Literal::Symbol(s), _) => Some(s.to_string()),
-                            _ => None,
-                        })
-                        .collect();
-                } else {
-                    class_var_names.clear();
-                }
-            }
-            // An incremental `addClassState: #name default: …` adds one
-            // class variable name (when the name is a literal symbol), so blocks
-            // installed by `addClassMethod:body:` recognise `self.name` as a
-            // class-variable access. Later setters add to the running set;
-            // `classVars:` (a bulk replace) resets it above.
-            "addClassState:default:" => {
-                if let [Expression::Literal(Literal::Symbol(s), _), _] = args {
-                    let name = s.to_string();
-                    if !class_var_names.contains(&name) {
-                        class_var_names.push(name);
-                    }
                 }
             }
             // `addClassMethod:body:` is the incremental counterpart of
@@ -411,7 +383,7 @@ pub(super) fn builder_class_method_context(
     if !last_is_register || !has_class_methods {
         return None;
     }
-    class_name.map(|cn| (cn, class_var_names))
+    class_name
 }
 
 #[cfg(test)]
@@ -948,37 +920,7 @@ mod tests {
              addClassMethod: #bump body: [:self | 1]; register",
         );
         let ctx = builder_class_method_context(&recv, &msgs).expect("should recognise");
-        assert_eq!(ctx.0, "Foo");
-    }
-
-    // `addClassState: #name default: …` contributes its name to the
-    // class-variable set so `addClassMethod:body:` blocks treat `self.name` as a
-    // class-variable access.
-    #[test]
-    fn context_collects_incremental_class_state_names() {
-        let (recv, msgs) = parse_cascade(
-            "Object classBuilder name: #Foo; \
-             addClassState: #total default: 0; \
-             addClassMethod: #bump body: [:self | self.total]; register",
-        );
-        let (_name, cvars) = builder_class_method_context(&recv, &msgs).expect("should recognise");
-        assert!(cvars.contains(&"total".to_string()), "got: {cvars:?}");
-    }
-
-    // `classVars:` and `addClassState:default:` both feed the class-var
-    // set; a later `classVars:` (bulk replace) resets, then incremental adds
-    // accumulate after it.
-    #[test]
-    fn context_merges_bulk_and_incremental_class_state() {
-        let (recv, msgs) = parse_cascade(
-            "Object classBuilder name: #Foo; \
-             classVars: #{ #a => 1 }; \
-             addClassState: #b default: 2; \
-             addClassMethod: #m body: [:self | self.a + self.b]; register",
-        );
-        let (_name, cvars) = builder_class_method_context(&recv, &msgs).expect("should recognise");
-        assert!(cvars.contains(&"a".to_string()), "got: {cvars:?}");
-        assert!(cvars.contains(&"b".to_string()), "got: {cvars:?}");
+        assert_eq!(ctx, "Foo");
     }
 
     // No class-side methods (bulk or incremental) → no class-method

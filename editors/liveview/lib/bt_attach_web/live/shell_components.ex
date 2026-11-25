@@ -4,8 +4,9 @@
 defmodule BtAttachWeb.Live.ShellComponents do
   @moduledoc """
   Cockpit shell function components extracted from `BtAttachWeb.WorkspaceLive`
-  (BT-5092): the Tweaks (appearance) panel. Imported by `WorkspaceLive`, so the
-  `<.tweaks_panel>` call site in its template is unchanged.
+  (BT-5092): the Tweaks (appearance) panel and the eval activity indicator
+  (BT-5189). Imported by `WorkspaceLive`, so the `<.tweaks_panel>` call site in
+  its template is unchanged.
   """
 
   use BtAttachWeb, :html
@@ -141,6 +142,33 @@ defmodule BtAttachWeb.Live.ShellComponents do
         <p class="twk-note">Appearance only — saved to this browser.</p>
       </div>
     </div>
+    """
+  end
+
+  # ── Eval activity indicator (BT-5189) ───────────────────────────────────────
+
+  # The cockpit-wide "an evaluation is running / N are waiting" indicator with
+  # its Stop control. Every eval — the dock's, the REPL's, and every internal
+  # one (renames, removals, destructive flushes, pokes, class compiles) — runs
+  # through the dock's single serialised queue, so this is rendered outside the
+  # dock (the top bar) and inside modals, where an internal eval queued behind
+  # a long user eval would otherwise have no Stop and no pending sign in view.
+  # Stop interrupts the running eval and cancels the queued ones; each
+  # cancelled operation reports it in its own UI.
+  attr :id, :string, required: true
+  attr :running, :boolean, required: true
+  attr :queued, :integer, required: true
+
+  def eval_activity(assigns) do
+    ~H"""
+    <span :if={@running} id={@id} class="eval-activity" role="status">
+      <span class="kbdhint">
+        evaluating…{if @queued > 0, do: " (#{@queued} waiting)"}
+      </span>
+      <button id={"#{@id}-stop"} class="btn btn-sm" type="button" phx-click="eval_interrupt">
+        Stop
+      </button>
+    </span>
     """
   end
 end

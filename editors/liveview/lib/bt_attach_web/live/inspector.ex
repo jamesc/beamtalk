@@ -1074,10 +1074,26 @@ defmodule BtAttachWeb.Live.Inspector do
 
   defp send_window_poke(socket, w, pid, label, message) do
     code = "#{label} #{message}"
+    crumbs = w.crumbs
 
-    BtAttachWeb.Live.Dock.eval_async(socket, pid, code, fn socket, result ->
-      update_window(socket, w.id, fn w -> fold_window_poke(socket, w, result) end)
-    end)
+    # BT-5189: the result lands only on the window it was sent from, and only
+    # while that window still shows the poked object — a window closed or
+    # navigated elsewhere meanwhile must not show it against another object.
+    BtAttachWeb.Live.Dock.eval_async(
+      socket,
+      pid,
+      code,
+      fn socket, result ->
+        update_window_at(socket, w.id, crumbs, &fold_window_poke(socket, &1, result))
+      end,
+      fn socket, reason ->
+        update_window_at(socket, w.id, crumbs, &%{&1 | poke_result: nil, poke_error: reason})
+      end
+    )
+  end
+
+  defp update_window_at(socket, id, crumbs, fun) do
+    update_window(socket, id, fn w -> if w.crumbs == crumbs, do: fun.(w), else: w end)
   end
 
   defp fold_window_poke(socket, w, result) do
@@ -1309,27 +1325,47 @@ defmodule BtAttachWeb.Live.Inspector do
 
   defp send_poke(socket, pid, label, message) do
     code = "#{label} #{message}"
+    crumbs = socket.assigns.inspect_crumbs
 
-    BtAttachWeb.Live.Dock.eval_async(socket, pid, code, fn socket, result ->
-      case result do
-        {:ok, term, _output, _warnings} ->
-          socket
-          |> assign(poke_result: "→ #{Workspace.render_term(term)}", poke_error: nil)
-          # A poke is a user-initiated mutation — re-read the inspected object
-          # now so its fields reflect the write immediately, rather than
-          # waiting on the async `{:object_changed, …}` change-stream push
-          # (which is coalesced/delayed, and is the live-tracking path tracked
-          # separately by BT-2524). No-op when the pane is frozen or nothing is
-          # watched.
-          |> refresh_poked_inspector()
-
-        {:error, _, _, _} = err ->
-          assign(socket, poke_result: nil, poke_error: FacadeError.render_eval_error(err))
-
-        {:error, _} = err ->
-          assign(socket, poke_result: nil, poke_error: FacadeError.render_eval_error(err))
+    # BT-5189: fold the (possibly queued) result only while the docked
+    # Inspector still shows the object it was sent to — navigation meanwhile
+    # resets the pane, and the result must not appear against another object.
+    BtAttachWeb.Live.Dock.eval_async(
+      socket,
+      pid,
+      code,
+      fn socket, result ->
+        if socket.assigns.inspect_crumbs == crumbs,
+          do: fold_poke(socket, result),
+          else: socket
+      end,
+      fn socket, reason ->
+        if socket.assigns.inspect_crumbs == crumbs,
+          do: assign(socket, poke_result: nil, poke_error: reason),
+          else: socket
       end
-    end)
+    )
+  end
+
+  defp fold_poke(socket, result) do
+    case result do
+      {:ok, term, _output, _warnings} ->
+        socket
+        |> assign(poke_result: "→ #{Workspace.render_term(term)}", poke_error: nil)
+        # A poke is a user-initiated mutation — re-read the inspected object
+        # now so its fields reflect the write immediately, rather than
+        # waiting on the async `{:object_changed, …}` change-stream push
+        # (which is coalesced/delayed, and is the live-tracking path tracked
+        # separately by BT-2524). No-op when the pane is frozen or nothing is
+        # watched.
+        |> refresh_poked_inspector()
+
+      {:error, _, _, _} = err ->
+        assign(socket, poke_result: nil, poke_error: FacadeError.render_eval_error(err))
+
+      {:error, _} = err ->
+        assign(socket, poke_result: nil, poke_error: FacadeError.render_eval_error(err))
+    end
   end
 
   # Re-read the inspected object after a successful poke so the pane

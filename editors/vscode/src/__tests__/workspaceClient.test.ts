@@ -1,7 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WebSocketCallbacks, WebSocketFactory } from "../workspaceClient";
@@ -727,6 +728,74 @@ describe("WorkspaceClient reconnect, timeout and close handling", () => {
     const before = sockets.length;
     await vi.advanceTimersByTimeAsync(1000); // back to the base delay
     expect(sockets.length).toBe(before + 1);
+    client.dispose();
+  });
+
+  // BT-5189: actor panels are closed only when a reconnect reached a
+  // restarted node — told apart by the port file's nonce, which a restart
+  // rewrites — never on a transient drop to the same node.
+  it("reports a node change only when the reconnect reached a restarted node", async () => {
+    const base = mkdtempSync(path.join(tmpdir(), "bt-ws-"));
+    const dir = path.join(base, "ws1");
+    mkdirSync(dir);
+    writeFileSync(path.join(dir, "port"), "4000\nnonce-a");
+    writeFileSync(path.join(dir, "cookie"), "secret");
+    const nodeInfo = (pid: number) =>
+      writeFileSync(
+        path.join(dir, "node.info"),
+        JSON.stringify({ port: 4000, pid, nonce: "nonce-a" })
+      );
+    nodeInfo(process.pid);
+    const sockets: MockWebSocket[] = [];
+    const client = await WorkspaceClient.fromFiles("ws1", {
+      baseDir: base,
+      wsFactory: (_url, callbacks) => {
+        const s = new MockWebSocket(callbacks);
+        sockets.push(s);
+        return s;
+      },
+    });
+    const handshake = (ws: MockWebSocket) => {
+      ws.receive({ op: "auth-required" });
+      ws.receive({ type: "auth_ok" });
+      ws.receive({ op: "session-started", session: "sess-abc" });
+    };
+    client.connect();
+    handshake(sockets[0]);
+    expect(client.nodeChangedOnLastConnect).toBe(false);
+
+    // Transient drop, same node (same nonce): not a change.
+    sockets[0].drop();
+    await vi.advanceTimersByTimeAsync(1000);
+    handshake(sockets[1]);
+    expect(client.state).toBe("connected");
+    expect(client.nodeChangedOnLastConnect).toBe(false);
+
+    // The node restarted on the same port: a fresh nonce.
+    writeFileSync(path.join(dir, "port"), "4000\nnonce-b");
+    sockets[1].drop();
+    await vi.advanceTimersByTimeAsync(1000);
+    handshake(sockets[2]);
+    expect(client.nodeChangedOnLastConnect).toBe(true);
+
+    // The node crashed and a successor took the port before rewriting the
+    // files: the old nonce lingers, but the recorded node pid is dead.
+    sockets[2].drop();
+    nodeInfo(2147483646);
+    await vi.advanceTimersByTimeAsync(1000);
+    handshake(sockets[3]);
+    expect(client.nodeChangedOnLastConnect).toBe(true);
+    client.dispose();
+  });
+
+  it("assumes a new node on reconnect when the node's identity cannot be read", async () => {
+    const { client, sockets, handshake } = makeMultiClient();
+    handshake(sockets[0]);
+    expect(client.nodeChangedOnLastConnect).toBe(false);
+    sockets[0].drop();
+    await vi.advanceTimersByTimeAsync(1000);
+    handshake(sockets[1]);
+    expect(client.nodeChangedOnLastConnect).toBe(true);
     client.dispose();
   });
 

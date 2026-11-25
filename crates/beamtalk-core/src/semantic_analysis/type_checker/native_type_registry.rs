@@ -570,15 +570,6 @@ impl FfiArgKinds {
             .into_iter()
             .chain(self.map.then_some(FFI_ARG_MAP_GUARD))
     }
-
-    /// The `badarg` charlist retry can change this argument (a binary becomes a
-    /// charlist, a map has nested tagged Strings unwrapped), so a call site with
-    /// one keeps the pre-call class-variable snapshot for it. A scalar never
-    /// retries.
-    #[must_use]
-    pub fn may_retry(self) -> bool {
-        self.binary || self.map
-    }
 }
 
 /// The extra guards `ty` (or a union member) needs: see [`FfiArgKinds`].
@@ -845,8 +836,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             [FFI_ARG_BINARY_GUARD, FFI_ARG_MAP_GUARD]
         );
-        assert!(!FfiArgKinds::default().may_retry());
-        assert!(ffi_arg_kinds(&ty("Dictionary")).may_retry());
     }
 
     #[test]
