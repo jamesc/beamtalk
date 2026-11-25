@@ -140,6 +140,10 @@ tls_preflight_test_() ->
                     Problems(#{"RELEASE_SSL_DIST_OPTFILE" => filename:join(Dir, "my!node.conf")})
                 ),
                 ?_assertMatch(
+                    ["RELEASE_SSL_DIST_OPTFILE '" ++ _],
+                    Problems(#{"RELEASE_SSL_DIST_OPTFILE" => filename:join(Dir, "n\x{e9}ud.conf")})
+                ),
+                ?_assertMatch(
                     ["RELEASE_DIST_INTERFACE is not set" ++ _],
                     Problems(#{"RELEASE_DIST_INTERFACE" => false})
                 ),

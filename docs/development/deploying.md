@@ -192,6 +192,12 @@ export RELEASE_DISTRIBUTION=tls RELEASE_HOST=web1.example.com \
 bin/orders foreground
 ```
 
+`RELEASE_HOST` must resolve, on the node's own host too, to an address the
+node listens on: the local client verbs dial it. Debian and Ubuntu map the
+machine's own name to `127.0.1.1` in `/etc/hosts`; with an interface such as
+`10.0.0.5`, `ping` and `stop` then report the running node as down. Fix that
+line, or name a wildcard interface.
+
 Both hosts use the same cookie. Open epmd (TCP 4369) and the distribution
 ports between them, and pin the distribution ports with
 `inet_dist_listen_min`/`inet_dist_listen_max` in a `[release] vm-args` overlay

@@ -458,7 +458,8 @@ tls_family(Host, Ip) ->
             {error,
                 io_lib:format(
                     "RELEASE_HOST ~ts and RELEASE_DIST_INTERFACE ~ts are different IP families; "
-                    "the node listens on one only, so use addresses of the same family",
+                    "the node's distribution runs over one family (inet_tls or inet6_tls), "
+                    "so use addresses of the same family",
                     [Host, inet:ntoa(Ip)]
                 )};
         _ ->
@@ -641,12 +642,14 @@ tls_optfile(Path0, Words, []) ->
     Path = filename:absname(Path0),
     %% The launchers splice the path into `erl`'s command line; `launcher.cmd`
     %% runs under delayed expansion, where `!`, `^` and `%` are not literal.
-    case [C || C <- Path, lists:member(C, "\"!^%") orelse C < 32] of
+    %% Non-ASCII is refused too: the check prints the path from a `-noshell`
+    %% VM, whose output encoding may be Latin-1.
+    case [C || C <- Path, lists:member(C, "\"!^%") orelse C < 32 orelse C > 126] of
         [_ | _] ->
             {error,
                 io_lib:format(
-                    "RELEASE_SSL_DIST_OPTFILE '~ts' must not contain '\"', '!', '^', '%' "
-                    "or control characters",
+                    "RELEASE_SSL_DIST_OPTFILE '~ts' must not contain '\"', '!', '^', '%', "
+                    "control or non-ASCII characters",
                     [Path]
                 )};
         [] ->
