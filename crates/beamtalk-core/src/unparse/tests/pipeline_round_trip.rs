@@ -161,7 +161,9 @@ fn a_comment_after_a_trailing_pipe_is_kept() {
 #[test]
 fn fmt_puts_a_short_pipeline_on_one_line() {
     assert_eq!(
-        format_source("x foo\n  |> bar baz\n  |> qux: 1\n").as_deref(),
+        format_source("x foo\n  |> bar baz\n  |> qux: 1\n")
+            .ok()
+            .as_deref(),
         Some("x foo |> bar baz |> qux: 1\n")
     );
 }
@@ -171,7 +173,7 @@ fn fmt_breaks_a_long_pipeline_one_stage_per_line() {
     let long = "total := orders select: [:o | o isPaid] |> collect: [:o | o amount] \
                 |> inject: 0 into: [:sum :each | sum + each]\n";
     assert_eq!(
-        format_source(long).as_deref(),
+        format_source(long).ok().as_deref(),
         Some(
             "total := orders select: [:o | o isPaid]\n  |> collect: [:o | o amount]\n  \
              |> inject: 0 into: [:sum :each | sum + each]\n"
@@ -184,7 +186,9 @@ fn a_comment_between_stages_breaks_the_whole_pipeline() {
     // The comment forces a break, and a broken pipeline puts every stage on
     // its own line, not only the one after the comment.
     assert_eq!(
-        format_source("x foo |> bar  // why\n  |> baz |> qux\n").as_deref(),
+        format_source("x foo |> bar  // why\n  |> baz |> qux\n")
+            .ok()
+            .as_deref(),
         Some("x foo\n  |> bar  // why\n  |> baz\n  |> qux\n")
     );
 }
@@ -194,7 +198,9 @@ fn a_stage_spanning_lines_breaks_the_pipeline() {
     // A stage whose block argument holds several statements spans lines, so
     // the pipeline is broken and the next stage starts its own line.
     assert_eq!(
-        format_source("xs |> collect: [:e |\n  e foo\n  e bar] |> size\n").as_deref(),
+        format_source("xs |> collect: [:e |\n  e foo\n  e bar] |> size\n")
+            .ok()
+            .as_deref(),
         Some("xs\n  |> collect: [:e |\n    e foo\n    e bar\n  ]\n  |> size\n")
     );
 }
@@ -204,7 +210,9 @@ fn a_broken_keyword_stage_keeps_its_first_keyword_after_the_pipe() {
     // Three keywords always break; the first stays on the `|>` line and the
     // rest align under it.
     assert_eq!(
-        format_source("x |> at: 1 put: 2 ifAbsent: [0]\n").as_deref(),
+        format_source("x |> at: 1 put: 2 ifAbsent: [0]\n")
+            .ok()
+            .as_deref(),
         Some("x\n  |> at: 1\n     put: 2\n     ifAbsent: [0]\n")
     );
 }
@@ -218,7 +226,7 @@ fn the_break_decision_counts_the_column_the_pipeline_starts_at() {
     assert_identity(&format!("{flat}\n"));
     let method = format!("Object subclass: A\n\n  m: allOrders => {flat}\n");
     assert_eq!(
-        format_source(&method),
+        format_source(&method).ok(),
         Some(format!(
             "Object subclass: A\n\n  m: allOrders =>\n    allOrders select: [:o | o isPaid]\n      {stage}\n"
         ))
