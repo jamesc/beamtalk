@@ -13,10 +13,10 @@ class-variable access (ADR 0130 §1, §2, §4, §5).
 A class's variables live in the calling process's dictionary under
 `key(ClassName)`: `{'$bt_class_vars', ClassTag}`, where `ClassTag` is the
 class's metaclass tag (`'Name class'`, `element(2, ClassSelf)`). The key
-shape is owned by Rust (`class_var_keys` in `beamtalk-codegen`) and shared
-through the generated `beamtalk_class_vars_keys.hrl`, because the class-variable
-reads and writes codegen inlines (`erlang:get/1` + `maps:*`, ADR 0130 Phase 0
-gate 3) build the same key. It is keyed by tag so that an access recovers its
+shape is defined in `beamtalk_class_vars_keys.hrl`. Compiled code no longer
+builds it (ADR 0153 Phase 2: codegen emits no class-variable access); this
+module and the class-variable home are its only users until Phase 3 deletes
+them. It is keyed by tag so that an access recovers its
 key from `ClassSelf` with one `element/2`, never a tag-to-name derivation. The
 value is either
 
