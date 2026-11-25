@@ -142,7 +142,7 @@ init([]) ->
 
 ## FFI Class Methods and Class Variables (ADR 0130)
 
-> **Being removed (ADR 0153).** Class variables are going away: `classState:` is a compile error and compiled code no longer reads or writes them. The rules below describe the `beamtalk_class_vars` API that remains until ADR 0153 Phase 3 deletes it; do not add new callers. Runtime catch boundaries no longer roll class-variable writes back (BT-5159).
+> **Being removed (ADR 0153).** Class variables are going away: `classState:` is a compile error and compiled code no longer reads or writes them. The rules below describe the `beamtalk_class_vars` API that remains until a later ADR 0153 Phase 3 step (BT-5163) deletes it; do not add new callers. Runtime catch boundaries no longer roll class-variable writes back (BT-5159).
 
 Class variables live in the class process's dictionary for the duration of a class-method invocation, and **every** access goes through `beamtalk_class_vars`. A class method implemented directly in hand-written Erlang (rather than compiled from `.bt` source) takes `(ClassSelf, Args...)` and returns the **bare result**: it never takes, builds or returns a class-variable map.
 
