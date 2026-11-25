@@ -51,3 +51,28 @@ fn no_compiled_on_do_calls_beamtalk_class_vars() {
     }
     assert_all_compile_through_erlc(&compiled);
 }
+
+/// Class-side reflection in an `Actor` class method (`self fieldAt:`,
+/// `fieldAt:put:`, `hasField:`, `clearField:`) is an ordinary send to the
+/// class: it never takes the actor-instance fast path, which would read the
+/// `State` a class method does not bind, and never calls `beamtalk_class_vars`.
+#[test]
+fn class_side_reflection_in_an_actor_class_method_is_a_plain_send() {
+    let src = "Actor subclass: P\n  state: n = 0\n\n  \
+               class probeAt => self fieldAt: #missing\n  \
+               class probePut => self fieldAt: #missing put: 1\n  \
+               class probeHas => self hasField: #missing\n  \
+               class probeClear => self clearField: #missing\n";
+    let code = codegen(src);
+    for selector in ["fieldAt:", "fieldAt:put:", "hasField:", "clearField:"] {
+        let send = "'beamtalk_message_dispatch':'send'(";
+        let atom = format!("'{selector}', [");
+        assert_has(selector, &code, &[send, atom.as_str()]);
+    }
+    assert_lacks(
+        "class-side reflection",
+        &code,
+        &["'beamtalk_primitive':'send'(State", "beamtalk_class_vars"],
+    );
+    assert_all_compile_through_erlc(&[("actor class-side reflection", code)]);
+}
