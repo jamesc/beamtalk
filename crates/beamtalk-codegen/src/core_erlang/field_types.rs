@@ -100,6 +100,12 @@ impl ComparisonKinds {
         }
     }
 
+    /// Whether a number or a `Character` (a codepoint integer) is held: the
+    /// kinds a comparison's number arm accepts.
+    pub(in crate::core_erlang) fn has_number_kind(self) -> bool {
+        self.number || self.character
+    }
+
     /// The `erlang` type-test BIFs that together accept exactly these kinds:
     /// the first, and a second to `or` with it when a `String` is also held.
     /// `is_number` covers a `Character`'s `is_integer`, so a numeric

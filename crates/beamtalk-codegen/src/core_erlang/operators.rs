@@ -86,8 +86,10 @@ impl OperatorGuard {
     /// for a guard with no number arm (a declared `String`) or no receiver
     /// test at all ([`Self::ProvenNumber`]), and for arithmetic.
     fn number_and_string_tests(self) -> Option<(&'static str, Option<&'static str>)> {
-        self.comparison_kind_tests()
-            .filter(|tests| *tests != ("is_binary", None))
+        match self {
+            Self::DeclaredComparison(kinds) if !kinds.has_number_kind() => None,
+            _ => self.comparison_kind_tests(),
+        }
     }
 
     /// The comparison guard's receiver kind tests: the first, and a second
@@ -234,7 +236,7 @@ pub(in crate::core_erlang) fn is_proven_numeric(
 /// proven numeric right operand: an unproven one is tested and, when it is
 /// not a number, sent its reflected hook (`lessThanFromNumber:` …), which
 /// may answer anything. A proven `String` receiver stays bare (its
-/// wrong-kind argument is a follow-up).
+/// wrong-kind argument is BT-5213).
 ///
 /// Read by every site that relies on a bare comparison:
 /// `generate_binary_op` (via [`CoreErlangGenerator::operator_guard`]) and
