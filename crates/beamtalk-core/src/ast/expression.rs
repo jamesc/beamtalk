@@ -84,6 +84,18 @@ pub enum ExpectCategory {
     /// then falls through the ordinary unused-`@expect` path and is reported
     /// as a stale-expectation warning. New code must not use it.
     StoredClosure,
+    /// Deprecated, parse-only (ADR 0153): the `class-state-abroad` lint was
+    /// removed with class variables. Like [`Self::StoredClosure`], an
+    /// existing `@expect class_state_abroad` keeps compiling and is reported
+    /// as a stale expectation.
+    ClassStateAbroad,
+    /// Deprecated, parse-only (ADR 0153): the `class-process-ffi` lint was
+    /// removed with class variables; reported as a stale expectation.
+    ClassProcessFfi,
+    /// Deprecated, parse-only (ADR 0153): the `class-var-reflection-shadowing`
+    /// warning was removed with class variables; reported as a stale
+    /// expectation.
+    ClassVarReflectionShadowing,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -116,6 +128,9 @@ impl ExpectCategory {
             "cascade_drops_update" => Some(Self::CascadeDropsUpdate),
             "discarded_update" => Some(Self::DiscardedUpdate),
             "stored_closure" => Some(Self::StoredClosure),
+            "class_state_abroad" => Some(Self::ClassStateAbroad),
+            "class_process_ffi" => Some(Self::ClassProcessFfi),
+            "class_var_reflection_shadowing" => Some(Self::ClassVarReflectionShadowing),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -148,12 +163,17 @@ impl ExpectCategory {
             Self::CascadeDropsUpdate => "cascade_drops_update",
             Self::DiscardedUpdate => "discarded_update",
             Self::StoredClosure => "stored_closure",
+            Self::ClassStateAbroad => "class_state_abroad",
+            Self::ClassProcessFfi => "class_process_ffi",
+            Self::ClassVarReflectionShadowing => "class_var_reflection_shadowing",
             Self::All => "all",
         }
     }
 
     /// Returns the list of valid category name strings, for use in error messages.
-    /// Omits the deprecated parse-only `stored_closure` so it is not advertised.
+    /// Omits the deprecated parse-only names (`stored_closure`,
+    /// `class_state_abroad`, `class_process_ffi`,
+    /// `class_var_reflection_shadowing`) so they are not advertised.
     #[must_use]
     pub const fn valid_names() -> &'static [&'static str] {
         &[

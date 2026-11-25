@@ -639,7 +639,11 @@ fn expect_category_unchecked(
         | ExpectCategory::DiscardedUpdate
         // Deprecated, parse-only (ADR 0130): nothing produces it, so it is
         // never "unchecked" — it is reported stale like any unmatched directive.
-        | ExpectCategory::StoredClosure => false,
+        | ExpectCategory::StoredClosure
+        // Deprecated, parse-only (ADR 0153): the lints were removed.
+        | ExpectCategory::ClassStateAbroad
+        | ExpectCategory::ClassProcessFfi
+        | ExpectCategory::ClassVarReflectionShadowing => false,
     }
 }
 
@@ -1458,6 +1462,29 @@ dnu = "error"
             .collect();
         assert_eq!(stale.len(), 1, "got: {diagnostics:?}");
         assert_eq!(stale[0].severity, Severity::Warning);
+    }
+
+    /// ADR 0153 (BT-5154): the removed class-variable lints' `@expect` names
+    /// still parse and are reported stale, like `stored_closure`.
+    #[test]
+    fn expect_removed_class_variable_lint_names_parse_and_are_reported_stale() {
+        for name in [
+            "class_state_abroad",
+            "class_process_ffi",
+            "class_var_reflection_shadowing",
+        ] {
+            let source = format!("@expect {name}\n42");
+            let (module, parse_diags) = parse(lex_with_eof(&source));
+            assert!(parse_diags.is_empty(), "{name}: {parse_diags:?}");
+            assert!(!ExpectCategory::valid_names().contains(&name), "{name}");
+            let mut diagnostics = parse_diags;
+            apply_expect_directives_excluding_lint_only(&module, &mut diagnostics);
+            let stale = diagnostics
+                .iter()
+                .filter(|d| d.message.contains(&format!("stale @expect {name}")))
+                .count();
+            assert_eq!(stale, 1, "{name}: {diagnostics:?}");
+        }
     }
 
     /// `beamtalk build`/`beamtalk test`/the LSP/the REPL never run

@@ -531,11 +531,8 @@ mod tests {
         assert_eq!(crate::ast::ExpectCategory::from_name(name), Some(cat));
         assert_eq!(cat.as_str(), name);
         assert!(crate::ast::ExpectCategory::valid_names().contains(&name));
-        // ADR 0153 removed `class-process-ffi` with the class process.
-        assert_eq!(
-            crate::ast::ExpectCategory::from_name("class_process_ffi"),
-            None
-        );
+        // ADR 0153 removed `class-process-ffi`: the name is parse-only.
+        assert!(!crate::ast::ExpectCategory::valid_names().contains(&"class_process_ffi"));
     }
 
     fn assert_suppressed(src: &str, category: DiagnosticCategory) {

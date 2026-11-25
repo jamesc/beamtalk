@@ -797,7 +797,8 @@ impl ClassHierarchy {
 
     /// The chain-dependent half of
     /// [`Self::explicit_class_constructor_builds_in_caller`], and the one place
-    /// the rule lives: not an actor, a fully known surface. Evaluated at query time against whatever hierarchy is in
+    /// the rule lives: not an actor, a fully known surface, and a chain that
+    /// resolves to its root ([`Self::chain_resolves_to_root`]; BT-4644). Evaluated at query time against whatever hierarchy is in
     /// hand, so a sibling-file ancestor injected later is seen (BT-4640); both
     /// codegen (through that method) and cross-file callers
     /// ([`Self::runs_class_method_in_caller`], from the published
@@ -808,11 +809,28 @@ impl ClassHierarchy {
             return false;
         };
         !info.surface_incomplete
+            && self.chain_resolves_to_root(class_name)
             && match self.resolve_class_kind(class_name) {
                 ClassKind::Actor => false,
                 ClassKind::Value => true,
                 ClassKind::Object => !self.has_cross_file_parent(class_name),
             }
+    }
+
+    /// Whether `class_name`'s superclass chain can be followed to its root:
+    /// every link is a known class, none is a superclass-index stub
+    /// ([`ClassInfo::is_superclass_index_stub`]), and there is no cycle. Any
+    /// doubt answers `false`, so an in-caller constructor verdict fails
+    /// closed on a chain this hierarchy cannot see (BT-4644).
+    fn chain_resolves_to_root(&self, class_name: &str) -> bool {
+        let mut last = None;
+        for info in self.ancestors(class_name) {
+            if info.is_superclass_index_stub() {
+                return false;
+            }
+            last = Some(info);
+        }
+        last.is_some_and(|info| info.superclass.is_none())
     }
 
     /// The chain-independent half of
