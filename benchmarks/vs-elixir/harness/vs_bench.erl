@@ -178,6 +178,16 @@ rows() ->
         {"11g", dispatch, "a max: 3, a :: Integer / max(a, 3)", 200000, 'maxTyped:a:', int, [
             {max_of, int}
         ]},
+        {"11h", dispatch, "5 < b, b untyped / 5 < b", 200000, 'litLess:b:', int, [{lit_less, int}]},
+        {"11i", dispatch, "a < b, both untyped / a < b", 200000, 'untypedLess:a:b:', int_pair, [
+            {less_ab, int_pair}
+        ]},
+        {"11j", dispatch, "a < b, a :: Integer, b untyped / a < b", 200000, 'typedLess:a:b:', int_pair, [
+            {less_ab, int_pair}
+        ]},
+        {"11k", dispatch, "5 + b, b untyped / 5 + b", 200000, 'litAdd:b:', int, [{lit_add, int}]},
+        {"11l", machinery, "actor method [0 < self.n] whileTrue: writing a field / GenServer.call",
+            20000, 'actorSpin:c:', counter, [{gen_spin, counter}]},
         {"12a", dispatch, "p class / p.__struct__", 200000, 'classOf:p:', point, [
             {struct_of, point}
         ]},
@@ -236,6 +246,8 @@ fixtures() ->
     #{
         none => 0,
         int => 5,
+        %% 11i/11j: both operands are 5 on each side (Elixir gets the pair).
+        int_pair => {5, {5, 5}},
         point => {Bt(point), ?EX:point()},
         open_point => {Bt(openPoint), ?EX:point()},
         square => {Bt(square), ?EX:square()},
@@ -288,7 +300,9 @@ bt_fun(Sel, Ctx) ->
     Self = bt_self(),
     case arity_of(Sel) of
         1 -> fun(N) -> ?BT:F(Self, N) end;
-        2 -> fun(N) -> ?BT:F(Self, N, Ctx) end
+        2 -> fun(N) -> ?BT:F(Self, N, Ctx) end;
+        %% `n:a:b:` rows (BT-5207): both operands get the row's fixture value.
+        3 -> fun(N) -> ?BT:F(Self, N, Ctx, Ctx) end
     end.
 
 ex_fun(Fun, Ctx) -> fun(N) -> ?EX:Fun(N, Ctx) end.
@@ -616,6 +630,11 @@ compiles_to("11d") -> "send(Bool, 'ifTrue:ifFalse:', [fun, fun]) -> True:dispatc
 compiles_to("11e") -> "is_number guard (declared Integer, BT-4823), erlang:'<'";
 compiles_to("11f") -> "letrec loop; is_number guard on the typed limit (BT-4823), erlang:'>'";
 compiles_to("11g") -> "Number>>max: (self guarded: Number is not a proven class), erlang:'>'";
+compiles_to("11h") -> "bare erlang:'<'(5, B): the proven number receiver gets no guard, so a non-number B is compared in Erlang term order (ADR 0116 addendum, the failing arm)";
+compiles_to("11i") -> "is_number/is_binary guard on A, erlang:'<'(A, B); else send(A, '<', [B]); B is never tested";
+compiles_to("11j") -> "as 11e, with B untyped: is_number guard on the declared-Integer A, erlang:'<'(A, B); B is never tested";
+compiles_to("11k") -> "erlang:'+'(5, B) in a try; on badarith an is_number(B) test then send_number_coercion/4 (the arithmetic reference the comparison addendum matches)";
+compiles_to("11l") -> "as 7a; in the actor the loop is a StateAcc letrec (whole state map threaded, one maps:put per iteration), condition bare erlang:'<'(0, maps:get(count, StateAcc)); the StateAcc shape, not the hybrid one (BT-4121)";
 compiles_to("12a") -> "typed receiver (BT-4127): is_map + tag guard, erlang:whereis + class-object tuple with the pinned module; untyped: beamtalk_primitive:class_of_object derived-cache hit";
 compiles_to("12b") -> "class ref built per call (whereis_class + module_name_safe) + send(P, 'isKindOf:') -> direct objectIsKindOf/2 call (no FFI proxy, BT-4410): one memoised {is_kind_of, C, B} lookup (BT-4221)";
 compiles_to("12c") -> "as 12b, but the String literal bakes its module (whereis only, no module_name_safe, BT-4411) and String:dispatch/3 takes the memoised inherited_target verdict {value, Object, ...} straight to Object:dispatch/3 (BT-4260; no per-level extensions walk)";
