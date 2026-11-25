@@ -265,6 +265,12 @@ defmodule VeBench do
   defbench(:while_to, a, do: count_to(0, a))
   defbench(:max_of, a, do: max(a, 3))
 
+  # BT-5207: number-on-the-left comparison rows (11h-11k).
+  defbench(:lit_less, b, do: 5 < b)
+  defbench(:less_ab, {a, b}, do: a < b)
+  defbench(:lit_add, b, do: 5 + b)
+  defbench(:gen_spin, pid, do: GenServer.call(pid, {:spin, 5}))
+
   defp count_to(i, a) when a > i, do: count_to(i + 1, a)
   defp count_to(i, _a), do: i
 

@@ -75,6 +75,11 @@ defmodule VeBench.Counter do
   def handle_call(:via_self, _from, n), do: {:reply, increment(n), increment(n)}
   def handle_call({:sum_of, %VeBench.Point{x: x, y: y}}, _from, n), do: {:reply, x + y, n}
 
+  def handle_call({:spin, k}, _from, _n), do: {:reply, 0, spin(k)}
+
+  defp spin(k) when 0 < k, do: spin(k - 1)
+  defp spin(k), do: k
+
   defp increment(n), do: n + 1
 
   @impl true
