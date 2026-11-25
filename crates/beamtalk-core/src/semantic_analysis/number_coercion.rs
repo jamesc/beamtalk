@@ -11,8 +11,8 @@
 //! § Reflected method protocol). Codegen emits that fallback and the type
 //! checker reasons about it, so the map lives here, below both
 //! (`docs/development/architecture-principles.md` § Duplication & the
-//! Shared-Leaf-Module Pattern). No other copy of these selector strings may
-//! exist in Rust.
+//! Shared-Leaf-Module Pattern). Callers read the operator sets and
+//! selectors from here rather than spelling them out.
 
 /// Which family a reflected operator is in. Callers pick the runtime entry
 /// point from it: arithmetic falls back through

@@ -300,6 +300,34 @@ impl CoreErlangGenerator {
         Ok(self.close_prelude(&preamble, call_doc, "BinOp"))
     }
 
+    /// The runtime guard the dispatchable operator `op` needs when its receiver
+    /// `left` is not statically a builtin, or `None` when the bare BIF is right
+    /// (a literal or suitably typed receiver, or an operator that is not message
+    /// dispatched). The one rule behind `generate_binary_op` and the cell-bracket
+    /// classification (`classify_binary`): the guard's dispatching branch is where
+    /// user code can run.
+    pub(in crate::core_erlang) fn operator_guard(
+        &self,
+        op: &str,
+        left: &Expression,
+    ) -> Option<OperatorGuard> {
+        let is_arithmetic = is_arithmetic_operator(op);
+        let is_comparison = is_ordering_comparison(op);
+        if is_arithmetic && !self.receiver_is_statically_numeric(left) {
+            Some(OperatorGuard::Arithmetic)
+        } else if is_comparison {
+            match self.comparison_receiver(left) {
+                ComparisonReceiver::Proven => None,
+                ComparisonReceiver::Declared(kinds) => {
+                    Some(OperatorGuard::DeclaredComparison(kinds))
+                }
+                ComparisonReceiver::Unknown => Some(OperatorGuard::Comparison),
+            }
+        } else {
+            None
+        }
+    }
+
     /// Whether `expr` is statically known to evaluate to a number, so
     /// the arithmetic fast path can skip the runtime `is_number` guard.
     ///
@@ -337,34 +365,6 @@ impl CoreErlangGenerator {
     /// `self.extra` in `self.total + self.extra` reaches the `try`/`catch` and a
     /// non-numeric `extra` dispatches to `plusFromNumber:` (closing the
     /// BT-3266 gap).
-    /// The runtime guard the dispatchable operator `op` needs when its receiver
-    /// `left` is not statically a builtin, or `None` when the bare BIF is right
-    /// (a literal or suitably typed receiver, or an operator that is not message
-    /// dispatched). The one rule behind `generate_binary_op` and the cell-bracket
-    /// classification (`classify_binary`): the guard's dispatching branch is where
-    /// user code can run.
-    pub(in crate::core_erlang) fn operator_guard(
-        &self,
-        op: &str,
-        left: &Expression,
-    ) -> Option<OperatorGuard> {
-        let is_arithmetic = is_arithmetic_operator(op);
-        let is_comparison = is_ordering_comparison(op);
-        if is_arithmetic && !self.receiver_is_statically_numeric(left) {
-            Some(OperatorGuard::Arithmetic)
-        } else if is_comparison {
-            match self.comparison_receiver(left) {
-                ComparisonReceiver::Proven => None,
-                ComparisonReceiver::Declared(kinds) => {
-                    Some(OperatorGuard::DeclaredComparison(kinds))
-                }
-                ComparisonReceiver::Unknown => Some(OperatorGuard::Comparison),
-            }
-        } else {
-            None
-        }
-    }
-
     pub(in crate::core_erlang) fn receiver_is_statically_numeric(&self, expr: &Expression) -> bool {
         use beamtalk_core::ast::Literal;
         match expr {
@@ -898,5 +898,22 @@ impl CoreErlangGenerator {
         };
 
         Ok(self.close_prelude(&preamble, call_doc, "ConcatRes"))
+    }
+}
+
+#[cfg(test)]
+mod number_fallback_tests {
+    use super::*;
+
+    #[test]
+    fn entry_point_follows_the_family() {
+        assert_eq!(
+            number_fallback_entry_point(OperatorFamily::Arithmetic),
+            "send_number_coercion"
+        );
+        assert_eq!(
+            number_fallback_entry_point(OperatorFamily::Ordering),
+            "send_number_comparison"
+        );
     }
 }
