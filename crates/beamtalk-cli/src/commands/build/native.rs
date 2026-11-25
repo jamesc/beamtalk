@@ -646,37 +646,43 @@ pub(crate) fn rebar3_restricted_env_hint() -> &'static str {
      docs/beamtalk-packages.md for the list and how to configure private hex packages."
 }
 
+/// The one screen for a native git URL, whether from the manifest or from
+/// `beamtalk.lock`: option/helper-transport rejection plus the plaintext rule.
+fn screen_native_git_url(name: &str, url: &str) -> Result<()> {
+    manifest::validate_git_url(name, url)?;
+    manifest::check_git_transport(
+        &format!("Native dependency '{name}'"),
+        url,
+        manifest::insecure_git_allowed(),
+    )
+}
+
 /// Render one `{deps, [...]}` entry for `rebar.config` from the manifest.
 ///
 /// Pinning to locked versions and commits is done by the generated
 /// `rebar.lock` (see [`prepare_rebar_lock`]), which rebar3 prefers over
 /// `rebar.config`.
-fn rebar_dep_entry(dep: &NativeDependency) -> String {
+fn rebar_dep_entry(dep: &NativeDependency) -> Result<String> {
     use crate::beam_compiler::escape_erlang_string;
 
     let name = &dep.name;
     match &dep.source {
-        NativeSource::Hex { constraint } => {
-            format!("    {{{name}, \"{}\"}}", escape_erlang_string(constraint))
-        }
+        NativeSource::Hex { constraint } => Ok(format!(
+            "    {{{name}, \"{}\"}}",
+            escape_erlang_string(constraint)
+        )),
         NativeSource::Git { url, reference } => {
-            if manifest::is_plaintext_git_url(url) {
-                tracing::warn!(
-                    dependency = %name,
-                    url = %url,
-                    "Native git dependency uses an insecure plaintext URL; prefer https:// or ssh://"
-                );
-            }
+            screen_native_git_url(name, url)?;
             let (kind, value) = match reference {
                 GitReference::Tag(tag) => ("tag", tag),
                 GitReference::Branch(branch) => ("branch", branch),
                 GitReference::Rev(rev) => ("ref", rev),
             };
-            format!(
+            Ok(format!(
                 "    {{{name}, {{git, \"{}\", {{{kind}, \"{}\"}}}}}}",
                 escape_erlang_string(url),
                 escape_erlang_string(value)
-            )
+            ))
         }
     }
 }
@@ -766,6 +772,15 @@ pub(crate) fn prepare_rebar_lock(
     let locks = locks.filter(|_| !force_resolve).unwrap_or(&empty);
     let rebar_lock = layout.native_dir().join("rebar.lock");
     let is_direct = |name: &str| native_deps.contains_key(name);
+
+    // `beamtalk.lock` is committed, third-party-editable data: screen every
+    // native git URL in it exactly like a manifest URL before it can reach
+    // rebar3 (BT-5135).
+    for lock in locks.values() {
+        if let NativeLockSource::Git { url, .. } = &lock.source {
+            screen_native_git_url(&lock.name, url)?;
+        }
+    }
 
     let kept = match native_lock_state(native_deps, locks) {
         NativeLockState::Current => {
@@ -884,7 +899,10 @@ pub(crate) fn generate_rebar_config(
 
     // Generate {deps, [...]} from the manifest.
     config.push_str("{deps, [\n");
-    let dep_entries: Vec<String> = native_deps.values().map(rebar_dep_entry).collect();
+    let dep_entries: Vec<String> = native_deps
+        .values()
+        .map(rebar_dep_entry)
+        .collect::<Result<_>>()?;
     config.push_str(&dep_entries.join(",\n"));
     config.push_str("\n]}.\n");
 

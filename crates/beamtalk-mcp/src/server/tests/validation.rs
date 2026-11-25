@@ -232,6 +232,31 @@ fn path_policy_refuses_symlink_escaping_the_root() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn path_policy_refuses_dangling_symlink() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = beamtalk_core::paths::canonicalize(tmp.path()).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let target = outside.path().join("file");
+    std::os::unix::fs::symlink(&target, root.join("out.json")).unwrap();
+    let policy = PathPolicy::Confined(root.clone());
+    assert!(
+        policy
+            .check(root.join("out.json").to_str().unwrap())
+            .is_err()
+    );
+    // A symlink loop (ELOOP) is not "not found" either.
+    std::os::unix::fs::symlink(root.join("loop"), root.join("loop")).unwrap();
+    assert!(policy.check(root.join("loop").to_str().unwrap()).is_err());
+    // A genuinely absent tail is still fine.
+    assert!(
+        policy
+            .check(root.join("new/x.json").to_str().unwrap())
+            .is_ok()
+    );
+}
+
 #[tokio::test]
 async fn confined_tools_refuse_paths_outside_the_project_root() {
     let tmp = tempfile::tempdir().unwrap();

@@ -17,7 +17,10 @@ mod git_url;
 mod hex;
 mod native;
 
-pub use git_url::{is_plaintext_git_url, validate_git_url, validate_registry_release_url};
+pub use git_url::{
+    ALLOW_INSECURE_GIT_ENV, check_git_transport, insecure_git_allowed, is_plaintext_git_url,
+    redact_url_credentials, validate_git_url, validate_registry_release_url,
+};
 pub use hex::hex_constraint_matches;
 pub use native::{
     NativeDependency, NativeDependencyMap, NativeOverride, NativeOverrideMap, NativeSource,
