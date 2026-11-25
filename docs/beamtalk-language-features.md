@@ -4130,9 +4130,9 @@ Object subclass: HpackHuffman
 Rules:
 
 - **Build-once only.** Reads copy nothing; `erase:` makes the VM scan every process heap. Use an Actor or `Ets` for anything that changes.
-- **The block must be pure and deterministic.** Two processes that miss together both run it; the helper reads again before storing and keeps the first value. A raising block stores nothing and is run again on the next call.
+- **One build per key; the first value wins (BT-5191).** A miss takes a node-local lock for its key, reads again, and only then runs the block and stores. A process that misses while another is building waits and answers the stored value without running its own block, so every caller answers the one stored value and nothing is replaced. Hits take no lock. A block that hangs holds up every other caller of that key for up to 60 s, after which each waiter raises a `runtime_error` (if the builder dies, the next waiter builds); a block that asks for its own key, directly or through another process that waits on it, raises a `runtime_error`. A raising block stores nothing and is run again on the next call.
 - **Do not store a pid, port, actor, class, `Ets` handle or block.** On a miss, a value that is itself a pid, an actor or a class raises a `type_error` naming the key; store a registered name and look the process up. A process identity nested inside a larger value is not detected.
-- **Keys are node-global.** Use a package-prefixed Symbol (`#mypkg_tables`). The helper stores under `{beamtalk_persistent_term, Key}`, so a key cannot collide with the runtime's own `persistent_term` keys.
+- **Keys are node-global; namespacing is by convention only.** Two packages that use the same key share one value: whichever builds first wins and the other silently gets it. Prefix every key with your package name (`#mypkg_tables`). The helper stores under `{beamtalk_persistent_term, Key}`, so a key cannot collide with the runtime's own `persistent_term` keys.
 - **Nothing is cleared on reload.** A value stays until `erase:` or the node stops. When its shape changes, change the key (`#mypkg_tables_v2`); in the REPL, `PersistentTerm erase:` rebuilds it on the next read. This is a deliberate exception to principles §4: after the builder method is edited at the REPL the stored value is stale, while `beamtalk run` builds it fresh.
 - **Tests.** The store is node-global: a test class that uses fixed keys overrides `class serial -> Boolean => true`, or uses keys unique to the test.
 
@@ -8947,6 +8947,15 @@ Value subclass: Issue
 ```
 
 `mapField:to:using:` takes a converter block for custom encoding. Chain entries with `|>`, not a cascade — `JsonMapping` is a Value and a cascade drops every update but the last (ADR 0145). A duplicate key in `mapField:to:` raises at build time; a field missing from the object raises at encode time. Works on Actors as well as Values.
+
+Rules (BT-5191):
+
+- **Built once per class.** `asJson` encodes with `JsonMapping forClass: self class`: `class jsonMapping` runs once, is validated, and is cached until any class is loaded, reloaded or removed. It must answer the same mapping every time.
+- **nil.** A nil (converted) value is emitted as `null`. `|> omittingNil` answers a mapping that leaves such keys out.
+- **Inheritance.** A subclass inherits `asJson` and the parent's `class jsonMapping`. If it declares fields of its own, `asJson` raises a `user_error` naming them; override `class jsonMapping` (`super jsonMapping |> mapField: #extra`, or `super jsonMapping` to keep them off on purpose).
+- **Secrets.** On an Actor, a mapped `secretState` slot (inherited ones included) is emitted as `"[redacted]"`, as in `sys:get_status`. A converter on that entry is the explicit opt-out: it receives the real value, so *any* converter on a secret slot (even `[:v | v asString]`) puts the secret on the wire. If the secret metadata cannot be read, `encode:` raises a `runtime_error`.
+- **Validation.** `encode:` validates the entries however they were built (`withEntries:` included): each needs a Symbol `#field`, a String `#key` and a Block or nil `#using`, with no repeated key.
+- **Errors and cycles.** A converter's error is re-signalled as the same exception (class and kind kept) with a message naming the field and key. `encode:` is shallow; `Json generate:` encodes converter results and nested `asJson` objects, and raises a `type_error` on a cycle.
 
 ### Diagnostic Suppression (`@expect`)
 

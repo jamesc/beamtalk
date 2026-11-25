@@ -117,6 +117,22 @@ are omitted. Chain the entries with `|>`, not a cascade: `JsonMapping` is a
 Value, and a cascade drops every update but the last. A hand-written `asJson`
 in the class body still wins over the provided one.
 
+A few rules worth knowing:
+
+- `class jsonMapping` runs once per class. The mapping is cached until a
+  class is loaded, reloaded or removed, so it must answer the same mapping
+  every time.
+- A `nil` field is emitted as `null`. Append `|> omittingNil` to the mapping
+  to leave such keys out instead.
+- A subclass inherits its parent's mapping. If it declares fields of its own,
+  `asJson` raises until it overrides `class jsonMapping`, usually as
+  `super jsonMapping |> mapField: #extra`.
+- On an actor, a mapped `secretState` slot is emitted as `"[redacted]"`
+  unless its entry has a converter, which then sees the real value (so
+  any converter on a secret slot puts the secret on the wire).
+- A converter's error is re-signalled (same class) naming the field, and an object that
+  reappears inside its own JSON (a cycle) makes `Json generate:` raise.
+
 ## Pretty printing
 
 `Json prettyPrint:` adds indentation for readability:

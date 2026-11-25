@@ -11,8 +11,8 @@ use super::{
     StateDeclaration, TypeAliasDefinition, break_, concat, docvec, group, join_docs,
     leading_ends_with_orphaned_doc_comment, leaf, line, nest, nil, unparse_comment,
     unparse_comment_attachment_leading, unparse_expression, unparse_expression_statement,
-    unparse_literal, unparse_method_display_signature_doc, unparse_selector_and_params,
-    unparse_type_annotation,
+    unparse_literal, unparse_literal_at, unparse_method_display_signature_doc,
+    unparse_selector_and_params, unparse_type_annotation,
 };
 
 /// One of the four top-level declaration kinds that can appear in a
@@ -290,7 +290,7 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
                 docvec![
                     line(),
                     "shapeVersion: ",
-                    leaf::int_lit(i64::from(sv.version))
+                    unparse_literal_at(&Literal::Integer(i64::from(sv.version)), sv.span)
                 ]
             )
         ]

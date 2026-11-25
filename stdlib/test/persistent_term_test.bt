@@ -23,6 +23,7 @@ TestCase subclass: PersistentTermTest
     PersistentTerm erase: #ptTestClass
     PersistentTerm erase: #ptTestTyped
     PersistentTerm erase: #ptTestTypedCount
+    PersistentTerm erase: "ptTestКлюч"
 
   testBuildsOnce =>
     self assert: (PersistentTerm at: #ptTestBuild ifAbsentPut: [
@@ -72,16 +73,26 @@ TestCase subclass: PersistentTermTest
     PersistentTerm at: #ptTestIfAbsent ifAbsentPut: [4]
     self assert: (PersistentTerm at: #ptTestIfAbsent ifAbsent: [3]) equals: 4
 
+  // BT-5191: each racer offers a distinct value, so a racer that replaced
+  // the stored value (or answered its own) would show up as a mismatch.
+  // The deterministic interleaving is in beamtalk_persistent_term_tests.erl.
   testProcessesMissingTogetherAgree =>
     blocks := ((1 to: 8) asList) collect: [:i |
-      [PersistentTerm at: #ptTestRace ifAbsentPut: [#built]]
+      [PersistentTerm at: #ptTestRace ifAbsentPut: [i]]
     ]
     results := (Parallel all: blocks) collect: [:r | r unwrap]
+    stored := PersistentTerm at: #ptTestRace ifAbsent: [nil]
     self assert: results size equals: 8
-    self assert: (results select: [:v | v =:= #built]) size equals: 8
+    self assert: (results allSatisfy: [:v | v =:= stored])
     self assert: (PersistentTerm at: #ptTestRace ifAbsentPut: [
       #other
-    ]) equals: #built
+    ]) equals: stored
+
+  testRefusalWorksForUnicodeKey =>
+    self should: [
+      PersistentTerm at: "ptTestКлюч" ifAbsentPut: [Erlang erlang self]
+    ] raise: #type_error
+    self deny: (PersistentTerm includesKey: "ptTestКлюч")
 
   testRefusesPid =>
     self should: [
