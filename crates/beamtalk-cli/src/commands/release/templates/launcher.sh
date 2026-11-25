@@ -225,10 +225,14 @@ export_cookie() {
 # by the node itself, or left behind if it dies first (see deploying.md).
 run_client() {
     status=0
-    # A Ctrl-C on a hung client, or TERM/HUP from a supervisor, still cleans up.
-    trap 'cleanup_cookie_home; exit 130' INT
-    trap 'cleanup_cookie_home; exit 143' TERM HUP
-    "$ERL" "$@" || status=$?
+    # Background plus `wait`, so a signal to the launcher (Ctrl-C, `timeout`,
+    # a supervisor's TERM/HUP) runs the trap at once: it stops the client and
+    # cleans up. These verbs are `-noshell` and read no stdin.
+    "$ERL" "$@" &
+    erl_pid=$!
+    trap 'kill "$erl_pid" 2>/dev/null; cleanup_cookie_home; exit 130' INT
+    trap 'kill "$erl_pid" 2>/dev/null; cleanup_cookie_home; exit 143' TERM HUP
+    wait "$erl_pid" || status=$?
     cleanup_cookie_home
     exit "$status"
 }

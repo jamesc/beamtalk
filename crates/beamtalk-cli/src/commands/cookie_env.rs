@@ -201,7 +201,11 @@ fn installed_erl_on_path() -> Option<OsString> {
     }
     let root = real.parent()?.parent()?;
     // Windows: keep the PATH hit; `canonicalize` gives a `\\?\` path.
-    let program = if cfg!(windows) { found } else { real.clone() };
+    let program = if cfg!(windows) {
+        std::path::absolute(&found).unwrap_or(found)
+    } else {
+        real.clone()
+    };
     root.join("releases")
         .is_dir()
         .then(|| program.into_os_string())
