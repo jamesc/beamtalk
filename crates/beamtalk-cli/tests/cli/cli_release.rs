@@ -1265,7 +1265,7 @@ fn write_tls_optfiles(dir: &std::path::Path) {
         Write("no_client_verify.conf", [{server, Srv ++ [{verify, verify_peer}, {fail_if_no_peer_cert, true}]},
                                         {client, Cli}]),
         halt()."#;
-    let status = Command::new("erl")
+    let status = beamtalk_workspace::erl_command()
         .args(["-noshell", "-eval", eval, "-extra"])
         .arg(dir)
         .status()
