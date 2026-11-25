@@ -159,7 +159,8 @@ test("every line is tokenized under the per-line time limit", async (t) => {
   // clock that jumps a second per read makes every line run out at once.
   let clock = 0;
   t.mock.method(Date, "now", () => (clock += 1000));
-  const [tokens] = tokenizer.tokenizeLines(['x := "never coloured"'], true, Infinity);
+  const unbounded = await tokenizerWithClock(() => 0);
+  const [tokens] = unbounded.tokenizeLines(['x := "never coloured"'], true);
   assert.deepEqual(tokens, [], "a line out of time must not be tokenized to the end");
 });
 
@@ -182,10 +183,15 @@ test("an over-long line gets no tokens", () => {
 test("lines after the request budget runs out get no tokens", async () => {
   const lines = ["x := 1", "y := 2"];
   const inTime = await tokenizerWithClock(() => 0);
-  assert.ok(inTime.tokenizeBlocks([{ lines, continuous: true }])[0].every((t) => t.length > 0));
+  const done = inTime.tokenizeBlocks([{ lines, continuous: true }]);
+  assert.ok(done.blocks[0].every((t) => t.length > 0));
+  assert.deepEqual(done.incomplete, []);
 
   // The first read sets the deadline; every later read is past it.
   let reads = 0;
   const late = await tokenizerWithClock(() => (reads++ === 0 ? 0 : LIMITS.requestBudgetMs + 1));
-  assert.deepEqual(late.tokenizeBlocks([{ lines, continuous: true }]), [[[], []]]);
+  assert.deepEqual(late.tokenizeBlocks([{ lines, continuous: true }]), {
+    blocks: [[[], []]],
+    incomplete: [0],
+  });
 });

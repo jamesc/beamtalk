@@ -77,7 +77,7 @@ test("a well-formed request is tokenized", async () => {
     blocks: [{ lines: ['"hi"'], continuous: true }],
   });
   assert.equal(handled, true);
-  assert.deepEqual(response, { blocks: [[[[0, 4, "string"]]]] });
+  assert.deepEqual(response, { blocks: [[[[0, 4, "string"]]]], incomplete: [] });
 });
 
 test("other messages and other senders are ignored", async () => {

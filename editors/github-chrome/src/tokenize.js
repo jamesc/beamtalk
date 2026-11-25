@@ -54,8 +54,9 @@ function categoryOf(scopes) {
  * @param {{ wasm: ArrayBuffer | Uint8Array, grammar: object, now?: () => number }} options
  *   `now` is the clock for the request budget (tests inject one).
  * @returns {Promise<{
- *   tokenizeLines: (lines: string[], continuous: boolean, deadline?: number) => BlockTokens,
- *   tokenizeBlocks: (blocks: Array<{ lines: string[], continuous: boolean }>) => BlockTokens[],
+ *   tokenizeLines: (lines: string[], continuous: boolean) => BlockTokens,
+ *   tokenizeBlocks: (blocks: Array<{ lines: string[], continuous: boolean }>) =>
+ *     { blocks: BlockTokens[], incomplete: number[] },
  * }>}
  */
 export async function createTokenizer({ wasm, grammar, now = Date.now }) {
@@ -84,10 +85,25 @@ export async function createTokenizer({ wasm, grammar, now = Date.now }) {
    * of it is left uncoloured and the next line starts from a fresh state
    * (the stopped line's state is mid-line).
    */
-  function tokenizeLines(lines, continuous, deadline = now() + LIMITS.requestBudgetMs) {
+  function tokenizeLines(lines, continuous) {
+    return tokenizeWithin(lines, continuous, now() + LIMITS.requestBudgetMs).tokens;
+  }
+
+  /**
+   * {@link tokenizeLines} against a given `deadline`; `cut` says whether the
+   * deadline left any line untokenized (worth retrying later, unlike a line
+   * that is too long or out of its own time, which would be cut again).
+   */
+  function tokenizeWithin(lines, continuous, deadline) {
     let state = vsctm.INITIAL;
-    return lines.map((line) => {
-      if (line.length > LIMITS.maxLineLength || now() > deadline) {
+    let cut = false;
+    const tokens = lines.map((line) => {
+      if (line.length > LIMITS.maxLineLength) {
+        state = vsctm.INITIAL;
+        return [];
+      }
+      if (now() > deadline) {
+        cut = true;
         state = vsctm.INITIAL;
         return [];
       }
@@ -110,12 +126,23 @@ export async function createTokenizer({ wasm, grammar, now = Date.now }) {
       }
       return out;
     });
+    return { tokens, cut };
   }
 
-  /** Tokenizes a whole request's blocks within one `LIMITS.requestBudgetMs`. */
+  /**
+   * Tokenizes a whole request's blocks within one `LIMITS.requestBudgetMs`.
+   * `incomplete` lists the blocks the budget cut short, which the content
+   * script does not cache, so a later scan asks for them again.
+   */
   function tokenizeBlocks(blocks) {
     const deadline = now() + LIMITS.requestBudgetMs;
-    return blocks.map((b) => tokenizeLines(b.lines, b.continuous, deadline));
+    const incomplete = [];
+    const tokens = blocks.map((b, i) => {
+      const result = tokenizeWithin(b.lines, b.continuous, deadline);
+      if (result.cut) incomplete.push(i);
+      return result.tokens;
+    });
+    return { blocks: tokens, incomplete };
   }
 
   return { tokenizeLines, tokenizeBlocks };

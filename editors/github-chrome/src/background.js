@@ -38,7 +38,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
   getTokenizer()
-    .then((tokenizer) => sendResponse({ blocks: tokenizer.tokenizeBlocks(message.blocks) }))
+    .then((tokenizer) => sendResponse(tokenizer.tokenizeBlocks(message.blocks)))
     .catch((err) => sendResponse({ error: String(err) }));
   return true;
 });

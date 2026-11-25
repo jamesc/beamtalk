@@ -92,6 +92,8 @@ function cacheKey(block) {
  */
 export async function tokenize(blocks) {
   const missing = blocks.filter((b) => !tokenCache.has(cacheKey(b)));
+  /** @type {Map<Block, Array<Array<[number, number, string]>>>} */
+  let fresh = new Map();
   if (missing.length) {
     const response = await chrome.runtime.sendMessage({
       type: MESSAGE_TYPE,
@@ -100,12 +102,19 @@ export async function tokenize(blocks) {
     if (!response || response.error) {
       throw new Error(`beamtalk tokenizer: ${response?.error ?? "no response"}`);
     }
-    missing.forEach((b, i) => tokenCache.set(cacheKey(b), response.blocks[i]));
+    // Blocks the worker's time budget cut short are used this once but not
+    // cached, so the next scan asks for them again.
+    const incomplete = new Set(response.incomplete ?? []);
+    fresh = new Map();
+    missing.forEach((b, i) => {
+      if (incomplete.has(i)) fresh.set(b, response.blocks[i]);
+      else tokenCache.set(cacheKey(b), response.blocks[i]);
+    });
     while (tokenCache.size > TOKEN_CACHE_LIMIT) {
       tokenCache.delete(tokenCache.keys().next().value);
     }
   }
-  return blocks.map((b) => tokenCache.get(cacheKey(b)));
+  return blocks.map((b) => fresh.get(b) ?? tokenCache.get(cacheKey(b)));
 }
 
 // --- ranges -----------------------------------------------------------------

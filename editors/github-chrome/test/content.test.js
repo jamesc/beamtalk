@@ -104,6 +104,23 @@ test("tokenize sends one typed request and caches the answer", async () => {
   assert.deepEqual(second, first);
 });
 
+test("blocks the worker's budget cut short are not cached, so they are asked for again", async () => {
+  page("");
+  const sent = [];
+  globalThis.chrome = {
+    runtime: {
+      async sendMessage(message) {
+        sent.push(message);
+        return { blocks: message.blocks.map((b) => b.lines.map(() => [])), incomplete: [0] };
+      },
+    },
+  };
+  const block = { continuous: true, lines: ["cut short"], places: [] };
+  assert.deepEqual(await tokenize([block]), [[[]]]);
+  await tokenize([block]);
+  assert.equal(sent.length, 2);
+});
+
 test("a scan never sends the worker more than the request limits", async () => {
   // More fences than `maxBlocks`, one with an over-long line.
   const fences = Array.from(

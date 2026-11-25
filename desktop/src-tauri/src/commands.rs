@@ -46,7 +46,7 @@ use crate::dto::{
     AttachOutcome, ConnectionStateChangedEvent, ConnectionStateView, EmptyStateView, PickerView,
     WorkspaceView,
 };
-use crate::state::AppState;
+use crate::state::{AppState, StopsInFlight};
 
 /// Overall timeout for the `wait_ready` readiness-polling phase only —
 /// generous headroom above a healthy boot, not a measured requirement. It
@@ -407,9 +407,14 @@ const FRONT_STOP_GRACE: Duration = Duration::from_secs(3);
 /// comment) — killing it locally without untracking would leave a dangling
 /// map entry for an already-dead process.
 fn kill_and_untrack(state: &AppState, workspace_id: &str, port: u16) {
-    untrack_then(&state.children, workspace_id, |mut child| {
-        child.stop(FRONT_STOP_GRACE);
-    });
+    untrack_then(
+        &state.children,
+        &state.stops_in_flight,
+        workspace_id,
+        |mut child| {
+            child.stop(FRONT_STOP_GRACE);
+        },
+    );
     remove_front_record(workspace_id, port);
 }
 
@@ -420,13 +425,22 @@ fn kill_and_untrack(state: &AppState, workspace_id: &str, port: u16) {
 /// `if let Some(c) = locked(..).remove(..) { .. }` keeps the guard (a
 /// temporary of the `if let` scrutinee) alive for the whole body, so the
 /// removal is bound first.
+///
+/// The stop is counted in `stops` from before the lock is released until it
+/// finishes, so [`detach_all`] (quit), which no longer sees the entry in
+/// `children`, still waits for it rather than exiting the app mid-stop, before
+/// a front slow to handle `SIGTERM` has been force-killed.
 fn untrack_then<T>(
     children: &Mutex<std::collections::HashMap<String, T>>,
+    stops: &StopsInFlight,
     workspace_id: &str,
     stop: impl FnOnce(T),
 ) {
-    let removed = locked(children).remove(workspace_id);
-    if let Some(child) = removed {
+    let removed = {
+        let mut map = locked(children);
+        map.remove(workspace_id).map(|child| (child, stops.begin()))
+    };
+    if let Some((child, _in_flight)) = removed {
         stop(child);
     }
 }
@@ -474,9 +488,14 @@ pub fn detach_internal<R: tauri::Runtime>(
     tracing::info!(workspace_id, "detaching");
     let removed = locked(&state.attach).remove(workspace_id);
 
-    untrack_then(&state.children, workspace_id, |mut child| {
-        child.stop(FRONT_STOP_GRACE);
-    });
+    untrack_then(
+        &state.children,
+        &state.stops_in_flight,
+        workspace_id,
+        |mut child| {
+            child.stop(FRONT_STOP_GRACE);
+        },
+    );
 
     // Removing the on-disk record — which also removes the front's
     // RELEASE_TMP directory on Windows (BT-3046) — must happen *after* the
@@ -550,7 +569,7 @@ pub fn quit_app<R: tauri::Runtime>(app: &AppHandle<R>, state: &AppState) {
 }
 
 /// The testable part of [`quit_app`]: everything up to, but not including,
-/// `AppHandle::exit`. Split out purely for [`tests::quit_cleanup_runs_cleanly_with_nothing_attached`]
+/// `AppHandle::exit`. Split out purely for [`tests::quit_cleanup_stops_and_untracks_every_tracked_front`]
 /// below: `tauri::test::mock_app()`'s `MockRuntime` implements
 /// `on_window_event` as a stub that never stores the callback (so no test
 /// can fire a simulated `CloseRequested` and observe [`quit_app`] get
@@ -604,6 +623,16 @@ pub fn detach_all<R: tauri::Runtime>(app: &AppHandle<R>, state: &AppState) {
     tracing::info!(count = ids.len(), "detaching all tracked fronts");
     for id in ids {
         let _ = detach_internal(app, state, &id);
+    }
+    // BT-5194: a detach on another thread may have taken a front out of
+    // `children` (so the loop above never saw it) and still be stopping it;
+    // exiting now would kill that thread before it force-kills a front slow
+    // to handle SIGTERM. Wait for it, bounded by one stop's own worst case.
+    if !state
+        .stops_in_flight
+        .wait_idle(FRONT_STOP_GRACE + Duration::from_secs(1))
+    {
+        tracing::warn!("quit: a front stop started elsewhere did not finish in time");
     }
     // BT-3059: `detach_internal`'s per-workspace `RELEASE_TMP` cleanup now
     // runs on a background thread rather than blocking the loop above, but
@@ -891,8 +920,9 @@ mod tests {
             ("a".to_string(), 1),
             ("b".to_string(), 2),
         ]));
+        let stops = StopsInFlight::default();
         let mut stopped = None;
-        untrack_then(&children, "a", |child| {
+        untrack_then(&children, &stops, "a", |child| {
             assert!(
                 children.try_lock().is_ok(),
                 "the children lock is held while stopping a front"
@@ -902,7 +932,42 @@ mod tests {
         assert_eq!(stopped, Some(1));
         assert_eq!(locked(&children).len(), 1);
 
-        untrack_then(&children, "missing", |_| panic!("nothing to stop"));
+        untrack_then(&children, &stops, "missing", |_| panic!("nothing to stop"));
+        assert!(stops.wait_idle(Duration::ZERO), "no stop left counted");
+    }
+
+    /// BT-5194: quit must not return (and exit the app) while a detach on
+    /// another thread is still stopping a front it already took out of
+    /// `children`.
+    #[test]
+    fn quit_waits_for_a_stop_already_in_progress_elsewhere() {
+        let app = tauri::test::mock_app();
+        let state = AppState::new(PathBuf::from("unused-in-this-test"));
+        let front = beamtalk_desktop_broker::spawn::SpawnedFront::from_child_for_tests(
+            long_running_child(),
+        )
+        .expect("wrap the stand-in front");
+        locked(&state.children).insert("a".to_string(), front);
+        let finished = std::sync::atomic::AtomicBool::new(false);
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                untrack_then(&state.children, &state.stops_in_flight, "a", |mut child| {
+                    started_tx.send(()).unwrap();
+                    // sleep: a front that takes a while to stop.
+                    std::thread::sleep(Duration::from_millis(300));
+                    child.stop(FRONT_STOP_GRACE);
+                    finished.store(true, std::sync::atomic::Ordering::SeqCst);
+                });
+            });
+            started_rx.recv().unwrap();
+            quit_cleanup(app.handle(), &state);
+            assert!(
+                finished.load(std::sync::atomic::Ordering::SeqCst),
+                "quit returned before the in-flight stop finished"
+            );
+        });
     }
 
     #[test]

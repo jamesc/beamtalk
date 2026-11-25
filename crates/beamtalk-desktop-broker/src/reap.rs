@@ -28,9 +28,10 @@
 //! (BT-5194): with nothing to compare, the live process at that PID cannot
 //! be told apart from an unrelated one that was handed the recycled PID, so
 //! [`classify_record`] maps it to [`Disposition::SkipUnverifiable`] and the
-//! sweep only clears the record. On such a platform a real orphan therefore
-//! outlives a broker crash until the user stops it; that is the deliberate
-//! price of never killing an unrelated process.
+//! sweep leaves both the process and the record alone (the record is cleared
+//! by a later sweep once nothing runs at that PID). A real orphan therefore
+//! outlives a broker crash until the user stops it, but stays recorded; that
+//! is the deliberate price of never killing an unrelated process.
 //!
 //! **A narrower race: `sweep` calls `is_process_alive` and
 //! `proc_start_time` as two separate syscalls** — if the process exits in
@@ -517,7 +518,9 @@ pub enum Disposition {
     SkipPidReused,
     /// A process is alive at that PID, but the record has no start time to
     /// match it against (BT-5194), so it may be an unrelated process holding
-    /// a recycled PID. Clear the record but do **not** signal the process.
+    /// a recycled PID. Do **not** signal the process, and keep the record:
+    /// it may still be a real orphan, and a later sweep clears the record once
+    /// the PID is dead.
     SkipUnverifiable,
 }
 
@@ -563,7 +566,8 @@ pub struct SweepReport {
     pub reaped: Vec<FrontRecord>,
     pub stale_cleared: Vec<FrontRecord>,
     pub pid_reused_skipped: Vec<FrontRecord>,
-    /// Alive, but with no recorded start time to match: not signalled.
+    /// Alive, but with no recorded start time to match: not signalled, and
+    /// the record kept.
     pub unverifiable_skipped: Vec<FrontRecord>,
     /// Records whose file could not be removed (logged; the sweep carries on
     /// with the rest, BT-5194).
@@ -635,9 +639,11 @@ fn sweep_with(
                     workspace = %record.workspace_id,
                     pid = record.pid,
                     "sweep: no recorded start time to match the live process at this PID \
-                     against — clearing the record without signaling it"
+                     against — leaving it and its record alone (stop it by hand if it is \
+                     an orphaned front)"
                 );
-                report.unverifiable_skipped.push(record.clone());
+                report.unverifiable_skipped.push(record);
+                continue;
             }
         }
         // `remove_record` below backgrounds its Windows RELEASE_TMP retry
@@ -1087,7 +1093,8 @@ mod tests {
     }
 
     /// BT-5194: the full sweep, against this test process's own live PID with
-    /// no recorded start time — it must survive, and the record is cleared.
+    /// no recorded start time — it must survive, and the record is kept (it
+    /// may be a real orphan; a later sweep clears it once the PID is dead).
     #[test]
     fn sweep_never_signals_a_live_pid_it_cannot_match_by_start_time() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -1097,8 +1104,8 @@ mod tests {
 
         let report = sweep(tmp.path()).unwrap();
         assert!(report.reaped.is_empty(), "must never reap the test process");
-        assert_eq!(report.unverifiable_skipped, vec![rec]);
-        assert!(load_all_records(tmp.path()).unwrap().is_empty());
+        assert_eq!(report.unverifiable_skipped, vec![rec.clone()]);
+        assert_eq!(load_all_records(tmp.path()).unwrap(), vec![rec]);
         assert!(is_process_alive(own_pid));
     }
 

@@ -54,10 +54,16 @@ const BUNDLED_LAUNCHER_RELATIVE_PATH: &str = "dist-liveview/bin/bt_attach.bat";
 /// check existed — not an opaque spawn-I/O error either.
 #[must_use]
 pub fn resolve_launcher_path<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
-    if let Some(override_path) = launcher_override(
-        std::env::var_os(LAUNCHER_PATH_OVERRIDE_ENV),
-        cfg!(debug_assertions),
-    ) {
+    resolve_launcher_path_with(app, std::env::var_os(LAUNCHER_PATH_OVERRIDE_ENV))
+}
+
+/// [`resolve_launcher_path`] with the [`LAUNCHER_PATH_OVERRIDE_ENV`] value
+/// passed in, so a test need not mutate the process environment.
+fn resolve_launcher_path_with<R: Runtime>(
+    app: &AppHandle<R>,
+    env_value: Option<OsString>,
+) -> PathBuf {
+    if let Some(override_path) = launcher_override(env_value, cfg!(debug_assertions)) {
         return override_path;
     }
     app.path().resource_dir().map_or_else(
@@ -105,11 +111,10 @@ mod tests {
     fn resolve_launcher_path_honours_the_override_in_debug_builds_only() {
         let app = tauri::test::mock_app();
         let fake = "/nonexistent/override/bin/server";
-        // SAFETY: the only test in this binary that reads or writes this var.
-        unsafe { std::env::set_var(LAUNCHER_PATH_OVERRIDE_ENV, fake) };
-        let resolved = resolve_launcher_path(app.handle());
-        // SAFETY: as above.
-        unsafe { std::env::remove_var(LAUNCHER_PATH_OVERRIDE_ENV) };
-        assert_eq!(resolved == std::path::Path::new(fake), cfg!(debug_assertions));
+        let resolved = resolve_launcher_path_with(app.handle(), Some(OsString::from(fake)));
+        assert_eq!(
+            resolved == std::path::Path::new(fake),
+            cfg!(debug_assertions)
+        );
     }
 }

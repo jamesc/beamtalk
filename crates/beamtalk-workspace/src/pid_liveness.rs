@@ -211,7 +211,7 @@ pub fn start_time_matches(expected: Option<u64>, actual: Option<u64>) -> bool {
 /// the broker's `classify_record` uses, applied again immediately before killing to
 /// close the PID-reuse window between `classify_record`'s check and the
 /// actual kill call (see the broker's `terminate_process`). Available
-/// wherever `proc_start_time` returns a real value (Linux, Windows).
+/// wherever `proc_start_time` returns a real value (Linux, macOS, Windows).
 pub fn still_same_process(pid: u32, expected_start_time: Option<u64>) -> bool {
     start_time_matches(expected_start_time, proc_start_time(pid))
 }
