@@ -24,7 +24,7 @@ use proptest::prelude::*;
 use crate::test_helpers::test_support::near_valid_from;
 
 use super::super::round_trip::{ast_fingerprint, comment_multiset, number_spellings};
-use super::super::{FormatError, format_source, unparse_module};
+use super::super::{format_source, unparse_module};
 use crate::source_analysis::{Severity, lex_with_eof, parse};
 
 // ============================================================================
@@ -93,6 +93,15 @@ const FIDELITY_FRAGMENTS: &[&str] = &[
     "x := 1 /// trailing doc",
     "x := #(1, // in list\n  2)",
     "x\n  |> foo  // pipeline\n  |> bar",
+    "x := // after assign\n  1",
+    "^ // after return\n  1",
+    "x := ( // open\n  1 + 2)",
+    "x := (1 + 2 // close\n)",
+    "x := 1 + // after op\n  2",
+    "x := [ // after open\n  a]",
+    "x := [:a | // after bar\n  a]",
+    "x := [ // empty\n]",
+    "x foo // before semi\n  ; bar",
 ];
 
 // ============================================================================
@@ -153,10 +162,8 @@ proptest! {
     /// Property 4 (BT-5183): formatting preserves the source.
     ///
     /// For every input (LF or CRLF) that parses cleanly, `format_source`
-    /// either returns text with the input's comments, number spellings and
-    /// AST, or refuses with [`FormatError::CommentsChanged`] (a comment in a
-    /// position the parser does not attach yet). Never a lossy result,
-    /// never another refusal. Checked here directly, not through the
+    /// returns text with the input's comments, number spellings and AST.
+    /// Never a lossy result, never a refusal. Checked here directly, not through the
     /// formatter's own gate.
     #[test]
     fn format_source_preserves_the_source(
@@ -182,7 +189,6 @@ proptest! {
                 let pass2 = format_source(&out).ok();
                 prop_assert_eq!(pass2.as_deref(), Some(out.as_str()), "not idempotent");
             }
-            Err(FormatError::CommentsChanged { .. }) => {}
             Err(e) => prop_assert!(false, "{:?} refused: {}", input, e),
         }
     }

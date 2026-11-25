@@ -1117,6 +1117,43 @@ pub(super) struct Parser {
     /// token's span (BT-5183), so the formatter can print `16rFF` rather
     /// than `255`. Taken by the owning definition like `literal_comments`.
     pub(super) number_spellings: Vec<(Span, EcoString)>,
+    /// The comments written in the gaps between an expression's tokens so
+    /// far (BT-5183), each with its anchor offset and slot. Taken by the
+    /// owning definition like `literal_comments`.
+    pub(super) gap_comments: Vec<(u32, crate::ast::GapSlot, crate::ast::GapComments)>,
+}
+
+/// The [`Comment`] one trivia item holds, with its delimiters stripped
+/// (`// `, `/* … */`, `/// `), or `None` for whitespace. `span` is the span
+/// recorded on the comment (its token's).
+pub(super) fn comment_from_trivia(trivia: &Trivia, span: Span) -> Option<Comment> {
+    match trivia {
+        Trivia::Whitespace(_) => None,
+        Trivia::LineComment(text) => {
+            let s = text.as_str();
+            let content = s
+                .strip_prefix("// ")
+                .or_else(|| s.strip_prefix("//"))
+                .unwrap_or(s);
+            Some(Comment::line(content, span))
+        }
+        Trivia::BlockComment(text) => {
+            let s = text.as_str();
+            let content = s
+                .strip_prefix("/* ")
+                .and_then(|s| s.strip_suffix(" */"))
+                .or_else(|| s.strip_prefix("/*").and_then(|s| s.strip_suffix("*/")))
+                .unwrap_or(s);
+            Some(Comment::block(content, span))
+        }
+        Trivia::DocComment(text) => {
+            let s = text.as_str();
+            let content = s
+                .strip_prefix("/// ")
+                .unwrap_or_else(|| s.strip_prefix("///").unwrap_or(s));
+            Some(Comment::doc(content, span))
+        }
+    }
 }
 
 impl Parser {
@@ -1147,6 +1184,7 @@ impl Parser {
             pipeline_sends: Vec::new(),
             literal_comments: Vec::new(),
             number_spellings: Vec::new(),
+            gap_comments: Vec::new(),
         }
     }
 
@@ -1417,31 +1455,11 @@ impl Parser {
             .map(|(_, positions)| positions);
         for (pos, trivia) in self.current_token().leading_trivia().iter().enumerate() {
             match trivia {
-                super::Trivia::LineComment(text) => {
-                    // Strip `// ` (with space) or `//` — Comment.content is
-                    // documented as "text without delimiters", consistent with
-                    // how collect_doc_comment strips `/// ` from DocComment.
-                    let s = text.as_str();
-                    let content = s
-                        .strip_prefix("// ")
-                        .or_else(|| s.strip_prefix("//"))
-                        .unwrap_or(s);
-                    let mut comment = Comment::line(content, token_span);
-                    comment.preceding_blank_line = saw_blank_line;
-                    leading.push(comment);
-                    saw_blank_line = false;
-                }
-                super::Trivia::BlockComment(text) => {
-                    // Strip `/* ` / ` */` delimiters.
-                    let s = text.as_str();
-                    let content = s
-                        .strip_prefix("/* ")
-                        .and_then(|s| s.strip_suffix(" */"))
-                        .or_else(|| s.strip_prefix("/*").and_then(|s| s.strip_suffix("*/")))
-                        .unwrap_or(s);
-                    let mut comment = Comment::block(content, token_span);
-                    comment.preceding_blank_line = saw_blank_line;
-                    leading.push(comment);
+                super::Trivia::LineComment(_) | super::Trivia::BlockComment(_) => {
+                    if let Some(mut comment) = comment_from_trivia(trivia, token_span) {
+                        comment.preceding_blank_line = saw_blank_line;
+                        leading.push(comment);
+                    }
                     saw_blank_line = false;
                 }
                 super::Trivia::Whitespace(ws) => {
@@ -1459,15 +1477,12 @@ impl Parser {
                 // trivia — preserve it as a `Comment::doc` leading
                 // comment (renders back as `///`, not `//`) so the formatter
                 // doesn't drop or mangle it.
-                super::Trivia::DocComment(text) => {
+                super::Trivia::DocComment(_) => {
                     let already_attached =
                         attached_positions.is_some_and(|positions| positions.contains(&pos));
-                    if !already_attached {
-                        let s = text.as_str();
-                        let content = s
-                            .strip_prefix("/// ")
-                            .unwrap_or_else(|| s.strip_prefix("///").unwrap_or(s));
-                        let mut comment = Comment::doc(content, token_span);
+                    if !already_attached
+                        && let Some(mut comment) = comment_from_trivia(trivia, token_span)
+                    {
                         comment.preceding_blank_line = saw_blank_line;
                         leading.push(comment);
                         saw_blank_line = false;
@@ -1488,6 +1503,60 @@ impl Parser {
         }
     }
 
+    /// The comments in the gap before the token at `idx` (BT-5183): the
+    /// previous token's trailing trivia (comments on its line) and this
+    /// token's leading trivia (comments on their own lines).
+    ///
+    /// Only for gaps inside an expression, which no statement- or
+    /// declaration-level collector reads: each token's trailing trivia is
+    /// read by whichever construct follows it, so a gap is collected once.
+    fn gap_before(&self, idx: usize) -> crate::ast::GapComments {
+        let mut gap = crate::ast::GapComments::default();
+        if let Some(prev) = idx.checked_sub(1).and_then(|i| self.tokens.get(i)) {
+            gap.same_line.extend(
+                prev.trailing_trivia()
+                    .iter()
+                    .filter_map(|t| comment_from_trivia(t, prev.span())),
+            );
+        }
+        if let Some(token) = self.tokens.get(idx) {
+            gap.own_line.extend(
+                token
+                    .leading_trivia()
+                    .iter()
+                    .filter_map(|t| comment_from_trivia(t, token.span())),
+            );
+        }
+        gap
+    }
+
+    /// The comments in the gap before the current token.
+    pub(super) fn gap_before_current(&self) -> crate::ast::GapComments {
+        self.gap_before(self.current)
+    }
+
+    /// The comments on both sides of the current token: the gap before it
+    /// and the gap after it (for a `;` or a binary operator, whose comments
+    /// are printed together before the token after it).
+    pub(super) fn gaps_around_current(&self) -> crate::ast::GapComments {
+        let mut gap = self.gap_before(self.current);
+        gap.extend(self.gap_before(self.current + 1));
+        gap
+    }
+
+    /// Files the comments of one gap on the parser; the owning definition
+    /// takes them (BT-5183). An empty gap is skipped.
+    pub(super) fn record_gap(
+        &mut self,
+        anchor: u32,
+        slot: crate::ast::GapSlot,
+        gap: crate::ast::GapComments,
+    ) {
+        if !gap.is_empty() {
+            self.gap_comments.push((anchor, slot, gap));
+        }
+    }
+
     /// Collects a trailing end-of-line comment from the last consumed token's trailing trivia.
     ///
     /// After parsing a complete expression, call this to check whether there is a
@@ -1495,9 +1564,9 @@ impl Parser {
     /// lexer places same-line trailing comments in [`Token::trailing_trivia`], so
     /// checking the previously-consumed token is sufficient — no look-ahead needed.
     ///
-    /// Only `//` line comments are considered; doc comments (`///`) and block
-    /// comments (`/* */`) are ignored here (block comments can span multiple lines
-    /// and are already collected as leading comments by [`collect_comment_attachment`]).
+    /// `//` line comments and `///` comments are considered (a `///` after
+    /// code on its line is an end-of-line comment, BT-5183); block comments
+    /// (`/* */`) are not.
     pub(super) fn collect_trailing_comment(&self) -> Option<Comment> {
         if self.current == 0 {
             return None;
@@ -1522,17 +1591,18 @@ impl Parser {
             self.tokens.len()
         );
         let last_token = &self.tokens[token_idx];
-        for trivia in last_token.trailing_trivia() {
-            if let super::Trivia::LineComment(text) = trivia {
-                let s = text.as_str();
-                let content = s
-                    .strip_prefix("// ")
-                    .or_else(|| s.strip_prefix("//"))
-                    .unwrap_or(s);
-                return Some(Comment::line(content, last_token.span()));
-            }
-        }
-        None
+        // `//` and `///` end-of-line comments (a trailing `///` after code is
+        // an end-of-line comment, BT-5183).
+        last_token
+            .trailing_trivia()
+            .iter()
+            .find(|t| {
+                matches!(
+                    t,
+                    super::Trivia::LineComment(_) | super::Trivia::DocComment(_)
+                )
+            })
+            .and_then(|t| comment_from_trivia(t, last_token.span()))
     }
 
     /// Reports an error at the current token.
@@ -1807,6 +1877,7 @@ impl Parser {
             literal_comments: crate::ast::LiteralComments::from_records(
                 std::mem::take(&mut self.literal_comments),
                 std::mem::take(&mut self.number_spellings),
+                std::mem::take(&mut self.gap_comments),
             ),
         }
     }

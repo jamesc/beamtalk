@@ -7,11 +7,11 @@
 use super::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
     CascadeMessage, CommentAttachment, CommentKind, Document, Expression, ExpressionStatement,
-    Identifier, Literal, LiteralCommentSlots, LiteralComments, MapPair, MapPatternKey, MatchArm,
-    MessageSelector, Pattern, PipelineSends, Span, StringSegment, TypeAnnotation,
-    binary_binding_power, break_, concat, docvec, group, join_docs, join_docs_vec, leaf, line,
-    nest, nil, unparse_comment, unparse_comment_attachment_leading, unparse_expect_categories,
-    unparse_keyword_part, unparse_type_annotation,
+    GapComments, GapSlot, Identifier, Literal, LiteralCommentSlots, LiteralComments, MapPair,
+    MapPatternKey, MatchArm, MessageSelector, Pattern, PipelineSends, Span, StringSegment,
+    TypeAnnotation, binary_binding_power, break_, concat, docvec, group, join_docs, join_docs_vec,
+    leaf, line, nest, nil, unparse_comment, unparse_comment_attachment_leading,
+    unparse_expect_categories, unparse_keyword_part, unparse_type_annotation,
 };
 use crate::source_analysis::{TokenKind, lex_with_eof, parse_integer};
 
@@ -91,26 +91,43 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             ..
         } => {
             let target_doc = unparse_expression(target);
+            let value_doc = docvec![
+                " :=",
+                value_separator(value, " "),
+                unparse_expression(value)
+            ];
             if let Some(ann) = type_annotation {
-                docvec![
-                    target_doc,
-                    " :: ",
-                    unparse_type_annotation(ann),
-                    " := ",
-                    unparse_expression(value)
-                ]
+                docvec![target_doc, " :: ", unparse_type_annotation(ann), value_doc]
             } else {
-                docvec![target_doc, " := ", unparse_expression(value)]
+                docvec![target_doc, value_doc]
             }
         }
         Expression::Return { value, .. } => {
-            docvec!["^", unparse_expression(value)]
+            docvec!["^", value_separator(value, ""), unparse_expression(value)]
         }
         Expression::Cascade {
             receiver, messages, ..
         } => unparse_cascade(receiver, messages),
-        Expression::Parenthesized { expression, .. } => {
-            docvec!["(", unparse_expression(expression), ")"]
+        Expression::Parenthesized { expression, span } => {
+            // Comments just inside the parentheses (BT-5183).
+            let open = gap_comments(span.start(), GapSlot::AfterOpenParen);
+            let close = gap_comments(span.end(), GapSlot::BeforeCloseParen);
+            if open.is_none() && close.is_none() {
+                docvec!["(", unparse_expression(expression), ")"]
+            } else {
+                docvec![
+                    "(",
+                    nest(
+                        1,
+                        docvec![
+                            open.as_ref().map_or_else(nil, gap_break),
+                            unparse_expression(expression),
+                            close.as_ref().map_or_else(nil, gap_break),
+                        ]
+                    ),
+                    ")"
+                ]
+            }
         }
         Expression::Match {
             value,
@@ -572,7 +589,14 @@ fn unparse_message_laid_out(
         }
         MessageSelector::Binary(op) => {
             let arg = arg_doc(&arguments[0]);
-            docvec![recv_doc, " ", leaf::ident(op), " ", arg]
+            // Comments around the operator (BT-5183) put it on its own line.
+            match gap_comments(arguments[0].span().start(), GapSlot::AroundBinaryOperator) {
+                Some(gap) => docvec![
+                    recv_doc,
+                    nest(2, docvec![gap_break(&gap), leaf::ident(op), " ", arg])
+                ],
+                None => docvec![recv_doc, " ", leaf::ident(op), " ", arg],
+            }
         }
         MessageSelector::Keyword(parts) => {
             // Break all keywords to their own indented lines when:
@@ -588,7 +612,13 @@ fn unparse_message_laid_out(
             // the check would double the work at every level of nested block
             // arguments, making unparse exponential in nesting depth (BT-4531).
             let arg_docs: Vec<Document<'static>> = arguments.iter().map(arg_doc).collect();
+            // Comments written before a keyword (BT-5183) put it on its own line.
+            let gaps: Vec<Option<GapComments>> = parts
+                .iter()
+                .map(|part| gap_comments(part.span.start(), GapSlot::BeforeKeyword))
+                .collect();
             let always_break = parts.len() >= 3
+                || gaps.iter().any(Option::is_some)
                 || arg_docs
                     .iter()
                     .any(|doc| doc.to_pretty_string().contains('\n'));
@@ -596,8 +626,8 @@ fn unparse_message_laid_out(
 
             if always_break {
                 let mut kw_docs: Vec<Document<'static>> = Vec::new();
-                for part in parts {
-                    kw_docs.push(line());
+                for (part, gap) in parts.iter().zip(&gaps) {
+                    kw_docs.push(gap.as_ref().map_or_else(line, gap_break));
                     let part_doc = unparse_keyword_part(part);
                     if let Some(arg) = arg_docs.next() {
                         kw_docs.push(docvec![part_doc, " ", arg]);
@@ -1006,6 +1036,11 @@ fn collect_concat_segments<'a>(expr: &'a Expression, out: &mut Vec<&'a Expressio
 // --- Block unparsing ---
 
 fn unparse_block(block: &Block) -> Document<'static> {
+    // Comments between the parameters and the `|`, and before the `]`
+    // (BT-5183). Either forces the block onto several lines.
+    let bar_gap = gap_comments(block.span.start(), GapSlot::BeforeBlockBar);
+    let close_gap = gap_comments(block.span.end(), GapSlot::BeforeBlockClose);
+
     // Build the parameter prefix: `:x :y | ` (if any)
     let params_doc: Document<'static> = if block.parameters.is_empty() {
         nil()
@@ -1016,9 +1051,19 @@ fn unparse_block(block: &Block) -> Document<'static> {
             .map(unparse_block_parameter)
             .collect();
         let mut p = join_docs_vec(params, " ");
-        p.push(Document::Str(" | "));
+        match &bar_gap {
+            Some(gap) => {
+                p.push(nest(2, gap_break(gap)));
+                p.push(Document::Str("| "));
+            }
+            None => p.push(Document::Str(" | ")),
+        }
         concat(p)
     };
+
+    if bar_gap.is_some() || close_gap.is_some() {
+        return unparse_block_broken(params_doc, &block.body, close_gap.as_ref());
+    }
 
     match block.body.as_slice() {
         // Empty block: `[]`
@@ -1090,6 +1135,35 @@ fn unparse_block(block: &Block) -> Document<'static> {
     }
 }
 
+/// A block on several lines — `[` and its parameters, each statement on its
+/// own line, then the comments before the `]` (BT-5183), then `]` on its own
+/// line.
+fn unparse_block_broken(
+    params_doc: Document<'static>,
+    body: &[ExpressionStatement],
+    close_gap: Option<&GapComments>,
+) -> Document<'static> {
+    let mut body_docs: Vec<Document<'static>> = Vec::new();
+    for (i, stmt) in body.iter().enumerate() {
+        if i > 0 && stmt.preceding_blank_line {
+            body_docs.push(line());
+        }
+        body_docs.push(line());
+        body_docs.push(unparse_expression_statement(stmt));
+    }
+    if let Some(gap) = close_gap {
+        for comment in &gap.same_line {
+            body_docs.push(Document::Str("  "));
+            body_docs.push(unparse_comment(comment));
+        }
+        for comment in &gap.own_line {
+            body_docs.push(line());
+            body_docs.push(unparse_comment(comment));
+        }
+    }
+    docvec!["[", params_doc, nest(2, concat(body_docs)), line(), "]"]
+}
+
 fn unparse_block_parameter(param: &BlockParameter) -> Document<'static> {
     docvec![
         ":",
@@ -1130,7 +1204,12 @@ fn unparse_cascade_message(msg: &CascadeMessage) -> Document<'static> {
             let mut kw_docs: Vec<Document<'static>> = Vec::new();
             for (i, part) in parts.iter().enumerate() {
                 if i > 0 {
-                    kw_docs.push(Document::Str(" "));
+                    // A keyword written after a comment goes on its own line
+                    // (BT-5183).
+                    match gap_comments(part.span.start(), GapSlot::BeforeKeyword) {
+                        Some(gap) => kw_docs.push(nest(2, gap_break(&gap))),
+                        None => kw_docs.push(Document::Str(" ")),
+                    }
                 }
                 kw_docs.push(unparse_keyword_part(part));
                 if i < msg.arguments.len() {
@@ -1165,8 +1244,23 @@ fn unparse_cascade(receiver: &Expression, messages: &[CascadeMessage]) -> Docume
         _ => unparse_expression(receiver),
     };
     let msg_docs: Vec<Document<'static>> = messages.iter().map(unparse_cascade_message).collect();
+    // Comments around a `;` (BT-5183) put the message after it on its own line.
+    let gaps: Vec<Option<GapComments>> = messages
+        .iter()
+        .map(|m| gap_comments(m.span.start(), GapSlot::BeforeCascadeMessage))
+        .collect();
 
-    if messages.len() == 1 {
+    if gaps.iter().any(Option::is_some) {
+        let mut continuation: Vec<Document<'static>> = Vec::new();
+        for (i, (msg_doc, gap)) in msg_docs.into_iter().zip(&gaps).enumerate() {
+            if i > 0 {
+                continuation.push(Document::Str(";"));
+            }
+            continuation.push(gap.as_ref().map_or_else(line, gap_break));
+            continuation.push(msg_doc);
+        }
+        docvec![receiver_doc, ";", nest(2, concat(continuation))]
+    } else if messages.len() == 1 {
         // Single cascade message: always inline
         docvec![receiver_doc, "; ", msg_docs.into_iter().next().unwrap()]
     } else {
@@ -1430,6 +1524,40 @@ impl Drop for LiteralCommentScope {
     fn drop(&mut self) {
         let previous = std::mem::take(&mut self.previous);
         LITERAL_COMMENTS.with(|current| *current.borrow_mut() = previous);
+    }
+}
+
+/// The comments recorded in gap `slot` anchored at `anchor`, if any
+/// (BT-5183).
+fn gap_comments(anchor: u32, slot: GapSlot) -> Option<GapComments> {
+    LITERAL_COMMENTS.with(|current| current.borrow().gap(anchor, slot).cloned())
+}
+
+/// The comments of a gap, laid out where they were written, followed by the
+/// line break they force: same-line comments after the preceding token
+/// (`foo: 1  // why`), then a line break, then each own-line comment on its
+/// own line. The caller puts this inside the `nest` that indents what comes
+/// after the gap, and the gap replaces the separator it would otherwise emit.
+fn gap_break(gap: &GapComments) -> Document<'static> {
+    let mut docs: Vec<Document<'static>> = Vec::new();
+    for comment in &gap.same_line {
+        docs.push(Document::Str("  "));
+        docs.push(unparse_comment(comment));
+    }
+    docs.push(line());
+    for comment in &gap.own_line {
+        docs.push(unparse_comment(comment));
+        docs.push(line());
+    }
+    concat(docs)
+}
+
+/// What goes between `:=` or `^` and its `value`: `plain`, or the comments
+/// written there (BT-5183) with the value on the next line.
+fn value_separator(value: &Expression, plain: &'static str) -> Document<'static> {
+    match gap_comments(value.span().start(), GapSlot::BeforeValue) {
+        Some(gap) => nest(2, gap_break(&gap)),
+        None => Document::Str(plain),
     }
 }
 

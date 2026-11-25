@@ -48,11 +48,12 @@ pub use signature_text::{
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
     CascadeMessage, ClassDefinition, Comment, CommentAttachment, CommentKind, ExpectCategory,
-    Expression, ExpressionStatement, Identifier, KeywordPart, Literal, LiteralCommentSlots,
-    LiteralComments, MapPair, MapPatternKey, MatchArm, MessageSelector, MethodDefinition, Module,
-    NativeDeclaration, ParameterDefinition, Pattern, PipelineSends, ProtocolDefinition,
-    ProtocolMethodSignature, ProtocolUse, ShapeField, SlotKind, StandaloneMethodDefinition,
-    StateDeclaration, StringSegment, TypeAliasDefinition, TypeAnnotation,
+    Expression, ExpressionStatement, GapComments, GapSlot, Identifier, KeywordPart, Literal,
+    LiteralCommentSlots, LiteralComments, MapPair, MapPatternKey, MatchArm, MessageSelector,
+    MethodDefinition, Module, NativeDeclaration, ParameterDefinition, Pattern, PipelineSends,
+    ProtocolDefinition, ProtocolMethodSignature, ProtocolUse, ShapeField, SlotKind,
+    StandaloneMethodDefinition, StateDeclaration, StringSegment, TypeAliasDefinition,
+    TypeAnnotation,
 };
 use crate::source_analysis::{
     Severity, TokenKind, binary_binding_power, lex_with_eof, line_ending, parse, parse_method,
