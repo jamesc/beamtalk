@@ -42,7 +42,6 @@ impl ClassMeta {
             has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
-            class_variables: vec![],
             type_params: vec![],
             superclass_type_args: vec![],
             handle_scope: None,
