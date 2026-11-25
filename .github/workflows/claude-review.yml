@@ -5,11 +5,19 @@ name: Claude Review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # The merge queue's test commit (BT-5247). "Claude BeamTalk Review" is a
+  # required check, so it must report there too or the queue stalls. The review
+  # already ran (and passed) on the PR, so on this event the job below only
+  # reports the check as passed: it runs no review and touches no secret.
+  merge_group:
+    types: [checks_requested]
 
-# Cancel an in-flight review if a newer push lands on the same PR.
+# Cancel an in-flight review if a newer push lands on the same PR. A
+# merge-group run has no PR number: it is keyed on its own SHA, so one queue
+# entry never cancels another, and it is never cancelled (BT-5247).
 concurrency:
-  group: claude-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: claude-review-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   review:
@@ -20,10 +28,18 @@ jobs:
     # separate context but the secret would still be exposed if the job ran on a
     # fork-originated PR). devin-ai-integration[bot] is the Devin GitHub App, installed
     # with write access and opening branches in this repo on jamesc's behalf.
+    #
+    # merge_group (BT-5247): one job, not a second job with the same name. A
+    # second job would report a *skipped* "Claude BeamTalk Review" on every PR
+    # commit next to the real one, and branch protection can count a skip as a
+    # pass while the review is still running. On merge_group only the first
+    # step runs; every review step is gated on pull_request.
     if: |
+      github.event_name == 'merge_group' || (
+      github.event_name == 'pull_request' &&
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      contains(fromJSON('["jamesc", "devin-ai-integration[bot]"]'), github.event.pull_request.user.login)
+      contains(fromJSON('["jamesc", "devin-ai-integration[bot]"]'), github.event.pull_request.user.login))
     timeout-minutes: 20
     permissions:
       id-token: write       # OIDC token exchange for the OAuth subscription auth
@@ -32,12 +48,18 @@ jobs:
       issues: write         # upsert the sticky summary comment
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Merge queue — reviewed on the pull request
+        if: github.event_name == 'merge_group'
+        run: echo "Claude review ran on the pull request; nothing to review on the merge-group commit."
+
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false  # the agent can run file-reading shell commands; keep the token out of .git/config
 
       - name: Compute diff ranges
+        if: github.event_name == 'pull_request'
         id: ranges
         run: |
           base="${{ github.event.pull_request.base.sha }}"
@@ -73,6 +95,7 @@ jobs:
             > "${GITHUB_WORKSPACE}/.claude-review-incr.diff" || true
 
       - name: Select model
+        if: github.event_name == 'pull_request'
         id: model
         env:
           FULL_RANGE: ${{ steps.ranges.outputs.full }}
@@ -109,6 +132,7 @@ jobs:
       # here via __INCR_RANGE__ / __FULL_RANGE__ placeholders (ranges are git SHAs — no shell
       # metacharacters), and the result is handed to the action through a step output.
       - name: Load review prompt
+        if: github.event_name == 'pull_request'
         id: load_prompt
         env:
           INCR_RANGE: ${{ steps.ranges.outputs.incr }}
@@ -131,6 +155,7 @@ jobs:
       # lets the job carry on to the retry step below instead of stopping here if
       # this step itself exits non-zero.
       - name: Run Claude review
+        if: github.event_name == 'pull_request'
         id: review
         continue-on-error: true
         uses: anthropics/claude-code-action@6070f08d2b4766348e0acded463606a7b176417b # v1
@@ -156,7 +181,7 @@ jobs:
       # window has a chance to clear (PR-level concurrency above already serialises
       # runs per-PR, so this is the only additional backoff needed).
       - name: Wait before retry
-        if: always() && hashFiles('.claude-verdict') == ''
+        if: always() && hashFiles('.claude-verdict') == '' && github.event_name == 'pull_request'
         run: sleep 30
 
       # Single retry of the exact same review step, only when the first attempt left
@@ -164,7 +189,7 @@ jobs:
       # soft (neutral) instead of blocking — see "Gate on verdict".
       - name: Retry Claude review (no verdict from first attempt)
         id: review_retry
-        if: always() && hashFiles('.claude-verdict') == ''
+        if: always() && hashFiles('.claude-verdict') == '' && github.event_name == 'pull_request'
         continue-on-error: true
         uses: anthropics/claude-code-action@6070f08d2b4766348e0acded463606a7b176417b # v1
         with:
@@ -195,7 +220,7 @@ jobs:
       # reviews can't be edited); GitHub marks superseded comments "outdated"
       # automatically.
       - name: Post PR review
-        if: always() && (hashFiles('.claude-verdict') != '' || hashFiles('.claude-findings.json') != '')
+        if: always() && (hashFiles('.claude-verdict') != '' || hashFiles('.claude-findings.json') != '') && github.event_name == 'pull_request'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
@@ -327,7 +352,7 @@ jobs:
             if (!posted) core.warning('All review submission attempts failed — findings remain in the sticky summary comment');
 
       - name: Post review summary
-        if: always()
+        if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
@@ -355,7 +380,7 @@ jobs:
             }
 
       - name: Gate on verdict
-        if: always()
+        if: always() && github.event_name == 'pull_request'
         run: |
           # BT-2765: the review agent occasionally dies before writing .claude-verdict
           # (infra/API rate-limit). The retry step above absorbs one such failure; if

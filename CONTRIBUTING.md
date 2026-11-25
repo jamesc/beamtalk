@@ -246,6 +246,8 @@ Include:
 - All PRs require review before merging
 - Reviewers check for correctness, test coverage, and adherence to project conventions
 - Address review comments by pushing new commits (don't force-push during review)
+- `main` merges through a merge queue: enable auto-merge (squash) on the PR instead of
+  merging it directly. See [Merge queue](docs/development/testing-strategy.md#merge-queue).
 
 ## CI & Release Workflows
 
@@ -253,7 +255,7 @@ We have three GitHub Actions workflows:
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| **CI** (`.github/workflows/ci.yml`) | Push to `main`, PRs | Build, lint, test, coverage |
+| **CI** (`.github/workflows/ci.yml`) | Push to `main`, PRs, merge queue | Build, lint, test, coverage |
 | **Release** (`.github/workflows/release.yml`) | GitHub Release published, manual | Build distributable tarball, upload as release asset |
 | **Fuzz** (`.github/workflows/fuzz.yml`) | Nightly (2 AM UTC) | Fuzz parser for crash safety |
 
