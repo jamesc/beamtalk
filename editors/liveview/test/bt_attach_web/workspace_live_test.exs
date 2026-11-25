@@ -50,7 +50,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     defp observer_conn(conn) do
       Plug.Test.init_test_session(conn, %{
         "bt_user" => %{"sub" => "bob", "groups" => ["beamtalk-observers"]},
-        "bt_logged_in_at" => System.system_time(:second)
+        "bt_logged_in_at" => System.system_time(:second),
+        "live_socket_id" => "bt_session:test"
       })
     end
 
@@ -2724,7 +2725,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       conn =
         Plug.Test.init_test_session(conn, %{
           "bt_user" => %{"sub" => "obs", "groups" => ["beamtalk-observers"]},
-          "bt_logged_in_at" => System.system_time(:second)
+          "bt_logged_in_at" => System.system_time(:second),
+          "live_socket_id" => "bt_session:test"
         })
 
       {:ok, conn: conn}

@@ -146,14 +146,25 @@ allowed_names() ->
     FromEnv =
         case os:getenv("BEAMTALK_WS_ALLOWED_HOSTS") of
             false -> [];
-            Str -> [list_to_binary(T) || T <- string:tokens(Str, ", ")]
+            Str -> string:tokens(Str, ", ")
         end,
-    FromApp =
-        [
-            iolist_to_binary(N)
-         || N <- application:get_env(beamtalk_workspace, ws_allowed_hosts, [])
-        ],
-    [string:lowercase(N) || N <- FromEnv ++ FromApp].
+    FromApp = application:get_env(beamtalk_workspace, ws_allowed_hosts, []),
+    [Name || Raw <- FromEnv ++ FromApp, {ok, Name} <- [allowed_name(Raw)]].
+
+%% BT-5185: one name as a lowercase UTF-8 binary, or `skip`. An entry that is
+%% not valid Unicode (or not a string at all) is ignored, not a crash on every
+%% upgrade: `list_to_binary/1` raised on any character above 255. A non-ASCII
+%% name can never equal a `Host` header (those are ASCII/IDNA), so skipping it
+%% loses nothing.
+allowed_name(Raw) when is_list(Raw); is_binary(Raw) ->
+    try unicode:characters_to_binary(Raw) of
+        Bin when is_binary(Bin), Bin =/= <<>> -> {ok, string:lowercase(Bin)};
+        _ -> skip
+    catch
+        error:badarg -> skip
+    end;
+allowed_name(_) ->
+    skip.
 
 is_bound_host(H, BindAddr) ->
     case inet:parse_address(binary_to_list(H)) of
@@ -175,7 +186,9 @@ websocket_init(State) ->
     %% owns the socket. Over the cap: close with 1013 (try again later).
     case beamtalk_ws_conn_cap:acquire() of
         ok ->
-            websocket_init_accepted(State);
+            websocket_init_accepted(State#ws_state{
+                cap_owner_mon = beamtalk_ws_conn_cap:monitor_owner()
+            });
         {error, at_capacity} ->
             ?LOG_WARNING("WebSocket refused: connection cap reached", #{
                 peer => State#ws_state.peer,
@@ -202,10 +215,24 @@ First message must be auth; subsequent messages are protocol ops.
 websocket_handle({text, Data}, State = #ws_state{authenticated = false}) ->
     case handle_auth(Data, State) of
         {Cmds, NewState = #ws_state{authenticated = true}} ->
-            %% Lift the pre-auth deadline and frame cap (BT-5066).
-            Lift =
-                {set_options, #{idle_timeout => infinity, max_frame_size => ?POST_AUTH_MAX_FRAME}},
-            {[Lift | Cmds], NewState};
+            %% BT-5185: move from the pre-auth budget to the authenticated one.
+            case beamtalk_ws_conn_cap:promote() of
+                ok ->
+                    %% Lift the pre-auth deadline and frame cap (BT-5066).
+                    Lift =
+                        {set_options, #{
+                            idle_timeout => infinity, max_frame_size => ?POST_AUTH_MAX_FRAME
+                        }},
+                    {[Lift | Cmds], NewState};
+                {error, Why} ->
+                    ?LOG_WARNING("WebSocket refused after auth: connection cap", #{
+                        peer => State#ws_state.peer,
+                        reason => Why,
+                        limit => beamtalk_ws_conn_cap:limit(),
+                        domain => [beamtalk, runtime]
+                    }),
+                    {[{close, 1013, <<"Too many connections">>}], State}
+            end;
         Other ->
             Other
     end;
@@ -218,6 +245,16 @@ websocket_handle(_Frame, State) ->
 Handle Erlang messages sent to the handler process.
 Streaming stdout chunk from eval
 """.
+websocket_info({beamtalk_ws_conn_cap, evicted}, State = #ws_state{authenticated = false}) ->
+    %% BT-5185: the pre-auth budget was full and this was the oldest
+    %% unauthenticated socket; a newer one has taken its slot.
+    {[{close, 1013, <<"Too many unauthenticated connections">>}], State};
+websocket_info(
+    {'DOWN', Ref, process, _Owner, _Reason}, State = #ws_state{cap_owner_mon = Ref}
+) when Ref =/= undefined ->
+    %% BT-5185: the REPL server (and its connection-cap table) restarted; this
+    %% connection would live on uncounted, so close it (1012: service restart).
+    {[{close, 1012, <<"Server restarting">>}], State#ws_state{cap_owner_mon = undefined}};
 websocket_info(auth_deadline, State = #ws_state{authenticated = false}) ->
     ?LOG_WARNING("WebSocket closed: auth deadline", #{
         peer => State#ws_state.peer, domain => [beamtalk, runtime]

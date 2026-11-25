@@ -178,11 +178,12 @@ resolve_version() {
     TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
     if command -v curl >/dev/null 2>&1; then
         if [ -n "${TOKEN}" ]; then
-            RELEASE_JSON=$(curl -sS --proto '=https' --retry 3 -H "Authorization: Bearer ${TOKEN}" "${RELEASE_URL}")
+            RELEASE_JSON=$(curl -sS --proto '=https' --proto-redir '=https' --retry 3 -H "Authorization: Bearer ${TOKEN}" "${RELEASE_URL}")
         else
-            RELEASE_JSON=$(curl -sS --proto '=https' --retry 3 "${RELEASE_URL}")
+            RELEASE_JSON=$(curl -sS --proto '=https' --proto-redir '=https' --retry 3 "${RELEASE_URL}")
         fi
     elif command -v wget >/dev/null 2>&1; then
+        require_https_only_wget
         if [ -n "${TOKEN}" ]; then
             RELEASE_JSON=$(wget -qO- --https-only --header="Authorization: Bearer ${TOKEN}" "${RELEASE_URL}")
         else
@@ -213,12 +214,24 @@ resolve_version() {
 
 # ─── Download and verify ────────────────────────────────────────────────
 
+# BT-5185: downloads must stay on https, redirects included. GNU wget has
+# --https-only; BusyBox wget (Alpine) does not and would fail with an
+# unrelated-looking usage error, so say what is missing instead.
+require_https_only_wget() {
+    if ! wget --help 2>&1 | grep -q -- '--https-only'; then
+        echo "Error: this wget does not support --https-only (BusyBox wget?), so downloads"
+        echo "  cannot be kept on https. Install curl (e.g. 'apk add curl') or GNU wget and retry."
+        exit 1
+    fi
+}
+
 download() {
     URL="$1"
     DEST="$2"
     if command -v curl >/dev/null 2>&1; then
-        curl --proto '=https' -LsSf "${URL}" -o "${DEST}"
+        curl --proto '=https' --proto-redir '=https' -LsSf "${URL}" -o "${DEST}"
     elif command -v wget >/dev/null 2>&1; then
+        require_https_only_wget
         wget -qO "${DEST}" --https-only "${URL}"
     else
         echo "Error: curl or wget required"
@@ -320,10 +333,12 @@ OWNED_DIRS="lib/beamtalk share/beamtalk"
 OWNED_BINS="beamtalk beamtalk-compiler-port beamtalk-lsp beamtalk-mcp beamtalk-exec"
 MANIFEST_NAME=".beamtalk-installed"
 
-# Every unit the archive supplies is replaced wholesale: each child of bin/,
-# lib/ and share/ (bin/beamtalk, lib/beamtalk, share/beamtalk, ...) and any
-# other top-level entry. PREFIX itself, and anything else in bin/ lib/ share/,
-# is untouched, so a shared prefix such as /usr/local is safe.
+# Every unit the archive supplies is replaced wholesale: each child of a
+# top-level directory (bin/beamtalk, lib/beamtalk, share/beamtalk, and the
+# same for any other top-level directory such as include/ or man/), and each
+# top-level file. A top-level directory itself is never a unit (BT-5185):
+# PREFIX, and anything else in its directories, is untouched, so a shared
+# prefix such as /usr/local is safe.
 #
 # The swap is journalled: before a unit is replaced its old copy is moved into
 # $OLD and recorded; if any later step fails, rollback_swap undoes every unit
@@ -387,20 +402,28 @@ swap_into_prefix() {
     for top in "${STAGE}/"*; do
         [ -e "${top}" ] || continue
         name="$(basename "${top}")"
-        case "${name}" in
-            bin|lib|share)
-                for unit in "${top}/"*; do
-                    [ -e "${unit}" ] || continue
-                    install_unit "${unit}" "${PREFIX}/${name}/$(basename "${unit}")"
-                done
-                ;;
-            *)
-                install_unit "${top}" "${PREFIX}/${name}"
-                ;;
-        esac
+        if [ -d "${top}" ] && [ ! -L "${top}" ]; then
+            for unit in "${top}/"*; do
+                [ -e "${unit}" ] || continue
+                install_unit "${unit}" "${PREFIX}/${name}/$(basename "${unit}")"
+            done
+        else
+            install_unit "${top}" "${PREFIX}/${name}"
+        fi
     done
     # Record what this install owns so --uninstall removes exactly it, even
     # for units a release adds later (the OWNED_* lists are only a fallback).
+    # BT-5185: keep entries an earlier install recorded that are still there,
+    # so a unit a newer release dropped is not orphaned.
+    if [ -f "${PREFIX}/${MANIFEST_NAME}" ]; then
+        while IFS= read -r rel; do
+            [ -n "${rel}" ] || continue
+            if [ -e "${PREFIX}/${rel}" ] || [ -L "${PREFIX}/${rel}" ]; then
+                grep -qxF -- "${rel}" "${OLD}/manifest" \
+                    || printf '%s\n' "${rel}" >> "${OLD}/manifest" || rollback_swap
+            fi
+        done < "${PREFIX}/${MANIFEST_NAME}"
+    fi
     cp "${OLD}/manifest" "${PREFIX}/${MANIFEST_NAME}" || rollback_swap
     rm -rf "${OLD}"
 }
@@ -418,7 +441,18 @@ uninstall_beamtalk() {
             case "${rel}" in
                 ''|/*|..|../*|*/..|*/../*) continue ;;
             esac
+            # BT-5185: a bare top-level name is a whole shared directory
+            # (include, man) in a manifest an older install.sh wrote; never
+            # remove one of those wholesale. Units are always <dir>/<name>.
+            case "${rel}" in
+                */*) ;;
+                *) [ -d "${PREFIX}/${rel}" ] && [ ! -L "${PREFIX}/${rel}" ] && continue ;;
+            esac
             rm -rf "${PREFIX:?}/${rel}"
+            # Tidy its directory if that leaves it empty.
+            case "${rel}" in
+                */*) rmdir "${PREFIX}/${rel%/*}" 2>/dev/null || true ;;
+            esac
         done < "${PREFIX}/${MANIFEST_NAME}"
         rm -f "${PREFIX}/${MANIFEST_NAME}"
     fi

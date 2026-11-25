@@ -60,7 +60,8 @@ defmodule BtAttachWeb.AuthBoundaryTest do
   defp session(conn, groups) do
     Plug.Test.init_test_session(conn, %{
       "bt_user" => %{"sub" => "u", "groups" => groups},
-      "bt_logged_in_at" => System.system_time(:second)
+      "bt_logged_in_at" => System.system_time(:second),
+      "live_socket_id" => "bt_session:test"
     })
   end
 

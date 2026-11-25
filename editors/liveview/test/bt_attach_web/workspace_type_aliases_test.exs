@@ -49,14 +49,16 @@ defmodule BtAttachWeb.WorkspaceTypeAliasesTest do
   defp owner_conn(conn) do
     Plug.Test.init_test_session(conn, %{
       "bt_user" => %{"sub" => "alice", "groups" => ["beamtalk-owners"]},
-      "bt_logged_in_at" => System.system_time(:second)
+      "bt_logged_in_at" => System.system_time(:second),
+      "live_socket_id" => "bt_session:test"
     })
   end
 
   defp observer_conn(conn) do
     Plug.Test.init_test_session(conn, %{
       "bt_user" => %{"sub" => "bob", "groups" => ["beamtalk-observers"]},
-      "bt_logged_in_at" => System.system_time(:second)
+      "bt_logged_in_at" => System.system_time(:second),
+      "live_socket_id" => "bt_session:test"
     })
   end
 

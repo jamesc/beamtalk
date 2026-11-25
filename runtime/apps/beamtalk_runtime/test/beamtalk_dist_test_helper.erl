@@ -76,6 +76,20 @@ into `peer:start_it/2` — the stacktrace only says where it was parked.
 %% this side or the peer did on purpose — see watch_peer_connection/2.
 -define(EXPECTED_NODEDOWN_REASONS, [disconnect, connection_closed]).
 
+%% The throwaway cookie every peer of this test run shares (BT-5185).
+-spec peer_cookie() -> atom().
+peer_cookie() ->
+    Key = {?MODULE, peer_cookie},
+    case persistent_term:get(Key, undefined) of
+        undefined ->
+            Hex = binary_to_list(binary:encode_hex(crypto:strong_rand_bytes(16))),
+            Cookie = list_to_atom("bt_peer_" ++ Hex),
+            persistent_term:put(Key, Cookie),
+            Cookie;
+        Cookie ->
+            Cookie
+    end.
+
 -doc """
 Make this (test) node distributed if it isn't already. Starts epmd first
 (idempotent: `epmd -daemon` against an epmd that is already listening on
@@ -212,9 +226,15 @@ start_peer(NamePrefix, Opts) ->
     Host = ?PEER_HOST,
     PeerName = unique_short_name(NamePrefix),
     CodePathArgs = lists:append([["-pa", Dir] || Dir <- code:get_path()]),
+    %% BT-5185: the peer gets a random per-run cookie on its command line, never
+    %% this node's own (often the developer's `~/.erlang.cookie`, which `ps`
+    %% would show). `erlang:set_cookie/2` makes this node use it for that
+    %% peer, in both directions; peers share it, so they can reach each other.
+    PeerCookie = peer_cookie(),
+    true = erlang:set_cookie(list_to_atom(atom_to_list(PeerName) ++ "@" ++ Host), PeerCookie),
     %% Warning level so an ERTS dist-rejection warning on the peer shows (BT-3937).
     CookieArgs = [
-        "-setcookie", atom_to_list(erlang:get_cookie()), "-kernel", "logger_level", "warning"
+        "-setcookie", atom_to_list(PeerCookie), "-kernel", "logger_level", "warning"
     ],
     ExtraArgs = maps:get(extra_args, Opts, []),
     PeerOpts0 = #{
