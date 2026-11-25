@@ -26,8 +26,10 @@ Membership changes are observed through `beamtalk_node_monitor`'s
 ## Connect policy (ADR 0126 §9 item 2)
 
 `connect` (and `ping`, which auto-connects) to a host that is not this host
-succeeds only when this node runs TLS distribution (`-proto_dist inet_tls`
-or `inet6_tls`); otherwise it answers
+succeeds only when this node runs TLS distribution with peer verification
+(`-proto_dist inet_tls` or `inet6_tls`, with `{verify, verify_peer}` on both
+sides and `{fail_if_no_peer_cert, true}` on the server side; ADR 0126
+amendment D2, `beamtalk_dist_tls:enabled/0`); otherwise it answers
 `#beamtalk_error{kind = insecure_distribution}`. "This host" means the host
 part names `localhost` or this machine's own hostname, or every address it
 resolves to is a loopback address or one of this machine's interface
@@ -83,7 +85,9 @@ selectors (ADR 0126 Phase 2) apply the same rule rather than re-deriving it.
 %% Upper bound on the `global:sync/0` every successful `connect` waits for (BT-5173, BT-5179).
 -define(GLOBAL_SYNC_TIMEOUT_MS, 5000).
 -define(INVALID_NAME_HINT, <<"expected name@host">>).
--define(INSECURE_HINT, <<"configure TLS distribution (ADR 0091) or use a tunnel">>).
+-define(INSECURE_HINT,
+    <<"configure TLS distribution with peer verification (ADR 0126 §9) or use a tunnel"/utf8>>
+).
 
 %%% ============================================================================
 %%% Class Methods
@@ -525,15 +529,15 @@ connect_policy(Node, false) ->
     end.
 
 -doc """
-Whether this node runs TLS distribution: `-proto_dist inet_tls` (or
-`inet6_tls`) on the command line / in `vm.args`.
+Whether this node runs TLS distribution with peer verification: `-proto_dist
+inet_tls` (or `inet6_tls`), and TLS options that set `{verify, verify_peer}`
+on both sides and `{fail_if_no_peer_cert, true}` on the server side (ADR 0126
+amendment D2, BT-5233). `-proto_dist inet_tls` alone authenticates nothing,
+so it does not count. See `beamtalk_dist_tls:enabled/0`.
 """.
 -spec tls_distribution() -> boolean().
 tls_distribution() ->
-    case init:get_argument(proto_dist) of
-        {ok, Values} -> lists:any(fun(V) -> lists:suffix("_tls", V) end, lists:append(Values));
-        error -> false
-    end.
+    beamtalk_dist_tls:enabled().
 
 %%% ============================================================================
 %%% Internal
