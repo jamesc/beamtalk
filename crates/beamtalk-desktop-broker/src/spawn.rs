@@ -251,6 +251,31 @@ impl SpawnedFront {
         &self.port_file
     }
 
+    /// Wrap an already-spawned `child` as a front, for downstream tests that
+    /// need a real tracked process without a workspace or launcher
+    /// (`test-support` feature only). On Windows the child is put in a fresh
+    /// Job Object, as [`spawn_front`] does.
+    ///
+    /// # Errors
+    ///
+    /// Windows only: creating the Job Object or assigning `child` to it.
+    #[cfg(feature = "test-support")]
+    pub fn from_child_for_tests(child: Child) -> io::Result<Self> {
+        #[cfg(windows)]
+        let job = {
+            let job = crate::winjob::JobHandle::new()?;
+            job.assign(&child)?;
+            job
+        };
+        Ok(Self {
+            child,
+            instance_id: String::new(),
+            port_file: PathBuf::new(),
+            #[cfg(windows)]
+            job,
+        })
+    }
+
     /// Stop the front and reap it: a graceful signal first, a forced kill only
     /// if it has not exited within `grace` (BT-5081).
     ///
@@ -262,11 +287,42 @@ impl SpawnedFront {
     /// `SIGKILL`. On Windows there is no graceful-signal equivalent for an
     /// arbitrary child, so it is the forced kill (the Job Object then takes the
     /// rest of the process tree down).
+    ///
+    /// A front that has already exited is not signalled at all (BT-5194): the
+    /// desktop app's monitor thread reaps an exited front with `try_wait()`,
+    /// and once reaped its PID is free for the OS to hand to an unrelated
+    /// process. `std`'s `Child` remembers a reaped status, so the `try_wait()`
+    /// here sees it and returns before any `kill(2)`.
     pub fn stop(&mut self, grace: Duration) {
         #[cfg(unix)]
-        if let Ok(pid) = i32::try_from(self.child.id()) {
-            // SAFETY: kill(2) on the PID of our own, still-unreaped child.
+        self.stop_signalling(grace, |pid| {
+            // SAFETY: kill(2) on the PID of our own child, which
+            // `stop_signalling` has just confirmed (`try_wait`) is not yet
+            // reaped, so the PID cannot have been recycled.
             unsafe { libc::kill(pid, libc::SIGTERM) };
+        });
+        #[cfg(not(unix))]
+        {
+            let _ = grace;
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    /// [`Self::stop`]'s Unix body, with the `SIGTERM` delivery injected so a
+    /// test can observe whether it was sent.
+    #[cfg(unix)]
+    fn stop_signalling(&mut self, grace: Duration, sigterm: impl FnOnce(i32)) {
+        // Already exited (and now reaped): its PID may belong to another
+        // process, so there is nothing to signal.
+        if matches!(self.child.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        if let Ok(pid) = i32::try_from(self.child.id()) {
+            sigterm(pid);
             let deadline = std::time::Instant::now() + grace;
             loop {
                 match self.child.try_wait() {
@@ -278,8 +334,8 @@ impl SpawnedFront {
                 }
             }
         }
-        #[cfg(not(unix))]
-        let _ = grace;
+        // `Child::kill` is a no-op on an already-reaped child, so this
+        // fallback cannot reach a recycled PID either.
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -930,6 +986,38 @@ mod tests {
 
         front.stop(Duration::from_secs(5));
         assert!(marker.exists(), "SIGTERM handler did not run before exit");
+    }
+
+    /// BT-5194: once the front has exited and been reaped (the desktop app's
+    /// monitor thread `try_wait()`s a front that stops answering), its PID is
+    /// free for the OS to reuse, so `stop` must not signal it.
+    #[cfg(unix)]
+    #[test]
+    fn stop_does_not_signal_a_front_that_was_already_reaped() {
+        let mut front = script_front("exit 0");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !matches!(front.child.try_wait(), Ok(Some(_))) {
+            assert!(std::time::Instant::now() < deadline, "front never exited");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let mut signalled = Vec::new();
+        front.stop_signalling(Duration::from_secs(5), |pid| signalled.push(pid));
+        assert!(
+            signalled.is_empty(),
+            "stop sent SIGTERM to the reaped front's (possibly recycled) PID {signalled:?}"
+        );
+    }
+
+    /// The counterpart: a still-running front does get its `SIGTERM`.
+    #[cfg(unix)]
+    #[test]
+    fn stop_signals_a_running_front() {
+        let mut front = script_front("while :; do sleep 0.05; done");
+        let mut signalled = Vec::new();
+        front.stop_signalling(Duration::from_millis(50), |pid| signalled.push(pid));
+        assert_eq!(signalled, vec![i32::try_from(front.child.id()).unwrap()]);
+        assert!(matches!(front.child.try_wait(), Ok(Some(_))));
     }
 
     /// A front that ignores `SIGTERM` is force-killed once the grace elapses, and

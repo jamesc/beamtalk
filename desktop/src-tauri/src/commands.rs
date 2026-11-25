@@ -407,10 +407,28 @@ const FRONT_STOP_GRACE: Duration = Duration::from_secs(3);
 /// comment) — killing it locally without untracking would leave a dangling
 /// map entry for an already-dead process.
 fn kill_and_untrack(state: &AppState, workspace_id: &str, port: u16) {
-    if let Some(mut child) = locked(&state.children).remove(workspace_id) {
+    untrack_then(&state.children, workspace_id, |mut child| {
         child.stop(FRONT_STOP_GRACE);
-    }
+    });
     remove_front_record(workspace_id, port);
+}
+
+/// Remove `workspace_id`'s entry from `children`, release the lock, and only
+/// then hand the entry to `stop` (BT-5194). `SpawnedFront::stop` blocks for up
+/// to [`FRONT_STOP_GRACE`]; holding the `children` lock across it would stall
+/// every other attach, detach, quit and the monitor thread for that long. An
+/// `if let Some(c) = locked(..).remove(..) { .. }` keeps the guard (a
+/// temporary of the `if let` scrutinee) alive for the whole body, so the
+/// removal is bound first.
+fn untrack_then<T>(
+    children: &Mutex<std::collections::HashMap<String, T>>,
+    workspace_id: &str,
+    stop: impl FnOnce(T),
+) {
+    let removed = locked(children).remove(workspace_id);
+    if let Some(child) = removed {
+        stop(child);
+    }
 }
 
 /// Detach `workspace_id`: kill its front process, clear bookkeeping, close
@@ -456,9 +474,9 @@ pub fn detach_internal<R: tauri::Runtime>(
     tracing::info!(workspace_id, "detaching");
     let removed = locked(&state.attach).remove(workspace_id);
 
-    if let Some(mut child) = locked(&state.children).remove(workspace_id) {
+    untrack_then(&state.children, workspace_id, |mut child| {
         child.stop(FRONT_STOP_GRACE);
-    }
+    });
 
     // Removing the on-disk record — which also removes the front's
     // RELEASE_TMP directory on Windows (BT-3046) — must happen *after* the
@@ -818,22 +836,74 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    /// A long-running stand-in for a front process.
+    fn long_running_child() -> std::process::Child {
+        #[cfg(unix)]
+        let mut cmd = std::process::Command::new("sleep");
+        #[cfg(unix)]
+        cmd.arg("60");
+        #[cfg(windows)]
+        let mut cmd = std::process::Command::new("ping");
+        #[cfg(windows)]
+        cmd.args(["-n", "61", "127.0.0.1"]);
+        cmd.stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn a stand-in front")
+    }
+
+    /// BT-3252 / BT-5194: the picker's `CloseRequested` handler and the Quit
+    /// button both run `quit_app`, whose body up to `app.exit(0)` (which
+    /// `MockRuntime` cannot run — see `quit_cleanup`'s doc comment) is
+    /// `quit_cleanup`. It must stop and untrack every tracked front,
+    /// including one whose attach is still in flight (tracked in
+    /// `children` but not yet recorded in `AttachManager`).
     #[test]
-    fn quit_cleanup_runs_cleanly_with_nothing_attached() {
-        // BT-3252: the picker window's own `CloseRequested` handler
-        // (`main.rs`) calls `quit_app`, whose entire body (besides the
-        // final `app.exit(0)` — see `quit_cleanup`'s doc comment for why
-        // that can't be exercised here) is `quit_cleanup`. This is the
-        // closest a test in this crate can get to "invoke the picker's new
-        // close handler and assert it runs the right quit/detach logic"
-        // without a live Tauri runtime: it confirms the shared path the
-        // picker's close and the in-app "Quit" button both now run
-        // (`detach_all` + best-effort log flush) completes without
-        // panicking against a freshly `mock_app()`-backed `AppHandle` and
-        // an `AppState` with nothing attached — the state both start from.
+    fn quit_cleanup_stops_and_untracks_every_tracked_front() {
         let app = tauri::test::mock_app();
         let state = AppState::new(PathBuf::from("unused-in-this-test"));
+        let mut pids = Vec::new();
+        for id in ["first", "second"] {
+            let front =
+                beamtalk_desktop_broker::spawn::SpawnedFront::from_child_for_tests(
+                    long_running_child(),
+                )
+                .expect("wrap the stand-in front");
+            pids.push(front.id());
+            locked(&state.children).insert(id.to_string(), front);
+        }
+
         quit_cleanup(app.handle(), &state);
+
+        assert!(locked(&state.children).is_empty(), "fronts still tracked");
+        for pid in pids {
+            assert!(
+                !beamtalk_workspace::pid_liveness::is_process_alive(pid),
+                "front {pid} is still running after quit"
+            );
+        }
+    }
+
+    /// BT-5194: the `children` lock must be free while a removed front is
+    /// being stopped (up to `FRONT_STOP_GRACE`), so other commands and the
+    /// monitor thread are not stalled behind it.
+    #[test]
+    fn untrack_then_releases_the_children_lock_before_stopping() {
+        let children = Mutex::new(std::collections::HashMap::from([
+            ("a".to_string(), 1),
+            ("b".to_string(), 2),
+        ]));
+        let mut stopped = None;
+        untrack_then(&children, "a", |child| {
+            assert!(
+                children.try_lock().is_ok(),
+                "the children lock is held while stopping a front"
+            );
+            stopped = Some(child);
+        });
+        assert_eq!(stopped, Some(1));
+        assert_eq!(locked(&children).len(), 1);
+
+        untrack_then(&children, "missing", |_| panic!("nothing to stop"));
     }
 
     #[test]

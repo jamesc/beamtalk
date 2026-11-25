@@ -32,7 +32,8 @@ desktop/
                            (`bin/server` on Unix, `bin\bt_attach.bat` on
                            Windows — BT-2988)
       dto.rs             JSON view models for the frontend
-    entitlements.plist  Hardened Runtime entitlements for the bundled BEAM
+    beam-entitlements.plist  Hardened Runtime entitlements for the bundled
+                         BEAM VM executable (beam.smp) only (BT-5194)
                          release (BT-2987 — see the packaging section below)
     icons/               Placeholder icon set (resized from
                          editors/vscode/images/icon.png — the existing
@@ -84,11 +85,12 @@ On macOS, every nested Mach-O binary in that bundled release (`beam.smp`,
 them in, because Tauri's own macOS bundler only reliably signs the top-level
 `.app` — arbitrary resource binaries are a known gap
 (tauri-apps/tauri#11992) and Apple's notary service rejects a bundle
-containing any unsigned Mach-O. `entitlements.plist` grants the Hardened
-Runtime allowances BEAM needs (`allow-jit` +
+containing any unsigned Mach-O. `beam-entitlements.plist` grants the
+Hardened Runtime allowances BEAM needs (`allow-jit` +
 `allow-unsigned-executable-memory` for BeamAsm's JIT, `disable-library-
-validation` for independently-signed NIFs) to both that pre-pass and the
-top-level app (`bundle.macOS.entitlements`). See the workflow file's header
+validation` for independently-signed NIFs) to `beam.smp` alone; every other
+nested binary and the top-level app are signed with the Hardened Runtime and
+no entitlements (BT-5194). See the workflow file's header
 comment for the full signing/notarization flow and the required secrets.
 Windows has no equivalent code-signing pass in this lane — the `.msi`/`.exe`
 Tauri produces are unsigned; that's a real gap (unsigned installers trigger

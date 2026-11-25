@@ -1018,6 +1018,7 @@ lint-repo: \
     test-lint-stamp \
     test-publish-rolling-release \
     test-refresh-edge \
+    test-sign-macos-nested-binaries \
     test-vs-elixir-nightly \
     test-workflow-paths
 
@@ -1113,6 +1114,16 @@ test-install-script:
 [windows]
 test-install-script:
     @echo "test-install-script: skipped on Windows (covered by Linux CI)"
+
+# Test (BT-5194): sign-macos-nested-binaries.sh gives the BEAM entitlements to
+# beam*.smp only (stubbed `file`/`codesign`, so it runs on Linux).
+[unix]
+test-sign-macos-nested-binaries:
+    @bash scripts/ci/test-sign-macos-nested-binaries.sh
+
+[windows]
+test-sign-macos-nested-binaries:
+    @echo "test-sign-macos-nested-binaries: skipped on Windows (covered by Linux CI)"
 
 # Test (BT-4925): the `test-install` class-beam guard passes on a populated
 # ebin dir every time (no `find | grep -q` SIGPIPE under pipefail) and fails
