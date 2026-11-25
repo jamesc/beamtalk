@@ -220,7 +220,9 @@ the line was not written. Every later `writeLine:` raises too.
 -spec write_dropped(atom(), binary(), map()) -> map().
 write_dropped(Class, Reason, State) ->
     Err = beamtalk_error:with_message(
-        beamtalk_error:new(runtime_error, Class, 'writeLine:', <<"stdin write failed: ", Reason/binary>>),
+        beamtalk_error:new(
+            runtime_error, Class, 'writeLine:', <<"stdin write failed: ", Reason/binary>>
+        ),
         <<"writeLine: failed: the line was not written">>
     ),
     S1 =

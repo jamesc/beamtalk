@@ -305,8 +305,7 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             ?LOG_WARNING("ReactiveSubprocess stdin write dropped", #{
                 reason => Reason, domain => [beamtalk, stdlib]
             }),
-            {noreply,
-                beamtalk_subprocess_port:write_dropped('ReactiveSubprocess', Reason, State)};
+            {noreply, beamtalk_subprocess_port:write_dropped('ReactiveSubprocess', Reason, State)};
         {error, _ChildId, Command, Reason} ->
             ?LOG_WARNING("ReactiveSubprocess command refused by exec port", #{
                 command => Command, reason => Reason, domain => [beamtalk, stdlib]
