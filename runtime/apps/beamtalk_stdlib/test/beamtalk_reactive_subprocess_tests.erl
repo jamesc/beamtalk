@@ -346,6 +346,28 @@ write_until_error(Pid, Chunk, Accepted) ->
         {error, Err} -> {Accepted, Err}
     end.
 
+%% A writeLine: whose write_stdin raises (the exec port is gone) marks the port
+%% closed; callers already parked for an answer must be failed then, or nothing
+%% would ever reply to them (BT-5248).
+writeLine_failing_write_fails_parked_callers_test() ->
+    Port = beamtalk_subprocess_port:open(),
+    beamtalk_subprocess_port:close(Port),
+    Parked = {self(), make_ref()},
+    State = beamtalk_subprocess_port:await_write(Parked, #{
+        port => Port, child_id => 0, port_closed => false
+    }),
+    {reply, {error, #beamtalk_error{kind = port_closed}}, NewState} =
+        beamtalk_reactive_subprocess:handle_call(
+            {'writeLine:', [<<"x">>]}, {self(), make_ref()}, State
+        ),
+    {_, Ref} = Parked,
+    receive
+        {Ref, {error, #beamtalk_error{kind = port_closed}}} -> ok
+    after 1000 -> error(parked_caller_not_answered)
+    end,
+    ?assertEqual(true, maps:get(port_closed, NewState)),
+    ?assertEqual(0, queue:len(maps:get(stdin_waiters, NewState))).
+
 %%% ============================================================================
 %%% close: terminates subprocess interaction
 %%% ============================================================================

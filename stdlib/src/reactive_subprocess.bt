@@ -95,8 +95,8 @@ typed Actor subclass: ReactiveSubprocess native: beamtalk_reactive_subprocess
   /// raises a `runtime_error`
   /// saying the line was not written (the reason is in its hint), and so does
   /// every later `writeLine:`. A line already accepted and still queued when
-  /// the child exits or closes its input is lost; only the next `writeLine:`
-  /// raises.
+  /// the child exits or closes its input is lost without an error; the
+  /// `writeLine:` calls after that raise.
   ///
   /// ## Examples
   /// ```beamtalk
