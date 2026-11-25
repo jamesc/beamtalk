@@ -439,10 +439,7 @@ impl Parser {
                 let end = p.skip_type_for_recovery();
                 TypeAnnotation::Simple(Identifier::new("Error", start.merge(end)))
             },
-            |p| {
-                let ty = p.parse_type_annotation_unguarded();
-                p.bound_type_depth(ty)
-            },
+            |p| p.bounded_type_level(Self::parse_type_annotation_unguarded),
         )
     }
 
@@ -654,7 +651,11 @@ impl Parser {
                 self.error("Expected ')' to close grouping parentheses in type annotation");
                 inner.span()
             };
-            return inner.with_span(start.merge(end));
+            // The group's tree is the one the nested level measured, so its
+            // recorded depth moves with the span (BT-5237).
+            let span = start.merge(end);
+            self.type_depths.respan_last(inner.span(), span);
+            return inner.with_span(span);
         }
         if let TokenKind::Identifier(name) = self.current_kind() {
             let span = self.current_token().span();
