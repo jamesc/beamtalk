@@ -346,7 +346,7 @@ const HAND_WRITTEN_CAPITALIZED: &[&str] = &[
     "ClfNewState",
     "ClrErr",
     // BT-5211: the fallback clause of the numeric-ordering primitive
-    // bodies (`primitives::generate_numeric_comparison_bif`).
+    // bodies (`primitives::generate_ordering_comparison_bif`).
     "CmpNoMatch",
     "Config",
     "ContErr",

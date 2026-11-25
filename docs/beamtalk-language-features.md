@@ -1160,7 +1160,23 @@ Value subclass: Money
 - **Implement all four or none.** `max:` needs `greaterThanFromNumber:`, `min:` needs `lessThanFromNumber:`, and `between:and:` needs the two inclusive ones. A type for which ordering against a number has no meaning implements none, and the hinted `does_not_understand` is the right error. (Unlike the arithmetic hooks, which are independent, the four orderings stand or fall together.)
 - **`n` arrives unconverted**: an `Integer` or a `Float` (a `Character` on the left arrives as its codepoint). The BEAM has no NaN or infinite float, so the number side never brings an unordered value; a type that has one answers `false` from each hook.
 
-Only an argument the compiler *proves* is a number (a number or character literal, `self` in `Integer`/`Float`/`Character`) skips the test; a declared argument (`n :: Integer`) is tested, since a declaration is not enforced at run time. A `String` or `Symbol` receiver compared with an argument of a different kind still falls back to the BEAM's term order (`#a < 5` answers `false`, BT-5213), as do default `sort` and `Dictionary`/`Set` order. The compiler warns when it can see a mismatch (the argument's static type is known and is not the receiver's kind, e.g. `5 < nil`, `#a < 5`); an untyped or generic argument stays silent. The warning is stricter than the run-time rule for `Character`: `$a < 1` is warned about, but at run time it orders the codepoint numerically.
+Only an argument the compiler *proves* is a number (a number or character literal, `self` in `Integer`/`Float`/`Character`) skips the test; a declared argument (`n :: Integer`) is tested, since a declaration is not enforced at run time.
+
+**A `String` or `Symbol` on the left orders only against its own kind** (BT-5213). Any other argument raises a `type_error` (`TypeError`) naming both classes. There is no hook to implement, unlike the number side, and a `Symbol` does not order against a `String` (or the reverse), although both have text:
+
+```beamtalk
+"apple" < "banana"   // => true
+#apple < #banana     // => true
+"a" < 5
+// => ERROR: String>><: cannot order a String against Integer
+// => ERROR: '<' cannot order a String against Integer — the argument must be a String
+#a <= nil
+// => ERROR: Symbol>><=: cannot order a Symbol against UndefinedObject
+// => ERROR: '<=' cannot order a Symbol against UndefinedObject — the argument must be a Symbol
+#a < "a"             // => ERROR: TypeError (convert first: #a asString < "a")
+```
+
+This covers every send, inlined or dynamic (`perform:`). A `Character` argument is named `Integer` in the error, since a `Character` is a codepoint integer at run time. Only a `String` argument the compiler proves (a `String` literal, `self` in `String`) skips the test. Default `sort` and `Dictionary`/`Set` order still use the BEAM's term order, so a mixed list sorts without raising. The compiler warns when it can see a mismatch (the argument's static type is known and is not the receiver's kind, e.g. `5 < nil`, `#a < 5`); an untyped or generic argument stays silent. The warning is stricter than the run-time rule for `Character`: `$a < 1` is warned about, but at run time it orders the codepoint numerically.
 
 ##### Arithmetic and comparison on fields: annotate numeric state
 

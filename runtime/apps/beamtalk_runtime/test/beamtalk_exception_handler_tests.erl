@@ -830,6 +830,46 @@ wrap_raw_badmap_is_type_error_test() ->
     Inner = classify({badmap, 42}),
     ?assertEqual(type_error, Inner#beamtalk_error.kind).
 
+%% BT-5213: the term codegen raises for a String or Symbol ordered against
+%% another kind is a located type_error naming both classes.
+wrap_raw_ordering_type_error_test() ->
+    Reason = {?BT_ORDERING_TYPE_ERROR_TAG, {beamtalk_string, <<"a">>}, '<', 5},
+    Inner = classify(Reason),
+    ?assertEqual(type_error, Inner#beamtalk_error.kind),
+    ?assertEqual('String', Inner#beamtalk_error.class),
+    ?assertEqual('<', Inner#beamtalk_error.selector),
+    ?assertEqual(
+        {beamtalk_string, <<"String>><: cannot order a String against Integer"/utf8>>},
+        Inner#beamtalk_error.message
+    ),
+    ?assertEqual(
+        {beamtalk_string, <<
+            "'<' cannot order a String against Integer — the argument must be a String"/utf8
+        >>},
+        Inner#beamtalk_error.hint
+    ),
+    ?assertEqual(#{got => 'Integer', reason => Reason}, Inner#beamtalk_error.details),
+    #{'$beamtalk_class' := Class} = beamtalk_exception_handler:wrap_raw(Reason),
+    ?assertEqual('TypeError', Class).
+
+wrap_raw_ordering_type_error_symbol_test() ->
+    Inner = classify({?BT_ORDERING_TYPE_ERROR_TAG, abc, '>=', nil}),
+    ?assertEqual(type_error, Inner#beamtalk_error.kind),
+    ?assertEqual('Symbol', Inner#beamtalk_error.class),
+    ?assertEqual(
+        {beamtalk_string, <<
+            "'>=' cannot order a Symbol against UndefinedObject — the argument must be a Symbol"/utf8
+        >>},
+        Inner#beamtalk_error.hint
+    ).
+
+%% A future on the right is named, not awaited: the error path never blocks.
+wrap_raw_ordering_type_error_future_not_awaited_test() ->
+    Future = {beamtalk_future, self()},
+    Inner = classify({?BT_ORDERING_TYPE_ERROR_TAG, abc, '<', Future}),
+    ?assertEqual(type_error, Inner#beamtalk_error.kind),
+    ?assertMatch(#{got := 'Future'}, Inner#beamtalk_error.details).
+
 wrap_raw_badarg_no_context_is_argument_error_test() ->
     Inner = classify(badarg),
     ?assertEqual(argument_error, Inner#beamtalk_error.kind),
@@ -888,6 +928,7 @@ classify_kind_buckets_test() ->
     %% Bucket A — user-input
     ?assertEqual(type_error, C(badarith)),
     ?assertEqual(type_error, C({badmap, #{}})),
+    ?assertEqual(type_error, C({?BT_ORDERING_TYPE_ERROR_TAG, <<>>, '<', 1})),
     ?assertEqual(key_error, C({badkey, missing})),
     ?assertEqual(argument_error, C(badarg)),
     %% Bucket B — internal bugs
@@ -913,6 +954,7 @@ classify_kind_agrees_with_wrap_raw_test() ->
     Reasons = [
         badarith,
         {badmap, #{}},
+        {?BT_ORDERING_TYPE_ERROR_TAG, abc, '<', 1},
         {badkey, missing},
         badarg,
         function_clause,

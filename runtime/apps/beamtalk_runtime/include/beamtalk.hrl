@@ -228,6 +228,15 @@
 %% "inside a real supervisor" from "inside a class's own gen_server").
 -define(BT_SUPERVISOR_SPAWN_CONTEXT_KEY, '$bt_supervisor_spawn_context').
 
+%% BT-5213: the head of the raw error term a `String` or `Symbol` ordering
+%% comparison (`<`, `<=`, `>`, `>=`) raises for a right operand of another kind:
+%% `erlang:error({?BT_ORDERING_TYPE_ERROR_TAG, Left, Op, Right})`. Codegen
+%% raises it frame-free on both send paths (`operators::ORDERING_TYPE_ERROR_TAG`
+%% in beamtalk-codegen); `beamtalk_exception_handler:wrap_raw/2` turns it into
+%% the structured `type_error`. The beamtalk-codegen test
+%% `the_ordering_type_error_tag_matches_the_runtime_header` reads this line.
+-define(BT_ORDERING_TYPE_ERROR_TAG, beamtalk_ordering_type_error).
+
 %% @doc Is `T` an in-flight `^` non-local return signal?
 %%
 %% Codegen throws the state-carrying 4-tuple `{'$bt_nlr', Token, Value,

@@ -277,11 +277,13 @@ TestCase subclass: NumberComparisonArgTest
     self assert: 3 /= nil
     self deny: (self money: 3) == 3
 
-  testStringAndSymbolReceiversStillTermOrder =>
+  /// BT-5213: a `String` or `Symbol` receiver raises a `type_error` (no
+  /// hook) for a number argument (`string_symbol_comparison_test.bt`).
+  testStringAndSymbolReceiversRaiseTypeError =>
     @expect type
-    self deny: "a" < 5
-    self deny: (self lt: "a" with: 5)
-    self deny: (self lt: #a with: 5)
+    self should: ["a" < 5] raise: #type_error
+    self should: [self lt: "a" with: 5] raise: #type_error
+    self should: [self lt: #a with: 5] raise: #type_error
 
   testDefaultSortOfAMixedListIsTermOrder =>
     self assert: #[nil, "a", 3] sort equals: #[3, nil, "a"]

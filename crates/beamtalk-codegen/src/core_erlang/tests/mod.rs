@@ -443,6 +443,7 @@ mod residual_dynamic_sends;
 mod shadowed_class_direct_calls;
 mod sibling_snapshot;
 mod stale_read_sites;
+mod string_symbol_comparison_right_operand;
 mod super_send_outside_producer;
 mod super_send_value_position_corpus;
 mod supervisor;

@@ -506,6 +506,25 @@ sealed Object subclass: VbBench
     n timesRepeat: [last := 5 + b]
     last
 
+  // BT-5213: `String` and `Symbol` receivers order only against their own
+  // kind. A `String` literal (proven) receiver, untyped right operand.
+  class litStrLess: n :: Integer b: b -> Object =>
+    last := false
+    n timesRepeat: [last := "m" < b]
+    last
+
+  // Both operands untyped (Strings at run time): dispatches to `String>><`.
+  class untypedStrLess: n :: Integer a: a b: b -> Object =>
+    last := false
+    n timesRepeat: [last := a < b]
+    last
+
+  // A `Symbol` literal receiver, untyped right operand: dispatches to `Symbol>><`.
+  class litSymLess: n :: Integer b: b -> Object =>
+    last := false
+    n timesRepeat: [last := #m < b]
+    last
+
   // BT-5207: an actor method looping on a field, the body writing it back
   // (VbCounter spin:). Five iterations per call at `k` = 5.
   class actorSpin: n :: Integer c: c :: VbCounter -> Integer =>

@@ -270,6 +270,10 @@ defmodule VeBench do
   defbench(:less_ab, {a, b}, do: a < b)
   defbench(:lit_add, b, do: 5 + b)
 
+  # 11m-11o (BT-5213): String and Symbol receivers.
+  defbench(:lit_str_less, b, do: "m" < b)
+  defbench(:lit_sym_less, b, do: :m < b)
+
   # 11l: an actor loop on a field.
   defbench(:gen_spin, pid, do: GenServer.call(pid, {:spin, 5}))
 
