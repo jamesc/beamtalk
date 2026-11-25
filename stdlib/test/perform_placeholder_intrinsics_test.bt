@@ -39,7 +39,10 @@ TestCase subclass: PerformPlaceholderIntrinsicsTest
     self assert: (ValuePoint perform: #respondsTo: withArguments: #(#name)) equals: (ValuePoint respondsTo: #name)
     // A class object has no instance fields (BT-4470).
     self assert: (ValuePoint perform: #fieldNames) equals: ValuePoint fieldNames
-    self assert: (ValuePoint perform: #hasField: withArguments: #(#x)) equals: (ValuePoint hasField: #x)
+    // ADR 0153 decision 7 (BT-5155): a class has no fields, so `hasField:`
+    // sent to a class is does-not-understand, through `perform:` and directly.
+    self should: [ValuePoint perform: #hasField: withArguments: #(#x)] raise: #does_not_understand
+    self should: [ValuePoint hasField: #x] raise: #does_not_understand
 
   testPerformViaPerformOnValueInstance =>
     p := ValuePoint x: 3 y: 4
