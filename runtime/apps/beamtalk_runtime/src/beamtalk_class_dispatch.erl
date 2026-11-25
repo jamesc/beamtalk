@@ -79,19 +79,15 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
         in_caller_owner/2,
         class_method_owner/2,
         run_in_caller/7,
-        send_in_caller_or/4,
-        in_caller_verdict/3
+        send_in_caller_or/4
     ]}
 ).
 %% ADR 0142 §2 (BT-4300): a class method the caller may run itself: the
 %% receiving class, its metaclass tag and module, the defining class and
 %% module, and the compiled function name (`class_method_owner/2`).
 -type owner() :: {owner, class_name(), atom(), module(), class_name(), module(), atom()}.
-%% BT-4771: what the class-method memo records for a selector a class method
-%% in the chain answers but the class process must run (class variables in the
-%% chain): the positive verdict "ask the class process", so the caller does not
-%% walk the chain a second time (`class_chain_only_send/3`) just to learn that.
--type verdict() :: owner() | process | decline.
+%% What the class-method memo records (`class_method_owner/2`).
+-type verdict() :: owner() | decline.
 -export_type([owner/0]).
 %% What the class-side chain walk (`find_class_side_method/3`) finds first: a
 %% class method in a class's table (compiled or ADR 0084 runtime fun).
@@ -246,33 +242,20 @@ class_send_plain(ClassPid, 'spawnWith:', [Map], Timeout) ->
 %% the metaclass equivalent. No working path changes: the alternative was an
 %% exit, not a successful call.
 class_send_plain(ClassPid, Selector, Args, Timeout) ->
-    %% ADR 0142 §2 (BT-4300): a class method of a class that needs no process
-    %% (no class variables anywhere in its chain, not shadowed, a selector
-    %% that is not process-bound) runs in the caller. Checked
-    %% before the self-call guard: an in-caller call has no gen_server to
-    %% deadlock on, so a block re-entering its class answers.
+    %% ADR 0142 §2 (BT-4300), ADR 0153 §5: a class method of a class that is
+    %% not shadowed, sent a selector that is not process-bound, runs in the
+    %% caller. Checked before the self-call guard: an in-caller call has no
+    %% gen_server to deadlock on, so a block re-entering its class answers.
     %% BT-4771: liveness is probed once for the whole send and handed to both
-    %% the in-caller check and the chain-only check below. Both used to probe
-    %% it themselves, back to back.
+    %% the in-caller check and the via-process path below.
     Alive = local_class_alive(ClassPid),
-    case in_caller_verdict(ClassPid, Selector, Alive) of
+    case in_caller_owner(ClassPid, Selector, Alive) of
         {owner, ClassName, Tag, Module, DefiningClass, DefiningModule, FunName} ->
             ClassSelf = #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid},
             run_in_caller(
                 ClassSelf, Selector, Args, ClassName, DefiningClass, DefiningModule, FunName
             );
-        process when ClassPid =/= self() ->
-            %% BT-4771: the memo already walked the chain: a class method
-            %% answers and the class process must run it, so the chain-only
-            %% shortcut (which would walk the chain again, uncached, only to
-            %% decline) is skipped. The class process still does its own
-            %% authoritative lookup, so a verdict that went stale in the
-            %% moment before a metadata write lands there as `not_found`,
-            %% which `class_method_result/4` already handles.
-            class_send_with_recovery(ClassPid, Selector, fun(P) ->
-                class_method_call(P, Selector, Args, Timeout)
-            end);
-        _ ->
+        decline ->
             class_send_via_process(ClassPid, Selector, Args, Timeout, Alive)
     end.
 
@@ -302,10 +285,8 @@ send_in_caller_or(ClassPid, Selector, Args, Otherwise) ->
 %% There is no unguarded direct call here (BT-4301): `in_caller_owner/2`
 %% already ran every class method the caller may run, so anything left is a
 %% shadowed method (an ADR 0084 runtime fun the class
-%% process honours) or a process-bound selector. A chain with class variables
-%% no longer comes here from another process: `class_send_plain/4` asks the
-%% class process directly on the memo's `process` verdict (BT-4771). Only a
-%% class's send to itself takes the first clause below.
+%% process honours) or a process-bound selector. Only a class's send to itself
+%% takes the first clause below.
 class_send_via_process(ClassPid, Selector, Args, _Timeout, _Alive) when ClassPid =:= self() ->
     class_send_from_own_process(Selector, Args);
 class_send_via_process(ClassPid, Selector, Args, Timeout, Alive) ->
@@ -328,23 +309,19 @@ DefiningModule, FunName}` when all of these hold, else `decline` (take
 
 - the class is local and alive;
 - `class_method_owner/2` (memoised) resolves the defining class: the
-  selector is not process-bound, the class-process lookup would answer it
-  with a class method, and neither the receiving class nor any ancestor
-  declares class variables (rule 2,
-  `beamtalk_class_metadata:chain_has_class_variables/1`, so an
-  inherited method touching a stateful parent's variables keeps its error);
+  selector is not process-bound (the generated list, ADR 0153 §5) and the
+  class-process lookup would answer it with a class method;
 - `beamtalk_class_shadow_flags:direct_call_ok/2` holds for the receiving
-  class (rule 1: no class variables, no ADR 0084
-  runtime fun, bootstrap finished). One `persistent_term` read of raw-flag
-  inputs that their writers raise before the change becomes visible.
+  class (no ADR 0084 runtime fun, bootstrap finished). One `persistent_term`
+  read of a raw-flag input its writers raise before the change becomes
+  visible.
 
 The memo stays consistent with class-metadata writes through the derived-fact
 cache's generation counter (`beamtalk_class_derived_cache`): an answer derived
 before a write is never served after the write's invalidation. Nothing here
 relies on a derived flag having been erased. As for every metadata-driven path,
 a hot reload's new code is current a moment before its class process publishes
-the new metadata; the raw `class_vars` input is published first
-(`beamtalk_object_class:apply_class_info/2`) to keep that window short.
+the new metadata.
 
 Exported for `beamtalk_class_shadow_flags:static_call_target/4` (BT-4316),
 which installs a static call key only while this answer names the call
@@ -357,16 +334,7 @@ in_caller_owner(ClassPid, Selector) ->
 %% `in_caller_owner/2` with the liveness probe (`local_class_alive/1`) already
 %% done by the caller.
 -spec in_caller_owner(pid(), selector(), boolean()) -> owner() | decline.
-in_caller_owner(ClassPid, Selector, Alive) ->
-    case in_caller_verdict(ClassPid, Selector, Alive) of
-        {owner, _, _, _, _, _, _} = Owner -> Owner;
-        _ -> decline
-    end.
-
-%% `in_caller_owner/3`'s answer, plus `process` when the memo says a class
-%% method in the chain answers and the class process runs it (BT-4771).
--spec in_caller_verdict(pid(), selector(), boolean()) -> verdict().
-in_caller_verdict(ClassPid, Selector, true) ->
+in_caller_owner(ClassPid, Selector, true) ->
     %% Alive before the memo is consulted: a send to a dead incarnation takes
     %% the crash recovery path and never derives a memo from a class mid-init.
     case class_method_owner(ClassPid, Selector) of
@@ -375,12 +343,10 @@ in_caller_verdict(ClassPid, Selector, true) ->
                 true -> Owner;
                 false -> decline
             end;
-        process ->
-            process;
-        _ ->
+        decline ->
             decline
     end;
-in_caller_verdict(_ClassPid, _Selector, false) ->
+in_caller_owner(_ClassPid, _Selector, false) ->
     decline.
 
 -doc """
@@ -397,17 +363,13 @@ the class's methods from its published selector list, which includes ADR 0084
 runtime funs, so a runtime fun at an ancestor counts as that ancestor's method
 (and is applied from the fun store by `apply_class_method_body/7`).
 
-`process` (BT-4771) records that a class method in the chain answers but the
-chain declares class variables, so the class process runs it: the caller
-asks it directly and does not walk the chain again. `decline` is memoised too
-(process-bound selector, class-variable reflection
-send, no class method in the chain or a fact unpublished): the next metadata
+`decline` is memoised too (process-bound selector, no class method in the
+chain or a fact unpublished): the next metadata
 write flushes it. A pid with no registered class, or a class with no metadata
 row, is never memoised. Every input is a class-metadata row field whose
 writers invalidate the cache after the write lands: `insert/5`,
 `merge_identity/5`, `set_runtime_class_methods/2` (selectors, superclass,
-module), `put_class_variables/2` (the chain's class variable facts) and
-`put_process_bound_selectors/2`.
+module) and `put_process_bound_selectors/2`.
 """.
 -spec class_method_owner(pid(), selector()) -> verdict().
 class_method_owner(ClassPid, Selector) ->
@@ -448,17 +410,7 @@ derive_class_method_owner(ClassName, Selector, ProcessBound) ->
         false ->
             case find_class_side_method_from_class(Selector, ClassName) of
                 {method, DefiningClass, DefiningModule} ->
-                    %% Rule 2, over the whole chain (see
-                    %% `beamtalk_class_metadata:chain_has_class_variables/1`).
-                    case beamtalk_class_metadata:chain_has_class_variables(ClassName) of
-                        false ->
-                            owner_of(ClassName, DefiningClass, DefiningModule, Selector);
-                        true ->
-                            %% BT-4771: a class method answers, but the chain
-                            %% has class variables, so the class process runs
-                            %% it. A positive verdict, not a miss.
-                            process
-                    end;
+                    owner_of(ClassName, DefiningClass, DefiningModule, Selector);
                 not_found ->
                     %% Only the `Class` chain answers: the BT-4073 skip in
                     %% `class_send_dispatch/3` already runs it in the caller.
@@ -486,8 +438,8 @@ inherited method, as every class-side path now builds it
 `class_mod` alone; it now walks the class-method chain from the receiving
 class, so an inherited selector is found and a subclass override wins
 (BT-4300). No class-variable
-home is installed: the chain has no class variables, and ADR 0130 §1's
-no-nesting rule concerns only homes. The class-process services (session
+home is installed (ADR 0153: compiled code no longer reads one), and ADR 0130
+§1's no-nesting rule concerns only homes. The class-process services (session
 context seeding, the mirrored caller pid, the entry group leader, the call
 timeouts) are not recreated: the caller is the context they stand in for.
 
@@ -527,9 +479,8 @@ Resolve a dynamic `new`/`new:` send to a direct module call, if eligible.
 Eligible when the class's baked `direct_constructors` lists the selector, the
 class names a module and has no runtime-installed class-method funs (the
 `beamtalk_class_metadata:lookup_direct_constructor/2` gates),
-`beamtalk_class_shadow_flags:direct_call_ok/2` holds for the class (ADR 0142
-§1 rules 1-2: no ADR 0084 runtime fun, no class
-variables in its chain; BT-4409), and the module exports `new` at the right
+`beamtalk_class_shadow_flags:direct_call_ok/2` holds for the class (no ADR
+0084 runtime fun; BT-4409), and the module exports `new` at the right
 arity (`new/0` for `new`, `new/1` for `new:` with a map argument). For `new:`,
 no ancestor may define a user class-side `new:`
 (`beamtalk_class_metadata:chain_has_user_new1/1`, from the facts the
@@ -898,9 +849,8 @@ Costs one `persistent_term` read for the defining-class receiver (BT-3700: a
 derived per-class flag in `beamtalk_class_shadow_flags` folds the runtime-fun flag
 and readiness; BT-3669/BT-3676 had three reads); a
 subclass receiver short-circuits on the first clause. It asks
-`shadow_free/2`, not `direct_call_ok/2`: a self-send runs wherever its calling
-method already runs (the class process for a class with class variables, the
-caller otherwise, ADR 0142), so the class's class variables do not bar it.
+`shadow_free/2`, which since ADR 0153 answers exactly as `direct_call_ok/2`:
+a self-send runs wherever its calling method already runs.
 """.
 -spec class_self_direct_ok(atom(), atom(), class_name(), selector()) -> boolean().
 class_self_direct_ok(Tag, Tag, ClassName, Selector) ->

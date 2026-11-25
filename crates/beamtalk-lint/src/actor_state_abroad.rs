@@ -41,9 +41,7 @@
 //! and `Result tryDo:` (their receivers are `self`, the block, a local or a
 //! stdlib class), class methods that run in the caller (judged by
 //! [`ClassHierarchy::runs_class_method_in_caller`], ADR 0142 §1), and blocks
-//! that touch no field and send nothing to `self`. Until BT-5158 the runtime
-//! can still route a class whose chain facts it cannot resolve to its class
-//! process, so the lint can miss a block sent abroad that way.
+//! that touch no field and send nothing to `self`.
 //!
 //! Differences from the former `class-state-abroad` lint this was modelled on
 //! (removed with class variables, ADR 0153): there is no stored/returned rule

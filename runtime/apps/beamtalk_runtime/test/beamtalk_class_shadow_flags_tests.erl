@@ -24,14 +24,10 @@ teardown_runtime(_) ->
 direct(Tag, Name, Sel) ->
     beamtalk_class_dispatch:class_self_direct_ok(Tag, Tag, Name, Sel).
 
-%% A throwaway metadata row for a stateless class under `Object`: the derived
-%% flag reads the chain's published class-variable facts and fails closed on a
-%% class with no row (BT-4301), so a class whose `direct_call_ok/2` must hold
-%% needs one.
+%% A throwaway metadata row for a class under `Object`.
 stateless_row(Name) ->
     beamtalk_class_metadata:new(),
-    ok = beamtalk_class_metadata:insert(Name, undefined, [], 'Object', false),
-    ok = beamtalk_class_metadata:put_class_variables(Name, false).
+    ok = beamtalk_class_metadata:insert(Name, undefined, [], 'Object', false).
 
 shadow_flag_test_() ->
     {setup, fun setup_runtime/0, fun teardown_runtime/1, [
@@ -689,7 +685,7 @@ static_call_target_test_() ->
             ?assertNot(target('Bt4316Dead', static_key('Bt4316Dead', class_testSelf), testSelf)),
             ?assert(key_gone('Bt4316Dead'))
         end},
-        {"declines when shadowed or when the class declares class variables", fun() ->
+        {"declines when shadowed; class-variable defaults are no input (ADR 0153)", fun() ->
             with_static_class('Bt4316Shadowed', fun(_Pid) ->
                 ok = beamtalk_class_shadow_flags:set(runtime_fun, 'Bt4316Shadowed'),
                 try
@@ -705,10 +701,10 @@ static_call_target_test_() ->
             end),
             Pid = start_static_class('Bt4316Stateful', none, #{count => 0}),
             try
-                ?assertNot(
+                ?assertMatch(
+                    #beamtalk_object{pid = Pid},
                     target('Bt4316Stateful', static_key('Bt4316Stateful', class_testSelf), testSelf)
-                ),
-                ?assert(key_gone('Bt4316Stateful'))
+                )
             after
                 stop_static_class(Pid)
             end
@@ -719,7 +715,6 @@ static_call_target_test_() ->
             with_static_class(Name, fun(Pid) ->
                 Writes = [
                     fun() -> beamtalk_class_shadow_flags:set(runtime_fun, Name) end,
-                    fun() -> beamtalk_class_shadow_flags:set_class_vars(Name, true) end,
                     fun() -> beamtalk_class_shadow_flags:invalidate(Name) end
                 ],
                 lists:foreach(
@@ -733,8 +728,7 @@ static_call_target_test_() ->
                                 lists:member(Tag, beamtalk_class_registry:static_call_key_tags())
                             )
                         after
-                            beamtalk_class_shadow_flags:clear(runtime_fun, Name),
-                            beamtalk_class_shadow_flags:set_class_vars(Name, false)
+                            beamtalk_class_shadow_flags:clear(runtime_fun, Name)
                         end
                     end,
                     Writes
@@ -1109,7 +1103,7 @@ static_call_target_test_() ->
         {"restart_class/1 erases a dead class's keys even when no 'DOWN' was seen", fun() ->
             %% A missed 'DOWN' (no monitor watching when the class died) must
             %% not let a restart keep serving the dead pid as ClassSelf: the
-            %% restart re-registers via merge_identity/5, which invalidates.
+            %% restart recreates the row via insert/5, which invalidates.
             Name = 'Bt4316Restart',
             Pid = start_static_class(Name, none, #{}),
             OldRef = warm(Name, Pid),
@@ -1137,19 +1131,6 @@ static_call_target_test_() ->
                     end)
                 after
                     beamtalk_class_shadow_flags:clear(runtime_fun, Name)
-                end
-            end)
-        end},
-        {"an install racing a class-variable write and its invalidate never survives it", fun() ->
-            Name = 'Bt4316RaceInv',
-            Tag = 'Bt4316RaceInv class',
-            with_static_class(Name, fun(_Pid) ->
-                try
-                    race_install_against(Name, Tag, fun() ->
-                        beamtalk_class_metadata:put_class_variables(Name, true)
-                    end)
-                after
-                    beamtalk_class_metadata:put_class_variables(Name, false)
                 end
             end)
         end},
