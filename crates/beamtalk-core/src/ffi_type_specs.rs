@@ -1422,8 +1422,10 @@ pub fn project_test_helper_ebin_dir(project_root: &Utf8Path) -> Option<Utf8PathB
 
 /// Collect the ebin directories for a project's native and path dependencies.
 ///
-/// Not the package's `native/test/` helpers: those are visible only to its
-/// tests, via [`project_test_helper_ebin_dir`].
+/// Not the package's `native/test/` helpers: those are added only for its
+/// tests, via [`project_test_helper_ebin_dir`]. (Their extracted specs do land
+/// in the shared project type cache, which [`load_type_cache_registry`] reads
+/// whole, as they did when the helpers lived in the native ebin.)
 ///
 /// Scans the standard `_build/` layout for a project rooted at `project_root`:
 /// - `_build/deps/*/ebin/` — Beamtalk path-dependency ebin dirs
@@ -1804,7 +1806,7 @@ mod tests {
         assert_eq!(project_test_helper_ebin_dir(&root), Some(helpers.clone()));
         assert!(
             !collect_project_dependency_ebin_dirs(&root).contains(&helpers),
-            "build, lint and the LSP never see test helpers"
+            "build, lint and the LSP do not scan the test helper ebin"
         );
     }
     use std::fs;
