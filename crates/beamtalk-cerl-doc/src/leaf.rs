@@ -113,6 +113,29 @@ pub fn int_lit(i: i64) -> Document<'static> {
     Document::Owned(i.to_string())
 }
 
+/// `100000000000000000000` — a Core Erlang integer literal too large for
+/// `i64` (a BEAM bignum, BT-5182).
+///
+/// `digits` is the canonical decimal spelling the parser stores in
+/// `Literal::BigInteger`: an optional `-` then ASCII digits. Core Erlang
+/// integer literals have no size limit, so it renders verbatim.
+///
+/// ```text
+/// big_int_lit("100000000000000000000")  => 100000000000000000000
+/// big_int_lit("-9223372036854775809")   => -9223372036854775809
+/// ```
+#[must_use]
+pub fn big_int_lit(digits: &str) -> Document<'static> {
+    debug_assert!(
+        {
+            let unsigned = digits.strip_prefix('-').unwrap_or(digits);
+            !unsigned.is_empty() && unsigned.bytes().all(|b| b.is_ascii_digit())
+        },
+        "big_int_lit expects canonical decimal digits, got {digits:?}"
+    );
+    Document::Owned(digits.to_string())
+}
+
 /// `3.14` / `5.0` — a Core Erlang float literal.
 ///
 /// Always renders a decimal point: Core Erlang interprets a bare `5` as an

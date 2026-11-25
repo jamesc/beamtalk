@@ -21,6 +21,7 @@ fn parse_err(source: &str) -> Vec<Diagnostic> {
 mod binary_construction_tests;
 mod class_tests;
 mod expression_tests;
+mod lexer_recovery_tests;
 mod literal_tests;
 mod method_tests;
 mod native_declaration_tests;
