@@ -116,11 +116,6 @@ sealed Object subclass: VdBench
     n timesRepeat: [last := VdOpenMath double: 21]
     last
 
-  class classStateful: n :: Integer -> Integer =>
-    last := 0
-    n timesRepeat: [last := VdStatefulMath double: 21]
-    last
-
   class classInVariable: n :: Integer c: c -> Integer =>
     last := 0
     n timesRepeat: [last := c double: 21]
