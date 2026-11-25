@@ -519,6 +519,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
         "source" => "Actor subclass: #{class}\n  state: value = 0\n\n  value => self.value + 1"
       })
 
+    # BT-5129: the eval folds off-process; wait for it.
+    save_html = render_async(view, 10_000)
+
     assert save_html =~ "Compiled #{class}"
 
     # First push: the save's own echo (the REAL coalesced refresh, BT-4810) —
@@ -693,6 +696,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       |> element(~s(button[phx-click="remove_method"]))
       |> render_click()
 
+    # BT-5129: the eval folds off-process; wait for it.
+    remove_html = render_async(view, 10_000)
+
     assert remove_html =~ "Removed triple from #{class}"
     refute remove_html =~ "{:error"
     refute remove_html =~ "beamtalk_error"
@@ -748,6 +754,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       view
       |> element(~s(button[phx-click="remove_class"]))
       |> render_click()
+
+    # BT-5129: the eval folds off-process; wait for it.
+    remove_html = render_async(view, 10_000)
 
     assert remove_html =~ "Removed #{class} from memory"
     assert remove_html =~ "not yet flushed to disk"
@@ -833,6 +842,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       |> element(~s(button[phx-click="flush_destructive"][phx-value-class="#{class}"]))
       |> render_click()
 
+    # BT-5129: the eval folds off-process; wait for it.
+    flush_html = render_async(view, 10_000)
+
     assert flush_html =~ "Flushed the pending removal for #{class}"
     refute flush_html =~ "beamtalk_error"
     refute flush_html =~ "{:error"
@@ -879,6 +891,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       view
       |> form("#rename-form")
       |> render_submit(%{"new_name" => new_name})
+
+    # BT-5129: the eval folds off-process; wait for it.
+    rename_html = render_async(view, 10_000)
 
     assert rename_html =~ "Renamed #{class} to #{new_name}"
     assert rename_html =~ "not yet flushed to disk"
@@ -959,6 +974,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       view
       |> form("#rename-form")
       |> render_submit(%{"new_name" => "tripled"})
+
+    # BT-5129: the eval folds off-process; wait for it.
+    rename_html = render_async(view, 10_000)
 
     assert rename_html =~ "Renamed #{class} triple to tripled"
     assert rename_html =~ "not yet flushed to disk"
@@ -1054,6 +1072,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       |> form("#rename-form")
       |> render_submit(%{"new_name" => new_name})
 
+    # BT-5129: the eval folds off-process; wait for it.
+    rename_html = render_async(view, 10_000)
+
     assert rename_html =~ "Renamed #{class_a} to #{new_name}"
     refute rename_html =~ "{:error"
     refute rename_html =~ "beamtalk_error"
@@ -1127,6 +1148,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
         ~s(button[phx-click="flush_destructive"][phx-value-class="#{new_name}"][phx-value-kind="rename-class"])
       )
       |> render_click()
+
+    # BT-5129: the eval folds off-process; wait for it.
+    flush_html = render_async(view, 10_000)
 
     assert flush_html =~ "Flushed the pending rename to #{new_name}"
     refute flush_html =~ "beamtalk_error"
