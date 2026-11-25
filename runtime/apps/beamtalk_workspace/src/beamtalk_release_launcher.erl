@@ -335,6 +335,7 @@ tls_preflight_main() ->
     Args = #{
         dist_opt_words => init_words(ssl_dist_opt),
         extra_optfiles => init_words(ssl_dist_optfile),
+        extra_proto_dists => init_words(proto_dist),
         epmd_listening => fun epmd_listening/2
     },
     case tls_preflight(fun os:getenv/1, Args) of
@@ -371,15 +372,21 @@ Check a `RELEASE_DISTRIBUTION=tls` opt-in, reading the environment with
 * `RELEASE_SSL_DIST_OPTFILE` is the `-ssl_dist_optfile` file. With the
   `-ssl_dist_opt` words the node will also get (`dist_opt_words`), it must
   pass `beamtalk_dist_tls:check_optfile/2`. A second option file from
-  `vm.args` (`extra_optfiles`) is refused.
+  `vm.args` (`extra_optfiles`) is refused, and so is a `-proto_dist` there
+  (`extra_proto_dists`): the launcher passes its own first, so OTP would
+  ignore it, with only a warning.
+* A `RELEASE_HOST` that is an IP address must be the same family (IPv4 or
+  IPv6) as the interface, or other nodes could not connect to it.
 
-`Args` carries what the VM supplies: `dist_opt_words`, `extra_optfiles` and
+`Args` carries what the VM supplies: `dist_opt_words`, `extra_optfiles`,
+`extra_proto_dists` (optional, default none) and
 `epmd_listening(Address, Port) -> boolean()`. Returns every problem at once,
 each with its fix.
 """.
 -spec tls_preflight(fun((string()) -> string() | false), #{
     dist_opt_words := [string()],
     extra_optfiles := [string()],
+    extra_proto_dists => [string()],
     epmd_listening := fun((inet:ip_address(), inet:port_number()) -> boolean())
 }) ->
     {ok, #{
@@ -390,7 +397,9 @@ each with its fix.
         notes := [string()]
     }}
     | {error, [unicode:chardata(), ...]}.
-tls_preflight(GetEnv, #{dist_opt_words := Words, extra_optfiles := Extra, epmd_listening := Epmd}) ->
+tls_preflight(
+    GetEnv, #{dist_opt_words := Words, extra_optfiles := Extra, epmd_listening := Epmd} = Args
+) ->
     Host = tls_host(read_env("RELEASE_HOST", GetEnv)),
     Interface = tls_interface(read_env("RELEASE_DIST_INTERFACE", GetEnv)),
     OptFile = tls_optfile(read_env("RELEASE_SSL_DIST_OPTFILE", GetEnv), Words, Extra),
@@ -399,7 +408,25 @@ tls_preflight(GetEnv, #{dist_opt_words := Words, extra_optfiles := Extra, epmd_l
             {ok, {Ip0, _}} -> tls_epmd(Ip0, epmd_port(GetEnv), Epmd);
             {error, _} -> ok
         end,
-    case [Problem || {error, Problem} <- [Host, Interface, OptFile, EpmdCheck]] of
+    ProtoCheck =
+        case maps:get(extra_proto_dists, Args, []) of
+            [] ->
+                ok;
+            Protos ->
+                {error,
+                    io_lib:format(
+                        "vm.args (or ERL_FLAGS) also sets -proto_dist ~ts; remove it: "
+                        "RELEASE_DISTRIBUTION=tls sets the protocol",
+                        [lists:join(" ", Protos)]
+                    )}
+        end,
+    FamilyCheck =
+        case {Host, Interface} of
+            {{ok, H0}, {ok, {Ip1, _}}} -> tls_family(H0, Ip1);
+            _ -> ok
+        end,
+    Checks = [Host, Interface, OptFile, EpmdCheck, ProtoCheck, FamilyCheck],
+    case [Problem || {error, Problem} <- Checks] of
         [] ->
             {ok, H} = Host,
             {ok, {Ip, Notes}} = Interface,
@@ -412,6 +439,21 @@ tls_preflight(GetEnv, #{dist_opt_words := Words, extra_optfiles := Extra, epmd_l
             {ok, #{proto => Proto, interface => Ip, host => H, optfile => F, notes => Notes}};
         Problems ->
             {error, Problems}
+    end.
+
+%% An IP-literal RELEASE_HOST names the address other nodes dial; it has to be
+%% reachable over the protocol family the interface selects.
+tls_family(Host, Ip) ->
+    case beamtalk_dist_address:parse(Host) of
+        {ok, HostIp} when tuple_size(HostIp) =/= tuple_size(Ip) ->
+            {error,
+                io_lib:format(
+                    "RELEASE_HOST ~ts and RELEASE_DIST_INTERFACE ~ts are different IP families; "
+                    "the node listens on one only, so use addresses of the same family",
+                    [Host, inet:ntoa(Ip)]
+                )};
+        _ ->
+            ok
     end.
 
 init_words(Flag) ->

@@ -11,8 +11,10 @@ Whether Erlang distribution runs over TLS *with peer verification* (ADR 0126
 
 `-proto_dist inet_tls` alone encrypts the link but authenticates nothing: with
 OTP's defaults a node accepts any client and trusts any server certificate.
-Distribution counts as TLS here only when every protocol in the (first, the
-one OTP uses) `-proto_dist` is a TLS one, and:
+Distribution counts as TLS here only when every protocol in the first
+`-proto_dist` is a TLS one (`net_kernel:proto_dist_argument/0` uses the first
+and only warns about the rest, on every OTP major this project supports;
+the release launcher also refuses a second one), and:
 
 * the server side sets `{verify, verify_peer}`;
 * the server side sets `{fail_if_no_peer_cert, true}`, so a client with no

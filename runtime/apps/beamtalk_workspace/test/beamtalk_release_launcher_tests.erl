@@ -115,6 +115,26 @@ tls_preflight_test_() ->
                     ["vm.args (or ERL_FLAGS) also sets -ssl_dist_optfile" ++ _],
                     ProblemsWith(#{}, #{extra_optfiles => ["/etc/other.conf"]})
                 ),
+                %% The launcher sets -proto_dist itself; a second one is refused.
+                ?_assertMatch(
+                    ["vm.args (or ERL_FLAGS) also sets -proto_dist inet_tcp" ++ _],
+                    ProblemsWith(#{}, #{extra_proto_dists => ["inet_tcp"]})
+                ),
+                ?_assertMatch(
+                    [
+                        "RELEASE_HOST 192.0.2.7 and RELEASE_DIST_INTERFACE fd00::5 are different" ++
+                            _
+                    ],
+                    Problems(#{
+                        "RELEASE_HOST" => "192.0.2.7", "RELEASE_DIST_INTERFACE" => "fd00::5"
+                    })
+                ),
+                ?_assertMatch(
+                    {ok, #{proto := "inet6_tls"}},
+                    Preflight(#{
+                        "RELEASE_HOST" => "fd00::5", "RELEASE_DIST_INTERFACE" => "fd00::5"
+                    })
+                ),
                 ?_assertMatch(
                     ["RELEASE_SSL_DIST_OPTFILE '" ++ _],
                     Problems(#{"RELEASE_SSL_DIST_OPTFILE" => filename:join(Dir, "my!node.conf")})
