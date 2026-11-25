@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fix: `to:by:` requires an Integer step; `to:by:do:` types its block `Block(Number, Object)` (BT-5217, BT-5216, BT-5235).** An `Interval` holds integers only, so `Integer>>to:by:` now raises `TypeError` "Interval step must be an Integer" for any step that is not an Integer, matching its `step :: Integer` declaration. `to:by:do:` still takes any Number step, and since a Float step passes Floats, its block (and `Number>>runToBy:step:do:`) is now typed `Block(Number, Object)`: the type checker no longer tells the body its parameter is an `Integer`. The start of `to:do:` / `to:by:do:` must be an Integer (already the behaviour; now documented). **Behaviour change:** `1 to: 10 by: 2.0` used to build an Interval with a Float step and now raises; a `nil` step on `to:by:` now says "must be an Integer" instead of "must be a number"; a `0.0` step on `to:by:` raises `type_error`, not `user_error`. Typed code whose `to:by:do:` block sends an Integer-only message to its parameter (`i isEven`, `xs at: i`) now gets a warning; annotate the parameter (`[:i :: Integer | ...]`). Follow-ups: BT-5246 (Integer parameter for a statically-Integer step), BT-5245 (non-Integer limit).
+
 - **Breaking: the `clone` wire op is removed; `close`, `kill` and `unsubscribe-logs` gain real senders (BT-5199).** Every op in the REPL op table must now have a sender, checked by `just check-surface-drift`.
   - Removed: `clone`. No client sent it, and sending it now answers "Unknown operation".
   - Changed: `:exit`, `:quit` and Ctrl-D in the CLI REPL end the session on the node (`close`) instead of leaving it resumable for 4 hours.

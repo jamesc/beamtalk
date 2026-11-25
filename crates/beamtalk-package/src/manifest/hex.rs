@@ -19,7 +19,8 @@ use miette::Result;
 /// - Comparison operators: `">= 1.0.0"`, `"> 1.0"`, `"< 2.0.0"`, `"<= 3.0"`
 /// - Compound constraints: `">= 1.0.0 and < 2.0.0"`
 ///
-/// Version segments must be non-negative integers separated by dots (max 3 segments).
+/// Version segments must be non-negative integers separated by dots (1–4 segments; hex.pm
+/// publishes four-segment versions such as `1.2.3.4`).
 pub(super) fn validate_hex_constraint(constraint: &str) -> Result<(), String> {
     let trimmed = constraint.trim();
     if trimmed.is_empty() {

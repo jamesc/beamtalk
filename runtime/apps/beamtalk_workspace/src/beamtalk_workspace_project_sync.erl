@@ -169,7 +169,7 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid, PackageName) ->
     %% native/test/ helper modules (e.g. a test server that a `.bt` test drives
     %% via `(Erlang <helper>) <msg>`). Under normal load-project they stay
     %% skipped — they are EUnit helpers, not runtime modules — mirroring how the
-    %% `beamtalk test` CLI compiles native/test/ into _build/dev/native/ebin/.
+    %% `beamtalk test` CLI compiles native/test/ into _build/dev/native_test/ebin/.
     AllErlFiles = beamtalk_workspace_project_files:find_erl_files(NativeDir, IncludeTests),
     AllFiles = AllErlFiles ++ AllBtFiles,
     PreviousMtimes =
