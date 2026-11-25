@@ -53,11 +53,8 @@ impl CoreErlangGenerator {
         // definition is the same own-declaration set that
         // `ClassHierarchy::own_class_variable_names` answers for the
         // hierarchy-sourced callers, so an ancestor's variable is rejected.
-        *self.class_var_names_mut() = class
-            .class_variables
-            .iter()
-            .map(|cv| cv.name.name.to_string())
-            .collect();
+        // ADR 0153: classes declare no class variables.
+        *self.class_var_names_mut() = std::collections::HashSet::new();
 
         // Populate class method selectors for self-send routing
         *self.class_method_selectors_mut() = class

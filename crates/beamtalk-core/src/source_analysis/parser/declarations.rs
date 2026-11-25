@@ -33,6 +33,20 @@ fn is_state_or_field_keyword(kind: &TokenKind) -> bool {
     matches!(kind, TokenKind::Keyword(k) if k == "state:" || k == "field:")
 }
 
+/// The one diagnostic for a removed `classState:` / `late classState:`
+/// declaration (ADR 0153). Every surface takes the text from here.
+fn class_state_removed_diagnostic(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "`classState:` was removed (ADR 0153). A class has no state of its own.",
+        span,
+    )
+    .with_hint(
+        "for state that changes, use an Actor (`spawnAs:` / `named:`), an AtomicCounter or an \
+         Ets table. For a constant, write a class method: `class limit => 100`. For a value \
+         that is expensive to build, see `PersistentTerm` (`at:ifAbsentPut:`).",
+    )
+}
+
 /// Returns `true` if the token kind is the `classState:` keyword that starts
 /// a class-variable declaration (see [`Parser::parse_classvar_declaration`]).
 pub(super) fn is_class_state_keyword(kind: &TokenKind) -> bool {
@@ -87,12 +101,11 @@ pub(super) fn is_state_like_declaration_keyword(kind: &TokenKind) -> bool {
 }
 
 /// [`Parser::parse_class_body`]'s return shape: `(state, instance methods,
-/// class methods, class variables, uses: lines)`.
+/// class methods, uses: lines)`.
 type ClassBodyParts = (
     Vec<StateDeclaration>,
     Vec<MethodDefinition>,
     Vec<MethodDefinition>,
-    Vec<StateDeclaration>,
     Vec<ProtocolUse>,
 );
 
@@ -398,7 +411,7 @@ impl Parser {
 
         // Parse class body (uses: lines, state declarations, instance
         // methods, class methods, class variables)
-        let (state, methods, class_methods, class_variables, uses) = self.parse_class_body();
+        let (state, methods, class_methods, uses) = self.parse_class_body();
 
         // Determine end span: max of last instance method, class method, state, class var, or name
         let mut end = name.span;
@@ -431,9 +444,6 @@ impl Parser {
         if let Some(cm) = class_methods.last() {
             end = end.merge(cm.span);
         }
-        if let Some(cv) = class_variables.last() {
-            end = end.merge(cv.span);
-        }
         let span = start.merge(end);
 
         let mut class_def = ClassDefinition::with_modifiers(
@@ -453,7 +463,6 @@ impl Parser {
         class_def.type_params = type_params;
         class_def.superclass_type_args = superclass_type_args;
         class_def.class_methods = class_methods;
-        class_def.class_variables = class_variables;
         class_def.doc_comment = doc_comment;
         class_def.comments = comments;
         class_def.backing_module = backing_module;
@@ -693,7 +702,6 @@ impl Parser {
         let mut state = Vec::new();
         let mut methods = Vec::new();
         let mut class_methods = Vec::new();
-        let mut class_variables = Vec::new();
         let mut uses = Vec::new();
 
         // Skip any periods/statement terminators
@@ -731,17 +739,14 @@ impl Parser {
                     state.push(state_decl);
                 }
             }
-            // Check for class variable declaration: `classState: varName ...`
+            // ADR 0153: `classState:` was removed. Parse the declaration to
+            // recover past it, report the error, and drop it.
             else if is_class_state_keyword(self.current_kind())
                 || self.is_at_late_class_state_keyword()
             {
-                if let Some(mut classvar_decl) = self.parse_classvar_declaration() {
-                    pending.apply_to(
-                        &mut classvar_decl.expect,
-                        &mut classvar_decl.doc_comment,
-                        &mut classvar_decl.comments,
-                    );
-                    class_variables.push(classvar_decl);
+                if let Some(removed) = self.parse_classvar_declaration() {
+                    self.diagnostics
+                        .push(class_state_removed_diagnostic(removed.span));
                 }
             }
             // Check for method definition (with optional modifiers including `class`)
@@ -794,10 +799,8 @@ impl Parser {
             // protocol body (see `parse_protocol_body`) — only a `uses:`
             // line with no `=>` is the reserved composition clause.
             else if is_uses_keyword(self.current_kind()) {
-                let has_prior_member = !state.is_empty()
-                    || !methods.is_empty()
-                    || !class_methods.is_empty()
-                    || !class_variables.is_empty();
+                let has_prior_member =
+                    !state.is_empty() || !methods.is_empty() || !class_methods.is_empty();
                 let use_line = self.parse_protocol_use_line();
                 if has_prior_member {
                     self.diagnostics.push(Diagnostic::error(
@@ -875,7 +878,7 @@ impl Parser {
         // Restore in_class_body flag
         self.in_class_body = was_in_class_body;
 
-        (state, methods, class_methods, class_variables, uses)
+        (state, methods, class_methods, uses)
     }
 
     // ========================================================================
@@ -1461,7 +1464,8 @@ impl Parser {
         }
     }
 
-    /// Parses a class variable declaration.
+    /// Parses a removed `classState:` declaration (ADR 0153) so the parser can
+    /// recover past it; the caller reports the error and discards the result.
     ///
     /// Syntax is identical to state declarations but uses `classState:` keyword:
     /// - `classState: varName`

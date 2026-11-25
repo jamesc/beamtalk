@@ -76,7 +76,6 @@ enum Scope {
     ActorClosure,
     MergedTier2Fun,
     ValueTypeMethod,
-    ClassMethod,
     /// ADR 0146: a REPL input, whose `^` carries the workspace bindings.
     Repl,
 }
@@ -86,7 +85,6 @@ const SCOPES: &[Scope] = &[
     Scope::ActorClosure,
     Scope::MergedTier2Fun,
     Scope::ValueTypeMethod,
-    Scope::ClassMethod,
     Scope::Repl,
 ];
 
@@ -115,10 +113,6 @@ impl Scope {
                 "Value subclass: Bt4312RelayValue\n  field: k = 0\n  bump => self withK: self.k + 1\n",
                 "k",
             ),
-            Self::ClassMethod => (
-                "Object subclass: Bt4312RelayClass\n  classState: n = 0\n  class bump => self.n := self.n + 1\n",
-                "n",
-            ),
             // No class: the input binds `w` first and writes it.
             Self::Repl => ("w := 0", "w"),
         }
@@ -141,7 +135,6 @@ impl Scope {
             Self::ActorMethod | Self::ValueTypeMethod => {
                 format!("  {name} =>\n    {stmt}\n    0\n")
             }
-            Self::ClassMethod => format!("  class {name} =>\n    {stmt}\n    0\n"),
             // An input of its own: a REPL statement per line.
             Self::Repl => format!("{stmt}\n"),
             Self::ActorClosure => {
@@ -318,7 +311,6 @@ const SHAPES: &[Shape] = &[
 fn relay_needed(scope: Scope, cleanup: Cleanup) -> bool {
     match (scope, cleanup) {
         (_, Cleanup::Inlined { writes: false })
-        | (Scope::ClassMethod, _)
         | (Scope::Repl | Scope::ValueTypeMethod, Cleanup::Closure | Cleanup::Indirect) => false,
         (_, Cleanup::Inlined { writes: true } | Cleanup::Closure | Cleanup::Indirect) => true,
     }
@@ -650,7 +642,7 @@ fn ensure_relay_corpus_fails_when_the_relay_rebuilds_at_the_site() {
             _ if cell.thrower == Thrower::OtherMethod => report.is_none(),
             Scope::ActorClosure | Scope::MergedTier2Fun => rebuilt == needed,
             Scope::ActorMethod => rebuilt || report.is_none(),
-            Scope::ValueTypeMethod | Scope::ClassMethod | Scope::Repl => report.is_none(),
+            Scope::ValueTypeMethod | Scope::Repl => report.is_none(),
         };
         if !agrees || (report.is_some() && !rebuilt) {
             failures.push(format!(

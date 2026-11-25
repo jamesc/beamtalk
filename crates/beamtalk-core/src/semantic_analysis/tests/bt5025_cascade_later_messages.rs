@@ -77,16 +77,6 @@ fn new_field_names_in_later_cascade_message() {
 }
 
 #[test]
-fn class_state_access_in_later_cascade_message() {
-    assert_plain_and_cascade(
-        "Object subclass: Counter\n  classState: n = 0\n  class describe => 1",
-        "Counter classState: #missing",
-        "Counter describe; classState: #missing",
-        "Undefined class variable",
-    );
-}
-
-#[test]
 fn literal_boolean_condition_in_later_cascade_message() {
     let hits = matching("true ifTrue: [1]; ifFalse: [2]", "Condition is always");
     assert_eq!(hits.len(), 2, "{hits:?}");

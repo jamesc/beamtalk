@@ -270,11 +270,9 @@ impl CoreErlangGenerator {
         // class-side slots are reflectable (`Behaviour>>classVarNames` /
         // `allClassVarNames`). The instance `fields` key above carries instance
         // state only.
-        let class_fields: Vec<String> = class
-            .class_variables
-            .iter()
-            .map(|s| s.name.name.to_string())
-            .collect();
+        // ADR 0153: `classState:` is rejected at parse time, so this is always
+        // empty until the metadata key itself is deleted.
+        let class_fields: Vec<String> = Vec::new();
 
         let class_fields_doc = Self::meta_atom_list(&class_fields);
 
@@ -307,7 +305,7 @@ impl CoreErlangGenerator {
         // read these so an inherited or cross-file `late` slot is known
         // without the declaring class's AST.
         let field_kinds_doc = Self::meta_field_kinds_map(&class.state);
-        let class_field_kinds_doc = Self::meta_field_kinds_map(&class.class_variables);
+        let class_field_kinds_doc = Self::meta_field_kinds_map(&[]);
 
         // initialize_assigns (ADR 0124 A2a): this class's own `initialize`
         // definitely-assigned slot summary — a must-analysis

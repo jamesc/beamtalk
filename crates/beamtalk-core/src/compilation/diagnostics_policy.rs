@@ -821,7 +821,7 @@ fn apply_expect_directives_impl(
         // Collect declaration-level @expect from state declarations.
         // directive_span = the @expect token span (for stale warnings),
         // target_span = the declaration span (for matching diagnostics).
-        for state_decl in class.state.iter().chain(class.class_variables.iter()) {
+        for state_decl in &class.state {
             if let Some((ref cats, ref reason, expect_span)) = state_decl.expect {
                 let contains_block = state_decl
                     .default_value

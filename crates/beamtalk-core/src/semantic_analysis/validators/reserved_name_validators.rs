@@ -58,10 +58,6 @@ pub(crate) fn check_reserved_internal_names(module: &Module, diagnostics: &mut V
         for field in &class.state {
             check_declared_name(&field.name, "field", diagnostics);
         }
-        // Class variables (`classState:`).
-        for var in &class.class_variables {
-            check_declared_name(&var.name, "class variable", diagnostics);
-        }
         // Method parameters (instance- and class-side).
         for method in class.methods.iter().chain(class.class_methods.iter()) {
             for param in &method.parameters {
@@ -312,19 +308,6 @@ mod tests {
         );
         assert!(diagnostics[0].message.contains("__local__balance"));
         assert!(diagnostics[0].message.contains("field"));
-    }
-
-    #[test]
-    fn rejects_reserved_class_variable_name() {
-        let diagnostics =
-            diagnostics_for("Object subclass: Config\n  classState: __methods__ = 0\n");
-        assert_eq!(
-            diagnostics.len(),
-            1,
-            "expected one diagnostic: {diagnostics:?}"
-        );
-        assert!(diagnostics[0].message.contains("__methods__"));
-        assert!(diagnostics[0].message.contains("class variable"));
     }
 
     #[test]

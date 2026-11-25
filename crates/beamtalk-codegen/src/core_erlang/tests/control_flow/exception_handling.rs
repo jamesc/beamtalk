@@ -516,34 +516,6 @@ fn test_class_method_ensure_last_position_and_assign_rhs_thread_local() {
 // `stdlib/test/fixtures/mutation_corpus_class_method.bt`.
 
 #[test]
-fn test_class_method_self_send_ensure_with_co_occurring_local_mutation_compiles() {
-    // A self-send AND a local-var mutation in the same try body: the construct
-    // threads the local through its `{Result, StateAcc}` tuple and nothing
-    // else (ADR 0130 §3), and the output compiles through `erlc`.
-    let src = concat!(
-        "Object subclass: CvEnsureSelfSendWithLocal\n",
-        "  classState: runs = 0\n\n",
-        "  class bump => self.runs := self.runs + 1\n\n",
-        "  class selfSendEnsureWithLocal =>\n",
-        "    self.runs := 0\n",
-        "    seen := 0\n",
-        "    [\n",
-        "      self bump\n",
-        "      seen := seen + 1\n",
-        "    ] ensure: [nil]\n",
-        "    self.runs + seen\n",
-    );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("bt@cvensureselfsendwithlocal"))
-        .expect(
-            "a class-method self-send alongside a co-occurring local mutation inside an \
-         ensure: try body must compile without a ThreadedIr verify failure",
-        );
-    assert_compiles_through_erlc("bt@cvensureselfsendwithlocal", &code);
-}
-
-#[test]
 fn test_value_type_field_write_nested_in_conditional_in_ensure_is_still_rejected() {
     // The `SelfVt` half must NOT regress: `reject_unthreadable_value_self_field_write`
     // has rejected this since BT-3486 (the acceptance criteria's "do not touch
@@ -565,64 +537,6 @@ fn test_value_type_field_write_nested_in_conditional_in_ensure_is_still_rejected
         "bt@vtcondinensureself",
     );
     assert_eq!(field, "total");
-}
-
-#[test]
-fn test_class_method_non_mutating_self_send_nested_in_conditional_in_ensure_still_compiles() {
-    // A nested self-send of a provably non-mutating selector compiles (and,
-    // since nothing about class variables is threaded, so does a mutating one).
-    let src = concat!(
-        "Object subclass: CvNestedPureSelfSend\n",
-        "  classState: runs = 0\n\n",
-        "  class helper => 42\n\n",
-        "  class pureSelfSendNested: flag =>\n",
-        "    self.runs := 0\n",
-        "    _t := 0\n",
-        "    [\n",
-        "      flag ifTrue: [ _t := self helper ]\n",
-        "      nil\n",
-        "    ] ensure: [nil]\n",
-        "    self.runs\n",
-    );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("bt@cvnestedpureselfsend"))
-        .expect("a provably non-class-var-mutating nested self-send must still compile");
-    assert_compiles_through_erlc("bt@cvnestedpureselfsend", &code);
-}
-
-#[test]
-fn test_class_method_fold_with_wrapper_local_loop_threads_no_outer_local() {
-    // BT-3848: a local the wrapping block introduces itself (`i`, in the
-    // `ensure:` / `on:do:` / conditional block) is crossed by the loop nested
-    // in it, but is not an outer local the enclosing fold threads. Counting it
-    // made the fold take mutation threading with an empty threaded set — a
-    // locals-less `StateAcc` fold, whose seed `State` does not exist in a
-    // class method (`ActorStateInClassMethod`).
-    for (name, wrapper) in [
-        (
-            "ensure",
-            "[a] ensure: [i := 0. [i < 3] whileTrue: [self.n := 1. i := i + 1]. a]",
-        ),
-        (
-            "ondo",
-            "[a] on: Error do: [:x | i := 0. [i < 3] whileTrue: [self.n := 1. i := i + 1]. a]",
-        ),
-        (
-            "cond",
-            "e > 1 ifTrue: [i := 0. [i < 3] whileTrue: [self.n := 1. i := i + 1]. a] ifFalse: [a]",
-        ),
-    ] {
-        let src = format!(
-            "Object subclass: CvWrapperLocal\n  classState: n = 0\n\n  class run =>\n    #(1, 3) inject: 0 into: [:a :e | self.n := 4. {wrapper}]\n"
-        );
-        let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
-        let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-        let module_name = format!("bt@cvwrapperlocal{name}");
-        let code = generate_module(&module, CodegenOptions::new(module_name.as_str()))
-            .unwrap_or_else(|e| panic!("{name}: wrapper-local loop in a class-method fold: {e:?}"));
-        assert_compiles_through_erlc(&module_name, &code);
-    }
 }
 
 // ─── BT-4312: an `ensure:` cleanup run by a `^` keeps its writes ────────────
@@ -688,33 +602,4 @@ fn test_bt4312_value_type_ensure_cleanup_field_write_rides_the_return() {
         code.contains(", Self1})"),
         "the resumed throw must carry the cleanup's Self1. Got:\n{code}"
     );
-}
-
-/// A class method's throw carries no state (its class variables are written
-/// in place), and a method with no `^` in a block has no throw of its own:
-/// neither relays.
-#[test]
-fn test_bt4312_nothing_to_relay_keeps_the_plain_catch() {
-    let code = compile_bt4312(
-        concat!(
-            "Object subclass: Bt4312ClassEnsure\n",
-            "  classState: n = 0\n\n",
-            "  class early =>\n",
-            "    [^1] ensure: [self.n := 9]\n",
-            "    0\n",
-        ),
-        "bt@bt4312classensure",
-    );
-    assert!(!code.contains("_EnsureNlrTok"), "{code}");
-    let code = compile_bt4312(
-        concat!(
-            "Actor subclass: Bt4312NoReturn\n",
-            "  state: n = 0\n\n",
-            "  plain =>\n",
-            "    [1] ensure: [self.n := 9]\n",
-            "    self.n\n",
-        ),
-        "bt@bt4312noreturn",
-    );
-    assert!(!code.contains("_EnsureNlrTok"), "{code}");
 }
