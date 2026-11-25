@@ -116,6 +116,25 @@ server {
 }
 ```
 
+The WebSocket handler refuses any `Host` or `Origin` name that is not loopback
+or the bound IP, to block DNS rebinding (ADR 0020). A proxy that forwards
+`Host $host` — or a client that dials a name such as a Tailscale MagicDNS host —
+must be listed, or the upgrade gets `403`:
+
+```bash
+# Comma-separated hostnames, no ports; matched case-insensitively against both
+# the Host and Origin headers. Set it in the environment of the workspace node.
+export BEAMTALK_WS_ALLOWED_HOSTS=repl.example.com,mybox.tailnet-1234.ts.net
+```
+
+The same list can be set as the `beamtalk_workspace` application env
+`ws_allowed_hosts`. Cookie authentication still applies; the list only widens
+which names pass the rebinding check. Alternatively, have the proxy send
+`proxy_set_header Host 127.0.0.1:49152;` and forward no `Origin`.
+
+**Connection cap:** the workspace allows at most 256 live WebSocket connections
+(`beamtalk_workspace` app env `ws_max_connections`); further upgrades get `503`.
+
 **Important nginx notes:**
 - `proxy_http_version 1.1` is required for WebSocket upgrade
 - `proxy_read_timeout` / `proxy_send_timeout` should be set high to avoid premature disconnects during long evaluations

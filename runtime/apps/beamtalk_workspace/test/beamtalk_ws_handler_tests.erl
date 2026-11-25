@@ -255,6 +255,57 @@ upgrade_allows_loopback_origin_test() ->
         )
     ).
 
+%% BT-5127: operator-listed names pass Host and Origin (reverse proxy,
+%% Tailscale MagicDNS); unlisted names still fail.
+upgrade_allowlist_accepts_listed_names_test() ->
+    L = {127, 0, 0, 1},
+    os:putenv("BEAMTALK_WS_ALLOWED_HOSTS", "Repl.Example.com, box.tail1234.ts.net"),
+    try
+        ?assertEqual(
+            ok,
+            beamtalk_ws_handler:check_upgrade_headers(
+                <<"https://repl.example.com">>, <<"repl.example.com">>, L
+            )
+        ),
+        ?assertEqual(
+            ok,
+            beamtalk_ws_handler:check_upgrade_headers(undefined, <<"box.tail1234.ts.net:9000">>, L)
+        ),
+        ?assertEqual(
+            {error, bad_host},
+            beamtalk_ws_handler:check_upgrade_headers(undefined, <<"evil.example">>, L)
+        )
+    after
+        os:unsetenv("BEAMTALK_WS_ALLOWED_HOSTS")
+    end,
+    ?assertEqual(
+        {error, bad_host},
+        beamtalk_ws_handler:check_upgrade_headers(undefined, <<"repl.example.com">>, L)
+    ).
+
+ws_conn_cap_acquire_release_test() ->
+    Created = ets:whereis(beamtalk_ws_conn_cap) =:= undefined,
+    ok = beamtalk_ws_conn_cap:new(),
+    Prev = application:get_env(beamtalk_workspace, ws_max_connections),
+    application:set_env(beamtalk_workspace, ws_max_connections, 1),
+    try
+        ?assertEqual(ok, beamtalk_ws_conn_cap:acquire()),
+        Self = self(),
+        spawn_link(fun() -> Self ! {second, beamtalk_ws_conn_cap:acquire()} end),
+        receive
+            {second, R} -> ?assertEqual({error, at_capacity}, R)
+        after 2000 -> error(timeout)
+        end,
+        ok = beamtalk_ws_conn_cap:release(),
+        ?assertEqual(0, beamtalk_ws_conn_cap:count())
+    after
+        case Prev of
+            {ok, V} -> application:set_env(beamtalk_workspace, ws_max_connections, V);
+            undefined -> application:unset_env(beamtalk_workspace, ws_max_connections)
+        end,
+        Created andalso ets:delete(beamtalk_ws_conn_cap)
+    end.
+
 upgrade_rejects_foreign_origin_test() ->
     L = {127, 0, 0, 1},
     ?assertEqual(

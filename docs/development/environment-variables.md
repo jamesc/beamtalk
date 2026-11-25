@@ -22,6 +22,7 @@ Read by shipped binaries and the runtime. Unset means the default behaviour.
 | `BEAMTALK_NODE_NAME` | Node name for the REPL; the `--node` flag takes priority. |
 | `BEAMTALK_REPL_PORT` | Port for the REPL listener (`crates/beamtalk-cli/src/commands/repl/mod.rs`); `0` is OS-assigned. |
 | `BEAMTALK_ERL_COOKIE` | Internal. How the CLI and the release launcher hand a cookie to a child `erl` without putting it in argv, where `ps` shows it; the node adopts it on boot and unsets it (`crates/beamtalk-cli/src/commands/cookie_env.rs`, `beamtalk_ws_cookie:adopt_env_cookie/0`). Not meant to be set by hand. |
+| `BEAMTALK_WS_ALLOWED_HOSTS` | Comma-separated hostnames the workspace WebSocket accepts in `Host`/`Origin` besides loopback and the bound IP (reverse proxy, MagicDNS). See `docs/development/remote-access.md`. |
 | `BEAMTALK_COOKIE` | Erlang cookie the MCP server uses with `--port`; must be non-empty then. |
 | `BEAMTALK_WORKSPACE_BOOT_TIMEOUT_SECS` | MCP server: how long to wait for `beamtalk repl` to report its port. |
 | `BEAMTALK_WORKSPACE_TCP_TIMEOUT_SECS` | MCP server: how long to wait for the workspace TCP port; the code default is 60. |

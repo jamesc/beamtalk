@@ -342,10 +342,17 @@ sealed typed Number subclass: Integer
   /// 1 to: 10 by: 3 do: [:i | Transcript show: i]
   /// ```
   ///
-  /// A step of 0 raises. A literal block that writes an outer local is inlined
+  /// A step of 0 (or 0.0) raises, and a step or limit that is not a number raises a
+  /// `TypeError`. A literal block that writes an outer local is inlined
   /// by the compiler as a counted loop; that path raises the same error (BT-5098).
   to: end :: Integer by: step :: Integer do: block :: Block(Integer, Object) -> Nil =>
-    step =:= 0 ifTrue: [self error: "Interval step cannot be zero"]
+    (step isKindOf: Number) ifFalse: [
+      ^TypeError signal: "Interval step must be a number"
+    ]
+    (end isKindOf: Number) ifFalse: [
+      ^TypeError signal: "Interval limit must be a number"
+    ]
+    step == 0 ifTrue: [self error: "Interval step cannot be zero"]
     cond := (step > 0 and: [self <= end]) or: [step < 0 and: [self >= end]]
     cond
       ifTrue: [
@@ -377,7 +384,13 @@ sealed typed Number subclass: Integer
   /// 1 to: 10 by: 2   // => (1 to: 10 by: 2)
   /// ```
   to: stop :: Integer by: step :: Integer -> Interval =>
-    step =:= 0 ifTrue: [self error: "Interval step cannot be zero"]
+    (step isKindOf: Number) ifFalse: [
+      ^TypeError signal: "Interval step must be a number"
+    ]
+    (stop isKindOf: Number) ifFalse: [
+      ^TypeError signal: "Interval limit must be a number"
+    ]
+    step == 0 ifTrue: [self error: "Interval step cannot be zero"]
     Interval new: #{#from => self, #to => stop, #step => step}
 
   // === Conversion & printing ===

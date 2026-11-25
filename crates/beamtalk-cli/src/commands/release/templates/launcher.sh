@@ -42,6 +42,12 @@ fi
 ERL_EPMD_ADDRESS=127.0.0.1
 export ERL_EPMD_ADDRESS
 
+# BT-5127: the client verbs below (`stop`/`ping`/`rpc`/`remote_console`)
+# start distributed nodes too, and the foreground node's `vm.args` pin
+# does not reach them. Each passes `-kernel inet_dist_use_interface
+# '{127,0,0,1}'` (the same value as `vm.args`) so no node this launcher
+# starts listens for distribution off loopback.
+
 # Reject a malformed RELEASE_NODE before it ever reaches `erl` — an invalid
 # `-sname` (e.g. containing '/', '@', '.', or whitespace) otherwise crashes
 # the whole node with a raw kernel crash dump ("Invalid node name!",
@@ -213,7 +219,7 @@ case "$VERB" in
         # with the same value).
         NODE=$(node_sname)
         export_cookie
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
             -eval \"__ADOPT_COOKIE_EVAL__.\" \
             -eval \"beamtalk_release_launcher:stop_client_main().\" \
             -extra \"\$NODE\""
@@ -227,7 +233,7 @@ case "$VERB" in
         # with the same value).
         NODE=$(node_sname)
         export_cookie
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
             -eval \"__ADOPT_COOKIE_EVAL__.\" \
             -eval \"beamtalk_release_launcher:ping_client_main().\" \
             -extra \"\$NODE\""
@@ -246,7 +252,7 @@ case "$VERB" in
         # `-remsh` would connect during boot, before any `-eval` can swap the
         # placeholder cookie for the real one (BT-5126), so adopt first and
         # then start the same remote shell `-remsh` does (OTP 26+).
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
             -eval \"__ADOPT_COOKIE_EVAL__, shell:start_interactive({'\$NODE', {shell, start, []}}).\""
         exec "$ERL" "$@"
         ;;
@@ -293,7 +299,7 @@ case "$VERB" in
         # with the same value).
         NODE=$(node_sname)
         export_cookie
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
             -eval \"__ADOPT_COOKIE_EVAL__.\" \
             -eval \"beamtalk_release_launcher:rpc_client_main().\" \
             -extra \"\$NODE\" \"\$CLASS\" \"\$SELECTOR\" \"\$@\""

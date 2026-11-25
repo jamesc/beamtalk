@@ -254,6 +254,14 @@ defmodule BtAttach.WorkspaceConnectTest do
       assert :application.get_env(:kernel, :inet_dist_use_interface) == {:ok, {127, 0, 0, 1}}
     end
 
+    test "loopback_dist?/1 honours the ERL_EPMD_ADDRESS opt-out (BT-5127)" do
+      assert Workspace.loopback_dist?(nil)
+      assert Workspace.loopback_dist?("")
+      assert Workspace.loopback_dist?("  ")
+      assert Workspace.loopback_dist?("127.0.0.1")
+      refute Workspace.loopback_dist?("10.0.0.5")
+    end
+
     test "net_kernel.start/2 racing to :already_started is treated as success" do
       :meck.expect(:net_kernel, :start, fn _name, _opts ->
         {:error, {:already_started, self()}}
