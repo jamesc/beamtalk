@@ -208,7 +208,7 @@ export_cookie() {
         exit 1
     fi
     # Always probed with a host ERTS (one extra boot): telling a real install
-    # from a shim is `cookie_env::installed_erl_on_path`'s rule, not repeated
+    # from a shim is `cookie_env::installed_erl_in`'s rule, not repeated
     # here. The default bundled ERTS never needs it.
     if [ "$USING_HOST_ERTS" = "true" ]; then
         erl_root=$("$ERL" -noshell -noinput -boot no_dot_erlang \
