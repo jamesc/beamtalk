@@ -25,7 +25,7 @@ name = "beamtalk-desktop"
 description = "Desktop picker: attach to live Beamtalk workspaces (ADR 0097, BT-2986)"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "Apache-2.0"
 publish = false
 

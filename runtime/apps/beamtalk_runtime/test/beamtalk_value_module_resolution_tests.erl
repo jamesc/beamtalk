@@ -848,7 +848,6 @@ class_info(Module, Superclass, Selectors) ->
     Base = #{
         superclass => Superclass,
         class_methods => #{},
-        class_state => #{},
         instance_methods => maps:from_list([{S, #{}} || S <- Selectors])
     },
     case Module of

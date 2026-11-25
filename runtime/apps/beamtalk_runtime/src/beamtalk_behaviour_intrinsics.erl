@@ -37,8 +37,6 @@ that the Behaviour/Class libraries can rely on.
 | classFieldKinds/1            | Field name -> eager/late kind, local only (ADR 0124 §9/B5b) |
 | classAllFieldKinds/1         | Combined field name -> eager/late kind via superclass chain (ADR 0124 §9/B5b) |
 | classAllFieldKindsByName/1   | Same as classAllFieldKinds/1, by ClassName (ADR 0124 §9/B5b)  |
-| classClassVarNames/1        | Class-side field names (class variables) from class meta   |
-| classAllClassVarNames/1     | Combined class-side field names via superclass chain       |
 | className/1                 | Class name from class gen_server state                    |
 | classClass/1                | Real metaclass object (ADR 0036)                          |
 | classDoc/1                  | Class doc string from published metadata (ADR 0033)       |
@@ -92,9 +90,6 @@ that the Behaviour/Class libraries can rely on.
     classFieldKinds/1,
     classAllFieldKinds/1,
     classAllFieldKindsByName/1,
-    %% class-side field (class variable) reflection
-    classClassVarNames/1,
-    classAllClassVarNames/1,
     className/1,
     classClass/1,
     %% BT-4065: `Object>>isKindOf:` in the caller, no class-process sends
@@ -676,12 +671,7 @@ class (not inherited).
 Backs `@primitive "classFieldKinds"` (`Behaviour>>fieldKinds`, ADR 0124 §9/B5b)
 — the instance-side counterpart to `classFieldNames/1`, reading B5a's
 `'field_kinds'` key from `__beamtalk_meta/0` instead of walking the AST.
-Instance side only: a class-side (`classState:`) kind map is deliberately
-*not* exposed under this name — an instance slot and a class var can share
-a name, so folding both into one dictionary would be ambiguous (ADR 0124
-§9's B10 documentation pass records the split; `classVarNames/1` is the
-existing precedent for keeping class-side reflection under its own
-selector rather than merging it into the instance-side one).
+Instance side only: a class has no fields (ADR 0153).
 
 Dynamic classes built via `beamtalk_class_builder` carry no static meta,
 so they answer `'eager'` for every field they report — ClassBuilder has no
@@ -823,59 +813,6 @@ classFieldNames(Self) ->
         not_available ->
             beamtalk_object_class_read:instance_variables_safe(ClassPid)
     end.
-
--doc """
-Return the class-side field (class variable) names declared in this class.
-
-Backs `@primitive "classClassVarNames"` (`Behaviour>>classVarNames`)
-— the class-side counterpart to `classFieldNames/1`. Reads the `class_fields`
-key emitted into `__beamtalk_meta/0` from `classState:` declarations. Returns
-`[]` for dynamic classes built via ClassBuilder (no static meta) and for
-classes with no class-side state.
-
-A distinct selector (not `fieldNames`) is required: `fieldNames` is intercepted
-at the call site as an instance-reflection primitive and never reaches the
-Behaviour method table.
-""".
--spec classClassVarNames(#beamtalk_object{}) -> [atom()].
-classClassVarNames(Self) ->
-    ClassPid = erlang:element(4, Self),
-    Module = beamtalk_object_class:module_name_safe(ClassPid),
-    case meta_for_module(Module) of
-        {ok, Meta} ->
-            maps:get(class_fields, Meta, []);
-        not_available ->
-            []
-    end.
-
--doc """
-Return all class-side field names including inherited, in slot order.
-
-Backs `@primitive "classAllClassVarNames"`
-(`Behaviour>>allClassVarNames`) — the class-side counterpart to
-`classAllFieldNames/1`. Walks the superclass chain collecting each level's
-`class_fields`, mirroring the slot order of `classAllFieldNames/1` (ancestor
-class-side slots precede subclass ones).
-""".
--spec classAllClassVarNames(#beamtalk_object{}) -> [atom()].
-classAllClassVarNames(Self) ->
-    ClassPid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
-    walk_hierarchy(
-        ClassName,
-        fun(_CN, CPid, Acc) ->
-            Module = beamtalk_object_class:module_name_safe(CPid),
-            CVars =
-                case meta_for_module(Module) of
-                    {ok, Meta} ->
-                        maps:get(class_fields, Meta, []);
-                    not_available ->
-                        []
-                end,
-            {cont, CVars ++ Acc}
-        end,
-        []
-    ).
 
 -doc "Return the name of the class as a Symbol (atom).".
 -spec className(#beamtalk_object{}) -> atom().

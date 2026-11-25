@@ -123,7 +123,7 @@ updates:
       prefix: "deps"
       include: "scope"
     ignore:
-      # Must match `engines.vscode` (^1.82.0); `vsce package` rejects a newer
+      # Must match `engines.vscode` (^1.91.0, raise both together); `vsce package` rejects a newer
       # types range (BT-5114).
       - dependency-name: "@types/vscode"
       # Stay on the Node major pinned in .tool-versions (22) (BT-5114).

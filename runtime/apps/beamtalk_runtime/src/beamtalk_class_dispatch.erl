@@ -38,7 +38,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     unwrap_class_call/1,
     class_method_fun_name/1,
     is_test_execution_selector/1,
-    handle_class_method_call/6,
+    handle_class_method_call/5,
     handle_async_dispatch/5,
     class_understands_class_selector/2,
     class_object_understands/2,
@@ -357,7 +357,7 @@ one class for its whole life, so a hit needs no pid-to-name lookup; a restarted
 class has a new pid (and its `init/1` flushes the cache anyway).
 
 Derived by walking the chain exactly as the class process does
-(`handle_class_method_call/6`), through the one class-side walk
+(`handle_class_method_call/5`), through the one class-side walk
 `find_class_side_method/3`: at the receiving class and each ancestor, a
 the class's methods from its published selector list, which includes ADR 0084
 runtime funs, so a runtime fun at an ancestor counts as that ancestor's method
@@ -433,18 +433,17 @@ Run a class method in the caller (ADR 0142 §3). `ClassSelf` is the real class
 reference of the receiving class, the value its class literal evaluates to
 (its metaclass tag, its own module and its registered pid), even for an
 inherited method, as every class-side path now builds it
-(the caller's own `ClassSelf`, `invoke_class_method/7`).
+(the caller's own `ClassSelf`, `invoke_class_method/6`).
 `beamtalk_object_class:local_call/3` used to apply its selector from
 `class_mod` alone; it now walks the class-method chain from the receiving
 class, so an inherited selector is found and a subclass override wins
-(BT-4300). No class-variable
-home is installed (ADR 0153: compiled code no longer reads one), and ADR 0130
-§1's no-nesting rule concerns only homes. The class-process services (session
+(BT-4300). As in the class process, no class-variable home is installed
+(ADR 0153). The class-process services (session
 context seeding, the mirrored caller pid, the entry group leader, the call
 timeouts) are not recreated: the caller is the context they stand in for.
 
 The outcome is adapted exactly as the class-process path adapts the same
-outcome (`run_with_class_vars/3`'s reply, then `class_method_call/4`), so
+outcome (`invoke_class_method/6`'s reply, then `class_method_call/4`), so
 every error is raised with the value it has today.
 """.
 -spec run_in_caller(
@@ -680,12 +679,11 @@ that sends `super peek:` runs the superclass's method instead of recursing
 into itself.
 
 `ClassSelf` is the live receiver (the calling method's own `ClassSelf`), so
-the found method runs under the receiver's class-variable key with the
-receiver's real reference, and nothing is looked up to rebuild it (BT-4301).
-Returns the
-plain result (ADR 0130 §3). When no ancestor defines `Selector`, the
-class-object protocol answers (`class_self_protocol_fallthrough/4`, BT-4252),
-else a structured `does_not_understand` is raised.
+the found method runs with the receiver's real reference, and nothing is
+looked up to rebuild it (BT-4301). Returns the plain result (ADR 0130 §3).
+When no ancestor defines `Selector`, the class-object protocol answers
+(`class_self_protocol_fallthrough/4`, BT-4252), else a structured
+`does_not_understand` is raised.
 """.
 -spec class_super_dispatch(class_name(), selector(), list(), #beamtalk_object{}) ->
     term() | no_return().
@@ -761,7 +759,7 @@ list (compiled class methods, or ADR 0084 runtime funs) has `Selector`, else
 `not_found`.
 
 Shared by every class-side lookup: the external send
-(`handle_class_method_call/6`), the in-caller owner memo
+(`handle_class_method_call/5`), the in-caller owner memo
 (`derive_class_method_owner/3`), the class-side self-send
 (`class_self_send/3`, `class_self_dispatch_local/4`), `super`
 (`class_super_dispatch/4`, from the superclass), `local_call/3`
@@ -886,8 +884,8 @@ structured `does_not_understand` is raised. No `gen_server` hop: the local looku
 ETS read the dispatch hot path already uses.
 
 `ClassSelf` is the calling fun's own `ClassSelf`: the live receiver, which can
-be a subclass of `ClassName`, so the found method runs under the receiver's
-class-variable key with its real reference (BT-4301: passed in, not rebuilt
+be a subclass of `ClassName`, so the found method runs with the receiver's
+real reference (BT-4301: passed in, not rebuilt
 from a tag). Like `class_self_send/3` it starts at `ClassName` itself, so it
 is not `super`: a class-side `super` uses `class_super_dispatch/4`.
 """.
@@ -922,7 +920,7 @@ can only be answered by the `Class` chain, so asking the class process first
 would only learn `{error, not_found}`; else `error` (take the gen_server path).
 
 Reads the same metadata the class process's own lookup
-(`handle_class_method_call/6`) consults, through
+(`handle_class_method_call/5`) consults, through
 `class_understands_class_selector/2`: the local class-method selectors (which `beamtalk_object_class` publishes from its
 `class_methods` map, runtime-installed ADR 0084 funs included, on every init,
 reload and `put_class_method`) and the inherited chain. It is general: no
@@ -1280,7 +1278,6 @@ unwrap_class_call({error, Error}) ->
 Handle a class method call from the gen_server.
 
 User-defined class method dispatch.
-Passes class variables to method and handles updates.
 For test execution (runAll, run:), spawns in a separate process
 to avoid gen_server deadlock.
 
@@ -1298,21 +1295,20 @@ Scope: this covers *external* sends (`Target sel` / `Target class sel`). A
 class — `class_self_send/3` / `class_self_dispatch_local/4`, above —
 walks the same chain through `find_class_side_method/3`.
 
-Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
+Returns {reply, Result} or test_spawn or {error, not_found}.
 """.
 -spec handle_class_method_call(
     selector(),
     list(),
     class_name(),
     atom(),
-    #{selector() => term()},
-    map()
-) -> {reply, term(), map()} | test_spawn | {error, not_found}.
-handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, ClassVars) ->
+    #{selector() => term()}
+) -> {reply, term()} | test_spawn | {error, not_found}.
+handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods) ->
     case maps:is_key(Selector, LocalClassMethods) of
         true ->
             %% Local class method found — invoke directly.
-            invoke_class_method(Selector, Args, ClassName, Module, ClassName, Module, ClassVars);
+            invoke_class_method(Selector, Args, ClassName, Module, ClassName, Module);
         false ->
             %% Not found locally — walk the superclass chain.
             case find_class_side_method(Selector, superclass_from_ets(ClassName), ClassName) of
@@ -1323,8 +1319,7 @@ handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, C
                         ClassName,
                         Module,
                         DefiningClass,
-                        DefiningModule,
-                        ClassVars
+                        DefiningModule
                     );
                 not_found ->
                     {error, not_found}
@@ -1334,13 +1329,8 @@ handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, C
 -doc """
 Invoke a class method (local or inherited), handling test execution specially.
 
-ADR 0130 §1: the class's variables live in this process's dictionary under
-`beamtalk_class_vars:key(ClassName)` for the duration of the invocation. The
-stored map is installed on entry and read back on exit; the compiled method
-neither takes nor returns class variables. A normal return and a foreign `^`
-(non-local return) keep the writes made before they left; an escaping error
-replies with the pre-call map. `assert_absent/1` runs first, so a nested
-invocation fails loudly with the outer map intact instead of overwriting it.
+The method runs as it is: no class-variable home is installed around it, and
+nothing is read back afterwards (ADR 0153: a class has no class variables).
 """.
 -spec invoke_class_method(
     selector(),
@@ -1348,54 +1338,27 @@ invocation fails loudly with the outer map intact instead of overwriting it.
     class_name(),
     atom(),
     class_name(),
-    atom(),
-    map()
+    atom()
 ) ->
-    {reply, term(), map()} | test_spawn.
-invoke_class_method(Selector, Args, ClassName, Module, DefiningClass, DefiningModule, ClassVars) ->
-    %% The metaclass tag is derived once: it keys the class-variable home and
-    %% is the `ClassSelf` tag the method receives.
-    ClassTag = receiver_tag(ClassName),
+    {reply, term()} | test_spawn.
+invoke_class_method(Selector, Args, ClassName, Module, DefiningClass, DefiningModule) ->
     %% BT-4300: `self()` is the receiving class's own gen_server here
-    %% (`handle_class_method_call/6` runs only inside it), so this is the
+    %% (`handle_class_method_call/5` runs only inside it), so this is the
     %% class's real reference; no path that may run elsewhere builds one from
     %% `self()`.
-    ClassSelf = #beamtalk_object{class = ClassTag, class_mod = Module, pid = self()},
-    run_with_class_vars(ClassTag, ClassVars, fun() ->
+    ClassSelf = #beamtalk_object{class = receiver_tag(ClassName), class_mod = Module, pid = self()},
+    case
         apply_class_method_in_context(
             Selector, Args, ClassName, ClassSelf, DefiningClass, DefiningModule
         )
-    end).
-
--doc """
-Install `ClassVars` as `ClassName`'s home, run `Thunk` (which yields a
-`class_method_outcome()`), and adapt the outcome to the gen_server reply shape
-(ADR 0130 §1). Shared by `invoke_class_method/7`.
-""".
--spec run_with_class_vars(atom(), map(), fun(() -> class_method_outcome())) ->
-    {reply, term(), map()} | test_spawn.
-run_with_class_vars(ClassTag, ClassVars, Thunk) ->
-    Key = beamtalk_class_vars:key_for_tag(ClassTag),
-    beamtalk_class_vars:assert_absent(Key),
-    beamtalk_class_vars:install(Key, ClassVars),
-    try Thunk() of
-        test_spawn ->
-            test_spawn;
-        {ok, _} = Outcome ->
-            {reply, outcome_reply(Outcome), erlang:get(Key)};
-        {nlr_relay, _, _} = Outcome ->
-            %% ADR 0110/0130: a foreign `^` is control flow, not a failure;
-            %% writes made before the unwind are kept.
-            {reply, outcome_reply(Outcome), erlang:get(Key)};
-        {error, _} = Outcome ->
-            {reply, outcome_reply(Outcome), ClassVars}
-    after
-        beamtalk_class_vars:uninstall(Key)
+    of
+        test_spawn -> test_spawn;
+        Outcome -> {reply, outcome_reply(Outcome)}
     end.
 
 -doc """
 The reply a class method's outcome becomes (`{ok, Result}` or `{error, _}`),
-whatever process ran it: the class process's `run_with_class_vars/3` and the
+whatever process ran it: the class process's `invoke_class_method/6` and the
 in-caller `run_in_caller/7` (ADR 0142) share it, and `class_method_result/4`
 interprets it, so a method raises the same value on either path. A foreign `^`
 keeps its `{error, Nlr}` shape so the `?IS_NLR` re-throw in
@@ -1426,8 +1389,7 @@ outcome_reply({error, {raised, _ErrClass, Error, _ST}}) ->
 %% ADR 0110: `{nlr_relay, Nlr, ST}` is a foreign `^` (non-local
 %% return) relaying out of the class method — the relayed NLR tuple plus its
 %% stacktrace. It is kept distinct from `{error, {raised, ...}}` so
-%% `run_with_class_vars/3` can keep the class-var writes made before the unwind
-%% instead of reverting them the way it does for genuine errors.
+%% `outcome_reply/1` relays it unwrapped and the caller re-throws it as a `^`.
 -type class_method_outcome() ::
     test_spawn
     | {ok, term()}
@@ -1443,7 +1405,7 @@ Handles the TestCase `test_spawn` guard, applies the method to `ClassSelf`
 (the receiving class's real reference, built by the caller: never from
 `self()` unless the caller is the class's own gen_server), and classifies any
 errors into the structured variants in `class_method_outcome()`. Both
-`invoke_class_method/7` (gen_server path) and `class_self_dispatch_chain/5`
+`invoke_class_method/6` (gen_server path) and `class_self_dispatch_chain/5`
 (self-send path) adapt the outcome to their own caller shapes.
 
 `{ok, Raw}` carries the method's bare result (ADR 0130 §3).
@@ -1536,8 +1498,7 @@ apply_class_method_fun(Fun, ClassSelf, Args, ClassName, Selector) ->
         %% belongs to a method frame in the *calling* process. Pass it through
         %% unlogged so class_send_dispatch/3 can re-throw it there.
         %% ADR 0110: tagged as its own outcome variant (not
-        %% {error, {raised, ...}}) so the entry point can keep class-var
-        %% writes made before the unwind instead of reverting them.
+        %% {error, {raised, ...}}) so it is relayed unwrapped.
         throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
             {nlr_relay, Nlr, NlrST};
         error:undef:ST ->
@@ -1569,8 +1530,7 @@ Apply a compiled `class_<Selector>` export, `FunName`
 apply_compiled_class_method(
     ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
 ) ->
-    %% ADR 0130 §3: `class_<sel>(ClassSelf, Args...)`; class variables live in
-    %% the process dictionary home installed by the invocation entry point.
+    %% ADR 0130 §3: `class_<sel>(ClassSelf, Args...)`.
     try erlang:apply(DefiningModule, FunName, [ClassSelf | Args]) of
         Raw ->
             {ok, Raw}
@@ -1582,8 +1542,7 @@ apply_compiled_class_method(
             {error, {raised, throw, ScriptExit, ScriptST}};
         %% See apply_class_method_fun/5 — a non-local return unwinding out
         %% of a class method is control flow for a frame in the calling process.
-        %% ADR 0110: tagged {nlr_relay, ...} so class-var writes made
-        %% before the unwind are kept rather than reverted.
+        %% ADR 0110: tagged {nlr_relay, ...} so it is relayed unwrapped.
         throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
             {nlr_relay, Nlr, NlrST};
         error:undef:ST ->
@@ -1774,7 +1733,7 @@ so the existing hierarchy-walk reflection helper
 (`beamtalk_behaviour_intrinsics:classCanUnderstandFromName/2`) cannot be
 pointed at it directly: there is no such class row to walk from. This
 function instead re-implements "does dispatch find this selector" directly
-against `ClassName`'s own tables, mirroring `handle_class_method_call/6`'s
+against `ClassName`'s own tables, mirroring `handle_class_method_call/5`'s
 priority order (local, then the inherited chain walked by
 `find_class_side_method/3`) without actually invoking anything.
 
@@ -2015,7 +1974,7 @@ in Phase 2+, this must be revisited.
 -spec try_class_chain_fallthrough(#beamtalk_object{}, atom(), list()) ->
     {ok, term()} | not_found.
 try_class_chain_fallthrough(ClassSelf, Selector, Args) ->
-    case beamtalk_object_class:is_class_var_reflection_selector(Selector) of
+    case beamtalk_object_class:is_field_reflection_selector(Selector) of
         true ->
             %% ADR 0153 decision 7 (BT-5155): a class object has no fields, so
             %% the instance-field reflection selectors are not part of its

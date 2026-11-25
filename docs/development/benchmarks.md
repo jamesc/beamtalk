@@ -1915,6 +1915,35 @@ cheaper than `5 + b` (8.9–9.5 ns). 11l was already a `StateAcc` loop; its
 condition now brackets the comparison with a BT-4279 fast path
 (`is_number(Count)` skips the store) and it measured faster.
 
+### BT-5211: the primitive bodies test their argument too (ADR 0116 addendum)
+
+Phase 2c gives the `@primitive` `<` `<=` `>` `>=` bodies of `Integer`,
+`Float` and `Character` the same right-operand test as the inlined path, so
+it only changes dynamic sends (`perform:`, a send the compiler cannot
+inline). None of the Phase 0 rows reaches a primitive body, so the gate is
+"no change beyond noise". Measured like for like: `main` at `0be6f90`
+(Phase 2b, built in a separate worktree) against this change, both repo dev
+builds, `BEAMTALK=<compiler> just bench-vs-elixir bench 7 11d,...,11l`,
+three runs per side, alternating base / after, on a 4-vCPU cloud container
+(OTP 28).
+
+| Row | base ns (1 / 2 / 3) | after ns (1 / 2 / 3) | red / words, both sides |
+|---|---|---|---|
+| 11d `a > 0` | 6.49 / 6.41 / 6.74 | 6.52 / 6.48 / 6.92 | 0 / 0 |
+| 11e `a < 10` | 6.92 / 6.43 / 6.61 | 6.43 / 6.85 / 6.63 | 0 / 0 |
+| 11f `[a > i] whileTrue:` | 223 / 187 / 235 | 207 / 224 / 226 | 19 / 7 |
+| 11g `a max: 3` | 14.3 / 14.1 / 16.0 | 14.3 / 14.3 / 14.3 | 4 / 0 |
+| 11h `5 < b` | 6.54 / 6.20 / 6.51 | 6.19 / 6.59 / 7.02 | 0 / 0 |
+| 11i `a < b` untyped | 6.28 / 6.57 / 6.61 | 6.28 / 6.38 / 7.75 | 0 / 0 |
+| 11j `a :: Integer < b` | 6.39 / 6.63 / 6.70 | 8.65 / 6.53 / 6.64 | 0 / 0 |
+| 11k `5 + b` (reference) | 7.57 / 7.32 / 7.96 | 7.48 / 7.92 / 7.72 | 0 / 0 |
+| 11l actor loop | 3660 / 3140 / 3297 | 3303 / 3351 / 3115 | 103 / 191–195 |
+
+The gate holds: reductions and words are identical on both sides (11l's
+words vary run to run, as in the BT-5210 runs), and every ns figure is
+inside the other side's spread apart from single outliers in both
+directions (after 11j run 1, 11i run 3; base 11f run 2).
+
 ## ADR 0153 baseline: class variables, before removal (BT-5145)
 
 The "before" run for removing `classState:` (epic BT-5144). It records what the class-variable snapshot before every compiled `on:do:`, `protect/1` in `Result tryDo:` and the class-variable input to the per-send class guard cost, so the "after" run (BT-5164, and the ADR 0153 Phase 3 gate) has something to compare against.

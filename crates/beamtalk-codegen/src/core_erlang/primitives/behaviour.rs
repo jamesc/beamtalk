@@ -46,8 +46,6 @@ const TOWER_ZERO_ARG: &[&str] = &[
     // ADR 0124 §9/B5b (BT-3550): field name -> eager|late kind reflection.
     "classFieldKinds",
     "classAllFieldKinds",
-    "classClassVarNames",
-    "classAllClassVarNames",
     "classRemoveFromSystem",
     "classSourceFile",
     "classReload",
@@ -298,18 +296,6 @@ mod tests {
                     "call 'beamtalk_behaviour_intrinsics':'classAllFieldNames'(Self)",
                 ),
                 (
-                    "test_class_class_var_names",
-                    "classClassVarNames",
-                    &[],
-                    "call 'beamtalk_behaviour_intrinsics':'classClassVarNames'(Self)",
-                ),
-                (
-                    "test_class_all_class_var_names",
-                    "classAllClassVarNames",
-                    &[],
-                    "call 'beamtalk_behaviour_intrinsics':'classAllClassVarNames'(Self)",
-                ),
-                (
                     "test_class_used_protocols",
                     "classUsedProtocols",
                     &[],
@@ -450,7 +436,20 @@ mod tests {
     fn generate_tower_bif_none_table() {
         assert_bif_none_table(
             generate_tower_bif,
-            &[("test_unknown_tower_selector", "unknownMethod", &[])],
+            &[
+                ("test_unknown_tower_selector", "unknownMethod", &[]),
+                // ADR 0153 (BT-5160): the class-variable name intrinsics are gone.
+                (
+                    "test_class_class_var_names_removed",
+                    "classClassVarNames",
+                    &[],
+                ),
+                (
+                    "test_class_all_class_var_names_removed",
+                    "classAllClassVarNames",
+                    &[],
+                ),
+            ],
         );
     }
 }

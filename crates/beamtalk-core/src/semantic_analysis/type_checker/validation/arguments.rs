@@ -1138,8 +1138,11 @@ impl TypeChecker {
 
         // Comparison operators require an argument of the receiver's own kind:
         // numeric for Integer/Float, otherwise Character, String or Symbol.
-        // Anything else falls back to Erlang term order at runtime (BT-3928),
-        // so the compiler is the only place the mismatch can be reported.
+        // At runtime a number receiver sends a wrong-kind argument its
+        // reflected hook and raises `does_not_understand` when it has none
+        // (ADR 0116 § Addendum, BT-5176); a String or Symbol receiver still
+        // falls back to Erlang term order (BT-5213). Reporting the mismatch
+        // here catches both before they run.
         let comparison_expectation = Self::comparison_arg_expectation(receiver_ty, hierarchy);
 
         // Whether this call has bespoke logic for `operator` on

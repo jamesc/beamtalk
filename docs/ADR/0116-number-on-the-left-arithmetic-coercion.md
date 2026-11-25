@@ -1779,9 +1779,16 @@ duplicate Epic)
 - BT-3266 — Right-operand untyped `self.<field>` gap: design decision (accepted, not fixed — see Addendum above)
 - BT-3892, BT-3924, BT-3925 — 2026-10-18 addendum follow-ups (untyped/union `self.<field>` guarding, comparison guard inversion, Actor `state:` fields)
 
-- BT-5176 — 2026-11-25 addendum (comparison operators): Accepted 2026-11-25; implementation issues to be filed. Related: BT-5175 (counted-loop limit guard), BT-3928 (the fallback this reverses), BT-4823 (declared receivers are tested)
+- BT-5176 — 2026-11-25 addendum (comparison operators): Accepted 2026-11-25; the runtime rule is implemented on both send paths. Related: BT-5175 (counted-loop limit guard), BT-3928 (the fallback this reverses), BT-4823 (declared receivers are tested)
+  - BT-5207 — Phase 0: benchmark baseline
+  - BT-5208 — Phase 1: runtime `send_number_comparison/4`
+  - BT-5209 — Phase 2a: the shared operator → reflected-selector table
+  - BT-5210 — Phase 2b: right-operand test on the inlined path, `comparison_is_bare`
+  - BT-5211 — Phase 2c: right-operand test on the primitive path (`perform:`), CHANGELOG and language docs
+  - BT-5212 — Phase 3: type-checker hook lookup (open)
+  - BT-5213, BT-5214 — follow-ups: `String`/`Symbol` wrong-kind ordering, Collection `max`/`min` (open)
 
-**Status:** Complete for the arithmetic design — all issues Done (BT-3262–BT-3266 closed 2026-08-25, BT-2712 closed 2026-08-25; addendum issues closed 2026-10-18). The 2026-11-25 comparison addendum is Accepted and not yet implemented.
+**Status:** Complete for the arithmetic design — all issues Done (BT-3262–BT-3266 closed 2026-08-25, BT-2712 closed 2026-08-25; addendum issues closed 2026-10-18). The 2026-11-25 comparison addendum is implemented at run time (Phases 0–2, BT-5207–BT-5211); the type-checker phase (BT-5212) is open.
 
 ## References
 - Related issues: BT-2712 (this ADR), BT-2708 (epic), BT-2709 (Phase 1,

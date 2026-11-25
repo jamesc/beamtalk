@@ -326,6 +326,12 @@ atomic_write(Path, Data, ExpectedCurrent, Opts) ->
             WriteErr
     end.
 
+%% Windows (BT-5258): there are no POSIX mode bits, so `change_mode/2` only
+%% toggles the read-only attribute and does NOT make the file private. This
+%% module adds no ACL of its own: privacy there ASSUMES the parent directory
+%% inherits an owner-only ACL, as the per-user profile location does. A
+%% workspace under a shared path (a drive root, a shared folder) is not
+%% protected. Exclusive create and atomic rename behave the same on Windows.
 -spec private_mode(string(), boolean()) -> ok | {error, term()}.
 private_mode(Tmp, true) -> file:change_mode(Tmp, 8#600);
 private_mode(_Tmp, false) -> ok.
@@ -348,6 +354,9 @@ Create `Dir` (and any missing parents) and make `Dir` itself mode 0700, so a
 workspace's state files are not listable by other local users even when the
 node, not the CLI, creates the directory first (BT-5135).
 """.
+%% Windows (BT-5258): `change_mode/2` is effectively a no-op for 0700; privacy
+%% comes from the inherited per-user ACL of the parent directory (see
+%% `private_mode/2`).
 -spec ensure_private_dir(string()) -> ok | {error, term()}.
 ensure_private_dir(Dir) ->
     case filelib:ensure_dir(filename:join(Dir, "x")) of
