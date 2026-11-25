@@ -289,7 +289,9 @@ rem to a file in a directory made with mkdir, read back with `for /f`, for
 rem the reasons :check_otp_window gives. '=' separates key and value because
 rem an IPv6 address can start with ':', which `for /f` would skip as a
 rem delimiter. The values are validated by the check, so they are safe to
-rem expand. epmd then follows the interface.
+rem expand: in particular tls_optfile/3 refuses '!', '^', '%' and '"' in the
+rem option-file path, which `set "TLS_OPTFILE=%%B"` under delayed expansion
+rem would otherwise mangle. epmd then follows the interface.
 :select_distribution
 if "%DIST_MODE%"=="unsupported" (
     echo error: RELEASE_DISTRIBUTION "!RELEASE_DISTRIBUTION!" is not supported: unset it to stay on this host, or set it to 'tls' to cluster across hosts over TLS with peer verification; plain TCP off-host is not offered 1>&2
@@ -309,7 +311,7 @@ if not defined TLS_PROBE_DIR (
     exit /b 1
 )
 set "TLS_PROBE=!TLS_PROBE_DIR!\preflight.txt"
-"%ERL%" -noshell %BOOT_ARGS% %PA_ARGS% -args_file "%CONFIG_DIR%\vm.args" -eval "beamtalk_release_launcher:tls_preflight_main()." >"!TLS_PROBE!"
+"%ERL%" -noshell %BOOT_ARGS% %PA_ARGS% -args_file "%CONFIG_DIR%\vm.args" -eval "beamtalk_release_launcher:tls_preflight_main()." -extra %VERB% >"!TLS_PROBE!"
 set "TLS_RC=!errorlevel!"
 set "TLS_PROTO="
 set "TLS_INTERFACE="

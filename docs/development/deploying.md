@@ -186,7 +186,9 @@ ports between them, and pin the distribution ports with
 to keep the firewall rule small. A node then reaches the other with `(Node
 named: 'orders@web2.example.com') connect`. `stop`, `ping`, `rpc` and
 `remote_console` need the same four variables (and the cookie) and talk to the
-local node over TLS.
+local node over TLS. Each of them first runs the TLS check in a short-lived VM,
+so a `ping` takes about twice as long as on loopback: allow for that in health
+check timeouts.
 
 ## Docker
 

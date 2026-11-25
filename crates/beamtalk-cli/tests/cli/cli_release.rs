@@ -1432,6 +1432,13 @@ fn release_launcher_tls_distribution_opt_in_test() {
         "rpc over TLS failed: stdout={rpc_stdout} stderr={}",
         String::from_utf8_lossy(&rpc.stderr)
     );
+    // The check's notes (here: an epmd is already running, with every
+    // interface named) are for `foreground` only, not each client call.
+    assert!(
+        !String::from_utf8_lossy(&rpc.stderr).contains("note:"),
+        "client verbs must not repeat the check's notes: {}",
+        String::from_utf8_lossy(&rpc.stderr)
+    );
 
     // A loopback client (no opt-in) cannot reach the TLS node.
     let plain = launcher_command(&output_dir, name)
