@@ -207,7 +207,9 @@ export_cookie() {
         echo "error: could not write the cookie file" >&2
         exit 1
     fi
-    if [ "$USING_HOST_ERTS" = "true" ]; then
+    # No probe when `$ERL` already is an installation's own launcher (a plain
+    # file next to `../releases`), only for a shim or a symlink.
+    if [ "$USING_HOST_ERTS" = "true" ] && { [ -L "$ERL" ] || [ ! -d "$(dirname "$ERL")/../releases" ]; }; then
         erl_root=$("$ERL" -noshell -noinput -boot no_dot_erlang \
             -eval 'io:format("erl-root:~ts~n", [code:root_dir()]), halt().' 2>/dev/null |
             sed -n 's/^erl-root://p' | head -n1) || erl_root=""

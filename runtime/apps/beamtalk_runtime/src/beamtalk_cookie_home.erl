@@ -31,8 +31,9 @@ CLI-started node and the first step of `beamtalk_runtime_app:start/2` (the
 earliest Beamtalk code in a release); a second call is a no-op.
 
 In a release, applications the boot script starts before `beamtalk_runtime`
-still see the private `HOME`. Two things stay as they were at boot: `init:get_argument(home)` names the
-(removed) private directory, so code should read `HOME` instead; and a
+still see the private `HOME`. Two things stay as they were at boot:
+`init:get_argument(home)` names the (removed) private directory, so code
+should read `HOME` instead; and a
 `~/.erlang` file in the real home is not evaluated at boot. Ports and epmd
 started before `restore/0` inherit the private `HOME`.
 """.
