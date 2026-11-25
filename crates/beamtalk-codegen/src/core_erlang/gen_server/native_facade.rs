@@ -655,9 +655,9 @@ impl CoreErlangGenerator {
             }
             let class_method_source_doc = Document::Vec(class_method_source_docs);
 
-            // Class variable initial values. ADR 0124 §2/B2: a defaultless
-            // `late classState:` slot is omitted from the map entirely — see
-            // `omit_late_defaultless_slot`.
+            // Class variable initial values. ADR 0153: `classState:` is rejected
+            // at parse time, so this map is always empty until the key itself is
+            // deleted (BT-5153..5163).
             let class_vars: Vec<&beamtalk_core::ast::StateDeclaration> = Vec::new();
             let class_vars_doc = self.class_var_map_doc(&class_vars)?;
 

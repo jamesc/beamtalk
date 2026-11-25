@@ -48,11 +48,6 @@ impl CoreErlangGenerator {
         &mut self,
         class: &ClassDefinition,
     ) -> Result<Document<'static>> {
-        // Populate class variable names for field access validation. These are
-        // the class's own `classState:` declarations (BT-3762): the AST class
-        // definition is the same own-declaration set that
-        // `ClassHierarchy::own_class_variable_names` answers for the
-        // hierarchy-sourced callers, so an ancestor's variable is rejected.
         // ADR 0153: classes declare no class variables.
         *self.class_var_names_mut() = std::collections::HashSet::new();
 

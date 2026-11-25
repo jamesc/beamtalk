@@ -266,10 +266,6 @@ impl CoreErlangGenerator {
 
         let fields_doc = Self::meta_atom_list(&fields);
 
-        // Build class-side field list from `classState:` declarations so
-        // class-side slots are reflectable (`Behaviour>>classVarNames` /
-        // `allClassVarNames`). The instance `fields` key above carries instance
-        // state only.
         // ADR 0153: `classState:` is rejected at parse time, so this is always
         // empty until the metadata key itself is deleted.
         let class_fields: Vec<String> = Vec::new();
