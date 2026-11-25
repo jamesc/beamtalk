@@ -58,13 +58,13 @@ jobs:
         with:
           node-version-file: .tool-versions
 
-      # `mix deps.audit` comes from the mix_audit archive; installing it as an
-      # archive keeps it out of editors/liveview/mix.exs.
-      - name: Install mix_audit and LiveView deps
+      # `mix deps.audit` comes from mix_audit, a dev-only dependency in
+      # editors/liveview/mix.exs. It cannot be an archive: archives carry no
+      # dependencies, so yaml_elixir was missing and the scan crashed (BT-5253).
+      - name: Install LiveView deps (includes mix_audit)
         working-directory: editors/liveview
         run: |
           mix local.hex --force
-          mix archive.install hex mix_audit 2.1.5 --force
           mix deps.get
 
       - name: Run advisory scans
@@ -96,7 +96,7 @@ jobs:
             gh issue close "${number}" --comment "Clean advisory scan: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           fi
 
-      # A setup step (cargo-audit, Erlang, Node, mix_audit) failing leaves the scan
+      # A setup step (cargo-audit, Erlang, Node, LiveView deps) failing leaves the scan
       # unrun and the job red, which nobody watches on a schedule. Say so in an issue
       # instead of staying silent (BT-5114).
       - name: Report that the scan could not run
