@@ -1001,11 +1001,11 @@ Ensure the classVars live-snapshot table exists (idempotent).
 class method *without* going through the class gen_server — calling
 `gen_server:call` back into it from inside a supervisor's `init/1` (or from
 the supervisor process itself) would deadlock, since that class gen_server
-is the one blocked waiting for `supervisor:start_link` to return. Those
-call sites previously used a hardcoded empty `ClassVars = #{}`, silently
-discarding any `classState:` value set via an ordinary class-method call
-before `supervise` — this table lets them read the current, live snapshot
-instead, without messaging the (possibly blocked) class process.
+is the one blocked waiting for `supervisor:start_link` to return. They run
+under `beamtalk_class_vars:with_snapshot/2`, which reads this table instead of
+messaging the (possibly blocked) class process. Since ADR 0153 (BT-5160) a
+class stores no class variables, so the table only holds one empty row per
+live class; BT-5162 deletes it together with `with_snapshot/2`.
 Read-concurrency + `{heir, ...}` mirrors `ensure_pid_table/0`.
 """.
 -spec ensure_class_state_table() -> ok.
