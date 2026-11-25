@@ -124,9 +124,6 @@ uniquely generated per reload. Bumped on:
 - live method patches — `beamtalk_object_class`'s `{put_method, ...}` and
   `{put_class_method, ...}` handlers (hot-patch / `classRemoveSelector` on a
   local method routes through `update_class`, already covered above)
-- class-side extension writes — `beamtalk_extensions:register/5` /
-  `unregister/3` for a class-object tag (an extension is inherited by every
-  descendant's class side, BT-4307)
 - class removal — `beamtalk_class_lifecycle:class_removed/2` calls
   `unregister_protocol/1` unconditionally, which flushes regardless of
   whether the removed class's module defined any protocols itself
@@ -944,9 +941,8 @@ all_required_class_methods(Info) ->
 -doc """
 Does `ClassName`'s class side understand `Selector`? The class-side dispatch
 lookup's own answer (`beamtalk_class_dispatch:class_understands_class_selector/2`:
-class-side extensions on the class or any ancestor, local and inherited class
-methods, runtime-installed class-method funs), so conformance agrees with
-`respondsTo:` and with what a send would find (BT-4307). Reads ETS and
+local and inherited class methods, runtime-installed class-method funs), so
+conformance agrees with `respondsTo:` and with what a send would find. Reads ETS and
 `persistent_term` only, never a class process (BT-3826).
 """.
 -spec class_has_class_method(atom(), atom()) -> boolean().

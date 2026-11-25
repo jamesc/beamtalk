@@ -34,7 +34,7 @@ introspection; the code moved verbatim.
   `beamtalk_workspace` or `beamtalk_compiler` at compile time (they sit
   above it). Calls into the registered workspace callback module `beamtalk_workspace_callback_impl` (`rewrite_sites/2`,
   `validate_sites/2`, `emit_rewrite_change_entry/2`, `remove_method/4`,
-  `emit_remove_change_entry/5`, `emit_extension_remove_change_entry/7`,
+  `emit_remove_change_entry/5`,
   `compile_method/6`, `precheck_method/4`) go through
   `beamtalk_workspace_callback`, which xref sees and which answers
   `{error, no_workspace}` when no workspace is running. The remaining
@@ -87,8 +87,7 @@ Beamtalk-visible surface.
 -endif.
 
 -doc """
-Remove `Selector` from the receiver, raising if it is not defined locally or
-as an extension.
+Remove `Selector` from the receiver, raising if it is not defined locally.
 
 Backs `@primitive "classRemoveSelector"` (`Behaviour>>removeSelector:`). Side
 follows `classIncludesSelector/2`'s own convention: a `Self` tagged
@@ -96,11 +95,9 @@ follows `classIncludesSelector/2`'s own convention: a `Self` tagged
 class-side method table; any other `Self` (`Counter removeSelector: #foo`)
 touches the instance-side table.
 
-Resolution mirrors `beamtalk_dispatch:lookup/5`'s own order (ADR 0112 §
-Extension methods): the extension registry (ADR 0066 open classes) is
-checked first — an extension shadows a same-named local method, so removing
-it re-exposes the local one (a second `removeSelector:` call removes that
-too) — then the local method table. Removing a locally-defined override
+Resolution follows the order dispatch uses: a class-side runtime fun (ADR
+0084) before the compiled method, else the local method table. Removing a
+locally-defined override
 re-exposes whatever the superclass chain supplies with no restart needed
 (ADR 0032's chain-walk dispatch does the work; nothing here invalidates a
 cache because there isn't one).
@@ -156,8 +153,8 @@ classRemoveSelectorIfAbsent(Self, Selector, AbsentBlock) ->
 
 %% Shared resolution + removal for classRemoveSelector/2 and
 %% classRemoveSelectorIfAbsent/3. Resolves `Selector` against whichever table
-%% currently supplies dispatch for it on `Self`'s side — extension registry
-%% first, local method table second (ADR 0112 § Extension methods) — removes
+%% currently supplies dispatch for it on `Self`'s side — a class-side runtime
+%% fun first, local method table second — removes
 %% it there, and reports whether anything was found. A removal that resolves
 %% but then fails unexpectedly (e.g. a local-method recompile error) raises
 %% directly rather than returning through this function, so its return type
@@ -199,16 +196,9 @@ remove_class_selector(Self, ClassName, Side, Selector) ->
         class -> beamtalk_class_shadow_flags:invalidate(ClassName);
         instance -> ok
     end,
-    EtsClass = extension_ets_class(ClassName, Side),
-    case beamtalk_extensions:has(EtsClass, Selector) of
-        true ->
-            remove_extension_selector(ClassName, EtsClass, Selector, Side),
-            removed;
-        false ->
-            remove_runtime_or_local_selector(Self, ClassName, Side, Selector)
-    end.
+    remove_runtime_or_local_selector(Self, ClassName, Side, Selector).
 
-%% BT-4438: after the extension registry, a class-side removal checks the
+%% BT-4438: a class-side removal checks the
 %% class's ADR 0084 runtime fun (`put_class_method`) before its compiled
 %% method -- the order `beamtalk_class_dispatch:apply_class_method_body/7`
 %% resolves them in. The class process undoes the put and answers `absent`
@@ -312,52 +302,6 @@ protocol_provided_selector_hint(SelectorBin, ProtocolBin, rename) ->
         <<" itself; every class using it shares this one definition">>
     ]).
 
-%% Remove an extension method and best-effort log its removal (ADR 0112 § Extension
-%% methods, § ChangeLog interaction). Captures the extension's owner +
-%% stored source BEFORE unregistering — both are gone from `beamtalk_extensions`'s
-%% ETS tables the instant `unregister/3` returns — so the ChangeLog entry can
-%% still attribute the removal and record what was removed for the audit trail.
--spec remove_extension_selector(atom(), atom(), atom(), instance | class) -> ok.
-remove_extension_selector(ClassName, EtsClass, Selector, Side) ->
-    Owner = extension_owner(EtsClass, Selector),
-    PrevSource = extension_prev_source(EtsClass, Selector),
-    ok = beamtalk_extensions:unregister(ClassName, Selector, Side =:= class),
-    log_extension_removal(ClassName, Selector, Side, Owner, PrevSource).
-
--spec extension_owner(atom(), atom()) -> atom() | undefined.
-extension_owner(EtsClass, Selector) ->
-    case beamtalk_extensions:lookup(EtsClass, Selector) of
-        {ok, _Fun, Owner} -> Owner;
-        not_found -> undefined
-    end.
-
--spec extension_prev_source(atom(), atom()) -> binary() | undefined.
-extension_prev_source(EtsClass, Selector) ->
-    %% BT-4173: getSource/2 answers a String; the ChangeLog entry
-    %% persists raw bytes — unwrap at this call site.
-    case beamtalk_extensions:getSource(EtsClass, Selector) of
-        {ok, {beamtalk_string, Source}} -> Source;
-        not_found -> undefined
-    end.
-
-%% Best-effort ChangeLog append for an extension removal — mirrors
-%% log_local_removal/3's `no_workspace` handling below: the extension install
-%% already succeeded above, so a missing/unavailable workspace here must
-%% never surface as a caller-visible error. A failed append becomes an eval
-%% warning (`beamtalk_refactor_support:note_changelog_result/1`).
--spec log_extension_removal(
-    atom(), atom(), instance | class, atom() | undefined, binary() | undefined
-) ->
-    ok.
-log_extension_removal(ClassName, Selector, Side, Owner, PrevSource) ->
-    ClassNameBin = atom_to_binary(ClassName, utf8),
-    {Author, AuthorKind} = beamtalk_refactor_support:current_author_context(),
-    beamtalk_refactor_support:note_changelog_result(
-        beamtalk_workspace_callback:emit_extension_remove_change_entry(
-            ClassNameBin, Selector, Side, Owner, PrevSource, Author, AuthorKind
-        )
-    ).
-
 %% `Self`'s removal side and class pid. A metaclass-tagged receiver
 %% (`Counter class removeSelector: #foo`) is class-side; any other class
 %% object (`Counter removeSelector: #foo`) is instance-side — the same
@@ -368,16 +312,7 @@ removal_target(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
 removal_target(Self) ->
     {instance, erlang:element(4, Self)}.
 
-%% The `beamtalk_extensions` ETS key for `Side` — the established
-%% convention: an instance-side extension is keyed under the bare class name,
-%% a class-side one under the metaclass tag (`unregister/3`'s own `ClassSide`
-%% resolution, mirrored here so a lookup and its matching removal always
-%% agree on the key).
--spec extension_ets_class(atom(), instance | class) -> atom().
-extension_ets_class(ClassName, instance) -> ClassName;
-extension_ets_class(ClassName, class) -> beamtalk_class_registry:class_object_tag(ClassName).
-
-%% Remove `Selector` from `ClassName`'s own (non-extension) method table via
+%% Remove `Selector` from `ClassName`'s own method table via
 %% the existing revert-of-add removal mechanism (ADR 0082, generalized
 %% by ADR 0112 rather than duplicated — see the ADR's *Implementation*
 %% section), with the stdlib gate relaxed (the `allow_stdlib` policy)
@@ -1096,7 +1031,7 @@ selector_not_found_error(Self, Selector) ->
         atom_to_binary(ClassName, utf8),
         <<" does not define #">>,
         atom_to_binary(Selector, utf8),
-        <<" locally (or as an extension)">>
+        <<" locally">>
     ]),
     Error1 = beamtalk_error:with_message(Error0, Msg),
     beamtalk_error:with_hint(

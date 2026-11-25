@@ -44,8 +44,6 @@ verbatim.
     note_changelog_result/1,
     take_changelog_warnings/0,
     begin_changelog_warnings/0,
-    note_reply_warning/1,
-    collecting_warnings/0,
     end_changelog_warnings/0,
     %% Shared by the class-rename and method-rename pipelines (BT-4703).
     raise_if_colliding/2,
@@ -307,16 +305,6 @@ note_changelog_result({warning, Text}) when is_binary(Text) ->
 note_changelog_result(_) ->
     ok.
 
-%% BT-5060: queue a warning for the reply of the operation this process is
-%% running (same queue as the ChangeLog warnings). A no-op outside one.
--spec note_reply_warning(binary()) -> ok.
-note_reply_warning(Text) when is_binary(Text) ->
-    note_changelog_result({warning, Text}).
-
--spec collecting_warnings() -> boolean().
-collecting_warnings() ->
-    erlang:get(?CHANGELOG_EVAL_KEY) =:= true.
-
 %% Start collecting in this process (an eval worker): clears any stale queue and
 %% marks the process so `note_changelog_result/1` queues. Pair with
 %% `end_changelog_warnings/0`.
@@ -336,12 +324,8 @@ end_changelog_warnings() ->
 -spec take_changelog_warnings() -> [binary()].
 take_changelog_warnings() ->
     case erlang:erase(?CHANGELOG_WARNINGS_KEY) of
-        undefined ->
-            [];
-        List ->
-            %% BT-5060: one text once per reply (a class's register_class/0 can
-            %% run both as its on_load and again on activation).
-            beamtalk_class_registry:dedupe_warnings(lists:reverse(List))
+        undefined -> [];
+        List -> lists:reverse(List)
     end.
 
 %% Resolve the audit author for the current patch. ADR 0082 distinguishes

@@ -137,14 +137,12 @@ send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
 send(Receiver, 'equals:', [Arg]) when ?IS_PRIMITIVE_RECEIVER(Receiver) ->
     %% BT-4416: `=:=` fast path for `equals:` on a primitive receiver, which
     %% otherwise walks the whole dispatch chain to reach `Object>>equals:`.
-    %% An override on the receiver's class — compiled or an extension — still
-    %% wins; see `beamtalk_equality:primitive_equals/2`.
+    %% An override on the receiver's class still wins; see `beamtalk_equality:primitive_equals/2`.
     beamtalk_equality:primitive_equals(Receiver, Arg);
 send(Receiver, 'isKindOf:', [Arg]) when ?IS_PRIMITIVE_RECEIVER(Receiver) ->
     %% BT-4473: `isKindOf:` on a primitive receiver, which otherwise walks the
     %% dispatch chain (and an `inherited_target` lookup) to reach
-    %% `Object>>isKindOf:`. An override on the receiver's chain — compiled or
-    %% an extension — still wins; see
+    %% `Object>>isKindOf:`. An override on the receiver's chain still wins; see
     %% `beamtalk_behaviour_intrinsics:primitiveIsKindOf/2`.
     beamtalk_behaviour_intrinsics:primitiveIsKindOf(Receiver, Arg);
 send(Receiver, Selector, Args) ->

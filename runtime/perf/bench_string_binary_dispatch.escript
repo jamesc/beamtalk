@@ -15,8 +15,8 @@
 %%
 %% BT-3049 follow-up: the fast path now routes straight to
 %% 'bt@stdlib@binary' instead of 'bt@stdlib@string', skipping the redundant
-%% hop where bt@stdlib@string's dispatch/3 re-checks the extension registry
-%% before delegating to bt@stdlib@binary anyway. bench_hop/0 isolates that
+%% hop where bt@stdlib@string's dispatch/3 delegates to bt@stdlib@binary
+%% anyway. bench_hop/0 isolates that
 %% one hop's cost directly (outside the noise of the full send/3 pipeline,
 %% where it's a small fraction of total overhead).
 -mode(compile).
@@ -29,11 +29,6 @@ main(_) ->
     lists:foreach(fun(B) -> code:ensure_loaded(list_to_atom(filename:basename(B, ".beam"))) end,
                   filelib:wildcard("apps/beamtalk_stdlib/ebin/bt@stdlib@*.beam")),
     timer:sleep(800),
-    %% Defensive/idempotent: beamtalk_runtime_app's start/2 already calls this,
-    %% but bench_hop/0 calls dispatch/3 directly rather than through send/3,
-    %% so this makes the escript's dependency on the extensions table explicit
-    %% rather than relying on app-startup ordering.
-    beamtalk_extensions:init(),
     Sizes = [1024, 65536, 1048576],
     lists:foreach(fun bench/1, Sizes),
     bench_hop(),
@@ -91,8 +86,8 @@ run(Label, F, Idx, K) ->
 %% BT-3049: isolates the cost of the redundant module hop the fast path used
 %% to pay before routing directly to bt@stdlib@binary — calls each compiled
 %% module's dispatch/3 directly (no beamtalk_primitive:send/3 wrapper), so
-%% the ~40-200 ns of module_for_value/2's own overhead (selector match,
-%% extensions:has check) doesn't dilute the signal.
+%% the ~40-200 ns of module_for_value/2's own overhead (selector match)
+%% doesn't dilute the signal.
 bench_hop() ->
     K = 200000,
     Bin = binary:copy(<<"A">>, 1048576),

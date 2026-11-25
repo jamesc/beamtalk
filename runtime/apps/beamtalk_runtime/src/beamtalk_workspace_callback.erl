@@ -40,7 +40,6 @@ the workspace's compile-and-install pipeline. This module is that seam:
     precheck_method/4,
     remove_method/4,
     emit_remove_change_entry/5,
-    emit_extension_remove_change_entry/7,
     rewrite_sites/2,
     validate_sites/2,
     emit_rewrite_change_entry/2,
@@ -70,15 +69,6 @@ the workspace's compile-and-install pipeline. This module is that seam:
 ) -> {ok, binary()} | {error, term()}.
 -callback emit_remove_change_entry(
     binary(), atom() | binary(), instance | class, binary(), human | agent
-) -> emit_result().
--callback emit_extension_remove_change_entry(
-    binary(),
-    atom() | binary(),
-    instance | class,
-    atom() | undefined,
-    binary() | undefined,
-    binary(),
-    human | agent
 ) -> emit_result().
 -callback rewrite_sites(map() | undefined, [map()]) -> {ok, map()} | {error, term()}.
 -callback validate_sites(map() | undefined, [map()]) -> ok | {error, term()}.
@@ -183,22 +173,6 @@ remove_method(ClassNameBin, Selector, Side, StdlibPolicy) ->
 ) -> emit_result() | no_workspace().
 emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
     invoke(emit_remove_change_entry, [ClassNameBin, Selector, Side, Author, AuthorKind]).
-
--spec emit_extension_remove_change_entry(
-    binary(),
-    atom() | binary(),
-    instance | class,
-    atom() | undefined,
-    binary() | undefined,
-    binary(),
-    human | agent
-) -> emit_result() | no_workspace().
-emit_extension_remove_change_entry(
-    ClassNameBin, Selector, Side, Owner, PrevSource, Author, AuthorKind
-) ->
-    invoke(emit_extension_remove_change_entry, [
-        ClassNameBin, Selector, Side, Owner, PrevSource, Author, AuthorKind
-    ]).
 
 -spec rewrite_sites(map() | undefined, [map()]) -> {ok, map()} | {error, term()} | no_workspace().
 rewrite_sites(DefinitionSite, ReferenceSites) ->

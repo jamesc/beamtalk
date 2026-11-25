@@ -420,7 +420,7 @@ info_fields(_) ->
 
 %% Group selector rows into sorted protocol buckets. The protocol of a selector
 %% is decided by `protocol_for_selector/5` (ADR 0096): a declared category if
-%% one exists, else the xref-extension source fact, else a Pharo-convention
+%% one exists, else the synthetic-accessor source fact, else a Pharo-convention
 %% selector-name heuristic; unrecognised selectors fall into "as yet
 %% unclassified". Selectors within a protocol are sorted; protocols are sorted.
 -spec group_by_protocol([map()]) -> [map()].

@@ -195,7 +195,7 @@ put_method_xref(ClassName, ClassSide, Selector, Source) ->
     Entry = beamtalk_xref:build_method_entry(
         ClassSide, Selector, Source, indexed, put_method
     ),
-    beamtalk_extensions:safe_xref(fun() ->
+    beamtalk_xref:safe_xref(fun() ->
         beamtalk_xref:put_method(ClassName, ClassSide, Selector, Entry)
     end).
 

@@ -1529,7 +1529,7 @@ call_new(
     %% superclass chain, which is true only when the BEAM module contains an
     %% explicit `class_new:` function — correctly supporting inherited constructors.
     %%
-    %% BT-4409: a class-side extension or ADR 0084 runtime fun on the class
+    %% BT-4409: an ADR 0084 runtime fun on the class
     %% itself for `new`/`new:` is honoured the same way: it is what turned the
     %% caller's direct constructor path off (`direct_call_ok/2`), so this
     %% fallback must answer it rather than the synthesized constructor.
@@ -1878,37 +1878,20 @@ find_inherited_class_method(Selector, SuperName) ->
     beamtalk_object_class_read:published_compiled_method(SuperName, class, Selector).
 
 -doc """
-Whether a class-side extension registered on `ClassName` itself, or an ADR
-0084 runtime class-method fun of `ClassName`, answers the constructor
-`Selector` (`new` or `new:`) (BT-4409). The `{new, _}` handler then runs it
-like any other class method (`handle_class_method_call/6`, which checks the
-extension first) instead of the synthesized constructor, so a constructor
-shadowed after a caller warmed up is honoured on the path the caller falls
-back to. The raw shadow flags (`beamtalk_class_shadow_flags:is_shadowed/2`,
-one `persistent_term` read each) pre-screen the common unshadowed class. For
-`new`, only the class's own shadows count: an ancestor's class-side `new`
-extension does not shadow the class's synthesized `new`, which is the class's
-own class-side method, found before an ancestor's extension (BT-4307).
-
-`new:` differs (BT-4588): an ancestor's class-side extension of `new:` counts
-as that ancestor's class-side `new:`, exactly as its compiled `class new:`
-(`has_class_new_in_chain/2`) or its runtime fun does, so a descendant's
-synthesized `new:` does not hide it. The direct path declines it through
-`beamtalk_class_metadata:chain_has_user_new1/1`; this answers it on the path
-the caller falls back to, as the class-side chain walk finds it
-(`beamtalk_class_dispatch:ancestor_class_side_extension/2`). The memoised
-`chain_has_user_new1/1`, `true` whenever an ancestor has a `new:` extension,
-pre-screens the walk, so the common class pays one cache read.
+Whether an ADR 0084 runtime class-method fun of `ClassName` answers the
+constructor `Selector` (`new` or `new:`) (BT-4409). The `{new, _}` handler then
+runs it like any other class method (`handle_class_method_call/6`) instead of
+the synthesized constructor, so a constructor shadowed after a caller warmed up
+is honoured on the path the caller falls back to. The raw shadow flag
+(`beamtalk_class_shadow_flags:is_shadowed/1`, one `persistent_term` read)
+pre-screens the common unshadowed class. Only the class's own runtime funs
+count: an ancestor's `new:` fun is declined on the direct path through
+`beamtalk_class_metadata:chain_has_user_new1/1`.
 """.
 -spec constructor_shadowed(class_name(), selector()) -> boolean().
 constructor_shadowed(ClassName, Selector) ->
-    Tag = beamtalk_class_registry:class_object_tag(ClassName),
-    (beamtalk_class_shadow_flags:is_shadowed(Tag, ClassName) andalso
-        (beamtalk_dispatch:check_extension(Tag, Selector) =/= not_found orelse
-            beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) =/= error)) orelse
-        (Selector =:= 'new:' andalso
-            beamtalk_class_metadata:chain_has_user_new1(ClassName) andalso
-            beamtalk_class_dispatch:ancestor_class_side_extension(ClassName, 'new:')).
+    beamtalk_class_shadow_flags:is_shadowed(ClassName) andalso
+        beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) =/= error.
 
 -doc """
 Check whether `class_new:/2` is exported anywhere in the superclass chain.
@@ -2149,7 +2132,7 @@ do_remove_class_method(Selector, #class_state{name = ClassName} = State) ->
         {ok, Source} ->
             beamtalk_class_publish:put_method_xref(ClassName, true, Selector, Source);
         error ->
-            beamtalk_extensions:safe_xref(fun() ->
+            beamtalk_xref:safe_xref(fun() ->
                 beamtalk_xref:purge_method(ClassName, true, Selector)
             end)
     end,

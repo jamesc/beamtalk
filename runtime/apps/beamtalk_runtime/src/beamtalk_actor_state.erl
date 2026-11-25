@@ -39,8 +39,7 @@ not at home in the new one.
 
 A callback returns the cell only on a normal exit; on an exception it returns
 (or stops with) the state it was called with. `adapt/1` is the adapter for
-code that still answers `{reply, R, NewState}` (native methods, ADR 0066
-instance-side extension funs): it stores
+code that still answers `{reply, R, NewState}` (native methods): it stores
 `NewState` in the cell so the callback can `take/0` it. `protect/1` is the
 rollback for runtime catchers that continue after an error: it restores the
 cell to its value at entry before re-raising. A `^` that reaches its actor
@@ -224,7 +223,7 @@ store(State) when is_map(State) ->
 
 -doc """
 Adapter for code that answers `{reply, R, NewState}`, `{noreply, NewState}` or
-`{error, Reason, State}` (native methods, ADR 0066 extension funs). Stores the state in the cell and answers the
+`{error, Reason, State}` (native methods). Stores the state in the cell and answers the
 result without it; the callback then returns `take/0`.
 """.
 -spec adapt({reply, term(), map()} | {noreply, map()} | {error, term(), map()}) -> adapted().
@@ -465,7 +464,7 @@ raise_stale_cell(#beamtalk_object{class = Class}, Cell, Carried) ->
 
 -doc """
 Run a `dispatch/4` exit that is not a compiled Beamtalk method (ADR 0137 §2): a
-native method, an ADR 0066 extension fun, the inherited `Object`/`ProtoObject`
+native method, the inherited `Object`/`ProtoObject`
 walk, `doesNotUnderstand:`. The code behind it is Erlang that does not bracket
 what it calls, and it may run one of this actor's blocks (a stored block handed to
 `perform:withArguments:`) or send back to `self`, which reads and writes the cell.
@@ -532,7 +531,7 @@ raise_conflict(Entry) ->
         beamtalk_error:with_hint(
             Error1,
             <<
-                "A native method or extension that runs a block must read the block's "
+                "A native method that runs a block must read the block's "
                 "writes back from the cell before it answers."
             >>
         )

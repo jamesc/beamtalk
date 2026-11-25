@@ -18,9 +18,8 @@ class-self send makes the same number of calls as before the split.
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 -export([
-    apply_class_self_extension/5,
     class_self_dispatch_chain/5,
-    class_self_dispatch_local/5,
+    class_self_dispatch_local/4,
     class_self_protocol_fallthrough/4
 ]).
 
@@ -33,9 +32,8 @@ class-self send makes the same number of calls as before the split.
 
 -doc """
 The class-method chain step shared by `class_self_dispatch_local/4`,
-`class_self_send/3` and `class_super_dispatch/4`: each does its own single
-extension check and its own chain lookup first, then applies the lookup
-result here, or falls through to the class-object protocol.
+`class_self_send/3` and `class_super_dispatch/4`: each does its own chain
+lookup first, then applies the lookup result here, or falls through to the class-object protocol.
 """.
 -spec class_self_dispatch_chain(
     beamtalk_class_dispatch:class_name(),
@@ -70,7 +68,7 @@ class_self_dispatch_chain(ClassName, Selector, Args, Found, ClassSelf) ->
 
 -doc """
 The class-object protocol fallthrough for a class-side `self`/`super` send
-(BT-4252): no class method or class-side extension in the chain answers
+(BT-4252): no class method in the chain answers
 `Selector`, so dispatch it the way an external send to the receiving class
 object does after its class-method lookup misses
 (`class_send_dispatch/3`'s `{error, not_found}` branch) — through the
@@ -143,85 +141,44 @@ class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf) ->
 
 -spec class_self_dispatch_local(
     beamtalk_class_dispatch:class_name(),
-    atom(),
     beamtalk_class_dispatch:selector(),
     list(),
     #beamtalk_object{}
 ) ->
     term() | no_return().
-class_self_dispatch_local(ClassName, ClassTag, Selector, Args, ClassSelf) ->
-    case beamtalk_class_dispatch:class_side_extension(ClassTag, Selector) of
-        {ok, Fun} ->
-            apply_class_self_extension(ClassName, Fun, Selector, Args, ClassSelf);
-        not_found ->
-            case beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) of
-                {ok, _Info} ->
-                    %% Own runtime class method: dispatch with DefiningClass = ClassName
-                    %% so apply_class_method_in_context resolves the fun from the store.
-                    DefiningModule = self_dispatch_module(ClassName),
-                    unwrap_self_dispatch_outcome(
-                        ClassName,
-                        Selector,
-                        beamtalk_class_dispatch:apply_class_method_in_context(
-                            Selector,
-                            Args,
-                            ClassName,
-                            ClassSelf,
-                            ClassName,
-                            DefiningModule
-                        )
-                    );
-                error ->
-                    %% Not a local runtime method — walk the chain from the
-                    %% class itself: its own compiled method (an own-class
-                    %% reference's fallback, BT-4301), then inherited ones,
-                    %% each ancestor's class-side extension before its
-                    %% methods (BT-4307), which also resolves inherited
-                    %% runtime funs.
-                    beamtalk_class_dispatch:class_side_dispatch_found(
-                        ClassName,
-                        Selector,
-                        Args,
-                        beamtalk_class_dispatch:find_class_side_method_from_class(
-                            Selector, ClassName
-                        ),
-                        ClassSelf
-                    )
-            end
+class_self_dispatch_local(ClassName, Selector, Args, ClassSelf) ->
+    case beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) of
+        {ok, _Info} ->
+            %% Own runtime class method: dispatch with DefiningClass = ClassName
+            %% so apply_class_method_in_context resolves the fun from the store.
+            DefiningModule = self_dispatch_module(ClassName),
+            unwrap_self_dispatch_outcome(
+                ClassName,
+                Selector,
+                beamtalk_class_dispatch:apply_class_method_in_context(
+                    Selector,
+                    Args,
+                    ClassName,
+                    ClassSelf,
+                    ClassName,
+                    DefiningModule
+                )
+            );
+        error ->
+            %% Not a local runtime method — walk the chain from the
+            %% class itself: its own compiled method (an own-class
+            %% reference's fallback, BT-4301), then inherited ones,
+            %% which also resolves inherited runtime funs.
+            beamtalk_class_dispatch:class_side_dispatch_found(
+                ClassName,
+                Selector,
+                Args,
+                beamtalk_class_dispatch:find_class_side_method_from_class(
+                    Selector, ClassName
+                ),
+                ClassSelf
+            )
     end.
-
--doc """
-Run a class-side extension (`beamtalk_extensions`, ADR 0066) found by a
-class-side self-send, builder self-send or `super` send:
-`class_side_dispatch_found/5` (whose chain walk found it on `Owner`, the
-receiving class or an ancestor, BT-4307) and `class_self_dispatch_local/5`
-(the receiving class's own tag, probed first).
-
-Reuses `apply_class_extension_fun/5` for the same calling convention and
-crash-safety as the external-dispatch path (a bad extension body must not
-take down the class's own long-lived gen_server, which this self-send may
-also run inside), then adapts the outcome to the self-dispatch caller shape
-via `unwrap_self_dispatch_outcome/3` — raw value on success, structured
-raises on failure, named after `Owner`, the class that registered the
-extension.
-
-`ClassSelf` is the live receiver, so the extension body reads the receiver's
-class-variable key and `self` is the receiving class, which is a subclass of
-`Owner` when the extension is inherited.
-""".
--spec apply_class_self_extension(
-    beamtalk_class_dispatch:class_name(),
-    fun(),
-    beamtalk_class_dispatch:selector(),
-    list(),
-    #beamtalk_object{}
-) -> term() | no_return().
-apply_class_self_extension(Owner, Fun, Selector, Args, ClassSelf) ->
-    unwrap_self_dispatch_outcome(
-        Owner,
-        Selector,
-        beamtalk_class_dispatch:apply_class_extension_fun(Fun, ClassSelf, Args, Owner, Selector)
-    ).
 
 -doc "The compiled module backing `ClassName`, for a `ClassSelf` built outside the gen_server state.".
 -spec self_dispatch_module(beamtalk_class_dispatch:class_name()) -> atom().

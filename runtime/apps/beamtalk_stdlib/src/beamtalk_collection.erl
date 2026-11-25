@@ -260,7 +260,7 @@ checks both (`KeyedFoldCall`, `VerifyError::KeyedFoldPathMismatch`).
 keyed_foldl(Lambda, Init, Recv, Selector, ListPath) ->
     case is_map(Recv) andalso not beamtalk_primitive:is_object(Recv) of
         true ->
-            %% The ADR 0133 receiver guard, once per call: a runtime extension of
+            %% The ADR 0133 receiver guard, once per call: a class's own override of
             %% the selector (or of a message it runs through) wins dispatch, so the
             %% in-place fold would skip it.
             ok = guard_writing_fold(Recv, Selector),
@@ -370,8 +370,7 @@ are `self inject:into:`, and `reject:` is `self select:`, so an override of
 those is reached by the pure send and skipped by the fold. Likewise for the
 species-dependent messages (`collect:`, `select:`, `reject:`) when `Collection`'s
 provision answers them: they end in `self species withAll:`, so a class with
-its own `species` or class-side `withAll:` (`overrides_species_construction`,
-or a runtime extension of either) would build a different result than the
+its own `species` or class-side `withAll:` (`overrides_species_construction`) would build a different result than the
 fold (BT-3951). All of these raise `stateful_block_dispatch`. A receiver that does not respond to `Selector`
 raises `does_not_understand`, as the pure path does. Codegen never emits this
 for `do:`, the fold's own source.

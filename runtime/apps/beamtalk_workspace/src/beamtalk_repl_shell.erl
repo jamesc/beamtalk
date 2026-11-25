@@ -46,8 +46,6 @@ bindings while sharing access to actors and loaded modules.
     load_file/2,
     load_file/3,
     load_source/2,
-    load_file_with_warnings/3,
-    load_source_with_warnings/2,
     remove_from_tracker/2,
     get_module_tracker/1,
     show_codegen/2
@@ -324,37 +322,16 @@ enqueue_mutation(SessionPid, Mutation) ->
 -doc "Load a Beamtalk source file in this session.".
 -spec load_file(pid(), string()) -> {ok, [map()]} | {error, term()}.
 load_file(SessionPid, Path) ->
-    {Result, _Warnings} = gen_server:call(SessionPid, {load_file, Path}, 30000),
-    Result.
+    gen_server:call(SessionPid, {load_file, Path}, 30000).
 
 -doc "Load a Beamtalk source file with pre-built class indexes.".
 -spec load_file(pid(), string(), map()) -> {ok, [map()]} | {error, term()}.
 load_file(SessionPid, Path, PrebuiltIndexes) ->
-    {Result, _Warnings} = gen_server:call(SessionPid, {load_file, Path, PrebuiltIndexes}, 30000),
-    Result.
-
--doc """
-`load_file/3` plus the one-hop extension warnings (BT-5060) the load queued,
-returned in the same reply so no other operation can take them.
-""".
--spec load_file_with_warnings(pid(), string(), map()) ->
-    {{ok, [map()]} | {error, term()}, [binary()]}.
-load_file_with_warnings(SessionPid, Path, PrebuiltIndexes) ->
     gen_server:call(SessionPid, {load_file, Path, PrebuiltIndexes}, 30000).
 
 -doc "Load Beamtalk source from an inline binary string.".
 -spec load_source(pid(), binary()) -> {ok, [map()]} | {error, term()}.
 load_source(SessionPid, Source) ->
-    {Result, _Warnings} = gen_server:call(SessionPid, {load_source, Source}, 30000),
-    Result.
-
--doc """
-`load_source/2` plus the one-hop extension warnings (BT-5060) the load queued,
-returned in the same reply so no other operation can take them.
-""".
--spec load_source_with_warnings(pid(), binary()) ->
-    {{ok, [map()]} | {error, term()}, [binary()]}.
-load_source_with_warnings(SessionPid, Source) ->
     gen_server:call(SessionPid, {load_source, Source}, 30000).
 
 -doc "Get the module tracker for this session (user-loaded modules only).".
@@ -521,34 +498,25 @@ handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
     announce_bindings_cleared(SessionId, ClearedKeys),
     {reply, ok, {SessionId, NewState, Worker}};
 handle_call({load_file, Path}, _From, {SessionId, State, Worker}) ->
-    {Result, Warnings} = collect_reply_warnings(fun() ->
-        beamtalk_repl_loader:handle_load(Path, State)
-    end),
-    case Result of
+    case beamtalk_repl_loader:handle_load(Path, State) of
         {ok, LoadedModules, NewState} ->
-            {reply, {{ok, LoadedModules}, Warnings}, {SessionId, NewState, Worker}};
+            {reply, {ok, LoadedModules}, {SessionId, NewState, Worker}};
         {error, Reason, NewState} ->
-            {reply, {{error, Reason}, Warnings}, {SessionId, NewState, Worker}}
+            {reply, {error, Reason}, {SessionId, NewState, Worker}}
     end;
 handle_call({load_file, Path, PrebuiltIndexes}, _From, {SessionId, State, Worker}) ->
-    {Result, Warnings} = collect_reply_warnings(fun() ->
-        beamtalk_repl_loader:handle_load(Path, State, PrebuiltIndexes)
-    end),
-    case Result of
+    case beamtalk_repl_loader:handle_load(Path, State, PrebuiltIndexes) of
         {ok, LoadedModules, NewState} ->
-            {reply, {{ok, LoadedModules}, Warnings}, {SessionId, NewState, Worker}};
+            {reply, {ok, LoadedModules}, {SessionId, NewState, Worker}};
         {error, Reason, NewState} ->
-            {reply, {{error, Reason}, Warnings}, {SessionId, NewState, Worker}}
+            {reply, {error, Reason}, {SessionId, NewState, Worker}}
     end;
 handle_call({load_source, Source}, _From, {SessionId, State, Worker}) ->
-    {Result, Warnings} = collect_reply_warnings(fun() ->
-        beamtalk_repl_loader:handle_load_source(Source, "<editor>", State)
-    end),
-    case Result of
+    case beamtalk_repl_loader:handle_load_source(Source, "<editor>", State) of
         {ok, LoadedModules, NewState} ->
-            {reply, {{ok, LoadedModules}, Warnings}, {SessionId, NewState, Worker}};
+            {reply, {ok, LoadedModules}, {SessionId, NewState, Worker}};
         {error, Reason, NewState} ->
-            {reply, {{error, Reason}, Warnings}, {SessionId, NewState, Worker}}
+            {reply, {error, Reason}, {SessionId, NewState, Worker}}
     end;
 handle_call(get_module_tracker, _From, {SessionId, State, Worker}) ->
     Tracker = beamtalk_repl_state:get_module_tracker(State),
@@ -1097,19 +1065,3 @@ reply_eval(From, {eval_error, Reason, Output, Warnings}) ->
 %% which encodes it for the connecting client before the session shell stops.
 reply_eval(From, {eval_script_exit, Code, Output, Warnings}) ->
     gen_server:reply(From, {script_exit, Code, Output, Warnings}).
-
-%% BT-5060: run a load in this session process, collecting the warnings it queues
-%% (one-hop extension warnings) and clearing the queue even if the load raises.
--spec collect_reply_warnings(fun(() -> Result)) -> {Result, [binary()]}.
-collect_reply_warnings(Fun) ->
-    ok = beamtalk_refactor_support:begin_changelog_warnings(),
-    %% bt-catcher-audit: not-applicable-reraises - only clears the collection marker, then re-raises
-    Result =
-        try
-            Fun()
-        catch
-            Class:Reason:Stack ->
-                _ = beamtalk_refactor_support:end_changelog_warnings(),
-                erlang:raise(Class, Reason, Stack)
-        end,
-    {Result, beamtalk_refactor_support:end_changelog_warnings()}.

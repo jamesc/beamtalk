@@ -415,7 +415,7 @@ pub struct RemoveMethodParams {
     )]
     pub selector: String,
     /// Optional fallback expression evaluated instead of raising when the
-    /// selector is not defined locally or as an extension.
+    /// selector is not defined locally.
     #[schemars(
         description = "Optional fallback: a Beamtalk expression (not a string value) evaluated as the body of an 'ifAbsent:' block when the selector is not found, instead of raising a selector_not_found error. Omit to raise on an absent selector."
     )]
