@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5167: an inlined (writing) `to:do:` / `timesRepeat:` counted loop with a
+// nil / non-number limit or count raises `type_error` instead of comparing by
+// term order (which looped forever with a writing block).
+
+TestCase subclass: CountedLoopNilLimitTest
+
+  writingToDo: limit =>
+    s := 0
+    1 to: limit do: [:i | s := s + i]
+    s
+
+  writingTimesRepeat: count =>
+    s := 0
+    count timesRepeat: [s := s + 1]
+    s
+
+  testWritingToDoNilLimitRaises =>
+    self should: [self writingToDo: nil] raise: #type_error
+
+  testWritingToDoNilLimitMessage =>
+    msg := [self writingToDo: nil] on: Exception do: [:e | e message]
+    self assert: msg equals: "Interval limit must be a number"
+
+  testWritingTimesRepeatNilRaises =>
+    self should: [self writingTimesRepeat: nil] raise: #type_error
+
+  testWritingToDoStillRuns => self assert: (self writingToDo: 4) equals: 10
+
+  testWritingTimesRepeatStillRuns =>
+    self assert: (self writingTimesRepeat: 3) equals: 3
