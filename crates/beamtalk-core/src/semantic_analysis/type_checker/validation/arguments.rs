@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use crate::announce_selectors::is_announce_selector;
 use crate::ast::{Expression, Literal, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
+use crate::semantic_analysis::number_coercion::reflected_operator;
 use crate::semantic_analysis::string_utils::is_symbol_singleton_name;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span, equality_operator_is_negated};
 use ecow::EcoString;
@@ -1155,6 +1156,15 @@ impl TypeChecker {
             || is_concat
             || (is_comparison && comparison_expectation.is_some());
 
+        // ADR 0116: an argument class that implements the reflected hook is
+        // valid; the hook's parameter is checked against the receiver.
+        if !is_generic && self.check_reflected_hook(receiver_ty, operator, arg_ty, span, hierarchy)
+        {
+            return handled;
+        }
+        let missing_hook_hint =
+            |kind: &str| Self::missing_hook_hint(kind, operator, arg_display.as_str());
+
         // Arithmetic operators on numeric types require numeric arguments
         if is_arithmetic && is_numeric(receiver_ty) && !is_numeric(arg_ty) {
             // Use hint severity for generic type params (likely false positive)
@@ -1175,7 +1185,7 @@ impl TypeChecker {
             };
             diag = diag
                 .with_category(DiagnosticCategory::Type)
-                .with_hint("Arithmetic operators require Integer or Float operands");
+                .with_hint(missing_hook_hint("Arithmetic"));
             if let Some((desc, origin_span)) = arg_origin {
                 diag = diag.with_note(desc.clone(), *origin_span);
             }
@@ -1189,27 +1199,7 @@ impl TypeChecker {
             && arg_ty.as_str() != "Symbol"
             && !is_symbol_singleton_name(arg_ty)
         {
-            // Use hint severity for generic type params (likely false positive)
-            let mut diag = if is_generic {
-                Diagnostic::hint(
-                    format!("`++` on String expects a String argument, got {arg_display}"),
-                    span,
-                )
-                .with_hint(
-                    "This is likely a false positive — the generic type may be String at runtime. \
-                     Use `displayString` or `@expect type` to suppress",
-                )
-            } else {
-                Diagnostic::warning(
-                    format!("`++` on String expects a String argument, got {arg_display}"),
-                    span,
-                )
-                .with_hint("Convert the argument to String first")
-            };
-            diag = diag.with_category(DiagnosticCategory::Type);
-            if let Some((desc, origin_span)) = arg_origin {
-                diag = diag.with_note(desc.clone(), *origin_span);
-            }
+            let diag = Self::concat_mismatch_diag(&arg_display, is_generic, span, arg_origin);
             self.diagnostics.push(diag);
             return handled;
         }
@@ -1234,15 +1224,98 @@ impl TypeChecker {
                     span,
                 )
             };
-            diag = diag
-                .with_category(DiagnosticCategory::Type)
-                .with_hint("Comparison operators require compatible types");
+            diag = diag.with_category(DiagnosticCategory::Type).with_hint(
+                if is_numeric(receiver_ty) {
+                    missing_hook_hint("Comparison")
+                } else {
+                    "Comparison operators require compatible types".to_string()
+                },
+            );
             if let Some((desc, origin_span)) = arg_origin {
                 diag = diag.with_note(desc.clone(), *origin_span);
             }
             self.diagnostics.push(diag);
         }
         handled
+    }
+
+    /// The `++` on String argument-mismatch diagnostic (a hint for a generic
+    /// argument, which is likely a false positive).
+    fn concat_mismatch_diag(
+        arg_display: &str,
+        is_generic: bool,
+        span: Span,
+        arg_origin: Option<&(EcoString, Option<Span>)>,
+    ) -> Diagnostic {
+        let message = format!("`++` on String expects a String argument, got {arg_display}");
+        let diag = if is_generic {
+            Diagnostic::hint(message, span).with_hint(
+                "This is likely a false positive — the generic type may be String at runtime. \
+                 Use `displayString` or `@expect type` to suppress",
+            )
+        } else {
+            Diagnostic::warning(message, span).with_hint("Convert the argument to String first")
+        };
+        let mut diag = diag.with_category(DiagnosticCategory::Type);
+        if let Some((desc, origin_span)) = arg_origin {
+            diag = diag.with_note(desc.clone(), *origin_span);
+        }
+        diag
+    }
+
+    /// The hint for a number-on-the-left send whose argument lacks the hook.
+    fn missing_hook_hint(kind: &str, operator: &str, arg_display: &str) -> String {
+        let selector =
+            reflected_operator(operator).map_or("the reflected selector", |r| r.selector);
+        format!(
+            "{kind} `{operator}` with a non-number argument raises `does_not_understand` \
+             at run time; implement `{selector}` on {arg_display} to support it"
+        )
+    }
+
+    /// Checks the hook parameter against the receiver when `arg_ty` declares
+    /// the reflected hook for `operator`. `false` when there is no hook.
+    fn check_reflected_hook(
+        &mut self,
+        receiver_ty: &EcoString,
+        operator: &str,
+        arg_ty: &EcoString,
+        span: Span,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        let Some(hook) = Self::reflected_hook(hierarchy, receiver_ty, operator, arg_ty) else {
+            return false;
+        };
+        let selector = hook.selector.clone();
+        self.check_argument_types(
+            arg_ty,
+            &selector,
+            &[InferredType::known(receiver_ty.clone())],
+            span,
+            hierarchy,
+            false,
+            None,
+            None,
+            &[],
+        );
+        true
+    }
+
+    /// The reflected hook (ADR 0116) a number-on-the-left binary send falls
+    /// back to: the `<name>FromNumber:` method declared on the argument's
+    /// class when `receiver_ty` is numeric, `arg_ty` is a known non-numeric
+    /// class and `operator` is one of the eight reflected operators.
+    pub(in super::super) fn reflected_hook<'h>(
+        hierarchy: &'h ClassHierarchy,
+        receiver_ty: &str,
+        operator: &str,
+        arg_ty: &str,
+    ) -> Option<&'h crate::semantic_analysis::class_hierarchy::MethodInfo> {
+        let reflected = reflected_operator(operator)?;
+        if !hierarchy.is_numeric_type(receiver_ty) || hierarchy.is_numeric_type(arg_ty) {
+            return None;
+        }
+        hierarchy.find_method(arg_ty, reflected.selector)
     }
 
     /// Warn when an `Exception`-typed expression is compared for equality
