@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Change: the hint on a missing number-on-the-left arithmetic hook is reworded (BT-5208, ADR 0116 addendum decision 4).** `3 + nil` now hints "'+' cannot combine a number with UndefinedObject — the right operand must be a number, or a value whose class implements 'plusFromNumber:'", for all four arithmetic operators. The old "… — implement it to support 'number + X' arithmetic" read as advice to add a method to `nil`. The error is still a `does_not_understand` for the hook selector; only the hint changes. The runtime also gains `beamtalk_message_dispatch:send_number_comparison/4`, the comparison counterpart that compiled code will call from ADR 0116 addendum Phase 2 (hint: "'<=' cannot order a number against …").
+
 - **Fix: a Value that crosses a node boundary equals the one that was sent (BT-5143).** Decoding a wire envelope stamped a `'__shape_version__'` key onto the Value, which `Value` instances never carry. A Value returned from a remote actor (a `Node` from `anActor node`, a user `Value` result) therefore compared unequal (`=:=`, `hash`) to a freshly built equal one. `beamtalk_shape_migration:unpack/1` no longer adds the key.
 - **New: `examples/cluster`, a three-node example for ADR 0126 with a CI end-to-end run (BT-5143).** A coordinator farms jobs out to two worker nodes, loses one mid-call, and reassigns the work. `just test-cluster` runs it; CI runs it when the example, the distribution runtime or the actor send path changes. The language-features Distribution section now says remote async sends are unsupported (ADR 0126 amendment BT-4989) and that `Node connect` waits for `global` to sync with the new peer, so a `scope: #global` name registered right after it is visible from the peer (BT-5156).
 

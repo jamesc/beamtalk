@@ -314,9 +314,14 @@ send_number_coercion(Right, Selector, Args, OrigOp) ->
             %% function's argument — the catch pattern re-uses them, so this
             %% only matches a does_not_understand for *this exact* class and
             %% selector, not any DNU that happens to propagate through.
+            %% Hint wording as reworded by the 2026-11-25 addendum
+            %% (decision 4); the original "~s has no '~s' — implement it to
+            %% support 'number ~s ~s' arithmetic" read as advice to add a
+            %% method to `nil`.
             Hint = iolist_to_binary(io_lib:format(
-                "~s has no '~s' — implement it to support 'number ~s ~s' arithmetic",
-                [RightClass, Selector, OrigOp, RightClass])),
+                "'~s' cannot combine a number with ~s — the right operand "
+                "must be a number, or a value whose class implements '~s'",
+                [OrigOp, RightClass, Selector])),
             HintedError = beamtalk_error:with_hint(Error, Hint),
             erlang:raise(error, beamtalk_exception_handler:wrap(HintedError), Stack)
     end.
@@ -361,7 +366,7 @@ substring the REPL/eval error message actually contains —
 
 5 + "not a vector"
 // => ERROR: String does not understand 'plusFromNumber:'
-// => ERROR: String has no 'plusFromNumber:' — implement it to support 'number + String' arithmetic
+// => ERROR: '+' cannot combine a number with String — the right operand must be a number, or a value whose class implements 'plusFromNumber:'
 
 aVector + 5
 // => Vector(6, 7, 8)
@@ -613,9 +618,10 @@ follow-up rather than folding it into this arithmetic-specific design.
 - A type that doesn't implement the reflected hook at all still gets a
   more useful error than a bare DNU: `send_number_coercion/4`
   (§ Dispatch mechanism) adds a hint naming the original operator, so
-  `5 + aThing` fails with something closer to "`Thing` has no
-  `plusFromNumber:` — implement it to support `number + Thing`
-  arithmetic" than an unexplained `"Thing does not understand
+  `5 + aThing` fails with "'+' cannot combine a number with Thing — the
+  right operand must be a number, or a value whose class implements
+  'plusFromNumber:'" (wording from the 2026-11-25 addendum, decision 4)
+  rather than an unexplained `"Thing does not understand
   'plusFromNumber:'"` referencing a selector the caller never typed.
 
 ### Negative
