@@ -129,7 +129,11 @@ pub(in crate::core_erlang) fn is_comparable_literal(expr: &Expression) -> bool {
     matches!(
         expr,
         Expression::Literal(
-            Literal::Integer(_) | Literal::Float(_) | Literal::String(_) | Literal::Character(_),
+            Literal::Integer(_)
+                | Literal::BigInteger(_)
+                | Literal::Float(_)
+                | Literal::String(_)
+                | Literal::Character(_),
             _,
         )
     )
@@ -368,7 +372,10 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn receiver_is_statically_numeric(&self, expr: &Expression) -> bool {
         use beamtalk_core::ast::Literal;
         match expr {
-            Expression::Literal(Literal::Integer(_) | Literal::Float(_), _) => true,
+            Expression::Literal(
+                Literal::Integer(_) | Literal::BigInteger(_) | Literal::Float(_),
+                _,
+            ) => true,
             _ if expr.is_self() => matches!(self.class_name().as_str(), "Integer" | "Float"),
             Expression::Identifier(id) => self.param_is_numeric(&id.name),
             // `self.<field>` stays bare only when the field is known numeric

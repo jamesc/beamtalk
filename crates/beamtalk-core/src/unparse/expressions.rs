@@ -13,7 +13,7 @@ use super::{
     nest, nil, unparse_comment, unparse_comment_attachment_leading, unparse_expect_categories,
     unparse_keyword_part, unparse_type_annotation,
 };
-use crate::source_analysis::{TokenKind, lex_with_eof, parse_integer};
+use crate::source_analysis::{TokenKind, lex_with_eof, parse_integer_literal};
 
 /// Builds a [`Document`] for an [`ExpressionStatement`].
 ///
@@ -213,6 +213,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
 pub(super) fn unparse_literal(lit: &Literal) -> Document<'static> {
     match lit {
         Literal::Integer(n) => leaf::int_lit(*n),
+        Literal::BigInteger(digits) => leaf::big_int_lit(digits),
         Literal::Float(f) => leaf::float_lit(*f),
         Literal::String(s) => {
             // The lexer unescapes doubled delimiters ("" → ") in the AST.
@@ -276,8 +277,10 @@ fn needs_symbol_quoting(s: &str) -> bool {
 /// Prints the literal at `span`, using its recorded source spelling when it
 /// is a number (BT-5183): `16rFF` stays `16rFF` rather than becoming `255`.
 pub(super) fn unparse_literal_at(lit: &Literal, span: Span) -> Document<'static> {
-    if matches!(lit, Literal::Integer(_) | Literal::Float(_))
-        && let Some(doc) = source_number_spelling(lit, span)
+    if matches!(
+        lit,
+        Literal::Integer(_) | Literal::BigInteger(_) | Literal::Float(_)
+    ) && let Some(doc) = source_number_spelling(lit, span)
     {
         return doc;
     }
@@ -345,8 +348,9 @@ fn unparse_unit(unit: usize, segment: Span) -> Document<'static> {
 /// `-lit` for a number literal, if it is representable.
 fn negate_literal(lit: &Literal) -> Option<Literal> {
     match lit {
-        Literal::Integer(n) => n.checked_neg().map(Literal::Integer),
-        Literal::Float(f) => Some(Literal::Float(-f)),
+        Literal::Integer(_) | Literal::BigInteger(_) | Literal::Float(_) => {
+            Some(lit.clone().negated())
+        }
         _ => None,
     }
 }
@@ -364,8 +368,8 @@ fn number_reads_back_as(spelling: &str, lit: &Literal) -> bool {
         return false;
     }
     match (token.kind(), lit) {
-        (TokenKind::Integer(text), Literal::Integer(value)) => {
-            text == spelling && parse_integer(text).is_ok_and(|v| v == *value)
+        (TokenKind::Integer(text), Literal::Integer(_) | Literal::BigInteger(_)) => {
+            text == spelling && parse_integer_literal(text).is_ok_and(|v| v == *lit)
         }
         (TokenKind::Float(text), Literal::Float(value)) => {
             text == spelling

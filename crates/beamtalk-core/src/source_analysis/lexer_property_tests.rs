@@ -227,11 +227,13 @@ proptest! {
     /// For any non-empty, non-whitespace-only, non-comment input, the lexer
     /// should produce at least one non-EOF token (even if it's an Error token).
     /// Comments and whitespace are stored as trivia, not tokens, so input that
-    /// is purely comment/whitespace legitimately produces zero tokens.
+    /// is purely comment/whitespace legitimately produces zero tokens, and so
+    /// does a leading byte-order mark, which the lexer skips (BT-5182).
     #[test]
     fn nonempty_input_produces_tokens(input in "[^ \t\n\r]{1,100}") {
-        // Skip inputs that are purely comments (line or block)
-        if input.starts_with("//") || input.starts_with("/*") {
+        // Skip inputs that are purely comments (line or block), after any BOM
+        let program = input.strip_prefix('\u{FEFF}').unwrap_or(&input);
+        if program.is_empty() || program.starts_with("//") || program.starts_with("/*") {
             return Ok(());
         }
         let tokens = lex(&input);
