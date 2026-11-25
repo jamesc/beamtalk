@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Breaking: the `clone` wire op is removed; `close`, `kill` and `unsubscribe-logs` gain real senders (BT-5199).** Every op in the REPL op table must now have a sender, checked by `just check-surface-drift`.
+  - Removed: `clone`. No client sent it, and sending it now answers "Unknown operation".
+  - Changed: `:exit`, `:quit` and Ctrl-D in the CLI REPL end the session on the node (`close`) instead of leaving it resumable for 4 hours.
+  - New: `close` takes an optional `session` field naming another session to end. An unknown id closes nothing. Like `interrupt`, any client with the workspace cookie can use it.
+  - Changed: `kill` replies only once the actor has exited, and refuses a pid that has stopped or is not an actor (`actor_not_alive` / `not_an_actor`).
+  - New: VS Code ends its session (`unsubscribe-logs`, then `close`) when it disconnects, and closes the session of a REPL terminal it started once that REPL exits. `beamtalk.logs.level` has a new `off` value that stops log streaming.
+  - New: "Kill Actor" in the VS Code inspector and "Kill actor" in the LiveView Inspector (Owner only), each with a confirmation, followed by a fresh actor list.
+  - Changed: the LiveView IDE closes a tab's session through the `close` op instead of a direct supervisor call.
+
 - **New: `NodeVersionSkew` announcement; fix: shape-skew counts on both nodes (BT-5232, ADR 0126 Amendment D3).** When a peer connects, `beamtalk_node_monitor` now reads its wire and Beamtalk versions and announces one `NodeVersionSkew` on a mismatch. Fields: `node`, `localWireVersion`, `remoteWireVersion`, `localBeamtalkVersion`, `remoteBeamtalkVersion`. A peer too old to answer is announced with `nil` remote fields. The connection is never refused. Fixed: a class reload now updates the peer's skew count and announces `NodeShapeSkew` there too (before, only the reloading node did); a check that finishes after its peer disconnected no longer brings back a skew count for that peer; a reload computes only the reloaded class's shape entry, not the whole manifest.
 
 - **Breaking: two `PersistentTerm` / `JsonMappable` changes make code that used to run raise (BT-5191).** A `JsonMappable` subclass that declares fields of its own but inherits `class jsonMapping` now raises a `user_error` from `asJson` instead of silently dropping those fields. Migration: override `class jsonMapping => super jsonMapping |> mapField: #extra` (or `super jsonMapping` to keep them off). A process waiting behind another's `PersistentTerm at:ifAbsentPut:` build now raises a `runtime_error` after 60 s instead of building its own copy; a caller inside an actor `call` may hit that call's shorter timeout first. Migration: keep builds short, or raise `fifo_lock_timeout_ms => #{persistent_term => Ms}` in the `beamtalk_runtime` env.

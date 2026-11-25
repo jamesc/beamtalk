@@ -811,6 +811,7 @@ pub(crate) fn repl_loop(
             }
             Err(e) => {
                 eprintln!("Readline error: {e}");
+                client.close_session();
                 break;
             }
         };
