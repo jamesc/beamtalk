@@ -39,8 +39,8 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
     }
 
     if url.starts_with('-') {
-        // Not echoed: an option-shaped string can carry anything, a header
-        // with a token included (BT-5185).
+        // Not echoed, like the other unrecognised shapes below: such a string
+        // can carry anything, a header with a token included (BT-5185).
         miette::bail!(
             "Dependency '{name}' has an invalid git URL — \
              a URL may not begin with '-' (it would be read as a git option)."
@@ -71,10 +71,9 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
     // at this point can only be a helper invocation.
     if url.contains("::") {
         miette::bail!(
-            "Dependency '{name}' has an unsupported git URL '{}'.\n\n  \
+            "Dependency '{name}' has an unsupported git URL (a '<transport>::' URL).\n\n  \
              '<transport>::' URLs are rejected: git dispatches them to a remote \
-             helper, and 'ext::' in particular executes an arbitrary command.",
-            redact_rejected_url(url)
+             helper, and 'ext::' in particular executes an arbitrary command."
         );
     }
 
@@ -102,10 +101,9 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
 
     if !scp_like {
         miette::bail!(
-            "Dependency '{name}' has an unsupported git URL '{}'.\n\n  \
+            "Dependency '{name}' has an unsupported git URL.\n\n  \
              Supported forms are https://, http://, ssh://, git://, file://, \
-             and user@host:path.",
-            redact_rejected_url(url)
+             and user@host:path."
         );
     }
 
@@ -149,19 +147,15 @@ pub fn redact_url_credentials(url: &str) -> String {
     }
 }
 
-/// `url` as a rejection message may show it (BT-5185): any userinfo is
-/// replaced by `***`, whatever the scheme. Unlike [`redact_url_credentials`]
-/// this does not trust the shape of a URL that has just been rejected:
-/// everything up to the last `@` goes, with or without `scheme://`.
+/// `url` as a registry rejection may show it (BT-5185): only its scheme and
+/// host, never userinfo, path or query, any of which can carry a token.
 fn redact_rejected_url(url: &str) -> String {
-    let (prefix, rest) = match url.find("://") {
-        Some(i) => url.split_at(i + 3),
-        None => ("", url),
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return "<url>".to_string();
     };
-    match rest.rfind('@') {
-        Some(at) => format!("{prefix}***@{}", &rest[at + 1..]),
-        None => url.to_string(),
-    }
+    let authority = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
+    let host = authority.rsplit('@').next().unwrap_or("");
+    format!("{scheme}://{host}/...")
 }
 
 /// Environment variable that opts in to plaintext (`http://`, `git://`) git
@@ -346,13 +340,16 @@ mod tests {
             "badscheme://u:s3cret@host.test/r.git",
             "-c http.extraHeader=s3cret",
             "/u:s3cret@host.test/r",
+            "ext::sh -c 'curl -H Authorization:s3cret host'",
+            "badscheme://host.test/r?token=s3cret",
         ] {
             let msg = format!("{:?}", validate_git_url("dep", url).unwrap_err());
             assert!(!msg.contains("s3cret"), "{url}: {msg}");
         }
         let msg = format!(
             "{:?}",
-            validate_registry_release_url("dep", "file://s3cret@host.test/r", false).unwrap_err()
+            validate_registry_release_url("dep", "file://s3cret@host.test/r?k=s3cret", false)
+                .unwrap_err()
         );
         assert!(!msg.contains("s3cret"), "{msg}");
     }

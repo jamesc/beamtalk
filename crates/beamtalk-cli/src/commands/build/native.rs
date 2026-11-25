@@ -7,7 +7,7 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;
 use std::fmt::Write;
 use std::fs;
@@ -668,13 +668,16 @@ const TRANSITIVE_GIT_REMEDY: &str = "It is not in your [native.dependencies]: an
 /// Screen every git URL rebar3 resolved, transitive ones included.
 ///
 /// A dependency's own `rebar.config` can name further git dependencies that
-/// never pass through our manifest. `compile_with_rebar3` runs this after
-/// `rebar3 get-deps` has fetched them and before `rebar3 compile` runs any of
-/// their code, and before they reach `beamtalk.lock` or the build output;
-/// `prepare_rebar_lock` re-screens them on every later build (BT-5174,
-/// BT-5185). The transport itself is refused earlier still, by git, through
-/// [`native_git_allowed_protocols`]. A refused transitive dependency's error
-/// names the fix ([`TRANSITIVE_GIT_REMEDY`]).
+/// never pass through our manifest. Their transport is refused before any
+/// fetch, by git itself ([`native_git_allowed_protocols`]). `compile_with_rebar3`
+/// runs this screen for the rest of the rules (credentials, URL shape) after
+/// `rebar3 get-deps` and before `rebar3 compile`, `beamtalk.lock` and the build
+/// output; `prepare_rebar_lock` re-screens them on every later build (BT-5174,
+/// BT-5185). `get-deps` does evaluate fetched dependencies' `rebar.config.script`
+/// and install their plugins, so code from a dependency fetched over an allowed
+/// transport can run before this screen: the same trust a dependency's compile
+/// hooks already get. A refused transitive dependency's error names the fix
+/// ([`TRANSITIVE_GIT_REMEDY`]).
 fn screen_resolved_native_git_urls(
     packages: &[NativePackageLock],
     native_deps: &NativeDependencyMap,
@@ -713,16 +716,23 @@ const GIT_ALLOW_PROTOCOL_ENV: &str = "GIT_ALLOW_PROTOCOL";
 /// it before connecting, instead of the lock screen catching it after the
 /// fetch. `https` and `ssh` (which scp-style `user@host:path` uses) are always
 /// allowed; `http` and `git` only with the insecure opt-in; `file` only when a
-/// declared dependency uses a `file://` URL, since it also lets a URL that
-/// looks like an option name a local repository.
-fn native_git_allowed_protocols(native_deps: &NativeDependencyMap, allow_insecure: bool) -> String {
+/// declared dependency, or one `beamtalk.lock` pins (and the lock screen has
+/// passed), uses a `file://` URL, since it also lets a URL that looks like an
+/// option name a local repository.
+fn native_git_allowed_protocols(
+    native_deps: &NativeDependencyMap,
+    locked: Option<&BTreeMap<String, NativePackageLock>>,
+    allow_insecure: bool,
+) -> String {
     let mut protocols = vec!["https", "ssh"];
     if allow_insecure {
         protocols.extend(["http", "git"]);
     }
-    let declares_file = native_deps.values().any(
-        |dep| matches!(&dep.source, NativeSource::Git { url, .. } if url.starts_with("file://")),
-    );
+    let declares_file = native_deps.values().any(|dep| {
+        matches!(&dep.source, NativeSource::Git { url, .. } if url.starts_with("file://"))
+    }) || locked.into_iter().flat_map(BTreeMap::values).any(|pkg| {
+        matches!(&pkg.source, NativeLockSource::Git { url, .. } if url.starts_with("file://"))
+    });
     if declares_file {
         protocols.push("file");
     }
@@ -734,9 +744,9 @@ fn native_git_allowed_protocols(native_deps: &NativeDependencyMap, allow_insecur
 /// allowed and how to fix a dependency on anything else.
 fn native_git_fetch_hint(allowed: &str) -> String {
     format!(
-        "\nNote: git ran with {GIT_ALLOW_PROTOCOL_ENV}={allowed}, so a native dependency on any \
-         other transport cannot be fetched, including one pulled in by another dependency's \
-         rebar.config. Declare it in [native.dependencies] with an https:// or ssh:// URL (a \
+        "\nNote: git ran with {GIT_ALLOW_PROTOCOL_ENV}={allowed}, so if the failed dependency's URL \
+         uses any other transport it was refused, including one pulled in by another \
+         dependency's rebar.config. Declare it in [native.dependencies] with an https:// or ssh:// URL (a \
          direct declaration takes precedence over a transitive one), or set {}=1 to allow \
          http:// and git://.",
         manifest::ALLOW_INSECURE_GIT_ENV
@@ -760,8 +770,8 @@ fn refresh_package_index(mut cmd: std::process::Command) {
 }
 
 /// Run `rebar3 get-deps` (`cmd`): fetch every native dependency and write
-/// `rebar.lock`, compiling nothing (BT-5185). A failure carries the
-/// allowed-transport hint, since rebar3 hides git's own refusal.
+/// `rebar.lock`, without `rebar3 compile` (BT-5185). A failed git fetch
+/// carries the allowed-transport hint, since rebar3 hides git's own refusal.
 fn fetch_native_deps(
     mut cmd: std::process::Command,
     rebar3: &Path,
@@ -779,10 +789,17 @@ fn fetch_native_deps(
             String::from_utf8_lossy(&fetched.stdout),
             String::from_utf8_lossy(&fetched.stderr)
         );
+        // rebar3's message for any failed dependency fetch; a git transport
+        // refusal is one cause, so only then is the transport hint relevant.
+        let hint = if combined.contains("Failed to fetch and copy dep: {git,") {
+            native_git_fetch_hint(git_protocols)
+        } else {
+            String::new()
+        };
         miette::bail!(
             "rebar3 could not fetch the native dependencies:\n{}\n{}{}",
             combined.trim_end(),
-            native_git_fetch_hint(git_protocols),
+            hint,
             rebar3_restricted_env_hint()
         );
     }
@@ -1152,7 +1169,8 @@ fn compile_with_rebar3(
         .into_diagnostic()
         .wrap_err("Failed to canonicalize rebar base dir")?;
     let allow_insecure = manifest::insecure_git_allowed();
-    let git_protocols = native_git_allowed_protocols(native_deps, allow_insecure);
+    let locked = existing_lock.as_ref().map(|lock| &lock.native_packages);
+    let git_protocols = native_git_allowed_protocols(native_deps, locked, allow_insecure);
     let rebar3_command = |subcommand: &str| {
         let mut cmd = rebar3_base_command(&rebar3);
         let passed = apply_rebar3_env(&mut cmd);
@@ -1171,8 +1189,9 @@ fn compile_with_rebar3(
     }
 
     // Fetch first, without compiling, so every resolved git URL (transitive
-    // ones included) is screened before `rebar3 compile` runs any dependency
-    // code (BT-5185). `get-deps` writes `rebar.lock`.
+    // ones included) is screened before `rebar3 compile` (BT-5185); git has
+    // already refused any transport outside `git_protocols` during the fetch.
+    // `get-deps` writes `rebar.lock`.
     fetch_native_deps(rebar3_command("get-deps"), &rebar3, &git_protocols)?;
     let resolved_native = lockfile::read_rebar_lock(&rebar_base_dir)?;
     screen_resolved_native_git_urls(&resolved_native, native_deps, allow_insecure)?;
@@ -1682,15 +1701,30 @@ mod transitive_screen_tests {
     #[test]
     fn git_runs_with_only_the_allowed_transports() {
         let none = NativeDependencyMap::new();
-        assert_eq!(native_git_allowed_protocols(&none, false), "https:ssh");
         assert_eq!(
-            native_git_allowed_protocols(&none, true),
+            native_git_allowed_protocols(&none, None, false),
+            "https:ssh"
+        );
+        assert_eq!(
+            native_git_allowed_protocols(&none, None, true),
             "https:ssh:http:git"
         );
         let file = declared("dep", "file:///repos/dep");
-        assert_eq!(native_git_allowed_protocols(&file, false), "https:ssh:file");
+        assert_eq!(
+            native_git_allowed_protocols(&file, None, false),
+            "https:ssh:file"
+        );
         let https = declared("dep", "https://example.test/dep.git");
-        assert_eq!(native_git_allowed_protocols(&https, false), "https:ssh");
+        assert_eq!(
+            native_git_allowed_protocols(&https, None, false),
+            "https:ssh"
+        );
+        // A locked transitive file:// dependency keeps working.
+        let locked = BTreeMap::from([("sub".to_string(), git_pkg("sub", "file:///repos/sub"))]);
+        assert_eq!(
+            native_git_allowed_protocols(&https, Some(&locked), false),
+            "https:ssh:file"
+        );
     }
 
     #[test]

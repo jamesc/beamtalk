@@ -2410,7 +2410,8 @@ defmodule BtAttach.Workspace do
         # BT-5127: unless the operator opted out with a non-loopback
         # ERL_EPMD_ADDRESS (same rule as the Rust `loopback_dist_args/0`).
         if loopback_dist?(System.get_env("ERL_EPMD_ADDRESS")) do
-          :ok = :application.set_env(:kernel, :inet_dist_use_interface, {127, 0, 0, 1})
+          interface = loopback_interface(:init.get_argument(:proto_dist))
+          :ok = :application.set_env(:kernel, :inet_dist_use_interface, interface)
         end
 
         case :net_kernel.start(name, dist_start_options()) do
@@ -2455,6 +2456,20 @@ defmodule BtAttach.Workspace do
       {:error, _} -> false
     end
   end
+
+  @doc """
+  The loopback address to pin the distribution listener to, given this VM's
+  `:init.get_argument(:proto_dist)`: IPv6 loopback for an IPv6 distribution
+  (`inet6_tcp`/`inet6_tls`, whose listener an IPv4 interface cannot bind),
+  else IPv4 loopback. Same rule as Rust `beamtalk_workspace::loopback_dist_args/0`.
+  """
+  def loopback_interface({:ok, protos}) do
+    if Enum.any?(for(args <- protos, arg <- args, do: to_string(arg)), &(&1 =~ "inet6_")),
+      do: {0, 0, 0, 0, 0, 0, 0, 1},
+      else: {127, 0, 0, 1}
+  end
+
+  def loopback_interface(_), do: {127, 0, 0, 1}
 
   defp loopback_ip?({127, _, _, _}), do: true
   defp loopback_ip?({0, 0, 0, 0, 0, 0, 0, 1}), do: true

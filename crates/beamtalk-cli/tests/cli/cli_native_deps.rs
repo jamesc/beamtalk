@@ -216,10 +216,11 @@ fn transitive_native_git_dep_pinned_on_fresh_build() {
 }
 
 /// BT-5185: a transitive dependency's plaintext git URL is refused before
-/// anything is fetched from it, not after `rebar3 compile` has run it. A
-/// loopback listener stands in for the plaintext server and must see no
-/// connection; the error names the fix, and that fix (declaring the
-/// dependency directly with an allowed URL) builds.
+/// anything is fetched from it (git refuses the transport), not after
+/// `rebar3 compile` has run it. A loopback listener stands in for the
+/// plaintext server and must see no connection; nothing is compiled; the
+/// error names the fix, and that fix (declaring the dependency directly with
+/// an allowed URL) builds.
 #[test]
 fn transitive_plaintext_native_git_dep_is_refused_before_fetch() {
     // Stands in for the plaintext server: records and drops every
@@ -274,7 +275,7 @@ fn transitive_plaintext_native_git_dep_is_refused_before_fetch() {
         !project
             .join("_build/dev/native/default/lib/foo/ebin/foo.beam")
             .exists(),
-        "nothing may be compiled before the screen"
+        "nothing may be compiled after a refused fetch"
     );
 
     // The remedy: declare `bar` directly with an allowed URL; the direct

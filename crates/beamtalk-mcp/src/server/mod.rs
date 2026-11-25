@@ -154,26 +154,33 @@ impl PathPolicy {
     /// Confine to the project root discovered from the current directory.
     pub fn project_root_of_cwd() -> std::io::Result<Self> {
         let cwd = std::env::current_dir()?;
-        let root = beamtalk_project::discover_project_root(&cwd);
-        Self::confine_to_root(&root, dirs::home_dir().as_deref())
+        match beamtalk_project::find_project_root(&cwd) {
+            Some(root) => Self::confine_to_root(&root, dirs::home_dir().as_deref(), true),
+            None => Self::confine_to_root(&cwd, dirs::home_dir().as_deref(), false),
+        }
     }
 
     /// Confine to `root`, refusing a root that would expose far more than a
-    /// project: the filesystem root, the user's home directory (BT-5174), or
-    /// any directory above it such as `/home`, `/Users` or `C:\Users`
-    /// (BT-5185). Discovery falls back to the current directory when no marker
-    /// exists, so launching from `$HOME` would otherwise confine to all of it.
-    /// `home` is the platform home directory ([`dirs::home_dir`]: `HOME` on
-    /// Unix, the profile folder on Windows), never `HOME` alone.
+    /// project: the filesystem root or the user's home directory (BT-5174).
+    /// `marked` says whether `root` carries a project marker; discovery falls
+    /// back to the current directory when none exists, so launching from
+    /// `$HOME`, or from a directory above it such as `/home`, `/Users` or
+    /// `C:\Users`, would otherwise confine to every home in it (BT-5185). A
+    /// real project that happens to contain the home directory (a hermetic
+    /// `HOME` inside a checkout) is allowed. `home` is the platform home
+    /// directory ([`dirs::home_dir`]: `HOME` on Unix, the profile folder on
+    /// Windows), never `HOME` alone.
     fn confine_to_root(
         root: &std::path::Path,
         home: Option<&std::path::Path>,
+        marked: bool,
     ) -> std::io::Result<Self> {
         let root = beamtalk_core::paths::canonicalize(root)?;
-        let contains_home = home
-            .and_then(|h| beamtalk_core::paths::canonicalize(h).ok())
-            .is_some_and(|h| h.starts_with(&root));
-        if root.parent().is_none() || contains_home {
+        let home = home.and_then(|h| beamtalk_core::paths::canonicalize(h).ok());
+        let exposes_home = home
+            .as_ref()
+            .is_some_and(|h| *h == root || (!marked && h.starts_with(&root)));
+        if root.parent().is_none() || exposes_home {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!(

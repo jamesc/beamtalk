@@ -330,10 +330,24 @@ pub fn pin_epmd_loopback(cmd: &mut std::process::Command) {
 /// operator's `ERL_EPMD_ADDRESS` names a non-loopback address
 /// ([`loopback_dist_for`]): pinning the listener to loopback would silently
 /// defeat that private-network choice.
+///
+/// The pinned address is IPv4 loopback, or IPv6 loopback when the node's
+/// distribution runs over IPv6 (`-proto_dist inet6_tcp`/`inet6_tls` in
+/// `ERL_FLAGS`, `ERL_AFLAGS` or `ERL_ZFLAGS`), since an IPv4 interface cannot
+/// bind an IPv6 listener.
 #[must_use]
 pub fn loopback_dist_args() -> Vec<&'static str> {
     if loopback_dist_for(std::env::var(EPMD_ADDRESS_VAR).ok().as_deref()) {
-        vec!["-kernel", "inet_dist_use_interface", "{127,0,0,1}"]
+        let ipv6 = ["ERL_FLAGS", "ERL_AFLAGS", "ERL_ZFLAGS"]
+            .iter()
+            .filter_map(|var| std::env::var(var).ok())
+            .any(|flags| flags.contains("inet6_"));
+        let interface = if ipv6 {
+            "{0,0,0,0,0,0,0,1}"
+        } else {
+            "{127,0,0,1}"
+        };
+        vec!["-kernel", "inet_dist_use_interface", interface]
     } else {
         Vec::new()
     }
@@ -588,6 +602,26 @@ mod tests {
         assert_eq!(parse_port_file("  4040  \n  abc \n"), None);
         assert_eq!(parse_port_file("not-a-port\nabc\n"), None);
         assert_eq!(parse_port_file(""), None);
+    }
+
+    /// BT-5185: an IPv6 distribution is pinned to IPv6 loopback; an IPv4
+    /// interface could not bind its listener.
+    #[test]
+    fn loopback_dist_args_pin_ipv6_distribution_to_ipv6_loopback() {
+        let _guard = EPMD_ENV_LOCK.lock().unwrap();
+        // SAFETY: guarded by EPMD_ENV_LOCK above.
+        unsafe {
+            std::env::set_var(EPMD_ADDRESS_VAR, "::1");
+            std::env::set_var("ERL_AFLAGS", "-proto_dist inet6_tcp");
+        }
+        let ipv6 = loopback_dist_args();
+        // SAFETY: guarded by EPMD_ENV_LOCK above.
+        unsafe { std::env::remove_var("ERL_AFLAGS") };
+        let ipv4 = loopback_dist_args();
+        // SAFETY: guarded by EPMD_ENV_LOCK above.
+        unsafe { std::env::remove_var(EPMD_ADDRESS_VAR) };
+        assert_eq!(ipv6.last(), Some(&"{0,0,0,0,0,0,0,1}"));
+        assert_eq!(ipv4.last(), Some(&"{127,0,0,1}"));
     }
 
     /// BT-5185: the loopback decision is the shared fixture's table, read
