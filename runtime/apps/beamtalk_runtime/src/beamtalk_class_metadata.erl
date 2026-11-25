@@ -129,6 +129,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
     put_class_method_fun/3,
     lookup_class_method_fun/2,
     delete_class_method_funs/1,
+    delete_class_method_funs_except/2,
     delete_class_method_fun/2,
     set_class_method_selectors/2,
     has_runtime_class_methods/1,
@@ -1728,6 +1729,32 @@ reload, so memory-only runtime methods do not survive a recompile (ADR 0082).
 -spec delete_class_method_funs(class_name()) -> ok.
 delete_class_method_funs(Name) ->
     drop_class_method_funs(Name, '_').
+
+-doc """
+Remove `Name`'s runtime class-method funs except those for `Keep`.
+
+The reload path's purge when the incoming class methods carry funs
+(`beamtalk_class_publish:replace_runtime_class_methods/2`): the incoming funs
+are seeded first, so a selector defined before and after the reload never
+reads as missing (ADR 0153 §5, BT-5161), and only the stale ones go.
+""".
+-spec delete_class_method_funs_except(class_name(), [selector()]) -> ok.
+delete_class_method_funs_except(Name, Keep) ->
+    try ets:match(?FUN_TABLE, {{Name, '$1'}, '_', '_'}) of
+        Rows ->
+            lists:foreach(
+                fun([Selector]) ->
+                    case lists:member(Selector, Keep) of
+                        true -> ok;
+                        false -> ets:delete(?FUN_TABLE, {Name, Selector})
+                    end
+                end,
+                Rows
+            )
+    catch
+        error:badarg -> ok
+    end,
+    beamtalk_class_derived_cache:invalidate().
 
 -spec drop_class_method_funs(class_name(), owner_scope()) -> ok.
 drop_class_method_funs(Name, Owner) ->

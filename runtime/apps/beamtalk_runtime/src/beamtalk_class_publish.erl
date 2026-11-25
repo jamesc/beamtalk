@@ -47,6 +47,7 @@ plain map of the class fields they read that `beamtalk_object_class` builds with
     warn_stale_subclass_constructors/3,
     is_runtime_fun_info/1,
     seed_runtime_class_methods/2,
+    replace_runtime_class_methods/2,
     publish_reflection/1,
     method_record/4,
     notify_hot_patch/1
@@ -438,6 +439,26 @@ warn_stale_subclass_constructors(ClassName, OldClassMethods, NewClassMethods) ->
 -spec is_runtime_fun_info(term()) -> boolean().
 is_runtime_fun_info(Info) ->
     is_map(Info) andalso maps:is_key(block, Info).
+
+-doc """
+The reload path's reconciliation of the fun store with the incoming class
+methods (ADR 0082: disk wins). With no incoming funs (a compiled reload) every
+runtime fun is purged and the gate reset. With incoming funs (a `ClassBuilder`
+re-register) they are seeded first and only then are the stale ones dropped, so
+the gate never closes and a selector defined before and after the reload never
+reads as missing to an in-caller send that resolved it (ADR 0153 §5, BT-5161).
+""".
+-spec replace_runtime_class_methods(class_name(), map()) -> ok.
+replace_runtime_class_methods(ClassName, ClassMethods) ->
+    Funs = maps:filter(fun(_Selector, Info) -> is_runtime_fun_info(Info) end, ClassMethods),
+    case maps:size(Funs) of
+        0 ->
+            beamtalk_class_metadata:delete_class_method_funs(ClassName),
+            beamtalk_class_metadata:reset_runtime_class_methods(ClassName);
+        _ ->
+            ok = seed_runtime_class_methods(ClassName, ClassMethods),
+            beamtalk_class_metadata:delete_class_method_funs_except(ClassName, maps:keys(Funs))
+    end.
 
 -doc """
 Seed the runtime class-method fun retrieval store from a class_methods map.

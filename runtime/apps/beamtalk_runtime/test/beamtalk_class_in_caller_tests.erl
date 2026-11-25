@@ -280,6 +280,31 @@ runtime_fun_test_() ->
                 beamtalk_test_proc:stop(Root)
             end
         end},
+        {"re-registering a ClassBuilder class never hides a fun it keeps", fun() ->
+            %% The reload seeds the incoming funs before dropping stale ones,
+            %% so a caller looping on a selector defined before and after
+            %% never sees it missing (a `does_not_understand`).
+            Methods = #{whereAmI => fun(_Self) -> self() end},
+            with_builder_class('Bt5161Reregister', 'Object', Methods, fun(Pid) ->
+                Self = self(),
+                Looper = spawn_link(fun() -> loop_in_caller(Pid, Self, 0) end),
+                ?awaitMessage({looping, Looper}),
+                lists:foreach(
+                    fun(_) ->
+                        {ok, Pid} = beamtalk_class_builder:register(#{
+                            className => 'Bt5161Reregister',
+                            superclassRef => 'Object',
+                            fieldSpecs => #{},
+                            methodSpecs => #{},
+                            classMethods => Methods
+                        })
+                    end,
+                    lists:seq(1, 200)
+                ),
+                Looper ! stop,
+                ?awaitMessage({stopped, Looper})
+            end)
+        end},
         {"a fun shadowing a compiled method runs in the caller; no static key binds it", fun() ->
             with_class('Bt5161Shadow', none, fun(Pid) ->
                 Tag = tag('Bt5161Shadow'),
@@ -355,6 +380,22 @@ after_fun(Pid, Parent, Runner, N) ->
     case send(Pid, testSelf, []) of
         {from_fun, Runner} -> after_fun(Pid, Parent, Runner, N + 1);
         Other -> exit({unexpected, Other})
+    end.
+
+%% Send `whereAmI` until told to stop; every answer must be this process.
+loop_in_caller(Pid, Parent, N) ->
+    Me = self(),
+    case send(Pid, whereAmI, []) of
+        Me -> ok;
+        Other -> exit({unexpected, Other})
+    end,
+    case N of
+        0 -> Parent ! {looping, Me};
+        _ -> ok
+    end,
+    receive
+        stop -> Parent ! {stopped, Me}
+    after 0 -> loop_in_caller(Pid, Parent, N + 1)
     end.
 
 %% Register a module-less class through `ClassBuilder`'s backing
