@@ -422,9 +422,24 @@ pub fn for_each_child_mut(expr: &mut Expression, f: &mut dyn FnMut(&mut Expressi
 /// deep for a recursive walk can still be measured (BT-5181).
 #[must_use]
 pub fn expression_depth(expr: &Expression) -> usize {
+    expression_depth_with(expr, &mut |_| None)
+}
+
+/// [`expression_depth`], taking the depth of any subtree `known` answers
+/// for instead of walking it. `known` is asked once for each node the walk
+/// reaches, before its children, so a caller that already measured some
+/// subtrees visits only the nodes above them (BT-5237).
+pub fn expression_depth_with(
+    expr: &Expression,
+    known: &mut dyn FnMut(&Expression) -> Option<usize>,
+) -> usize {
     let mut max = 0;
     let mut stack = vec![(expr, 1usize)];
     while let Some((node, depth)) = stack.pop() {
+        if let Some(below) = known(node) {
+            max = max.max(depth - 1 + below);
+            continue;
+        }
         max = max.max(depth);
         for_each_child(node, &mut |child| stack.push((child, depth + 1)));
     }
@@ -486,9 +501,23 @@ pub fn for_each_type_child<'a>(ty: &'a TypeAnnotation, f: &mut dyn FnMut(&'a Typ
 /// stack — the [`expression_depth`] of type annotations (BT-5181).
 #[must_use]
 pub fn type_annotation_depth(ty: &TypeAnnotation) -> usize {
+    type_annotation_depth_with(ty, &mut |_| None)
+}
+
+/// [`type_annotation_depth`], taking the depth of any subtree `known`
+/// answers for instead of walking it — the [`expression_depth_with`] of
+/// type annotations (BT-5237).
+pub fn type_annotation_depth_with(
+    ty: &TypeAnnotation,
+    known: &mut dyn FnMut(&TypeAnnotation) -> Option<usize>,
+) -> usize {
     let mut max = 0;
     let mut stack = vec![(ty, 1usize)];
     while let Some((node, depth)) = stack.pop() {
+        if let Some(below) = known(node) {
+            max = max.max(depth - 1 + below);
+            continue;
+        }
         max = max.max(depth);
         for_each_type_child(node, &mut |child| stack.push((child, depth + 1)));
     }

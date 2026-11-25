@@ -463,3 +463,113 @@ fn replaced_chain_leaves_no_pipeline_sends() {
         module.pipeline_sends.len()
     );
 }
+
+// ── Cost of the depth bound (BT-5237) ───────────────────────────────────────
+
+/// Parses `source`; answers how many nodes the depth bounds visited and how
+/// many tokens the source has.
+fn depth_bound_visits(source: &str) -> (usize, usize) {
+    let tokens = lex_with_eof(source);
+    let token_count = tokens.len();
+    let mut parser = Parser::new(tokens);
+    let _module = parser.parse_module();
+    (parser.depth_walk_visits, token_count)
+}
+
+/// Asserts that the depth bounds over `source` visit each node a constant
+/// number of times, not once per nesting level it sits inside: every node
+/// adds a token, so a single visit per node stays within a small multiple
+/// of the token count, however deep the nesting.
+fn assert_depth_bound_is_linear(source: &str) {
+    let (visits, tokens) = depth_bound_visits(source);
+    assert!(
+        visits <= 3 * tokens,
+        "depth bounds visited {visits} nodes for {tokens} tokens: subtrees are walked again per level"
+    );
+}
+
+#[test]
+fn depth_bound_does_not_rewalk_nested_chains() {
+    let level = " + a + a + a + a + a + a + a)";
+    assert_depth_bound_is_linear(&format!("x := {}", nested_n("(", "a", level, 60)));
+}
+
+#[test]
+fn depth_bound_does_not_rewalk_nested_literals() {
+    let elements = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ";
+    assert_depth_bound_is_linear(&format!(
+        "x := {}",
+        nested_n(&format!("#({elements}"), "0", ")", 60)
+    ));
+}
+
+#[test]
+fn depth_bound_does_not_rewalk_nested_blocks() {
+    assert_depth_bound_is_linear(&format!(
+        "x := {}",
+        nested_n("[ a foo: 1 bar: b. b baz. ", "a", " ]", 60)
+    ));
+}
+
+#[test]
+fn depth_bound_does_not_rewalk_nested_types() {
+    assert_depth_bound_is_linear(&format!(
+        "x :: {} := 1",
+        nested_n("(", "A", " & B & C & D)", 60)
+    ));
+}
+
+#[test]
+fn depth_bound_does_not_rewalk_spliced_unions() {
+    // A grouped union is spliced into the union around it, so each level
+    // holds the members of every level inside it: the bound looks each
+    // member up once per level (as the splice copies it), but must not walk
+    // a member's subtree again. Each member here is eight levels deep.
+    let member = nested_n("Foo(", "A", ")", 7);
+    assert_depth_bound_is_linear(&format!(
+        "x :: {} := 1",
+        nested_n("(", "A", &format!(" | {member})"), 20)
+    ));
+}
+
+#[test]
+fn depth_bound_does_not_rewalk_the_repository_sources() {
+    // Every `.bt` file in the repository. Under test the parser also holds
+    // each level's ledger depth equal to a full walk of its tree
+    // (`Parser::bound_expression_depth`), so this checks both that the
+    // ledger recognises the real code's subtrees and that it answers their
+    // true depths.
+    fn bt_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("read source directory") {
+            let path = entry.expect("directory entry").path();
+            if path.is_dir() {
+                bt_files(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "bt") {
+                out.push(path);
+            }
+        }
+    }
+    let root = beamtalk_workspace::cargo_workspace_root!();
+    let mut files = Vec::new();
+    for dir in ["stdlib", "examples", "tests"] {
+        bt_files(&root.join(dir), &mut files);
+    }
+    assert!(files.len() > 100, "found only {} .bt files", files.len());
+    let (mut visits, mut tokens) = (0, 0);
+    for file in &files {
+        let source = std::fs::read_to_string(file).expect("read .bt file");
+        let (file_visits, file_tokens) = depth_bound_visits(&source);
+        assert!(
+            file_visits <= 2 * file_tokens,
+            "{}: depth bounds visited {file_visits} nodes for {file_tokens} tokens",
+            file.display()
+        );
+        visits += file_visits;
+        tokens += file_tokens;
+    }
+    assert!(
+        visits <= tokens,
+        "depth bounds visited {visits} nodes for {tokens} tokens over {} files",
+        files.len()
+    );
+}

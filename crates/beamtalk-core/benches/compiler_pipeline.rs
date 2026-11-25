@@ -161,6 +161,57 @@ fn bench_parse(c: &mut Criterion) {
     group.finish();
 }
 
+/// Synthetic deeply nested inputs, each within the parser's nesting and
+/// depth limits: every nesting level's result is held to a tree-depth bound,
+/// which must not walk a subtree again once per level around it (BT-5237).
+fn deep_nesting_inputs() -> Vec<(&'static str, String)> {
+    let nest = |open: &str, middle: &str, close: &str, levels: usize| {
+        open.repeat(levels) + middle + &close.repeat(levels)
+    };
+    let atoms = (0..200)
+        .map(|i| format!("{i}, "))
+        .collect::<Vec<_>>()
+        .concat();
+    let chains = format!(
+        "x := {}.\n",
+        nest("(", "a", " + a + a + a + a + a + a + a)", 60)
+    )
+    .repeat(200);
+    let blocks = (0..50)
+        .map(|i| format!("a foo: {i} bar: b. "))
+        .collect::<Vec<_>>()
+        .concat();
+    vec![
+        ("chains_60x7_x200", chains),
+        (
+            "lists_60x200",
+            format!("x := {}", nest(&format!("#({atoms}"), "0", ")", 60)),
+        ),
+        (
+            "blocks_60x50",
+            format!("x := {}", nest(&format!("[ {blocks}"), "a", " ]", 60)),
+        ),
+    ]
+}
+
+fn bench_parse_deep_nesting(c: &mut Criterion) {
+    let mut group = c.benchmark_group("parse_deep_nesting");
+
+    for (name, source) in deep_nesting_inputs() {
+        assert_no_parse_errors(name, &source);
+        let tokens = lex_with_eof(&source);
+        group.bench_with_input(BenchmarkId::new("parse", name), &tokens, |b, toks| {
+            b.iter_batched(
+                || toks.clone(),
+                |t| black_box(parse(t)),
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    group.finish();
+}
+
 fn bench_analyse(c: &mut Criterion) {
     let mut group = c.benchmark_group("analyse");
 
@@ -367,6 +418,7 @@ criterion_group!(
     benches,
     bench_lex,
     bench_parse,
+    bench_parse_deep_nesting,
     bench_analyse,
     bench_codegen,
     bench_end_to_end,
