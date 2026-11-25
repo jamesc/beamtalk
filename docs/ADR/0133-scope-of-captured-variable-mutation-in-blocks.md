@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-11-03) — Phases 0–4 shipped under Epic BT-3901 (Phase 3 closed by BT-3913, 2026-11-02); Accepted 2026-10-18; Proposed 2026-10-18
 
+> **Amended by [ADR 0153](0153-remove-class-variables.md) (2026-11-25), class variables in the escaping-block rule.** Class variables are removed, so "a field or a class variable" reads "a field" and the class-variable write at home no longer applies.
+
 > **Amended by [ADR 0137](0137-actor-closures-see-live-state.md) (2026-10-26, BT-4011 Phase 4), the actor-state halves of the escaping-block rule.** An escaping block may now assign `self.field` (the BT-3922 actor half is deleted), a block that reads `self.field` and is passed to a self-send or stored is no longer rejected (BT-3952 is deleted), and a self-send or aliased self-send in a block keeps its state change (BT-3936, BT-3985, BT-3998 are deleted): inside the actor the block sees the live fields, elsewhere it reads its creation-time capture and a write raises `actor_state_unreachable`. The escaping class-variable assignment goes with the field half (ADR 0137 resolved question 2; ADR 0130's runtime already handles it). The local-threading rules are unchanged — an escaping block may still read but not assign a captured local (`Tier2BlockNoReturnChannel`), and the §Decision rule still governs locals and value-type fields. The `actor-state-abroad` lint warns where a field-touching block runs away from home.
 
 > **Amended (2026-11-06, BT-4430): `on:do:` and `ensure:` are in place only when both operands are block literals.** See the amendment under §Decision.
