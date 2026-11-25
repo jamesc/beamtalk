@@ -104,6 +104,26 @@ weaker_words_override_a_good_file_test() ->
         ])
     ).
 
+%% PR review of BT-5233: the client verbs start without `vm.args`, so
+%% `-ssl_dist_opt` words there cannot stand in for a setting the file lacks.
+words_cannot_complete_an_incomplete_file_test_() ->
+    {setup, fun() -> beamtalk_test_fs:tmp_dir("bt5233_words") end, fun beamtalk_test_fs:rm_rf/1,
+        fun(Dir) ->
+            Path = filename:join(Dir, "noclient.conf"),
+            ok = file:write_file(
+                Path, "[{server, [{verify, verify_peer}, {fail_if_no_peer_cert, true}]}]."
+            ),
+            [
+                ?_assertEqual(
+                    {error, {peer_verification, [client_verify_peer]}},
+                    beamtalk_dist_tls:check_optfile(Path, ["client_verify", "verify_peer"])
+                )
+            ]
+        end}.
+
+ssl_unavailable_is_explained_test() ->
+    ?assert(has("ssl application", beamtalk_dist_tls:format_error(ssl_unavailable))).
+
 plain_tcp_is_never_verified_test() ->
     ?assertNot(beamtalk_dist_tls:verified([], [], [?SERVER_OK, ?CLIENT_OK])),
     ?assertNot(beamtalk_dist_tls:verified(["inet_tcp"], [], [?SERVER_OK, ?CLIENT_OK])).

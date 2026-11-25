@@ -139,6 +139,10 @@ tls_preflight_test_() ->
                     Problems(#{"RELEASE_HOST" => "bad host"})
                 ),
                 ?_assertMatch(
+                    ["RELEASE_HOST 'fe80::1%eth0' is not" ++ _],
+                    Problems(#{"RELEASE_HOST" => "fe80::1%eth0"})
+                ),
+                ?_assertMatch(
                     {ok, #{host := "192.0.2.7"}},
                     Preflight(#{"RELEASE_HOST" => "192.0.2.7"})
                 ),
@@ -205,3 +209,31 @@ tls_preflight_epmd_test_() ->
                 ?_assertMatch({ok, _}, Run("127.0.0.1", [{127, 0, 0, 1}]))
             ]
         end}.
+
+%% Under RELEASE_DISTRIBUTION=tls the launchers put their own
+%% `-kernel inet_dist_use_interface` ahead of `-args_file vm.args`, whose
+%% loopback value it must replace. That holds because `erl` keeps the first
+%% of a repeated application parameter; pin it on every OTP CI runs.
+kernel_parameter_first_wins_test_() ->
+    {timeout, 60, fun() ->
+        {ok, Peer, nonode@nohost} = peer:start_link(#{
+            connection => standard_io,
+            args => [
+                "-kernel",
+                "inet_dist_use_interface",
+                "{10,0,0,5}",
+                "-kernel",
+                "inet_dist_use_interface",
+                "{127,0,0,1}"
+            ],
+            wait_boot => 60000
+        }),
+        try
+            ?assertEqual(
+                {ok, {10, 0, 0, 5}},
+                peer:call(Peer, application, get_env, [kernel, inet_dist_use_interface])
+            )
+        after
+            peer:stop(Peer)
+        end
+    end}.

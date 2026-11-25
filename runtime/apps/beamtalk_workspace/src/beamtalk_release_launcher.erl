@@ -469,10 +469,11 @@ tls_host("") ->
         "RELEASE_HOST is not set: set it to this host's name as the other nodes reach it "
         "(the DNS name its certificate names), e.g. RELEASE_HOST=node1.example.com"};
 tls_host(Host) ->
-    case beamtalk_dist_address:parse(Host) of
+    %% `parse/1` drops a `%zone`, which would then end up in `-name`.
+    case not lists:member($%, Host) andalso beamtalk_dist_address:parse(Host) of
         {ok, _} ->
             {ok, Host};
-        error ->
+        _ ->
             case valid_host_name(Host) of
                 true ->
                     {ok, Host};

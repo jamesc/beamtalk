@@ -54,7 +54,8 @@ Both use `peer_verification/2`.
     {optfile_missing, file:filename_all()}
     | {optfile_unreadable, file:filename_all(), term()}
     | {optfile_malformed, file:filename_all(), term()}
-    | {peer_verification, [problem(), ...]}.
+    | {peer_verification, [problem(), ...]}
+    | ssl_unavailable.
 -export_type([reason/0]).
 
 %% Each required setting: its name, the side, the ssl option and the value.
@@ -121,8 +122,10 @@ Read an `-ssl_dist_optfile` exactly as the node will: with OTP's own
 """.
 -spec read_optfile(file:filename_all()) -> {ok, [{side(), list()}]} | {error, reason()}.
 read_optfile(Path) ->
-    case file:read_file_info(Path) of
-        {ok, _} ->
+    case {file:read_file_info(Path), code:ensure_loaded(ssl_dist_sup)} of
+        {{ok, _}, {error, _}} ->
+            {error, ssl_unavailable};
+        {{ok, _}, {module, _}} ->
             try ssl_dist_sup:consult(Path) of
                 Opts when is_list(Opts) -> {ok, Opts};
                 Other -> {error, {optfile_malformed, Path, {not_a_list, Other}}}
@@ -132,21 +135,29 @@ read_optfile(Path) ->
                 Class:Detail ->
                     {error, {optfile_malformed, Path, {Class, Detail}}}
             end;
-        {error, enoent} ->
+        {{error, enoent}, _} ->
             {error, {optfile_missing, Path}};
-        {error, Posix} ->
+        {{error, Posix}, _} ->
             {error, {optfile_unreadable, Path, Posix}}
     end.
 
 -doc """
-`ok` if the optfile at `Path` exists, parses, and, together with the
-`-ssl_dist_opt` words the node will also get, passes `peer_verification/2`.
+`ok` if the optfile at `Path` exists, parses, and passes
+`peer_verification/2` both by itself and together with the `-ssl_dist_opt`
+words the node will also get. The words can only fail it, never complete it:
+the launcher's client nodes (`stop`, `ping`, `rpc`, `remote_console`) start
+without `vm.args`, so the file alone must make them verify their peer.
 """.
 -spec check_optfile(file:filename_all(), [string()]) -> ok | {error, reason()}.
 check_optfile(Path, DistOptWords) ->
     case read_optfile(Path) of
-        {ok, Opts} -> peer_verification(DistOptWords, Opts);
-        {error, _} = Error -> Error
+        {ok, Opts} ->
+            case peer_verification([], Opts) of
+                ok -> peer_verification(DistOptWords, Opts);
+                {error, _} = Error -> Error
+            end;
+        {error, _} = Error ->
+            Error
     end.
 
 -doc "An operator-facing explanation of a `reason()`, with the fix.".
@@ -168,6 +179,9 @@ format_error({optfile_malformed, Path, Detail}) ->
         "[{server, [...]}, {client, [...]}]. (~0tp)",
         [Path, Detail]
     );
+format_error(ssl_unavailable) ->
+    "this release does not include the ssl application, which TLS distribution needs; "
+    "add ssl to the release (for example as a dependency of the project's application)";
 format_error({peer_verification, Problems}) ->
     [
         "the TLS distribution options (the option file and any -ssl_dist_opt flags) "
