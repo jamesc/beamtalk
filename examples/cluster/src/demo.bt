@@ -114,10 +114,6 @@ Object subclass: Demo
     report check: "remote async send fails loudly instead of hanging" is: asyncOutcome =:= #unsupported_operation
 
     // ---- Phase 5: cluster-wide registration ----
-    // `connect` returns before OTP's `global` has synced names with the new
-    // peer; without this a name registered now may not be visible from a peer
-    // for ~200 ms (see README "Things To Know").
-    Erlang global sync
     ledger := (Ledger spawnAs: #ledger scope: #global) unwrap
     report check: "global name registers on the coordinator" is: (Ledger named: #ledger scope: #global) isOk
     report check: "worker1 reaches the global Ledger from its own node" is: (a1 reportToLedger: r1)

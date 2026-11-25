@@ -198,8 +198,12 @@ pub(crate) fn compile_dependency_at(
     if let Some(dep_build) = ebin_path.parent() {
         let src = dep_root.join("priv");
         let dest = dep_build.join("priv");
-        if src.is_dir() && src != dest {
+        if src != dest {
+            // Always drop the old mirror: a dependency that no longer ships
+            // `priv/` must not keep shipping the stale copy (BT-5134).
             remove_stale_dir(&dest)?;
+        }
+        if src.is_dir() && src != dest {
             beamtalk_workspace::copy_tree(src.as_std_path(), dest.as_std_path())
                 .into_diagnostic()
                 .wrap_err_with(|| format!("Failed to copy '{src}' to '{dest}'"))?;

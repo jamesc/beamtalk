@@ -129,6 +129,8 @@ Establish a connection to this node, applying the §9 host policy first
 connection answers `Result error:` with `kind = insecure_distribution`; an
 unreachable node (or a local node that is not itself distributed) answers
 `kind = node_down`. Connecting to the current node is a no-op success.
+Answers only after OTP `global` has synced names with the peer, so a
+`scope: #global` name registered next is visible from it at once (BT-5156).
 """.
 -spec connect(t()) -> beamtalk_result:t().
 connect(#{?BT_CLASS_TAG_KEY := 'Node', name := Name} = Self) ->
@@ -529,6 +531,12 @@ tls_distribution() ->
 do_connect(Self, Name) ->
     case net_kernel:connect_node(Name) of
         true ->
+            %% OTP `global` shares names with a new peer in the background;
+            %% wait for that so a `scope: #global` name is visible from the
+            %% peer as soon as `connect` answers (BT-5156).
+            %% A sync failure (e.g. bad `global_groups` config) does not undo
+            %% the connection, so still answer ok.
+            _ = global:sync(),
             {ok, Self};
         false ->
             {error,
