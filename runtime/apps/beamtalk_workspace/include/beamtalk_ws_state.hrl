@@ -28,5 +28,9 @@
     %% connection may only issue the `shutdown` op (enforced in
     %% `handle_protocol/3`). Shutdown loads no code, so version skew is
     %% irrelevant — but it must grant nothing else.
-    shutdown_only = false :: boolean()
+    shutdown_only = false :: boolean(),
+    %% BT-5185: monitor on the connection-cap table's owner; when it goes the
+    %% table is recreated empty, so this connection closes rather than live on
+    %% uncounted (`beamtalk_ws_conn_cap`).
+    cap_owner_mon :: reference() | undefined
 }).

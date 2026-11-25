@@ -53,7 +53,7 @@ Workspace metadata is scoped to its project.
 |--------|------------|
 | Remote network access to REPL | Loopback binding (`127.0.0.1`) prevents remote connections |
 | Cross-site WebSocket hijacking / DNS rebinding from a browser | `Origin` and `Host` must be loopback (or the bound address); cookie required |
-| Unauthenticated connections tying up the server | 10 s auth deadline, 4 KiB pre-auth frame limit, 256 connection cap |
+| Unauthenticated connections tying up the server | 10 s auth deadline, 4 KiB pre-auth frame limit, a separate 32-socket pre-auth budget in which a new socket evicts the oldest unauthenticated one, 256 authenticated-connection cap |
 | Cross-user access to workspace state | Per-workspace directories created with mode 0700 |
 
 ### Out of Scope (Current)

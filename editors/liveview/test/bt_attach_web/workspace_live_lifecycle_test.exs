@@ -136,7 +136,8 @@ defmodule BtAttachWeb.WorkspaceLiveLifecycleTest do
   defp user_conn(conn, user) do
     Plug.Test.init_test_session(conn, %{
       "bt_user" => user,
-      "bt_logged_in_at" => System.system_time(:second)
+      "bt_logged_in_at" => System.system_time(:second),
+      "live_socket_id" => "bt_session:#{System.unique_integer([:positive])}"
     })
   end
 
