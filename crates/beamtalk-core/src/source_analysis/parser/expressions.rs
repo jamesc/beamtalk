@@ -24,7 +24,7 @@ use crate::ast::{
 use crate::source_analysis::{Span, Token, TokenKind};
 use ecow::EcoString;
 
-use super::{Diagnostic, Parser, binary_binding_power};
+use super::{Diagnostic, MAX_EXPRESSION_DEPTH, Parser, binary_binding_power};
 
 /// Helper function for parsing integers with radix notation.
 pub(crate) fn parse_integer(s: &str) -> Result<i64, String> {
@@ -53,31 +53,16 @@ impl Parser {
     /// Parses any expression.
     ///
     /// Entry point for expression parsing. Handles all precedence levels.
-    /// Uses `stacker::maybe_grow` to extend the stack on the heap if
-    /// remaining stack space falls below 32 KiB (prevents stack overflow
-    /// even under `AddressSanitizer` during fuzzing).
+    /// Runs one nesting level deeper ([`Self::with_expression_nesting`]),
+    /// which also holds the result to the tree-depth limit, so no later pass
+    /// receives a tree deep enough to overflow its stack (BT-5181).
     pub(super) fn parse_expression(&mut self) -> Expression {
-        // Grow the stack on the heap when remaining space is low.
-        // 32 KiB red zone, 256 KiB new segment.  Kept small because the
-        // nesting-depth guard (MAX_NESTING_DEPTH = 64) caps recursion,
-        // so we never need many segments, and a large segment size would
-        // cause OOM under AddressSanitizer during fuzzing.
-        stacker::maybe_grow(32 * 1024, 256 * 1024, || {
-            // Guard against stack overflow from deeply nested input
-            if let Err(error) = self.enter_nesting(self.current_token().span()) {
-                return error;
-            }
-
-            // Check for return statement first
-            let result = if self.match_token(&TokenKind::Caret) {
-                self.parse_return()
+        self.with_expression_nesting(self.current_token().span(), |p| {
+            if p.match_token(&TokenKind::Caret) {
+                p.parse_return()
             } else {
-                // Try to parse assignment or regular expression
-                self.parse_assignment()
-            };
-
-            self.leave_nesting();
-            result
+                p.parse_assignment()
+            }
         })
     }
 
@@ -122,7 +107,8 @@ impl Parser {
             self.advance(); // consume `::`
             let _ = self.parse_type_annotation();
             if self.match_token(&TokenKind::Assign) {
-                let _ = self.parse_cascade();
+                let value = self.parse_cascade();
+                self.discard_expression(value, span);
             }
             return Expression::Error {
                 message: "Type annotations on non-identifier assignments are not supported".into(),
@@ -146,11 +132,7 @@ impl Parser {
         let start = self.current_token().span();
         let pattern = self.parse_tuple_pattern();
         self.expect(&TokenKind::Assign, "Expected ':=' after tuple pattern");
-        if let Err(error) = self.enter_nesting(start) {
-            return error;
-        }
-        let value = Box::new(self.parse_assignment());
-        self.leave_nesting();
+        let value = Box::new(self.with_expression_nesting(start, Self::parse_assignment));
         let span = start.merge(value.span());
         Expression::DestructureAssignment {
             pattern,
@@ -220,11 +202,8 @@ impl Parser {
     ) -> Expression {
         match Self::collection_elements_to_pattern(elements, lhs_span, list_syntax) {
             Ok(pattern) => {
-                if let Err(error) = self.enter_nesting(lhs_span) {
-                    return error;
-                }
-                let value = Box::new(self.parse_assignment());
-                self.leave_nesting();
+                let value =
+                    Box::new(self.with_expression_nesting(lhs_span, Self::parse_assignment));
                 let span = lhs_span.merge(value.span());
                 Expression::DestructureAssignment {
                     pattern,
@@ -249,11 +228,8 @@ impl Parser {
     fn parse_map_destructure(&mut self, pairs: &[MapPair], lhs_span: Span) -> Expression {
         match Self::map_pairs_to_pattern(pairs, lhs_span) {
             Ok(pattern) => {
-                if let Err(error) = self.enter_nesting(lhs_span) {
-                    return error;
-                }
-                let value = Box::new(self.parse_assignment());
-                self.leave_nesting();
+                let value =
+                    Box::new(self.with_expression_nesting(lhs_span, Self::parse_assignment));
                 let span = lhs_span.merge(value.span());
                 Expression::DestructureAssignment {
                     pattern,
@@ -292,12 +268,7 @@ impl Parser {
             };
         }
 
-        // Guard recursive call against stack overflow
-        if let Err(error) = self.enter_nesting(expr.span()) {
-            return error;
-        }
-        let value = Box::new(self.parse_assignment());
-        self.leave_nesting();
+        let value = Box::new(self.with_expression_nesting(expr.span(), Self::parse_assignment));
         let span = expr.span().merge(value.span());
         Expression::Assignment {
             target: Box::new(expr),
@@ -329,12 +300,7 @@ impl Parser {
             };
         }
 
-        // Guard recursive call against stack overflow
-        if let Err(error) = self.enter_nesting(start) {
-            return error;
-        }
-        let value = Box::new(self.parse_assignment());
-        self.leave_nesting();
+        let value = Box::new(self.with_expression_nesting(start, Self::parse_assignment));
         let span = start.merge(value.span());
         Expression::Assignment {
             target: Box::new(target),
@@ -487,7 +453,24 @@ impl Parser {
     /// in `Parser::pipeline_sends`, so the unparser can print the `|>` back.
     fn parse_pipeline(&mut self, head: Expression) -> Expression {
         let mut value = head;
+        let mut links = 0usize;
+        let sends_mark = self.pipeline_sends.len();
         while self.check(&TokenKind::PipeGt) {
+            if !self.chain_may_grow(&mut links, self.current_token().span()) {
+                // Past the chain limit: consume the rest of the pipeline
+                // without building it, onto an error receiver.
+                self.advance(); // consume `|>`
+                let mark = self.pipeline_sends.len();
+                let receiver = Expression::Error {
+                    message: "Expression chain too long".into(),
+                    span: self.current_token().span(),
+                };
+                let stage = self.parse_pipeline_stage(receiver, CommentAttachment::default());
+                let stage_span = stage.span();
+                self.discard_expression(stage, stage_span);
+                self.pipeline_sends.truncate(mark);
+                continue;
+            }
             // Comments between the previous stage and this `|>` attach to the
             // send this `|>` introduces (see `ast::pipeline`): an end-of-line
             // comment after the previous stage, and comments on their own
@@ -508,7 +491,11 @@ impl Parser {
                 .extend(self.collect_comment_attachment().leading);
             value = self.parse_pipeline_stage(value, comments);
         }
-        value
+        if links > MAX_EXPRESSION_DEPTH {
+            // The chain becomes one error node: its sends are gone.
+            self.pipeline_sends.truncate(sends_mark);
+        }
+        self.finish_chain(value, links)
     }
 
     /// Parses one pipeline stage with `receiver` (the previous stage's value)
@@ -1000,6 +987,7 @@ impl Parser {
             left = self.report_infix_ltlt(&left);
         }
 
+        let mut links = 0usize;
         // Extract binary operator string from BinarySelector, Arrow (ADR 0047), or GtGt.
         // Arrow (`->`) is treated as the binary operator `"->"`.
         // GtGt (`>>`) is treated as the binary operator `">>"` (method lookup).
@@ -1027,10 +1015,33 @@ impl Parser {
             }
 
             // Consume the operator
-            self.advance();
+            let op_span = self.advance().span();
 
-            // Parse the right-hand side with the operator's right binding power
-            let right = self.parse_binary_with_pratt(bp.right);
+            // Parse the right-hand side with the operator's right binding
+            // power. A right-associative operator's right operand repeats
+            // the operator, so its parse recurses once per operator
+            // (`2 ** 2 ** ...`) and goes through the nesting guard; a
+            // left-associative operator's recursion is bounded by the number
+            // of precedence levels.
+            let right = if bp.right < bp.left {
+                self.with_nesting(
+                    op_span,
+                    |p| {
+                        let end = p.skip_binary_operands();
+                        Self::nesting_error(op_span.merge(end))
+                    },
+                    |p| p.parse_binary_with_pratt(bp.right),
+                )
+            } else {
+                self.parse_binary_with_pratt(bp.right)
+            };
+
+            if !self.chain_may_grow(&mut links, op_span) {
+                // Past the chain limit: consume the rest without building it.
+                let right_span = right.span();
+                self.discard_expression(right, right_span);
+                continue;
+            }
 
             // Build the message send expression
             let span = left.span().merge(right.span());
@@ -1043,7 +1054,7 @@ impl Parser {
             };
         }
 
-        left
+        self.finish_chain(left, links)
     }
 
     /// Reports a `<<` that follows an operand (`a << b`) and consumes it with
@@ -1063,6 +1074,30 @@ impl Parser {
         }
     }
 
+    /// Consumes the operands and binary operators that follow, for recovery
+    /// once a right-associative chain is too deep, without recursing into
+    /// the chain. Stops where the binary loop would: at a token that is not
+    /// a binary operator, or a line that starts a method definition.
+    /// Answers the span of the last token consumed.
+    fn skip_binary_operands(&mut self) -> Span {
+        loop {
+            let operand = self.parse_unary_message();
+            let end = operand.span();
+            self.discard_expression(operand, end);
+            let continues = match self.current_kind() {
+                TokenKind::BinarySelector(op) => binary_binding_power(op).is_some(),
+                TokenKind::Arrow | TokenKind::GtGt => true,
+                _ => false,
+            };
+            if !continues
+                || (self.current_token().has_leading_newline() && self.is_at_method_definition())
+            {
+                return end;
+            }
+            self.advance();
+        }
+    }
+
     /// Parses unary messages (highest message precedence).
     pub(super) fn parse_unary_message(&mut self) -> Expression {
         let receiver = self.parse_primary();
@@ -1074,6 +1109,7 @@ impl Parser {
     fn parse_unary_tail(&mut self, mut receiver: Expression) -> Expression {
         // Parse chain of unary messages
         // Stop if the identifier is on a new line (start of new statement)
+        let mut links = 0usize;
         while let TokenKind::Identifier(name) = self.current_kind() {
             // A newline before the identifier indicates a new statement, not a message
             if self.current_token().has_leading_newline() {
@@ -1082,6 +1118,10 @@ impl Parser {
 
             let selector = MessageSelector::Unary(name.clone());
             let tok = self.advance();
+            if !self.chain_may_grow(&mut links, tok.span()) {
+                // Past the chain limit: consume the rest without building it.
+                continue;
+            }
             let span = receiver.span().merge(tok.span());
 
             receiver = Expression::MessageSend {
@@ -1093,10 +1133,16 @@ impl Parser {
             };
         }
 
-        receiver
+        self.finish_chain(receiver, links)
     }
 
     /// Parses a primary expression (literals, identifiers, blocks, parentheses).
+    ///
+    /// The collection literals and binary constructions parse their elements
+    /// below the statement level (not through [`Self::parse_expression`]), so
+    /// each runs one nesting level deeper itself (BT-5181). Blocks,
+    /// parentheses and string interpolations reach the guard through their
+    /// own bodies.
     pub(super) fn parse_primary(&mut self) -> Expression {
         match self.current_kind() {
             // Literals
@@ -1132,22 +1178,22 @@ impl Parser {
             TokenKind::LeftParen => self.parse_parenthesized(),
 
             // Map literal
-            TokenKind::MapOpen => self.parse_map_literal(),
+            TokenKind::MapOpen => self.with_bracketed_nesting(Self::parse_map_literal),
 
             // List literal
-            TokenKind::ListOpen => self.parse_list_literal(),
+            TokenKind::ListOpen => self.with_bracketed_nesting(Self::parse_list_literal),
 
             // Array literal
-            TokenKind::ArrayOpen => self.parse_array_literal(),
+            TokenKind::ArrayOpen => self.with_bracketed_nesting(Self::parse_array_literal),
 
             // Tuple literal: `{a, b}` (ADR 0136)
-            TokenKind::LeftBrace => self.parse_tuple_literal(),
+            TokenKind::LeftBrace => self.with_bracketed_nesting(Self::parse_tuple_literal),
 
             // Binary construction: `<<16:8, payload/binary>>` (ADR 0143).
             // Only a leading `<<` reaches here: `parse_primary` runs where an
             // operand is expected, while an infix `<<` after an operand is
             // seen by the binary-operator loop, never by this dispatch.
-            TokenKind::LtLt => self.parse_binary_construction(),
+            TokenKind::LtLt => self.with_bracketed_nesting(Self::parse_binary_construction),
 
             // Primitive pragma: @primitive/@intrinsic 'name' or @primitive/@intrinsic intrinsicName
             TokenKind::AtPrimitive | TokenKind::AtIntrinsic => self.parse_primitive(),
@@ -1263,11 +1309,46 @@ impl Parser {
     /// Token sequence example for `"Hello, {name}!"`:
     /// - `StringStart("Hello, ")` → expression tokens → `StringEnd("!")`
     fn parse_string_interpolation(&mut self) -> Expression {
-        // Guard against stack overflow from deeply nested interpolations
-        if let Err(error) = self.enter_nesting(self.current_token().span()) {
-            return error;
-        }
+        // Guard against stack overflow from deeply nested interpolations.
+        // Past the limit the whole string is skipped, so its later
+        // segments are not reparsed as stray tokens.
+        let start = self.current_token().span();
+        self.with_nesting(
+            start,
+            |p| {
+                let end = p.skip_string_interpolation();
+                Self::nesting_error(start.merge(end))
+            },
+            |p| {
+                let expr = p.parse_string_interpolation_body();
+                p.bound_expression_depth(expr)
+            },
+        )
+    }
 
+    /// Consumes the interpolated string starting at the current
+    /// `StringStart`, up to its matching `StringEnd` or the end of input,
+    /// without recursion. Answers the span of the last token consumed.
+    fn skip_string_interpolation(&mut self) -> Span {
+        let mut depth = 0usize;
+        loop {
+            if self.is_at_end() {
+                return self.current_token().span();
+            }
+            let kind = self.current_kind().clone();
+            let span = self.advance().span();
+            match kind {
+                TokenKind::StringStart(_) => depth += 1,
+                TokenKind::StringEnd(_) => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            if depth == 0 {
+                return span;
+            }
+        }
+    }
+
+    fn parse_string_interpolation_body(&mut self) -> Expression {
         let start_token = self.advance();
         let start_span = start_token.span();
         let TokenKind::StringStart(first_text) = start_token.into_kind() else {
@@ -1304,7 +1385,6 @@ impl Parser {
                         segments.push(StringSegment::Literal(text));
                     }
                     let span = start_span.merge(end_token.span());
-                    self.leave_nesting();
                     return Expression::StringInterpolation { segments, span };
                 }
                 _ => {
@@ -1313,7 +1393,6 @@ impl Parser {
                         "Unterminated string interpolation",
                         start_span,
                     ));
-                    self.leave_nesting();
                     return Expression::Error {
                         message: "Unterminated string interpolation".into(),
                         span: start_span,
@@ -1336,14 +1415,19 @@ impl Parser {
 
         // Check for field access: identifier.field (see
         // `at_attached_field_access`).
+        let mut links = 0usize;
         while self.at_attached_field_access(false) {
-            self.advance(); // consume the period
+            let period_span = self.advance().span(); // consume the period
 
             let field_token = self.advance();
             let TokenKind::Identifier(field_name) = field_token.kind() else {
                 unreachable!()
             };
             let field_span = field_token.span();
+            if !self.chain_may_grow(&mut links, period_span) {
+                // Past the chain limit: consume the rest without building it.
+                continue;
+            }
 
             let full_span = expr.span().merge(field_span);
             expr = Expression::FieldAccess {
@@ -1353,7 +1437,7 @@ impl Parser {
             };
         }
 
-        expr
+        self.finish_chain(expr, links)
     }
 
     /// The expression a name stands for: `super`, a class reference
