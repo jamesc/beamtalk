@@ -345,7 +345,11 @@ getOrPut_wait_is_bounded_test() ->
             end),
             %% The child gave up and raised; the parent then stored that outcome.
             {raised, Raised} = Result,
-            ?assertBtError(runtime_error, erlang:error(Raised)),
+            %% The error names the user's key, not the encoded lock key.
+            ?assertBtErrorMatch(
+                #beamtalk_error{kind = runtime_error, details = #{key := Key, reason := timeout}},
+                erlang:error(Raised)
+            ),
             ?assertEqual(Result, beamtalk_persistent_term:getOrElse(Key, fun() -> missing end))
         after
             case Old of

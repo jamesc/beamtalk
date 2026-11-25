@@ -121,8 +121,8 @@ build_locked(Key, Block, Miss) ->
     Timeout = beamtalk_fifo_lock:configured_timeout(persistent_term, ?BUILD_WAIT_MS),
     %% bt-catcher-audit: not-applicable-reraises - the only clause turns this call's own recursive_lock into a raised beamtalk_error; block errors propagate untouched
     try
-        beamtalk_fifo_lock:with_lock_or_raise(
-            LockKey, Timeout, {'PersistentTerm', 'at:ifAbsentPut:'}, fun() ->
+        beamtalk_fifo_lock:with_lock(
+            LockKey, Timeout, fun() ->
                 %% Read again under the lock: the holder before us may have stored.
                 case persistent_term:get(PtKey, Miss) of
                     Miss ->
@@ -143,6 +143,23 @@ build_locked(Key, Block, Miss) ->
                 end
             end
         )
+    of
+        {ok, Answer} ->
+            Answer;
+        {error, Reason} ->
+            %% Name the user's key, not the encoded lock key.
+            beamtalk_error:raise(
+                beamtalk_error:with_details(
+                    beamtalk_error:new_fmt(
+                        runtime_error,
+                        'PersistentTerm',
+                        'at:ifAbsentPut:',
+                        "Gave up waiting (~ts after ~p ms) for another process building key ~tp",
+                        [Reason, Timeout, Key]
+                    ),
+                    #{key => Key, reason => Reason, timeout_ms => Timeout}
+                )
+            )
     catch
         error:{recursive_lock, LockKey} ->
             beamtalk_error:raise(

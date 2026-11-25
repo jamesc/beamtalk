@@ -8948,7 +8948,7 @@ Rules (BT-5191):
 - **Built once per class.** `asJson` encodes with `JsonMapping forClass: self class`: `class jsonMapping` runs once, is validated, and is cached until any class is loaded, reloaded or removed. It must answer the same mapping every time.
 - **nil.** A nil (converted) value is emitted as `null`. `|> omittingNil` answers a mapping that leaves such keys out.
 - **Inheritance.** A subclass inherits `asJson` and the parent's `class jsonMapping`. If it declares fields of its own, `asJson` raises a `user_error` naming them; override `class jsonMapping` (`super jsonMapping |> mapField: #extra`, or `super jsonMapping` to keep them off on purpose).
-- **Secrets.** On an Actor, a mapped `secretState` slot (inherited ones included) is emitted as `"[redacted]"`, as in `sys:get_status`. A converter on that entry is the explicit opt-out: it receives the real value.
+- **Secrets.** On an Actor, a mapped `secretState` slot (inherited ones included) is emitted as `"[redacted]"`, as in `sys:get_status`. A converter on that entry is the explicit opt-out: it receives the real value, so *any* converter on a secret slot (even `[:v | v asString]`) puts the secret on the wire. If the secret metadata cannot be read, `encode:` raises a `runtime_error`.
 - **Validation.** `encode:` validates the entries however they were built (`withEntries:` included): each needs a Symbol `#field`, a String `#key` and a Block or nil `#using`, with no repeated key.
 - **Errors and cycles.** A converter's error is re-signalled as the same exception (class and kind kept) with a message naming the field and key. `encode:` is shallow; `Json generate:` encodes converter results and nested `asJson` objects, and raises a `type_error` on a cycle.
 

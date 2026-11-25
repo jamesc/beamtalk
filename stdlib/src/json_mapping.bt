@@ -17,7 +17,12 @@
 /// - **Secrets.** A mapped actor state slot named in the class's
 ///   `secretState` (inherited ones included) is emitted as `"[redacted]"`,
 ///   the same stand-in `sys:get_status` uses. A converter on that field is the
-///   explicit opt-out: it receives the real value and its answer is emitted.
+///   explicit opt-out: it receives the real value and its answer is emitted,
+///   so **any** converter on a secret slot, even a harmless-looking
+///   `[:v | v asString]`, puts the secret on the wire. Give a secret slot a
+///   converter only to redact or transform it deliberately. If the class's
+///   secret metadata cannot be read, `encode:` raises a `runtime_error`
+///   rather than guess.
 /// - **Validation.** Every entry list is checked before use, however it was
 ///   built (`mapField:`, `withEntries:`, `JsonMapping new: #{...}`): each entry
 ///   needs a Symbol `#field`, a String (or Symbol) `#key` and a Block or nil

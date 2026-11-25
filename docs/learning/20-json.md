@@ -128,7 +128,8 @@ A few rules worth knowing:
   `asJson` raises until it overrides `class jsonMapping`, usually as
   `super jsonMapping |> mapField: #extra`.
 - On an actor, a mapped `secretState` slot is emitted as `"[redacted]"`
-  unless its entry has a converter, which then sees the real value.
+  unless its entry has a converter, which then sees the real value (so
+  any converter on a secret slot puts the secret on the wire).
 - A converter's error is re-signalled (same class) naming the field, and an object that
   reappears inside its own JSON (a cycle) makes `Json generate:` raise.
 

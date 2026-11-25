@@ -38,8 +38,28 @@ metadata the actor's status redaction reads; it fails closed). Any other
 object has none.
 """.
 -spec secretSlots(term()) -> [atom()].
-secretSlots(#beamtalk_object{class_mod = Module}) when is_atom(Module) ->
-    beamtalk_actor_redaction:secret_slots(Module);
+secretSlots(#beamtalk_object{class = Class, class_mod = Module}) when is_atom(Module) ->
+    try
+        beamtalk_actor_redaction:secret_slots(Module)
+    catch
+        %% Fail closed, as a structured error: without the metadata we cannot
+        %% tell which mapped slots are secret, so nothing is encoded.
+        error:{Why, Module, _} = Raw when
+            Why =:= secret_metadata_unavailable; Why =:= malformed_secret_metadata
+        ->
+            beamtalk_error:raise(
+                beamtalk_error:with_details(
+                    beamtalk_error:new_fmt(
+                        runtime_error,
+                        'JsonMapping',
+                        'encode:',
+                        "Cannot read the secretState of ~ts, so it is not encoded (~ts)",
+                        [Class, Why]
+                    ),
+                    #{class => Class, module => Module, cause => Raw}
+                )
+            )
+    end;
 secretSlots(_Other) ->
     [].
 
