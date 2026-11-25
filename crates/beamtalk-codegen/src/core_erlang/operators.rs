@@ -881,8 +881,9 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// The fast path's test implies the bare BIF arm: the right operand's
-    /// [`OrderingKind::test_doc`] for a proven receiver; otherwise `<kind test>(L) and is_number(R)`, `or`
-    /// `is_binary(L)` when a `String` is held.
+    /// [`OrderingKind::test_doc`] for a proven receiver; otherwise
+    /// `<kind test>(L) and is_number(R)`, `or` `is_binary(L)` when a `String`
+    /// is held.
     fn right_tested_comparison(
         &mut self,
         guard: OperatorGuard,
@@ -1042,8 +1043,9 @@ pub(in crate::core_erlang) fn right_tested_comparison(
 struct RightOperand {
     /// Arithmetic: numeric by literal or declaration (ADR 0116, no coercion).
     statically_numeric: bool,
-    /// Ordering comparison: not proven numeric, so tested (ADR 0116
-    /// § Addendum, BT-5176).
+    /// Ordering comparison: the right operand is not proven of the
+    /// receiver's kind, so it is tested (ADR 0116 § Addendum, BT-5176,
+    /// BT-5213).
     tested: bool,
 }
 

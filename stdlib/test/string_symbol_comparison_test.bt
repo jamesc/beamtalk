@@ -13,7 +13,8 @@
 // `String` and `Symbol` (an untyped or declared receiver, which dispatches,
 // and `perform:`, a dynamic send). The two must agree.
 //
-// Fixture: `fixtures/widget.bt` (an object with no ordering).
+// Fixtures: `fixtures/widget.bt` (an object with no ordering) and
+// `fixtures/string_compare_actor.bt` (the error crossing an actor boundary).
 
 TestCase subclass: StringSymbolComparisonTest
 
@@ -259,3 +260,12 @@ TestCase subclass: StringSymbolComparisonTest
           self performGe: #m with: x
         ]) equals: (self outcomeOf: [self symGe: x])
       ]
+
+  /// The error raised inside an actor method reaches the caller as the same
+  /// structured `type_error`, hint included.
+  testActorMethodRaisesTheSameTypeError =>
+    a := StringCompareActor spawn
+    self assertBlock: [a lt: 5] raisesTypeErrorFor: "<" on: "String"
+    self assertBlock: [a symGt: "m"] raisesTypeErrorFor: ">" on: "Symbol"
+    self assert: (a lt: "z")
+    a stop

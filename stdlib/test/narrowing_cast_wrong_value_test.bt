@@ -108,5 +108,8 @@ TestCase subclass: NarrowingCastWrongValueTest
     self assert: (self kindOf: [
       self.probe castThenField: #{#v => nil}
     ]) equals: #does_not_understand
-    self assert: (self.probe castThenField: #{#v => #foo}) equals: true
+    // A Symbol reaches `Symbol>>>`, which raises for the Integer (BT-5213).
+    self assert: (self kindOf: [
+      self.probe castThenField: #{#v => #foo}
+    ]) equals: #type_error
     self assert: (self.probe castThenField: #{#v => 7.5}) equals: false
