@@ -10,7 +10,6 @@
 //!   and block-context classification
 //! - [`bt4573_setup_cascade_single_diagnostic`] — a `setUp` multi-`with*:`
 //!   cascade draws only `cascade-drops-update` (BT-4573)
-//! - [`class_state_abroad`] — ADR 0130 §5 `class-state-abroad` lint (BT-3712)
 //! - [`local_threading`] — ADR 0131 §6 and Phase 0 outer-local threading
 //!   errors (BT-3745)
 //! - [`match_arm_analysis`] — `match:` arm pattern binding and scoping

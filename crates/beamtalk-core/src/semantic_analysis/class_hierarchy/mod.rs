@@ -33,8 +33,8 @@ pub(crate) fn generated_stdlib_protocol_files() -> Vec<(&'static str, &'static s
 #[cfg(test)]
 mod tests;
 pub use class_info::{
-    AutoConstructors, ClassInfo, ClassVarInfo, DirectConstructors, InitializeAssignsSummary,
-    MethodInfo, SuperclassTypeArg, format_default_value,
+    AutoConstructors, ClassInfo, DirectConstructors, InitializeAssignsSummary, MethodInfo,
+    SuperclassTypeArg, format_default_value,
 };
 pub use declared_type::{DeclaredShapeField, DeclaredType};
 pub use hierarchy_queries::{Ancestors, AncestorsOrObject, superclass_chain_includes_value};
@@ -261,7 +261,6 @@ impl ClassHierarchy {
                     has_dynamic_field_writer: false,
                     methods: vec![],
                     class_methods,
-                    class_variables: vec![],
                     type_params: vec![],
                     type_param_bounds: vec![],
                     superclass_type_args: vec![],
@@ -405,31 +404,23 @@ impl ClassHierarchy {
     /// caller's process instead of the class's `gen_server`, however it is
     /// reached (ADR 0142 §1). THE one rule, the static form of the runtime's
     /// (`beamtalk_class_dispatch`'s in-caller owner memo); nothing keeps a
-    /// second copy. It holds when:
-    ///
-    /// 1. no class in `class_name`'s chain declares class variables
-    ///    ([`Self::chain_has_class_variables`]): rules 1-2 taken over the whole
-    ///    chain, as the runtime takes them
-    ///    (`beamtalk_class_metadata:chain_has_class_variables/1`), because a
-    ///    subclass holds its ancestors' class variables in its own process;
-    /// 2. the selector is not process-bound
-    ///    ([`ClassInfo::is_process_bound_class_selector`], rule 3) and not a
-    ///    class-variable reflection send
-    ///    ([`ClassInfo::is_class_var_reflection_selector`]), which the class
-    ///    process answers from its own state.
+    /// second copy. Since ADR 0153 removed class variables it has one input:
+    /// the selector is not process-bound
+    /// ([`ClassInfo::is_process_bound_class_selector`]). A class's own
+    /// explicit `new:` of the in-caller shape ([`ClassInfo::in_caller_new1`])
+    /// runs in the caller too, when its chain allows it.
     ///
     /// `sealed` and `class sealed` play no part. The method may be inherited:
     /// a dynamic send runs an inherited stateless method in the caller too
     /// (BT-4300). The lints that ask where a class method runs
-    /// (`class-state-abroad`, `actor-state-abroad`, `class-process-ffi` /
-    /// `class-method-process-resource`) and the local-threading escape
-    /// analysis read this (for a class *reference* receiver, through
-    /// [`Self::class_reference_send_runs_in_caller`], which adds shadowing);
-    /// codegen reads [`Self::is_direct_call_eligible`], which adds only the
-    /// own-method condition. Like every compile-time verdict it describes the
-    /// classes as compiled: a class-side extension or ADR 0084 runtime fun
-    /// sends the method back to the class process at run time, which the guard
-    /// of every static direct call re-checks.
+    /// (`actor-state-abroad`, `class-method-process-resource`) and the
+    /// local-threading escape analysis read this (for a class *reference*
+    /// receiver, through [`Self::class_reference_send_runs_in_caller`], which
+    /// adds shadowing); codegen reads [`Self::is_direct_call_eligible`], which
+    /// adds only the own-method condition. Like every compile-time verdict it
+    /// describes the classes as compiled: a class-side extension or ADR 0084
+    /// runtime fun sends the method back to the class process at run time,
+    /// which the guard of every static direct call re-checks.
     #[must_use]
     pub fn runs_class_method_in_caller(&self, class_name: &str, selector: &str) -> bool {
         if selector == "new:"
@@ -444,8 +435,6 @@ impl ClassHierarchy {
             return true;
         }
         !ClassInfo::is_process_bound_class_selector(selector)
-            && !ClassInfo::is_class_var_reflection_selector(selector)
-            && !self.chain_has_class_variables(class_name)
     }
 
     /// Whether a send of the class-side `selector` to the class *reference*
@@ -454,9 +443,8 @@ impl ClassHierarchy {
     /// name is shadowed ([`Self::is_shadowed_class`], BT-4283). A shadowed
     /// name is one last-wins runtime class, so this hierarchy's entry need not
     /// be the class the send reaches, and codegen sends it dynamically: a
-    /// block passed to it may run in that class's process. The block-escape
-    /// validators (`class-state-abroad`, local threading's passed-block
-    /// escape) and the `actor-state-abroad` lint ask this for a class
+    /// block passed to it may run in that class's process. Local threading's
+    /// passed-block escape and the `actor-state-abroad` lint ask this for a class
     /// reference receiver; a `self class` receiver is the running class
     /// itself and asks [`Self::runs_class_method_in_caller`] directly.
     #[must_use]
@@ -476,43 +464,12 @@ impl ClassHierarchy {
     ///
     /// A compile-time verdict only: every call site it enables is guarded at
     /// run time by `beamtalk_class_shadow_flags:direct_call_ok/2`, which
-    /// re-checks shadows and the chain's class variables against the live
-    /// classes.
+    /// re-checks shadows against the live classes.
     #[must_use]
     pub fn is_direct_call_eligible(&self, class_name: &str, selector: &str) -> bool {
         self.get_class(class_name)
             .is_some_and(|class| class.class_methods.iter().any(|m| m.selector == selector))
             && self.runs_class_method_in_caller(class_name, selector)
-    }
-
-    /// Whether `class_name` or any of its ancestors declares class variables
-    /// ([`ClassInfo::has_class_variables`]), or the chain cannot be followed to
-    /// its root (an unknown class or superclass, a cycle, a superclass-index
-    /// stub from [`Self::add_external_superclasses`]): any doubt answers
-    /// `true`, as the runtime's `beamtalk_class_metadata:
-    /// chain_has_class_variables/1` answers for an unpublished fact.
-    #[must_use]
-    pub fn chain_has_class_variables(&self, class_name: &str) -> bool {
-        let mut current = class_name;
-        let mut seen = HashSet::new();
-        loop {
-            if !seen.insert(current) {
-                return true;
-            }
-            let Some(class) = self.get_class(current) else {
-                return true;
-            };
-            // A superclass-index stub (`add_external_superclasses`) carries
-            // only name + superclass: its class variables are unknown, not
-            // absent, so it answers `true` like any other doubt (BT-4644).
-            if class.has_class_variables() || class.is_superclass_index_stub() {
-                return true;
-            }
-            match class.superclass.as_deref() {
-                Some(superclass) => current = superclass,
-                None => return false,
-            }
-        }
     }
 
     /// Look up a class by name.
@@ -634,7 +591,6 @@ impl ClassHierarchy {
                         has_dynamic_field_writer: false,
                         methods: Vec::new(),
                         class_methods: Vec::new(),
-                        class_variables: Vec::new(),
                         type_params: Vec::new(),
                         type_param_bounds: Vec::new(),
                         superclass_type_args: Vec::new(),

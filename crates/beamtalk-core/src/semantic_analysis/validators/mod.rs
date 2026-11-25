@@ -7,12 +7,9 @@
 //!
 //! This module contains validation checks that run after the main analysis
 //! pipeline. Validators are organized by concern:
-//! - `class_process_ffi_validators` — class-side methods that run
-//!   process-sensitive FFI in the class process (`class-process-ffi`,
-//!   BT-4031), or create process-owned resources in the caller
-//!   (`class-method-process-resource`, ADR 0142, BT-4302)
-//! - `class_state_abroad` — blocks that touch their home class's variables
-//!   where they run outside an invocation of it (ADR 0130 §5, BT-3712)
+//! - `class_process_ffi_validators` — class-side methods that create
+//!   process-owned resources in the caller (`class-method-process-resource`,
+//!   ADR 0142, BT-4302)
 //! - `class_validators` — class-hierarchy-dependent checks
 //! - `handleinfo_catch_all_validators` — `handleInfo:` written as a `match:`
 //!   with no catch-all arm (ADR 0134, BT-3959)
@@ -28,9 +25,7 @@
 //! - `operator_validators` — non-dispatchable operator declaration checks
 //! - `package_validators` — package qualifiers name a known package
 //!   (ADR 0070)
-//! - `reserved_name_validators` — reserved internal-namespace name checks,
-//!   and class-side methods shadowed by the class process's class-variable
-//!   reflection selectors (BT-4422)
+//! - `reserved_name_validators` — reserved internal-namespace name checks
 //! - `sendability_validators` — sendability checks that need data the type
 //!   checker does not carry (ADR 0103)
 //! - `structural_validators` — unresolved classes and FFI modules, Erlang
@@ -41,7 +36,6 @@
 //!   (ADR 0071)
 
 mod class_process_ffi_validators;
-mod class_state_abroad;
 mod class_validators;
 mod handleinfo_catch_all_validators;
 mod late_slot_validators;
@@ -63,11 +57,10 @@ mod visibility_validators;
 pub(crate) use class_process_ffi_validators::{
     check_class_method_ffi, ffi_call_is_process_sensitive,
 };
-pub(crate) use class_state_abroad::check_class_state_abroad;
 pub use class_validators::check_stdlib_name_shadowing;
 pub(crate) use class_validators::{
     check_abstract_instantiation, check_actor_new_usage, check_cast_on_value_type,
-    check_class_side_self_field_access, check_class_variable_access, check_data_keyword_class_kind,
+    check_class_side_self_field_access, check_data_keyword_class_kind,
     check_handle_scope_on_object, check_new_field_names, check_object_new_usage,
     check_shape_version_and_migrations, check_value_nil_return, check_value_slot_assignment,
     check_value_slot_case_collision,
@@ -102,7 +95,7 @@ pub(crate) use operator_validators::check_non_overridable_operator_methods;
 pub(crate) use package_validators::check_package_qualifiers;
 pub use reserved_name_validators::MODULE_INFO_FUNCTION;
 pub(crate) use reserved_name_validators::{
-    check_class_var_reflection_shadowing, check_reserved_internal_names, check_reserved_module_info,
+    check_reserved_internal_names, check_reserved_module_info,
 };
 pub(crate) use sendability_validators::{
     check_block_capture_sendability, check_undeclared_handle_class,

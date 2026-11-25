@@ -152,15 +152,9 @@ const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
     ),
     ("unguarded-late-read", DiagnosticCategory::UnguardedLateRead),
     ("match-arm-block", DiagnosticCategory::MatchArmBlock),
-    ("class-state-abroad", DiagnosticCategory::ClassStateAbroad),
-    ("class-process-ffi", DiagnosticCategory::ClassProcessFfi),
     (
         "class-method-process-resource",
         DiagnosticCategory::ClassMethodProcessResource,
-    ),
-    (
-        "class-var-reflection-shadowing",
-        DiagnosticCategory::ClassVarReflectionShadowing,
     ),
     ("actor-state-abroad", DiagnosticCategory::ActorStateAbroad),
     ("ffi-nested-string", DiagnosticCategory::FfiNestedString),
@@ -638,10 +632,7 @@ fn expect_category_unchecked(
         | ExpectCategory::Inheritance
         | ExpectCategory::Sendability
         | ExpectCategory::MatchArmBlock
-        | ExpectCategory::ClassStateAbroad
-        | ExpectCategory::ClassProcessFfi
         | ExpectCategory::ClassMethodProcessResource
-        | ExpectCategory::ClassVarReflectionShadowing
         | ExpectCategory::FfiNestedString
         | ExpectCategory::BinaryStringCompare
         | ExpectCategory::CascadeDropsUpdate
@@ -975,20 +966,8 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     Some(DiagnosticCategory::MatchArmBlock)
                 )
                 | (
-                    ExpectCategory::ClassStateAbroad,
-                    Some(DiagnosticCategory::ClassStateAbroad)
-                )
-                | (
-                    ExpectCategory::ClassProcessFfi,
-                    Some(DiagnosticCategory::ClassProcessFfi)
-                )
-                | (
                     ExpectCategory::ClassMethodProcessResource,
                     Some(DiagnosticCategory::ClassMethodProcessResource)
-                )
-                | (
-                    ExpectCategory::ClassVarReflectionShadowing,
-                    Some(DiagnosticCategory::ClassVarReflectionShadowing)
                 )
                 | (
                     ExpectCategory::ActorStateAbroad,
@@ -1178,10 +1157,7 @@ file-class-name-mismatch = "error"
 definite-assignment = "error"
 unguarded-late-read = "error"
 match-arm-block = "off"
-class-state-abroad = "off"
-class-process-ffi = "off"
 class-method-process-resource = "off"
-class-var-reflection-shadowing = "off"
 actor-state-abroad = "off"
 ffi-nested-string = "off"
 binary-string-compare = "off"

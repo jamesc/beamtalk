@@ -627,14 +627,6 @@ impl CoreErlangGenerator {
             .is_some_and(|h| h.state_field_kind(class_name, field_name) == SlotKind::Late)
     }
 
-    /// Class-side counterpart to [`Self::is_late_state_field`], for a
-    /// `classState:` slot read via `self.<var>` in a class method.
-    fn is_late_class_var(&self, class_name: &str, var_name: &str) -> bool {
-        self.class_hierarchy
-            .as_ref()
-            .is_some_and(|h| h.class_variable_kind(class_name, var_name) == SlotKind::Late)
-    }
-
     /// ADR 0124 §3 (as amended by BT-4061): builds the
     /// `call 'beamtalk_error':'raise'(...)` for the `'error'` (absent-key)
     /// arm of [`Self::generate_late_field_read`]. Reuses the shared
@@ -772,14 +764,9 @@ impl CoreErlangGenerator {
         // class process's dictionary (inlined, the runtime helper on a miss).
         if self.in_class_method() {
             if self.is_class_var_field_read(receiver, field) {
-                let class_name = self.class_name();
-                let late = self.is_late_class_var(&class_name, field.name.as_str());
-                return Ok(self.class_var_read_doc(field.name.as_str(), late));
-            }
-            if Self::is_self_receiver(receiver)
-                && let Some(err) = self.inherited_class_var_error(field.name.as_str(), field.span)
-            {
-                return Err(err);
+                // ADR 0153: no class variable is `late` (or exists at all);
+                // BT-5153 deletes this read path.
+                return Ok(self.class_var_read_doc(field.name.as_str(), false));
             }
             return Err(CodeGenError::UnsupportedFeature {
                 feature: format!(
@@ -920,9 +907,6 @@ impl CoreErlangGenerator {
         // the assigned value, an expression like any other (no rebinding).
         if self.in_class_method() {
             if !self.class_var_names().contains(field_name) {
-                if let Some(err) = self.inherited_class_var_error(field_name, value.span()) {
-                    return Err(err);
-                }
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: format!(
                         "cannot assign to instance field '{field_name}' in a class method"

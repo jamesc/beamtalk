@@ -55,22 +55,10 @@ pub enum ExpectCategory {
     /// Suppress match-arm-block warnings — a `match:` arm whose body is a
     /// bare block literal answers the Block without running it (BT-4028).
     MatchArmBlock,
-    /// Suppress class-state-abroad warnings — a block literal that touches
-    /// its home class's variables used where it runs outside an invocation of
-    /// that class (ADR 0130 §5).
-    ClassStateAbroad,
-    /// Suppress class-process-ffi warnings — a class-side method that runs in
-    /// its class's process and directly calls a process-sensitive Erlang
-    /// function (BT-4031).
-    ClassProcessFfi,
     /// Suppress class-method-process-resource warnings — a class-side method
     /// that is direct-called in the caller's process directly creates a
     /// resource tied to, or acts on, the calling process (BT-4302).
     ClassMethodProcessResource,
-    /// Suppress class-var-reflection-shadowing warnings — a class-side method
-    /// named `fieldAt:`, `fieldAt:put:`, `hasField:` or `clearField:`, which
-    /// the class process answers itself for a Symbol argument (BT-4422).
-    ClassVarReflectionShadowing,
     /// Suppress actor-state-abroad warnings — a block literal that touches
     /// its actor's state used where it runs outside the actor's process
     /// (ADR 0137).
@@ -121,10 +109,7 @@ impl ExpectCategory {
             "inheritance" => Some(Self::Inheritance),
             "sendability" => Some(Self::Sendability),
             "match_arm_block" => Some(Self::MatchArmBlock),
-            "class_state_abroad" => Some(Self::ClassStateAbroad),
-            "class_process_ffi" => Some(Self::ClassProcessFfi),
             "class_method_process_resource" => Some(Self::ClassMethodProcessResource),
-            "class_var_reflection_shadowing" => Some(Self::ClassVarReflectionShadowing),
             "actor_state_abroad" => Some(Self::ActorStateAbroad),
             "ffi_nested_string" => Some(Self::FfiNestedString),
             "binary_string_compare" => Some(Self::BinaryStringCompare),
@@ -156,10 +141,7 @@ impl ExpectCategory {
             Self::Inheritance => "inheritance",
             Self::Sendability => "sendability",
             Self::MatchArmBlock => "match_arm_block",
-            Self::ClassStateAbroad => "class_state_abroad",
-            Self::ClassProcessFfi => "class_process_ffi",
             Self::ClassMethodProcessResource => "class_method_process_resource",
-            Self::ClassVarReflectionShadowing => "class_var_reflection_shadowing",
             Self::ActorStateAbroad => "actor_state_abroad",
             Self::FfiNestedString => "ffi_nested_string",
             Self::BinaryStringCompare => "binary_string_compare",
@@ -191,10 +173,7 @@ impl ExpectCategory {
             "inheritance",
             "sendability",
             "match_arm_block",
-            "class_state_abroad",
-            "class_process_ffi",
             "class_method_process_resource",
-            "class_var_reflection_shadowing",
             "actor_state_abroad",
             "ffi_nested_string",
             "binary_string_compare",

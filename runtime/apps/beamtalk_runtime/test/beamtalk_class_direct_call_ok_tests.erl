@@ -104,6 +104,21 @@ direct_call_ok_test_() ->
                 beamtalk_test_proc:stop(Stateful)
             end
         end},
+        {"meta without class-variable keys (ADR 0153 codegen) means no class variables",
+            fun() ->
+                %% BT-5154: the compiler no longer emits `class_fields` or
+                %% `class_field_kinds`; with no `classState` defaults either,
+                %% the class has no class variables and may be direct-called.
+                Name = 'Bt5154NoClassVarKeys',
+                Meta = #{process_bound_class_selectors => [new]},
+                Pid = beamtalk_test_class:start(Name, class_info(#{}, Meta)),
+                try
+                    ?assertEqual(false, beamtalk_class_metadata:lookup_has_class_variables(Name)),
+                    ?assert(ok(Name))
+                after
+                    beamtalk_test_proc:stop(Pid)
+                end
+            end},
         {"compiled class_field_kinds is the class-variable fact when present", fun() ->
             %% A declared `late` class variable has no default, so the
             %% `classState` defaults are empty; the meta still says it exists.
