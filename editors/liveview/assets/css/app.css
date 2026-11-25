@@ -936,6 +936,7 @@
 .actionbar .spacer { flex: 1; }
 .btn .k { font-family: var(--code-font, ui-monospace, monospace); font-size: 10px; color: var(--faint); }
 .kbdhint { font-size: 10.5px; color: var(--faint); }
+.eval-activity { display: inline-flex; align-items: center; gap: 6px; margin-right: 8px; }
 
 /* right column splits between bindings and inspector, with a draggable gutter
    (BT-2576). Bindings (top pane) is sized by `--right-split`; the Inspector

@@ -171,33 +171,19 @@ fn test_field_assignment_closed_value_type_threads_self() {
 }
 
 #[test]
-fn test_field_assignment_closed_class_var_is_an_in_place_put_answering_the_value() {
-    // ADR 0130 §2: a class-method field write is a `put` into the class
-    // process's dictionary that answers the assigned value; no `ClassVars{N}`
-    // rebinding and no shadow write.
+fn test_field_assignment_closed_in_a_class_method_is_rejected() {
+    // ADR 0153: a class has no slots; the codegen backstop rejects the write.
     let mut generator = CoreErlangGenerator::new("test");
     generator.set_in_class_method(true);
-    generator.class_var_names_mut().insert("total".to_string());
     let value = Expression::Literal(Literal::Integer(42), s());
-    let output = generator
+    let err = generator
         .generate_field_assignment("total", &value)
-        .unwrap()
-        .to_pretty_string();
+        .expect_err("a class-side field write must not lower");
     assert!(
-        output.starts_with("let _CVVal@1 = 42 in case call 'erlang':'get'({'$bt_class_vars', "),
-        "the value is evaluated first, then the class key is probed. Got: {output}"
-    );
-    assert!(
-        output.contains("call 'erlang':'put'({'$bt_class_vars', ")
-            && output.contains("call 'maps':'put'('total', _CVVal@1, "),
-        "class-var write should put the new map back in place. Got: {output}"
-    );
-    assert!(
-        output.contains("call 'beamtalk_class_vars':'put'(ClassSelf, 'total', _CVVal@1)"),
-        "a miss falls back to the runtime helper. Got: {output}"
-    );
-    assert!(
-        !output.contains("ClassVars") && !output.contains("State"),
-        "class-var write must never reference ClassVars or State. Got: {output}"
+        matches!(
+            err,
+            crate::core_erlang::CodeGenError::UnsupportedFeature { .. }
+        ),
+        "got: {err:?}"
     );
 }

@@ -54,7 +54,13 @@ process.
     harmless; a `gen_server` caller sees it as an unknown `handle_info`.
 """.
 
--export([with_lock/3, with_lock_or_raise/4, configured_timeout/2, queue/1, ensure_table/0]).
+-export([
+    with_lock/3,
+    with_lock_or_raise/4, with_lock_or_raise/5,
+    configured_timeout/2,
+    queue/1,
+    ensure_table/0
+]).
 
 -define(TABLE, beamtalk_fifo_locks).
 -define(POLL_MS, 200).
@@ -96,7 +102,17 @@ section) still answers a bounded wait with a user-facing error. `Class` and
 the `reason` and the `timeout_ms`. `Fun` is not run on error.
 """.
 -spec with_lock_or_raise(term(), timeout(), {atom(), atom()}, fun(() -> T)) -> T.
-with_lock_or_raise(Key, TimeoutMs, {Class, Selector}, Fun) ->
+with_lock_or_raise(Key, TimeoutMs, ClassSelector, Fun) ->
+    with_lock_or_raise(Key, Key, TimeoutMs, ClassSelector, Fun).
+
+-doc """
+`with_lock_or_raise/4`, naming `DisplayKey` instead of the lock `Key` in the
+error's message and `lock_key` detail. For a caller whose lock key is an
+encoding of the user's key (BT-5191: `PersistentTerm` locks on
+`term_to_binary/2` of it), so the error shows what the user passed.
+""".
+-spec with_lock_or_raise(term(), term(), timeout(), {atom(), atom()}, fun(() -> T)) -> T.
+with_lock_or_raise(Key, DisplayKey, TimeoutMs, {Class, Selector}, Fun) ->
     case with_lock(Key, TimeoutMs, Fun) of
         {ok, Result} ->
             Result;
@@ -104,10 +120,12 @@ with_lock_or_raise(Key, TimeoutMs, {Class, Selector}, Fun) ->
             Msg = beamtalk_error:chars_to_binary(
                 case TimeoutMs of
                     infinity ->
-                        io_lib:format("could not take lock ~0tp: ~ts", [Key, Reason]);
+                        io_lib:format("could not take lock ~0tp: ~ts", [DisplayKey, Reason]);
                     _ ->
                         io_lib:format(
-                            "could not take lock ~0tp: ~ts after ~p ms", [Key, Reason, TimeoutMs]
+                            "could not take lock ~0tp: ~ts after ~p ms", [
+                                DisplayKey, Reason, TimeoutMs
+                            ]
                         )
                 end
             ),
@@ -115,7 +133,7 @@ with_lock_or_raise(Key, TimeoutMs, {Class, Selector}, Fun) ->
             Err1 = beamtalk_error:with_message(Err0, Msg),
             beamtalk_error:raise(
                 beamtalk_error:with_details(Err1, #{
-                    lock_key => Key, reason => Reason, timeout_ms => TimeoutMs
+                    lock_key => DisplayKey, reason => Reason, timeout_ms => TimeoutMs
                 })
             )
     end.

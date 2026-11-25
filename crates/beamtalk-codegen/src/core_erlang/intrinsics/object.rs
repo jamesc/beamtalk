@@ -11,8 +11,8 @@
 
 use super::{
     ClassHierarchy, CodeGenContext, CoreErlangGenerator, Document, ErrorSignalReceiver, Expression,
-    MessageSelector, PERFORM_WITH_ARGS_TIMEOUT, Result, WellKnownSelector, class_var_fn, docvec,
-    leaf, nil_test_case, not_nil_apply, primitives, validate_if_not_nil_block,
+    MessageSelector, PERFORM_WITH_ARGS_TIMEOUT, Result, WellKnownSelector, docvec, leaf,
+    nil_test_case, not_nil_apply, primitives, validate_if_not_nil_block,
 };
 use crate::core_erlang::dispatch_codegen::{runtime_send_args, runtime_send_doc};
 use crate::core_erlang::errors::{BeamtalkErrorChain, ErrorBinding};
@@ -1268,33 +1268,11 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         debug_assert_eq!(arguments.len(), 1);
-        // Class-method `self fieldAt: k` reads the class
-        // variable in place, like `self.x` (BT-4421):
-        // `beamtalk_class_vars:field_at(ClassSelf, Name)`,
-        // which applies the `Cls fieldAt:` read rule
-        // (declared `late`, declared set) at run time, the
-        // name being dynamic. A `class_send` would re-enter
-        // the class's own gen_server (`dispatch_error`).
-        if self.is_class_side_self_reflection(receiver) {
-            let name_var = self.fresh_var("Name");
-            let name_code = self.expression_doc(&arguments[0])?;
-            let doc = docvec![
-                "let ",
-                leaf::var(name_var.clone()),
-                " = ",
-                name_code,
-                " in ",
-                self.class_var_read_helper_call_doc(
-                    class_var_fn::FIELD_AT,
-                    vec![leaf::var(name_var)],
-                ),
-            ];
-            return Ok(Some(doc));
-        }
         // Fast-path for `self` receiver in actor context.
         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
         if receiver.is_self()
             && self.context == super::super::CodeGenContext::Actor
+            && !self.in_class_method()
             && self.lookup_var("self").is_none()
         {
             let name_var = self.fresh_var("Name");
@@ -1399,46 +1377,12 @@ impl CoreErlangGenerator {
     }
 
     /// `fieldAt:put:` — write an instance variable by name.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "fieldAt:put: requires verbose type guards for actor vs primitive dispatch"
-    )]
     fn object_field_at_put(
         &mut self,
         receiver: &Expression,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         debug_assert_eq!(arguments.len(), 2);
-        // Class-method `self fieldAt: k put: v` writes the
-        // class variable in place, like `self.x := v`
-        // (BT-4421): `beamtalk_class_vars:field_at_put`,
-        // `put/3` after the `Cls fieldAt:put:` declared-set
-        // check. Not a state-threaded write
-        // (`is_self_field_at_put` excludes class methods,
-        // ADR 0130); its order against sibling operands is
-        // pinned by `is_class_side_effect`.
-        if self.is_class_side_self_reflection(receiver) {
-            let name_var = self.fresh_var("Name");
-            let value_var = self.fresh_var("Value");
-            let name_code = self.expression_doc(&arguments[0])?;
-            let value_code = self.expression_doc(&arguments[1])?;
-            let doc = docvec![
-                "let ",
-                leaf::var(name_var.clone()),
-                " = ",
-                name_code,
-                " in let ",
-                leaf::var(value_var.clone()),
-                " = ",
-                value_code,
-                " in ",
-                Self::class_var_helper_call_doc(
-                    class_var_fn::FIELD_AT_PUT,
-                    vec![leaf::var(name_var), leaf::var(value_var)],
-                ),
-            ];
-            return Ok(Some(doc));
-        }
         // Fast-path for `self` receiver in actor context.
         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
         //
@@ -1453,6 +1397,7 @@ impl CoreErlangGenerator {
         // state back into the actor's State variable.
         if receiver.is_self()
             && self.context == super::super::CodeGenContext::Actor
+            && !self.in_class_method()
             && self.lookup_var("self").is_none()
         {
             let name_var = self.fresh_var("Name");
@@ -1555,23 +1500,6 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         debug_assert_eq!(arguments.len(), 1);
-        // Class-method `self hasField: #x` is a presence test
-        // on the class variables, in place (ADR 0130 §2):
-        // `beamtalk_class_vars:has(ClassSelf, Name)`, which
-        // never raises on the name.
-        if self.is_class_side_self_reflection(receiver) {
-            let name_var = self.fresh_var("Name");
-            let name_code = self.expression_doc(&arguments[0])?;
-            let doc = docvec![
-                "let ",
-                leaf::var(name_var.clone()),
-                " = ",
-                name_code,
-                " in ",
-                self.class_var_read_helper_call_doc(class_var_fn::HAS, vec![leaf::var(name_var)]),
-            ];
-            return Ok(Some(doc));
-        }
         // Fast-path for `self` receiver in actor instance
         // context. Avoids sync_send(self()) → deadlock.
         if receiver.is_self()
@@ -1627,25 +1555,6 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         debug_assert_eq!(arguments.len(), 1);
-        // Class-side `self clearField: #x` removes the class
-        // variable in place at any nesting depth (ADR 0130
-        // §2): `beamtalk_class_vars:clear(ClassSelf, Name)`,
-        // which answers `self`. Routing it through
-        // `class_send` instead would deadlock on the class's
-        // own process.
-        if self.is_class_side_self_reflection(receiver) {
-            let name_var = self.fresh_var("Name");
-            let name_code = self.expression_doc(&arguments[0])?;
-            let doc = docvec![
-                "let ",
-                leaf::var(name_var.clone()),
-                " = ",
-                name_code,
-                " in ",
-                Self::class_var_helper_call_doc(class_var_fn::CLEAR, vec![leaf::var(name_var)]),
-            ];
-            return Ok(Some(doc));
-        }
         // Fast-path for `self` receiver in actor instance
         // context. Avoids sync_send(self()) → deadlock.
         // Method-body-level state threading is handled by
@@ -1662,6 +1571,7 @@ impl CoreErlangGenerator {
         // actor's `State` variable.
         if receiver.is_self()
             && self.context == super::super::CodeGenContext::Actor
+            && !self.in_class_method()
             && self.lookup_var("self").is_none()
         {
             let name_var = self.fresh_var("Name");

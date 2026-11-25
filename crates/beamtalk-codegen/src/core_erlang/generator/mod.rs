@@ -84,7 +84,7 @@ pub enum CodeGenContext {
 /// Fields are organized into context-specific groups to reduce the cognitive
 /// load of the god object:
 /// - [`ReplContext`] — REPL-specific state (`is_repl_mode`, etc.)
-/// - [`ClassContext`] — Class/actor-specific state (`class_identity`, `class_var_*`, etc.)
+/// - [`ClassContext`] — Class/actor-specific state (`class_identity`, etc.)
 /// - [`ValueTypeContext`] — Value-type-specific state (`self_version`, `current_nlr_token`)
 ///
 /// Each context is `Option<T>` on the generator, set only when relevant.
@@ -177,30 +177,16 @@ pub struct CoreErlangGenerator {
     /// ADR 0137 Phase 2a (BT-4020): the cell bracket's mode and bookkeeping
     /// (`synced_call.rs`). Inert outside an actor instance method.
     pub(in crate::core_erlang) synced: super::synced_call::SyncedCallState,
-    /// ADR 0130 §5: the Core Erlang variable holding the class-variable
-    /// capture of the innermost enclosing block literal that reads a class
-    /// variable (`beamtalk_class_vars:capture/2` bound at its creation), or
-    /// `None` at method level and inside blocks that read none. While `Some`,
-    /// every class-variable read's miss path lowers to the 3-arity
-    /// captured-fallback helper with this variable.
-    pub(in crate::core_erlang) class_var_capture: Option<String>,
     /// ADR 0137 Phase 2b: the innermost enclosing actor closure being lowered
     /// (`None` at method level). Inside one, field access and self-sends go
     /// through the actor-state cell (`actor_state_access.rs`), not a threaded
-    /// `State`, exactly as a class method's class-variable access is in place.
+    /// `State`.
     pub(in crate::core_erlang) actor_closure: Option<super::actor_state_access::ActorClosure>,
     /// ADR 0137 §5: how many `ensure:` protected bodies enclose the code being
     /// lowered in an actor instance method. While non-zero, every field write
     /// also stores the new `State` to the cell (write-through), so the cleanup
     /// an error runs sees the writes the body made before it failed.
     pub(in crate::core_erlang) ensure_write_through: usize,
-    /// BT-3719: the per-method class-variable key binding. While a
-    /// class-method body is being lowered (`class_method_body_doc`) the `CVKey`
-    /// variable is minted lazily at the first inlined class-variable access and
-    /// bound once around the body, so every access reuses it instead of
-    /// rebuilding `{'$bt_class_vars', element(2, ClassSelf)}`. Outside a
-    /// class-method body an access inlines the key.
-    pub(in crate::core_erlang) class_var_key_scope: super::class_var_keys::KeyScope,
     /// Original source text for extracting method source.
     pub(in crate::core_erlang) source_text: Option<String>,
     /// Source identity of each provision-bearing protocol (ADR 0127 §3);
@@ -242,11 +228,6 @@ pub struct CoreErlangGenerator {
     /// guard so an object value dispatches (BT-3892, BT-3925). Populated at
     /// value-type / actor / supervisor class entry and for extension targets.
     pub(in crate::core_erlang) current_class_field_types:
-        std::collections::HashMap<String, crate::core_erlang::field_types::FieldTypeFact>,
-    /// The class-side counterpart of `current_class_field_types`: facts for
-    /// the class's `classState:` variables, consulted for `self.<name>` reads
-    /// inside class methods (BT-3892).
-    pub(in crate::core_erlang) current_class_var_types:
         std::collections::HashMap<String, crate::core_erlang::field_types::FieldTypeFact>,
     /// ADR 0118 phase 1a: sub-expressions `threaded_expression`'s
     /// sequencing rule (`threaded_prelude.rs`) has already compiled — each one's value
@@ -707,10 +688,8 @@ impl CoreErlangGenerator {
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
             synced: super::synced_call::SyncedCallState::new(),
-            class_var_capture: None,
             actor_closure: None,
             ensure_write_through: 0,
-            class_var_key_scope: super::class_var_keys::KeyScope::Unscoped,
             source_text: None,
             protocol_sources: std::collections::HashMap::new(),
             local_protocol_names: std::collections::HashSet::new(),
@@ -719,7 +698,6 @@ impl CoreErlangGenerator {
             current_method_params: Vec::new(),
             current_method_param_types: std::collections::HashMap::new(),
             current_class_field_types: std::collections::HashMap::new(),
-            current_class_var_types: std::collections::HashMap::new(),
             precompiled_subexprs: std::collections::HashMap::new(),
             current_send_span: None,
             local_producer_sites: std::collections::HashSet::new(),
