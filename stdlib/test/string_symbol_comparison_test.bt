@@ -265,7 +265,13 @@ TestCase subclass: StringSymbolComparisonTest
   /// structured `type_error`, hint included.
   testActorMethodRaisesTheSameTypeError =>
     a := StringCompareActor spawn
-    self assertBlock: [a lt: 5] raisesTypeErrorFor: "<" on: "String"
-    self assertBlock: [a symGt: "m"] raisesTypeErrorFor: ">" on: "Symbol"
+    self
+      assertBlock: [a lt: 5]
+      raisesTypeErrorFor: "<"
+      on: "String"
+    self
+      assertBlock: [a symGt: "m"]
+      raisesTypeErrorFor: ">"
+      on: "Symbol"
     self assert: (a lt: "z")
     a stop

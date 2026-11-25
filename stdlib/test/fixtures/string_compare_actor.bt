@@ -6,6 +6,7 @@
 // wrong-kind `type_error` crosses the actor boundary intact.
 
 Actor subclass: StringCompareActor
+
   lt: x => "m" < x
 
   symGt: x => #m > x
