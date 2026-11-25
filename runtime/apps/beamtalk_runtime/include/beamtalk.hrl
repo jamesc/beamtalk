@@ -235,7 +235,7 @@
 %% by `beamtalk_result:tryDo/1`. Both are control-flow signals aimed at a
 %% method frame that may live in another process, so any dispatch layer that
 %% might intercept a `throw` (class-side self-sends, instance-side extension
-%% invocation, `tryDo:`, class-variable `protect/1`, JSON encoding) must
+%% invocation, `tryDo:`, JSON encoding) must
 %% relay rather than report them. Single source of truth for the shape check
 %% across the runtime and stdlib apps — per AGENTS.md's no-duplicate-
 %% implementation rule, a future NLR shape change only needs to land here.

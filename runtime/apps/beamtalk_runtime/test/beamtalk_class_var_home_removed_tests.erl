@@ -11,7 +11,8 @@ class variables or installs a class-variable home around a class method.
 
 - The class-variable API of the class process is gone: `set_class_var/3`
   (`beamtalk_object_class`, `beamtalk_runtime_api`), the reflection-send
-  helpers, and the `ClassVars` argument of `handle_class_method_call`.
+  helpers, the `ClassVars` argument of `handle_class_method_call`, and the
+  `classClassVarNames` / `classAllClassVarNames` intrinsics.
 - A class method run in the class process sees no home: neither the
   receiver's class-variable key nor a live home key is set.
 - `ClassBuilder register` ignores a `classState` key: the class process's
@@ -41,7 +42,9 @@ removed_exports_test_() ->
             {beamtalk_object_class, class_var_reflection_op, 2},
             {beamtalk_object_class, is_class_var_reflection_send, 2},
             {beamtalk_object_class, is_class_var_reflection_selector, 1},
-            {beamtalk_class_dispatch, handle_class_method_call, 6}
+            {beamtalk_class_dispatch, handle_class_method_call, 6},
+            {beamtalk_behaviour_intrinsics, classClassVarNames, 1},
+            {beamtalk_behaviour_intrinsics, classAllClassVarNames, 1}
         ]
     ] ++
         [

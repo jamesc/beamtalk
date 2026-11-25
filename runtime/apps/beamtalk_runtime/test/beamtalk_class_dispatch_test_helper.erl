@@ -135,7 +135,7 @@ class_testScriptExit(_ClassSelf) ->
 Zero-argument class method that throws a `^` non-local return signal
 (ADR 0110) — the state-carrying `{'$bt_nlr', Token, Value, State}`
 4-tuple codegen throws for a foreign `^` unwinding out of a class method.
-Exercises the `{nlr_relay, Nlr, ST}` catch in `invoke_class_method/7`.
+Exercises the `{nlr_relay, Nlr, ST}` catch in `invoke_class_method/6`.
 """.
 -spec class_testNlrThrow(term()) -> no_return().
 class_testNlrThrow(_ClassSelf) ->

@@ -1011,7 +1011,7 @@ or hand-written Erlang class, or no live class), else the class's own declared
 kinds, which may be `#{}` (the set is KNOWN empty). One read answers both
 questions, so a hot reload between two reads cannot make them disagree. Kept
 here, in the metadata leaf, so that `beamtalk_class_vars` (the class-variable
-access leaf, `undeclared_class_variable`; deleted by ADR 0153 Phase 3) does not
+access leaf, `undeclared_class_variable`; to be deleted by BT-5163) does not
 call up into the class gen_server or the reflection intrinsics.
 """.
 -spec class_var_kinds_or_unknown(class_name()) -> unknown | #{atom() => eager | late}.
@@ -1523,7 +1523,7 @@ Walks the ancestors' published `defines_user_class_new1` facts
 is already in its baked `direct_constructors` (and an own ADR 0084 runtime fun
 already turns the class's direct paths off). An ancestor's runtime-installed
 `new:` fun (`put_class_method`) counts as a user `new:` too: the class-process
-path runs it (`handle_class_method_call/6` finds it in the chain). Fails
+path runs it (`handle_class_method_call/5` finds it in the chain). Fails
 closed (`true`) on any
 doubt: a missing row, a missing superclass link, an unpublished fact (an older
 module or a dynamic ancestor) or a hierarchy cycle. `Value`'s fact is `false`

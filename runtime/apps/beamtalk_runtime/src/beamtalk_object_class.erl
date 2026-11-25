@@ -1722,7 +1722,7 @@ find_inherited_class_method(Selector, SuperName) ->
 -doc """
 Whether an ADR 0084 runtime class-method fun of `ClassName` answers the
 constructor `Selector` (`new` or `new:`) (BT-4409). The `{new, _}` handler then
-runs it like any other class method (`handle_class_method_call/6`) instead of
+runs it like any other class method (`handle_class_method_call/5`) instead of
 the synthesized constructor, so a constructor shadowed after a caller warmed up
 is honoured on the path the caller falls back to. The raw shadow flag
 (`beamtalk_class_shadow_flags:is_shadowed/1`, one `persistent_term` read)
