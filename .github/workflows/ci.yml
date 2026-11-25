@@ -190,7 +190,7 @@ jobs:
           # and the Windows one otherwise compiles only in ci-platforms.yml
           # (opt-in) and nightly.
           exec=$(flag matches 'crates/beamtalk-exec/*' 'crates/beamtalk-etf/*' \
-              'crates/beamtalk-build/*' Cargo.toml Cargo.lock \
+              'crates/beamtalk-process/*' 'crates/beamtalk-build/*' Cargo.toml Cargo.lock \
               rust-toolchain.toml '.github/workflows/ci.yml' '.github/actions/*')
 
           # BT-5033: `npm test` and `tsc` for the extension. Besides the
@@ -242,6 +242,7 @@ jobs:
           # Defined once, here.
           desktop=$(flag matches 'desktop/*' 'crates/beamtalk-desktop-broker/*' \
               'crates/beamtalk-desktop-shell/*' 'crates/beamtalk-env/*' 'crates/beamtalk-workspace/*' \
+              'crates/beamtalk-process/*' \
               'crates/beamtalk-repl-protocol/*' 'crates/beamtalk-build/*' 'crates/beamtalk-cerl-doc/*' \
               Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml '.github/actions/*')
 
@@ -552,10 +553,10 @@ jobs:
           key: profile-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Check beamtalk-exec for Windows (warnings denied)
+      - name: Check beamtalk-exec and beamtalk-process for Windows (warnings denied)
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check --target x86_64-pc-windows-msvc -p beamtalk-exec --all-targets
+        run: cargo check --target x86_64-pc-windows-msvc -p beamtalk-exec -p beamtalk-process --all-targets
 
   # ─── core-diff snapshot-only vs full equivalence (BT-3934) ────────────
   # `core-diff`'s snapshot-only mode (BT-3887) is only sound if it leaves

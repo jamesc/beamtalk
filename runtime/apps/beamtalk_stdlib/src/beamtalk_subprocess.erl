@@ -228,9 +228,10 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             buffer_and_maybe_reply(stderr, Data, State);
         {exit, _ChildId, Code} ->
             ?LOG_INFO("Subprocess exited", #{exit_code => Code, domain => [beamtalk, stdlib]}),
-            %% The beamtalk-exec binary joins its reader threads before sending
-            %% this exit event, so all stdout/stderr data is guaranteed
-            %% to have arrived.  Flush any partial line and close the port now.
+            %% `exit` is the child's last event: beamtalk-exec sends it once
+            %% the output pipes close, or after a bounded drain if a
+            %% grandchild holds them (BT-5195), and drops anything later.
+            %% Flush any partial line and close the port now.
             S0 = flush_pending(stdout, State),
             S1 = flush_pending(stderr, S0),
             (try
@@ -242,6 +243,11 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             S2 = maybe_reply_eof(stdout, NewState),
             S3 = maybe_reply_eof(stderr, S2),
             {noreply, S3};
+        {error, _ChildId, Reason} ->
+            ?LOG_WARNING("Subprocess command refused by exec port", #{
+                reason => Reason, domain => [beamtalk, stdlib]
+            }),
+            {noreply, State};
         _Other ->
             {noreply, State}
     end;

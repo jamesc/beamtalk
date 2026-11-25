@@ -206,6 +206,7 @@ dependencies = [
  "beamtalk-language-service",
  "beamtalk-lint",
  "beamtalk-package",
+ "beamtalk-process",
  "beamtalk-project",
  "beamtalk-repl",
  "beamtalk-repl-protocol",
@@ -309,6 +310,7 @@ name = "beamtalk-desktop-broker"
 version = "0.6.0"
 dependencies = [
  "base64",
+ "beamtalk-process",
  "beamtalk-repl-protocol",
  "beamtalk-workspace",
  "dirs",
@@ -360,13 +362,13 @@ version = "0.6.0"
 dependencies = [
  "beamtalk-build",
  "beamtalk-etf",
+ "beamtalk-process",
  "clap",
  "eetf",
  "libc",
  "serial_test",
  "tracing",
  "tracing-subscriber",
- "windows-sys",
 ]
 
 [[package]]
@@ -480,6 +482,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "beamtalk-process"
+version = "0.6.0"
+dependencies = [
+ "windows-sys",
+]
+
+[[package]]
 name = "beamtalk-project"
 version = "0.6.0"
 dependencies = [
@@ -532,6 +541,7 @@ name = "beamtalk-workspace"
 version = "0.6.0"
 dependencies = [
  "beamtalk-env",
+ "beamtalk-process",
  "libc",
  "miette",
  "serde_json",

@@ -294,6 +294,11 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             NewState = S1#{exit_code => Code, port_closed => true},
             cast_notify(NewState, 'subprocessExit:from:', [Code]),
             {noreply, NewState};
+        {error, _ChildId, Reason} ->
+            ?LOG_WARNING("ReactiveSubprocess command refused by exec port", #{
+                reason => Reason, domain => [beamtalk, stdlib]
+            }),
+            {noreply, State};
         _Other ->
             {noreply, State}
     end;

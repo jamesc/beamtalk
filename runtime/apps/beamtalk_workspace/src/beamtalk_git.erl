@@ -393,6 +393,11 @@ collect(Selector, Port, ChildId, Stdout, Stderr) ->
                     collect(Selector, Port, ChildId, Stdout, <<Stderr/binary, Data/binary>>);
                 {exit, ChildId, Code} when is_integer(Code) ->
                     finish(Selector, Code, Stdout, Stderr);
+                {error, ChildId, Reason} when is_binary(Reason) ->
+                    %% The exec port refused a command (e.g. a failed spawn,
+                    %% which is followed by `{exit, ChildId, -1}`): keep its
+                    %% reason with git's own stderr.
+                    collect(Selector, Port, ChildId, Stdout, <<Stderr/binary, Reason/binary>>);
                 _Other ->
                     collect(Selector, Port, ChildId, Stdout, Stderr)
             end;
