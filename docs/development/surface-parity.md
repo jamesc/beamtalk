@@ -749,6 +749,10 @@ error "Unknown package 'pkg' in qualified reference …".
 
 A file with no manifest, or whose manifest is unreadable, has no package set and is never checked (on the LSP: a file under no registered root). A dependency's own files are checked against its own manifest's set (`dependency_compile_options`), not the downstream package's. A transitive dependency is not in the set on any surface.
 
+### `classState:` and class-side `self.x` are compile errors (ADR 0153, BT-5152)
+
+`classState:`, `late classState:` and `self.x` (read or write) in a class method are errors, with no deprecation period. The `classState:` error is produced once, by the parser (`class_state_removed_diagnostic` in `crates/beamtalk-core/src/source_analysis/parser/declarations.rs`), which recovers past the declaration; the class-side `self.x` error is produced once by `check_class_side_self_field_access` (`semantic_analysis/validators/class_validators.rs`). Both are ordinary diagnostics, so every surface reports identical text: CLI `build`/`check`/`lint`/`test`/`run`, MCP `lint`/`diagnostic_summary`, LSP diagnostics, and the REPL (`Workspace load:`, inline class definitions, the compiler port). The `class_state_removed` diagnostic-parity fixture and `tests/repl-protocol/cases/class_state_removed.btscript` pin it. The ADR 0123 "`migrateFromVN:` may not access class variables" check is gone: class-side `self.x` is rejected everywhere.
+
 ### Cross-file `>>` is a compile error (ADR 0152)
 
 A `Class >> selector => ...` or `Class class >> selector => ...` in a file that does not define `Class` is an error, on instance and class side, including another file of the same package. The message names ADR 0152 and the alternatives (define the method in the class's file, or live from the REPL or IDE). It is one rule, `reject_cross_file_extensions` (`crates/beamtalk-core/src/compilation/same_file_fold.rs`), run after the same-file fold from every file-compile entry point, so the diagnostic is the same on each surface. Same-file `>>`, live method definition and the `Foo >> #sel` reflection operator are unchanged.

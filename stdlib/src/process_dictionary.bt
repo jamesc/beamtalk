@@ -23,8 +23,8 @@
 /// This is not a general mutable global. Nothing here is shared between
 /// processes, nothing survives the process, and keys are **not** namespaced,
 /// so pick keys that cannot collide with other libraries (for example a
-/// package-prefixed Symbol). Prefer an Actor or `classState:` for state that
-/// several processes need.
+/// package-prefixed Symbol). Prefer an Actor, an `AtomicCounter` or an Ets table for
+/// state that several processes need.
 ///
 /// ## Absence
 /// "Absent" means the key holds Erlang's `undefined` (a Beamtalk `#undefined`

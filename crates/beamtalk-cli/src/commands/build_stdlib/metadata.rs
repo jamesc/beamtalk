@@ -781,16 +781,8 @@ pub(super) fn extract_class_metadata(
     let has_dynamic_field_writer =
         beamtalk_core::semantic_analysis::has_dynamic_field_writer(&class.methods);
 
-    let class_variables = class
-        .class_variables
-        .iter()
-        .map(|cv| ClassVarMeta {
-            name: cv.name.name.to_string(),
-            ty: cv.type_annotation.as_ref().map(DeclaredType::from),
-            has_default: cv.default_value.is_some(),
-            kind: cv.slot_kind,
-        })
-        .collect();
+    // ADR 0153: classes declare no class variables.
+    let class_variables = Vec::new();
 
     let class_name = class.name.name.to_string();
 

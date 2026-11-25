@@ -427,7 +427,7 @@ fn class_rename_reaches_a_class_used_only_in_a_state_default() {
         ("/p/models.bt", "Object subclass: St@@ack\n  push => 1\n"),
         (
             "/p/Holder.bt",
-            "Object subclass: Holder\n  state: s = Stack new\n  classState: cv = Stack new\n  get => s\n",
+            "Object subclass: Holder\n  state: s = Stack new\n  state: cv = Stack new\n  get => s\n",
         ),
     ]);
     let plan = svc.plan_rename(&file, pos, "Pile").expect("plan");

@@ -854,8 +854,6 @@ Actor subclass: Runner
   run: aBlock => aBlock value
 
 Object subclass: Lib
-  classState: hits = 0
-
   class each: aBlock => aBlock value
 
   class sealed eachSealed: aBlock => aBlock value
@@ -867,16 +865,12 @@ sealed Object subclass: SealedLib
   class sealed each: aBlock => aBlock value
 
 sealed Object subclass: StatefulSealed
-  classState: seen = 0
-
   class sealed each: aBlock => aBlock value
 
 Actor subclass: Counter
   state: n = 0
   state: onTick = nil
   field: tag = #c
-  classState: ticks = 0
-
   class each: aBlock => aBlock value
 
   bump => self.n := self.n + 1
@@ -1425,17 +1419,6 @@ Actor subclass: Counter
     }
 
     #[test]
-    fn reflective_fieldat_class_method_may_keep_it() {
-        one_with(
-            "  peekVia => Lib each: [(self fieldAt: #n) printNl]\n",
-            &[
-                "block reads field n of Counter with `fieldAt:`",
-                "passed to 'Lib each:', which may keep it",
-            ],
-        );
-    }
-
-    #[test]
     fn direct_and_reflective_reads_combined() {
         one_with(
             "  startBoth => Timer after: 1 do: [self.n printNl. (self fieldAt: #onTick) printNl]\n",
@@ -1706,105 +1689,11 @@ Actor subclass: Counter
         assert!(d.is_empty(), "{d:?}");
     }
 
-    // ---- Shape C: a class method that runs in its class process -----------
+    // ---- Shape C: a class method that runs in the caller -------------------
     //
-    // ADR 0142 §1 (BT-4301): only a class whose chain declares class variables
-    // keeps its process (`Lib`, `StatefulSealed`, `Counter` declare
-    // `classState:`); sealing plays no part.
-
-    #[test]
-    fn open_class_method_write_warns() {
-        let d = only("  viaLib => Lib each: [self.n := 1]\n");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message
-                .contains("passed to 'Lib each:', which runs it in Lib's process"),
-            "{}",
-            d[0].message
-        );
-    }
-
-    #[test]
-    fn sealed_method_of_open_class_warns() {
-        // A `class sealed` method of a class with class variables still runs
-        // in its class process.
-        let d = only("  viaLibSealed => Lib eachSealed: [self.n := 1]\n");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message.contains("passed to 'Lib eachSealed:'"),
-            "{}",
-            d[0].message
-        );
-    }
-
-    #[test]
-    fn sealed_stateful_class_method_warns() {
-        // Direct-called needs no class variables.
-        let d = only("  viaStateful => StatefulSealed each: [self.n := 1]\n");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message.contains("passed to 'StatefulSealed each:'"),
-            "{}",
-            d[0].message
-        );
-    }
-
-    #[test]
-    fn inherited_class_side_method_warns() {
-        // An inherited method of a chain with class variables runs in the
-        // receiving class's process.
-        let d = abroad(
-            "Object subclass: Lib
-  classState: hits = 0
-
-  class each: aBlock => aBlock value
-
-Lib subclass: Kid
-  kidHelper => nil
-
-Actor subclass: Counter
-  state: n = 0
-
-  viaKid => Kid each: [self.n := 1]
-",
-        );
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message.contains("passed to 'Kid each:'"),
-            "{}",
-            d[0].message
-        );
-    }
-
-    #[test]
-    fn class_side_self_send_warns() {
-        let d = only("  viaLibTick => Lib each: [self bump]\n");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message.contains("sends `self bump`"),
-            "{}",
-            d[0].message
-        );
-        assert!(
-            d[0].message.contains("passed to 'Lib each:'"),
-            "{}",
-            d[0].message
-        );
-    }
-
-    #[test]
-    fn own_class_side_method_warns() {
-        // An instance method's home is the actor process; the class's own
-        // class-side method runs in the class process.
-        let d = only("  viaOwn => Counter each: [self.n]\n");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message
-                .contains("passed to 'Counter each:', which may keep it"),
-            "{}",
-            d[0].message
-        );
-    }
+    // ADR 0153: classes declare no class variables, so no class method runs in
+    // a class process of its own for this lint to flag; a block passed to one
+    // stays in the caller.
 
     /// `body` appended to `Counter`, linted against this module's hierarchy
     /// with `shadowed` declared by more than one package in scope.
@@ -1858,28 +1747,6 @@ Actor subclass: Counter
         let mut diagnostics = Vec::new();
         super::check_module(&module, &hierarchy, &mut diagnostics);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    }
-
-    #[test]
-    fn self_class_receiver_warns() {
-        let d = only("  viaSelfClass => self class each: [self.n := 1]\n");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message.contains("passed to 'Counter each:'"),
-            "{}",
-            d[0].message
-        );
-    }
-
-    #[test]
-    fn super_class_receiver_warns() {
-        let d = only("  viaSuperClass => super class each: [self.n := 1]\n");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message.contains("passed to 'Counter each:'"),
-            "{}",
-            d[0].message
-        );
     }
 
     // ---- staying home stays quiet ------------------------------------------

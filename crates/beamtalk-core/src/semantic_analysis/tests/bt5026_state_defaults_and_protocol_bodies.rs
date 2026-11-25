@@ -31,17 +31,6 @@ fn undefined_name_in_state_default() {
 }
 
 #[test]
-fn undefined_name_in_class_variable_default() {
-    let src = "Object subclass: Foo\n  classState: x = nosuchVar\n  get => 1\n";
-    assert_eq!(
-        count(src, "Undefined variable: nosuchVar"),
-        1,
-        "{:?}",
-        messages(src)
-    );
-}
-
-#[test]
 fn state_default_does_not_see_sibling_state_or_defined_names() {
     // A well-formed default must stay clean.
     let src = "Object subclass: Foo\n  state: x = 1\n  state: y = #(1, 2)\n  get => 1\n";
@@ -52,18 +41,6 @@ fn state_default_does_not_see_sibling_state_or_defined_names() {
 fn abstract_instantiation_in_state_default() {
     let src = "abstract Object subclass: Thing\n  foo => 1\n\
                Object subclass: Holder\n  state: w = Thing new\n  get => 1\n";
-    assert_eq!(
-        count(src, "Cannot instantiate abstract class"),
-        1,
-        "{:?}",
-        messages(src)
-    );
-}
-
-#[test]
-fn abstract_instantiation_in_class_variable_default() {
-    let src = "abstract Object subclass: Thing\n  foo => 1\n\
-               Object subclass: Holder\n  classState: w = Thing new\n  get => 1\n";
     assert_eq!(
         count(src, "Cannot instantiate abstract class"),
         1,

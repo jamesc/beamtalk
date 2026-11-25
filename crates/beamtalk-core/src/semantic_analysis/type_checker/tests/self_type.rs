@@ -188,8 +188,7 @@ fn test_self_class_no_false_dnu_warnings() {
     // not produce false DNU warnings for class-side method sends on the result.
     let source = "
 Value subclass: Counter
-  classState: instanceCount = 0
-  class instanceCount => self.instanceCount
+  class instanceCount => 0
   getMyClass -> Self class => self class
 
 Value subclass: User

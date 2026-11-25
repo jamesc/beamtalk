@@ -744,40 +744,6 @@ fn test_bt3925_untyped_actor_counter_is_guarded_and_typed_counter_is_bare() {
 }
 
 #[test]
-fn test_bt3925_class_variable_facts_drive_class_method_operators() {
-    // Untyped class variables are guarded even in a sealed class; an
-    // annotated one stays bare.
-    let core = crate::core_erlang::tests::codegen(
-        "sealed Object subclass: Reg\n  classState: hits = 0\n  \
-         classState: typedHits :: Integer = 0\n  \
-         class bump => self.hits := self.hits + 1\n  \
-         class bumpTyped => self.typedHits := self.typedHits + 1\n",
-    );
-    assert!(
-        method_body_contains(&core, "class_bump", "call 'erlang':'is_number'("),
-        "an untyped class variable must be guarded:\n{core}"
-    );
-    assert!(
-        !method_body_contains(&core, "class_bumpTyped", "is_number"),
-        "an `:: Integer` class variable must stay bare:\n{core}"
-    );
-}
-
-#[test]
-fn test_bt3892_class_variables_of_unsealed_class_are_guarded() {
-    // A subclass may redeclare `hits` with a non-numeric default and inherit
-    // `bump`, which then runs over the subclass's variable (ADR 0130).
-    let core = crate::core_erlang::tests::codegen(
-        "Object subclass: Reg\n  classState: hits = 0\n  \
-         class bump => self.hits := self.hits + 1\n",
-    );
-    assert!(
-        method_body_contains(&core, "class_bump", "call 'erlang':'is_number'("),
-        "an unsealed class's untyped class variable must be guarded:\n{core}"
-    );
-}
-
-#[test]
 fn test_bt3921_rebound_typed_param_name_is_guarded() {
     // A typed parameter's name is trusted only where it still means the
     // parameter: a block parameter, local or destructuring pattern variable
