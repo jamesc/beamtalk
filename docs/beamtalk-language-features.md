@@ -7763,12 +7763,9 @@ real operational cost, not just a lookup convenience:
 > locks the global name table during a registration) — reach for it
 > deliberately, not as the default choice for cluster-wide lookup.
 
-> **Sync after connecting.** OTP's `global` shares names with a newly connected
-> node in the background, so a name registered (or looked up from the peer) in
-> the first moments after `connect` may not be visible yet and answers
-> `name_not_registered` for a fraction of a second. Call `Erlang global sync`
-> after connecting and before relying on a cluster-wide name, as
-> [`examples/cluster`](../examples/cluster/README.md) does.
+> **Connect waits for `global`.** `Node connect` answers only after OTP's
+> `global` has synced names with the new peer, so a `scope: #global` name
+> registered right after `connect` is visible from the peer at once.
 
 When a netsplit heals and the same global name was registered on both sides,
 Beamtalk's own resolver keeps the *older* registrant (by start time) and
