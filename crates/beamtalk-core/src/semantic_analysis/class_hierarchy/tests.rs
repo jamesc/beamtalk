@@ -1915,24 +1915,20 @@ fn cross_file_value_sub_subclass_finds_new() {
     assert_eq!(result.unwrap().defined_in.as_str(), "Value");
 }
 
-/// ADR 0124 §1/B5a cross-file test: class `B` (this file) subclasses `A`
-/// (a different file, injected via `add_from_beam_meta` the way a
+/// ADR 0124 §1 cross-file test: class `B` (this file) subclasses `A` (a
+/// different file, injected via `add_from_beam_meta` the way a
 /// cross-package/prior-compiled ancestor is), where `A` declares
-/// `late state: proc` and `late classState: current` alongside an
-/// ordinary eager field/class-variable of each kind. `ClassInfo` for `B`
-/// must report both kinds through the flattened
-/// `state_field_kind`/`class_variable_kind` accessors — the metadata B3's
-/// guarded read depends on — without `A`'s AST being present in this
-/// compilation.
+/// `late state: proc` alongside an ordinary eager field. `ClassInfo` for `B`
+/// must report both kinds through the flattened `state_field_kind` accessor —
+/// the metadata B3's guarded read depends on — without `A`'s AST being
+/// present in this compilation.
 #[test]
-fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
+fn cross_file_state_field_kind_reports_late() {
     let module = module_with_classes(vec![make_user_class("B", "A")]);
     let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
 
-    // Inject cross-file A: `late state: proc`, `state: id`,
-    // `late classState: current`, `classState: total`.
     let a_info = ClassInfo {
         is_typed: true,
         state: vec![EcoString::from("proc"), EcoString::from("id")],
@@ -1940,27 +1936,10 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
             (EcoString::from("proc"), crate::ast::SlotKind::Late),
             (EcoString::from("id"), crate::ast::SlotKind::Eager),
         ]),
-        class_variables: vec![
-            ClassVarInfo {
-                name: EcoString::from("current"),
-                ty: Some(DeclaredType::simple("TranscriptStream")),
-                has_default: false,
-                kind: crate::ast::SlotKind::Late,
-            },
-            ClassVarInfo {
-                name: EcoString::from("total"),
-                ty: None,
-                has_default: true,
-                kind: crate::ast::SlotKind::Eager,
-            },
-        ],
         ..ClassInfo::test("A", Some("Object"))
     };
     h.add_from_beam_meta(vec![a_info]);
 
-    // B declares no state/class-variables of its own (make_user_class's
-    // "count" state field is irrelevant here) — both kinds must be found
-    // by walking B → A.
     assert_eq!(
         h.state_field_kind("B", "proc"),
         crate::ast::SlotKind::Late,
@@ -1971,34 +1950,11 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
         crate::ast::SlotKind::Eager,
         "B should report A's ordinary instance field as SlotKind::Eager"
     );
-    assert_eq!(
-        h.class_variable_kind("B", "current"),
-        crate::ast::SlotKind::Late,
-        "B should report A's late class variable as SlotKind::Late"
-    );
-    assert_eq!(
-        h.class_variable_kind("B", "total"),
-        crate::ast::SlotKind::Eager,
-        "B should report A's ordinary class variable as SlotKind::Eager"
-    );
     // An unknown field degrades to Eager rather than panicking.
     assert_eq!(
         h.state_field_kind("B", "doesNotExist"),
         crate::ast::SlotKind::Eager
     );
-    // ADR 0124 B3: the guarded read's hint names the declared type, walked
-    // the same way as the kind.
-    assert_eq!(
-        h.class_variable_type("B", "current"),
-        Some(DeclaredType::simple("TranscriptStream")),
-        "B should report A's late class variable's declared type"
-    );
-    assert_eq!(
-        h.class_variable_type("B", "total"),
-        None,
-        "an untyped class variable has no declared type"
-    );
-    assert_eq!(h.class_variable_type("B", "doesNotExist"), None);
 }
 
 // --- ADR 0124 A2a: all_initialize_assigns tests ---
@@ -2818,13 +2774,14 @@ fn process_bound_selectors_are_never_direct_call_eligible() {
 #[test]
 fn direct_call_eligibility_is_adr_0142s_rule() {
     // BT-4301: no `sealed`/`class sealed` requirement; the class must define
-    // the method itself; no class in its chain may declare class variables
-    // (the runtime's chain-wide rule 2); class-variable reflection selectors
-    // are never eligible.
+    // the method itself. ADR 0153 (BT-5154): with no class variables the
+    // chain plays no part; a process-bound selector, or a class-variable
+    // reflection selector the runtime still intercepts (until BT-5160),
+    // keeps the class process.
     let hierarchy = bt4099_hierarchy_for_source(
         "Object subclass: Open\n  class foo => 1\n  class hasField: x => 2\n\n\
-         Open subclass: OpenSub\n  class bar => 3\n\n\
-         ",
+         Open subclass: OpenSub\n  class bar => 5\n\n\
+         Missing subclass: Orphan\n  class baz => 6\n",
     );
     assert!(hierarchy.is_direct_call_eligible("Open", "foo"));
     assert!(!hierarchy.is_direct_call_eligible("Open", "hasField:"));
@@ -2833,8 +2790,12 @@ fn direct_call_eligibility_is_adr_0142s_rule() {
         !hierarchy.is_direct_call_eligible("OpenSub", "foo"),
         "an inherited class method is not in the class's own table"
     );
-    assert!(!hierarchy.chain_has_class_variables("OpenSub"));
-    assert!(hierarchy.chain_has_class_variables("NoSuchClass"));
+    assert!(
+        hierarchy.is_direct_call_eligible("Orphan", "baz"),
+        "an unresolved superclass is no longer a doubt"
+    );
+    assert!(hierarchy.runs_class_method_in_caller("NoSuchClass", "foo"));
+    assert!(!hierarchy.runs_class_method_in_caller("NoSuchClass", "spawn"));
 }
 
 /// BT-4148: the compile-time class-variable reflection selector set agrees

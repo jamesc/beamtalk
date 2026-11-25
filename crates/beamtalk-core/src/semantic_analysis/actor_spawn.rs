@@ -6,10 +6,8 @@
 //!
 //! **DDD Context:** Semantic Analysis
 //!
-//! Shared by the `class-state-abroad` validator
-//! (`validators::class_state_abroad`) and the standalone `beamtalk-lint`
-//! crate's `actor-state-abroad` lint, which both judge a block handed to an
-//! actor (BT-4186).
+//! Read by the standalone `beamtalk-lint` crate's `actor-state-abroad` lint,
+//! which judges a block handed to an actor (BT-4186).
 
 use crate::ast::{ConstructorSelectors, Expression, ExpressionStatement};
 use crate::ast_walker::walk_expression;

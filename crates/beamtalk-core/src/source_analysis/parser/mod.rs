@@ -663,22 +663,7 @@ pub enum DiagnosticCategory {
     /// when every arm of the match is a block literal (an intentional
     /// block-valued match). Suppressible with `@expect match_arm_block`.
     MatchArmBlock,
-    /// A block literal that reads or writes a class variable of its home
-    /// class is used where it will run outside an invocation of that class
-    /// (ADR 0130 §5): a reading block handed to an asynchronous send, stored
-    /// or returned sees the values captured at creation; a writing block
-    /// carried into another class's class-side method raises
-    /// `class_state_unreachable`. A lint, not a guarantee.
-    ClassStateAbroad,
-    /// A class-side method that runs in its class's `gen_server` process (it
-    /// is not direct-called) and directly calls a process-sensitive Erlang
-    /// function — one that blocks, or depends on the identity or ownership of
-    /// the calling process (BT-4031, ADR 0129). Suppressible with
-    /// `@expect class_process_ffi` for deliberate serialisation.
-    ClassProcessFfi,
-    /// A class-side method that is direct-called in the caller's process
-    /// (today: `class sealed` in a `sealed` class without class variables;
-    /// after ADR 0142, every class method of a class without class variables)
+    /// A class-side method, which runs in the caller's process (ADR 0142),
     /// directly calls an Erlang function that creates a resource tied to the
     /// calling process (ETS table, port, linked process, link, monitor,
     /// registered name, timer) or acts on the calling process itself
