@@ -29,7 +29,6 @@
 //! - `boolean` — Boolean conditionals
 //! - `logger` — `Logger` call sites
 
-use super::class_var_access::class_var_fn;
 use super::control_flow::SoloBoolean;
 use super::control_flow::{PureArm, SoloAnswer};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, primitives};

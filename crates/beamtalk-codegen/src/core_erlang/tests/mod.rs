@@ -424,6 +424,7 @@ mod match_scrutinee_state_corpus;
 mod module_info;
 mod nlr;
 mod nlr_closure_call_corpus;
+mod no_class_var_emission;
 mod open_reach;
 mod operand_evaluation_order;
 mod paren_arm_statements;

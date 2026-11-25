@@ -51,7 +51,7 @@ impl CoreErlangGenerator {
         let selector_atom = selector.name().to_string();
 
         // A class-side `super` resolves up the metaclass chain via the runtime
-        // helper, keyed on the class the method belongs to (`class_var_home`):
+        // helper, keyed on the class the method belongs to (`class_method_home`):
         // the builder class inside a programmatic ClassBuilder class-method
         // fun (ADR 0084), else a class-side extension's target, else the
         // class being compiled (BT-4001). `class_super_dispatch/4` begins the
@@ -66,7 +66,7 @@ impl CoreErlangGenerator {
         // below.
         let class_side_super_class = (self.builder_class_method_class().is_some()
             || self.in_class_method())
-        .then(|| self.class_var_home());
+        .then(|| self.class_method_home());
         if let Some(defining_class) = class_side_super_class {
             let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let call_doc = docvec![

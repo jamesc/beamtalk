@@ -412,3 +412,15 @@ crash_filter_redacts_excused_carried_states_test() ->
         [{'$bt_nlr_commit_excused', [#{token => ?R}, not_a_map]}],
         proplists:get_value(dictionary, Info)
     ).
+
+%% BT-5191: secret_slots/1 fails closed. A module that cannot be loaded raises
+%% (JsonMapping must not emit a secret because the metadata was unreachable);
+%% a loadable module without secret metadata has none.
+secret_slots_fails_closed_for_unloadable_module_test() ->
+    ?assertError(
+        {secret_metadata_unavailable, bt5191_no_such_module, _},
+        beamtalk_actor_redaction:secret_slots(bt5191_no_such_module)
+    ).
+
+secret_slots_empty_without_metadata_test() ->
+    ?assertEqual([], beamtalk_actor_redaction:secret_slots(lists)).
