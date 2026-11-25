@@ -1,7 +1,7 @@
 # ADR 0116: Double-Dispatch Coercion for Number-on-the-Left Arithmetic
 
 ## Status
-Implemented (2026-08-25) — Phases 1–4 landed (BT-3262–BT-3266, parent BT-2712); 2026-10-18 addendum follow-ups BT-3892, BT-3924, BT-3925 also Done. The 2026-11-25 addendum (comparison operators, BT-5176) is **Proposed** and not implemented.
+Implemented (2026-08-25) — Phases 1–4 landed (BT-3262–BT-3266, parent BT-2712); 2026-10-18 addendum follow-ups BT-3892, BT-3924, BT-3925 also Done. The 2026-11-25 addendum (comparison operators, BT-5176) is **Accepted (2026-11-25)** and not yet implemented.
 
 ## Context
 
@@ -60,7 +60,7 @@ isn't.
    Erlang's `<` never raises, so `5 < aVector` today silently term-orders
    instead of crashing — a worse failure mode (silent wrong answer vs. a
    crash) tracked as a separate follow-up, not designed here. (That
-   follow-up is the 2026-11-25 addendum below, Proposed.)
+   follow-up is the 2026-11-25 addendum below, Accepted.)
 
 ## Decision
 
@@ -591,7 +591,7 @@ no `badarith`-style signal to catch, so it needs its own mechanism (likely a
 proactive `is_object`-style check on the right operand, mirroring BT-2710's
 existing left-operand guard) — different enough to warrant its own
 follow-up rather than folding it into this arithmetic-specific design.
-(Designed in the 2026-11-25 addendum below, Proposed.)
+(Designed in the 2026-11-25 addendum below, Accepted.)
 
 ## Consequences
 
@@ -1009,7 +1009,7 @@ through dispatch.
 
 ## Addendum (2026-11-25): BT-5176 — number-on-the-left comparison (`< <= > >=`)
 
-**Status: Proposed.** Nothing in this addendum is implemented. It supersedes
+**Status: Accepted (2026-11-25).** Nothing in this addendum is implemented yet. It supersedes
 constraint 4, the "No comparison-operator reflection" bullet of § What this
 ADR does not do, the deferred alternative "Extend reflection to comparison
 operators now" and the first Neutral consequence, all of which deferred
@@ -1183,9 +1183,13 @@ implementation, and a second entry point, `send_number_comparison/4`,
 calls it with the ordering wording; codegen chooses the entry point, so
 the runtime holds no table of which operators are comparisons (a rule that
 would otherwise be duplicated across the Rust/Erlang boundary). The
-arithmetic text is unchanged. The ordering text differs because the
-arithmetic template ("implement it to support …") reads as advice to add
-a method to `nil`, the common case here and the wrong advice. The narrow
+ordering text differs from today's arithmetic template because that
+template ("implement it to support …") reads as advice to add a method to
+`nil`, the common case here and the wrong advice. The arithmetic hint is
+reworded to match (decision 4 below): `3 + nil` gets "'+' cannot combine a
+number with UndefinedObject — the right operand must be a number, or a
+value whose class implements 'plusFromNumber:'", which replaces the text
+in § Hinting the DNU when the reflected method is missing. The narrow
 catch — only a `does_not_understand` for *this* class and *this* selector
 — is what keeps a bug inside a present hook from being relabelled.
 
@@ -1363,8 +1367,8 @@ So the "failing arm must be `erlang:error/1`" requirement is met in spirit
 only: the failing arm is **one** call to a runtime helper — never the
 inline `beamtalk_error` construction chain of `type_error_raise_doc`, and
 the raise itself happens inside the helper — but it is a call, and the
-literal-on-the-left shape pays for it. Open question 1 puts that trade to
-the owner.
+literal-on-the-left shape pays for it. The owner accepted that trade
+(decision 1 below).
 
 #### How the type checker sees the hook
 
@@ -1561,7 +1565,8 @@ exists to remove. Shipping `type_error` now and hooks later is not a
 cheap middle path either: the second step would change the error's class
 again, a second breaking change for anyone who had started catching the
 first. It remains the fallback if the frame cost on literal-receiver sites
-is judged unacceptable (open question 1).
+were ever judged unacceptable; the owner accepted that cost (decision 1
+below).
 
 **Mirror dispatch (Python's rule): send `x > n` for `n < x`.** No new
 selectors at all. Rejected: a type's `>` is declared for its own kind
@@ -1688,7 +1693,7 @@ real change and run the cross-repo CI.
 
 ### Implementation plan
 
-No work starts until this addendum is accepted. The de-risking this ADR
+The de-risking this ADR
 asked of its own mechanism is already done for this one: the Core Erlang
 shapes above (unknown receiver, proven receiver, primitive body) were
 hand-compiled and run, the `Money` example passes `beamtalk check`, and the
@@ -1697,7 +1702,7 @@ cost table in § The failing arm is measured.
 | Phase | Size | Content | Acceptance |
 |---|---|---|---|
 | **0. Baseline** | S | Add `benchmarks/vs-elixir` rows before any behaviour change: `5 < b` with `b` untyped (proven receiver, unknown right — the new row BT-5176 asked for), `a < b` both untyped, `a :: Integer < b` untyped, `5 + b` untyped as the arithmetic reference, and an actor loop `[0 < self.n] whileTrue:` that writes a field. Record them together with the existing rows 11d–11g, which are in the harness (`vs_bench.erl`) but in no committed results file. | Rows run under `just bench-vs-elixir`; baseline committed under `benchmarks/vs-elixir/results/`. |
-| **1. Runtime** | S | `send_number_comparison/4`, sharing `send_number_coercion/4`'s body. EUnit: comparison hint text; arithmetic hint unchanged; a DNU raised inside a present hook is not relabelled. | `just test` and `just dialyzer` green. |
+| **1. Runtime** | S | `send_number_comparison/4`, sharing `send_number_coercion/4`'s body. The arithmetic hint is reworded to match (decision 4), with the tests and language-features text that pin it. EUnit: both hint texts; a DNU raised inside a present hook is not relabelled. | `just test` and `just dialyzer` green. |
 | **2. Codegen and behaviour** | M–L, `ci:corpus` | Shared selector table in `beamtalk-core` (replaces `coercion_selector`). Right-operand test on both inlined arms and in `generate_comparison_bif` for `Integer`/`Float`/`Character`. The shared "bare and Boolean" predicate for `classify_binary`, the BT-4279 fast path and the guard-return rewrite. Flip the two pins. New `stdlib/test/number_comparison_arg_test.bt`. CHANGELOG entry and language-features rewrite in the same PR. | See below. |
 | **3. Type checker** | S | Hook lookup in `check_binary_operand_types` for all eight operators; new hint text; inferred type from the hook. Blocked by phase 2. | Tests: a class with the hook produces no diagnostic and the send has the hook's return type; a class without it warns with the new hint; an untyped argument is silent; `5 + aVector` with `plusFromNumber:` no longer warns. |
 | **4. Follow-ups** (separate issues) | — | `String`/`Symbol` receivers; proving more right operands (loop counters, arithmetic results); match-arm guards. | — |
@@ -1733,30 +1738,27 @@ cost table in § The failing arm is measured.
   before and after loop shape (see § Consequences); a regression there is
   a decision for the owner, not an automatic stop. All of it is recorded in
   `docs/development/benchmarks.md`. A result outside those bounds stops
-  the PR and goes back to open question 1.
+  the PR and goes back to the owner (decision 1).
 
-### Open questions for the owner
+### Decisions on the open questions
 
-1. **The frame on literal-receiver sites.** Hooks make the failing arm a
-   returning call, so `0 < x` (proven receiver, unproven right) pays a
-   stack frame in call-free code — what `5 + x` already pays — and can
-   move a field-writing actor loop to `StateAcc`. The consistency that
-   buys is with number arithmetic and with `nil < 3`, not with every
-   comparison: stdlib value types already raise `type_error` for a
-   wrong-kind argument. Accept the cost (recommended: the shape is rare,
-   since comparisons are idiomatically written variable-first, and
-   everything else is free), or fall back to a frame-free `type_error`
-   with no hooks?
-2. **Declared right operands are tested, not trusted.** This departs from
-   the BT-5176 proposal and from arithmetic, in order to make `max:`,
-   `min:`, `between:and:` and `to:do:` actually raise. Confirm.
-3. **`Character` receivers are covered**, because a character is an integer
-   at run time and an untyped one cannot be told apart. This narrows
-   decision (b) to `String` and `Symbol`. Confirm, or keep statically
-   known `Character` receivers on the old behaviour until the follow-up.
-4. **Hint wording** for the ordering operators (it differs from the
-   arithmetic template), and whether `3 + nil` should get a matching
-   reword in the same change.
+The draft put four questions to the owner, who answered them on
+2026-11-25 when accepting this addendum:
+
+1. **The frame on literal-receiver sites: accepted.** Hooks make the
+   failing arm a returning call, so `0 < x` (proven receiver, unproven
+   right) pays a stack frame in call-free code — what `5 + x` already
+   pays — and can move a field-writing actor loop to `StateAcc`. The
+   frame-free `type_error` without hooks is not taken. The benchmark gate
+   in phase 2 still applies.
+2. **Declared right operands are tested, not trusted.** Confirmed, as in
+   § Elision, so that `max:`, `min:`, `between:and:` and `to:do:` raise.
+3. **`Character` receivers are covered.** The wrong-kind follow-up is
+   narrowed to `String` and `Symbol` receivers.
+4. **The arithmetic hint is reworded to match the ordering wording.**
+   `3 + nil` and the other three arithmetic operators take the new
+   template (§ Missing hook). The change is made in phase 1, not in the
+   pull request that added this addendum.
 
 ## Implementation Tracking
 
@@ -1771,9 +1773,9 @@ duplicate Epic)
 - BT-3266 — Right-operand untyped `self.<field>` gap: design decision (accepted, not fixed — see Addendum above)
 - BT-3892, BT-3924, BT-3925 — 2026-10-18 addendum follow-ups (untyped/union `self.<field>` guarding, comparison guard inversion, Actor `state:` fields)
 
-- BT-5176 — 2026-11-25 addendum (comparison operators): Proposed; implementation issues to be filed on acceptance. Related: BT-5175 (counted-loop limit guard), BT-3928 (the fallback this reverses), BT-4823 (declared receivers are tested)
+- BT-5176 — 2026-11-25 addendum (comparison operators): Accepted 2026-11-25; implementation issues to be filed. Related: BT-5175 (counted-loop limit guard), BT-3928 (the fallback this reverses), BT-4823 (declared receivers are tested)
 
-**Status:** Complete for the arithmetic design — all issues Done (BT-3262–BT-3266 closed 2026-08-25, BT-2712 closed 2026-08-25; addendum issues closed 2026-10-18). The 2026-11-25 comparison addendum is Proposed.
+**Status:** Complete for the arithmetic design — all issues Done (BT-3262–BT-3266 closed 2026-08-25, BT-2712 closed 2026-08-25; addendum issues closed 2026-10-18). The 2026-11-25 comparison addendum is Accepted and not yet implemented.
 
 ## References
 - Related issues: BT-2712 (this ADR), BT-2708 (epic), BT-2709 (Phase 1,
