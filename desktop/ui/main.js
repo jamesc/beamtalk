@@ -4,14 +4,13 @@
 // Picker frontend (ADR 0097, BT-2986) — vanilla JS, no build step, in
 // keeping with the ADR's "thin shell" framing (the shell does very little:
 // spawn -> probe -> window). Talks to the Rust side exclusively through
-// `window.__TAURI__.core.invoke` (enabled via `withGlobalTauri` in
-// tauri.conf.json) and listens for two events the backend emits:
-// `attach-progress` (loading/probing state while attaching) and
-// `connection-state-changed` (post-attach disconnected-state reflection,
-// ADR 0097 Broker §3 / spike criterion (f)).
+// `pickerIpc.invoke` (`tauri-bridge.js`, loaded first by index.html — the
+// app no longer sets `withGlobalTauri`, BT-5194) and listens for two events
+// the backend emits: `attach-progress` (loading/probing state while
+// attaching) and `connection-state-changed` (post-attach disconnected-state
+// reflection, ADR 0097 Broker §3 / spike criterion (f)).
 
-const { invoke } = window.__TAURI__.core;
-const { listen } = window.__TAURI__.event;
+const { invoke, listen } = window.pickerIpc;
 
 const statusEl = document.getElementById("status");
 const emptyStateEl = document.getElementById("empty-state");

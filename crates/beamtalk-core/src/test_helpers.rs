@@ -109,23 +109,10 @@ pub mod test_support {
     }
 
     /// `value`'s `Debug` form with every span erased, so two trees that
-    /// differ only in source positions compare equal.
+    /// differ only in source positions compare equal. Shares the
+    /// formatter's round-trip span eraser (BT-5183).
     pub fn without_spans(value: &impl std::fmt::Debug) -> String {
-        let debug = format!("{value:?}");
-        let mut out = String::with_capacity(debug.len());
-        let mut rest = debug.as_str();
-        while let Some(at) = rest.find("Span { start: ") {
-            out.push_str(&rest[..at]);
-            out.push_str("Span");
-            match rest[at..].find('}') {
-                Some(close) => rest = &rest[at + close + 1..],
-                None => {
-                    rest = "";
-                }
-            }
-        }
-        out.push_str(rest);
-        out
+        crate::unparse::debug_without_layout(value, &[])
     }
 
     /// Parses `source` and returns the [`Module`] AST, discarding all

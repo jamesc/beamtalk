@@ -46,8 +46,8 @@ Read by shipped binaries and the runtime. Unset means the default behaviour.
 | `BEAMTALK_WARN_STATEACC` | `1` enables the state-accumulator warning. |
 | `BEAMTALK_CORE_SNAPSHOT_DIR` | When set, `build-stdlib` writes `.core` snapshots there and skips incremental reuse (`just core-diff`). |
 | `BEAMTALK_CORE_SNAPSHOT_ONLY` | Opt-in for snapshot-only output (`crates/beamtalk-cli/src/commands/util.rs`). |
-| `BEAMTALK_CLI_PATH` | Desktop broker: path of the `beamtalk` CLI. |
-| `BEAMTALK_ATTACH_LAUNCHER` | Desktop shell: path of a locally built `bt_attach` launcher. |
+| `BEAMTALK_CLI_PATH` | Desktop broker: path of the `beamtalk` CLI. Honoured in release builds and trusted as-is, like `PATH`, which the broker also searches: both come from the user's own environment. |
+| `BEAMTALK_ATTACH_LAUNCHER` | Desktop shell: path of a locally built `bt_attach` launcher. Debug builds only; a release build ignores it and runs the bundled launcher (BT-5194). |
 | `BEAMTALK_BUILD_CHANNEL` | Distribution channel (`edge`, `nightly`) of a CI build; set by `edge.yml` and `nightly.yml`. |
 | `BEAMTALK_BUILD_COMMIT` | Commit being built when there is no `.git` directory; otherwise `git rev-parse` is used. |
 | `BEAMTALK_BUILD_ID` | Compile-time (`env!`) build identity of the compiler port; set by a build script. |
