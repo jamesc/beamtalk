@@ -44,7 +44,12 @@ fn classes_after_an_unterminated_string_are_still_indexed() {
             .iter()
             // The missing quote on line 2 pairs with the first quote on
             // line 3, so the string left open is the one line 3 opens.
-            .any(|m| m.starts_with("unterminated string literal starting at line 3, column 14")),
+            .any(|m| {
+                m.starts_with(
+                    "string literal starting at line 3, column 14 is not closed before the \
+                     definition on line 5",
+                )
+            }),
         "{diagnostics:?}"
     );
     assert!(

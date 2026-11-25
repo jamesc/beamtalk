@@ -65,7 +65,8 @@ fn unterminated_string_keeps_later_classes() {
     assert_eq!(errors.len(), 1, "one error for the one typo: {errors:?}");
     assert_eq!(
         errors[0].message,
-        "unterminated string literal starting at line 2, column 12: add a closing \""
+        "string literal starting at line 2, column 12 is not closed before the definition \
+         on line 4: add a closing \""
     );
 }
 
@@ -77,7 +78,9 @@ fn unterminated_string_diagnostic_names_construct_not_token_kind() {
     assert_eq!(errors.len(), 1, "{errors:?}");
     let message = &errors[0].message;
     assert!(
-        message.starts_with("unterminated string literal"),
+        message.starts_with(
+            "string literal starting at line 1, column 6 is not closed before the definition on line 2"
+        ),
         "{message}"
     );
     assert!(!message.contains("<error"), "token kind leaked: {message}");
@@ -129,9 +132,9 @@ fn unterminated_interpolation_keeps_later_classes() {
     let (module, diagnostics) = parse_file(source);
     assert_eq!(class_names(&module), ["A", "B"]);
     assert!(
-        errors(&diagnostics).iter().any(|d| d
-            .message
-            .starts_with("unterminated string literal starting at line 2")),
+        errors(&diagnostics)
+            .iter()
+            .any(|d| d.message.starts_with("string literal starting at line 2")),
         "{diagnostics:?}"
     );
 }
@@ -142,9 +145,9 @@ fn unterminated_string_with_unknown_escape_does_not_swallow_file() {
     let (module, diagnostics) = parse_file(source);
     assert_eq!(class_names(&module), ["B"]);
     assert!(
-        errors(&diagnostics).iter().any(|d| d
-            .message
-            .starts_with("unterminated string literal starting at line 1")),
+        errors(&diagnostics)
+            .iter()
+            .any(|d| d.message.starts_with("string literal starting at line 1")),
         "the open string outranks its unknown escape: {diagnostics:?}"
     );
 }
@@ -562,6 +565,25 @@ fn unterminated_string_is_still_incomplete_input() {
     assert!(!is_input_complete("x := \"abc\\"));
     assert!(!is_input_complete("x := 1 /* note"));
     assert!(is_input_complete("x := \"abc\ndef\""));
+}
+
+#[test]
+fn string_cut_off_by_a_definition_is_complete_but_invalid_input() {
+    // No later line can close a string the lexer stops at a definition
+    // header, so the REPL must report the error, not wait for more input.
+    let source = "s := \"doc\nObject subclass: Foo\n  bar => 1";
+    assert!(is_input_complete(source));
+    // A class header without methods still waits, but a blank line submits.
+    assert!(crate::source_analysis::needs_blank_line_to_complete(
+        "s := \"doc\nObject subclass: Foo"
+    ));
+    let (_, diagnostics) = parse_file(source);
+    assert!(
+        diagnostics.iter().any(|d| d.message
+            == "string literal starting at line 1, column 6 is not closed before the definition \
+                on line 2: add a closing \""),
+        "{diagnostics:?}"
+    );
 }
 
 #[test]

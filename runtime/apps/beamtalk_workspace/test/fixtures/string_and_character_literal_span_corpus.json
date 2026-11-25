@@ -160,5 +160,35 @@
     "source": "\"a\nb\nObject subclass: Foo\n  x => \"q\"",
     "expected_end": 2,
     "why": "a string cannot run over a line that starts a definition, even when a quote follows it (BT-5182)"
+  },
+  {
+    "kind": "unterminated_string",
+    "source": "\"ab\\\nObject subclass: B\n  x => \"q\"",
+    "expected_end": 4,
+    "why": "a backslash before the line ending does not carry the string over the definition header on the next line"
+  },
+  {
+    "kind": "unterminated_string",
+    "source": "\"a {x",
+    "expected_end": 5,
+    "why": "an interpolation left open at end of input leaves the string unterminated; it ends at the end of its opening line"
+  },
+  {
+    "kind": "unterminated_string",
+    "source": "\"a {x\nObject subclass: B\n  y => \"}\"",
+    "expected_end": 5,
+    "why": "an interpolation body never runs over a definition header"
+  },
+  {
+    "kind": "unterminated_string",
+    "source": "\"a {x /* c\nObject subclass: B\n */ }\"",
+    "expected_end": 10,
+    "why": "a block comment inside an interpolation never runs over a definition header"
+  },
+  {
+    "kind": "unterminated_string",
+    "source": "\"a {{x\nObject subclass: B\n}}\"",
+    "expected_end": 6,
+    "why": "doubled braces never run over a definition header"
   }
 ]

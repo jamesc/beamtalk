@@ -885,12 +885,16 @@ skip_string_literal_body([$\n | Next]) ->
 skip_string_literal_body([${ | Rest]) ->
     case skip_interpolation_body(Rest) of
         {ok, After} -> skip_string_literal_body(After);
-        unsupported -> unsupported
+        Stopped -> Stopped
     end;
 skip_string_literal_body([$", $" | Rest]) ->
     skip_string_literal_body(Rest);
 skip_string_literal_body([$" | Rest]) ->
     {ok, Rest};
+skip_string_literal_body([$\\, $\n | Next]) ->
+    %% A backslash before the line ending (an unknown escape) still leaves
+    %% the next line subject to the definition-header check.
+    skip_string_literal_body([$\n | Next]);
 skip_string_literal_body([$\\, _Escaped | Rest]) ->
     skip_string_literal_body(Rest);
 skip_string_literal_body([$\\]) ->
@@ -983,8 +987,12 @@ skip_blanks(Chars) ->
 
 %% Mirror of `lex_interpolation_body` (`source_analysis/lexer.rs`): `Chars`
 %% starts just after the interpolation's opening `{`; returns the characters
-%% after its matching `}`. Unterminated input is `unsupported`.
--spec skip_interpolation_body(string()) -> {ok, string()} | unsupported.
+%% after its matching `}`. Like the lexer, an interpolation never runs over a
+%% definition-header line: reaching one, or end of input, leaves the whole
+%% string `unterminated` (BT-5182). A nested string that never closes is
+%% `unsupported` (the lexer reads its `"` as the outer close and reports an
+%% unescaped `{`).
+-spec skip_interpolation_body(string()) -> {ok, string()} | unterminated | unsupported.
 skip_interpolation_body([${ | _] = Chars) ->
     %% Doubled `{{`: `skip_doubled_braces` consumes to the matching depth-0
     %% `}` counting only braces (no strings or comments).
@@ -999,16 +1007,32 @@ skip_interpolation_body(Chars) ->
             skip_interpolation_chars(Chars, 1)
     end.
 
--spec skip_doubled_braces(string(), non_neg_integer()) -> {ok, string()} | unsupported.
-skip_doubled_braces(Rest, 0) -> {ok, Rest};
-skip_doubled_braces([], _Depth) -> unsupported;
-skip_doubled_braces([${ | Rest], Depth) -> skip_doubled_braces(Rest, Depth + 1);
-skip_doubled_braces([$} | Rest], Depth) -> skip_doubled_braces(Rest, Depth - 1);
-skip_doubled_braces([_ | Rest], Depth) -> skip_doubled_braces(Rest, Depth).
+-spec skip_doubled_braces(string(), non_neg_integer()) -> {ok, string()} | unterminated.
+skip_doubled_braces(Rest, 0) ->
+    {ok, Rest};
+skip_doubled_braces([], _Depth) ->
+    unterminated;
+skip_doubled_braces([$\n | Next], Depth) ->
+    case is_definition_header(Next) of
+        true -> unterminated;
+        false -> skip_doubled_braces(Next, Depth)
+    end;
+skip_doubled_braces([${ | Rest], Depth) ->
+    skip_doubled_braces(Rest, Depth + 1);
+skip_doubled_braces([$} | Rest], Depth) ->
+    skip_doubled_braces(Rest, Depth - 1);
+skip_doubled_braces([_ | Rest], Depth) ->
+    skip_doubled_braces(Rest, Depth).
 
--spec skip_interpolation_chars(string(), pos_integer()) -> {ok, string()} | unsupported.
+-spec skip_interpolation_chars(string(), pos_integer()) ->
+    {ok, string()} | unterminated | unsupported.
 skip_interpolation_chars([], _Depth) ->
-    unsupported;
+    unterminated;
+skip_interpolation_chars([$\n | Next], Depth) ->
+    case is_definition_header(Next) of
+        true -> unterminated;
+        false -> skip_interpolation_chars(Next, Depth)
+    end;
 skip_interpolation_chars([$" | Rest], Depth) ->
     case skip_nested_string(Rest) of
         {ok, After} -> skip_interpolation_chars(After, Depth);
@@ -1021,7 +1045,7 @@ skip_interpolation_chars([$/, $/ | _] = Chars, Depth) ->
 skip_interpolation_chars([$/, $* | _] = Chars, Depth) ->
     case skip_block_comment_terminated(Chars) of
         {ok, After} -> skip_interpolation_chars(After, Depth);
-        unsupported -> unsupported
+        unterminated -> unterminated
     end;
 skip_interpolation_chars([$$ | _] = Chars, Depth) ->
     skip_interpolation_chars(skip_character_literal(Chars), Depth);
@@ -1029,31 +1053,54 @@ skip_interpolation_chars([$} | Rest], 1) ->
     {ok, Rest};
 skip_interpolation_chars([$} | Rest], Depth) ->
     skip_interpolation_chars(Rest, Depth - 1);
+skip_interpolation_chars([$\\, $\n | Next], Depth) ->
+    skip_interpolation_chars([$\n | Next], Depth);
 skip_interpolation_chars([$\\, _ | Rest], Depth) ->
     skip_interpolation_chars(Rest, Depth);
 skip_interpolation_chars([_ | Rest], Depth) ->
     skip_interpolation_chars(Rest, Depth).
 
 %% Mirror of `skip_nested_string` (`source_analysis/lexer.rs`): `Chars` starts
-%% just after the nested string's opening `"`. EOF before the closing quote is
-%% `unsupported` (the lexer treats that `"` as the outer string's close and
-%% reports an error).
+%% just after the nested string's opening `"`. EOF or a definition-header
+%% line before the closing quote is `unsupported` (the lexer treats that `"`
+%% as the outer string's close and reports an error).
 -spec skip_nested_string(string()) -> {ok, string()} | unsupported.
-skip_nested_string([]) -> unsupported;
-skip_nested_string([$", $" | Rest]) -> skip_nested_string(Rest);
-skip_nested_string([$" | Rest]) -> {ok, Rest};
-skip_nested_string([$\\, _ | Rest]) -> skip_nested_string(Rest);
-skip_nested_string([_ | Rest]) -> skip_nested_string(Rest).
+skip_nested_string([]) ->
+    unsupported;
+skip_nested_string([$\n | Next]) ->
+    case is_definition_header(Next) of
+        true -> unsupported;
+        false -> skip_nested_string(Next)
+    end;
+skip_nested_string([$\\, $\n | Next]) ->
+    skip_nested_string([$\n | Next]);
+skip_nested_string([$", $" | Rest]) ->
+    skip_nested_string(Rest);
+skip_nested_string([$" | Rest]) ->
+    {ok, Rest};
+skip_nested_string([$\\, _ | Rest]) ->
+    skip_nested_string(Rest);
+skip_nested_string([_ | Rest]) ->
+    skip_nested_string(Rest).
 
 %% A `/* ... */` comment that must be terminated (inside an interpolation the
-%% lexer treats EOF there as incomplete input).
--spec skip_block_comment_terminated(string()) -> {ok, string()} | unsupported.
+%% lexer treats EOF, or a definition-header line, there as an unterminated
+%% string).
+-spec skip_block_comment_terminated(string()) -> {ok, string()} | unterminated.
 skip_block_comment_terminated([$/, $* | Rest]) -> block_comment_end(Rest).
 
--spec block_comment_end(string()) -> {ok, string()} | unsupported.
-block_comment_end([]) -> unsupported;
-block_comment_end([$*, $/ | Rest]) -> {ok, Rest};
-block_comment_end([_ | Rest]) -> block_comment_end(Rest).
+-spec block_comment_end(string()) -> {ok, string()} | unterminated.
+block_comment_end([]) ->
+    unterminated;
+block_comment_end([$\n | Next]) ->
+    case is_definition_header(Next) of
+        true -> unterminated;
+        false -> block_comment_end(Next)
+    end;
+block_comment_end([$*, $/ | Rest]) ->
+    {ok, Rest};
+block_comment_end([_ | Rest]) ->
+    block_comment_end(Rest).
 
 -doc """
 Skips one character literal starting at `$`, returning the characters
@@ -1061,7 +1108,7 @@ immediately after its single payload character.
 
 Mirrors `lex_character/0` (`source_analysis/lexer.rs`) exactly: `$x` (any
 payload character, including `(`, `"`, `.`, another `$`, ...) or `$\x` (an
-escaped payload — `$\n`, `$\(`, ...) is consumed atomically as one token,
+escaped payload — `$\n`, `$\{`, ...) is consumed atomically as one token,
 never letting the payload be read as bracket/quote/period syntax. A `$`
 with no payload (malformed/truncated input) returns `[]`.
 """.

@@ -26,11 +26,14 @@ load_fixture(Name) ->
 %% Lexeme skippers
 %%====================================================================
 
-%% An interpolation or nested string left unterminated is `unsupported`.
+%% An interpolation (or a block comment inside one) left open leaves the
+%% string unterminated, which ends at the end of its opening line, as the
+%% lexer recovers (BT-5182). A nested string left open is `unsupported`.
 skip_string_literal_unterminated_interpolation_test() ->
-    ?assertEqual(unsupported, beamtalk_repl_editor_context:skip_string_literal("\"a {b")),
+    ?assertEqual({ok, []}, beamtalk_repl_editor_context:skip_string_literal("\"a {b")),
+    ?assertEqual({ok, "\nx"}, beamtalk_repl_editor_context:skip_string_literal("\"a {b\nx")),
     ?assertEqual(unsupported, beamtalk_repl_editor_context:skip_string_literal("\"a {b \"c")),
-    ?assertEqual(unsupported, beamtalk_repl_editor_context:skip_string_literal("\"a {b /* c")).
+    ?assertEqual({ok, []}, beamtalk_repl_editor_context:skip_string_literal("\"a {b /* c")).
 
 %% (Per AGENTS.md Essential Rules: a "mirrors" claim across the
 %% Rust/Erlang boundary needs a shared conformance fixture, not

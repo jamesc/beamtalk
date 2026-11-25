@@ -835,18 +835,38 @@ impl<'src> Lexer<'src> {
         kind
     }
 
-    /// The unterminated-string error for the open string literal, after
-    /// rewinding to the end of the line its opening quote is on.
+    /// The error for the open string literal left unclosed, after rewinding
+    /// to the end of the line its opening quote is on. Unclosed at end of
+    /// input it is unterminated (more input can close it); unclosed before
+    /// a definition header it is a complete-but-invalid error naming that
+    /// definition's line.
     fn unterminated_string(&mut self) -> TokenKind {
         let Some((string_start, after_quote)) = self.open_string.clone() else {
             // Unreachable: only called while `lex_string` has a string open.
             let at = self.current_position();
             return self.unterminated_error("string literal", at, "\"");
         };
+        let stopped_at_definition = self.fence < self.source.len();
+        let definition_at = self.fence;
         self.restore_position(after_quote);
         self.advance_to_line_end();
         self.override_span = None;
-        self.unterminated_error("string literal", string_start, "\"")
+        if !stopped_at_definition {
+            return self.unterminated_error("string literal", string_start, "\"");
+        }
+        // Stopped by a definition header, not end of input: no later line
+        // can close it (the header always comes first), so this is a
+        // complete-but-invalid error, not a request for more input.
+        let (line, column) = self.line_col(string_start);
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "source files over 4GB are not supported"
+        )]
+        let (definition_line, _) = self.line_col(definition_at as u32);
+        TokenKind::Error(EcoString::from(format!(
+            "string literal starting at line {line}, column {column} is not closed \
+             before the definition on line {definition_line}: add a closing \""
+        )))
     }
 
     /// [`Self::lex_string`] after the opening quote is consumed.
@@ -3223,7 +3243,10 @@ mod tests {
                     ("string", TokenKind::String(_) | TokenKind::StringStart(_))
                         | ("character", TokenKind::Character(_))
                 ) || (kind == "unterminated_string"
-                    && matches!(tokens[0].kind(), TokenKind::Error(m) if is_unterminated_error(m))),
+                    && matches!(
+                        tokens[0].kind(),
+                        TokenKind::Error(m) if m.contains("string literal starting at")
+                    )),
                 "expected a {kind} token for {source:?}, got {:?} ({why})",
                 tokens[0].kind()
             );
