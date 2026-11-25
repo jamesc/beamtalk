@@ -17,6 +17,13 @@ categories = ["development-tools"]
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+# why: BT-5188 — the pre-auth identity proof (`handshake::identity_proof`),
+# SHA-256 over the port-file nonce and a client challenge, shared by every
+# client that verifies a workspace before sending it the cookie.
+sha2.workspace = true
+# why: BT-5188 — `hex_encode`, the shared hash-to-hex leaf, for the identity
+# proof (no duplicate encoder).
+beamtalk-workspace.workspace = true
 # why: BT-3331 — `test_support`'s shared loopback WS handshake double needs
 # an async runtime/WS implementation in the normal dependency graph, not
 # just dev-dependencies, so it compiles for dependent crates that opt in via

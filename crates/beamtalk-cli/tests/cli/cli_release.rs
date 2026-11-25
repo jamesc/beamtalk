@@ -14,6 +14,7 @@ use std::process::Command;
 
 use crate::cli_common;
 
+use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
 
 /// Turn the shared library fixture into a releasable service: an
@@ -1585,7 +1586,10 @@ fn release_upgrade_from_the_output_being_replaced() {
         .arg(project.path().join("nope"))
         .assert()
         .failure()
-        .stderr(contains("does not exist"));
+        // miette word-wraps the message to terminal width, so a long temp path
+        // (Windows' `C:\Users\RUNNER~1\AppData\Local\Temp\...`) splits
+        // "does not exist" across lines; match unwrapped fragments instead.
+        .stderr(contains("--upgrade-from").and(contains("Pass a previous")));
 }
 
 /// BT-5072: a package's own `native/*.erl`, a path dependency's `native/*.erl`
