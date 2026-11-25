@@ -1796,6 +1796,9 @@ pub fn extend_with_ebin_type_specs(
 mod tests {
     use super::*;
 
+    use std::fs;
+    use tempfile::TempDir;
+
     /// BT-5186: helper beams count only while the package has `native/test/`.
     #[test]
     fn test_helper_ebin_is_only_known_while_native_test_exists() {
@@ -1811,8 +1814,6 @@ mod tests {
             "build, lint and the LSP do not scan the test helper ebin"
         );
     }
-    use std::fs;
-    use tempfile::TempDir;
 
     // -----------------------------------------------------------------------
     // Runtime discovery (moved from beamtalk-cli's repl_startup)
