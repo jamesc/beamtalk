@@ -543,7 +543,7 @@ pub fn parse_manifest(path: &Utf8Path) -> Result<PackageManifest> {
 /// `[native.dependencies]`, or `[diagnostics]` section.
 pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
     let manifest = parse_manifest_raw(path)?;
-    parsed_from_raw(manifest, path)
+    parsed_from_raw(manifest, path, false)
 }
 
 /// Parse a *dependency's* `beamtalk.toml` leniently (BT-5133).
@@ -558,7 +558,11 @@ pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
 ///
 /// **Leniency stops at dependency specs (BT-5186).** Unknown top-level keys,
 /// tables, and keys in `[package]`, `[application]`, `[stubs]`, `[registry]`
-/// and `[native]` are dropped. An unknown key *inside one entry* of
+/// and `[native]` are dropped (a single-line `key = value`, or a whole
+/// table; an unknown key inside an inline table or with a multi-line value is
+/// still an error, since it cannot be removed alone). An invalid
+/// `[diagnostics]` or `[release]` section is dropped whole, as a dependent
+/// never uses either. An unknown key *inside one entry* of
 /// `[dependencies]`, `[native.dependencies]` or `[native.overrides]` is still
 /// an error: those keys decide what code is fetched and how it is compiled
 /// (a new source kind, a version pin, compiler options), so ignoring one would
@@ -578,7 +582,7 @@ pub fn parse_dependency_manifest_full(path: &Utf8Path) -> Result<ParsedManifest>
             tracing::warn!("Ignoring unknown key `{key}` in dependency manifest '{path}'");
         }
     }
-    parsed_from_raw(manifest, path)
+    parsed_from_raw(manifest, path, true)
 }
 
 /// Whether the unknown-key warning for `key` in the dependency manifest at
@@ -625,6 +629,8 @@ fn deserialize_ignoring_unknown_keys(content: &str) -> Result<(Manifest, Vec<Str
             .find('\n')
             .map_or(text.len(), |i| span.start + i + 1);
         let line = &text[line_start..line_end];
+        let key = &text[span.start..span.end];
+        let key_bare = key.trim_matches(|c| c == '"' || c == '\'');
         let remove_end = if line.trim_start().starts_with('[') {
             // An unknown table: drop its header and body, up to the next header.
             let mut end = line_end;
@@ -637,23 +643,54 @@ fn deserialize_ignoring_unknown_keys(content: &str) -> Result<(Manifest, Vec<Str
             }
             end
         } else {
-            // Only a plain single-line `key = value` can be dropped safely.
-            let single_line_value = line.split_once('=').is_some_and(|(_, v)| {
+            // Only a plain single-line `key = value` whose key *is* the unknown
+            // key can be dropped safely. An unknown key inside an inline table
+            // (`native = { dependencies = ..., new = 1 }`) would take the
+            // whole table with it, so that stays an error.
+            let single_line_value = line.split_once('=').is_some_and(|(k, v)| {
                 let v = v.trim();
-                !v.is_empty() && !v.ends_with('[') && !v.ends_with('{') && !v.contains("\"\"\"")
+                k.trim().trim_matches(|c| c == '"' || c == '\'') == key_bare
+                    && !v.is_empty()
+                    && !v.ends_with('[')
+                    && !v.ends_with('{')
+                    && !v.contains("\"\"\"")
             });
             if !single_line_value {
                 return Err(miette::miette!("{err}"));
             }
             line_end
         };
-        dropped.push(text[span.start..span.end].to_string());
+        dropped.push(key.to_string());
         text.replace_range(line_start..remove_end, "");
     }
 }
 
-/// Validate a deserialized [`Manifest`] into a [`ParsedManifest`].
-fn parsed_from_raw(manifest: Manifest, path: &Utf8Path) -> Result<ParsedManifest> {
+/// A section's parse result: as is for the project's own manifest; for a
+/// `dependency`'s, an error is warned about (once) and the default used.
+fn lenient_section<T: Default>(
+    parsed: Result<T>,
+    dependency: bool,
+    path: &Utf8Path,
+    section: &str,
+) -> Result<T> {
+    match parsed {
+        Err(e) if dependency => {
+            if first_unknown_key_warning(path, section) {
+                tracing::warn!("Ignoring {section} in dependency manifest '{path}': {e:?}");
+            }
+            Ok(T::default())
+        }
+        other => other,
+    }
+}
+
+/// Validate a deserialized [`Manifest`] into a [`ParsedManifest`];
+/// `dependency` when it is a dependency's manifest, read leniently.
+fn parsed_from_raw(
+    manifest: Manifest,
+    path: &Utf8Path,
+    dependency: bool,
+) -> Result<ParsedManifest> {
     validate_package_identity(&manifest.package)?;
 
     let dependencies = parse_dependencies(manifest.dependencies.as_ref())
@@ -672,11 +709,17 @@ fn parsed_from_raw(manifest: Manifest, path: &Utf8Path) -> Result<ParsedManifest
     let native_overrides = parse_native_overrides(manifest.native.as_ref())
         .wrap_err_with(|| format!("Failed to parse [native.overrides] in '{path}'"))?;
 
+    // `[diagnostics]` and `[release]` only shape how the package builds and
+    // releases *itself*; a dependent never uses them. In a dependency's
+    // manifest a value this toolchain does not know (a newer diagnostics
+    // category or release key) is therefore dropped with a warning (BT-5186).
     let diagnostics = parse_diagnostics_table(manifest.diagnostics.as_ref())
-        .wrap_err_with(|| format!("Failed to parse [diagnostics] in '{path}'"))?;
+        .wrap_err_with(|| format!("Failed to parse [diagnostics] in '{path}'"));
+    let diagnostics = lenient_section(diagnostics, dependency, path, "[diagnostics]")?;
 
     let release = parse_release_config(manifest.release.as_ref())
-        .wrap_err_with(|| format!("Failed to parse [release] in '{path}'"))?;
+        .wrap_err_with(|| format!("Failed to parse [release] in '{path}'"));
+    let release = lenient_section(release, dependency, path, "[release]")?;
 
     Ok(ParsedManifest {
         package: manifest.package,
@@ -827,6 +870,21 @@ pub fn package_checker_scope(package_root: Option<&Utf8Path>) -> PackageCheckerS
     package_root.map_or_else(PackageCheckerScope::module_only, |root| {
         PackageCheckerScope::from_manifest_read(&find_manifest_full(root))
     })
+}
+
+/// The checker scope for compiling the *dependency* rooted at `dep_root`:
+/// [`package_checker_scope`], but reading its manifest leniently
+/// ([`parse_dependency_manifest_full`], BT-5186), so a dependency written for
+/// a newer toolchain keeps its `pkg@Class` qualifier checks.
+#[must_use]
+pub fn dependency_checker_scope(dep_root: &Utf8Path) -> PackageCheckerScope {
+    let path = dep_root.join("beamtalk.toml");
+    let read = match path.try_exists() {
+        Ok(true) => parse_dependency_manifest_full(&path).map(Some),
+        Ok(false) => Ok(None),
+        Err(e) => Err(miette::miette!("Failed to stat manifest '{path}': {e}")),
+    };
+    PackageCheckerScope::from_manifest_read(&read)
 }
 
 /// Look for `beamtalk.toml` in the given directory and return the `[application]` config if present.

@@ -224,8 +224,10 @@ fn open_and_lock(
     what: &str,
     announce: impl FnOnce(),
 ) -> Result<std::fs::File> {
+    const MAX_REPLACED: u32 = 16;
     let mut announce = Some(announce);
     let mut directory_vanished = 0;
+    let mut replaced = 0;
     loop {
         // `clean --all` may have removed `_build/` itself since the last pass.
         if let Some(parent) = lock_path.parent() {
@@ -278,7 +280,11 @@ fn open_and_lock(
         // nobody else will ever contend, so it must retry on the file the path
         // names now. (On Windows `clean --all` keeps the lock file, so the path
         // cannot change under a holder there.)
-        if still_names_locked_file(lock_path, &file) {
+        // Bounded: on a filesystem whose path and descriptor stats never
+        // agree (some FUSE/overlay mounts), the check cannot succeed, and the
+        // lock we hold is then the best there is.
+        replaced += 1;
+        if replaced > MAX_REPLACED || still_names_locked_file(lock_path, &file) {
             return Ok(file);
         }
     }

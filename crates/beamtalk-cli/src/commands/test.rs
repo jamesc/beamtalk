@@ -1200,8 +1200,9 @@ fn collect_known_erlang_modules_for(
         );
         // The package's compiled `native/test/` helpers, which live outside
         // the build's native ebin (BT-5186).
-        let helpers = BuildLayout::new(pkg_root.clone()).native_test_ebin_dir();
-        if let Ok(modules) = collect_beam_module_names(&helpers) {
+        if let Some(helpers) = beamtalk_core::ffi_type_specs::project_test_helper_ebin_dir(pkg_root)
+            && let Ok(modules) = collect_beam_module_names(&helpers)
+        {
             known.extend_modules(modules.into_iter().collect());
         }
     }
@@ -1814,6 +1815,16 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
                         pipeline.native_test_modules.push(module);
                     }
                 }
+            }
+        } else {
+            // `native/test/` is gone: so are its helpers (they are already not
+            // known modules, `project_test_helper_ebin_dir`).
+            let helper_ebin = pkg_layout.native_test_ebin_dir();
+            if helper_ebin.is_dir() {
+                let _project_lock = super::dir_lock::lock_project_build(pkg_root)?;
+                fs::remove_dir_all(&helper_ebin)
+                    .into_diagnostic()
+                    .wrap_err_with(|| format!("Failed to remove stale '{helper_ebin}'"))?;
             }
         }
     }

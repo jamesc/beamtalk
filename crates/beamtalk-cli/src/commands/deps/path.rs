@@ -515,7 +515,7 @@ fn dependency_compile_options(
 ) -> beamtalk_core::CompilerOptions {
     beamtalk_core::CompilerOptions {
         current_package: Some(dep_name.to_owned()),
-        known_packages: beamtalk_package::manifest::package_checker_scope(Some(dep_root))
+        known_packages: beamtalk_package::manifest::dependency_checker_scope(dep_root)
             .known_packages,
         suppress_warnings: true,
         warnings_as_errors: false,

@@ -56,8 +56,10 @@ pub fn extract_project_test_type_specs(layout: &BuildLayout) -> Option<NativeTyp
 fn extract_specs_with(layout: &BuildLayout, test_helpers: bool) -> Option<NativeTypeRegistry> {
     let mut ebin_dirs =
         beamtalk_core::ffi_type_specs::collect_project_dependency_ebin_dirs(layout.project_root());
-    let helpers = layout.native_test_ebin_dir();
-    if test_helpers && helpers.is_dir() {
+    if test_helpers
+        && let Some(helpers) =
+            beamtalk_core::ffi_type_specs::project_test_helper_ebin_dir(layout.project_root())
+    {
         ebin_dirs.push(helpers);
     }
     beamtalk_core::ffi_type_specs::extract_type_specs(&layout.type_cache_dir(), &ebin_dirs)
