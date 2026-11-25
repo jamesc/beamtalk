@@ -153,9 +153,9 @@ project_class_shape_entry_agrees_with_shape_manifest_test() ->
     ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
     Dir = fixtures_dir(),
     {ok, _} = beamtalk_release_shapes:extract_shapes([], [Dir]),
+    Live = [Name || {Name, _Module, _Pid} <- beamtalk_class_registry:live_class_entries()],
     Manifest = beamtalk_release:shape_manifest(),
     ?assert(maps:is_key('ReleaseShapesRoot', Manifest)),
-    Live = [Name || {Name, _Module, _Pid} <- beamtalk_class_registry:live_class_entries()],
     ?assertEqual(
         [],
         [

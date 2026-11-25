@@ -187,7 +187,9 @@ init([]) ->
             false -> undefined
         end,
     %% Peers already connected when the monitor (re)starts get a tally entry
-    %% too, or their skew casts would be dropped until they reconnect.
+    %% too, or their skew casts would be dropped until they reconnect. Their
+    %% counts start at 0: no connect-time check runs for them, so skew shows
+    %% up again only on the next reload of a shared class or a reconnect.
     Skew = maps:from_list([{Peer, empty_skew_set()} || Peer <- nodes()]),
     {ok, #state{own_name = OwnName, class_loaded_sub = ClassLoadedSub, skew = Skew}}.
 
