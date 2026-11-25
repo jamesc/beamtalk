@@ -394,7 +394,10 @@ mod tests {
         // sleep: start the child at a measurably later time than this process.
         std::thread::sleep(std::time::Duration::from_millis(50));
         #[cfg(unix)]
-        let mut child = std::process::Command::new("sleep").arg("5").spawn().unwrap();
+        let mut child = std::process::Command::new("sleep")
+            .arg("5")
+            .spawn()
+            .unwrap();
         #[cfg(windows)]
         let mut child = std::process::Command::new("ping")
             .args(["-n", "6", "127.0.0.1"])

@@ -120,7 +120,11 @@ mod tests {
     #[test]
     fn a_workspace_window_is_refused_every_app_command() {
         let app = app();
-        let workspace = window(&app, &workspace_label(), WebviewUrl::External(workspace_url()));
+        let workspace = window(
+            &app,
+            &workspace_label(),
+            WebviewUrl::External(workspace_url()),
+        );
         for cmd in APP_COMMANDS {
             assert!(
                 invoke(&workspace, cmd, workspace_url()).is_err(),
@@ -136,7 +140,11 @@ mod tests {
     #[test]
     fn a_workspace_window_on_a_local_page_is_refused_every_app_command() {
         let app = app();
-        let workspace = window(&app, &workspace_label(), WebviewUrl::External(workspace_url()));
+        let workspace = window(
+            &app,
+            &workspace_label(),
+            WebviewUrl::External(workspace_url()),
+        );
         for cmd in APP_COMMANDS {
             assert!(
                 invoke(&workspace, cmd, local_url()).is_err(),

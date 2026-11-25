@@ -253,13 +253,13 @@ impl SpawnedFront {
 
     /// Wrap an already-spawned `child` as a front, for downstream tests that
     /// need a real tracked process without a workspace or launcher
-    /// (`test-support` feature only). On Windows the child is put in a fresh
+    /// (`test` feature only). On Windows the child is put in a fresh
     /// Job Object, as [`spawn_front`] does.
     ///
     /// # Errors
     ///
     /// Windows only: creating the Job Object or assigning `child` to it.
-    #[cfg(feature = "test-support")]
+    #[cfg(feature = "test")]
     pub fn from_child_for_tests(child: Child) -> io::Result<Self> {
         #[cfg(windows)]
         let job = {
@@ -518,9 +518,14 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
     }
 }
 
+/// Once `attach.log` reaches this size, the next front launch moves it to
+/// `attach.log.1` (replacing any older one) and starts a fresh log (BT-5194),
+/// so a long-lived workspace's log stays bounded at about twice this.
+const ATTACH_LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
+
 /// Redirect `cmd`'s stdout/stderr to `~/.beamtalk/workspaces/<id>/attach.log`
-/// (append mode, accumulating across restarts — mirrors `workspace.log`'s own
-/// convention on the workspace-node side) instead of the default inherited
+/// (append mode, accumulating across restarts until it reaches
+/// [`ATTACH_LOG_MAX_BYTES`], then rotated once to `attach.log.1`) instead of the default inherited
 /// stdio. Inherited stdio is the packaged Tauri app's own — i.e. nowhere, in
 /// a release build (`windows_subsystem = "windows"` on Windows; macOS/Linux
 /// app bundles have no attached terminal either) — so without this, a
@@ -535,7 +540,7 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
 fn redirect_front_stdio(cmd: &mut Command, workspace_id: &str) {
     let stdio_pair = beamtalk_workspace::workspace_dir(workspace_id)
         .ok()
-        .and_then(|dir| open_front_log(&dir.join("attach.log")).ok());
+        .and_then(|dir| open_front_log(&dir.join("attach.log"), ATTACH_LOG_MAX_BYTES).ok());
 
     if let Some((stdout_file, stderr_file)) = stdio_pair {
         cmd.stdout(Stdio::from(stdout_file));
@@ -560,7 +565,8 @@ fn redirect_front_stdio(cmd: &mut Command, workspace_id: &str) {
 /// e.g. `metadata.json` — appropriate there, not here). No Windows
 /// equivalent is set here; it inherits the parent directory's ACLs, same as
 /// this crate's other Windows gaps this module's doc comment already notes.
-fn open_front_log(path: &Path) -> io::Result<(File, File)> {
+fn open_front_log(path: &Path, max_bytes: u64) -> io::Result<(File, File)> {
+    rotate_if_at_least(path, max_bytes);
     let mut options = OpenOptions::new();
     options.create(true).append(true);
     #[cfg(unix)]
@@ -571,6 +577,17 @@ fn open_front_log(path: &Path) -> io::Result<(File, File)> {
     let file = options.open(path)?;
     let cloned = file.try_clone()?;
     Ok((file, cloned))
+}
+
+/// Move `path` to `<path>.1` (replacing it) if `path` is at least
+/// `max_bytes` long. Best-effort, like the log itself: a failed rotation
+/// leaves the log appending as before.
+fn rotate_if_at_least(path: &Path, max_bytes: u64) {
+    if std::fs::metadata(path).is_ok_and(|m| m.len() >= max_bytes) {
+        let mut rotated = path.as_os_str().to_owned();
+        rotated.push(".1");
+        let _ = std::fs::rename(path, PathBuf::from(rotated));
+    }
 }
 
 /// Kill and reap `child` after it was successfully spawned but
@@ -1047,6 +1064,27 @@ mod tests {
             matches!(front.child.try_wait(), Ok(Some(_))),
             "front still running"
         );
+    }
+
+    /// BT-5194: `attach.log` used to grow forever (appended on every
+    /// launch). At the size cap the next launch rotates it to `attach.log.1`.
+    #[test]
+    fn open_front_log_rotates_a_full_log_once() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = dir.path().join("attach.log");
+        let rotated = dir.path().join("attach.log.1");
+
+        std::fs::write(&log, "small\n").unwrap();
+        drop(open_front_log(&log, 64).unwrap());
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "small\n");
+        assert!(!rotated.exists(), "a log under the cap is appended to");
+
+        std::fs::write(&log, "x".repeat(64)).unwrap();
+        std::fs::write(&rotated, "older").unwrap();
+        let (mut out, _err) = open_front_log(&log, 64).unwrap();
+        io::Write::write_all(&mut out, b"fresh\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "fresh\n");
+        assert_eq!(std::fs::read_to_string(&rotated).unwrap(), "x".repeat(64));
     }
 
     #[test]

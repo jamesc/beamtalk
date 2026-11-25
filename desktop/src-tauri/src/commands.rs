@@ -863,11 +863,10 @@ mod tests {
         let state = AppState::new(PathBuf::from("unused-in-this-test"));
         let mut pids = Vec::new();
         for id in ["first", "second"] {
-            let front =
-                beamtalk_desktop_broker::spawn::SpawnedFront::from_child_for_tests(
-                    long_running_child(),
-                )
-                .expect("wrap the stand-in front");
+            let front = beamtalk_desktop_broker::spawn::SpawnedFront::from_child_for_tests(
+                long_running_child(),
+            )
+            .expect("wrap the stand-in front");
             pids.push(front.id());
             locked(&state.children).insert(id.to_string(), front);
         }

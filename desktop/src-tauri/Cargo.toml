@@ -90,6 +90,6 @@ tempfile = "3.27.0"
 # ships in the release binary (edition 2024's per-target feature resolver
 # keeps dev-dependency features out of `cargo build`).
 tauri = { version = "2", features = ["test"] }
-# "test-support": `SpawnedFront::from_child_for_tests`, so `commands.rs`'s
+# "test": `SpawnedFront::from_child_for_tests`, so `commands.rs`'s
 # quit test can track a real process as an attached front (BT-5194).
-beamtalk-desktop-broker = { path = "../../crates/beamtalk-desktop-broker", features = ["test-support"] }
+beamtalk-desktop-broker = { path = "../../crates/beamtalk-desktop-broker", features = ["test"] }
