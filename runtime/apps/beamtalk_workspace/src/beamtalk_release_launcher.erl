@@ -50,7 +50,8 @@ WebSocket `run-entry` op and these launcher verbs — never a second one.
     ping_client_main/0,
     stop_client_main/0,
     tls_preflight_main/0,
-    tls_preflight/2
+    tls_preflight/2,
+    epmd_address/1
 ]).
 
 %%% ============================================================================
@@ -350,7 +351,7 @@ tls_preflight_main() ->
             ],
             io:format(
                 "tls-proto=~ts~ntls-interface=~w~ntls-epmd=~ts~ntls-host=~ts~ntls-optfile=~ts~n",
-                [Proto, Ip, inet:ntoa(Ip), Host, OptFile]
+                [Proto, Ip, epmd_address(Ip), Host, OptFile]
             ),
             erlang:halt(0);
         {error, Problems} ->
@@ -463,6 +464,17 @@ tls_family(Host, Ip) ->
         _ ->
             ok
     end.
+
+-doc """
+The `ERL_EPMD_ADDRESS` for the interface, or `all` for `0.0.0.0` / `::`: the
+launchers then leave `ERL_EPMD_ADDRESS` unset, epmd's own default of every
+interface. Naming `0.0.0.0` makes a freshly started epmd exit, since it binds
+the wildcard and then loopback on the same port.
+""".
+-spec epmd_address(inet:ip_address()) -> string().
+epmd_address({0, 0, 0, 0}) -> "all";
+epmd_address({0, 0, 0, 0, 0, 0, 0, 0}) -> "all";
+epmd_address(Ip) -> inet:ntoa(Ip).
 
 init_words(Flag) ->
     case init:get_argument(Flag) of

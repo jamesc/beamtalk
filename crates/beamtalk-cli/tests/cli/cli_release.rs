@@ -1273,6 +1273,28 @@ fn write_tls_optfiles(dir: &std::path::Path) {
     assert!(status.success(), "writing the TLS option files failed");
 }
 
+/// An epmd port for one test, and on drop a kill request to whatever epmd
+/// listens there (epmd honours it once no node is registered), so the epmd a
+/// test's nodes start never outlives the test.
+struct PrivateEpmd(u16);
+impl PrivateEpmd {
+    fn new() -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("pick a free port");
+        Self(listener.local_addr().expect("local addr").port())
+    }
+}
+impl Drop for PrivateEpmd {
+    fn drop(&mut self) {
+        use std::io::{Read, Write};
+        if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", self.0)) {
+            // EPMD_KILL_REQ: a 2-byte length, then 'k'.
+            let _ = stream.write_all(&[0, 1, b'k']);
+            let mut reply = [0u8; 2];
+            let _ = stream.read(&mut reply);
+        }
+    }
+}
+
 /// BT-5233 (ADR 0126 amendment D2): with `RELEASE_DISTRIBUTION=tls` the
 /// launcher refuses to start when the option file is missing or leaves out
 /// `verify_peer` on either side or `fail_if_no_peer_cert`, each with an
@@ -1293,10 +1315,15 @@ fn release_launcher_tls_distribution_opt_in_test() {
 
     // On Unix the node listens on every interface, a different value from
     // `vm.args`'s loopback pin, so `remote_console` below can show the
-    // launcher's `-kernel inet_dist_use_interface` won (first-wins).
+    // launcher's `-kernel inet_dist_use_interface` won (first-wins). epmd
+    // follows the interface, so the test runs its own epmd on a private port
+    // and stops it at the end: the host's shared epmd is never widened.
     let interface = if cfg!(unix) { "0.0.0.0" } else { "127.0.0.1" };
+    let epmd = PrivateEpmd::new();
+    let epmd_port = epmd.0.to_string();
     let tls_env = |optfile: &std::path::Path| -> Vec<(&'static str, std::ffi::OsString)> {
         vec![
+            ("ERL_EPMD_PORT", epmd_port.clone().into()),
             ("RELEASE_DISTRIBUTION", "tls".into()),
             ("RELEASE_HOST", "127.0.0.1".into()),
             ("RELEASE_DIST_INTERFACE", interface.into()),
@@ -1443,6 +1470,7 @@ fn release_launcher_tls_distribution_opt_in_test() {
     // A loopback client (no opt-in) cannot reach the TLS node.
     let plain = launcher_command(&output_dir, name)
         .arg("ping")
+        .env("ERL_EPMD_PORT", &epmd_port)
         .env("RELEASE_NODE", &node)
         .env("RELEASE_COOKIE", &cookie)
         .output()

@@ -318,12 +318,19 @@ select_distribution() {
     TLS_INTERFACE=$(printf '%s\n' "$preflight" | sed -n 's/^tls-interface=//p')
     TLS_HOST=$(printf '%s\n' "$preflight" | sed -n 's/^tls-host=//p')
     TLS_OPTFILE=$(printf '%s\n' "$preflight" | sed -n 's/^tls-optfile=//p')
-    ERL_EPMD_ADDRESS=$(printf '%s\n' "$preflight" | sed -n 's/^tls-epmd=//p')
-    export ERL_EPMD_ADDRESS
+    tls_epmd=$(printf '%s\n' "$preflight" | sed -n 's/^tls-epmd=//p')
     if [ -z "$TLS_PROTO" ] || [ -z "$TLS_INTERFACE" ] || [ -z "$TLS_HOST" ] ||
-        [ -z "$TLS_OPTFILE" ] || [ -z "$ERL_EPMD_ADDRESS" ]; then
+        [ -z "$TLS_OPTFILE" ] || [ -z "$tls_epmd" ]; then
         echo "error: the RELEASE_DISTRIBUTION=tls check printed no settings" >&2
         exit 1
+    fi
+    # `all` (interface 0.0.0.0 or ::): leave epmd at its default of every
+    # interface; naming 0.0.0.0 makes a freshly started epmd exit.
+    if [ "$tls_epmd" = "all" ]; then
+        unset ERL_EPMD_ADDRESS
+    else
+        ERL_EPMD_ADDRESS=$tls_epmd
+        export ERL_EPMD_ADDRESS
     fi
 }
 

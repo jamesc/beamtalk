@@ -842,6 +842,33 @@ mod tests {
         }
     }
 
+    /// BT-5233: for interface `0.0.0.0`/`::` the check prints `tls-epmd=all`
+    /// and `launcher.sh` leaves `ERL_EPMD_ADDRESS` unset (epmd's own default),
+    /// because naming `0.0.0.0` makes a freshly started epmd exit.
+    #[cfg(unix)]
+    #[test]
+    fn launcher_sh_tls_wildcard_interface_leaves_epmd_address_unset() {
+        let temp = TempDir::new().unwrap();
+        let base = Utf8PathBuf::from_path_buf(temp.path().join("rel")).unwrap();
+        write_launcher_scripts(&base, "orders", "1.0.0", "14.0", false).unwrap();
+        let path = fake_tls_erl(temp.path());
+        let preflight = "tls-proto=inet_tls\ntls-interface={0,0,0,0}\ntls-epmd=all\n\
+                         tls-host=node1.example.com\ntls-optfile=/etc/ssl_dist.conf\n";
+        let out = std::process::Command::new("sh")
+            .arg(base.join("bin/orders").as_std_path())
+            .arg("ping")
+            .env("PATH", &path)
+            .env("RELEASE_DISTRIBUTION", "tls")
+            .env("ERL_EPMD_ADDRESS", "10.9.9.9")
+            .env("FAKE_PREFLIGHT", preflight)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "{stdout}");
+        assert!(stdout.contains("EPMD=\n"), "{stdout}");
+        assert!(stdout.contains("ARG[{0,0,0,0}]"), "{stdout}");
+    }
+
     /// BT-5233: when the Erlang-side check refuses the opt-in, `launcher.sh`
     /// stops with its exit code before starting any node, and passes its
     /// explanation through; an unknown `RELEASE_DISTRIBUTION` is refused up

@@ -244,6 +244,19 @@ tls_preflight_epmd_test_() ->
             ]
         end}.
 
+%% Naming 0.0.0.0 in ERL_EPMD_ADDRESS makes a fresh epmd exit (it then also
+%% binds loopback on the same port), so a wildcard interface leaves epmd at
+%% its default instead.
+epmd_address_test_() ->
+    [
+        ?_assertEqual("all", beamtalk_release_launcher:epmd_address({0, 0, 0, 0})),
+        ?_assertEqual("all", beamtalk_release_launcher:epmd_address({0, 0, 0, 0, 0, 0, 0, 0})),
+        ?_assertEqual("10.0.0.5", beamtalk_release_launcher:epmd_address({10, 0, 0, 5})),
+        ?_assertEqual(
+            "fd00::5", beamtalk_release_launcher:epmd_address({16#fd00, 0, 0, 0, 0, 0, 0, 5})
+        )
+    ].
+
 %% Under RELEASE_DISTRIBUTION=tls the launchers put their own
 %% `-kernel inet_dist_use_interface` ahead of `-args_file vm.args`, whose
 %% loopback value it must replace. That holds because `erl` keeps the first

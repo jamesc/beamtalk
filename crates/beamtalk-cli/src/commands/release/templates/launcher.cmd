@@ -335,7 +335,13 @@ if not defined TLS_INTERFACE goto :tls_no_settings
 if not defined TLS_EPMD goto :tls_no_settings
 if not defined TLS_HOST goto :tls_no_settings
 if not defined TLS_OPTFILE goto :tls_no_settings
-set "ERL_EPMD_ADDRESS=!TLS_EPMD!"
+rem all (interface 0.0.0.0 or ::): leave epmd at its default of every
+rem interface; naming 0.0.0.0 makes a freshly started epmd exit.
+if "!TLS_EPMD!"=="all" (
+    set "ERL_EPMD_ADDRESS="
+) else (
+    set "ERL_EPMD_ADDRESS=!TLS_EPMD!"
+)
 exit /b 0
 :tls_no_settings
 echo error: the RELEASE_DISTRIBUTION=tls check printed no settings 1>&2
