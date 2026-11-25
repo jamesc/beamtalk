@@ -672,9 +672,6 @@ value-type convention `fun(Self, Arg1..ArgN)`. Otherwise advance the walk.
 invoke_runtime_fun(MethodOwner, ClassPid, Selector, Args, Self, State) ->
     case runtime_value_fun(MethodOwner, Selector, length(Args)) of
         {ok, Fun} ->
-            %% bt-catcher-audit: not-applicable-reraises - {error,_} is re-raised
-            %% by every in-tree caller (or replied by an actor), as in
-            %% invoke_resolved/6.
             try
                 {reply, erlang:apply(Fun, [Self | Args]), State}
             catch
@@ -835,8 +832,6 @@ invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State) ->
             %% {reply, Result, NewState} or {error, Error, State} (3-tuple).
             %% We call it inside a try/catch to translate raw Erlang exceptions
             %% into structured beamtalk errors instead of letting them escape.
-            %% bt-catcher-audit: not-applicable-reraises - {error,_} is re-raised
-            %% by every in-tree caller (or replied by an actor)
             try
                 case ModuleName:dispatch(Selector, Args, Self, State) of
                     {reply, _, _} = Reply ->

@@ -8,8 +8,9 @@ defmodule BtAttach.SessionTeardownTest do
   The `e2e` job's "closing a tab tears down its session" test checks the same
   guarantee against a real workspace, but it can only observe the workspace-wide
   session count, which every other tab also moves. These tests mock the one
-  workspace call the registry makes (`beamtalk_session_sup:stop_session/1`, via
-  `:erpc`) and assert exactly WHICH session it is asked to stop and when.
+  workspace call the registry makes (the `close` operation dispatched through
+  `beamtalk_repl_ops:dispatch/4` with the session as its SessionPid, BT-5199,
+  via `:erpc`) and assert exactly WHICH session it is asked to stop and when.
 
   `async: false`: `:meck` replaces `:erpc` for the whole VM (see
   `workspace_rpc_test.exs` for the same arrangement and why it is safe).
@@ -25,9 +26,15 @@ defmodule BtAttach.SessionTeardownTest do
     :meck.new(:erpc, [:unstick, :passthrough])
 
     :meck.expect(:erpc, :call, fn
-      _node, :beamtalk_session_sup, :stop_session, [pid], _timeout ->
+      _node, :beamtalk_repl_protocol, :decode, [_json], _timeout ->
+        {:ok, :decoded_msg}
+
+      _node, :beamtalk_repl_protocol, :get_params, [:decoded_msg], _timeout ->
+        %{}
+
+      _node, :beamtalk_repl_ops, :dispatch, ["close", _params, :decoded_msg, pid], _timeout ->
         send(test, {:stop_session, pid})
-        :ok
+        {:status, :ok}
 
       node, mod, fun, args, timeout ->
         :meck.passthrough([node, mod, fun, args, timeout])

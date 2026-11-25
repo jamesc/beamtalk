@@ -3,28 +3,36 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { panels } = vi.hoisted(() => ({
+const { panels, showWarningMessage, executeCommand } = vi.hoisted(() => ({
   panels: [] as Array<{
     disposed: boolean;
     posted: unknown[];
     send: (msg: unknown) => void;
+    html: () => string;
   }>,
+  showWarningMessage: vi.fn(),
+  executeCommand: vi.fn(),
 }));
 
 vi.mock("vscode", () => ({
   ViewColumn: { Two: 2 },
+  commands: { executeCommand },
   window: {
+    showWarningMessage,
     createWebviewPanel: () => {
+      const webview = {
+        html: "",
+      };
       const state = {
         disposed: false,
         posted: [] as unknown[],
         send: (_msg: unknown) => {},
+        html: () => webview.html,
       };
       panels.push(state);
       let onDispose: () => void = () => {};
       return {
-        webview: {
-          html: "",
+        webview: Object.assign(webview, {
           onDidReceiveMessage: (cb: (msg: unknown) => void) => {
             state.send = cb;
             return { dispose() {} };
@@ -33,7 +41,7 @@ vi.mock("vscode", () => ({
             state.posted.push(m);
             return Promise.resolve(true);
           },
-        },
+        }),
         onDidDispose: (cb: () => void) => {
           onDispose = cb;
           return { dispose() {} };
@@ -263,5 +271,86 @@ describe("InspectorPanel error states and waiters (BT-5189)", () => {
     InspectorPanel.setClient(null);
     await flush();
     expect(lastPosted()).toContain("kept");
+  });
+});
+
+describe("InspectorPanel kill actor (BT-5199)", () => {
+  beforeEach(() => {
+    InspectorPanel.disposeAll();
+    panels.length = 0;
+    showWarningMessage.mockReset();
+    executeCommand.mockReset();
+  });
+
+  function killClient(kill: ReturnType<typeof vi.fn>): WorkspaceClient {
+    return { ...fakeClient(0), killActor: kill } as unknown as WorkspaceClient;
+  }
+
+  it("offers Kill Actor on a user actor but not on a system actor or a binding", () => {
+    InspectorPanel.show(fakeClient(0), { kind: "actor", info: { pid: "<0.1.0>", class: "Foo" } });
+    InspectorPanel.show(fakeClient(0), {
+      kind: "actor",
+      info: { pid: "<0.2.0>", class: "TranscriptStream", system: true },
+    });
+    InspectorPanel.show(fakeClient(0), { kind: "binding", name: "x", value: "", sessionId: "s" });
+    expect(panels[0].html()).toContain('id="bt-kill"');
+    expect(panels[1].html()).not.toContain('id="bt-kill"');
+    expect(panels[2].html()).not.toContain('id="bt-kill"');
+  });
+
+  it("kills after confirmation, closes the panel and refreshes the actor list", async () => {
+    const kill = vi.fn().mockResolvedValue(undefined);
+    showWarningMessage.mockResolvedValue("Kill Actor");
+    InspectorPanel.show(killClient(kill), {
+      kind: "actor",
+      info: { pid: "<0.1.0>", class: "Foo" },
+    });
+    await flush();
+
+    panels[0].send({ type: "kill" });
+    await flush();
+
+    expect(showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining("Foo <0.1.0>"),
+      expect.objectContaining({ modal: true }),
+      "Kill Actor"
+    );
+    expect(kill).toHaveBeenCalledWith("<0.1.0>");
+    expect(panels[0].disposed).toBe(true);
+    expect(executeCommand).toHaveBeenCalledWith("beamtalk.refreshWorkspace");
+  });
+
+  it("does nothing when the confirmation is dismissed", async () => {
+    const kill = vi.fn().mockResolvedValue(undefined);
+    showWarningMessage.mockResolvedValue(undefined);
+    InspectorPanel.show(killClient(kill), {
+      kind: "actor",
+      info: { pid: "<0.1.0>", class: "Foo" },
+    });
+    await flush();
+
+    panels[0].send({ type: "kill" });
+    await flush();
+
+    expect(kill).not.toHaveBeenCalled();
+    expect(panels[0].disposed).toBe(false);
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("shows a refusal in the panel and keeps it open", async () => {
+    const kill = vi.fn().mockRejectedValue(new Error("Actor is not alive: <0.1.0>"));
+    showWarningMessage.mockResolvedValue("Kill Actor");
+    InspectorPanel.show(killClient(kill), {
+      kind: "actor",
+      info: { pid: "<0.1.0>", class: "Foo" },
+    });
+    await flush();
+
+    panels[0].send({ type: "kill" });
+    await flush();
+
+    expect(panels[0].disposed).toBe(false);
+    expect(JSON.stringify(panels[0].posted.at(-1))).toContain("Actor is not alive");
+    expect(executeCommand).not.toHaveBeenCalled();
   });
 });

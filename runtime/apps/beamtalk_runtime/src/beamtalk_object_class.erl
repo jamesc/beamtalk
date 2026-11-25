@@ -633,8 +633,6 @@ probe_local_method(ClassPid, Selector, EnsureLoaded, ResolveFun) ->
                     Fun = ResolveFun(ModuleName),
                     case erlang:function_exported(ModuleName, Fun, 1) of
                         true ->
-                            %% bt-catcher-audit: not-applicable-no-block - generated
-                            %% selector-table probe, no user code
                             try
                                 ModuleName:Fun(Selector)
                             catch

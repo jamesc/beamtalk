@@ -299,7 +299,6 @@ pattern); any other `badarg` is re-raised unchanged.
 """.
 -spec run_subject(atom(), binary(), fun(() -> T)) -> T.
 run_subject(Selector, Bin, Run) ->
-    %% bt-catcher-audit: not-applicable-no-block - `Run` is an internal re:* closure, never a Beamtalk block
     try
         Run()
     catch

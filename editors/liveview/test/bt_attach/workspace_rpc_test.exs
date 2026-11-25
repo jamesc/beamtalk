@@ -55,7 +55,13 @@ defmodule BtAttach.WorkspaceRpcTest do
   # firing while this file's global `:erpc` mock is active must not encounter
   # an unscripted call. Merged under every `mock_rpc/1` call's own handlers so
   # a test can override it, though none need to.
-  @safe_defaults %{{:beamtalk_session_sup, :stop_session} => :ok}
+  # The reap's close is the dispatched `close` operation (BT-5199): decode,
+  # get_params, then dispatch.
+  @safe_defaults %{
+    {:beamtalk_repl_protocol, :decode} => {:ok, :stray_close},
+    {:beamtalk_repl_protocol, :get_params} => %{},
+    {:beamtalk_repl_ops, :dispatch} => {:status, :ok}
+  }
 
   setup do
     :meck.new(:erpc, [:unstick, :passthrough])
@@ -595,6 +601,78 @@ defmodule BtAttach.WorkspaceRpcTest do
     test "diagnostics/2 surfaces a badrpc from the decode step itself (dispatch_diagnostics's own catch-all)" do
       mock_rpc(%{{:beamtalk_repl_protocol, :decode} => {:badrpc, :mock_scripted}})
       assert Workspace.diagnostics("x", "expression") == {:error, {:unreachable, :mock_scripted}}
+    end
+  end
+
+  describe "close_session/1, kill_actor/1, actors/0, sessions/0 — wire ops (BT-5199)" do
+    test "close_session/1 dispatches `close` with the session as its SessionPid" do
+      session = spawn(fn -> :ok end)
+      test = self()
+
+      mock_rpc(%{
+        {:beamtalk_repl_protocol, :decode} => fn [json] ->
+          assert :json.decode(json) == %{"op" => "close"}
+          {:ok, :fake_msg}
+        end,
+        {:beamtalk_repl_protocol, :get_params} => %{},
+        {:beamtalk_repl_ops, :dispatch} => fn ["close", _params, :fake_msg, pid] ->
+          send(test, {:closed, pid})
+          {:status, :ok}
+        end
+      })
+
+      assert Workspace.close_session(session) == :ok
+      assert_received {:closed, ^session}
+    end
+
+    test "close_session/1 surfaces a dispatch badrpc as unreachable" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :dispatch}, {:badrpc, :mock_scripted}))
+      assert Workspace.close_session(self()) == {:error, {:unreachable, :mock_scripted}}
+    end
+
+    test "kill_actor/1 formats the pid on the workspace and dispatches `kill`" do
+      pid = self()
+
+      mock_rpc(
+        Map.put(
+          decode_asserting(
+            fn req -> assert req == %{"op" => "kill", "actor" => "<0.99.0>"} end,
+            {:status, :ok}
+          ),
+          {:erlang, :pid_to_list},
+          ~c"<0.99.0>"
+        )
+      )
+
+      assert Workspace.kill_actor({:beamtalk_object, :Counter, :counter, pid}) == :ok
+    end
+
+    test "kill_actor/1 passes a refusal through and rejects a non-actor term" do
+      mock_rpc(
+        Map.put(
+          decode_ok({:beamtalk_repl_ops, :dispatch}, {:error, :system_actor}),
+          {:erlang, :pid_to_list},
+          ~c"<0.99.0>"
+        )
+      )
+
+      assert Workspace.kill_actor({:beamtalk_object, :T, :t, self()}) == {:error, :system_actor}
+      assert Workspace.kill_actor(42) == {:error, :not_inspectable}
+    end
+
+    test "actors/0 and sessions/0 unwrap their op terms" do
+      actor = %{pid: self(), class: :Counter}
+
+      mock_rpc(
+        decode_ok({:beamtalk_repl_ops, :dispatch}, fn
+          ["actors", _, _, _] -> {:actors, [actor]}
+          ["sessions", _, _, _] -> {:sessions, [%{id: "s1"}]}
+        end)
+        |> Map.put({:lists, :map}, fn [_fun, [_pid]] -> [~c"<0.77.0>"] end)
+      )
+
+      assert Workspace.actors() == {:ok, [Map.put(actor, :pid_text, "<0.77.0>")]}
+      assert Workspace.sessions() == {:ok, [%{id: "s1"}]}
     end
   end
 
@@ -1400,6 +1478,30 @@ defmodule BtAttach.WorkspaceRpcTest do
       assert is_integer(default) and default > 0
       assert eval_timeout == Workspace.rpc_eval_timeout()
       assert eval_timeout > default
+    end
+
+    test "close_session/1 bounds every call by the short interactive timeout (BT-5199)" do
+      test_pid = self()
+
+      :meck.expect(:erpc, :call, fn _node, mod, fun, _args, timeout ->
+        send(test_pid, {:rpc_timeout, mod, fun, timeout})
+
+        case {mod, fun} do
+          {:beamtalk_repl_protocol, :decode} -> {:ok, :fake_msg}
+          {:beamtalk_repl_protocol, :get_params} -> %{}
+          {:beamtalk_repl_ops, :dispatch} -> {:status, :ok}
+        end
+      end)
+
+      assert Workspace.close_session(self()) == :ok
+
+      timeouts =
+        for _ <- 1..3 do
+          assert_received {:rpc_timeout, _mod, _fun, timeout}
+          timeout
+        end
+
+      assert Enum.all?(timeouts, &(&1 <= 5_000)), "close waited up to #{inspect(timeouts)} ms"
     end
 
     test "render_terms/1 renders every term with ONE round-trip, in order" do

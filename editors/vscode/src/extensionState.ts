@@ -32,6 +32,11 @@ export interface ExtensionState {
   replTerminal: vscode.Terminal | undefined;
   /** True while `beamtalk repl` is actively running inside replTerminal. */
   replRunning: boolean;
+  /**
+   * The node session of the REPL in replTerminal, scraped from its output.
+   * Closed on the node when the REPL ends (BT-5199).
+   */
+  replSessionId: string | undefined;
   /** Debounce timer for port-file reads. */
   portDebounceTimer: ReturnType<typeof setTimeout> | null;
 }
@@ -47,5 +52,6 @@ export const state: ExtensionState = {
   workspaceWsClient: undefined,
   replTerminal: undefined,
   replRunning: false,
+  replSessionId: undefined,
   portDebounceTimer: null,
 };

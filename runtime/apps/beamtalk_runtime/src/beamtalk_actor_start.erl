@@ -93,8 +93,6 @@ await_initialize(Pid, MonRef) ->
     ok | {error, term()}.
 
 await_initialize_sys(Pid, MonRef, SysCall, Mode) ->
-    %% bt-catcher-audit: not-applicable-no-block - SysCall is a local fun
-    %% wrapping a sys:get_state/replace_state call, never a Beamtalk block
     try SysCall(Pid) of
         _State ->
             settle_monitor(Mode, MonRef)
@@ -485,8 +483,6 @@ name_holder({global, Name}) ->
 start_native_trapped(Backing, Config, Registration, Link) ->
     OldTrap = erlang:process_flag(trap_exit, true),
     Result =
-        %% bt-catcher-audit: not-applicable-no-block - Backing:start_link/1
-        %% is a hand-written Erlang start function, never a Beamtalk block
         try Backing:start_link(Config) of
             {ok, Pid} when is_pid(Pid) -> register_native_started(Registration, Pid);
             {error, Reason} -> {error, Reason};

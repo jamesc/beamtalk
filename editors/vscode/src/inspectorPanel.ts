@@ -60,12 +60,12 @@ export class InspectorPanel {
     this._panel.onDidDispose(() => this._onPanelDispose());
 
     this._panel.webview.onDidReceiveMessage((msg: unknown) => {
-      if (
-        typeof msg === "object" &&
-        msg !== null &&
-        (msg as Record<string, unknown>).type === "refresh"
-      ) {
+      if (typeof msg !== "object" || msg === null) return;
+      const type = (msg as Record<string, unknown>).type;
+      if (type === "refresh") {
         void this._refetch();
+      } else if (type === "kill") {
+        void this._killActor();
       }
     });
   }
@@ -227,6 +227,44 @@ export class InspectorPanel {
     this._panel.dispose();
   }
 
+  /**
+   * "Kill Actor" (BT-5199): confirm, send `kill`, then close this panel and
+   * refresh the Workspace Explorer so the actor list drops the killed actor
+   * at once (the `stopped` push does the same, but may lag or be missed
+   * during a reconnect). A refusal (a system actor, an actor that already
+   * stopped) is shown in the panel.
+   */
+  private async _killActor(): Promise<void> {
+    if (this._disposed || this._target.kind !== "actor") return;
+    const { pid, class: className } = this._target.info;
+    const choice = await vscode.window.showWarningMessage(
+      `Kill actor ${className} ${pid}?`,
+      {
+        modal: true,
+        detail:
+          "The actor process exits at once; its state is lost and its supervisor may restart it.",
+      },
+      KILL_ACTOR_CONFIRM
+    );
+    if (choice !== KILL_ACTOR_CONFIRM || this._disposed) return;
+    const client = this._client;
+    if (!client) {
+      this._postContent(renderError("Not connected to workspace"));
+      return;
+    }
+    try {
+      await client.killActor(pid);
+    } catch (err) {
+      if (!this._disposed) {
+        ++this._refreshGeneration;
+        this._postContent(renderError(err instanceof Error ? err.message : String(err)));
+      }
+      return;
+    }
+    this.dispose();
+    await vscode.commands.executeCommand("beamtalk.refreshWorkspace");
+  }
+
   // ─── Private helpers ─────────────────────────────────────────────────────
 
   private _onPanelDispose(): void {
@@ -244,7 +282,10 @@ export class InspectorPanel {
         ? `Binding: ${this._target.name}`
         : `Actor: ${this._target.info.class}  ${this._target.info.pid}`;
 
-    this._panel.webview.html = buildPanelHtml(nonce, title, initialContent);
+    // A system actor (`TranscriptStream`) is refused by the node, so it gets
+    // no Kill button (BT-5199).
+    const killable = this._target.kind === "actor" && this._target.info.system !== true;
+    this._panel.webview.html = buildPanelHtml(nonce, title, initialContent, killable);
   }
 
   /**
@@ -403,7 +444,16 @@ function renderError(message: string): string {
 
 // ─── Panel HTML template ──────────────────────────────────────────────────────
 
-function buildPanelHtml(nonce: string, title: string, initialContent: string): string {
+/** The confirm button of the "Kill Actor" dialog. */
+const KILL_ACTOR_CONFIRM = "Kill Actor";
+
+function buildPanelHtml(
+  nonce: string,
+  title: string,
+  initialContent: string,
+  killable = false
+): string {
+  const killButton = killable ? `<button id="bt-kill">✕ Kill Actor</button>` : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -452,6 +502,21 @@ function buildPanelHtml(nonce: string, title: string, initialContent: string): s
     font-size: 12px;
   }
   #bt-refresh:hover {
+    background: var(--vscode-button-secondaryHoverBackground, #45494e);
+  }
+
+  #bt-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+  #bt-kill {
+    padding: 3px 10px;
+    background: var(--vscode-button-secondaryBackground, #3a3d41);
+    color: var(--vscode-errorForeground, #f44747);
+    border: 1px solid var(--vscode-button-border, transparent);
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  #bt-kill:hover {
     background: var(--vscode-button-secondaryHoverBackground, #45494e);
   }
 
@@ -516,7 +581,7 @@ function buildPanelHtml(nonce: string, title: string, initialContent: string): s
 <body>
 <div id="bt-header">
   <span id="bt-title">${escapeHtml(title)}</span>
-  <button id="bt-refresh">↻ Refresh</button>
+  <span id="bt-actions">${killButton}<button id="bt-refresh">↻ Refresh</button></span>
 </div>
 <div id="bt-content">${initialContent}</div>
 <script nonce="${nonce}">
@@ -525,6 +590,13 @@ function buildPanelHtml(nonce: string, title: string, initialContent: string): s
   document.getElementById('bt-refresh').addEventListener('click', function() {
     vscode.postMessage({ type: 'refresh' });
   });
+
+  const kill = document.getElementById('bt-kill');
+  if (kill) {
+    kill.addEventListener('click', function() {
+      vscode.postMessage({ type: 'kill' });
+    });
+  }
 
   window.addEventListener('message', function(event) {
     const msg = event.data;

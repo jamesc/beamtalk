@@ -115,8 +115,6 @@ start_exit_watcher(ActorPid, Block) ->
         Caller ! {onExit_ready, Token},
         receive
             {'DOWN', Ref, process, ActorPid, Reason} ->
-                %% bt-catcher-audit: not-applicable-other-process - onExit block runs in the
-                %% spawned watcher, no home entry
                 try
                     Block(Reason)
                 catch
@@ -773,8 +771,6 @@ not implement it — so `isRemote` never crashes on a well-formed actor.
 -spec is_remote(pid(), fun(() -> term())) -> boolean().
 is_remote(ActorPid, AskNode) ->
     NodeName =
-        %% bt-catcher-audit: not-applicable-other-process - AskNode is a gen_server:call to the
-        %% actor
         try AskNode() of
             #{?BT_CLASS_TAG_KEY := 'Node', name := Name} when is_atom(Name) -> Name;
             _NotANode -> node(ActorPid)

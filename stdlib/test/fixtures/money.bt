@@ -57,3 +57,15 @@ Value subclass: Money
 
   /// Greater than or equal, by cents.
   >= other :: Money -> Boolean => self.cents >= other cents
+
+  /// `500 < aMoney` (number-on-the-left ordering, ADR 0116 § Addendum).
+  lessThanFromNumber: n :: Number -> Boolean => n < self.cents
+
+  /// `500 <= aMoney`.
+  lessOrEqualFromNumber: n :: Number -> Boolean => n <= self.cents
+
+  /// `500 > aMoney`.
+  greaterThanFromNumber: n :: Number -> Boolean => n > self.cents
+
+  /// `500 >= aMoney`.
+  greaterOrEqualFromNumber: n :: Number -> Boolean => n >= self.cents
