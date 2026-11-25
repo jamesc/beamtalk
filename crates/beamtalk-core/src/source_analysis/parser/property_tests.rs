@@ -9,6 +9,8 @@
 //! 2. **Diagnostic spans within input** — all spans have `end <= input.len()`
 //! 3. **Error nodes produce diagnostics** — `Expression::Error` ⟹ non-empty diagnostics
 //! 4. **Error messages are user-facing** — no internal type names in diagnostics
+//! 5. **Nesting is bounded** — any mix of nested constructs past the limit
+//!    reports the nesting diagnostic instead of overflowing the stack (BT-5181)
 //!
 //! **DDD Context:** Compilation
 //!
@@ -319,4 +321,135 @@ proptest! {
         let tokens = lex_with_eof(&input);
         let (_module, _diagnostics) = parse(tokens);
     }
+
+    /// Property 5: Any mix of nested expression constructs past the
+    /// nesting limit reports the nesting diagnostic, on a small stack.
+    #[test]
+    fn mixed_expression_nesting_is_bounded(levels in nesting_strategy(EXPRESSION_NESTERS)) {
+        let source = nested_source("", &levels, EXPRESSION_NESTERS, "1", "");
+        assert_nesting_reported(&source)?;
+    }
+
+    /// Property 5b: As property 5, for type annotations.
+    #[test]
+    fn mixed_type_nesting_is_bounded(levels in nesting_strategy(TYPE_NESTERS)) {
+        let source = nested_source("x :: ", &levels, TYPE_NESTERS, "Integer", " := 1");
+        assert_nesting_reported(&source)?;
+    }
+
+    /// Property 5c: As property 5, for match patterns.
+    #[test]
+    fn mixed_pattern_nesting_is_bounded(levels in nesting_strategy(PATTERN_NESTERS)) {
+        let source = nested_source("x match: [", &levels, PATTERN_NESTERS, "a", " -> 1]");
+        assert_nesting_reported(&source)?;
+    }
+
+    /// Property 5d: Chains of mixed operators, unary messages, pipeline
+    /// stages and field accesses of any length parse on a small stack.
+    #[test]
+    fn mixed_long_chains_are_bounded(links in prop::collection::vec(0..CHAIN_LINKS.len(), 0..3_000)) {
+        let mut source = String::from("a");
+        for link in links {
+            source.push_str(CHAIN_LINKS[link]);
+        }
+        prop_assert!(parse_on_small_stack(source).is_some());
+    }
+}
+
+// ============================================================================
+// Nesting generators (BT-5181)
+// ============================================================================
+
+/// `(open, close)` pairs that each nest an expression one level deeper, and
+/// that are valid inside each other: each opens with a primary, since a map
+/// key is one.
+const EXPRESSION_NESTERS: &[(&str, &str)] = &[
+    ("(", ")"),
+    ("[", "]"),
+    ("#(", ")"),
+    ("#[", "]"),
+    ("{", "}"),
+    ("#{#a => ", "}"),
+    ("#{", " => 1}"),
+    ("#(1 | ", ")"),
+    ("(a at: #(", "))"),
+    ("<<(", ")>>"),
+    ("[x := ", "]"),
+    ("(2 ** ", ")"),
+    ("\"a{ ", " }a\""),
+];
+
+/// `(open, close)` pairs that each nest a type annotation one level deeper.
+const TYPE_NESTERS: &[(&str, &str)] = &[
+    ("Foo(", ")"),
+    ("(", ")"),
+    ("#{#a => ", "}"),
+    ("Foo(Integer, ", ")"),
+];
+
+/// `(open, close)` pairs that each nest a pattern one level deeper.
+///
+/// (A map pattern's value is a variable or literal, and a constructor
+/// pattern stands only at the top of an arm, so neither nests here.)
+const PATTERN_NESTERS: &[(&str, &str)] = &[("{", "}"), ("#[", "]")];
+
+/// Links of a flat chain, appended to a receiver.
+const CHAIN_LINKS: &[&str] = &[" + a", " ** a", " foo", " |> bar", " , a"];
+
+/// Opener indices for a nesting deeper than `MAX_NESTING_DEPTH` (64).
+fn nesting_strategy(
+    nesters: &'static [(&'static str, &'static str)],
+) -> impl Strategy<Value = Vec<usize>> {
+    prop::collection::vec(0..nesters.len(), 65..400)
+}
+
+fn nested_source(
+    prefix: &str,
+    levels: &[usize],
+    nesters: &[(&str, &str)],
+    middle: &str,
+    suffix: &str,
+) -> String {
+    let mut source = String::from(prefix);
+    for &level in levels {
+        source.push_str(nesters[level].0);
+    }
+    source.push_str(middle);
+    for &level in levels.iter().rev() {
+        source.push_str(nesters[level].1);
+    }
+    source.push_str(suffix);
+    source
+}
+
+/// Parses `source` on a thread with a deliberately small stack (an
+/// unguarded recursive path overflows it and aborts the test process);
+/// answers the first diagnostics, or `None` if the parse panicked.
+fn parse_on_small_stack(source: String) -> Option<Vec<String>> {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || {
+            let (_module, diagnostics) = parse(lex_with_eof(&source));
+            diagnostics
+                .iter()
+                .take(5)
+                .map(|d| d.message.to_string())
+                .collect()
+        })
+        .expect("spawn parse thread")
+        .join()
+        .ok()
+}
+
+/// Asserts that parsing `source` on a small stack completes and reports the
+/// nesting diagnostic.
+fn assert_nesting_reported(source: &str) -> Result<(), TestCaseError> {
+    let diagnostics = parse_on_small_stack(source.to_string());
+    prop_assert!(
+        diagnostics
+            .as_ref()
+            .is_some_and(|ds| ds.iter().any(|m| m.contains("nesting is too deep"))),
+        "no nesting diagnostic for {source:?}: {diagnostics:?}"
+    );
+    Ok(())
 }

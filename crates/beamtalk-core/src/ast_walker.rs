@@ -17,7 +17,11 @@
 //!
 //! - [`for_each_child`] / [`children_in_source_order`] — an expression's direct
 //!   children, the one enumeration [`walk_expression`] runs on; [`CursorBound`]
-//!   names the span-end rule for cursor queries that descend through them.
+//!   names the span-end rule for cursor queries that descend through them;
+//!   [`for_each_child_mut`] is the mutable twin.
+//!
+//! - [`expression_depth`] / [`dismantle_expression`] — measure and drop a tree
+//!   without recursion, for trees too deep to walk (BT-5181).
 //!
 //! - [`walk_expression_and_patterns`] — [`walk_expression`] that also reports
 //!   match-arm patterns, for passes that look for names a pattern carries.
@@ -300,98 +304,104 @@ impl CursorBound {
 /// [`walk_expression`], for passes that rewrite nodes in place (e.g.
 /// `trait_expansion`'s body-local type-annotation substitution).
 ///
-/// Kept in exact variant-for-variant lockstep with [`for_each_child`] (the
-/// one child enumeration [`walk_expression`] runs on) — a new `Expression`
-/// variant must be added to both, or a pass relying on
-/// either silently stops seeing it (AGENTS.md's no-duplicate-implementations
-/// rule: this is the one walk both the read-only and mutating passes share,
-/// not two independently-maintained traversals).
+/// Runs on [`for_each_child_mut`], the mutable twin of [`for_each_child`]
+/// (the one child enumeration [`walk_expression`] runs on) — a new
+/// `Expression` variant must be added to both, or a pass relying on either
+/// silently stops seeing it.
 pub fn walk_expression_mut<F>(expr: &mut Expression, f: &mut F)
 where
     F: FnMut(&mut Expression),
 {
     f(expr);
+    for_each_child_mut(expr, &mut |child| walk_expression_mut(child, f));
+}
+
+/// Calls `f` on each direct child expression of `expr`, in source order,
+/// with a mutable reference — the write counterpart of [`for_each_child`],
+/// which [`walk_expression_mut`] and [`dismantle_expression`] run on.
+///
+/// Kept in variant-for-variant lockstep with [`for_each_child`]; the
+/// `walk_mut_visit_count_matches_read_only_walker` test enforces it.
+pub fn for_each_child_mut(expr: &mut Expression, f: &mut dyn FnMut(&mut Expression)) {
     match expr {
         Expression::MessageSend {
             receiver,
             arguments,
             ..
         } => {
-            walk_expression_mut(receiver, f);
+            f(receiver);
             for arg in arguments {
-                walk_expression_mut(arg, f);
+                f(arg);
             }
         }
         Expression::Block(block) => {
             for stmt in &mut block.body {
-                walk_expression_mut(&mut stmt.expression, f);
+                f(&mut stmt.expression);
             }
         }
         Expression::Assignment { target, value, .. } => {
-            walk_expression_mut(target, f);
-            walk_expression_mut(value, f);
+            f(target);
+            f(value);
         }
         Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
-            walk_expression_mut(value, f);
+            f(value);
         }
         Expression::Cascade {
             receiver, messages, ..
         } => {
-            walk_expression_mut(receiver, f);
+            f(receiver);
             for msg in messages {
                 for arg in &mut msg.arguments {
-                    walk_expression_mut(arg, f);
+                    f(arg);
                 }
             }
         }
         Expression::Parenthesized { expression, .. } => {
-            walk_expression_mut(expression, f);
+            f(expression);
         }
         Expression::FieldAccess { receiver, .. } => {
-            walk_expression_mut(receiver, f);
+            f(receiver);
         }
         Expression::Match { value, arms, .. } => {
-            walk_expression_mut(value, f);
+            f(value);
             for arm in arms {
                 if let Some(guard) = &mut arm.guard {
-                    walk_expression_mut(guard, f);
+                    f(guard);
                 }
-                walk_expression_mut(&mut arm.body, f);
+                f(&mut arm.body);
             }
         }
         Expression::MapLiteral { pairs, .. } => {
             for pair in pairs {
-                walk_expression_mut(&mut pair.key, f);
-                walk_expression_mut(&mut pair.value, f);
+                f(&mut pair.key);
+                f(&mut pair.value);
             }
         }
         Expression::ListLiteral { elements, tail, .. } => {
             for elem in elements {
-                walk_expression_mut(elem, f);
+                f(elem);
             }
             if let Some(t) = tail {
-                walk_expression_mut(t, f);
+                f(t);
             }
         }
         Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
-                walk_expression_mut(elem, f);
+                f(elem);
             }
         }
         Expression::StringInterpolation { segments, .. } => {
             for seg in segments {
                 if let StringSegment::Interpolation(e) = seg {
-                    walk_expression_mut(e, f);
+                    f(e);
                 }
             }
         }
         Expression::BinaryConstruction { segments, .. } => {
-            for e in segments
+            segments
                 .iter_mut()
                 .flat_map(BinarySegment::sub_expressions_mut)
-            {
-                walk_expression_mut(e, f);
-            }
+                .for_each(f);
         }
         // Leaf nodes — nothing to recurse into.
         Expression::Literal(..)
@@ -402,6 +412,40 @@ where
         | Expression::ExpectDirective { .. }
         | Expression::Error { .. }
         | Expression::Spread { .. } => {}
+    }
+}
+
+/// The depth of `expr`'s tree: 1 for a leaf, counting one level per
+/// [`for_each_child`] step. Measured with an explicit stack, so a tree too
+/// deep for a recursive walk can still be measured (BT-5181).
+#[must_use]
+pub fn expression_depth(expr: &Expression) -> usize {
+    let mut max = 0;
+    let mut stack = vec![(expr, 1usize)];
+    while let Some((node, depth)) = stack.pop() {
+        max = max.max(depth);
+        for_each_child(node, &mut |child| stack.push((child, depth + 1)));
+    }
+    max
+}
+
+/// Drops `expr` without recursion: each node's children are detached onto an
+/// explicit stack before the node itself is dropped. The compiler-generated
+/// `Drop` recurses once per tree level, so a tree too deep for a recursive
+/// walk must be released through this (BT-5181).
+pub fn dismantle_expression(expr: Expression) {
+    let mut stack = vec![expr];
+    while let Some(mut node) = stack.pop() {
+        for_each_child_mut(&mut node, &mut |child| {
+            let span = child.span();
+            stack.push(std::mem::replace(
+                child,
+                Expression::Error {
+                    message: ecow::EcoString::new(),
+                    span,
+                },
+            ));
+        });
     }
 }
 

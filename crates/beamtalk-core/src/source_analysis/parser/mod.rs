@@ -1020,16 +1020,47 @@ impl Severity {
     }
 }
 
-/// Maximum nesting depth for expressions before the parser bails out.
+/// Maximum nesting depth before the parser bails out.
 ///
-/// Prevents stack overflow on deeply nested input (e.g., `(((((...)))))`).
-/// Each nesting level uses multiple stack frames through the parser call
-/// chain, and ASAN-instrumented builds (fuzzing) have larger frames.
-/// 64 is generous enough for any realistic program while staying safe.
+/// Prevents stack overflow on deeply nested input (e.g., `(((((...)))))`,
+/// `#(#(#(...)))`, `Foo(Foo(...))`, `2 ** 2 ** ...`). Each nesting level uses
+/// multiple stack frames through the parser call chain, and ASAN-instrumented
+/// builds (fuzzing) have larger frames. 64 is generous enough for any
+/// realistic program while staying safe.
 ///
-/// As a second line of defence, `stacker::maybe_grow` is used at the
-/// recursive entry point so the stack is extended on the heap if needed.
-const MAX_NESTING_DEPTH: usize = 64;
+/// Every recursive parse path descends through [`Parser::with_nesting`],
+/// which enforces this limit and, as a second line of defence, extends the
+/// stack on the heap with `stacker::maybe_grow`. The lexer applies the same
+/// limit to string interpolation, which it lexes recursively, and the
+/// lookahead skippers for type annotations apply it to their own recursion.
+pub(crate) const MAX_NESTING_DEPTH: usize = 64;
+
+/// Maximum depth of an expression's syntax tree, and so also the maximum
+/// length of one flat chain of sends (`a + b + c ...`, `a foo bar ...`,
+/// `a |> f |> g ...`, `a.b.c ...`) or of a type operator chain
+/// (`A & B & C ...`) (BT-5181).
+///
+/// A flat chain does not recurse while it is parsed, but it builds a
+/// left-deep tree that every later pass (and `Drop`) walks recursively, so an
+/// unbounded chain would overflow their stacks instead. A chain is capped as
+/// it is built; an expression that is deep through nesting and chains
+/// together is measured once complete and replaced by an error node.
+///
+/// 512 is far past any realistic program, and leaves the recursive passes
+/// that run on the language server's 2 MiB worker threads a wide margin
+/// even in debug builds (about 700 levels fit there; the
+/// `deep_input_stack_safety` tests in `beamtalk-language-service` check it).
+pub(crate) const MAX_EXPRESSION_DEPTH: usize = 512;
+
+/// Stack the parser keeps free before descending one nesting level, and the
+/// size of each heap segment `stacker` adds when less than that is left.
+///
+/// The red zone must hold one nesting level's whole frame chain (a dozen
+/// frames between two guarded entry points, large in debug builds); the
+/// segment is kept modest because `MAX_NESTING_DEPTH` caps how many are ever
+/// needed and a large one would cause OOM under `AddressSanitizer`.
+const STACK_RED_ZONE: usize = 128 * 1024;
+const STACK_SEGMENT: usize = 1024 * 1024;
 
 /// The parser state.
 pub(super) struct Parser {
@@ -1074,6 +1105,9 @@ pub(super) struct Parser {
     pub(super) current_method_header_indent: Option<usize>,
     /// Current expression nesting depth (guards against stack overflow).
     nesting_depth: usize,
+    /// Current recursion depth of the type-annotation lookahead skippers,
+    /// which take `&self` (see `skip_type_operand`).
+    pub(super) lookahead_depth: std::cell::Cell<usize>,
     /// Indices of tokens whose leading trivia contains at least one `DocComment`.
     ///
     /// Pre-scanned in `Parser::new`. Entries are removed as doc comments are
@@ -1138,6 +1172,7 @@ impl Parser {
             in_protocol_body: false,
             current_method_header_indent: None,
             nesting_depth: 0,
+            lookahead_depth: std::cell::Cell::new(0),
             unattached_doc_comment_indices,
             attached_doc_comment_positions: None,
             pipeline_sends: Vec::new(),
@@ -1586,32 +1621,192 @@ impl Parser {
         )
     }
 
-    /// Increments the nesting depth and returns `Err(Expression::Error)` if
-    /// it exceeds [`MAX_NESTING_DEPTH`].  Call [`leave_nesting`] on every
-    /// exit path when this returns `Ok(())`.
-    pub(super) fn enter_nesting(&mut self, span: Span) -> Result<(), Expression> {
-        self.nesting_depth += 1;
-        if self.nesting_depth > MAX_NESTING_DEPTH {
-            self.diagnostics.push(Diagnostic::error(
-                format!("Expression nesting is too deep (maximum {MAX_NESTING_DEPTH} levels)"),
-                span,
-            ));
+    /// Runs `body` one nesting level deeper, or `too_deep` (after reporting
+    /// the "nesting is too deep" diagnostic at `span`) once the level would
+    /// exceed [`MAX_NESTING_DEPTH`].
+    ///
+    /// Every recursive parse path goes through here — expressions, collection
+    /// literals, right-associative operators, type annotations and patterns —
+    /// so no input can recurse more than [`MAX_NESTING_DEPTH`] levels, and the
+    /// stack is extended on the heap when less than [`STACK_RED_ZONE`] is
+    /// left (BT-5181).
+    pub(super) fn with_nesting<T>(
+        &mut self,
+        span: Span,
+        too_deep: impl FnOnce(&mut Self) -> T,
+        body: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
+            if self.nesting_depth >= MAX_NESTING_DEPTH {
+                self.diagnostics.push(Diagnostic::error(
+                    format!("Expression nesting is too deep (maximum {MAX_NESTING_DEPTH} levels)"),
+                    span,
+                ));
+                return too_deep(self);
+            }
+            self.nesting_depth += 1;
+            let result = body(self);
             self.nesting_depth -= 1;
-            return Err(Expression::Error {
-                message: "Expression nesting too deep".into(),
-                span,
-            });
-        }
-        Ok(())
+            result
+        })
     }
 
-    /// Decrements the nesting depth (pair with [`enter_nesting`]).
-    pub(super) fn leave_nesting(&mut self) {
-        debug_assert!(
-            self.nesting_depth > 0,
-            "leave_nesting called without matching enter_nesting"
+    /// [`Self::with_nesting`] for a parse path that answers an
+    /// [`Expression`]: past the limit it answers an error node.
+    pub(super) fn with_expression_nesting(
+        &mut self,
+        span: Span,
+        body: impl FnOnce(&mut Self) -> Expression,
+    ) -> Expression {
+        self.with_nesting(span, |_| Self::nesting_error(span), body)
+    }
+
+    /// [`Self::with_expression_nesting`] for a bracketed construct starting at
+    /// the current token: past the limit the whole construct, up to its
+    /// matching closer, is skipped, so its contents are not reparsed (and
+    /// reported again) as the enclosing construct's elements.
+    pub(super) fn with_bracketed_nesting(
+        &mut self,
+        body: impl FnOnce(&mut Self) -> Expression,
+    ) -> Expression {
+        let start = self.current_token().span();
+        self.with_nesting(
+            start,
+            |p| {
+                let end = p.skip_bracketed_group();
+                Self::nesting_error(start.merge(end))
+            },
+            body,
+        )
+    }
+
+    fn nesting_error(span: Span) -> Expression {
+        Expression::Error {
+            message: "Expression nesting too deep".into(),
+            span,
+        }
+    }
+
+    /// Consumes the bracketed group opening at the current token (any of
+    /// `(`, `[`, `{`, `#(`, `#[`, `#{`, `<<`), up to its matching closer or
+    /// the end of input, without recursion. Answers the span of the last
+    /// token consumed. Consumes just the current token when it opens no
+    /// group.
+    pub(super) fn skip_bracketed_group(&mut self) -> Span {
+        let mut depth = 0usize;
+        loop {
+            if self.is_at_end() {
+                return self.current_token().span();
+            }
+            let opens = matches!(
+                self.current_kind(),
+                TokenKind::LeftParen
+                    | TokenKind::LeftBracket
+                    | TokenKind::LeftBrace
+                    | TokenKind::ListOpen
+                    | TokenKind::ArrayOpen
+                    | TokenKind::MapOpen
+                    | TokenKind::LtLt
+            );
+            let closes = matches!(
+                self.current_kind(),
+                TokenKind::RightParen
+                    | TokenKind::RightBracket
+                    | TokenKind::RightBrace
+                    | TokenKind::GtGt
+            );
+            let span = self.advance().span();
+            if opens {
+                depth += 1;
+            } else if closes {
+                depth = depth.saturating_sub(1);
+            }
+            if depth == 0 {
+                return span;
+            }
+        }
+    }
+
+    /// Counts one more link of a flat chain in `links` and answers whether
+    /// the chain may take it (see [`MAX_EXPRESSION_DEPTH`]). Reports the
+    /// "too long" diagnostic at `span` once, for the first link past the
+    /// limit; the caller consumes that link and the rest of the chain
+    /// without building them.
+    pub(super) fn chain_may_grow(&mut self, links: &mut usize, span: Span) -> bool {
+        *links = links.saturating_add(1);
+        if *links <= MAX_EXPRESSION_DEPTH {
+            return true;
+        }
+        if *links == MAX_EXPRESSION_DEPTH + 1 {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "Expression chain is too long (maximum {MAX_EXPRESSION_DEPTH} operators or messages in one chain)"
+                    ),
+                    span,
+                )
+                .with_hint("split the chain across statements with intermediate variables"),
+            );
+        }
+        false
+    }
+
+    /// Answers the chain built so far or, once `links` has passed the limit
+    /// ([`Self::chain_may_grow`]), an error node spanning the whole chain:
+    /// a too-long chain leaves one diagnostic and no partial tree.
+    pub(super) fn finish_chain(&mut self, built: Expression, links: usize) -> Expression {
+        if links <= MAX_EXPRESSION_DEPTH {
+            return built;
+        }
+        let span = built.span().merge(self.previous_token_span());
+        crate::ast_walker::dismantle_expression(built);
+        Expression::Error {
+            message: "Expression chain too long".into(),
+            span,
+        }
+    }
+
+    /// The span of the token most recently consumed (the current token's
+    /// before any is consumed).
+    pub(super) fn previous_token_span(&self) -> Span {
+        self.current
+            .checked_sub(1)
+            .and_then(|i| self.tokens.get(i))
+            .map_or_else(|| self.current_token().span(), Token::span)
+    }
+
+    /// Replaces `expr` with an error node, reporting a diagnostic, when its
+    /// syntax tree is deeper than [`MAX_EXPRESSION_DEPTH`]. Checked on each
+    /// outermost expression (and on the literals a declaration parses
+    /// directly), so the passes after the parser never see a tree
+    /// deep enough to overflow their stacks: long chains nested inside
+    /// each other can be deep together while each chain and each nesting
+    /// level is within its own limit (BT-5181).
+    pub(super) fn bound_expression_depth(&mut self, expr: Expression) -> Expression {
+        if crate::ast_walker::expression_depth(&expr) <= MAX_EXPRESSION_DEPTH {
+            return expr;
+        }
+        let span = expr.span();
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "Expression is too long or nested too deep (maximum syntax tree depth {MAX_EXPRESSION_DEPTH})"
+                ),
+                span,
+            )
+            .with_hint("split it across statements with intermediate variables"),
         );
-        self.nesting_depth = self.nesting_depth.saturating_sub(1);
+        crate::ast_walker::dismantle_expression(expr);
+        Expression::Error {
+            message: "Expression too deep".into(),
+            span,
+        }
+    }
+
+    /// Whether the parser is inside no nesting level: the expression being
+    /// parsed is an outermost one.
+    pub(super) fn at_outermost_level(&self) -> bool {
+        self.nesting_depth == 0
     }
 
     /// Synchronizes parser to a safe recovery point.
