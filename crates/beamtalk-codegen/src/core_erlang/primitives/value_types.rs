@@ -111,19 +111,6 @@ pub(crate) fn generate_proto_object_bif(
                 Some(leaf::var(timeout.to_string())),
             ))
         }
-        // Class objects only: any other receiver gets a structured
-        // `type_error` from `local_call/3`.
-        "performLocally:withArguments:" => {
-            let sel = param(params, 0, "_Selector");
-            let args = param(params, 1, "_Args");
-            Some(docvec![
-                "call 'beamtalk_object_class':'local_call'(Self, ",
-                leaf::var(sel.to_string()),
-                ", ",
-                leaf::var(args.to_string()),
-                ")",
-            ])
-        }
         "doesNotUnderstand:args:" => {
             let selector_var = super::param(params, 0, "_Selector");
             let hint =

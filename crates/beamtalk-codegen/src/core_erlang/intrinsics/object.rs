@@ -158,20 +158,6 @@ impl CoreErlangGenerator {
                 )
                 .map(Some)
             }
-            // Execute a class method in the caller's process,
-            // bypassing the class object's gen_server.
-            Some(WellKnownSelector::PerformLocallyWithArgs) => {
-                debug_assert_eq!(arguments.len(), 2);
-                // Hoist open-scope receiver + args (e.g. class method self-sends).
-                self.sequenced_runtime_call(
-                    "beamtalk_object_class",
-                    "local_call",
-                    &[receiver, &arguments[0], &arguments[1]],
-                    "PerfLoc",
-                    |operands| operands,
-                )
-                .map(Some)
-            }
             Some(WellKnownSelector::Perform) => {
                 debug_assert_eq!(arguments.len(), 1);
                 // Hoist open-scope receiver + selector arg.
@@ -1309,8 +1295,9 @@ impl CoreErlangGenerator {
         // class object, which share that shape — goes through
         // `beamtalk_message_dispatch:send/3`, whose
         // `classify_receiver` tells them apart (actor →
-        // `sync_send`; class object → `class_send`, reaching
-        // `dispatch_class_method`'s `fieldAt:` clause; BT-4148).
+        // `sync_send`; class object → `class_send`, which raises
+        // `does_not_understand` unless the class defines a `fieldAt:`
+        // class method; ADR 0153 decision 7).
         // Sending a class object the actor message shape
         // instead crashed the class gen_server.
         //
@@ -1527,8 +1514,8 @@ impl CoreErlangGenerator {
         // `beamtalk_message_dispatch:send/3`, which already
         // classifies the receiver correctly (actor instance
         // → `sync_send`; class object → `beamtalk_object_class:class_send`,
-        // reaching this issue's `dispatch_class_method`
-        // `'hasField:'` clause; value/tagged-map/primitive
+        // which raises `does_not_understand` unless the class defines a
+        // `hasField:` class method (ADR 0153 decision 7); value/tagged-map/primitive
         // → `beamtalk_primitive:send`, reaching the
         // `hasField:` arm every class's `dispatch/3` now
         // carries). A class object is also

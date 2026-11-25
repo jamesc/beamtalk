@@ -59,9 +59,10 @@ pub enum ExpectCategory {
     /// that is direct-called in the caller's process directly creates a
     /// resource tied to, or acts on, the calling process (BT-4302).
     ClassMethodProcessResource,
-    /// Suppress class-var-reflection-shadowing warnings — a class-side method
-    /// named `fieldAt:`, `fieldAt:put:`, `hasField:` or `clearField:`, which
-    /// the class process answers itself for a Symbol argument (BT-4422).
+    /// Deprecated, parse-only (ADR 0153, BT-5155): the
+    /// `class-var-reflection-shadowing` lint was removed, because a class
+    /// method named `fieldAt:` etc. now answers on every route; reported as
+    /// a stale expectation.
     ClassVarReflectionShadowing,
     /// Suppress actor-state-abroad warnings — a block literal that touches
     /// its actor's state used where it runs outside the actor's process
@@ -172,7 +173,8 @@ impl ExpectCategory {
 
     /// Returns the list of valid category name strings, for use in error messages.
     /// Omits the deprecated parse-only names (`stored_closure`,
-    /// `class_state_abroad`, `class_process_ffi`) so they are not advertised.
+    /// `class_state_abroad`, `class_process_ffi`,
+    /// `class_var_reflection_shadowing`) so they are not advertised.
     #[must_use]
     pub const fn valid_names() -> &'static [&'static str] {
         &[
@@ -193,7 +195,6 @@ impl ExpectCategory {
             "sendability",
             "match_arm_block",
             "class_method_process_resource",
-            "class_var_reflection_shadowing",
             "actor_state_abroad",
             "ffi_nested_string",
             "binary_string_compare",
