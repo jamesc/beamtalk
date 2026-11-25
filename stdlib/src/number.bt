@@ -50,7 +50,7 @@ abstract typed Value subclass: Number
 
   /// The recursive loop of `to:by:do:`. The arguments are validated once by
   /// `to:by:do:`, so each step only compares and recurses (BT-5167).
-  internal runToBy: end :: Number step: step :: Number do: block :: Block(Integer, Object) -> Nil =>
+  internal runToBy: end :: Number step: step :: Number do: block :: Block(Number, Object) -> Nil =>
     cond := (step > 0 and: [self <= end]) or: [step < 0 and: [self >= end]]
     cond
       ifTrue: [

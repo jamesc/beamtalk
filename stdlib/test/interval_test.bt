@@ -142,6 +142,36 @@ TestCase subclass: IntervalTest
 
   testZeroStepRaisesError => self should: [1 to: 10 by: 0] raise: #user_error
 
+  // BT-5217: an Interval holds integers only, so `to:by:` rejects a
+  // non-Integer step with a TypeError (`to:by:do:` still takes a Float step).
+  // The step arrives untyped so the call compiles; a literal `0.5` is
+  // rejected at compile time by `step :: Integer`.
+  intervalBy: step => 1 to: 2 by: step
+
+  testFloatStepRaisesTypeError =>
+    self should: [self intervalBy: 0.5] raise: #type_error
+
+  testFloatStepIsCaughtAsTypeErrorWithMessage =>
+    message := [self intervalBy: 0.5] on: TypeError do: [:e | e message]
+    self assert: message equals: "Interval step must be an Integer"
+
+  testWholeFloatStepRaisesTypeError =>
+    self should: [self intervalBy: 2.0] raise: #type_error
+
+  testFloatZeroStepRaisesTypeError =>
+    self should: [self intervalBy: 0.0] raise: #type_error
+
+  testNilStepRaisesTypeError =>
+    self should: [self intervalBy: nil] raise: #type_error
+
+  testFloatStepStillLoopsWithToByDo =>
+    seen := #()
+    1
+      to: 2
+      by: 0.5
+      do: [:x | seen := seen add: x]
+    self assert: seen equals: #(1, 1.5, 2.0)
+
   testAsListForward => self assert: (1 to: 5) asList equals: #(1, 2, 3, 4, 5)
 
   testAsListSingleElement => self assert: (3 to: 3) asList equals: #(3)

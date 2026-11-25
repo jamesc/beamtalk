@@ -397,9 +397,11 @@ pub fn cleanup_stale_node_info(workspace_id: &str) -> Result<()> {
 
 /// Acquire an exclusive advisory lock for workspace creation.
 ///
-/// Returns a locked `File` handle. The lock is released when the file is dropped.
+/// Returns the lock guard. The lock is released when it is dropped.
 /// The lockfile is created at [`workspace_lockfile_path`].
-pub(super) fn acquire_workspace_lock(workspace_id: &str) -> Result<fs::File> {
+pub(super) fn acquire_workspace_lock(
+    workspace_id: &str,
+) -> Result<crate::commands::dir_lock::DirLock> {
     let lockfile_path = workspace_lockfile_path(workspace_id)?;
     fs::create_dir_all(workspaces_base_dir()?).into_diagnostic()?;
 

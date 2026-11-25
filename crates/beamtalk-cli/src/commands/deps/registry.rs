@@ -429,7 +429,7 @@ fn cache_key(url: &str) -> String {
 
 /// Acquire the exclusive advisory lock covering `cache_root`'s clone,
 /// refresh, and swap. Hold it for no longer than that sequence.
-fn lock_registry_cache(cache_root: &Utf8Path) -> Result<std::fs::File> {
+fn lock_registry_cache(cache_root: &Utf8Path) -> Result<crate::commands::dir_lock::DirLock> {
     crate::commands::dir_lock::lock_dir(cache_root, "registry cache")
 }
 
