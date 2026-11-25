@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /// Demo — the coordinator scenario. Run it on the coordinator node with
-/// `bin/cluster rpc "Demo run"` (see README.md).
+/// `bin/cluster rpc "Demo main: workerA@localhost workerB@localhost"` (see
+/// README.md). `Demo run` does the same with the default node names.
 ///
 /// It farms jobs out to two worker nodes, kills one of them mid-call,
 /// notices through `NodeDown`, reassigns the lost job, and prints one

@@ -230,7 +230,8 @@ jobs:
               runtime/apps/beamtalk_runtime/src/beamtalk_future.erl \
               runtime/apps/beamtalk_runtime/src/beamtalk_pid.erl \
               runtime/apps/beamtalk_runtime/src/beamtalk_announcements.erl \
-              stdlib/src/actor.bt stdlib/src/node.bt \
+              stdlib/src/actor.bt stdlib/src/node.bt stdlib/src/node_up.bt \
+              stdlib/src/node_down.bt stdlib/src/system_announcer.bt \
               'crates/beamtalk-codegen/src/core_erlang/gen_server/*' \
               'crates/beamtalk-cli/src/commands/release/*' \
               Justfile .github/workflows/ci.yml '.github/actions/*')
