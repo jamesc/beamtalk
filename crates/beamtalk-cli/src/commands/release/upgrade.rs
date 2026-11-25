@@ -161,6 +161,9 @@ pub fn run_upgrade_preflight(
 
 fn is_tarball(path: &Utf8Path) -> bool {
     let name = path.file_name().unwrap_or_default();
+    // A tarball parked by `ReleaseSwap` (`--upgrade-from` naming the output
+    // being replaced) keeps its type under the parked suffix.
+    let name = name.strip_suffix(super::PREVIOUS_SUFFIX).unwrap_or(name);
     name.ends_with(".tar.gz")
         || std::path::Path::new(name)
             .extension()
@@ -852,6 +855,11 @@ mod tests {
     #[test]
     fn is_tarball_recognises_tar_gz_and_tgz_only() {
         assert!(is_tarball(Utf8Path::new("orders-1.3.0.tar.gz")));
+        // A tarball parked by `ReleaseSwap` (BT-5134).
+        assert!(is_tarball(Utf8Path::new(
+            "orders-1.3.0.tar.gz.beamtalk-previous"
+        )));
+        assert!(!is_tarball(Utf8Path::new("orders.beamtalk-previous")));
         assert!(is_tarball(Utf8Path::new("orders-1.3.0.tgz")));
         assert!(!is_tarball(Utf8Path::new("orders-1.3.0")));
         assert!(!is_tarball(Utf8Path::new("/some/dir")));
