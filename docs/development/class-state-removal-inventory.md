@@ -423,7 +423,7 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | `crates/beamtalk-cli/src/commands/util.rs` | 4 | edit | BT-5149 |
 | `crates/beamtalk-cli/src/commands/build_stdlib/tests/generators.rs` | 4 | edit | BT-5154 |
 | `crates/beamtalk-language-service/src/tests/goto_definition_navigation.rs` | 3 | edit | BT-5154 |
-| `crates/beamtalk-core/src/test_helpers/statement_probes.rs` | 3 | edit | BT-5151 |
+| `crates/beamtalk-core/src/test_helpers/statement_probes.rs` | 3 | edit (the ADR 0131 probe matrix, not the fuzz harness; it compiles until the parser rejects `classState:`) | BT-5152 |
 | `crates/beamtalk-core/src/semantic_analysis/validators/native_validators.rs` | 3 | edit | BT-5154 |
 | `crates/beamtalk-core/src/semantic_analysis/validators/mod.rs` | 3 | edit | BT-5154 |
 | `crates/beamtalk-core/src/semantic_analysis/type_checker/tests/bt4043_metaclass_slot_assignment.rs` | 3 | edit | BT-5154 |

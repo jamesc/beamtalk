@@ -132,11 +132,11 @@ jobs:
       # and use the Linear issue tools.
       # Not allowed: Write/Edit (it reports only through Linear), cat/find/head/
       # tail or other shell, env-prefixed commands, git writes, the web. Those
-      # cargo subcommands run this repo's code (the
-      # checked-out commit, which the agent cannot modify), and the OAuth token
-      # and Linear key are in the job's environment, so injected instructions
-      # could in principle still reach them through cargo; that residual risk is
-      # why the prompt marks all fetched data as untrusted.
+      # cargo subcommands run this repo's code (the checked-out commit, which
+      # the agent cannot modify), and the OAuth token and Linear key are in the
+      # job's environment, so injected instructions could in principle still
+      # reach them through cargo; that residual risk is why the prompt marks
+      # all fetched data as untrusted.
       # The composite action (from the trusted config checkout, shared with
       # ci-triage.yml) writes the Linear MCP config, runs Claude, and reports denials.
       - name: Triage with Claude
