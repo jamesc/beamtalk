@@ -341,22 +341,26 @@ impl Rewriter {
     /// holds; a receiver that breaks it is dispatched and may answer anything,
     /// which [`helper_guard_sense`] decides through `beamtalk_guard_return`.
     ///
-    /// A comparison on a proven receiver that is not bare (`0 < x`, the
-    /// right operand unproven) is the same: a Boolean unless its right
-    /// operand is not a number, which is then sent a reflected hook that may
-    /// answer anything (ADR 0116 § Addendum, BT-5176).
+    /// A comparison on a proven receiver whose right operand is a declared
+    /// parameter (`0 < x`, `x :: Integer`) is the same: a Boolean while the
+    /// declaration holds; a non-number right operand broke it and is sent a
+    /// reflected hook that may answer anything (ADR 0116 § Addendum,
+    /// BT-5176). With an untyped right operand a hook answer is ordinary
+    /// code, not a broken declaration, so it is not counted here.
     fn is_declared_boolean(&self, expr: &Expression) -> bool {
         if let Expression::MessageSend {
             receiver,
             selector: MessageSelector::Binary(op),
+            arguments,
             is_cast: false,
             ..
         } = expr
             && is_ordering_comparison(op)
         {
-            return matches!(receiver.as_ref(), Expression::Identifier(id)
-                if self.declared_params.contains(&id.name))
-                || proven_comparison_kind(receiver, None).is_some();
+            let declared = |e: &Expression| matches!(e, Expression::Identifier(id) if self.declared_params.contains(&id.name));
+            return declared(receiver)
+                || (proven_comparison_kind(receiver, None).is_some()
+                    && arguments.first().is_some_and(declared));
         }
         self.short_circuit_declared_operands(expr).is_some()
     }
@@ -1262,6 +1266,17 @@ mod tests {
             assert_eq!(helpers, 1, "{body}");
             assert_eq!(boolean_comparisons(&src), 0, "{body}");
         }
+        // With an untyped right operand a non-Boolean hook answer is ordinary
+        // code, not a broken declaration: only the strict effect-free
+        // `[^v]` guard goes to the helper; an effectful one keeps its frame.
+        let untyped = |body: &str| format!("Object subclass: C\n  m: x =>\n{body}\n");
+        assert_eq!(
+            rewritten(&untyped("    0 < x ifTrue: [self foo. ^1]\n    2")),
+            None
+        );
+        let (_, helpers) = rewritten_with_conditions(&untyped("    0 < x ifTrue: [^1]\n    2"))
+            .expect("an effect-free guard is rewritten");
+        assert_eq!(helpers, 1);
         // A two-branch guard on it keeps its frame, as on a declared one.
         assert_eq!(
             rewritten(&typed_class(

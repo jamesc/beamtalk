@@ -65,9 +65,10 @@ impl OperatorGuard {
         };
         match self {
             Self::Arithmetic => test("is_number"),
-            Self::Comparison => either(test("is_number"), test("is_binary")),
-            Self::DeclaredComparison(kinds) => {
-                let (first, second) = kinds.type_tests();
+            Self::Comparison | Self::DeclaredComparison(_) => {
+                let (first, second) = self
+                    .comparison_kind_tests()
+                    .expect("a receiver-tested comparison guard has kind tests");
                 match second {
                     Some(second) => either(test(first), test(second)),
                     None => test(first),
@@ -85,12 +86,17 @@ impl OperatorGuard {
     /// for a guard with no number arm (a declared `String`) or no receiver
     /// test at all ([`Self::ProvenNumber`]), and for arithmetic.
     fn number_and_string_tests(self) -> Option<(&'static str, Option<&'static str>)> {
+        self.comparison_kind_tests()
+            .filter(|tests| *tests != ("is_binary", None))
+    }
+
+    /// The comparison guard's receiver kind tests: the first, and a second
+    /// to `or` with it (always `is_binary` when present). The one table
+    /// behind [`Self::predicate_doc`] and [`Self::number_and_string_tests`].
+    fn comparison_kind_tests(self) -> Option<(&'static str, Option<&'static str>)> {
         match self {
             Self::Comparison => Some(("is_number", Some("is_binary"))),
-            Self::DeclaredComparison(kinds) => match kinds.type_tests() {
-                ("is_binary", None) => None,
-                tests => Some(tests),
-            },
+            Self::DeclaredComparison(kinds) => Some(kinds.type_tests()),
             Self::Arithmetic | Self::ProvenNumber => None,
         }
     }
@@ -127,6 +133,27 @@ fn number_fallback_entry_point(family: OperatorFamily) -> &'static str {
     }
 }
 
+/// ADR 0116: the one call that sends the right operand `right` of `left op
+/// right` its reflected selector, through the family's runtime entry point:
+/// `beamtalk_message_dispatch:<entry>(Right, '<selector>', [Left], '<op>')`.
+fn reflected_hook_call(
+    reflected: beamtalk_core::semantic_analysis::number_coercion::ReflectedOperator,
+    op: &str,
+    right: Document<'static>,
+    left: Document<'static>,
+) -> Document<'static> {
+    form::call(
+        "beamtalk_message_dispatch",
+        number_fallback_entry_point(reflected.family),
+        [
+            right,
+            atom(reflected.selector),
+            docvec!["[", left, "]"],
+            atom(op.to_string()),
+        ],
+    )
+}
+
 /// Whether `op` is a coercing arithmetic operator (`+ - * /`, ADR 0116):
 /// `%` and `**` are not.
 pub(in crate::core_erlang) fn is_arithmetic_operator(op: &str) -> bool {
@@ -153,7 +180,9 @@ pub(in crate::core_erlang) enum ProvenKind {
     /// A number at run time: an `Integer`, `Float` or `Character` (a
     /// codepoint integer) literal, or `self` in one of those classes.
     Number,
-    /// A binary at run time: a `String` literal, or `self` in `String`.
+    /// A `String`: a `String` literal (the tagged `{beamtalk_string, Bin}`
+    /// tuple at run time, BT-4170, which the bare BIF term-orders as a
+    /// tuple), or `self` in `String`.
     String,
 }
 
@@ -821,15 +850,11 @@ impl CoreErlangGenerator {
                 unreachable!("number_comparison_arm called for a non-ordering operator: {op}")
             });
         // BT-4366: nested in a `case`, so the call node carries the line.
-        let hook = self.annotate_current_send_call(form::call(
-            "beamtalk_message_dispatch",
-            number_fallback_entry_point(reflected.family),
-            [
-                var(right_var.to_string()),
-                atom(reflected.selector),
-                docvec!["[", var(left_var.to_string()), "]"],
-                atom(op.to_string()),
-            ],
+        let hook = self.annotate_current_send_call(reflected_hook_call(
+            reflected,
+            op,
+            var(right_var.to_string()),
+            var(left_var.to_string()),
         ));
         let fallback = self.fresh_temp_var("BinOpNoMatch");
         form::case_of(
@@ -937,7 +962,6 @@ impl CoreErlangGenerator {
             .unwrap_or_else(|| {
                 unreachable!("number_coercion_try_catch called for non-arithmetic operator: {op}")
             });
-        let selector = reflected.selector;
         let try_result_var = self.fresh_temp_var("BinCoerceTry");
         let type_var = self.fresh_temp_var("BinCoerceType");
         let error_var = self.fresh_temp_var("BinCoerceError");
@@ -956,16 +980,7 @@ impl CoreErlangGenerator {
         let raise = Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone());
         let flat_clause = |pattern, body| form::clause([pattern], None, body, form::Layout::Flat);
         let coercion = docvec![
-            form::call(
-                "beamtalk_message_dispatch",
-                number_fallback_entry_point(reflected.family),
-                [
-                    right_doc.clone(),
-                    atom(selector),
-                    docvec!["[", left_doc, "]"],
-                    atom(op.to_string()),
-                ],
-            ),
+            reflected_hook_call(reflected, op, right_doc.clone(), left_doc),
             inner_no_match,
         ];
         let is_number_case = form::case_of(

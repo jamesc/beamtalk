@@ -77,7 +77,7 @@ and words are the same in all six runs.
 |---|---|
 | 11d, 11e (proven right operand) compile to the same code; reductions, words, ns unchanged | **Pass.** Identical Core Erlang; 0 / 0 both sides; ns 7.5–8.8 on both sides. |
 | 11f, 11g, 11i, 11j gain one `is_number` test: reductions and words identical, ns inside the run-to-run spread | **Pass.** 11f 19 / 7 both sides, ns 246–267 → 254–273. 11g 4 / 0, ns 19.3–23.5 → 17.0. 11i 0 / 0, ns 10.6–11.0 → 7.7–8.0. 11j 0 / 0, ns 7.6–8.2 → 7.7–8.3. None is slower outside the spread. |
-| The new `5 < b` row (11h) is no slower than the `5 + b` row (11k) | **Pass.** 11h 7.68 / 7.75 / 7.77 ns; 11k 8.87 / 9.38 / 9.54 ns in the same runs. 11h itself goes from the noise floor (bare BIF, 0.5–1.1 ns) to ~7.7 ns: the stack frame the hook call adds to a literal-receiver site, which the addendum predicted and the owner accepted (decision 1). |
+| The new `5 < b` row (11h) is no slower than the `5 + b` row (11k) | **Pass.** 11h 7.68 / 7.75 / 7.77 ns; 11k 8.87 / 9.38 / 9.54 ns in the same runs. 11h itself goes from the noise floor (bare BIF, 0.5–1.1 ns) to ~7.7 ns: an explicit regression of literal-receiver sites with an unproven right operand. The cost is not the hook (here `b` is a number and the hook never runs) but the stack frame a `case` arm that makes a call gives the whole site, as the addendum predicted (§ The failing arm) and the owner accepted (decision 1). |
 | The actor-loop row (11l) reported with its before and after loop shape | Reported above. Both sides are `StateAcc`; after adds the fast-path bracket in the condition. It measured **faster**, not slower: 3583–3667 ns against 3692–4912, and 102 reductions against 112–113. No regression to take to the owner. |
 
 ## After-run 2 in full
