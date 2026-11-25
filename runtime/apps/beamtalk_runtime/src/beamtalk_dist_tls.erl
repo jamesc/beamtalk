@@ -204,8 +204,9 @@ format_error({peer_verification, Problems}) ->
 %%% Internal
 %%% ============================================================================
 
-%% `none`, or the first entry that is not `{server | client, list()}` or
-%% repeats a side, or the tail of an improper list.
+%% `none`, or the first problem: an entry that is not `{server | client,
+%% list()}`, a repeated side, a side whose options are an improper list
+%% (`{not_a_list, Side}`), or the tail of an improper outer list.
 sides_problem(Opts) ->
     sides_problem(Opts, []).
 
@@ -214,15 +215,20 @@ sides_problem([], _Seen) ->
 sides_problem([{Side, List} | Rest], Seen) when
     (Side =:= server orelse Side =:= client) andalso is_list(List)
 ->
-    case lists:member(Side, Seen) of
-        true -> {duplicate_side, Side};
-        false -> sides_problem(Rest, [Side | Seen])
+    case {lists:member(Side, Seen), is_proper_list(List)} of
+        {true, _} -> {duplicate_side, Side};
+        {false, false} -> {not_a_list, Side};
+        {false, true} -> sides_problem(Rest, [Side | Seen])
     end;
 sides_problem([Other | _], _Seen) ->
     {not_a_side, Other};
 sides_problem(Tail, _Seen) ->
     %% The tail of an improper list.
     {not_a_list, Tail}.
+
+is_proper_list([_ | Tail]) -> is_proper_list(Tail);
+is_proper_list([]) -> true;
+is_proper_list(_) -> false.
 
 problem_fix(server_verify_peer) ->
     "add {verify, verify_peer} to the server list";
