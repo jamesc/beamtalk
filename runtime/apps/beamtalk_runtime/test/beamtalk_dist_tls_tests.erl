@@ -186,6 +186,19 @@ optfile_test_() ->
                 "[{server, [{verify, verify_peer}, {fail_if_no_peer_cert, true}]}]."
             ),
             Garbage = Write("garbage.conf", "[{server, ["),
+            %% OTP keeps one entry per side (the last), so a repeated side
+            %% could hide a weaker list behind a complete one.
+            Duplicate = Write(
+                "duplicate.conf",
+                "[{server, [{verify, verify_peer}, {fail_if_no_peer_cert, true}]},"
+                " {client, [{verify, verify_peer}]},"
+                " {server, [{certfile, \"c.pem\"}]}]."
+            ),
+            Stray = Write(
+                "stray.conf",
+                "[{server, [{verify, verify_peer}, {fail_if_no_peer_cert, true}]},"
+                " {client, [{verify, verify_peer}]}, {verify, verify_none}]."
+            ),
             Missing = filename:join(Dir, "absent.conf"),
             [
                 ?_assertEqual(ok, beamtalk_dist_tls:check_optfile(Good, [])),
@@ -203,6 +216,14 @@ optfile_test_() ->
                 ?_assertEqual(
                     {error, {optfile_missing, Missing}},
                     beamtalk_dist_tls:check_optfile(Missing, [])
+                ),
+                ?_assertEqual(
+                    {error, {optfile_malformed, Duplicate, {duplicate_side, server}}},
+                    beamtalk_dist_tls:check_optfile(Duplicate, [])
+                ),
+                ?_assertEqual(
+                    {error, {optfile_malformed, Stray, {not_a_side, {verify, verify_none}}}},
+                    beamtalk_dist_tls:check_optfile(Stray, [])
                 ),
                 ?_assert(
                     has(

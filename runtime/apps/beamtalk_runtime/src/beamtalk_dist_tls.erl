@@ -120,7 +120,11 @@ peer_verification(DistOptWords, FileOpts) ->
 -doc """
 Read an `-ssl_dist_optfile` exactly as the node will: with OTP's own
 `ssl_dist_sup:consult/1` (one Erlang expression, normally `[{server, Opts},
-{client, Opts}].`, with no free variables), which must evaluate to a list.
+{client, Opts}].`, with no free variables), which must evaluate to a list of
+`{server | client, Options}` entries, each side at most once. OTP stores the
+entries in a set keyed by side, so a repeated side silently keeps only the
+last list; it would let a complete list pass this check while the node uses a
+weaker one, so it is refused.
 """.
 -spec read_optfile(file:filename_all()) -> {ok, [{side(), list()}]} | {error, reason()}.
 read_optfile(Path) ->
@@ -129,8 +133,13 @@ read_optfile(Path) ->
             {error, ssl_unavailable};
         {{ok, _}, {module, _}} ->
             try ssl_dist_sup:consult(Path) of
-                Opts when is_list(Opts) -> {ok, Opts};
-                Other -> {error, {optfile_malformed, Path, {not_a_list, Other}}}
+                Opts when is_list(Opts) ->
+                    case sides_problem(Opts) of
+                        none -> {ok, Opts};
+                        Problem -> {error, {optfile_malformed, Path, Problem}}
+                    end;
+                Other ->
+                    {error, {optfile_malformed, Path, {not_a_list, Other}}}
             catch
                 error:{bad_ssl_dist_optfile, Detail} ->
                     {error, {optfile_malformed, Path, Detail}};
@@ -194,6 +203,23 @@ format_error({peer_verification, Problems}) ->
 %%% ============================================================================
 %%% Internal
 %%% ============================================================================
+
+%% `none`, or the first entry that is not `{server | client, list()}` or
+%% repeats a side.
+sides_problem(Opts) ->
+    sides_problem(Opts, []).
+
+sides_problem([], _Seen) ->
+    none;
+sides_problem([{Side, List} | Rest], Seen) when
+    (Side =:= server orelse Side =:= client) andalso is_list(List)
+->
+    case lists:member(Side, Seen) of
+        true -> {duplicate_side, Side};
+        false -> sides_problem(Rest, [Side | Seen])
+    end;
+sides_problem([Other | _], _Seen) ->
+    {not_a_side, Other}.
 
 problem_fix(server_verify_peer) ->
     "add {verify, verify_peer} to the server list";
