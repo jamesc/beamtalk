@@ -680,9 +680,10 @@ into itself.
 
 `ClassSelf` is the live receiver (the calling method's own `ClassSelf`), so
 the found method runs with the receiver's real reference, and nothing is
-looked up to rebuild it (BT-4301). Returns the plain result (ADR 0130 §3). When no ancestor defines `Selector`, the
-class-object protocol answers (`class_self_protocol_fallthrough/4`, BT-4252),
-else a structured `does_not_understand` is raised.
+looked up to rebuild it (BT-4301). Returns the plain result (ADR 0130 §3).
+When no ancestor defines `Selector`, the class-object protocol answers
+(`class_self_protocol_fallthrough/4`, BT-4252), else a structured
+`does_not_understand` is raised.
 """.
 -spec class_super_dispatch(class_name(), selector(), list(), #beamtalk_object{}) ->
     term() | no_return().

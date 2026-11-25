@@ -37,8 +37,9 @@ Rust test `class_var_abi_matches_the_runtime_header` enforces that.
 
 -doc """
 The `class_var_abi` value this runtime accepts: the calling convention of
-compiled class methods (`class_<sel>(ClassSelf, Args...)`, class variables in
-the class process's dictionary). Must equal codegen's `CLASS_VAR_ABI`
+compiled class methods (`class_<sel>(ClassSelf, Args...)`; the class process
+no longer installs a class-variable home since ADR 0153, BT-5160, and BT-5163
+deletes this gate). Must equal codegen's `CLASS_VAR_ABI`
 (`class_meta.rs`), which it emits into every module's `__beamtalk_meta/0`;
 the Rust test `class_var_abi_matches_the_runtime_header` enforces that.
 """.
