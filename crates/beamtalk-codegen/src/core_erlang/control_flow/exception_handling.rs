@@ -48,12 +48,11 @@
 //!     primop 'raw_raise'(_Type, _Error, _Stacktrace)
 //! ```
 
-use super::super::erlang_types::ErlangVar;
 use super::super::intrinsics::{validate_block_arity_exact, validate_on_do_handler};
 use super::super::synced_call::ActorStateSource;
 use super::super::threaded_ir::{
-    self, CatchClause, CatchEntry, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars, RenderCtx,
-    StateReadSite, ThreadedStmt, TryRegion, VersionPrefix, VersionedVar,
+    self, CatchClause, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars, RenderCtx, StateReadSite,
+    ThreadedStmt, TryRegion, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use super::analysis::ThreadedFamilies;
@@ -403,15 +402,7 @@ impl CoreErlangGenerator {
         )
     }
 
-    /// The snapshot variable of the `on:do:` whose exception-class variable is
-    /// `ex_class_var`: that (already unique) name with a `Snap` suffix, derived
-    /// without minting from the module counter (see `fresh_on_do_catch_vars`).
-    fn derived_snapshot_var(ex_class_var: &str) -> ErlangVar {
-        ErlangVar::new([ex_class_var, "Snap"].concat())
-    }
-
-    /// Mints the Core Erlang variables of one compiled `on:do:`'s catch clause,
-    /// plus the class-variable snapshot variable bound before its `try`.
+    /// Mints the Core Erlang variables of one compiled `on:do:`'s catch clause.
     /// `ex_class_var` is the variable holding the exception class.
     pub(super) fn fresh_on_do_catch_vars(&mut self, ex_class_var: String) -> OnDoCatchVars {
         OnDoCatchVars {
@@ -432,10 +423,8 @@ impl CoreErlangGenerator {
             // two separate elements).
             other_pair_var: self.fresh_temp_var("OtherPair"),
             // Derived from the (already unique) exception-class variable, not
-            // minted from the module counter: the snapshot binding then
-            // renumbers none of the module's other temporaries.
-            snapshot_var: Self::derived_snapshot_var(&ex_class_var),
-            // Derived the same way, for the same reason: no module-counter mint.
+            // minted from the module counter, so it renumbers none of the
+            // module's other temporaries.
             filter_fallback_var: [ex_class_var.as_str(), "NoMatch"].concat(),
             ex_class_var,
         }
@@ -443,32 +432,24 @@ impl CoreErlangGenerator {
 
     /// Generates the `try`/`catch` shared by every compiled `on:do:`
     /// (`generate_on_do`, `generate_on_do_with_mutations`,
-    /// `generate_on_do_tier1_try`): the single owner of the catch boundary
-    /// (ADR 0130 §4), built as a [`ThreadedStmt::OnDoCatch`] node,
-    /// [`threaded_ir::verify`]d (a violated obligation is a
-    /// `VerifyError::CatchWithoutClassVarRestore`) and rendered.
+    /// `generate_on_do_tier1_try`): the single owner of the catch boundary,
+    /// built as a [`ThreadedStmt::OnDoCatch`] node, [`threaded_ir::verify`]d and
+    /// rendered.
     ///
-    /// Produces `let Snap = beamtalk_class_vars:snapshot() in try <body> of R
-    /// -> R catch ...` as one unit, so both halves of the boundary (the entry
-    /// snapshot and the catch's restore) come from the node and no caller emits
-    /// either. `try_region` is the protected expression and its `of` variable,
-    /// and `handler` the body of the class filter's `'true'` arm (the handler
-    /// application). The node owns the filter
-    /// `case` end to end, so its `'false'` re-raise arm and the exhaustive
-    /// wildcard clause that keeps `erlc` from rejecting an `on:do:` nested in
-    /// another protected region (`ambiguous_catch_try_state`) are present by
-    /// construction, and `verify()` rejects a node without them
-    /// (`VerifyError::CatchFilterNotClosed`). The node orders the
-    /// clauses: NLR throws (`{'$bt_nlr', ...}`, both the actor-shaped 4-tuple
-    /// and the 3-tuple) bypass the catch untouched so the enclosing method's NLR
-    /// handler can intercept them and a `^` keeps the writes made before it;
-    /// every other exception then restores the class variables to the
-    /// `snapshot_var` the node's entry bound before the `try` and only then
-    /// wraps the exception and runs the class filter.
-    ///
-    /// Every context gets the same obligation: with no live class invocation in
-    /// the process `snapshot/0` answers `none` and `restore/1` is a no-op, so
-    /// nothing here depends on the method context.
+    /// Produces `try <body> of R -> R catch ...` as one unit. `try_region` is
+    /// the protected expression and its `of` variable, and `handler` the body
+    /// of the class filter's `'true'` arm (the handler application). The node
+    /// owns the filter `case` end to end, so its `'false'` re-raise arm and the
+    /// exhaustive wildcard clause that keeps `erlc` from rejecting an `on:do:`
+    /// nested in another protected region (`ambiguous_catch_try_state`) are
+    /// present by construction, and `verify()` rejects a node without them
+    /// (`VerifyError::CatchFilterNotClosed`). The node orders the clauses: NLR
+    /// throws (`{'$bt_nlr', ...}`, both the actor-shaped 4-tuple and the
+    /// 3-tuple) bypass the catch untouched so the enclosing method's NLR
+    /// handler can intercept them (`VerifyError::CatchNlrNotPassedThrough`);
+    /// every other exception restores the actor-state cell where there is one
+    /// (ADR 0137 §5) and only then wraps the exception and runs the class
+    /// filter.
     pub(super) fn on_do_catch_boundary(
         &mut self,
         vars: OnDoCatchVars,
@@ -478,11 +459,13 @@ impl CoreErlangGenerator {
         handler: Document<'static>,
     ) -> Document<'static> {
         let cell = self.on_do_cell_boundary(&vars.ex_class_var, pre_region_state, span);
-        let snapshot = vars.snapshot_var.clone();
-        let mut steps = vec![CatchStep::ClassVarRestore { snapshot }];
-        // ADR 0137 §5: the cell's half, restored right after the class
-        // variables and before the exception is wrapped.
-        steps.extend(cell.clone().map(CatchStep::CellRestore));
+        // ADR 0137 §5: the cell's half, restored first, before the exception
+        // is wrapped.
+        let mut steps: Vec<CatchStep> = cell
+            .clone()
+            .map(CatchStep::CellRestore)
+            .into_iter()
+            .collect();
         steps.extend([
             CatchStep::WrapException,
             CatchStep::ClassFilter,
@@ -491,7 +474,6 @@ impl CoreErlangGenerator {
         ]);
         let node = ThreadedStmt::OnDoCatch {
             vars: Box::new(vars),
-            entry: Some(CatchEntry::ClassVarSnapshot),
             cell,
             try_region,
             clauses: vec![
@@ -503,11 +485,7 @@ impl CoreErlangGenerator {
         };
         let ir = [node];
         let errors = self.verify_threaded_ir(&ir);
-        self.report_threaded_ir_verify_errors(
-            &errors,
-            "on:do: class-variable catch boundary",
-            span,
-        );
+        self.report_threaded_ir_verify_errors(&errors, "on:do: catch boundary", span);
         threaded_ir::render(&ir, &mut RenderCtx::new(self))
     }
 

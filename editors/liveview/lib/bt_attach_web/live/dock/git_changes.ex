@@ -372,29 +372,52 @@ defmodule BtAttachWeb.Live.Dock.GitChanges do
   defp rename_flush_message(_kind, class), do: "Flushed the pending removal for #{class}"
 
   defp flush_destructive_eval(socket, class, kind, expr, pid) do
-    BtAttachWeb.Live.Dock.eval_async(socket, pid, expr, fn socket, result ->
-      case result do
-        {:ok, _term, _output, _warnings} ->
-          socket
-          |> assign(
-            save_result: nil,
-            save_error: nil,
-            flush_result: rename_flush_message(kind, class),
-            flush_error: nil
-          )
-          |> WorkspaceLive.assign_changes()
-          # BT-2586: a successful destructive flush can delete a tracked file,
-          # so the git panel must reflect it immediately, same as an ordinary
-          # "Save All to Disk" flush.
-          |> WorkspaceLive.maybe_refresh_git()
+    BtAttachWeb.Live.Dock.eval_async(
+      socket,
+      pid,
+      expr,
+      fn socket, result ->
+        case result do
+          {:ok, _term, _output, _warnings} ->
+            socket
+            |> assign(
+              save_result: nil,
+              save_error: nil,
+              flush_result: rename_flush_message(kind, class),
+              flush_error: nil
+            )
+            |> WorkspaceLive.assign_changes()
+            # BT-2586: a successful destructive flush can delete a tracked file,
+            # so the git panel must reflect it immediately, same as an ordinary
+            # "Save All to Disk" flush.
+            |> WorkspaceLive.maybe_refresh_git()
 
-        {:error, _, _, _} = err ->
-          WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
+          {:error, _, _, _} = err ->
+            WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
 
-        {:error, _} = err ->
-          WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
-      end
-    end)
+          {:error, _} = err ->
+            WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
+        end
+      end,
+      &flush_destructive_failed(&1, class, &2),
+      key: flush_destructive_key(class, kind)
+    )
+  end
+
+  # BT-5189: the pending key of a destructive flush of `class`'s `kind` entry —
+  # its Changes-pane button stays disabled while the flush is queued or running.
+  @doc false
+  def flush_destructive_key(class, kind), do: {:flush_destructive, class, kind}
+
+  # The flush never ran (refused, dropped from the queue) or its task died:
+  # report it in the Changes pane's flush status, where its success would land.
+  defp flush_destructive_failed(socket, class, message) do
+    assign(socket,
+      save_result: nil,
+      save_error: nil,
+      flush_result: nil,
+      flush_error: "Flushing #{class} did not complete: #{message}"
+    )
   end
 
   # After a flush, clear the `unflushed` badge on the `:method` tabs this

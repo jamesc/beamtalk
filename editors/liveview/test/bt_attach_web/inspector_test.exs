@@ -1742,4 +1742,78 @@ defmodule BtAttachWeb.Live.InspectorTest do
       refute observer_html =~ "poke-row"
     end
   end
+
+  # BT-5189: a poke waits in the dock's eval queue behind any running eval, so
+  # its result (or its rejection) may land after the user navigated away.
+  describe "queued pokes (BT-5189)" do
+    defp queued_job(socket) do
+      [{job, _pid, _code}] = socket.assigns.eval_queue
+      job
+    end
+
+    test "a docked poke's late result is dropped when the Inspector shows another object" do
+      socket =
+        base_socket(%{
+          role: :owner,
+          eval_running: true,
+          inspect_crumbs: [%{label: "counter", term: object_term()}]
+        })
+
+      {:noreply, socket} = Inspector.handle_event("poke", %{"message" => "increment"}, socket)
+      job = queued_job(socket)
+
+      socket =
+        Phoenix.Component.assign(socket, inspect_crumbs: [%{label: "other", term: object_term()}])
+
+      socket = job.fold.(socket, {:ok, 42, "", []})
+      assert socket.assigns.poke_result == nil
+
+      socket = job.reject.(socket, "Stopped before it ran.")
+      assert socket.assigns.poke_error == nil
+    end
+
+    test "a docked poke dropped by Stop says so in the poke bar" do
+      socket =
+        base_socket(%{
+          role: :owner,
+          eval_running: true,
+          inspect_crumbs: [%{label: "counter", term: object_term()}]
+        })
+
+      {:noreply, socket} = Inspector.handle_event("poke", %{"message" => "increment"}, socket)
+      {:noreply, socket} = BtAttachWeb.Live.Dock.handle_event("eval_interrupt", %{}, socket)
+
+      assert socket.assigns.poke_error == "Stopped before it ran."
+    end
+
+    test "a window poke's late result is dropped when that window navigated elsewhere" do
+      term = object_term(self())
+      StubWorkspaceClient.seed_inspect_value("TestClass", %{"count" => 1})
+      socket = Inspector.open_window_for_term(base_socket(%{eval_running: true}), "counter", term)
+      [win] = socket.assigns.windows
+
+      {:noreply, socket} =
+        Inspector.handle_event("window_poke", %{"id" => win.id, "message" => "increment"}, socket)
+
+      job = queued_job(socket)
+
+      moved =
+        Enum.map(socket.assigns.windows, &%{&1 | crumbs: [%{label: "elsewhere", term: term}]})
+
+      socket = Phoenix.Component.assign(socket, windows: moved)
+      socket = job.fold.(socket, {:ok, 42, "", []})
+      [win] = socket.assigns.windows
+      assert win.poke_result == nil
+
+      # On the window it was sent from, the rejection lands.
+      socket =
+        Phoenix.Component.assign(socket,
+          windows: [%{win | crumbs: [%{label: "counter", term: term}]}]
+        )
+
+      socket = job.reject.(socket, "Stopped before it ran.")
+      [win] = socket.assigns.windows
+      assert win.poke_error == "Stopped before it ran."
+    end
+  end
 end
