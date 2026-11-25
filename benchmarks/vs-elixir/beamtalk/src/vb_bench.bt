@@ -479,6 +479,40 @@ sealed Object subclass: VbBench
     n timesRepeat: [last := a max: 3]
     last
 
+  // BT-5207 (ADR 0116 comparison addendum, Phase 0): number-on-the-left
+  // comparison baselines. `b` is a parameter the compiler cannot prove numeric,
+  // so these rows measure the arm the addendum changes.
+  // A literal (proven) receiver, untyped right operand.
+  class litLess: n :: Integer b: b -> Object =>
+    last := false
+    n timesRepeat: [last := 5 < b]
+    last
+
+  // Both operands untyped.
+  class untypedLess: n :: Integer a: a b: b -> Object =>
+    last := false
+    n timesRepeat: [last := a < b]
+    last
+
+  // A declared `:: Integer` receiver, untyped right operand.
+  class typedLess: n :: Integer a: a :: Integer b: b -> Object =>
+    last := false
+    n timesRepeat: [last := a < b]
+    last
+
+  // The arithmetic reference: `+` with a proven receiver and untyped right operand.
+  class litAdd: n :: Integer b: b -> Object =>
+    last := 0
+    n timesRepeat: [last := 5 + b]
+    last
+
+  // BT-5207: an actor method looping on a field, the body writing it back
+  // (VbCounter spin:). Five iterations per call at `k` = 5.
+  class actorSpin: n :: Integer c: c :: VbCounter -> Integer =>
+    last := 0
+    n timesRepeat: [last := c spin: 5]
+    last
+
   // === 12. Class references and isKindOf: ===
   class classOf: n :: Integer p: p :: VbPoint -> Object =>
     last := nil
