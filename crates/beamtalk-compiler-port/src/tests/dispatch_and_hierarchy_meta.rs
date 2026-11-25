@@ -230,14 +230,15 @@ fn parse_class_hierarchy_from_term_roundtrip() {
     assert_eq!(info.class_methods[0].arity, 0);
 }
 
-/// ADR 0124 §1/B5a: `'field_kinds'` and `'class_field_kinds'`
-/// (`class_meta.rs`'s `meta_field_kinds_map`) must survive the ETF
-/// `__beamtalk_meta/0` boundary into `ClassInfo.state_kinds` and
-/// `ClassInfo.class_variables[].kind` — the cross-file half of the guarded
-/// read (B3): a `late` slot declared in a class whose AST is not in the
-/// current compilation is only visible through this metadata.
+/// ADR 0124 §1: `'field_kinds'` (`class_meta.rs`'s `meta_field_kinds_map`)
+/// must survive the ETF `__beamtalk_meta/0` boundary into
+/// `ClassInfo.state_kinds` — the cross-file half of the guarded read (B3): a
+/// `late` slot declared in a class whose AST is not in the current
+/// compilation is only visible through this metadata. A module built before
+/// ADR 0153 still carries `'class_fields'`/`'class_field_kinds'`; the decoder
+/// ignores them (classes have no class variables).
 #[test]
-fn field_kinds_and_class_field_kinds_survive_etf_meta() {
+fn field_kinds_survive_etf_meta_and_legacy_class_fields_are_ignored() {
     use beamtalk_core::ast::SlotKind;
     use eetf::{FixInteger, List};
 
@@ -283,12 +284,9 @@ fn field_kinds_and_class_field_kinds_survive_etf_meta() {
         Some(SlotKind::Eager),
         "ordinary instance field must decode as SlotKind::Eager"
     );
-    assert_eq!(info.class_variables.len(), 1);
-    assert_eq!(info.class_variables[0].name.as_str(), "current");
-    assert_eq!(
-        info.class_variables[0].kind,
-        SlotKind::Late,
-        "late class variable must decode as SlotKind::Late"
+    assert!(
+        !info.state_kinds.contains_key("current"),
+        "a legacy class variable must not leak into the instance-side slots"
     );
 }
 
