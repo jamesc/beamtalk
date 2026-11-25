@@ -8,7 +8,10 @@ on:
   # The merge queue's test commit (BT-5247). "Claude BeamTalk Review" is a
   # required check, so it must report there too or the queue stalls. The review
   # already ran (and passed) on the PR, so on this event the job below only
-  # reports the check as passed: it runs no review and touches no secret.
+  # reports the check as passed: it runs no review and reads no secret. The
+  # job's `permissions:` cannot vary by event, so its one echo step runs with
+  # the review's token scopes; like every queue run, it runs the queued
+  # commit's own copy of this file.
   merge_group:
     types: [checks_requested]
 

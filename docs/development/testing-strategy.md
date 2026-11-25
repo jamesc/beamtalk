@@ -1056,7 +1056,7 @@ it re-queues while auto-merge is still on.
 
 | Check | Workflow | On `merge_group` |
 |-------|----------|------------------|
-| `ci-ok` | `ci.yml` | The full Linux suite, as on a push to `main`: every path gate true, every OTP in the window |
+| `ci-ok` | `ci.yml` | The full Linux suite, as on a push to `main`: every path gate true, every OTP in the window. Not the corpus tier: `corpus.yml` runs on `main` after the merge, and the queue run has only its fixture-reader subset |
 | `Claude BeamTalk Review` | `claude-review.yml` | Reports a pass without reviewing: the review already ran on the PR |
 
 No other check may be required. The other workflows a PR starts

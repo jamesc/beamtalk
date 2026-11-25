@@ -47,8 +47,10 @@ on:
   # The merge queue's test commit (BT-5247): the PR on top of main and every PR
   # ahead of it in the queue. `ci-ok` is a required check, so it must report on
   # this commit or the queue stalls. The `changes` job treats it like a push to
-  # main (the full Linux suite), so a PR is merged only after the run main itself
-  # would get. Never path-filtered: a skipped required check stalls the queue.
+  # main: the full Linux suite, every OTP in the window. The corpus tier is
+  # not part of it (corpus.yml runs on main after the merge; only its cheap
+  # fixture-reader subset runs here). Never path-filtered: a required check that
+  # never starts stalls the queue.
   # scripts/ci/test_merge_queue.py pins all of this.
   merge_group:
     types: [checks_requested]
