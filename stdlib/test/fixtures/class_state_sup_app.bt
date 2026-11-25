@@ -1,33 +1,25 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3407: Test fixtures for classState visibility during supervisor
-// configuration: a value set via an ordinary class-method call (`configure:`)
-// before the supervisor starts must be visible to its configuration.
+// BT-3407: Test fixtures for shared configuration visibility during supervisor
+// configuration: a value set on the named `ClassStateSupConfig` actor
+// (`#bt3407_sup_cfg`) before the supervisor starts must be visible to its
+// configuration.
 //
 // Since ADR 0135 the configuration is instance-side (`childSpecs`), running
-// inside the supervisor's own `init`, and reads the class variable through a
-// class-side message (`ClassStateSupApp cfg`). That message is served by the
-// class process, which is free while `ClassStateSupApp supervise` runs: since
-// BT-3962 `supervise` starts the tree in the caller (ADR 0135 §1).
+// inside the supervisor's own `init`, and reads the value by messaging the
+// named actor. The actor is free while `ClassStateSupApp supervise` runs.
 //
 // The worker actor (`ClassStateSupWorker`) lives in its own file,
 // class_state_sup_worker.bt, since a .bt file may only declare one
 // class.
 
 Supervisor subclass: ClassStateSupApp
-  classState: cfg = nil
-
-  class configure: aDict =>
-    self.cfg := aDict
-    nil
-
-  class cfg => self.cfg
 
   strategy -> Symbol => #oneForOne
 
   childSpecs -> List =>
-    ClassStateSupApp cfg
+    ((ClassStateSupConfig named: #bt3407_sup_cfg) unwrap) cfg
       ifNil: [#()]
       ifNotNil: [:c |
         lbl := c at: #label ifAbsent: ["default"]

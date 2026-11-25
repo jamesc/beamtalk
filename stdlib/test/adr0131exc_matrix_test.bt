@@ -11,14 +11,6 @@
 
 TestCase subclass: Adr0131ExcMatrixTest
 
-  testClassArmCvarOnDo =>
-    self assert: (Adr0131ExcMatrixClass armCvarOnDo: true) equals: 1
-    self assert: (Adr0131ExcMatrixClass armCvarOnDo: false) equals: 0
-
-  testClassArmCvarOuterOnDo =>
-    self assert: (Adr0131ExcMatrixClass armCvarOuterOnDo: true) equals: 1
-    self assert: (Adr0131ExcMatrixClass armCvarOuterOnDo: false) equals: 0
-
   testClassArmDirectEnsure =>
     self assert: (Adr0131ExcMatrixClass armDirectEnsure: true) equals: 1
     self assert: (Adr0131ExcMatrixClass armDirectEnsure: false) equals: 0
@@ -180,12 +172,6 @@ TestCase subclass: Adr0131ExcMatrixTest
     self assert: (Adr0131ExcMatrixClass iterArmOuterOnDo: true) equals: 1
     self assert: (Adr0131ExcMatrixClass iterArmOuterOnDo: false) equals: 0
 
-  testClassLoopCvarOnDo =>
-    self assert: (Adr0131ExcMatrixClass loopCvarOnDo) equals: 1
-
-  testClassLoopCvarOuterOnDo =>
-    self assert: (Adr0131ExcMatrixClass loopCvarOuterOnDo) equals: 1
-
   testClassLoopDirectEnsure =>
     self assert: (Adr0131ExcMatrixClass loopDirectEnsure) equals: 1
 
@@ -200,36 +186,6 @@ TestCase subclass: Adr0131ExcMatrixTest
 
   testClassLoopSelfsendOnDo =>
     self assert: (Adr0131ExcMatrixClass loopSelfsendOnDo) equals: 1
-
-  testClassProtCvarDo =>
-    self assert: (Adr0131ExcMatrixClass protCvarDo) equals: 3
-
-  testClassProtCvarInject =>
-    self assert: (Adr0131ExcMatrixClass protCvarInject) equals: 3
-
-  testClassProtCvarOnDo =>
-    self assert: (Adr0131ExcMatrixClass protCvarOnDo) equals: 1
-
-  testClassProtCvarToDo =>
-    self assert: (Adr0131ExcMatrixClass protCvarToDo) equals: 3
-
-  testClassProtCvarWhile =>
-    self assert: (Adr0131ExcMatrixClass protCvarWhile) equals: 2
-
-  testClassProtCvarOuterDo =>
-    self assert: (Adr0131ExcMatrixClass protCvarOuterDo) equals: 3
-
-  testClassProtCvarOuterInject =>
-    self assert: (Adr0131ExcMatrixClass protCvarOuterInject) equals: 3
-
-  testClassProtCvarOuterOnDo =>
-    self assert: (Adr0131ExcMatrixClass protCvarOuterOnDo) equals: 1
-
-  testClassProtCvarOuterToDo =>
-    self assert: (Adr0131ExcMatrixClass protCvarOuterToDo) equals: 3
-
-  testClassProtCvarOuterWhile =>
-    self assert: (Adr0131ExcMatrixClass protCvarOuterWhile) equals: 2
 
   testClassProtDirectCollect =>
     self assert: (Adr0131ExcMatrixClass protDirectCollect) equals: 3

@@ -123,6 +123,9 @@ impl CoreErlangGenerator {
         // gensym the loop counter so a user local named `i` (→ Core `I`)
         // cannot collide with the loop fun parameter.
         let counter = self.fresh_temp_var("loopidx");
+        // BT-5167: a nil/non-number count would be term-ordered by `=<`.
+        let number_guard =
+            self.number_guard_doc(&n_var, &[(&n_var, "timesRepeat: count must be a number")]);
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -130,7 +133,8 @@ impl CoreErlangGenerator {
                 leaf::var(n_var.clone()),
                 " = ",
                 receiver_code,
-                " in"
+                " in ",
+                number_guard,
             ],
             fn_name: threaded_ir::REPEAT_LOOP_FN.to_string(),
             condition_prelude: Document::Nil,
@@ -168,6 +172,11 @@ impl CoreErlangGenerator {
 
         // Bind the block parameter name (e.g. "i" in [:i | ...])
         let body_param = body.parameters.first().map(|p| p.name.to_string());
+        // BT-5167: a nil/non-number limit would be term-ordered by `=<` and a
+        // writing block would loop forever; raise the same `type_error` as
+        // the stdlib `Integer>>to:by:do:`.
+        let number_guard =
+            self.number_guard_doc(&start_var, &[(&end_var, "Interval limit must be a number")]);
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -179,7 +188,8 @@ impl CoreErlangGenerator {
                 leaf::var(end_var.clone()),
                 " = ",
                 limit_code,
-                " in",
+                " in ",
+                number_guard,
             ],
             fn_name: threaded_ir::COUNTED_LOOP_FN.to_string(),
             condition_prelude: Document::Nil,
@@ -202,18 +212,9 @@ impl CoreErlangGenerator {
     /// BT-5136: `do case is_number(Step) and is_number(Limit) of 'false' ->
     /// raise type_error`. A nil or other non-number would otherwise be
     /// term-ordered by `erlang:>`/`<` and the loop would silently do nothing.
-    fn number_guard_doc(
-        &mut self,
-        recv_var: &str,
-        step_var: &str,
-        end_var: &str,
-    ) -> Document<'static> {
-        let checks = [
-            (step_var, "Interval step must be a number"),
-            (end_var, "Interval limit must be a number"),
-        ];
+    fn number_guard_doc(&mut self, recv_var: &str, checks: &[(&str, &str)]) -> Document<'static> {
         let mut guards = Vec::new();
-        for (var, text) in checks {
+        for &(var, text) in checks {
             let msg_var = self.fresh_temp_var("NumMsg");
             let raise = form::let_in(
                 leaf::var(msg_var.clone()),
@@ -280,7 +281,13 @@ impl CoreErlangGenerator {
         let step_code = self.expression_doc(step)?;
         // BT-5098: a step of 0 raises, as `Integer>>to:by:do:` does. Checked
         // once here in the preamble (not per iteration).
-        let number_guard = self.number_guard_doc(&start_var, &step_var, &end_var);
+        let number_guard = self.number_guard_doc(
+            &start_var,
+            &[
+                (&step_var, "Interval step must be a number"),
+                (&end_var, "Interval limit must be a number"),
+            ],
+        );
         let zero_step_guard = self.zero_step_guard_doc(&start_var, &step_var);
         // gensym the loop counter (the block param is aliased to it).
         let counter = self.fresh_temp_var("loopidx");

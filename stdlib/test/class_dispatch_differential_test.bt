@@ -17,12 +17,12 @@
 //   compiles to a dynamic `class_send`.
 //
 // Since BT-4300 both reach `class_send`, which runs a stateless class's
-// methods in the caller and a stateful one's in its class process (or both
+// methods in the caller (or both
 // take the ADR 0129 Phase 0b direct call, for `class sealed` methods of a
 // sealed stateless class). BT-4301 must keep every row green.
 //
 // Some rows also pin what the outcome is, where ADR 0142 says it must not
-// change: the inherited class-variable error (§1 rule 2), the ancestor's
+// change: the ancestor's
 // method being reached (runtime fun), and the process-bound
 // selectors (§1 rule 3). One row pins the outcome ADR 0142 changes: the
 // re-entrant block (`testReentrantBlock`) used to raise `dispatch_error` and
@@ -33,7 +33,6 @@
 //
 // Fixtures: fixtures/guarded_diff_class_root.bt, fixtures/guarded_diff_class_leaf.bt,
 // fixtures/guarded_diff_class_ext_protocol.bt,
-// fixtures/guarded_diff_class_stateful.bt, fixtures/guarded_diff_class_forgot.bt,
 // fixtures/guarded_diff_class_fun_root.bt, fixtures/guarded_diff_class_fun_leaf.bt,
 // fixtures/guarded_diff_class_sealed.bt, fixtures/guarded_diff_sup.bt,
 // fixtures/guarded_diff_point.bt, fixtures/counter.bt,
@@ -157,7 +156,7 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
   // BT-4317: inside an inherited class method, an explicit own-class send
   // (`GuardedDiffClassRoot receiverName`, compiled statically) answers what
   // the same send to the class held in a variable answers: the named class
-  // is `self`, and its class variables are read, whichever subclass the
+  // is `self`, whichever subclass the
   // calling method runs for.
   testOwnClassLiteralSendInInheritedMethod =>
     outcome := self
@@ -166,12 +165,6 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
       dynamic: [:cls | GuardedDiffClassLeaf receiverNameOf: cls]
       on: GuardedDiffClassRoot
     self assert: outcome equals: #(#returned, #GuardedDiffClassRoot)
-    outcome := self
-      classSend: #ownLiteralClassVariable
-      literal: [GuardedDiffClassForgot ownLiteralPeek]
-      dynamic: [:cls | GuardedDiffClassForgot peekOf: cls]
-      on: GuardedDiffClassStateful
-    self assert: (outcome at: 1) equals: #returned
 
   // A sealed, stateless class: a method that is not `class sealed` (runs in
   // the class process today) and one that is (direct-called today).
@@ -186,31 +179,6 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
       literal: [GuardedDiffClassSealed triple: 14]
       dynamic: [:cls | cls triple: 14]
       on: GuardedDiffClassSealed
-
-  // ADR 0142 §1, rule 2: an inherited class method touching its defining
-  // class's class variables, sent to a stateless subclass, raises
-  // `undeclared_class_variable` (class variables are own-only, ADR 0130).
-  // It stays in the class process, so the error must not change.
-  testInheritedClassVariableMethod =>
-    self
-      classSend: #statefulOwnRead
-      literal: [GuardedDiffClassStateful peek]
-      dynamic: [:cls | cls peek]
-      on: GuardedDiffClassStateful
-    readOutcome := self
-      classSend: #inheritedClassVariableRead
-      literal: [GuardedDiffClassForgot peek]
-      dynamic: [:cls | cls peek]
-      on: GuardedDiffClassForgot
-    self assert: (readOutcome at: 1) equals: #raised
-    self assert: (readOutcome at: 3) equals: #undeclared_class_variable
-    writeOutcome := self
-      classSend: #inheritedClassVariableWrite
-      literal: [GuardedDiffClassForgot bump]
-      dynamic: [:cls | cls bump]
-      on: GuardedDiffClassForgot
-    self assert: (writeOutcome at: 1) equals: #raised
-    self assert: (writeOutcome at: 3) equals: #undeclared_class_variable
 
   // An ADR 0084 runtime class-method fun installed on an ancestor of the
   // receiving class shadows the ancestor's compiled method, for the
@@ -335,20 +303,6 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
       dynamic: [:cls | cls each: #(1, 2) do: [:x | cls double: x]]
       on: GuardedDiffClassLeaf
     self assert: outcome equals: #(#returned, #(2, 4))
-    // `GuardedDiffClassStateful` declares class variables, so ADR 0142 §1
-    // rule 2 keeps its class methods in its class process, and re-entry still
-    // raises `dispatch_error` on both paths.
-    outcome := self
-      classSend: #reentrantBlockStateful
-      literal: [
-        GuardedDiffClassStateful each: #(1, 2) do: [:x |
-          GuardedDiffClassStateful double: x
-        ]
-      ]
-      dynamic: [:cls | cls each: #(1, 2) do: [:x | cls double: x]]
-      on: GuardedDiffClassStateful
-    self assert: (outcome at: 1) equals: #raised
-    self assert: (outcome at: 3) equals: #dispatch_error
     // A block that does not re-enter the class is fine either way.
     self
       classSend: #nonReentrantBlock

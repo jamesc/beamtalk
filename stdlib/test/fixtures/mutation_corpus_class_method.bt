@@ -20,13 +20,6 @@
 // ground-truth values). See mutation_corpus_value.bt for the axis legend.
 
 Object subclass: MutationCorpusClassMethod
-  // BT-3176 axis 4: a class var, distinct from the outer locals every fragment
-  // above threads. Every fragment that reads/writes it resets it to 0 first,
-  // so results stay deterministic regardless of prior test-call order (unlike
-  // the actor corpus, class methods run against one shared class object —
-  // there is no per-test "spawn fresh" the way `MutationCorpusActor spawn`
-  // gives the actor fragments).
-  classState: runs = 0
 
   // ── to:do: ────────────────────────────────────────────────────────────────
   class toDoNonLastWriteOnly =>
@@ -100,24 +93,6 @@ Object subclass: MutationCorpusClassMethod
     sum := 0
     1 to: 3 do: [:i | 1 to: 3 do: [:j | sum := sum + j]]
     sum
-
-  // A nested loop where only the OUTER loop's top-level body mutates the class
-  // var (the inner loop touches only its own local) — the compiling
-  // counterpart of BT-3172's rejected inner-mutates shape. Class-var threading
-  // is top-level-body-only by design (`loop_body_threads_class_vars`), so this
-  // shape threads correctly and must keep doing so. The outer body reads the
-  // inner loop's local back (`+ j`), so a lost inner write shows (BT-3776).
-  class nestedWhileTrueOuterOnlyClassVarReadWrite =>
-    self.runs := 0
-    i := 0
-    [i < 3]
-      whileTrue: [
-        j := 0
-        [j < 3] whileTrue: [j := j + 1]
-        self.runs := self.runs + j
-        i := i + 1
-      ]
-    self.runs
 
   // ── construct-equivalence summing accumulators (BT-2345) ────────────────────
   // timesRepeat: / whileTrue: variants that SUM 1..5 (the count/n fragments
@@ -295,239 +270,6 @@ Object subclass: MutationCorpusClassMethod
     ] ensure: [nil]
     t
 
-  // ── self-send as the mutation mechanism (BT-3176 axis 2) ────────────────────
-  // A fragment method that calls another class method (a same-class self-send)
-  // which mutates the class var, inside a loop/conditional body — not a direct
-  // `self.field :=`. See BT-3159 (class-method conditional + self-send) and
-  // BT-3150 (loop + self-send, actor context) for the bugs this generalizes.
-  class bump => self.runs := self.runs + 1
-
-  class selfSendWhileTrueNonLastReadWrite =>
-    self.runs := 0
-    i := 0
-    [i < 5]
-      whileTrue: [
-        self bump
-        i := i + 1
-      ]
-    self.runs
-
-  // BT-3611: the `Foldl*` (`do:`) counterpart of
-  // `selfSendWhileTrueNonLastReadWrite` above (a Letrec-shaped construct) —
-  // a same-class self-send plus a co-occurring outer-local read+write inside
-  // a NON-last `do:` statement, followed by a POST-FOLD read of the class
-  // var. `do:`'s own class-method-body-top-level codegen
-  // (`generate_value_type_do_open`) never had this gap; kept here as the
-  // `do:` peer of `selfSendCollectNonLastReadWrite` below, whose `collect:`
-  // counterpart (`generate_vt_foldl_list_op_open`) did.
-  class selfSendDoNonLastReadWrite =>
-    self.runs := 0
-    seen := 0
-    (1 to: 5)
-      do: [:x |
-        self bump
-        seen := seen + 1
-      ]
-    self.runs
-
-  // BT-3611: `collect:` (and the rest of the `Foldl*` list-op family —
-  // `select:`/`reject:`/`inject:into:`/`detect:`/`detect:ifNone:`/`count:`,
-  // see `metamorphic_threading_test.bt`/`value_type_mutation_matrix_test.bt`
-  // for the matrix's own ground-truth cells) with a self-send plus a
-  // co-occurring outer-local read+write inside a NON-last statement,
-  // followed by a POST-FOLD read of the class var — the shape the existing
-  // `collectNonLastReadWrite`/`collectAssignRhsReadWrite` fragments above
-  // never covered (outer-local mutation only, no self-send, no post-fold
-  // class-var read). Before the fix, `generate_vt_foldl_list_op_open`
-  // (the non-last, class-method-body-top-level `collect:` codegen) bound
-  // the whole fold expression — including the self-send's own freshly
-  // minted `ClassVarsN` rebind — as the RHS of a fresh `let`, trapping that
-  // bind inside its own closed scope; the `self.runs` read below then
-  // referenced a `ClassVarsN` Core Erlang never actually bound at that
-  // point (`erlc`: "unbound variable 'ClassVarsN'"), an outright compiler
-  // crash, not merely a wrong return value.
-  class selfSendCollectNonLastReadWrite =>
-    self.runs := 0
-    seen := 0
-    (1 to: 5)
-      collect: [:x |
-        self bump
-        seen := seen + 1
-        x
-      ]
-    self.runs
-
-  // `needs_mutation_threading` requires a co-occurring outer-local read+write
-  // alongside the class-var write/self-send — a bare self-send with no other
-  // mutation in the block never reaches the threaded path at all (see
-  // `resetRuns`/`bump`'s own callers in loop_class_var_mutation.bt).
-  class selfSendIfTrueNonLastReadWrite: flag =>
-    self.runs := 0
-    seen := 0
-    flag
-      ifTrue: [
-        self bump
-        seen := seen + 1
-      ]
-    self.runs
-
-  // ── on:do: + self-send (BT-3176 axis 3) ──────────────────────────────────────
-  // A same-class self-send as the LAST statement of an `on:do:` try body
-  // (BT-3161 Flavor A's shape) — fixed by BT-3177: `self bump` here emits an
-  // *open* let-chain (`emit_class_var_result_unwrap`) that
-  // `generate_exception_body_with_threading_inner`'s last-position handling
-  // used to treat as a self-contained expression, producing a dangling `in`
-  // (erlc `core_parse_error`). Now closed via `closed_expression_doc`
-  // (BT-2350's established pattern for this exact hazard).
-  class onDoSelfSendLastReadWrite =>
-    t := 0
-    [
-      t := t + 1
-      self bump
-    ] on: Error do: [:e | nil]
-    t
-
-  // ── class-var mutation, threaded like an outer local (BT-3176 axis 4) ───────
-  // Every fragment above threads an outer LOCAL; these mirror the same
-  // constructs but mutate the class var directly instead.
-  class classVarToDoNonLastReadWrite =>
-    self.runs := 0
-    seen := 0
-    1
-      to: 5
-      do: [:i |
-        self.runs := self.runs + i
-        seen := seen + 1
-      ]
-    self.runs
-
-  class classVarIfTrueNonLastReadWrite: flag =>
-    self.runs := 0
-    seen := 0
-    flag
-      ifTrue: [
-        self.runs := self.runs + 7
-        seen := seen + 1
-      ]
-    self.runs
-
-  // ── class-var mutation via self-send through on:do:/ensure: (BT-3506) ──────
-  // The `ClassVars` twin of `mutation_corpus_value.bt`'s BT-3486
-  // `fragStateFieldEnsure*`/`fragStateFieldOnDo*` fragments: the mutation
-  // rides a same-class self-send (`self bump`), never a bare
-  // `self.runs := ...` — a direct class-var write stays a clean compile-time
-  // rejection through `on:do:`/`ensure:` (BT-3506's decision, mirroring
-  // `classVarToDoNonLastReadWrite`'s own loop-body counterpart: threading a
-  // BARE class-var field write through this construct's own trailing slot
-  // was deliberately left unsupported; see `ClassVarAssignmentInThreadedBody`).
-  class classVarEnsureTryNonLastReadWrite =>
-    self.runs := 0
-    seen := 0
-    [
-      self bump
-      seen := seen + 1
-    ] ensure: [nil]
-    self.runs
-
-  class classVarEnsureCleanupNonLastReadWrite =>
-    self.runs := 0
-    seen := 0
-    [
-      seen := seen + 1
-      nil
-    ]
-      ensure: [
-        self bump
-        nil
-      ]
-    self.runs
-
-  class classVarEnsureBothNonLastReadWrite =>
-    self.runs := 0
-    seen := 0
-    [
-      self bump
-      seen := seen + 1
-    ]
-      ensure: [
-        self bump
-        nil
-      ]
-    self.runs
-
-  class classVarOnDoTryNonLastReadWrite =>
-    self.runs := 0
-    seen := 0
-    [
-      self bump
-      seen := seen + 1
-    ] on: Error do: [:e | nil]
-    self.runs
-
-  class classVarOnDoHandlerNonLastReadWrite =>
-    self.runs := 0
-    seen := 0
-    [
-      seen := seen + 1
-      Error signal: "boom"
-    ]
-      on: Error
-      do: [:e |
-        self bump
-        nil
-      ]
-    self.runs
-
-  // BT-3506's own headline repro, verbatim: the self-send is the
-  // construct's ONLY mutation, with no co-occurring captured-local
-  // read+write — `needs_mutation_threading`'s class-method branch only ever
-  // checked for THAT, so before this fix the whole construct compiled via
-  // the closure-based path, discarding the self-send's own `ClassVars`
-  // rebind once the closure's own body (which evaluates to `nil`) returned.
-  // No like-for-like Actor/TestCase cell for this one shape — see
-  // `fragStateFieldEnsureWriteOnlyNonLast`'s own matching comment for why.
-  class classVarEnsureSelfSendOnlyNonLast =>
-    self.runs := 0
-    [
-      self bump
-      nil
-    ] ensure: [nil]
-    self.runs
-
-  // ── class-var mutation BELOW an arm's top level (BT-3522) ─────────────────
-  // BT-3506 gated the construct's trailing `ClassVars` slot on a
-  // top-level-only walk, so a mutation at any depth >= 1 got no slot at all.
-  // The two fragments below are the half that the widened (recursive)
-  // detector makes thread end-to-end: the self-send sits in a top-level
-  // STATEMENT's own sub-expression, where ADR 0118's `thread_ahead` already
-  // binds it into the arm's own frame — it only ever lacked a slot to land
-  // in. (On the parent commit these did not merely lose the mutation: the
-  // orphaned `Bind` tripped `ThreadedIr::verify`'s `UnboundVersion`, an
-  // `erlc` unbound-variable crash in a release build.)
-  //
-  // The OTHER half — a mutation inside a NESTED BLOCK (`flag ifTrue: [self
-  // bump]`) — is a clean compile-time rejection, so it cannot be a fragment
-  // in a file that must compile; it is pinned at the Rust level instead, by
-  // `test_class_method_self_send_nested_in_conditional_in_ensure_try_body_is_compile_error`
-  // in `crates/beamtalk-codegen/src/core_erlang/tests/control_flow/exception_handling.rs`.
-  class classVarEnsureSelfSendInSubExprNonLast =>
-    self.runs := 0
-    _t := 0
-    [
-      _t := 1 + self bump
-      nil
-    ] ensure: [nil]
-    self.runs
-
-  class classVarOnDoSelfSendAsReceiverNonLast =>
-    self.runs := 0
-    _t := 0
-    [
-      _t := (self bump) + 0
-      nil
-    ] on: Error do: [:e | nil]
-    self.runs
-
   // ── opaque (non-literal) callable forwarded to a collection HOM (BT-3615) ──
   // ADR 0128 / BT-3583 / BT-3615: each `opaque*:` helper forwards its block
   // parameter — opaque at the primitive's call site — straight to
@@ -548,7 +290,7 @@ Object subclass: MutationCorpusClassMethod
   // class-method loop-body family detectors agree — see
   // `family_detector_differential.rs`); besides, a
   // same-class class-method self-send used DIRECTLY as the receiver of a
-  // threaded `do:`/`ifTrue:` in a class with a `classState:` is a separate,
+  // threaded `do:`/`ifTrue:` in a class with class state is a separate,
   // pre-existing compiler crash (`unbound variable 'ClassVars1'`) — see
   // ADR 0128's Scope section.
   class opaqueDo: block => #(1, 2, 3) do: block

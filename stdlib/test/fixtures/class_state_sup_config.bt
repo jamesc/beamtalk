@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3407: the configuration holder for ClassStateSupApp
+// (stdlib/test/fixtures/class_state_sup_app.bt). A named Actor holds the value
+// the supervisor's `childSpecs` reads while the tree starts (ADR 0153: shared
+// mutable state lives in an Actor, not in a class variable).
+
+Actor subclass: ClassStateSupConfig
+  state: cfg = nil
+
+  configure: aDict =>
+    self.cfg := aDict
+    nil
+
+  cfg => self.cfg

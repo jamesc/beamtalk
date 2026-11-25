@@ -477,7 +477,7 @@ weighted by how often each appears on the path:
 | # | Cost | Excess per occurrence | Rows | Kind | Fixable? |
 |---|---|---|---|---|---|
 | 1 | Actor dispatch hooks (trace-store aggregates, send wrapper chain, actor-state/`From`/pending-action cells; telemetry spans opt-in since BT-4113) | +52 red, +86 words per sync send; +50 red, +61 words per cast (BT-4265; was +103 / +89 and +91 / +68 after BT-4113, +174 / +256 and +175 / +230 before it) | 7a-7c | machinery | Partly: the aggregates are a product decision (BT-4103); the rest is not needed for the send itself. The gen_server round trip (37 red, 56 words) is the structural floor. |
-| 2 | Class-side sends through the class process (non-`class sealed` class methods, Value keyword constructors, `Result ok:`, class objects in `on:do:` and `isKindOf:`) | +143 to +415 red, +444 to +1,358 words, 1-7 µs, and a node-wide serialization point | 3b, 3c, 2b, 9a, 8a, 12b | dispatch + machinery | Yes for sealed stateless classes and constructors (direct call); BT-4065 covers class objects, `isKindOf:` and `Result`. Classes with `classState:` structurally need their process for writes. |
+| 2 | Class-side sends through the class process (non-`class sealed` class methods, Value keyword constructors, `Result ok:`, class objects in `on:do:` and `isKindOf:`) | +143 to +415 red, +444 to +1,358 words, 1-7 µs, and a node-wide serialization point | 3b, 3c, 2b, 9a, 8a, 12b | dispatch + machinery | Yes for sealed stateless classes and constructors (direct call); BT-4065 covers class objects, `isKindOf:` and `Result`. (Rows 3f-3h, which measured a class with class variables, were removed with `classState:`, ADR 0153.) |
 | 3 | Dynamic sends to Value instances, regardless of static type | +27 to +29 red, +28 words, about 160 ns per send; a self-send is a second one | 1a-1c, 4a-4c, 5a, 5b, 9b, 10a, 10b | dispatch + allocation | Yes for sealed receivers (BT-4069). For open classes, late binding is structural, but its cost is not: a guarded direct call costs a map-key match. |
 | 4 | Non-inlined conditionals and loops | +14 red, +4 words per conditional; +26 red, +10 words per loop step | 11d, 0b | dispatch + allocation | Yes: compile to `case` and `letrec` with a fallback send for non-Booleans. |
 | 5 | Map-threaded locals in iteration blocks | +4 words per element, 8x time | 6b | allocation | Done (BT-4116): a bare fold accumulator. |
@@ -489,8 +489,7 @@ Rarer on a message path but very expensive when hit: a raise (+2,645 red,
 
 **Structural vs fixable.** Structural: a sync actor send cannot be cheaper
 than a `gen_server:call` (37 reductions, 56 words); a send to an open class
-must check the receiver's class at run time (a guard, not a lookup); a class
-with `classState:` needs its process for writes (ADR 0130); a non-local `^`
+must check the receiver's class at run time (a guard, not a lookup); a non-local `^`
 is a throw. Everything else measured here is fixable without changing the
 language: it is either a send the compiler could resolve, a hook that could be
 off, or a value rebuilt on every use.

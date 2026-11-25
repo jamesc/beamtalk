@@ -7,11 +7,6 @@
 
 TestCase subclass: ClassMethodNonLocalReturnTest
 
-  setUp =>
-    // Reset class var state before each test for isolation.
-    ClassMethodNlrClassVars resetFlag
-    self
-
   testNlrFromClassMethodIfTrue =>
     // ^ inside ifTrue: block should return from the class method
     self assert: (ClassMethodNlrCheck check: 42) equals: 99
@@ -34,16 +29,12 @@ TestCase subclass: ClassMethodNonLocalReturnTest
     // No positive element — falls through do:, returns nil
     self assert: (ClassMethodNlrEarly firstPositive: #(-1, -2, -3)) equals: nil
 
-  testNlrFromClassMethodWithClassVars =>
-    // ^ in a class method that also mutates class vars:
-    // the class var mutation should be preserved when ^ fires via NLR.
-    self assert: ClassMethodNlrClassVars flagValue equals: false  // reset by setUp
-    self assert: (ClassMethodNlrClassVars check: 5) equals: "positive"
-    self assert: ClassMethodNlrClassVars flagValue equals: true
+  testNlrFromClassMethodWithLocalRebind =>
+    // ^ in a class method that also rebinds a local:
+    // the rebind before the ^ is visible in the answer.
+    self assert: (ClassMethodNlrClassVars check: 5) equals: #("positive", 1)
 
-  testNlrFromClassMethodWithClassVarsFallthrough =>
+  testNlrFromClassMethodWithLocalRebindFallthrough =>
     // When ^ is not taken, normal return also works,
-    // and the class var mutation survives the fallthrough path.
-    self assert: ClassMethodNlrClassVars flagValue equals: false  // reset by setUp
-    self assert: (ClassMethodNlrClassVars check: -1) equals: "negative"
-    self assert: ClassMethodNlrClassVars flagValue equals: true
+    // and the rebind survives the fallthrough path.
+    self assert: (ClassMethodNlrClassVars check: -1) equals: #("negative", 1)

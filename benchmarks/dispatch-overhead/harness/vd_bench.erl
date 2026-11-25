@@ -48,7 +48,6 @@ rows() ->
         {"c1", class_side, "`class sealed` on a sealed class", 100000, 'classSealedStatic:', []},
         {"c2", class_side, "class method on a sealed class", 100000, 'classSealedPlain:', []},
         {"c3", class_side, "class method on an open class", 100000, 'classOpen:', []},
-        {"c4", class_side, "class method on a class with classState:", 20000, 'classStateful:', []},
         {"c5", class_side, "class method, class in a variable", 100000, 'classInVariable:c:', [open_math]},
         {"f1", ffi, "FFI, integer result: erlang:phash2", 100000, 'ffiInt:a:', [int]},
         {"f2", ffi, "FFI, binary result: integer_to_binary", 100000, 'ffiBinary:a:', [int]},

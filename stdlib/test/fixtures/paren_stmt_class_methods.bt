@@ -7,17 +7,11 @@
 // by a read) or LAST, and the expected answers are in
 // stdlib/test/paren_statement_walkers_test.bt.
 //
-// The four shapes: a local rebind `(x := x + 1)`, a field write
-// `(self.count := self.count + 1)`, a conditional with a field-writing arm
-// `(c ifTrue: [self.count := 1])` and a loop that writes a field
-// `(xs do: [:e | self.count := self.count + e])`.
+// Class methods have no state of their own, so only the local rebind shape
+// `(x := x + 1)` is pinned here; the actor and value-type fixtures carry the
+// field-write, conditional and loop shapes.
 
 Object subclass: ParenStmtClassMethods
-  classState: count = 0
-
-  class getCount => self.count
-
-  class reset => self.count := 0
 
   class localNonLast =>
     x := 1
@@ -27,27 +21,3 @@ Object subclass: ParenStmtClassMethods
   class localLast =>
     x := 1
     (x := x + 1)
-
-  class fieldNonLast =>
-    (self.count := self.count + 1)
-    self.count
-
-  class fieldLast => (self.count := self.count + 1)
-
-  class condNonLast =>
-    c := true
-    (c ifTrue: [self.count := 1])
-    self.count
-
-  class condLast =>
-    c := true
-    (c ifTrue: [self.count := 1])
-
-  class doNonLast =>
-    xs := #(1, 2, 3)
-    (xs do: [:e | self.count := self.count + e])
-    self.count
-
-  class doLast =>
-    xs := #(1, 2, 3)
-    (xs do: [:e | self.count := self.count + e])
