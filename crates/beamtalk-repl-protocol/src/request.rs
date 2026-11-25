@@ -192,6 +192,14 @@ impl RequestBuilder {
     // Session state is read and reset via the `Session` API
     // (`Session current bindings keys`, `Session current clear`) over `eval`.
 
+    /// Build a `sessions` request. No client sends it; the REPL-protocol e2e
+    /// harness uses it to prove a release-mode listener answers a
+    /// non-compiling op (`crates/beamtalk-cli/tests/repl_protocol.rs`).
+    #[must_use]
+    pub fn sessions() -> serde_json::Value {
+        Self::no_param("sessions")
+    }
+
     /// Build a `close` request: ends the sender's own session (the CLI REPL's
     /// `:exit` / Ctrl-D, BT-5199).
     #[must_use]
@@ -217,7 +225,8 @@ impl RequestBuilder {
         })
     }
 
-    /// Build a `kill` request.
+    /// Build a `kill` request. Clients send `kill` from VS Code and LiveView;
+    /// in Rust the REPL-protocol e2e harness uses this to drive the real op.
     #[must_use]
     pub fn kill(actor: &str) -> serde_json::Value {
         serde_json::json!({
@@ -682,6 +691,12 @@ mod tests {
     }
 
     #[test]
+    fn sessions_request_has_correct_op() {
+        let req = RequestBuilder::sessions();
+        assert_eq!(req["op"], "sessions");
+    }
+
+    #[test]
     fn close_request_has_correct_op() {
         let req = RequestBuilder::close();
         assert_eq!(req["op"], "close");
@@ -993,6 +1008,7 @@ mod tests {
                 RequestBuilder::load_project_with_force("p", true, true),
                 Some("pkg"),
             ),
+            RequestBuilder::sessions(),
             RequestBuilder::close(),
             RequestBuilder::actors(),
             RequestBuilder::inspect("a"),
