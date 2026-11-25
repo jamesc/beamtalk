@@ -125,7 +125,7 @@ fn hook_without_return_annotation_is_not_typed_as_the_number_result() {
         !matches!(
             ty.as_ref()
                 .and_then(InferredType::as_known)
-                .map(|s| s.as_str()),
+                .map(ecow::EcoString::as_str),
             Some("Integer")
         ),
         "{ty:?}"
@@ -142,7 +142,7 @@ fn inherited_hook_and_float_receiver_are_found() {
     assert_eq!(
         ty.as_ref()
             .and_then(InferredType::as_known)
-            .map(|s| s.as_str()),
+            .map(ecow::EcoString::as_str),
         Some("Base")
     );
 }
