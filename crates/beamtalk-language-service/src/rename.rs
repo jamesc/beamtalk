@@ -164,6 +164,17 @@ impl SimpleLanguageService {
                     }
                 }
             }
+            // A rejected cross-file `Foo >> sel` (ADR 0152): its sends are
+            // text the user will move into `Foo`'s file, so they are renamed
+            // too, but it is not a method of `Foo` (no owner).
+            for smd in &data.module.method_definitions {
+                out.push(BodyCtx {
+                    file,
+                    source,
+                    owner: None,
+                    roots: stmts(&smd.method.body),
+                });
+            }
             // State / class-variable defaults and protocol provided methods
             // (BT-5079): not a method body of any class, so no owner.
             for expr in data.module.state_default_exprs() {

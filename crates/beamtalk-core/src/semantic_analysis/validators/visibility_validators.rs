@@ -1056,14 +1056,18 @@ pub fn check_leaked_method_visibility(
         }
     }
 
+    if by_class.is_empty() {
+        return;
+    }
+    // Sorted by name so the errors come out in a stable order: the registry
+    // is a `HashMap` (BT-5184).
+    let mut protocols: Vec<_> = protocol_registry.protocols().collect();
+    protocols.sort_unstable_by(|a, b| a.0.cmp(b.0));
+
     for (class_name, internal_instance, internal_class) in &by_class {
         // Check each protocol the class might conform to
         // (Protocols don't have is_internal yet, so all protocols are treated as public)
-        // Sorted by name so the warnings come out in a stable order: the
-        // registry is a `HashMap` (BT-5184).
-        let mut protocols: Vec<_> = protocol_registry.protocols().collect();
-        protocols.sort_unstable_by(|a, b| a.0.cmp(b.0));
-        for (_proto_name, proto_info) in protocols {
+        for (_proto_name, proto_info) in &protocols {
             // Use the protocol registry's conformance check so we stay consistent
             // with DNU-bypass, cross-file-parent, and inherited method handling.
             if protocol_registry

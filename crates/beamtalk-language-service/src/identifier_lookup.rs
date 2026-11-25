@@ -255,6 +255,13 @@ impl SimpleLanguageService {
             }
         }
 
+        for smd in &file_data.module.method_definitions {
+            if let Some(ident) = Self::find_identifier_in_standalone_method(smd, offset, offset_val)
+            {
+                return Some(ident);
+            }
+        }
+
         // Walk the top-level expressions
         for stmt in &file_data.module.expressions {
             if let Some(ident) = Self::find_identifier_in_expr(&stmt.expression, offset) {
@@ -373,6 +380,28 @@ impl SimpleLanguageService {
             }
         }
         None
+    }
+
+    /// Walk a Tonel-style standalone method definition for an identifier at `offset`.
+    fn find_identifier_in_standalone_method(
+        smd: &beamtalk_core::ast::StandaloneMethodDefinition,
+        offset: ByteOffset,
+        offset_val: u32,
+    ) -> Option<(Identifier, Span, IdentifierContext)> {
+        if offset_val >= smd.class_name.span.start() && offset_val < smd.class_name.span.end() {
+            return Some((
+                smd.class_name.clone(),
+                smd.class_name.span,
+                IdentifierContext::TypeReference,
+            ));
+        }
+        Self::find_identifier_in_method_signature_and_body(
+            &smd.method.parameters,
+            smd.method.return_type.as_ref(),
+            &smd.method.body,
+            offset,
+            offset_val,
+        )
     }
 
     /// Walk a method's parameter types, return type, and body for an identifier

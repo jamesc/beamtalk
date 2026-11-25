@@ -119,7 +119,8 @@ pub enum DiagnosticsTableError {
 /// `unresolved-class`), except where a word is kept whole
 /// (`HandleInfoNoCatchAll` → `handleinfo-no-catch-all`, after the selector).
 /// Categories that are not user-configurable (`InternalVerifier`,
-/// `CodegenReport`, the ADR 0131 local-threading errors) have no key.
+/// `CodegenReport`, the ADR 0131 local-threading errors, and
+/// `MisplacedExtension`, which must never be turned off) have no key.
 const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
     ("dnu", DiagnosticCategory::Dnu),
     ("type", DiagnosticCategory::Type),

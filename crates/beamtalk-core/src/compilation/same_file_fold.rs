@@ -156,11 +156,13 @@ fn cross_file_extension_hint(target: &str) -> String {
              workspace cannot redefine it. Instead, {own_class}."
         )
     } else {
+        // `target` may also be a protocol declared in another file; the
+        // hint says where a protocol's methods go rather than guessing.
         format!(
-            "Define the method in the file that defines {target} (in the class body, or as a \
-             `>>` next to it). If {target}'s source is loaded in your workspace, you can also \
-             define it live from the REPL or the IDE. If {target} comes from a dependency, \
-             {own_class}."
+            "Define the method in the file that defines {target}: in the class body, or as a \
+             `>>` next to it (for a protocol, in its `Protocol define:` body). If {target}'s \
+             source is loaded in your workspace, you can also define it live from the REPL or \
+             the IDE. If {target} comes from a dependency, {own_class}."
         )
     }
 }

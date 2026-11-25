@@ -1483,6 +1483,13 @@ impl LanguageService for SimpleLanguageService {
                     }
                 }
             }
+            // And standalone method bodies: a rejected cross-file `>>` is
+            // still text the user will move into the class's file.
+            for smd in &fd.module.method_definitions {
+                for stmt in &smd.method.body {
+                    Self::collect_identifiers(&stmt.expression, &ident.name, &mut spans);
+                }
+            }
             results.extend(
                 spans
                     .into_iter()
@@ -1623,11 +1630,11 @@ impl Default for SimpleLanguageService {
 /// file-compile rule the language service shares with the build.
 ///
 /// Every standalone definition left after the fold is a rejected cross-file
-/// extension, so it is dropped from the indexed module (BT-5184): rename,
-/// hover, completion, references, definition and implementors must not treat
-/// a method that will never be compiled as a method of its target class.
-/// Its error is already in the returned diagnostics, and the `@expect` pass
-/// could not have suppressed it anyway.
+/// extension. It stays in the indexed module, so diagnostics match the CLI and
+/// the outline, folding and class references still see its text; but the
+/// method-level queries (implementors, selector declarations and references,
+/// selector rename, call hierarchy) do not treat it as a method of its target
+/// class (BT-5184).
 fn fold_and_check_extensions(
     module: &mut beamtalk_core::ast::Module,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
@@ -1635,6 +1642,5 @@ fn fold_and_check_extensions(
     diagnostics.extend(beamtalk_core::compilation::reject_cross_file_extensions(
         module,
     ));
-    module.method_definitions.clear();
     diagnostics
 }
