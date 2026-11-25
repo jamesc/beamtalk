@@ -287,3 +287,22 @@ async fn confined_tools_refuse_paths_outside_the_project_root() {
         .unwrap();
     assert_eq!(r.is_error, Some(true));
 }
+
+// --- BT-5174: no confinement to $HOME or `/` ---
+
+#[test]
+fn confine_to_root_refuses_home_and_filesystem_root() {
+    let home = tempfile::tempdir().unwrap();
+    let err = PathPolicy::confine_to_root(home.path(), Some(home.path().as_os_str())).unwrap_err();
+    assert!(
+        err.to_string().contains("no beamtalk project found"),
+        "{err}"
+    );
+    assert!(PathPolicy::confine_to_root(std::path::Path::new("/"), None).is_err());
+
+    // A project below home, or any directory when HOME is unset, is fine.
+    let project = home.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    assert!(PathPolicy::confine_to_root(&project, Some(home.path().as_os_str())).is_ok());
+    assert!(PathPolicy::confine_to_root(home.path(), None).is_ok());
+}

@@ -216,6 +216,17 @@ atomic_write_keeps_existing_mode_test() ->
         ?assertEqual(8#640, M3 band 8#777)
     end).
 
+atomic_write_private_tightens_existing_0644_test() ->
+    with_dir(fun(Dir) ->
+        Path = filename:join(Dir, "metadata.json"),
+        ok = file:write_file(Path, <<"old">>),
+        ok = file:change_mode(Path, 8#644),
+        ok = beamtalk_workspace_file:atomic_write(Path, <<"new">>, undefined, #{private => true}),
+        {ok, #file_info{mode = Mode}} = file:read_file_info(Path),
+        ?assertEqual(8#600, Mode band 8#777),
+        ?assertEqual({ok, <<"new">>}, file:read_file(Path))
+    end).
+
 ensure_private_dir_is_0700_test() ->
     with_dir(fun(Dir) ->
         Sub = filename:join([Dir, "a", "ws"]),

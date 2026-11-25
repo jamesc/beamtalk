@@ -16,6 +16,16 @@ defmodule BtAttach.RevokedSessionsTest do
     assert RevokedSessions.revoke(nil, 60) == :ok
   end
 
+  test "fails closed: with the table absent every session id reads as revoked" do
+    :ok = Supervisor.terminate_child(BtAttach.Supervisor, RevokedSessions)
+    on_exit(fn -> Supervisor.restart_child(BtAttach.Supervisor, RevokedSessions) end)
+
+    assert :ets.whereis(RevokedSessions) == :undefined
+    assert RevokedSessions.revoked?("bt_session:never-seen")
+    # Non-binary ids stay "not revoked": there is no session to refuse.
+    refute RevokedSessions.revoked?(nil)
+  end
+
   test "an entry past its TTL is no longer revoked and is swept" do
     id = "bt_session:expired-#{System.unique_integer([:positive])}"
     :ets.insert(RevokedSessions, {id, System.system_time(:second) - 1})
