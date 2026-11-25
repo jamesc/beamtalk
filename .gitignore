@@ -17,7 +17,8 @@
 # graph; fuzz/ is kept so the advisory scan can audit libfuzzer-sys (BT-5114).
 # CI fails if the root or fuzz/ Cargo.lock is out of date with its Cargo.toml
 # (`cargo tree --locked`).
-.cargo/
+.cargo/*
+!.cargo/audit.toml
 
 # IDEs and editors
 *.swp
