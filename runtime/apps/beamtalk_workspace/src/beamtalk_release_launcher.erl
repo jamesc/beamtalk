@@ -222,7 +222,11 @@ rpc_client_main() ->
             ClassBin = unicode:characters_to_binary(ClassStr),
             SelectorBin = unicode:characters_to_binary(SelectorStr),
             Argv = [unicode:characters_to_binary(A) || A <- RestArgs],
-            case rpc:call(Node, ?MODULE, rpc_entry, [ClassBin, SelectorBin, Argv], ?RPC_CALL_TIMEOUT_MS) of
+            case
+                rpc:call(
+                    Node, ?MODULE, rpc_entry, [ClassBin, SelectorBin, Argv], ?RPC_CALL_TIMEOUT_MS
+                )
+            of
                 {ok, Value} ->
                     io:format("~tp~n", [Value]),
                     erlang:halt(0);
