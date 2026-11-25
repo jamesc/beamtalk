@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5168: typed callers of PersistentTerm. `tables -> Tuple` and `count ->
+// Integer` return the helper's answer directly, which only type-checks when
+// the answer type follows the block's type.
+
+Object subclass: PersistentTermTypedCaller
+
+  class tables -> Tuple =>
+    PersistentTerm at: #ptTestTyped ifAbsentPut: [{1, 2, 3}]
+
+  class count -> Integer =>
+    PersistentTerm at: #ptTestTypedCount ifAbsentPut: [7]

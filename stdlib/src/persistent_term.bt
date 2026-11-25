@@ -64,12 +64,15 @@ sealed typed Object subclass: PersistentTerm
   /// that first value is kept and answered. A miss whose value is a pid, an
   /// actor or a class raises a `type_error`.
   ///
+  /// The answer is typed by *this* block. Keys are untyped and node-global, so
+  /// every call site for one key must build the same type.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// PersistentTerm at: #doc_once ifAbsentPut: [42]   // => 42
   /// PersistentTerm at: #doc_once ifAbsentPut: [99]   // => 42
   /// ```
-  class at: key :: Object ifAbsentPut: block :: Block(Object) -> Object =>
+  class at: key :: Object ifAbsentPut: block :: Block(T) -> T =>
     (Erlang beamtalk_persistent_term) getOrPut: key block: block
 
   /// Answer the value stored under `key`, or the result of evaluating
@@ -79,7 +82,7 @@ sealed typed Object subclass: PersistentTerm
   /// ```beamtalk
   /// PersistentTerm at: #doc_nothing_here ifAbsent: [0]   // => 0
   /// ```
-  class at: key :: Object ifAbsent: block :: Block(Object) -> Object =>
+  class at: key :: Object ifAbsent: block :: Block(T) -> Object | T =>
     (Erlang beamtalk_persistent_term) getOrElse: key block: block
 
   /// Answer whether a value is stored under `key`. A stored `nil` counts.

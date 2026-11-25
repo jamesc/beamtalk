@@ -21,6 +21,8 @@ TestCase subclass: PersistentTermTest
     PersistentTerm erase: #ptTestPid
     PersistentTerm erase: #ptTestActor
     PersistentTerm erase: #ptTestClass
+    PersistentTerm erase: #ptTestTyped
+    PersistentTerm erase: #ptTestTypedCount
 
   testBuildsOnce =>
     self assert: (PersistentTerm at: #ptTestBuild ifAbsentPut: [
@@ -100,3 +102,7 @@ TestCase subclass: PersistentTermTest
       PersistentTerm at: #ptTestClass ifAbsentPut: [Integer]
     ] raise: #type_error
     self deny: (PersistentTerm includesKey: #ptTestClass)
+
+  testTypedCallerAnswersBlockType =>
+    self assert: PersistentTermTypedCaller tables equals: {1, 2, 3}
+    self assert: PersistentTermTypedCaller count equals: 7
