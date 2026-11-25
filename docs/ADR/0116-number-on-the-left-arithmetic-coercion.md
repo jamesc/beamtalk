@@ -1081,8 +1081,9 @@ this is an addendum, not a new ADR.
 1. **Rule.** When the left operand of `<`, `<=`, `>` or `>=` is a number at
    run time and the right operand is not, the right operand is sent a
    **reflected comparison method**. The four operators no longer
-   term-order a number against a non-number. `max:`, `min:`, `between:and:` and every other
-   caller of the four operators inherit the rule. Equality (`==`, `=:=`,
+   term-order a number against a non-number. `max:`, `min:`,
+   `between:and:` and every other caller of the four operators inherit
+   the rule. Equality (`==`, `=:=`,
    `/=`, `=/=`) is untouched and stays total: `3 == nil` is `false`.
 2. **Hook shape: one reflected method per operator**, named on this ADR's
    `<verb>FromNumber:` scheme — not a single three-way
@@ -1388,8 +1389,8 @@ method with a declared signature, and nothing is looked up through
     argument, got Nil ``), with its hint changed from "Comparison operators
     require compatible types" to say that it raises `does_not_understand`
     at run time and names the selector to implement.
-- Severity stays a warning, and an untyped or generic argument stays
-  silent, as today. The check is the same code for arithmetic, so the
+- Severity stays a warning; an untyped argument stays silent and a
+  generic one keeps its hint-level diagnostic, as today. The check is the same code for arithmetic, so the
   false positive this ADR recorded for `5 + aVector` (§ Consequences,
   Negative) is closed by the same change.
 - **Not covered:** `3 max: aMoney`, `min:` and `between:and:` are keyword
