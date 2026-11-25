@@ -11,7 +11,7 @@
     "url": "https://github.com/jamesc/beamtalk"
   },
   "engines": {
-    "vscode": "^1.82.0"
+    "vscode": "^1.91.0"
   },
   "categories": [
     "Programming Languages"
@@ -363,13 +363,18 @@
     "format:check": "biome format src/"
   },
   "dependencies": {
-    "vscode-languageclient": "^10.1.0",
+    "vscode-languageclient": "^11.0.1",
     "ws": "^8.23.0"
+  },
+  "overrides": {
+    "vscode-languageclient": {
+      "minimatch": "^11.0.9"
+    }
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",
     "@types/node": "^26.6.6",
-    "@types/vscode": "^1.82.0",
+    "@types/vscode": "^1.91.0",
     "@types/ws": "^8.18.2",
     "@vscode/vsce": "^4.1.1",
     "esbuild": "^0.28.2",
