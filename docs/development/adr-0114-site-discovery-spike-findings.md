@@ -21,7 +21,7 @@ method) before any rename primitive is built on top of it.
   reproduced end-to-end through `SystemNavigation referencesTo:` against a
   real `ClassBuilder`-installed method (`just test-bunit
   test/adr0114class_builder_live_patch_gap_test.bt` → passes).
-- `tests/repl-protocol/cases/adr_0114_live_patch_gap.btscript` — *deleted
+- the `adr_0114_live_patch_gap` REPL script — *deleted
   with the extension machinery (ADR 0152).* It checked the `register/5`
   extension surface and found it did not reproduce the gap end-to-end; that
   surface no longer exists. The `>>`/`compile:source:` finding below (finding

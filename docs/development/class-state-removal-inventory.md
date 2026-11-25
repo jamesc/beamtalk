@@ -588,7 +588,6 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | `runtime/apps/beamtalk_runtime/test/beamtalk_object_printer_tests.erl` | 1 | edit (comments only) | BT-5160 |
 | `runtime/apps/beamtalk_runtime/test/beamtalk_class_sup_tests.erl` | 1 | edit (comments only) | BT-5160 |
 | `runtime/apps/beamtalk_runtime/src/beamtalk_runtime_app.erl` | 1 | edit (comments only) | BT-5160 |
-| `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl` | 1 | edit | BT-5160 |
 | `runtime/apps/beamtalk_runtime/src/beamtalk_dispatch.erl` | 1 | edit | BT-5160 |
 | `runtime/apps/beamtalk_runtime/src/beamtalk_class_monitor.erl` | 1 | edit (comments only) | BT-5158 |
 | `runtime/apps/beamtalk_runtime/src/beamtalk_class_dispatch_self.erl` | 1 | edit | BT-5160 |
