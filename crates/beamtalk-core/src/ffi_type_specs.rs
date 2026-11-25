@@ -519,7 +519,26 @@ impl TypeCache {
             },
             std::process::id()
         ));
-        if let Err(e) = std::fs::write(tmp.as_std_path(), &json) {
+        // Exclusive create (`create_new`): never write through a pre-created
+        // file or symlink at the predictable temp name (BT-5135). A stale
+        // leftover from a crashed run with a recycled pid is removed once.
+        let write_exclusive = || -> std::io::Result<()> {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(tmp.as_std_path())?;
+            f.write_all(json.as_bytes())
+        };
+        let written = write_exclusive().or_else(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                let _ = std::fs::remove_file(tmp.as_std_path());
+                write_exclusive()
+            } else {
+                Err(e)
+            }
+        });
+        if let Err(e) = written {
             debug!("Failed to write type cache temp for {module_name}: {e}");
             return;
         }

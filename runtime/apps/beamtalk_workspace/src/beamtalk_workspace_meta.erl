@@ -1191,7 +1191,7 @@ persist_metadata_to_disk(State) ->
     Path = State#state.metadata_path,
     %% Ensure directory exists
     Dir = filename:dirname(Path),
-    _ = filelib:ensure_dir(filename:join(Dir, "dummy")),
+    _ = beamtalk_workspace_file:ensure_private_dir(Dir),
 
     %% Build JSON metadata (PIDs as strings, atoms as strings)
     Owned = #{
@@ -1257,7 +1257,7 @@ persist_metadata_to_disk(State) ->
     %% in-place `file:write_file/2` left a window where a crash or a concurrent
     %% reader saw a truncated file, which `load_metadata_from_disk/1` then
     %% treated as "use defaults".
-    case beamtalk_workspace_file:atomic_write(Path, Json, undefined) of
+    case beamtalk_workspace_file:atomic_write(Path, Json, undefined, #{private => true}) of
         ok ->
             ok;
         {error, {_Step, Reason}} ->
