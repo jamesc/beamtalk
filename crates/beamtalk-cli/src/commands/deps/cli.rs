@@ -485,8 +485,8 @@ fn dep_version(project_root: &Utf8Path, name: &str, source: &DependencySource) -
     };
 
     let manifest_path = dep_root.join("beamtalk.toml");
-    if let Ok(m) = manifest::parse_manifest(&manifest_path) {
-        m.version
+    if let Ok(m) = manifest::parse_dependency_manifest_full(&manifest_path) {
+        m.package.version
     } else {
         "?".to_string()
     }

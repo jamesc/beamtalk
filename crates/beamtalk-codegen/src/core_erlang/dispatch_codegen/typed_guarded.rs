@@ -278,11 +278,7 @@ impl CoreErlangGenerator {
                     |operands| operands.into_iter().skip(1).collect(),
                 )?));
             }
-            Some(
-                WellKnownSelector::Perform
-                | WellKnownSelector::PerformWithArgs
-                | WellKnownSelector::PerformLocallyWithArgs,
-            ) => {
+            Some(WellKnownSelector::Perform | WellKnownSelector::PerformWithArgs) => {
                 return Ok(Some(self.generate_character_typed_dispatch(
                     receiver, selector, arguments,
                 )?));
@@ -597,11 +593,8 @@ impl CoreErlangGenerator {
         if matches!(selector, MessageSelector::Binary(_)) {
             return Err(StaysDynamic::BinarySelector);
         }
-        if let Some(
-            WellKnownSelector::Perform
-            | WellKnownSelector::PerformWithArgs
-            | WellKnownSelector::PerformLocallyWithArgs,
-        ) = selector.well_known()
+        if let Some(WellKnownSelector::Perform | WellKnownSelector::PerformWithArgs) =
+            selector.well_known()
         {
             return Err(StaysDynamic::PerformFamily);
         }

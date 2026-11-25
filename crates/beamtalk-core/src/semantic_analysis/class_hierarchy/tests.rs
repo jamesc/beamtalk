@@ -2775,16 +2775,16 @@ fn process_bound_selectors_are_never_direct_call_eligible() {
 fn direct_call_eligibility_is_adr_0142s_rule() {
     // BT-4301: no `sealed`/`class sealed` requirement; the class must define
     // the method itself. ADR 0153 (BT-5154): with no class variables the
-    // chain plays no part; a process-bound selector, or a class-variable
-    // reflection selector the runtime still intercepts (until BT-5160),
-    // keeps the class process.
+    // chain plays no part; a process-bound selector keeps the class process.
+    // BT-5155: a class method named after a field-reflection selector is
+    // no exception, since the runtime no longer intercepts it.
     let hierarchy = bt4099_hierarchy_for_source(
         "Object subclass: Open\n  class foo => 1\n  class hasField: x => 2\n\n\
          Open subclass: OpenSub\n  class bar => 5\n\n\
          Missing subclass: Orphan\n  class baz => 6\n",
     );
     assert!(hierarchy.is_direct_call_eligible("Open", "foo"));
-    assert!(!hierarchy.is_direct_call_eligible("Open", "hasField:"));
+    assert!(hierarchy.is_direct_call_eligible("Open", "hasField:"));
     assert!(hierarchy.is_direct_call_eligible("OpenSub", "bar"));
     assert!(
         !hierarchy.is_direct_call_eligible("OpenSub", "foo"),
@@ -2834,16 +2834,16 @@ fn class_var_reflection_selectors_match_shared_fixture() {
     }
 }
 
-/// BT-4148: a user class method named `fieldAt:` / `fieldAt:put:` is never
-/// what a send reaches (the class process answers it first), so it is never
-/// direct-call eligible.
+/// BT-5155: a user class method named `fieldAt:` / `fieldAt:put:` is what a
+/// send reaches on every route (the class process no longer intercepts it),
+/// so it is direct-call eligible like any other class method.
 #[test]
-fn field_at_class_methods_are_not_direct_call_eligible() {
+fn field_at_class_methods_are_direct_call_eligible() {
     let hierarchy = bt4099_hierarchy_for_source(
         "Object subclass: Reg\n  class fieldAt: k => 1\n  class fieldAt: k put: v => 2\n",
     );
-    assert!(!hierarchy.is_direct_call_eligible("Reg", "fieldAt:"));
-    assert!(!hierarchy.is_direct_call_eligible("Reg", "fieldAt:put:"));
+    assert!(hierarchy.is_direct_call_eligible("Reg", "fieldAt:"));
+    assert!(hierarchy.is_direct_call_eligible("Reg", "fieldAt:put:"));
 }
 
 /// BT-4464: `ClassHierarchy::explicit_class_new_builds_in_caller` over the

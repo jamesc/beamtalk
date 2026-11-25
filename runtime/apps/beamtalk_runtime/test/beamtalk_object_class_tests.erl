@@ -1426,10 +1426,14 @@ test_local_call_non_class_receiver() ->
         class_mod = counter,
         pid = self()
     },
-    ?assertBtError(type_error, beamtalk_object_class:local_call(FakeActor, testSuccess, [])).
+    ?assertBtError(
+        type_error, _, testSuccess, beamtalk_object_class:local_call(FakeActor, testSuccess, [])
+    ).
 
 test_local_call_non_object() ->
-    ?assertBtError(type_error, beamtalk_object_class:local_call(not_an_object, testSuccess, [])).
+    ?assertBtError(
+        type_error, _, testSuccess, beamtalk_object_class:local_call(not_an_object, testSuccess, [])
+    ).
 
 %%====================================================================
 %% local_call/3 class-variable snapshot region (ADR 0130 §5, BT-3708)
@@ -1448,7 +1452,7 @@ local_call_snapshot_group() ->
             fun test_local_call_write_raises/0},
         {"mid-invocation on the same class reads and writes the live map",
             fun test_local_call_live_same_class/0},
-        {"mid-invocation of X calling performLocally: on Y keeps X's home",
+        {"mid-invocation of X calling local_call/3 on Y keeps X's home",
             fun test_local_call_other_class_keeps_home/0}
     ]}.
 
@@ -1457,7 +1461,7 @@ lc_class(Name, N) ->
         name => Name,
         module => ?MODULE,
         superclass => none,
-        %% BT-4300: performLocally: resolves through the published class-method
+        %% BT-4300: local_call/3 resolves through the published class-method
         %% selectors (the class-method chain), not any export of the module.
         class_methods => #{
             lcRead => #{arity => 0}, lcWrite => #{arity => 0}, lcSelf => #{arity => 0}

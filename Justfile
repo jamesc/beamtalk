@@ -1056,9 +1056,12 @@ test-cache-keys:
 # other job, every job is gated on a `changes` output (so a docs-only PR runs only
 # `changes` and `ci-ok`), and the `code` filter equals the former pull_request
 # `paths:` list. A job added to ci.yml cannot be left out of the one required check.
+# test_merge_queue (BT-5247): ci.yml and claude-review-queue.yml report the required
+# checks on the merge queue's `merge_group` commit, and every other PR workflow is
+# listed as one that cannot be required.
 test-ci-ok:
     @python3 scripts/ci/ci_ok.py check
-    @cd scripts/ci && python3 -m unittest -q test_ci_ok test_ci_code_filter
+    @cd scripts/ci && python3 -m unittest -q test_ci_ok test_ci_code_filter test_merge_queue
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
