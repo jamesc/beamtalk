@@ -507,7 +507,9 @@ mod tests {
             "#!/bin/sh\nfor a; do echo \"ARG[$a]\"; done\necho \"AFLAGS=$ERL_AFLAGS\"\n\
              echo \"RELEASECOOKIE=$RELEASE_COOKIE\"\necho \"HOME=$HOME\"\n\
              echo \"COOKIEHOME=$BEAMTALK_COOKIE_HOME\"\necho \"ORIG=$BEAMTALK_ORIG_HOME\"\n\
-             echo \"FILE=$(cat \"$HOME/.erlang.cookie\")\"\n",
+             echo \"FILE=$(cat \"$HOME/.erlang.cookie\")\"\n\
+             echo \"DIRMODE=$(stat -c %a \"$HOME\" 2>/dev/null || stat -f %Lp \"$HOME\")\"\n\
+             echo \"FILEMODE=$(stat -c %a \"$HOME/.erlang.cookie\" 2>/dev/null || stat -f %Lp \"$HOME/.erlang.cookie\")\"\n",
         )
         .unwrap();
         std::fs::set_permissions(&erl, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -554,13 +556,14 @@ mod tests {
                 stdout.contains(&format!("COOKIEHOME={home}\n")),
                 "{verb}: {stdout}"
             );
-            let dir_mode = std::fs::metadata(&home).unwrap().permissions().mode();
-            let file_mode = std::fs::metadata(format!("{home}/.erlang.cookie"))
-                .unwrap()
-                .permissions()
-                .mode();
-            assert_eq!(dir_mode & 0o777, 0o700, "{verb}: dir {dir_mode:o}");
-            assert_eq!(file_mode & 0o777, 0o400, "{verb}: file {file_mode:o}");
+            assert!(stdout.contains("DIRMODE=700\n"), "{verb}: {stdout}");
+            assert!(stdout.contains("FILEMODE=400\n"), "{verb}: {stdout}");
+            // The launcher removes the private home once erl exits, even
+            // though this fake erl never ran the node's restore step.
+            assert!(
+                !std::path::Path::new(&home).exists(),
+                "{verb}: private cookie home left behind"
+            );
         }
     }
 

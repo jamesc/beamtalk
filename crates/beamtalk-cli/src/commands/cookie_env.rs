@@ -169,8 +169,35 @@ pub(crate) fn erl_command() -> Command {
 pub(crate) fn erl_program() -> OsString {
     static PROGRAM: std::sync::OnceLock<OsString> = std::sync::OnceLock::new();
     PROGRAM
-        .get_or_init(|| resolve_erl_program().unwrap_or_else(|| OsString::from("erl")))
+        .get_or_init(|| {
+            installed_erl_on_path()
+                .or_else(resolve_erl_program)
+                .unwrap_or_else(|| {
+                    tracing::warn!(
+                        "could not resolve the real `erl`; starting `erl` from PATH. A version \
+                         manager's shim may not find its Erlang while a node boots with a private \
+                         cookie home (BT-5185)"
+                    );
+                    OsString::from("erl")
+                })
+        })
         .clone()
+}
+
+/// The `erl` on `PATH`, when it already is an installation's own launcher
+/// (its canonical path is `<root>/bin/erl` with a `<root>/releases`
+/// directory): no shim, so no probe is needed.
+fn installed_erl_on_path() -> Option<OsString> {
+    let name = if cfg!(windows) { "erl.exe" } else { "erl" };
+    let path = std::env::var_os("PATH")?;
+    let found = std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())?;
+    let real = std::fs::canonicalize(&found).ok()?;
+    let root = real.parent()?.parent()?;
+    root.join("releases")
+        .is_dir()
+        .then(|| real.into_os_string())
 }
 
 /// Ask `erl` (through any shim, with this process's environment) where its

@@ -205,6 +205,7 @@ rem reads the cookie there as the kernel boots. The node puts HOMEDRIVE and
 rem HOMEPATH back and removes the directory first thing. RELEASE_COOKIE is
 rem cleared so no process erl starts inherits it. See launcher.sh's
 rem `export_cookie`.
+set "COOKIE_HOME="
 if not defined RELEASE_COOKIE exit /b 0
 set "COOKIE_HOME=%TEMP%\beamtalk-cookie-%RANDOM%%RANDOM%%RANDOM%%RANDOM%"
 mkdir "!COOKIE_HOME!" 2>nul
@@ -214,6 +215,16 @@ if errorlevel 1 (
 )
 rem `set /p` writes the value with no trailing newline.
 <nul set /p "=!RELEASE_COOKIE!" > "!COOKIE_HOME!\.erlang.cookie"
+if not exist "!COOKIE_HOME!\.erlang.cookie" (
+    rmdir /s /q "!COOKIE_HOME!" 2>nul
+    echo error: could not write the cookie file 1>&2
+    exit /b 1
+)
+for %%F in ("!COOKIE_HOME!\.erlang.cookie") do if %%~zF==0 (
+    rmdir /s /q "!COOKIE_HOME!" 2>nul
+    echo error: could not write the cookie file 1>&2
+    exit /b 1
+)
 if defined HOMEDRIVE (
     set "__ORIG_PREFIX__HOMEDRIVE=set:!HOMEDRIVE!"
 ) else (
@@ -229,8 +240,14 @@ for %%I in ("!COOKIE_HOME!") do (
     set "HOMEPATH=%%~pnxI"
 )
 set "__COOKIE_HOME_ENV__=!COOKIE_HOME!"
-set "COOKIE_HOME="
 set "RELEASE_COOKIE="
+exit /b 0
+
+rem BT-5185: remove the private cookie home once erl has exited, in case the
+rem node died before its own restore step removed it. cmd does not exec, so
+rem this runs after every verb that made one, the foreground node included.
+:cleanup_cookie
+if defined COOKIE_HOME if exist "!COOKIE_HOME!" rmdir /s /q "!COOKIE_HOME!" 2>nul
 exit /b 0
 
 rem This node's own -sname: RELEASE_NODE if set, else the release name
@@ -274,7 +291,9 @@ rem and terminate right after boot. Console output is unaffected.
 "%ERL%" -noshell -noinput -boot "%CONFIG_DIR%\start" -boot_var RELEASE_DIR "%ROOT%" ^
     -sname "%THIS_NODE%" ^
     -config "%CONFIG_DIR%\sys" -args_file "%CONFIG_DIR%\vm.args"
-exit /b %errorlevel%
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :stop
 call :check_otp_window
@@ -300,7 +319,9 @@ set "NODE=%THIS_NODE%"
 "%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %BOOT_ARGS% %PA_ARGS% ^
     -eval "__RESTORE_HOME_EVAL__." ^
     -eval "beamtalk_release_launcher:stop_client_main()." -extra "%NODE%"
-exit /b %errorlevel%
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :ping
 call :check_otp_window
@@ -320,7 +341,9 @@ set "NODE=%THIS_NODE%"
 "%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %BOOT_ARGS% %PA_ARGS% ^
     -eval "__RESTORE_HOME_EVAL__." ^
     -eval "beamtalk_release_launcher:ping_client_main()." -extra "%NODE%"
-exit /b %errorlevel%
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :remote_console
 call :check_otp_window
@@ -341,7 +364,9 @@ rem Put HOMEDRIVE and HOMEPATH back first (BT-5185), then start the same
 rem remote shell `-remsh` does (OTP 26+).
 "%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %BOOT_ARGS% %PA_ARGS% ^
     -eval "__RESTORE_HOME_EVAL__, shell:start_interactive({'%NODE%', {shell, start, []}})."
-exit /b %errorlevel%
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :eval
 call :check_otp_window
@@ -391,7 +416,9 @@ set "NODE=%THIS_NODE%"
     -eval "__RESTORE_HOME_EVAL__." ^
     -eval "beamtalk_release_launcher:rpc_client_main()." ^
     -extra "%NODE%" "%CLASS%" "%SELECTOR%" %ENTRY_REST%
-exit /b %errorlevel%
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :version
 if exist "%PROVENANCE%" (

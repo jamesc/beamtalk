@@ -176,6 +176,7 @@ client_sname() {
 # manager's shim (mise, asdf) that needs the real `HOME` to find its Erlang,
 # so it is first resolved to the installation's own `bin/erl`, which does not.
 # Must run in the main shell (not a `$(...)` subshell) so the exports stick.
+COOKIE_HOME_DIR=""
 export_cookie() {
     [ -n "${RELEASE_COOKIE:-}" ] || return 0
     case "$RELEASE_COOKIE" in
@@ -199,7 +200,8 @@ export_cookie() {
     fi
     if [ "$USING_HOST_ERTS" = "true" ]; then
         erl_root=$("$ERL" -noshell -noinput -boot no_dot_erlang \
-            -eval 'io:format("~ts", [code:root_dir()]), halt().' 2>/dev/null) || erl_root=""
+            -eval 'io:format("erl-root:~ts~n", [code:root_dir()]), halt().' 2>/dev/null |
+            sed -n 's/^erl-root://p' | head -n1) || erl_root=""
         if [ -n "$erl_root" ] && [ -x "$erl_root/bin/erl" ]; then
             ERL="$erl_root/bin/erl"
         fi
@@ -210,9 +212,24 @@ export_cookie() {
         __ORIG_PREFIX__HOME=unset
     fi
     __COOKIE_HOME_ENV__="$cookie_home"
+    COOKIE_HOME_DIR="$cookie_home"
     HOME="$cookie_home"
     export __ORIG_PREFIX__HOME __COOKIE_HOME_ENV__ HOME
     unset RELEASE_COOKIE
+}
+
+# Run a short-lived client node (`stop`/`ping`/`rpc`) without `exec`, so the
+# private cookie home is removed even if the node dies before its first
+# `-eval` restores it (BT-5185). The foreground node and `remote_console`
+# keep `exec` (signals and the tty belong to erl); their directory is removed
+# by the node itself, or left behind if it dies first (see deploying.md).
+run_client() {
+    status=0
+    "$ERL" "$@" || status=$?
+    case "$COOKIE_HOME_DIR" in
+        */beamtalk-cookie.*) rm -rf "$COOKIE_HOME_DIR" ;;
+    esac
+    exit "$status"
 }
 
 # This node's own `-sname`: `RELEASE_NODE` if set, else the release name
@@ -272,7 +289,7 @@ case "$VERB" in
             -eval \"__RESTORE_HOME_EVAL__.\" \
             -eval \"beamtalk_release_launcher:stop_client_main().\" \
             -extra \"\$NODE\""
-        exec "$ERL" "$@"
+        run_client "$@"
         ;;
     ping)
         check_otp_window
@@ -286,7 +303,7 @@ case "$VERB" in
             -eval \"__RESTORE_HOME_EVAL__.\" \
             -eval \"beamtalk_release_launcher:ping_client_main().\" \
             -extra \"\$NODE\""
-        exec "$ERL" "$@"
+        run_client "$@"
         ;;
     remote_console)
         check_otp_window
@@ -351,7 +368,7 @@ case "$VERB" in
             -eval \"__RESTORE_HOME_EVAL__.\" \
             -eval \"beamtalk_release_launcher:rpc_client_main().\" \
             -extra \"\$NODE\" \"\$CLASS\" \"\$SELECTOR\" \"\$@\""
-        exec "$ERL" "$@"
+        run_client "$@"
         ;;
     version)
         if [ -f "$PROVENANCE" ]; then
