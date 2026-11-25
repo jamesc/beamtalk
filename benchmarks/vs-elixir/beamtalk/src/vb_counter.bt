@@ -20,3 +20,9 @@ Actor subclass: VbCounter
 
   // Row 7g (BT-4279): two getters of a typed sealed Value, summed.
   sumOf: p :: VbPoint -> Integer => p x + p y
+
+  // Row 11l (BT-5207): a loop whose condition reads a field and whose body writes it.
+  spin: k :: Integer -> Integer =>
+    self.count := k
+    [0 < self.count] whileTrue: [self.count := self.count - 1]
+    self.count
