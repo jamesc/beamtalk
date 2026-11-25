@@ -235,3 +235,42 @@ ensure_binary_env_mixed_valid_invalid_test() ->
             'run:'
         )
     ).
+
+%%% ============================================================================
+%%% Parked writeLine: callers (BT-5248)
+%%% ============================================================================
+
+%% Callers parked by await_write/2 are answered in order; fail_pending_writes/2
+%% answers the rest, so none is left waiting once the port is gone.
+parked_writes_are_answered_in_order_and_failed_on_close_test() ->
+    %% gen_server From tuples whose replies come back to this process.
+    S0 = #{},
+    F1 = {self(), make_ref()},
+    F2 = {self(), make_ref()},
+    F3 = {self(), make_ref()},
+    S1 = beamtalk_subprocess_port:await_write(
+        F3, beamtalk_subprocess_port:await_write(F2, beamtalk_subprocess_port:await_write(F1, S0))
+    ),
+    S2 = beamtalk_subprocess_port:write_queued(S1),
+    {_, R1} = F1,
+    ?assertEqual(
+        ok,
+        receive
+            {R1, nil} -> ok
+        after 1000 -> timeout
+        end
+    ),
+    S3 = beamtalk_subprocess_port:write_dropped('Subprocess', <<"full">>, S2),
+    {_, R2} = F2,
+    receive
+        {R2, {error, #beamtalk_error{kind = runtime_error}}} -> ok
+    after 1000 -> error(no_drop_reply)
+    end,
+    ?assertEqual(<<"full">>, maps:get(stdin_dropped, S3)),
+    S4 = beamtalk_subprocess_port:fail_pending_writes('Subprocess', S3),
+    {_, R3} = F3,
+    receive
+        {R3, {error, #beamtalk_error{kind = port_closed}}} -> ok
+    after 1000 -> error(no_close_reply)
+    end,
+    ?assertEqual(0, queue:len(maps:get(stdin_waiters, S4))).
