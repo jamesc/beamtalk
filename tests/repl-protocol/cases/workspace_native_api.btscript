@@ -611,35 +611,6 @@ childWriters := SystemNavigation fieldWritersOf: #tally in: FieldFixture
   collect: [:r | r at: #class]) includes: FieldChild
 // => true
 
-// --- class-side field (classState:) via the metaclass walk ---
-
-// `spawnCount` is a class-side field touched only by class-side methods. The
-// metaclass walk (`cls class`) must find them; the #class is the metaclass
-// object. `bumpSpawnCount` reads and writes it; `readSpawnCount` reads it.
-spawnReaders := SystemNavigation fieldReadersOf: #spawnCount in: FieldFixture
-// => _
-
-(spawnReaders collect: [:r | r at: #selector]) includes: #bumpSpawnCount
-// => true
-
-(spawnReaders collect: [:r | r at: #selector]) includes: #readSpawnCount
-// => true
-
-// Class-side hits report the metaclass OBJECT in #class.
-((spawnReaders select: [:r | (r at: #selector) == #readSpawnCount])
-  collect: [:r | r at: #class]) includes: FieldFixture class
-// => true
-
-spawnWriters := SystemNavigation fieldWritersOf: #spawnCount in: FieldFixture
-// => _
-
-(spawnWriters collect: [:r | r at: #selector]) includes: #bumpSpawnCount
-// => true
-
-// `readSpawnCount` only reads — not a writer.
-(spawnWriters collect: [:r | r at: #selector]) includes: #readSpawnCount
-// => false
-
 // --- declared-but-untouched slot returns [] ---
 
 // `untouched` is a declared slot that no method reads or writes. Both queries

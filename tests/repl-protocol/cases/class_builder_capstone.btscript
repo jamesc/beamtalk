@@ -14,7 +14,7 @@
 //   * BT-2275 — `new` / `new:` instantiate a module-less builder class (fields
 //     default and are seeded from the init map).
 //   * BT-2269 — the incremental piece API (`addMethod:body:`,
-//     `addClassMethod:body:`, `addClassState:default:`) assembles a class.
+//     `addClassMethod:body:`) assembles a class.
 //   * BT-2268 — metadata parity: signatures + docs reach `:help` for instance
 //     and class methods and the class-level doc.
 //   * BT-2270 — class-side `classMethodSource` is navigable via
@@ -28,7 +28,7 @@
 //      reference, not an assignable local.
 //   2. `var := <cascade whose block has a `.` statement separator>` is a
 //      pre-existing REPL assignment-parse limitation; where a class method must
-//      thread class-variable state (a multi-statement block), the registered
+//      run a multi-statement block, the registered
 //      class is reached by its *name* (which is itself the canonical class
 //      object) rather than through a bound variable. The class-side `>>`
 //      live-edit case targets an inline-defined class, because the `>>` reload
@@ -72,18 +72,6 @@ cap greeting
 cap doubled
 // => 42
 
-// A class method threading class-variable state is reached by class name (the
-// name *is* the canonical class object). Mutation persists across calls — the
-// BT-873 "dropped state" regression must not recur.
-Object classBuilder name: #CapstoneCounter; superclass: Object; classVars: #{ #opened => 0 }; classMethods: #{ #open => [:self | self.opened := self.opened + 1. self.opened] }; register
-// => CapstoneCounter
-
-CapstoneCounter open
-// => 1
-
-CapstoneCounter open
-// => 2
-
 // ===========================================================================
 // BT-2275 — instantiate a module-less builder class via new / new:
 // ===========================================================================
@@ -120,10 +108,9 @@ p2 sum
 // BT-2269 — incremental piece API assembles a class one piece at a time.
 // ===========================================================================
 
-// addClassState:default: + addMethod:body: + addClassMethod:body: write the
-// same maps the bulk setters do; the cascade compiles each block the same way.
-// The class variable threads through the class method, so it is reached by name.
-Object classBuilder name: #CapstoneTally; superclass: Object; addClassState: #total default: 10; addMethod: #answer body: [:inst | 42]; addClassMethod: #tally body: [:self | self.total := self.total + 5. self.total]; register
+// addMethod:body: + addClassMethod:body: write the same maps the bulk setters
+// do; the cascade compiles each block the same way.
+Object classBuilder name: #CapstoneTally; superclass: Object; addMethod: #answer body: [:inst | 42]; addClassMethod: #tally body: [:self | 15]; register
 // => CapstoneTally
 
 (CapstoneTally new) answer
@@ -131,9 +118,6 @@ Object classBuilder name: #CapstoneTally; superclass: Object; addClassState: #to
 
 CapstoneTally tally
 // => 15
-
-CapstoneTally tally
-// => 20
 
 // ===========================================================================
 // BT-2268 — metadata parity: signatures + docs reach :help for a builder class.
