@@ -26,6 +26,7 @@ defmodule BtAttachWeb.Live.InspectorFakeClient do
   forceable(pid_stats(term))
   forceable(eval(pid, code))
   forceable(subscribe_object_changes(term, pid))
+  forceable(kill_actor(term))
 
   defdelegate unsubscribe_object_changes(term, pid), to: StubWorkspaceClient
   defdelegate list_bindings(pid), to: StubWorkspaceClient
@@ -342,6 +343,102 @@ defmodule BtAttachWeb.Live.InspectorTest do
       {:noreply, socket} = Inspector.handle_event("poke", %{"message" => "   "}, socket)
 
       assert socket.assigns.poke_error == "Enter a message to send."
+    end
+  end
+
+  describe "kill actor (BT-5199)" do
+    test "an Owner's kill closes the pane, says so and lists the actors still running" do
+      killed = object_term()
+      survivor = %{pid: self(), class: :Survivor, module: :survivor}
+      StubWorkspaceClient.put_actors([survivor])
+
+      socket =
+        base_socket(%{
+          inspect_target: %{label: "counter", pid: "<0.1.0>"},
+          inspect_crumbs: [%{label: "counter", term: killed}]
+        })
+
+      {:noreply, socket} = Inspector.handle_event("kill_actor", %{}, socket)
+
+      assert {:kill_actor, killed} in StubWorkspaceClient.calls()
+      assert socket.assigns.inspect_target == nil
+      assert socket.assigns.inspect_crumbs == []
+      assert socket.assigns.kill_notice == "Killed counter."
+      assert socket.assigns.actor_list == [survivor]
+      assert Inspector.actor_row_label(survivor) == "Survivor #{inspect(self())}"
+
+      assert Inspector.actor_row_label(Map.put(survivor, :pid_text, "<0.5.0>")) ==
+               "Survivor <0.5.0>"
+    end
+
+    test "a kill also closes floating windows on the killed actor, and only those" do
+      killed = object_term()
+      other = object_term(spawn(fn -> Process.sleep(:infinity) end))
+
+      socket =
+        base_socket(%{
+          inspect_target: %{label: "counter", pid: "<0.1.0>"},
+          inspect_crumbs: [%{label: "counter", term: killed}],
+          windows: [
+            window(%{id: "win-1", crumbs: [%{label: "counter", term: killed}]}),
+            window(%{id: "win-2", crumbs: [%{label: "other", term: other}]}),
+            # Drilled from the killed actor into a field: its root is the actor.
+            window(%{
+              id: "win-3",
+              crumbs: [%{label: "counter", term: killed}, %{label: "count", term: 3}]
+            })
+          ]
+        })
+
+      {:noreply, socket} = Inspector.handle_event("kill_actor", %{}, socket)
+
+      assert Enum.map(socket.assigns.windows, & &1.id) == ["win-2"]
+    end
+
+    test "an Observer's kill is refused by the facade (kill is :admin) and nothing is sent" do
+      socket =
+        base_socket(%{
+          role: :observer,
+          inspect_target: %{label: "counter", pid: "<0.1.0>"},
+          inspect_crumbs: [%{label: "counter", term: object_term()}]
+        })
+
+      {:noreply, socket} = Inspector.handle_event("kill_actor", %{}, socket)
+
+      refute Enum.any?(StubWorkspaceClient.calls(), &match?({:kill_actor, _}, &1))
+      assert socket.assigns.inspect_error =~ "Not authorized"
+      assert socket.assigns.inspect_crumbs != []
+    end
+
+    test "a refused kill keeps the pane open and shows why" do
+      force_workspace_replies(%{kill_actor: {:error, :actor_not_alive}})
+
+      socket =
+        base_socket(%{
+          inspect_target: %{label: "counter", pid: "<0.1.0>"},
+          inspect_crumbs: [%{label: "counter", term: object_term()}]
+        })
+
+      {:noreply, socket} = Inspector.handle_event("kill_actor", %{}, socket)
+
+      assert socket.assigns.inspect_error != nil
+      assert socket.assigns.inspect_crumbs != []
+      assert socket.assigns.actor_list == nil
+    end
+
+    test "only a live actor head is killable" do
+      refute Inspector.killable?(%{inspect_crumbs: []})
+      refute Inspector.killable?(%{inspect_crumbs: [%{label: "n", term: 42}]})
+      assert Inspector.killable?(%{inspect_crumbs: [%{label: "c", term: object_term()}]})
+
+      {:noreply, socket} =
+        Inspector.handle_event(
+          "kill_actor",
+          %{},
+          base_socket(%{inspect_crumbs: [%{label: "n", term: 42}]})
+        )
+
+      assert socket.assigns.inspect_error == "Only a live actor can be killed."
     end
   end
 
@@ -811,7 +908,8 @@ defmodule BtAttachWeb.Live.InspectorTest do
         "window_moved" => %{"id" => "win-1", "x" => 5, "y" => 5},
         "window_poke" => %{"id" => "win-1", "message" => "increment"},
         "window_reset_positions" => %{},
-        "dismiss_window_error" => %{"id" => "win-1"}
+        "dismiss_window_error" => %{"id" => "win-1"},
+        "kill_actor" => %{}
       }
 
       # A hardcoded event-name list here would itself be an unenforced "keep
@@ -864,7 +962,7 @@ defmodule BtAttachWeb.Live.InspectorTest do
           inspect_target inspect_rows inspect_crumbs inspect_error
           inspect_watch inspect_stats inspect_frozen flash_gen
           refresh_pending poke_result poke_error windows window_z
-          next_window_id inspector_mode
+          next_window_id inspector_mode kill_notice actor_list
         )a)
 
       assert MapSet.new(Map.keys(Inspector.init_assigns())) == expected
@@ -1740,6 +1838,80 @@ defmodule BtAttachWeb.Live.InspectorTest do
         render_component(&Inspector.inspector_windows/1, windows: [root], role: :observer)
 
       refute observer_html =~ "poke-row"
+    end
+  end
+
+  # BT-5189: a poke waits in the dock's eval queue behind any running eval, so
+  # its result (or its rejection) may land after the user navigated away.
+  describe "queued pokes (BT-5189)" do
+    defp queued_job(socket) do
+      [{job, _pid, _code}] = socket.assigns.eval_queue
+      job
+    end
+
+    test "a docked poke's late result is dropped when the Inspector shows another object" do
+      socket =
+        base_socket(%{
+          role: :owner,
+          eval_running: true,
+          inspect_crumbs: [%{label: "counter", term: object_term()}]
+        })
+
+      {:noreply, socket} = Inspector.handle_event("poke", %{"message" => "increment"}, socket)
+      job = queued_job(socket)
+
+      socket =
+        Phoenix.Component.assign(socket, inspect_crumbs: [%{label: "other", term: object_term()}])
+
+      socket = job.fold.(socket, {:ok, 42, "", []})
+      assert socket.assigns.poke_result == nil
+
+      socket = job.reject.(socket, "Stopped before it ran.")
+      assert socket.assigns.poke_error == nil
+    end
+
+    test "a docked poke dropped by Stop says so in the poke bar" do
+      socket =
+        base_socket(%{
+          role: :owner,
+          eval_running: true,
+          inspect_crumbs: [%{label: "counter", term: object_term()}]
+        })
+
+      {:noreply, socket} = Inspector.handle_event("poke", %{"message" => "increment"}, socket)
+      {:noreply, socket} = BtAttachWeb.Live.Dock.handle_event("eval_interrupt", %{}, socket)
+
+      assert socket.assigns.poke_error == "Stopped before it ran."
+    end
+
+    test "a window poke's late result is dropped when that window navigated elsewhere" do
+      term = object_term(self())
+      StubWorkspaceClient.seed_inspect_value("TestClass", %{"count" => 1})
+      socket = Inspector.open_window_for_term(base_socket(%{eval_running: true}), "counter", term)
+      [win] = socket.assigns.windows
+
+      {:noreply, socket} =
+        Inspector.handle_event("window_poke", %{"id" => win.id, "message" => "increment"}, socket)
+
+      job = queued_job(socket)
+
+      moved =
+        Enum.map(socket.assigns.windows, &%{&1 | crumbs: [%{label: "elsewhere", term: term}]})
+
+      socket = Phoenix.Component.assign(socket, windows: moved)
+      socket = job.fold.(socket, {:ok, 42, "", []})
+      [win] = socket.assigns.windows
+      assert win.poke_result == nil
+
+      # On the window it was sent from, the rejection lands.
+      socket =
+        Phoenix.Component.assign(socket,
+          windows: [%{win | crumbs: [%{label: "counter", term: term}]}]
+        )
+
+      socket = job.reject.(socket, "Stopped before it ran.")
+      [win] = socket.assigns.windows
+      assert win.poke_error == "Stopped before it ran."
     end
   end
 end

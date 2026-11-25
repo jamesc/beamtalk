@@ -60,7 +60,7 @@ Each `changes.jsonl` line is a JSON object with these fields (ADR 0082,
 | `candidate_sites`      | `[{sourceFile,span},...] \| null`                           | ADR 0114: `"rename-method"`-only — reported, never auto-rewritten senders; no `source_ref`/`prev_source_ref` since nothing here is ever spliced |
 | `intent`               | `"durable"`\|`"ephemeral"`                                  | |
 | `flushable`            | boolean                                                      | true iff in-project source; for `"rename-class"`/`"rename-method"`, true iff every entry in `sites` (never `candidate_sites`) resolves to a flushable file |
-| `not_flushable_reason` | string \| null                                              | `"stdlib"`/`"dynamic"`/`"dependency:<path>"`/`"extension"`; `"rename-class"` is `"dynamic"`\|null only (ADR 0114 refuses stdlib/dependency before any entry exists); `"rename-method"` is `"stdlib"`\|`"dynamic"`\|`"dependency:<path>"`\|null — `"extension"` is not reachable there either (ADR 0114 § ChangeLog schema) |
+| `not_flushable_reason` | string \| null                                              | `"stdlib"`/`"dynamic"`/`"dependency:<path>"`; `"rename-class"` is `"dynamic"`\|null only (ADR 0114 refuses stdlib/dependency before any entry exists); `"rename-method"` is `"stdlib"`\|`"dynamic"`\|`"dependency:<path>"`\|null (ADR 0114 § ChangeLog schema) |
 | `author`               | string                                                       | session/tool id |
 | `author_kind`          | `"human"`\|`"agent"`                                        | audit metadata |
 

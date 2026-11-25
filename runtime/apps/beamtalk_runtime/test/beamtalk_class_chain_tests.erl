@@ -14,9 +14,9 @@ dispatches through the 'Class' instance method chain.
 
 ## What This Tests
 
-1. **Dispatch fallthrough**: `Counter testClassProtocol` reaches
-   the `Class` instance-method chain (in this suite, a `testClassProtocol`
-   extension registered on `Class`) via `try_class_chain_fallthrough/3`.
+1. **Dispatch fallthrough**: `Counter yourself` reaches the `Class`
+   instance-method chain (`Object>>yourself`, which `Counter` does not
+   define class-side) via `try_class_chain_fallthrough/3`.
 
 2. **Metaclass tag preservation**: The `self` argument received by
    the Class method has the 'Counter class' tag, not 'Counter'.
@@ -30,9 +30,9 @@ dispatches through the 'Class' instance method chain.
 
 ## Phase 0 Outcome
 
-The testClassProtocol probe is a test-registered extension on `Class`
-(removed in teardown) to keep production code clean. The dispatch mechanism
-(try_class_chain_fallthrough) remains in beamtalk_class_dispatch.
+The probe is the stdlib's own `Object>>yourself`, so no test-only method is
+installed. The dispatch mechanism (try_class_chain_fallthrough) remains in
+beamtalk_class_dispatch.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -46,27 +46,13 @@ The testClassProtocol probe is a test-registered extension on `Class`
 setup() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_test_boot:boot_real_stdlib('Integer'),
-    %% Provide the testClassProtocol probe as an instance-side extension on
-    %% 'Class' (the supported open-class path) instead of re-pointing the
-    %% registered 'Class' at a test module. Redefining 'Class' from a non-stdlib
-    %% module is refused by the stdlib-shadowing gate once the compiled stdlib
-    %% 'Class' is registered (any fresh VM that ran beamtalk_stdlib:init/0).
-    register_probe(),
+    %% The probe is `Object>>yourself` (sealed, answers its receiver): Counter
+    %% defines no class-side `yourself`, so it is reached by
+    %% try_class_chain_fallthrough/3 through the Class chain.
     ok.
 
 teardown(_) ->
-    unregister_probe(),
     ok.
-
-%% Install / remove the testClassProtocol probe on 'Class'. dispatch/5 checks
-%% the extension registry before the class's own methods, so the probe is
-%% reached by try_class_chain_fallthrough/3 without touching 'Class' itself.
-register_probe() ->
-    ProbeFun = fun([], Self) -> {class_protocol_ok, Self} end,
-    ok = beamtalk_extensions:register('Class', testClassProtocol, ProbeFun, class_chain_tests).
-
-unregister_probe() ->
-    ok = beamtalk_extensions:unregister('Class', testClassProtocol).
 
 %%====================================================================
 %% Test Suite
@@ -75,7 +61,7 @@ unregister_probe() ->
 class_chain_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
-            {"BT-732: Counter testClassProtocol dispatches through Class chain",
+            {"BT-732: Counter yourself dispatches through Class chain",
                 fun test_dispatch_fallthrough/0},
             {"BT-732: metaclass tag is preserved in self", fun test_metaclass_tag_preserved/0},
             {"BT-732: unknown message still raises does_not_understand",
@@ -91,33 +77,32 @@ class_chain_test_() ->
 
 %% Test 1: The dispatch fallthrough works end-to-end.
 %%
-%% When Counter (a class object) receives testClassProtocol,
+%% When Counter (a class object) receives yourself,
 %% it is NOT defined in Counter's class methods, so the dispatch
-%% falls through to 'Class' instance methods, where
-%% the testClassProtocol extension probe handles it.
+%% falls through to the 'Class' instance-method chain, where
+%% Object>>yourself handles it.
 test_dispatch_fallthrough() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     ?assertNotEqual(undefined, CounterPid),
 
     %% class_send delegates to user-defined class methods first (not found),
-    %% then falls through to Class chain (testClassProtocol found in test helper).
-    Result = beamtalk_object_class:class_send(CounterPid, testClassProtocol, []),
+    %% then falls through to Class chain (Object>>yourself).
+    Result = beamtalk_object_class:class_send(CounterPid, yourself, []),
 
-    %% Result is {class_protocol_ok, Self} where Self is the class object
-    ?assertMatch({class_protocol_ok, #beamtalk_object{}}, Result).
+    %% Result is Self, the class object
+    ?assertMatch(#beamtalk_object{}, Result).
 
 %% Test 2: The virtual metaclass tag is preserved.
 %%
-%% The self received by testClassProtocol must have class = 'Counter class'
+%% The self received by yourself must have class = 'Counter class'
 %% (the metaclass tag), not 'Counter'.
 %% This confirms that class objects retain their identity through dispatch.
 test_metaclass_tag_preserved() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
 
-    {class_protocol_ok, Self} =
-        beamtalk_object_class:class_send(CounterPid, testClassProtocol, []),
+    Self = beamtalk_object_class:class_send(CounterPid, yourself, []),
 
     %% Self must be a beamtalk_object with the metaclass tag 'Counter class'
     ExpectedTag = beamtalk_class_registry:class_object_tag('Counter'),
@@ -148,9 +133,8 @@ test_fallthrough_absent_class() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
 
-    %% The probe extension is checked before the Class process is consulted,
-    %% so remove it for the absent-Class case and restore it afterwards.
-    unregister_probe(),
+    %% `subclasses` is a Behaviour method, answered only through the Class chain
+    %% (unlike `yourself`, which the class-object protocol also answers itself).
     ClassPid = beamtalk_class_registry:whereis_class('Class'),
     ?assert(is_pid(ClassPid)),
     ClassModule = beamtalk_object_class:module_name(ClassPid),
@@ -165,13 +149,12 @@ test_fallthrough_absent_class() ->
         ?assertBtError(
             does_not_understand,
             'Counter',
-            beamtalk_object_class:class_send(CounterPid, testClassProtocol, [])
+            beamtalk_object_class:class_send(CounterPid, subclasses, [])
         )
     after
-        %% Re-register the real 'Class' (same module it had) and the probe so
-        %% later tests and modules in the same VM are not affected.
-        ok = ClassModule:register_class(),
-        register_probe()
+        %% Re-register the real 'Class' (same module it had) so later tests
+        %% and modules in the same VM are not affected.
+        ok = ClassModule:register_class()
     end.
 
 %%====================================================================

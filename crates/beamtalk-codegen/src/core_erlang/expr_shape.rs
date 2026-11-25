@@ -16,7 +16,7 @@
 //!
 //! Each predicate is a plain function over `&Expression` (plus [`ShapeCtx`]
 //! for the handful that need a borrowed slice of generator state —
-//! `context`, `class_var_names`, and similar). [`CoreErlangGenerator`] keeps
+//! `context`, `class_method_selectors`, and similar). [`CoreErlangGenerator`] keeps
 //! a same-named, same-signature inherent method for every predicate that
 //! previously took `&self`, forwarding straight to the free function via
 //! [`CoreErlangGenerator::shape_ctx`] — so no call site elsewhere in the
@@ -39,8 +39,6 @@ pub(super) struct ShapeCtx<'a> {
     /// [`CoreErlangGenerator::in_cell_closure`]: inside an actor closure, which
     /// has no threaded `State` (ADR 0137 §3).
     pub(super) in_cell_closure: bool,
-    /// [`CoreErlangGenerator::class_var_names`].
-    pub(super) class_var_names: &'a HashSet<String>,
     /// [`CoreErlangGenerator::class_method_selectors`].
     pub(super) class_method_selectors: &'a HashSet<String>,
     /// [`CoreErlangGenerator::class_name`] — cloned since that accessor
@@ -59,7 +57,6 @@ impl CoreErlangGenerator {
             context: self.context,
             in_class_method: self.in_class_method(),
             in_cell_closure: self.in_cell_closure(),
-            class_var_names: self.class_var_names(),
             class_method_selectors: self.class_method_selectors(),
             class_name: self.class_name(),
             self_var_bound: self.lookup_var("self").is_some(),
@@ -272,21 +269,6 @@ pub(super) fn field_assignment_name(expr: &Expression) -> Option<&str> {
 pub(super) fn local_assign_field_write(rhs: &Expression) -> Option<&Expression> {
     let inner = rhs.unwrap_parens();
     is_field_assignment(inner).then_some(inner)
-}
-
-/// The syntactic shape `self.classVar := value` in a class method.
-fn class_var_assignment_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
-    if !ctx.in_class_method {
-        return false;
-    }
-    let Expression::Assignment { target, .. } = expr else {
-        return false;
-    };
-    let Expression::FieldAccess { field, .. } = target.as_ref() else {
-        return false;
-    };
-    beamtalk_core::semantic_analysis::block_facts::is_self_field_target(target)
-        && ctx.class_var_names.contains(field.name.as_str())
 }
 
 /// Checks if an expression is a self-send to a class method,
@@ -511,7 +493,8 @@ pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
     }
     // Well-known selectors that the intrinsics
     // layer **unconditionally** handles before `try_handle_self_dispatch`.
-    // Covers ProtoObject (`class`, `perform:`/`perform:withArguments:`), Object reflection (`respondsTo:`,
+    // Covers ProtoObject (`class`, `perform:`/`perform:withArguments:`),
+    // Object reflection (`respondsTo:`,
     // `fieldAt:`, `fieldAt:put:`, `fieldNames`, `hasField:`, `clearField:`
     // — ADR 0124 §1/B4), Nil protocol
     // (`isNil`/`notNil`/`ifNil:`/`ifNotNil:`/`ifNil:ifNotNil:`/
@@ -602,9 +585,8 @@ pub(super) fn is_error_message_send(expr: &Expression) -> bool {
 /// Checks if an expression is `self fieldAt: <name> put: <value>` in actor
 /// instance context. These need state threading via maps:put, similar to
 /// field assignments. Not in a class method (`ctx.in_class_method`, where an
-/// actor class's `context` is `Actor` too): there it writes a class variable
-/// in place (`beamtalk_class_vars:field_at_put`, BT-4421), exactly as
-/// [`is_self_clear_field`] defers to `clear`.
+/// actor class's `context` is `Actor` too): `self` is the class there, which
+/// has no `State` (ADR 0153), exactly as [`is_self_clear_field`].
 pub(super) fn is_self_field_at_put(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     if ctx.context != CodeGenContext::Actor || ctx.in_class_method || ctx.in_cell_closure {
         return false;
@@ -634,8 +616,8 @@ pub(super) fn is_self_field_at_put(ctx: &ShapeCtx<'_>, expr: &Expression) -> boo
 /// context (ADR 0124 §1/B4) — the arity-1 write counterpart to
 /// [`is_self_field_at_put`], recognized identically (same receiver/context/
 /// self-binding guard) but for `WellKnownSelector::ClearField`. Excludes a
-/// class method (`ctx.in_class_method`): a `classState:` slot lives in the
-/// class process (ADR 0130), not `State`.
+/// class method (`ctx.in_class_method`): `self` is the class there, which has
+/// no `State` (ADR 0153).
 pub(super) fn is_self_clear_field(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     if ctx.context != CodeGenContext::Actor || ctx.in_class_method || ctx.in_cell_closure {
         return false;
@@ -656,29 +638,24 @@ pub(super) fn is_self_clear_field(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool
     false
 }
 
-/// A class-side expression with an in-place class-variable effect whose
-/// evaluation order against its siblings must be pinned (ADR 0130): a
-/// class-variable write (`self.x := v`, or reflectively `self fieldAt: k put:
-/// v` / `self clearField: k`, BT-4421) or a same-class self-send, in a class
-/// method.
+/// A class-side expression with an effect whose evaluation order against its
+/// siblings must be pinned: a same-class self-send, or a reflective write
+/// (`self fieldAt: k put: v` / `self clearField: k`, BT-4421) sent to the
+/// class, in a class method.
 ///
-/// Nothing is threaded (a write is a `put`, a send rebinds nothing), but
-/// Core Erlang leaves the evaluation order of call arguments and tuple/list
-/// elements unspecified, and a class variable is now shared mutable state: an
-/// argument that writes it, or sends a message that may, must run in source
-/// order relative to the arguments around it. `subexpr_needs_prelude` and
+/// Nothing is threaded (a send rebinds nothing), but Core Erlang leaves the
+/// evaluation order of call arguments and tuple/list elements unspecified: an
+/// argument that sends a message with effects must run in source order
+/// relative to the arguments around it. `subexpr_needs_prelude` and
 /// `class_method_prelude_producer` hoist these into ordered `let`s.
 pub(super) fn is_class_side_effect(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
-    class_var_assignment_shape(ctx, expr)
-        || class_var_reflective_write_shape(ctx, expr)
-        || class_method_self_send_shape(ctx, expr)
+    class_side_reflective_write_shape(ctx, expr) || class_method_self_send_shape(ctx, expr)
 }
 
-/// `self fieldAt: k put: v` / `self clearField: k` in a class method: an
-/// in-place class-variable write (`beamtalk_class_vars:field_at_put` /
-/// `clear`), lowered by the reflection intrinsics under the same
-/// `in_class_method` + `self` rule (`is_class_side_self_reflection`).
-fn class_var_reflective_write_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
+/// `self fieldAt: k put: v` / `self clearField: k` in a class method: a
+/// reflective write sent to the class (ADR 0153: there is no class-variable
+/// home to write in place).
+fn class_side_reflective_write_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     if !ctx.in_class_method {
         return false;
     }

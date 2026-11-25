@@ -64,12 +64,10 @@ pub(in crate::core_erlang) enum NlrBoundary {
     /// live in the class process's dictionary (ADR 0130 §3), so nothing is
     /// returned alongside the result.
     ClassMethod,
-    /// Value-type methods (and value-type extension funs): the catch arm
-    /// yields the bare `Value`, as the body's normal path does (BT-4503). A
-    /// value-type method function answers exactly what a send of it answers,
-    /// so `dispatch/3`, the own-module typed direct call (BT-4473) and
-    /// the runtime's extension apply all take its return as the send's
-    /// result. A value type's `Self` is immutable to its callers, so nothing
+    /// Value-type methods: the catch arm yields the bare `Value`, as the
+    /// body's normal path does (BT-4503). A value-type method function answers
+    /// exactly what a send of it answers, so `dispatch/3` and the own-module
+    /// typed direct call (BT-4473) both take its return as the send's result. A value type's `Self` is immutable to its callers, so nothing
     /// is returned beside the result.
     ValueType,
     /// BT-4288: a REPL eval (`repl_nlr`). The throw's state is the workspace

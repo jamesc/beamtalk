@@ -26,8 +26,10 @@ Membership changes are observed through `beamtalk_node_monitor`'s
 ## Connect policy (ADR 0126 §9 item 2)
 
 `connect` (and `ping`, which auto-connects) to a host that is not this host
-succeeds only when this node runs TLS distribution (`-proto_dist inet_tls`
-or `inet6_tls`); otherwise it answers
+succeeds only when this node runs TLS distribution with peer verification
+(`-proto_dist inet_tls` or `inet6_tls`, with `{verify, verify_peer}` on both
+sides and `{fail_if_no_peer_cert, true}` on the server side; ADR 0126
+amendment D2, `beamtalk_dist_tls:enabled/0`); otherwise it answers
 `#beamtalk_error{kind = insecure_distribution}`. "This host" means the host
 part names `localhost` or this machine's own hostname, or every address it
 resolves to is a loopback address or one of this machine's interface
@@ -39,6 +41,7 @@ selectors (ADR 0126 Phase 2) apply the same rule rather than re-deriving it.
 """.
 
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 %% Class methods (`self delegate` calls the first keyword, colon stripped)
 -export([current/0, named/1, connected/0]).
@@ -73,11 +76,18 @@ selectors (ADR 0126 Phase 2) apply the same rule rather than re-deriving it.
     remote_shape_manifest/1
 ]).
 
+%% Exported for EUnit only (BT-5173); not part of the runtime surface.
+-export([bounded_sync/2]).
+
 -type t() :: #{?BT_CLASS_TAG_KEY := 'Node', name := node()}.
 -export_type([t/0]).
 
+%% Upper bound on the `global:sync/0` every successful `connect` waits for (BT-5173, BT-5179).
+-define(GLOBAL_SYNC_TIMEOUT_MS, 5000).
 -define(INVALID_NAME_HINT, <<"expected name@host">>).
--define(INSECURE_HINT, <<"configure TLS distribution (ADR 0091) or use a tunnel">>).
+-define(INSECURE_HINT,
+    <<"configure TLS distribution with peer verification (ADR 0126 §9) or use a tunnel"/utf8>>
+).
 
 %%% ============================================================================
 %%% Class Methods
@@ -129,6 +139,13 @@ Establish a connection to this node, applying the §9 host policy first
 connection answers `Result error:` with `kind = insecure_distribution`; an
 unreachable node (or a local node that is not itself distributed) answers
 `kind = node_down`. Connecting to the current node is a no-op success.
+Every successful `connect` answers only after OTP `global` has synced names
+with the peer (so a `scope: #global` name registered on it is visible at
+once, BT-5156), including when the node was already connected by `ping`,
+Erlang's auto-connect or raw `net_kernel` (BT-5179). The wait is bounded at
+5 seconds: on timeout a warning is logged and `connect` still answers ok
+(BT-5173). `ping` never syncs: it is a liveness probe. Callers that call
+`connect` in a tight loop can check `isConnected` first to skip the sync.
 """.
 -spec connect(t()) -> beamtalk_result:t().
 connect(#{?BT_CLASS_TAG_KEY := 'Node', name := Name} = Self) ->
@@ -173,7 +190,8 @@ isCurrent(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) ->
 `net_adm:ping/1` — `true` iff the node answered (and is now connected). The
 current node always answers. Because a ping auto-connects, it applies the
 same §9 host policy as `connect`: an off-host node without TLS distribution
-answers `false` without touching the network.
+answers `false` without touching the network. It does not wait for
+`global` to sync names (unlike `connect`, BT-5173).
 """.
 -spec ping(t()) -> boolean().
 ping(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) ->
@@ -511,15 +529,15 @@ connect_policy(Node, false) ->
     end.
 
 -doc """
-Whether this node runs TLS distribution: `-proto_dist inet_tls` (or
-`inet6_tls`) on the command line / in `vm.args`.
+Whether this node runs TLS distribution with peer verification: `-proto_dist
+inet_tls` (or `inet6_tls`), and TLS options that set `{verify, verify_peer}`
+on both sides and `{fail_if_no_peer_cert, true}` on the server side (ADR 0126
+amendment D2, BT-5233). `-proto_dist inet_tls` alone authenticates nothing,
+so it does not count. See `beamtalk_dist_tls:enabled/0`.
 """.
 -spec tls_distribution() -> boolean().
 tls_distribution() ->
-    case init:get_argument(proto_dist) of
-        {ok, Values} -> lists:any(fun(V) -> lists:suffix("_tls", V) end, lists:append(Values));
-        error -> false
-    end.
+    beamtalk_dist_tls:enabled().
 
 %%% ============================================================================
 %%% Internal
@@ -529,6 +547,14 @@ tls_distribution() ->
 do_connect(Self, Name) ->
     case net_kernel:connect_node(Name) of
         true ->
+            %% OTP `global` shares names with a new peer in the background;
+            %% wait for that (bounded) so a `scope: #global` name is visible
+            %% from the peer as soon as `connect` answers (BT-5156, BT-5173).
+            %% Always run, even when already connected (BT-5179): a connection
+            %% made by `ping`/auto-connect/FFI did not wait for the sync.
+            %% A sync failure or timeout does not undo the connection, so
+            %% still answer ok.
+            bounded_sync(fun global:sync/0, ?GLOBAL_SYNC_TIMEOUT_MS),
             {ok, Self};
         false ->
             {error,
@@ -542,6 +568,36 @@ do_connect(Self, Name) ->
                     Name,
                     <<"This node is not distributed; start it with a node name (--sname/--name)">>
                 )}
+    end.
+
+-doc """
+Run `SyncFun` in a monitored process and wait at most `TimeoutMs` for it.
+On timeout the process is killed and a warning logged; on a crash a warning
+is logged. Always answers `ok` — a failed sync never fails `connect`.
+""".
+-spec bounded_sync(fun(() -> term()), non_neg_integer()) -> ok.
+bounded_sync(SyncFun, TimeoutMs) ->
+    {Pid, Ref} = spawn_monitor(fun() ->
+        _ = SyncFun(),
+        ok
+    end),
+    receive
+        {'DOWN', Ref, process, Pid, normal} ->
+            ok;
+        {'DOWN', Ref, process, Pid, Reason} ->
+            ?LOG_WARNING(
+                "Node connect: global:sync() failed",
+                #{reason => Reason, domain => [beamtalk, runtime]}
+            ),
+            ok
+    after TimeoutMs ->
+        exit(Pid, kill),
+        erlang:demonitor(Ref, [flush]),
+        ?LOG_WARNING(
+            "Node connect: global:sync() did not finish; answering ok anyway",
+            #{timeout_ms => TimeoutMs, domain => [beamtalk, runtime]}
+        ),
+        ok
     end.
 
 -spec node_down_error(node(), binary()) -> #beamtalk_error{}.

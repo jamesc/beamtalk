@@ -256,22 +256,6 @@ class_class_test_() ->
             end)
         end),
         %%% ============================================================================
-        %%% classClassVarNames/1 and classAllClassVarNames/1
-        %%% ============================================================================
-        %% Dynamic (ClassBuilder) classes carry no static __beamtalk_meta/0, so the
-        %% class-side field intrinsics return [] rather than crashing. The meta-reading
-        %% path (real class_fields) is covered by the BUnit suite against compiled
-        %% fixtures (stdlib/test/class_state_test.bt).
-        ?_test(begin
-            {ClassObj, Pid} = register_class('BT2238ClassVarsNoMeta', #{x => 0}, #{}),
-            beamtalk_test_class:with_class(Pid, fun() ->
-                Local = beamtalk_behaviour_intrinsics:classClassVarNames(ClassObj),
-                All = beamtalk_behaviour_intrinsics:classAllClassVarNames(ClassObj),
-                ?assertEqual([], Local),
-                ?assertEqual([], All)
-            end)
-        end),
-        %%% ============================================================================
         %%% classIncludesSelector/2
         %%% ============================================================================
         ?_test(begin
@@ -1276,54 +1260,6 @@ class_remove_from_system_dynamic_class_test_() ->
                 undefined, beamtalk_class_registry:whereis_class(ClassName)
             )
         end),
-        %%% ============================================================================
-        %%% classRemoveFromSystemByName purges derived registries
-        %%% ============================================================================
-        %% The observable bug this issue fixes: an extension registered on a class
-        %% must stop being dispatchable once the class is removed, and must not
-        %% resurrect if a class of the same name is later re-created (extensions are
-        %% keyed by class *name* atom, not by the class's pid/module, so a stale row
-        %% would otherwise silently reattach to the new class).
-        ?_test(begin
-            beamtalk_extensions:init(),
-            ModAtom = bt3105_ext_removable_mod,
-            Forms = [
-                {attribute, 1, module, ModAtom},
-                {attribute, 2, export, []}
-            ],
-            ok = beamtalk_test_module:load(ModAtom, Forms),
-            ClassName = 'BT3105ExtRemovable',
-            ClassInfo = #{
-                name => ClassName,
-                module => ModAtom,
-                superclass => none,
-                instance_methods => #{},
-                class_methods => #{}
-            },
-            {ok, _Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
-
-            %% Register an extension on the class and confirm it is live.
-            ExtFun = fun(_Args, _Self) -> greeted end,
-            ok = beamtalk_extensions:register(ClassName, 'greet', ExtFun, bt3105_test),
-            ?assert(beamtalk_extensions:has(ClassName, 'greet')),
-
-            %% Remove the class: exercises the full teardown path.
-            ?assertEqual(
-                nil, beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
-            ),
-
-            %% The extension is gone — no longer dispatchable.
-            ?assertNot(beamtalk_extensions:has(ClassName, 'greet')),
-            ?assertEqual(not_found, beamtalk_extensions:lookup(ClassName, 'greet')),
-
-            %% Redefine a class under the same name: the old extension
-            %% must not resurrect.
-            {ok, Pid2} = beamtalk_object_class:start(ClassName, ClassInfo),
-            beamtalk_test_class:with_class(Pid2, fun() ->
-                ?assertNot(beamtalk_extensions:has(ClassName, 'greet')),
-                ?assertEqual(not_found, beamtalk_extensions:lookup(ClassName, 'greet'))
-            end)
-        end),
         %% metaclassAllMethods returns the combined method set (class-side + Behaviour
         %% protocol). Even for a dynamic class without the stdlib Class hierarchy
         %% loaded, the function should at least return a list.
@@ -1422,7 +1358,7 @@ compile_source_non_binary_raises_type_error_test_() ->
 %%% ============================================================================
 
 %% A class backed by a module exporting __beamtalk_meta/0 takes the meta fast
-%% path in classFieldNames/1, classLocalMethods/1, classClassVarNames/1 and
+%% path in classFieldNames/1, classLocalMethods/1 and
 %% classIncludesSelector/2 instead of the gen_server fallback.
 meta_fast_path_reflection_test_() ->
     {foreach, fun setup/0, fun teardown/1, [
@@ -1431,8 +1367,7 @@ meta_fast_path_reflection_test_() ->
                 superclass => nil,
                 fields => [alpha, beta],
                 method_info => #{'doThing' => #{}, 'doOther' => #{}},
-                class_method_info => #{'factory' => #{}},
-                class_fields => [counter]
+                class_method_info => #{'factory' => #{}}
             }),
             ClassName = 'BTMetaFixtureA',
             ClassInfo = #{
@@ -1456,11 +1391,6 @@ meta_fast_path_reflection_test_() ->
                 LocalMethods = beamtalk_behaviour_intrinsics:classLocalMethods(ClassObj),
                 ?assert(lists:member('doThing', LocalMethods)),
                 ?assert(lists:member('doOther', LocalMethods)),
-                %% classClassVarNames -> maps:get(class_fields, Meta)
-                ?assertEqual(
-                    [counter],
-                    beamtalk_behaviour_intrinsics:classClassVarNames(ClassObj)
-                ),
                 %% classIncludesSelector -> maps:is_key(_, method_info)
                 ?assert(
                     beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'doThing')
@@ -1474,6 +1404,31 @@ meta_fast_path_reflection_test_() ->
                 purge_meta_module(MetaMod)
             end
         end),
+        %% BT-5154 (ADR 0153): the compiler no longer emits `class_fields`;
+        %% a meta map without the key reads as no class-variable kinds.
+        ?_test(begin
+            MetaMod = load_meta_module(bt_meta_fixture_no_class_fields, #{
+                superclass => nil,
+                fields => [alpha],
+                method_info => #{},
+                class_method_info => #{}
+            }),
+            ClassName = 'BTMetaFixtureNoClassFields',
+            ClassInfo = #{
+                name => ClassName,
+                module => MetaMod,
+                superclass => none,
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+            try
+                ?assertEqual(#{}, beamtalk_class_metadata:class_var_kinds_or_unknown(ClassName))
+            after
+                beamtalk_test_proc:stop(Pid),
+                purge_meta_module(MetaMod)
+            end
+        end),
         %% classIncludesSelector/2 on a metaclass-tagged object backed by a meta module
         %% uses the class_method_info fast path (maps:is_key over class_method_info).
         ?_test(begin
@@ -1481,8 +1436,7 @@ meta_fast_path_reflection_test_() ->
                 superclass => nil,
                 fields => [],
                 method_info => #{},
-                class_method_info => #{'build' => #{}},
-                class_fields => []
+                class_method_info => #{'build' => #{}}
             }),
             ClassName = 'BTMetaFixtureB',
             ClassInfo = #{
@@ -1888,8 +1842,8 @@ object_class_rename_toctou_through_public_api_test_() ->
 %%% The happy-path (local-method removal) is exercised by the REPL-protocol
 %%% suite (`tests/repl-protocol/cases/remove_selector.btscript`) because it
 %%% needs a live workspace.  These EUnit tests cover the paths that do NOT need
-%%% a workspace: absent-selector errors, extension-method removal (instance and
-%%% class side), and the defensive `error:undef` catch for local removal.
+%%% a workspace: absent-selector errors and the no-workspace refusal of a local
+%%% removal.
 %%% ============================================================================
 
 %% Absent selector raises selector_not_found — deliberately not
@@ -1897,7 +1851,7 @@ object_class_rename_toctou_through_public_api_test_() ->
 class_remove_selector_absent_raises_selector_not_found_test_() ->
     {foreach, fun setup/0, fun teardown/1, [
         ?_test(begin
-            beamtalk_extensions:init(),
+            beamtalk_class_shadow_flags:mark_ready(),
             {ClassObj, Pid} = register_class('BTRmSelAbsent3186', #{}, #{}),
             beamtalk_test_class:with_class(Pid, fun() ->
                 ?assertBtError(
@@ -1908,28 +1862,10 @@ class_remove_selector_absent_raises_selector_not_found_test_() ->
                 )
             end)
         end),
-        %% Instance-side extension removal: classRemoveSelector returns Self and the
-        %% extension is gone.  Uses register/4 (no source) so extension_prev_source/2
-        %% exercises its not_found branch (lines 833-835).
-        ?_test(begin
-            beamtalk_extensions:init(),
-            ClassName = 'BTRmSelExtInst3186',
-            {ClassObj, Pid} = register_class(ClassName, #{}, #{}),
-            ok = beamtalk_extensions:register(
-                ClassName, 'extensionMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
-            ),
-            beamtalk_test_class:with_class(Pid, fun() ->
-                Result = beamtalk_class_refactor:classRemoveSelector(
-                    ClassObj, 'extensionMethod3186'
-                ),
-                ?assertEqual(ClassObj, Result),
-                ?assertNot(beamtalk_extensions:has(ClassName, 'extensionMethod3186'))
-            end)
-        end),
         %% classRemoveSelectorIfAbsent/3: absent selector evaluates the block and
         %% returns its value rather than raising.
         ?_test(begin
-            beamtalk_extensions:init(),
+            beamtalk_class_shadow_flags:mark_ready(),
             {ClassObj, Pid} = register_class('BTRmSelIfAbsent3186', #{}, #{}),
             beamtalk_test_class:with_class(Pid, fun() ->
                 Result = beamtalk_class_refactor:classRemoveSelectorIfAbsent(
@@ -1938,52 +1874,10 @@ class_remove_selector_absent_raises_selector_not_found_test_() ->
                 ?assertEqual(block_was_called, Result)
             end)
         end),
-        %% classRemoveSelectorIfAbsent/3: extension present — returns Self (block not
-        %% called).
-        ?_test(begin
-            beamtalk_extensions:init(),
-            ClassName = 'BTRmSelIfAbsentExt3186',
-            {ClassObj, Pid} = register_class(ClassName, #{}, #{}),
-            ok = beamtalk_extensions:register(
-                ClassName, 'extMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
-            ),
-            beamtalk_test_class:with_class(Pid, fun() ->
-                Result = beamtalk_class_refactor:classRemoveSelectorIfAbsent(
-                    ClassObj, 'extMethod3186', fun() -> block_was_called end
-                ),
-                ?assertEqual(ClassObj, Result),
-                ?assertNot(beamtalk_extensions:has(ClassName, 'extMethod3186'))
-            end)
-        end),
-        %% Class-side extension removal via a Metaclass-tagged object — exercises the
-        %% removal_target/1 Metaclass clause (line 864) and the class-side branch of
-        %% extension_ets_class/2 (line 875).
-        ?_test(begin
-            beamtalk_extensions:init(),
-            ClassName = 'BTRmSelClassSide3186',
-            {_ClassObj, Pid} = register_class_with_class_methods(
-                ClassName, #{}, #{}, #{}
-            ),
-            %% Metaclass-tagged object is the class-side receiver.
-            Module = beamtalk_object_class:module_name(Pid),
-            MetaObj = #beamtalk_object{class = 'Metaclass', class_mod = Module, pid = Pid},
-            %% Class-side ETS key is class_object_tag(ClassName).
-            ClassEtsKey = beamtalk_class_registry:class_object_tag(ClassName),
-            ok = beamtalk_extensions:register(
-                ClassEtsKey, 'classExtMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
-            ),
-            beamtalk_test_class:with_class(Pid, fun() ->
-                Result = beamtalk_class_refactor:classRemoveSelector(
-                    MetaObj, 'classExtMethod3186'
-                ),
-                ?assertEqual(MetaObj, Result),
-                ?assertNot(beamtalk_extensions:has(ClassEtsKey, 'classExtMethod3186'))
-            end)
-        end),
         %% Local-method removal on a node with no recorded workspace capabilities is
         %% refused by beamtalk_capability:require_workspace/1 with a no_workspace error.
         ?_test(begin
-            beamtalk_extensions:init(),
+            beamtalk_class_shadow_flags:mark_ready(),
             MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
             {ClassObj, Pid} = register_class(
                 'BTRmSelLocalNoWs3186', #{}, #{'localTestMethod3186' => MethodFun}
@@ -2025,7 +1919,7 @@ ensure_xref_started() ->
 class_remove_selector_protocol_provided_refused_test_() ->
     {foreach, fun setup/0, fun teardown/1, [
         ?_test(begin
-            beamtalk_extensions:init(),
+            beamtalk_class_shadow_flags:mark_ready(),
             ensure_xref_started(),
             ClassName = 'BT3592RmSelProtoProvided',
             MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
@@ -2060,7 +1954,7 @@ class_remove_selector_protocol_provided_refused_test_() ->
         %% A locally-defined selector (no `protocol` provenance row) removes as usual
         %% — the refusal must not fire for an ordinary class-body method.
         ?_test(begin
-            beamtalk_extensions:init(),
+            beamtalk_class_shadow_flags:mark_ready(),
             ensure_xref_started(),
             ClassName = 'BT3592RmSelOrdinary',
             MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
@@ -2081,7 +1975,7 @@ class_remove_selector_protocol_provided_refused_test_() ->
             end
         end),
         ?_test(begin
-            beamtalk_extensions:init(),
+            beamtalk_class_shadow_flags:mark_ready(),
             ensure_xref_started(),
             ClassName = 'BT3592RenSelProtoProvided',
             MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,

@@ -143,6 +143,19 @@ mod registry {
         /// was sequenced (`(self flip: p) ifTrue: [^8]`), as BT-4532's first
         /// cut did for the runtime dispatch's operands (`StalePrestore`).
         PrestoreReadsBeforeOperands,
+        /// BT-5210: the bracket classification (`classify_binary`) reads
+        /// only the receiver of an ordering comparison, as before ADR 0116
+        /// § Addendum, so `0 < x` (whose right operand is now tested and may
+        /// be sent a reflected hook) is not bracketed
+        /// (`UnbracketedGuardedOperator`).
+        ComparisonBracketIgnoresRightOperand,
+
+        // ── Guard-return rewrite (`guard_returns.rs`) ───────────────────
+        /// BT-5210: the rewrite takes a literal-receiver comparison for a
+        /// Boolean by construction whatever its right operand, as before ADR
+        /// 0116 § Addendum, so the BT-4452 backstop
+        /// (`unconfirmed_boolean_comparisons`) can be shown to refuse it.
+        LiteralComparisonTrustsRightOperand,
 
         // ── Local-rebind producers (ADR 0131; `threaded_expr.rs` & co) ──
         /// `sequence_children` reads a plain-variable sibling in place even

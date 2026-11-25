@@ -228,7 +228,7 @@ fn formatter_keeps_redundant_operand_parens() {
         "Object subclass: A\n\n  m => (self) foo\n",
         "Object subclass: A\n\n  m => (3 + 4) * 2\n",
     ] {
-        assert_eq!(format_source(source).as_deref(), Some(source));
+        assert_eq!(format_source(source).ok().as_deref(), Some(source));
     }
 }
 
@@ -392,19 +392,18 @@ total := orders select: [:o | o isPaid]  // paid only
 [:e | e |> foo bar] value: 1
 ";
 
-/// State and class-state initialisers are outside any method, so they record
+/// State initialisers are outside any method, so they record
 /// `|>` on the module too.
 const PIPELINE_INITIALISERS: &str = "\
 Actor subclass: Holder
   state: items = #(3, 1, 2) |> asSortedList |> first
-  classState: count = #(1, 2) |> size
 ";
 
 #[test]
 fn fmt_reproduces_pipelines_byte_for_byte() {
     for fixture in [PIPELINE_CLASS, PIPELINE_MODULE, PIPELINE_INITIALISERS] {
         assert_eq!(
-            format_source(fixture).as_deref(),
+            format_source(fixture).ok().as_deref(),
             Some(fixture),
             "fmt changed a canonical pipeline fixture"
         );

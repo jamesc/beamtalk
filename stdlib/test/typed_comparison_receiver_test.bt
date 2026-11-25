@@ -6,7 +6,9 @@
 // time. Erlang's `<` is a total term order and never raises, so trusting the
 // declaration made `nil > 10` answer `true`. A wrong-kind receiver now
 // dispatches and raises `does_not_understand`, as for an unknown receiver
-// (BT-3924). The argument stays unchecked (BT-3928). Fixture:
+// (BT-3924). A number receiver tests its argument too (ADR 0116 § Addendum,
+// BT-5176, reversing BT-3928), and a String receiver raises a `type_error`
+// for a non-String argument (BT-5213). Fixture:
 // `fixtures/typed_comparison_probe.bt`.
 
 TestCase subclass: TypedComparisonReceiverTest
@@ -99,16 +101,20 @@ TestCase subclass: TypedComparisonReceiverTest
     bad := TypedComparisonProbe new: #{#mixed => self wrong}
     self should: [bad mixedFieldLt] raise: #does_not_understand
     self assert: (TypedComparisonProbe new: #{#mixed => 5}) mixedFieldLt
-    // A String receiver orders against the Integer argument by term order
-    // (the argument is unchecked, BT-3928): numbers sort before binaries.
-    self deny: (TypedComparisonProbe new: #{#mixed => "abc"}) mixedFieldLt
+    // A String receiver raises a `type_error` for a wrong-kind argument
+    // instead of ordering it by term order (BT-5213).
+    self should: [
+      (TypedComparisonProbe new: #{#mixed => "abc"}) mixedFieldLt
+    ] raise: #type_error
 
   testTypedLocalStillRaises =>
     self should: [self.probe localGt: self wrong] raise: #does_not_understand
     self assert: (self.probe localGt: 11)
 
-  /// BT-3928: only the receiver is checked. `5 < nil` and a typed receiver
-  /// with a wrong-kind argument still fall back to Erlang term order.
-  testArgumentSideIsStillUnchecked =>
-    self assert: (self.probe literalLtArg: nil)
-    self assert: (self.probe intLtArg: 5 other: nil)
+  /// ADR 0116 § Addendum (BT-5176), reversing BT-3928: the argument side is
+  /// tested too. `5 < nil` and a typed number receiver with a wrong-kind
+  /// argument raise `does_not_understand` for the reflected hook instead of
+  /// term-ordering.
+  testArgumentSideIsTested =>
+    self should: [self.probe literalLtArg: nil] raise: #does_not_understand
+    self should: [self.probe intLtArg: 5 other: nil] raise: #does_not_understand

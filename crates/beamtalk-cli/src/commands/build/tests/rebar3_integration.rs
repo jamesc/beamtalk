@@ -251,7 +251,7 @@ fn test_generate_package_corpus_creates_files() {
 
     // Use build_class_module_index to extract ClassInfo from source
     let source_files = vec![bt_file];
-    let (_module_index, _superclass_index, class_infos, _extensions, _cached_asts) =
+    let (_module_index, _superclass_index, class_infos, _cached_asts) =
         build_class_module_index(&source_files, Some(&src_dir), "my_pkg").unwrap();
 
     let result = generate_package_corpus(&corpus_dir, "my_pkg", &class_infos, &source_files);
@@ -312,7 +312,7 @@ fn test_generate_package_corpus_excludes_internal_classes() {
     );
 
     let source_files = vec![bt_file];
-    let (_module_index, _superclass_index, class_infos, _extensions, _cached_asts) =
+    let (_module_index, _superclass_index, class_infos, _cached_asts) =
         build_class_module_index(&source_files, Some(&src_dir), "my_pkg").unwrap();
 
     // Verify the class was parsed as internal

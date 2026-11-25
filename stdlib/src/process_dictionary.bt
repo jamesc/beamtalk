@@ -4,8 +4,8 @@
 /// ProcessDictionary — the calling process's own dictionary.
 ///
 /// Every operation acts on **the process that calls it**, never on the class
-/// process and never on another process. Class methods of a class without
-/// class variables run in the caller (ADR 0142), so `ProcessDictionary at:`
+/// process and never on another process. Its class methods run in the
+/// caller (ADR 0142), so `ProcessDictionary at:`
 /// reads the dictionary of whoever sent the message; a value written in one
 /// process is invisible to every other process.
 ///
@@ -23,8 +23,8 @@
 /// This is not a general mutable global. Nothing here is shared between
 /// processes, nothing survives the process, and keys are **not** namespaced,
 /// so pick keys that cannot collide with other libraries (for example a
-/// package-prefixed Symbol). Prefer an Actor or `classState:` for state that
-/// several processes need.
+/// package-prefixed Symbol). Prefer an Actor, an `AtomicCounter` or an Ets table for
+/// state that several processes need.
 ///
 /// ## Absence
 /// "Absent" means the key holds Erlang's `undefined` (a Beamtalk `#undefined`

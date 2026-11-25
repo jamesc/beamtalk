@@ -1,0 +1,253 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+/// JsonMapping — a declarative field-to-wire-key schema (BT-2819).
+///
+/// A `JsonMapping` lists which fields of an object go on the wire, under
+/// which key, and through which optional converter block. `encode:` applies
+/// it to an object and answers a Dictionary. Unmapped fields are omitted, so
+/// the mapping is the whole wire schema. Modelled on Pharo's NeoJSON mapper.
+///
+/// A class opts in with `uses: JsonMappable` and a class-side `jsonMapping`
+/// (see `JsonMappable`). Keys are written out explicitly — nothing is
+/// inferred from field names.
+///
+/// ## Behaviour (BT-5191)
+/// - **nil.** A field whose (converted) value is nil is emitted as `null` by
+///   default. `omittingNil` answers a mapping that leaves such keys out.
+/// - **Secrets.** A mapped actor state slot named in the class's
+///   `secretState` (inherited ones included) is emitted as `"[redacted]"`,
+///   the same stand-in `sys:get_status` uses. A converter on that field is the
+///   explicit opt-out: it receives the real value and its answer is emitted,
+///   so **any** converter on a secret slot, even a harmless-looking
+///   `[:v | v asString]`, puts the secret on the wire. Give a secret slot a
+///   converter only to redact or transform it deliberately. If the class's
+///   secret metadata cannot be read, `encode:` raises a `runtime_error`
+///   rather than guess.
+/// - **Validation.** Every entry list is checked before use, however it was
+///   built (`mapField:`, `withEntries:`, `JsonMapping new: #{...}`): each entry
+///   needs a Symbol `#field`, a String (or Symbol) `#key` and a Block or nil
+///   `#using`, and
+///   no wire key may repeat. A violation raises a `user_error`.
+/// - **Converter errors** are re-signalled as the same exception (class and
+///   kind kept, so handlers still match) with a message naming the field and
+///   the wire key, followed by the original message.
+/// - **Recursion.** `encode:` is shallow: a converter's answer is put in the
+///   Dictionary as is. `Json generate:` then encodes it, converting any
+///   nested `asJson` object, and raises if an object reappears inside its own
+///   encoding (a cycle).
+///
+/// `JsonMapping` is a Value: `mapField:` and its variants answer a **new**
+/// mapping and leave the receiver alone. Chain them with a pipeline (`|>`),
+/// not a cascade. A cascade sends every message to the original receiver and
+/// drops all but the last update (ADR 0145).
+///
+/// ## Examples
+/// ```beamtalk
+/// Value subclass: Point
+///   field: px = 0
+///   field: py = 0
+///
+/// mapping := JsonMapping new
+///   |> mapField: #px to: "x"
+///   |> mapField: #py to: "y" using: [:v | v * 10]
+/// mapping encode: (Point px: 1 py: 2)   // => #{"x" => 1, "y" => 20}
+/// ```
+Value subclass: JsonMapping
+  /// The recorded entries, in declaration order. Each entry is a Dictionary
+  /// with `#field` (Symbol), `#key` (String) and `#using` (Block or nil).
+  field: entries :: List = #()
+  /// Whether keys whose (converted) value is nil are left out. Default false:
+  /// nil is emitted as `null`. Set it with `omittingNil`.
+  field: omitNil :: Boolean = false
+
+  /// The validated mapping a `JsonMappable` class's instances are encoded
+  /// with: `aClass jsonMapping`, built once and cached by class. The cache is
+  /// flushed by every class load, reload or removal, so a `jsonMapping`
+  /// edited at the REPL takes effect on the next `asJson`. The method must
+  /// therefore answer the same mapping every time it is called.
+  ///
+  /// Raises a `user_error` when `aClass` inherits `class jsonMapping` but
+  /// declares fields its defining ancestor does not have: those fields would
+  /// otherwise be left off the wire silently. Override it, extending the
+  /// parent's (`class jsonMapping => super jsonMapping |> mapField: #extra`),
+  /// or answering `super jsonMapping` to keep the extra fields off on purpose.
+  class forClass: aClass -> JsonMapping =>
+    (Erlang beamtalk_json_mapping)
+      cached: aClass name
+      build: [
+        self checkInheritedMappingOf: aClass
+        aClass jsonMapping validate
+      ]
+
+  /// Raise a `user_error` if `aClass` inherits `class jsonMapping` and
+  /// declares fields its defining ancestor does not have.
+  class internal checkInheritedMappingOf: aClass -> Nil =>
+    definer := (aClass allSuperclasses addFirst: aClass) detect: [:c |
+      c class includesSelector: #jsonMapping
+    ] ifNone: [aClass]
+    (definer =:= aClass) ifTrue: [^nil]
+    extra := aClass allFieldNames reject: [:f |
+      definer allFieldNames includes: f
+    ]
+    extra isEmpty ifTrue: [^nil]
+    self
+      error: "JsonMapping: "
+        ++ aClass name asString
+        ++ " inherits class jsonMapping from "
+        ++ definer name asString
+        ++ " but adds fields "
+        ++ extra printString
+        ++ " that it does not map. Override class jsonMapping, e.g. super jsonMapping |> mapField: "
+        ++ extra first printString
+
+  /// A mapping with the given entry list (kept for callers of the keyword
+  /// constructor from before `omitNil` existed). The entries are validated
+  /// when the mapping is used.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (JsonMapping entries: #()) entries size   // => 0
+  /// ```
+  class entries: aList :: List -> JsonMapping => self new withEntries: aList
+
+  /// A copy of this mapping that leaves out keys whose (converted) value is
+  /// nil, instead of emitting `null`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (JsonMapping new |> mapField: #a |> omittingNil) omitNil   // => true
+  /// ```
+  omittingNil -> JsonMapping => self withOmitNil: true
+
+  /// Check the entry list and answer the receiver. Raises a `user_error` for
+  /// an entry that is not a Dictionary with a Symbol `#field`, a String `#key`
+  /// and a Block or nil `#using`, or for a repeated wire key. `encode:` calls
+  /// it, so an entry list built with `withEntries:` cannot skip it.
+  validate -> JsonMapping =>
+    self.entries
+      inject: Set new
+      into: [:seen :entry |
+        (self isWellFormedEntry: entry)
+          ifFalse: [
+            self
+              error: "JsonMapping: malformed entry "
+                ++ entry printString
+                ++ " (expected #field Symbol, #key String or Symbol, #using Block or nil)"
+          ]
+        // Compare by wire name: #id and "id" are written as the same key.
+        key := (entry at: #key) asString
+        (seen includes: key) ifTrue: [
+          self error: "JsonMapping: duplicate wire key " ++ key printString
+        ]
+        seen add: key
+      ]
+    self
+
+  /// Whether `key` can be a wire key: a String, or a Symbol (which
+  /// `Json generate:` writes as its name).
+  internal isWireKey: key :: Object -> Boolean =>
+    (key isKindOf: String) or: [key isKindOf: Symbol]
+
+  /// Whether `entry` is a Dictionary with a Symbol `#field`, a String (or
+  /// Symbol) `#key` and a Block or nil `#using`.
+  internal isWellFormedEntry: entry :: Object -> Boolean =>
+    (entry isKindOf: Dictionary) ifFalse: [^false]
+    using := entry at: #using ifAbsent: [nil]
+    ((entry at: #field ifAbsent: [nil]) isKindOf: Symbol)
+      and: [
+        (self isWireKey: (entry at: #key ifAbsent: [
+          nil
+        ])) and: [using isNil or: [using isKindOf: Block]]
+      ]
+
+  /// Map `fieldName` to a wire key of the same name.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (JsonMapping new mapField: #title) entries size   // => 1
+  /// ```
+  mapField: fieldName :: Symbol -> JsonMapping =>
+    self
+      mapField: fieldName
+      to: fieldName asString
+      using: nil
+
+  /// Map `fieldName` to the wire key `key`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (JsonMapping new mapField: #issueId to: "issue_id") entries size   // => 1
+  /// ```
+  mapField: fieldName :: Symbol to: key :: String -> JsonMapping =>
+    self
+      mapField: fieldName
+      to: key
+      using: nil
+
+  /// Map `fieldName` to the wire key `key`, passing the field's value through
+  /// `converter` (a one-argument block) first. A nil converter means no
+  /// conversion. The converter's answer is stored as is; `Json generate:`
+  /// encodes it later, so it may answer another mapped object.
+  ///
+  /// Raises an error if `key` is already mapped, so a typo cannot silently
+  /// drop a field from the wire schema.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (JsonMapping new mapField: #at to: "created_at" using: [:v | v printString]) entries size   // => 1
+  /// ```
+  mapField: fieldName :: Symbol to: key :: String using: converter :: Block | Nil -> JsonMapping =>
+    entry := #{#field => fieldName, #key => key, #using => converter}
+    (self withEntries: (self.entries add: entry)) validate
+
+  /// Apply the mapping to `anObject` and answer a Dictionary of wire key to
+  /// (converted) field value. Fields that are not mapped are omitted. A mapped
+  /// field the object does not have (or has not assigned) raises a `user_error`
+  /// naming the class and field, not the runtime's `fieldAt:` error kind.
+  /// The entries are validated first (see `validate`). A secret actor slot
+  /// without a converter is emitted as `"[redacted]"`; with `omittingNil`, a
+  /// nil value leaves its key out.
+  encode: anObject :: Object -> Dictionary =>
+    self validate
+    secrets := (Erlang beamtalk_json_mapping) secretSlots: anObject
+    self.entries
+      inject: (Dictionary new)
+      into: [:acc :entry |
+        name := entry at: #field
+        key := entry at: #key
+        (anObject perform: #hasField: withArguments: (#() add: name))
+          ifFalse: [
+            self
+              error: "JsonMapping: "
+                ++ anObject class name asString
+                ++ " has no assigned field "
+                ++ name printString
+          ]
+        raw := anObject perform: #fieldAt: withArguments: (#() add: name)
+        converter := entry at: #using ifAbsent: [nil]
+        value := converter isNil
+          ifTrue: [
+            (secrets includes: name) ifTrue: [
+              (Erlang beamtalk_json_mapping) redacted
+            ] ifFalse: [raw]
+          ]
+          ifFalse: [
+            [converter value: raw]
+              on: Error
+              do: [:e |
+                // Re-signal the same exception (same class and kind) with
+                // the field and key prepended, so handlers still match.
+                cause :: Dynamic := e message
+                e
+                  signal: "JsonMapping: converter for field "
+                    ++ name printString
+                    ++ " (key "
+                    ++ key printString
+                    ++ ") raised: "
+                    ++ (cause isNil ifTrue: [e printString] ifFalse: [cause])
+              ]
+          ]
+        (value isNil and: [
+          self.omitNil
+        ]) ifTrue: [acc] ifFalse: [acc at: key put: value]
+      ]

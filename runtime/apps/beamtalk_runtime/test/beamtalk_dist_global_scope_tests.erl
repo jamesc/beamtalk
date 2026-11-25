@@ -30,6 +30,9 @@ exercise) — covered by the BUnit suite `ActorGlobalScopeTest`
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+
+%% `supervisor` callback for the supervised heal-conflict tests (BT-5231).
+-export([init/1]).
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%====================================================================
@@ -351,3 +354,224 @@ netsplit_heal_resolves_conflict(Peer, PeerNode) ->
     %% is reconnected to it now, so rpc:call/4 would also work, but the
     %% control channel is already at hand).
     ok = peer:call(Peer, gen_server, stop, [PeerPid]).
+
+%%====================================================================
+%% A supervised #global child that loses a heal conflict stays down (BT-5231)
+%%====================================================================
+
+-doc """
+ADR 0126 BT-5193 amendment D1. A `one_for_one` supervisor (intensity 3 per
+5 s) runs a sibling and a `{global, Name}` actor child started through
+`beamtalk_supervisor:start_actor_child/3`. The peer registers `Name` first
+during a netsplit; the heal stops this node's younger child with
+`{shutdown, global_name_conflict}`. Before BT-5231 a `permanent` child's
+restart answered `{error, _}` in a loop until the supervisor died with its
+sibling; now the restart answers `ignore`, so the supervisor keeps the spec
+with no pid. A `transient` child is not restarted; `restartChild` then answers
+`ignore` (`Result ok: nil`) and logs the warning. Also run for a `native:`
+child (`beamtalk_test_native_counter_facade`).
+""".
+supervised_global_child_heal_conflict_test_() ->
+    {timeout, 120,
+        {setup, fun setup_conflict/0, fun cleanup_conflict/1, fun({Peer, PeerNode}) ->
+            [
+                {
+                    lists:flatten(io_lib:format("~p ~p child stays down", [Mod, Restart])),
+                    fun() -> supervised_child_loses_heal_conflict(Peer, PeerNode, Mod, Restart) end
+                }
+             || {Mod, Restart} <- [
+                    {test_counter, permanent},
+                    {test_counter, transient},
+                    {beamtalk_test_native_counter_facade, permanent}
+                ]
+            ]
+        end}}.
+
+init(ChildSpecs) ->
+    {ok, {#{strategy => one_for_one, intensity => 3, period => 5}, ChildSpecs}}.
+
+child_args(test_counter) -> 0;
+child_args(_NativeFacade) -> #{}.
+
+supervised_child_loses_heal_conflict(Peer, PeerNode, Mod, Restart) ->
+    _Sub = subscribe_self('ActorStopped'),
+    Name = beamtalk_test_unique:atom("bt5231_supervised"),
+    Args = child_args(Mod),
+    true = erlang:disconnect_node(PeerNode),
+    %% The older registrant, on the peer (unlinked: see
+    %% netsplit_heal_resolves_conflict/2).
+    {ok, PeerPid} = peer:call(Peer, erlang, apply, [
+        fun() ->
+            {ok, P} = beamtalk_actor_registry:'spawnAsGlobal'(Name, Mod, Args),
+            unlink(P),
+            {ok, P}
+        end,
+        []
+    ]),
+    PeerStartedAt = peer:call(Peer, beamtalk_actor_registry, started_at_from_dictionary, [
+        PeerPid
+    ]),
+    ?assert(is_integer(PeerStartedAt)),
+    ok = beamtalk_test_wait:until(fun() -> erlang:system_time(microsecond) > PeerStartedAt end),
+    {ok, Sup} = supervisor:start_link(?MODULE, [
+        #{id => sibling, start => {beamtalk_supervisor, start_actor_child, [test_counter, 0]}},
+        #{
+            id => child,
+            start => {beamtalk_supervisor, start_actor_child, [Mod, Args, {global, Name}]},
+            restart => Restart
+        }
+    ]),
+    %% The supervisor must not take this test process down if it dies; its
+    %% death is what the assertions below catch.
+    unlink(Sup),
+    SupMon = erlang:monitor(process, Sup),
+    Self = {beamtalk_supervisor, 'BT5231Sup', ?MODULE, Sup},
+    try
+        {ok, Sibling} = beamtalk_supervisor:childWithId(Self, sibling),
+        {ok, Loser} = beamtalk_supervisor:childWithId(Self, child),
+        LoserPid = pid_of(Loser),
+        ?assertEqual(node(), node(LoserPid)),
+        LoserMon = erlang:monitor(process, LoserPid),
+        beamtalk_test_log:with_capture(warning, fun() ->
+            %% Heal. The conflict is resolved when global:sync/0 returns.
+            pong = net_adm:ping(PeerNode),
+            ok = global:sync(),
+            ?assertEqual(PeerPid, global:whereis_name(Name)),
+            ?awaitMessage(
+                {'DOWN', LoserMon, process, LoserPid, {shutdown, global_name_conflict}}
+            ),
+            ?awaitMessage({got, 'ActorStopped', #{pid := LoserPid, reason := globalNameConflict}}),
+            case Restart of
+                permanent ->
+                    %% The supervisor restarts the child at once; the start
+                    %% answers `ignore` and logs the warning (before the fix:
+                    %% {error, _}, a restart loop and a dead supervisor).
+                    ok = await_holder_warning(Name, PeerNode, SupMon);
+                transient ->
+                    %% `{shutdown, _}` is a normal exit for a transient child:
+                    %% no restart, so no start and no warning yet.
+                    ok
+            end,
+            ?assertEqual(undefined, child_pid(Sup, child)),
+            %% A later restartChild: retries; the name is still held, so
+            %% the start is ignored again: `Result ok: nil`, not an error.
+            ?assertEqual({ok, nil}, beamtalk_supervisor:restartChild(Self, child)),
+            ok = await_holder_warning(Name, PeerNode, SupMon)
+        end),
+        %% No restart loop: the supervisor and the sibling are unaffected.
+        ?assert(is_process_alive(Sup)),
+        ?assertEqual(pid_of(Sibling), child_pid(Sup, sibling)),
+        ?assertEqual(undefined, child_pid(Sup, child)),
+        ?assertEqual(PeerPid, global:whereis_name(Name))
+    after
+        erlang:demonitor(SupMon, [flush]),
+        is_process_alive(Sup) andalso beamtalk_test_proc:stop(Sup),
+        ok = peer:call(Peer, gen_server, stop, [PeerPid])
+    end.
+
+pid_of(#beamtalk_object{pid = Pid}) -> Pid;
+pid_of(Pid) when is_pid(Pid) -> Pid.
+
+child_pid(Sup, Id) ->
+    {Id, Pid, _Type, _Mods} = lists:keyfind(Id, 1, supervisor:which_children(Sup)),
+    Pid.
+
+%% The start's warning, naming the child and the holder's node. Fails at once
+%% (not after a timeout) if the supervisor dies instead.
+await_holder_warning(Name, PeerNode, SupMon) ->
+    receive
+        {beamtalk_test_log, #{level := warning, meta := #{child := Name} = Meta}} ->
+            ?assertEqual(PeerNode, maps:get(holder_node, Meta)),
+            ok;
+        {'DOWN', SupMon, process, _, Reason} ->
+            ?assertEqual(supervisor_alive, {supervisor_died, Reason})
+    after 10000 ->
+        ?assertEqual(warning_logged, timeout)
+    end.
+
+%%====================================================================
+%% Unsupervised spawnAs:scope: #global against a remote holder (BT-5231)
+%%====================================================================
+
+unsupervised_global_spawn_keeps_name_registered_test_() ->
+    {timeout, 60, fun() ->
+        {ok, Peer, PeerNode} = beamtalk_dist_test_helper:start_peer("bt5231_unsup"),
+        try
+            ok = global:sync(),
+            Name = beamtalk_test_unique:atom("bt5231_unsup"),
+            {ok, PeerPid} = rpc:call(PeerNode, erlang, apply, [
+                fun() ->
+                    {ok, P} = beamtalk_actor_registry:'spawnAsGlobal'(Name, test_counter, 0),
+                    unlink(P),
+                    {ok, P}
+                end,
+                []
+            ]),
+            ?assertEqual(PeerPid, global:whereis_name(Name)),
+            ?assertMatch(
+                {error, #beamtalk_error{kind = name_registered}},
+                beamtalk_actor_registry:'spawnAsGlobal'(Name, test_counter, 0)
+            )
+        after
+            beamtalk_dist_test_helper:stop_peer(Peer)
+        end
+    end}.
+
+%%====================================================================
+%% Register right after connect (BT-5156)
+%%====================================================================
+
+register_right_after_connect_test_() ->
+    {timeout, 60, fun() ->
+        {ok, Peer, PeerNode} = beamtalk_dist_test_helper:start_peer("bt5156_connect"),
+        try
+            %% Drop the connection, then reconnect through `Node connect`
+            %% and register at once, with no explicit `global:sync/0`.
+            true = erlang:disconnect_node(PeerNode),
+            ?assertMatch(
+                {ok, _},
+                beamtalk_result:to_tagged_tuple(
+                    beamtalk_node:connect(beamtalk_node:from_atom(PeerNode))
+                )
+            ),
+            Name = beamtalk_test_unique:atom("bt5156_afterconnect"),
+            {ok, Pid} = beamtalk_actor_registry:'spawnAsGlobal'(Name, test_counter, 0),
+            try
+                ?assertEqual(Pid, rpc:call(PeerNode, global, whereis_name, [Name]))
+            after
+                gen_server:stop(Pid)
+            end
+        after
+            beamtalk_dist_test_helper:stop_peer(Peer)
+        end
+    end}.
+
+%%====================================================================
+%% Connect to an already-connected node still syncs (BT-5179)
+%%====================================================================
+
+connect_after_raw_connect_sees_peer_global_name_test_() ->
+    {timeout, 60, fun() ->
+        {ok, Peer, PeerNode} = beamtalk_dist_test_helper:start_peer("bt5179_connect"),
+        try
+            %% Drop the link, register a name on the peer alone, then
+            %% reconnect through `net_kernel` (no explicit sync) so the
+            %% node is already connected when `Node connect` runs.
+            true = erlang:disconnect_node(PeerNode),
+            Name = beamtalk_test_unique:atom("bt5179_peername"),
+            {ok, PeerPid} = peer:call(
+                Peer, beamtalk_actor_registry, 'spawnAsGlobal', [Name, test_counter, 0]
+            ),
+            true = net_kernel:connect_node(PeerNode),
+            ?assert(lists:member(PeerNode, nodes(connected))),
+            ?assertMatch(
+                {ok, _},
+                beamtalk_result:to_tagged_tuple(
+                    beamtalk_node:connect(beamtalk_node:from_atom(PeerNode))
+                )
+            ),
+            ?assertEqual(PeerPid, global:whereis_name(Name))
+        after
+            beamtalk_dist_test_helper:stop_peer(Peer)
+        end
+    end}.

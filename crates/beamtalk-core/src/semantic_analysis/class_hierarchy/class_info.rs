@@ -14,36 +14,6 @@ use std::collections::{BTreeSet, HashMap};
 
 use super::{ClassHierarchy, DeclaredType};
 
-/// Information about a class variable (`classState:` declaration, ADR 0067).
-///
-/// The class-side counterpart to a `state:` field's `state_types`/
-/// `state_has_default`/`state_kinds` entries on [`ClassInfo`] — but class
-/// variables have no per-name-keyed maps to hang extra data off (there is no
-/// existing `class_variable_types` map to extend), so this carries name,
-/// type, default-presence and slot kind together in one structure (ADR 0124
-/// B5a). Populated for local classes from the AST's `class_variables:
-/// Vec<StateDeclaration>`. For cross-file classes only `name` and `kind` are
-/// recoverable today, from `__beamtalk_meta/0`'s `class_fields` (name list)
-/// and `class_field_kinds` (name → `eager`/`late`) keys — `ty`/`has_default`
-/// degrade to `None`/`false` because there is no `class_field_types`/
-/// `class_field_has_default` wire representation yet (only the instance-side
-/// `field_types`/`field_has_default` exist); see
-/// `parse_class_info_from_meta_term` (beamtalk-compiler-port).
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ClassVarInfo {
-    /// The class variable name.
-    pub name: EcoString,
-    /// Declared type annotation, if any.
-    pub ty: Option<DeclaredType>,
-    /// Whether this class variable carries an explicit default value.
-    pub has_default: bool,
-    /// Whether this class variable is `late` (ADR 0124 §1). Defaults to
-    /// [`SlotKind::Eager`] for every declaration that doesn't use the
-    /// modifier.
-    pub kind: SlotKind,
-}
-
 /// Information about a method in the hierarchy.
 ///
 /// **DDD Context:** Semantic Analysis — Value Object
@@ -448,9 +418,6 @@ pub struct ClassInfo {
     pub methods: Vec<MethodInfo>,
     /// Class-side methods defined on this class.
     pub class_methods: Vec<MethodInfo>,
-    /// Class variables (declared with `classState:`) — name, declared type,
-    /// default-value presence and slot kind (ADR 0124 B5a).
-    pub class_variables: Vec<ClassVarInfo>,
     /// Type parameters for generic classes (e.g., `["T", "E"]` for `Result(T, E)`).
     ///
     /// Empty for non-generic classes.
@@ -574,7 +541,6 @@ impl ClassInfo {
             has_dynamic_field_writer: false,
             methods: Vec::new(),
             class_methods: Vec::new(),
-            class_variables: Vec::new(),
             type_params: Vec::new(),
             type_param_bounds: Vec::new(),
             superclass_type_args: Vec::new(),
@@ -583,9 +549,9 @@ impl ClassInfo {
 
     /// Whether this entry is a superclass-index stub inserted by
     /// `ClassHierarchy::add_external_superclasses`: it carries only a name and
-    /// a superclass, so its class variables and method surface are unknown,
-    /// not absent. No other producer sets both flags; a new producer of that
-    /// combination must decide whether it is a stub (BT-4644).
+    /// a superclass, so its method surface is unknown, not absent. No other
+    /// producer sets both flags; a new producer of that combination must
+    /// decide whether it is a stub (BT-4644).
     #[must_use]
     pub fn is_superclass_index_stub(&self) -> bool {
         self.is_module_less && self.surface_incomplete
@@ -608,44 +574,12 @@ impl ClassInfo {
         !self.is_sealed
     }
 
-    /// Whether this class declares class variables (`classState:`) of its
-    /// own — class variables are per class, never inherited (BT-3762). The
-    /// one Rust-side answer to "does this class declare class state?" (ADR
-    /// 0142 §1 rule 1). Whether a class *needs* its process is the chain-wide
-    /// [`ClassHierarchy::chain_has_class_variables`], which reads this per
-    /// class.
-    #[must_use]
-    pub fn has_class_variables(&self) -> bool {
-        !self.class_variables.is_empty()
-    }
-
     /// Whether `selector` is one of the process-bound class-side selectors
     /// (ADR 0142 §1 rule 3, [`PROCESS_BOUND_CLASS_SELECTORS`]) that keep their
     /// class-process or dedicated routing whatever the class declares.
     #[must_use]
     pub fn is_process_bound_class_selector(selector: &str) -> bool {
         PROCESS_BOUND_CLASS_SELECTORS.contains(&selector)
-    }
-
-    /// Whether `selector` is a class-variable reflection send (`hasField:`,
-    /// `clearField:`, `fieldAt:`, `fieldAt:put:`; BT-4148): the class process
-    /// answers it from its own state ahead of the class-method lookup
-    /// (`beamtalk_object_class:is_class_var_reflection_selector/1`), so a
-    /// class method of that name is never what a send reaches and is never
-    /// direct-call eligible. Both sides are pinned to
-    /// `runtime/apps/beamtalk_runtime/test/fixtures/class_var_reflection_selectors_conformance.json`.
-    #[must_use]
-    pub fn is_class_var_reflection_selector(selector: &str) -> bool {
-        use crate::ast::WellKnownSelector;
-        matches!(
-            WellKnownSelector::from_name(selector),
-            Some(
-                WellKnownSelector::HasField
-                    | WellKnownSelector::ClearField
-                    | WellKnownSelector::FieldAt
-                    | WellKnownSelector::FieldAtPut
-            )
-        )
     }
 
     /// The process-bound class-side selectors (ADR 0142 §1 rule 3), in a fixed
@@ -722,16 +656,6 @@ impl ClassInfo {
             ),
             methods: instance_methods,
             class_methods,
-            class_variables: class
-                .class_variables
-                .iter()
-                .map(|cv| ClassVarInfo {
-                    name: cv.name.name.clone(),
-                    ty: cv.type_annotation.as_ref().map(DeclaredType::from),
-                    has_default: cv.default_value.is_some(),
-                    kind: cv.slot_kind,
-                })
-                .collect(),
             type_params: class
                 .type_params
                 .iter()

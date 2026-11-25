@@ -11,41 +11,121 @@ export function setReplRunning(value: boolean): void {
   void vscode.commands.executeCommand("setContext", "beamtalk.replRunning", value);
 }
 
-const SESSION_ID_PATTERN = /\[beamtalk\] session: ([A-Za-z0-9_-]+)(?![^\s])/;
+const SESSION_ID_PATTERN = /\[beamtalk\] session: ([A-Za-z0-9_-]+)(?=\s)/;
+
+/**
+ * Feed one terminal chunk to the session-id scraper (BT-5130). The id must be
+ * followed by whitespace within the buffered text, so a marker split across
+ * chunks is never accepted as a prefix; the incomplete tail is carried over.
+ */
+export function scanSessionChunk(
+  tail: string,
+  chunk: string
+): { sessionId: string | undefined; tail: string } {
+  const text = tail + chunk;
+  const match = SESSION_ID_PATTERN.exec(text);
+  if (match) {
+    return { sessionId: match[1], tail: "" };
+  }
+  // Keep the last 80 chars to catch markers spanning chunk boundaries.
+  return { sessionId: undefined, tail: text.length > 80 ? text.slice(-80) : text };
+}
+
+/** The slice of `WorkspaceClient` closing a REPL session needs. */
+export interface SessionCloser {
+  readonly state: string;
+  closeSession(sessionId: string): Promise<unknown>;
+}
+
+/**
+ * End the node session of a REPL that has stopped (BT-5199). A REPL killed with
+ * its terminal never sends `close` itself, so without this its session stays
+ * resumable until the node's idle bound (4 h by default). Clears the recorded
+ * id first, so a terminal close after the REPL exited sends one `close`, not two.
+ */
+export function closeReplSession(
+  client: SessionCloser | undefined,
+  warn: (msg: string) => void
+): void {
+  const sessionId = state.replSessionId;
+  state.replSessionId = undefined;
+  if (sessionId === undefined || !client || client.state !== "connected") return;
+  client.closeSession(sessionId).catch((err) => {
+    warn(
+      `Failed to close REPL session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  });
+}
+
+/** How much recent REPL output `captureSessionId` keeps for the reconnect check. */
+const RECENT_OUTPUT_CHARS = 400;
+
+/**
+ * True when `sessionId`'s marker in `recent` directly follows the CLI's
+ * "Reconnected (new session)" notice — the marker the REPL prints after a
+ * reconnect gave it a new session (BT-1021), as opposed to one in user output.
+ */
+export function followsReconnectNotice(recent: string, sessionId: string): boolean {
+  const escaped = sessionId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `Reconnected \\(new session\\)\\.[^\\n]*\\r?\\n\\[beamtalk\\] session: ${escaped}(?=\\s)`
+  ).test(recent);
+}
 
 /**
  * Read chunks from a shell execution until the session ID is found.
  * Updates `workspaceTreeProvider` with the captured session ID so bindings
  * from the session are shown in the sidebar.
  */
-async function captureSessionId(
+export async function captureSessionId(
   execution: vscode.TerminalShellExecution,
   terminal: vscode.Terminal
 ): Promise<void> {
   // Buffer the tail of the previous chunk to handle session markers split
   // across arbitrary terminal chunk boundaries.
   let tail = "";
+  // True only when the execution's output ran to its end, i.e. the REPL
+  // process exited. A thrown read (shell integration dropped) says nothing
+  // about the REPL, which may still be running (BT-5199).
+  let executionEnded = false;
+  // The session `close` ends when the REPL exits (BT-5199): the first marker
+  // of a run (the REPL's startup line), or a later one the REPL printed right
+  // after its "Reconnected (new session)" notice. Any other later marker may
+  // be user output (`Transcript show:` of a marker-shaped string), so it moves
+  // the sidebar as before but does not pick the session `close` ends. The
+  // notice check is a heuristic: output that forges both lines can still pick
+  // it, which only affects the user's own workspace (one cookie, one trust
+  // boundary — docs/repl-protocol.md § close).
+  let closeTargetRecorded = false;
+  // The most recent output, so a later marker can be checked against the
+  // reconnect notice printed just before it (possibly in an earlier chunk).
+  let recent = "";
   try {
     for await (const chunk of execution.read()) {
-      const text = tail + chunk;
-      const match = SESSION_ID_PATTERN.exec(text);
-      if (match) {
-        const sessionId = match[1];
+      // Check against the untrimmed window: one chunk can hold the notice, the
+      // marker and a long retried result after them.
+      const window = recent + chunk;
+      recent = window.slice(-RECENT_OUTPUT_CHARS);
+      const scanned = scanSessionChunk(tail, chunk);
+      const sessionId = scanned.sessionId;
+      tail = scanned.tail;
+      if (sessionId !== undefined) {
         state.outputChannel?.info(`Captured session ID: ${sessionId}`);
         // Only act if this is still our active REPL terminal.
         if (state.replTerminal !== terminal) {
           break;
         }
         setReplRunning(true);
+        if (!closeTargetRecorded || followsReconnectNotice(window, sessionId)) {
+          closeTargetRecorded = true;
+          state.replSessionId = sessionId;
+        }
         state.workspaceTreeProvider?.setSessionId(sessionId);
         // Don't break — keep reading. The REPL may reconnect and emit a new
         // session ID (BT-1021); we need to pick up the updated value.
-        tail = "";
-      } else {
-        // Keep the last 80 chars to catch markers spanning chunk boundaries.
-        tail = text.length > 80 ? text.slice(-80) : text;
       }
     }
+    executionEnded = true;
   } catch {
     // Stream ended (terminal closed or shell integration disconnected) — no-op.
   }
@@ -54,6 +134,9 @@ async function captureSessionId(
   // Clear the session so bindings disappear and the Start button returns.
   if (state.replTerminal === terminal) {
     setReplRunning(false);
+    if (executionEnded) {
+      closeReplSession(state.workspaceWsClient, (msg) => state.outputChannel?.warn(msg));
+    }
     state.workspaceTreeProvider?.setSessionId(null);
     state.outputChannel?.info("REPL session ended; session bindings cleared.");
   }
@@ -163,6 +246,7 @@ export function setupTerminalMonitoring(context: vscode.ExtensionContext): void 
       }
       state.replTerminal = undefined;
       setReplRunning(false);
+      closeReplSession(state.workspaceWsClient, (msg) => state.outputChannel?.warn(msg));
       // Clear session ID — bindings from the closed session are gone.
       state.workspaceTreeProvider?.setSessionId(null);
       state.outputChannel?.info("Beamtalk Session terminal closed; session bindings cleared.");

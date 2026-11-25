@@ -325,7 +325,7 @@ fn find_hover_in_declarations(
         if offset >= smd.class_name.span.start() && offset < smd.class_name.span.end() {
             return Some(class_reference_hover_info(
                 &smd.class_name.name,
-                smd.package.as_ref().map(|p| &p.name),
+                None,
                 smd.class_name.span,
                 hierarchy,
             ));
@@ -1040,7 +1040,7 @@ fn identifier_hover_info(ident: &Identifier, env: &HoverEnv<'_>) -> HoverInfo {
 fn literal_hover_info(lit: &Literal, span: Span) -> HoverInfo {
     let rendered = beamtalk_core::unparse::unparse_literal_display(lit);
     let info = match lit {
-        Literal::Integer(_) => format!("Integer: `{rendered}`"),
+        Literal::Integer(_) | Literal::BigInteger(_) => format!("Integer: `{rendered}`"),
         Literal::Float(_) => format!("Float: `{rendered}`"),
         Literal::String(_) => format!("String: `{rendered}`"),
         Literal::Symbol(_) => format!("Symbol: `{rendered}`"),

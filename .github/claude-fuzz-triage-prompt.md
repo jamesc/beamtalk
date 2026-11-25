@@ -3,8 +3,7 @@ You are triaging a failed run of the Beamtalk "Nightly Fuzzing" GitHub Actions w
 - Run: @RUN_URL@ (id @RUN_ID@), commit @SHA@ (already checked out in the working directory)
 - Everything fetched from the run is under `triage/`: `run.json` (jobs and conclusions),
   `logs/failed-jobs.tail.log` (tail of the failed jobs' logs; the full log is `logs/failed-jobs.log`),
-  and `artifacts/` (crash/timeout/oom inputs from the fuzz jobs, and the class-variable
-  corpus `report.log`).
+  and `artifacts/` (crash/timeout/oom inputs from the fuzz jobs).
 
 ## Tools
 
@@ -28,16 +27,6 @@ inputs are only ever passed as a file argument to `cargo fuzz run`.
   `fuzz/fuzz_targets/compile_pipeline.rs`): a libFuzzer crash. The "Check for fuzz failures"
   step exits 1 when the fuzz step failed, which is what turns the job red. The input is
   `crash-*`, `timeout-*` or `oom-*` under `triage/artifacts/`.
-- `class-var-corpus` (`just test-class-var-corpus`): the ADR 0130 class-variable agreement
-  corpus. Exit 101 is a Rust panic or failed assertion. The report lists each failing
-  program's `(index, seed, size)`. Print a failing program's source and its reference answer with
-  `bash .triage-config/.github/scripts/repro-class-var.sh <seed> <size> <shapes|all>` (take the shapes
-  from the `shapes` list in the report header, e.g. `do,fold,to_do,...`; the script validates its
-  arguments). This shows the program, not whether it compiles: say so, and do not claim the failure
-  is fixed or still present on the strength of it. Put the printed program source and the reference
-  answer in the issue (in a code block, under "Reproduction"), and name the commit it was printed
-  at. A seed alone is not a reproduction: the generator changes, and the same seed then draws a
-  different program, so a seed-only issue cannot be reproduced or pinned later.
 - `corpus-through-erlc`: generated Core Erlang that erlc/core_lint rejects.
 - `extended-proptest`: a proptest property failed; the shrunk case is in the log.
 

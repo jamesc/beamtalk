@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import { type LogLevelWorkspace, registerLogLevelSync } from "../logLevelSync";
+import { applyLogLevel, type LogLevelWorkspace, registerLogLevelSync } from "../logLevelSync";
 
 function fakeWorkspace(initial: string) {
   let level = initial;
@@ -28,7 +28,12 @@ describe("registerLogLevelSync (BT-5082)", () => {
     const ws = fakeWorkspace("warning");
     const subscribeLogs = vi.fn().mockResolvedValue(undefined);
     const bar = vi.fn();
-    registerLogLevelSync(ws.workspace, () => ({ subscribeLogs }), bar, vi.fn());
+    registerLogLevelSync(
+      ws.workspace,
+      () => ({ subscribeLogs, unsubscribeLogs: vi.fn() }),
+      bar,
+      vi.fn()
+    );
 
     ws.change("debug");
 
@@ -39,7 +44,12 @@ describe("registerLogLevelSync (BT-5082)", () => {
   it("ignores unrelated settings and a missing client", () => {
     const ws = fakeWorkspace("warning");
     const subscribeLogs = vi.fn().mockResolvedValue(undefined);
-    let client: { subscribeLogs: typeof subscribeLogs } | undefined = { subscribeLogs };
+    let client:
+      | { subscribeLogs: typeof subscribeLogs; unsubscribeLogs: typeof subscribeLogs }
+      | undefined = {
+      subscribeLogs,
+      unsubscribeLogs: vi.fn(),
+    };
     registerLogLevelSync(ws.workspace, () => client, vi.fn(), vi.fn());
 
     ws.change("info", "beamtalk.other");
@@ -54,7 +64,10 @@ describe("registerLogLevelSync (BT-5082)", () => {
     const warn = vi.fn();
     registerLogLevelSync(
       ws.workspace,
-      () => ({ subscribeLogs: () => Promise.reject(new Error("boom")) }),
+      () => ({
+        subscribeLogs: () => Promise.reject(new Error("boom")),
+        unsubscribeLogs: vi.fn(),
+      }),
       vi.fn(),
       warn
     );
@@ -62,5 +75,37 @@ describe("registerLogLevelSync (BT-5082)", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("boom"));
+  });
+});
+
+describe("log level off (BT-5199)", () => {
+  it("unsubscribes instead of subscribing when the level is set to off", () => {
+    const ws = fakeWorkspace("warning");
+    const subscribeLogs = vi.fn().mockResolvedValue(undefined);
+    const unsubscribeLogs = vi.fn().mockResolvedValue(undefined);
+    registerLogLevelSync(
+      ws.workspace,
+      () => ({ subscribeLogs, unsubscribeLogs }),
+      vi.fn(),
+      vi.fn()
+    );
+
+    ws.change("off");
+    expect(unsubscribeLogs).toHaveBeenCalledTimes(1);
+    expect(subscribeLogs).not.toHaveBeenCalled();
+
+    ws.change("info");
+    expect(subscribeLogs).toHaveBeenCalledWith("info");
+  });
+
+  it("applyLogLevel picks the op from the level", async () => {
+    const client = {
+      subscribeLogs: vi.fn().mockResolvedValue(undefined),
+      unsubscribeLogs: vi.fn().mockResolvedValue(undefined),
+    };
+    await applyLogLevel(client, "off");
+    await applyLogLevel(client, "error");
+    expect(client.unsubscribeLogs).toHaveBeenCalledTimes(1);
+    expect(client.subscribeLogs).toHaveBeenCalledWith("error");
   });
 });

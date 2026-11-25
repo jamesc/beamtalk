@@ -661,19 +661,6 @@ fn blank_line_preserved_before_class_side_standalone_method() {
     ));
 }
 
-#[test]
-fn blank_line_preserved_before_package_qualified_standalone_method() {
-    // Same, for a package-qualified standalone method
-    // (`package@Class >> ...`, ADR 0070) — the blank line must be
-    // captured before the package identifier, not lost when the
-    // `identifier @ Identifier` pair is parsed.
-    assert_identity(concat!(
-        "Counter >> increment => self.value := self.value + 1\n",
-        "\n",
-        "json@Parser >> lenientParse: input => input\n",
-    ));
-}
-
 // --- Comments before a standalone method stay above its target (BT-4253) ---
 //
 // The `Target >>` / `Target class >>` prefix goes on the signature line,
@@ -695,13 +682,7 @@ fn comment_before_class_side_standalone_method_stays_above_it() {
 
 #[test]
 fn comment_before_instance_side_standalone_method_stays_above_it() {
-    assert_identity(concat!(
-        "// Instance-side comment.\n",
-        "Foo >> baz => 2\n",
-        "\n",
-        "// A package-qualified one.\n",
-        "json@Parser >> lenientParse: input => input\n",
-    ));
+    assert_identity(concat!("// Instance-side comment.\n", "Foo >> baz => 2\n",));
 }
 
 #[test]

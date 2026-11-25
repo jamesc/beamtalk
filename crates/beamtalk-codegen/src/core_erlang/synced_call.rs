@@ -458,7 +458,7 @@ impl CoreErlangGenerator {
     /// Beamtalk method of the class being compiled or of a compiled actor
     /// superclass. Anything else may reach `dispatch/4`'s default arm — an
     /// inherited `Object`/`ProtoObject`/`Actor` method (compiled without
-    /// actor `State`), a native method, an ADR 0066 extension fun, or
+    /// actor `State`), a native method, or
     /// `does_not_understand` — and is bracketed.
     fn self_send_target_is_compiled(&self, selector: &MessageSelector) -> bool {
         let Some(hierarchy) = &self.class_hierarchy else {
@@ -766,20 +766,40 @@ impl CoreErlangGenerator {
             let selector = MessageSelector::Binary(op.into());
             return self.classify_self_send(&selector);
         }
-        let arithmetic = matches!(op, "+" | "-" | "*" | "/");
-        let comparison = matches!(op, "<" | ">" | "<=" | ">=");
+        let arithmetic = super::operators::is_arithmetic_operator(op);
+        let comparison = super::operators::is_ordering_comparison(op);
         let Some(right) = arguments.first() else {
             return UserCodeCall::Yes;
         };
         if !arithmetic && !comparison {
             return UserCodeCall::Yes;
         }
+        // An ordering comparison runs no user code exactly when it is bare
+        // (`comparison_is_bare`, the one predicate `generate_binary_op` lowers
+        // by): a proven number receiver with an unproven right operand sends
+        // that operand its reflected hook when it is not a number (ADR 0116
+        // § Addendum, BT-5176), as arithmetic does for its coercion.
+        if comparison {
+            let bare = if fault!(ComparisonBracketIgnoresRightOperand) {
+                matches!(
+                    self.comparison_receiver(left),
+                    super::operators::ComparisonReceiver::Proven(_)
+                )
+            } else {
+                self.comparison_is_bare(left, right)
+            };
+            return if bare {
+                UserCodeCall::No
+            } else {
+                UserCodeCall::GuardedOperator
+            };
+        }
         // The guard rule is `operators.rs`'s (`operator_guard`); an arithmetic
         // operator with a bare-BIF receiver still reaches the number-on-the-left
         // coercion (a user `plusFromNumber:`) when its right operand is not
         // statically numeric (ADR 0116).
-        let coercion = arithmetic && !self.receiver_is_statically_numeric(right);
-        if self.operator_guard(op, left).is_some() || coercion {
+        let coercion = !self.receiver_is_statically_numeric(right);
+        if self.operator_guard(op, left, right).is_some() || coercion {
             UserCodeCall::GuardedOperator
         } else {
             UserCodeCall::No

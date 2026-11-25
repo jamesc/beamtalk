@@ -603,40 +603,35 @@ pub(super) fn counter_class_with_typed_state(
     }
 }
 
-/// Helper to build a hierarchy with an extension method registered.
-pub(super) fn hierarchy_with_extension(
+/// Helper to build a hierarchy where `class_name` additionally has an
+/// instance method `selector` with the given signature.
+#[allow(clippy::needless_pass_by_value)] // callers build the signature inline
+pub(super) fn hierarchy_with_method(
     class_name: &str,
     selector: &str,
     arity: usize,
     param_types: Vec<Option<EcoString>>,
     return_type: Option<EcoString>,
 ) -> ClassHierarchy {
-    use crate::compilation::extension_index::{
-        ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
-    };
-    use std::path::PathBuf;
+    use crate::semantic_analysis::class_hierarchy::{DeclaredType, MethodInfo};
 
     let mut h = ClassHierarchy::with_builtins();
-    let mut index = ExtensionIndex::new();
-    let key = ExtensionKey {
-        class_name: class_name.into(),
-        side: MethodSide::Instance,
-        selector: selector.into(),
-    };
-    index.entries_mut().insert(
-        key,
-        vec![ExtensionLocation {
-            file_path: PathBuf::from("test.bt"),
-            span: span(),
-            type_info: ExtensionTypeInfo {
-                answers_receiver: false,
-                arity,
-                param_types,
-                return_type,
-            },
-        }],
+    assert_eq!(arity, param_types.len(), "arity must match the parameters");
+    let method = MethodInfo::synthesized(
+        selector,
+        class_name,
+        return_type.as_deref().map(DeclaredType::parse),
+        param_types
+            .iter()
+            .map(|p| p.as_deref().map(DeclaredType::parse))
+            .collect(),
+        None,
     );
-    h.register_extensions(&index);
+    h.get_class_mut(class_name)
+        .expect("class is a builtin")
+        .methods
+        .push(method);
+    h.rebuild_all_indexes();
     h
 }
 

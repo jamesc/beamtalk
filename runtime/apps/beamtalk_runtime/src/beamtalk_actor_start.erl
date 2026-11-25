@@ -93,8 +93,6 @@ await_initialize(Pid, MonRef) ->
     ok | {error, term()}.
 
 await_initialize_sys(Pid, MonRef, SysCall, Mode) ->
-    %% bt-catcher-audit: not-applicable-no-block - SysCall is a local fun
-    %% wrapping a sys:get_state/replace_state call, never a Beamtalk block
     try SysCall(Pid) of
         _State ->
             settle_monitor(Mode, MonRef)
@@ -485,8 +483,6 @@ name_holder({global, Name}) ->
 start_native_trapped(Backing, Config, Registration, Link) ->
     OldTrap = erlang:process_flag(trap_exit, true),
     Result =
-        %% bt-catcher-audit: not-applicable-no-block - Backing:start_link/1
-        %% is a hand-written Erlang start function, never a Beamtalk block
         try Backing:start_link(Config) of
             {ok, Pid} when is_pid(Pid) -> register_native_started(Registration, Pid);
             {error, Reason} -> {error, Reason};
@@ -617,7 +613,7 @@ register_native_started({global, Name} = Registration, Pid) ->
 %% the backing module already wrote is left alone. A backing process that does
 %% not answer the system message within a second stays untimed until it drains
 %% its queue, and meanwhile behaves as before BT-4956: the other side wins, or
-%% `random_exit_name/3` if neither has one. The stamp it then writes still
+%% the lower-node tie-break if neither has one. The stamp it then writes still
 %% carries the registration time, taken before the request.
 -spec record_native_start_time(pid()) -> ok.
 

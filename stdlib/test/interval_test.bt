@@ -142,6 +142,81 @@ TestCase subclass: IntervalTest
 
   testZeroStepRaisesError => self should: [1 to: 10 by: 0] raise: #user_error
 
+  // BT-5217: an Interval holds integers only, so `to:by:` rejects a
+  // non-Integer step with a TypeError (`to:by:do:` still takes a Float step).
+  // The step arrives untyped so the call compiles; a literal `0.5` is
+  // rejected at compile time by `step :: Integer`.
+  intervalBy: step => 1 to: 2 by: step
+
+  testFloatStepRaisesTypeError =>
+    self should: [self intervalBy: 0.5] raise: #type_error
+
+  testFloatStepIsCaughtAsTypeErrorWithMessage =>
+    message := [self intervalBy: 0.5] on: TypeError do: [:e | e message]
+    self assert: message equals: "Interval step must be an Integer"
+
+  testWholeFloatStepRaisesTypeError =>
+    self should: [self intervalBy: 2.0] raise: #type_error
+
+  testFloatZeroStepRaisesTypeError =>
+    self should: [self intervalBy: 0.0] raise: #type_error
+
+  testNilStepRaisesTypeError =>
+    self should: [self intervalBy: nil] raise: #type_error
+
+  // BT-5245: the limit follows the step rule — an Interval holds integers
+  // only, so `to:` / `to:by:` reject a non-Integer limit with a TypeError.
+  // `to:do:` / `to:by:do:` loops keep accepting any Number limit.
+  intervalTo: limit => 1 to: limit
+
+  intervalToBy: limit => 1 to: limit by: 1
+
+  testFloatLimitOnToRaisesTypeError =>
+    self should: [self intervalTo: 2.5] raise: #type_error
+
+  testFloatLimitOnToByRaisesTypeError =>
+    self should: [self intervalToBy: 2.5] raise: #type_error
+
+  testWholeFloatLimitRaisesTypeError =>
+    self should: [self intervalTo: 3.0] raise: #type_error
+    self should: [self intervalToBy: 3.0] raise: #type_error
+
+  testNilLimitRaisesTypeError =>
+    self should: [self intervalTo: nil] raise: #type_error
+    self should: [self intervalToBy: nil] raise: #type_error
+
+  testFloatLimitMessageIsIntervalLimitMustBeAnInteger =>
+    msg1 := [self intervalTo: 2.5] on: TypeError do: [:e | e message]
+    self assert: msg1 equals: "Interval limit must be an Integer"
+    msg2 := [self intervalToBy: 2.5] on: TypeError do: [:e | e message]
+    self assert: msg2 equals: "Interval limit must be an Integer"
+
+  loopTo: limit =>
+    seen := #()
+    1 to: limit do: [:i | seen := seen add: i]
+    seen
+
+  testIntegerLimitsStillBuildIntervals =>
+    self assert: (1 to: -3 by: -1) size equals: 5
+    self assert: (1 to: 100000000000000000000) last equals: 100000000000000000000
+    self assert: (self intervalTo: 3) size equals: 3
+    self assert: (self intervalToBy: 3) size equals: 3
+
+  testStringAndSymbolLimitRaiseTypeError =>
+    self should: [self intervalTo: "3"] raise: #type_error
+    self should: [self intervalToBy: #three] raise: #type_error
+
+  testFloatLimitStillLoopsWithToDo =>
+    self assert: (self loopTo: 2.5) equals: #(1, 2)
+
+  testFloatStepStillLoopsWithToByDo =>
+    seen := #()
+    1
+      to: 2
+      by: 0.5
+      do: [:x | seen := seen add: x]
+    self assert: seen equals: #(1, 1.5, 2.0)
+
   testAsListForward => self assert: (1 to: 5) asList equals: #(1, 2, 3, 4, 5)
 
   testAsListSingleElement => self assert: (3 to: 3) asList equals: #(3)

@@ -93,7 +93,10 @@ FROM ${RUNTIME_IMAGE} AS app
 ENV LANG=C.UTF-8 \
     PHX_SERVER=true \
     PORT=8443 \
-    BT_ATTACH_BIND_IP=::
+    BT_ATTACH_BIND_IP=:: \
+    RELEASE_DISTRIBUTION=none
+# BT-5127: no boot-time Erlang distribution (it would listen on every
+# interface); the front starts it lazily, pinned to loopback, on attach.
 # The image is for remote (OIDC) deployment, so it listens on all interfaces —
 # and boot refuses that bind unless OIDC (or BT_IDE_DEV_AUTH) is configured
 # (BT-5065). Override BT_ATTACH_BIND_IP=127.0.0.1 for a loopback-only trial.

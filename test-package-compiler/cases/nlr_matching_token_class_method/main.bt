@@ -9,7 +9,6 @@
 // `nlr_matching_token_actor`, `nlr_matching_token_value_type`.
 
 Actor subclass: NlrClassCtr
-  classState: total = 0
 
   class findFirstOver: threshold in: coll =>
     coll do: [:each | each > threshold ifTrue: [^each]]

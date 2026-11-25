@@ -52,8 +52,10 @@ mod flush;
 mod guard;
 mod handlers;
 mod hover;
+mod listeners;
 mod lock;
 mod nav;
+mod publish;
 mod range_format;
 mod reload;
 
@@ -232,15 +234,25 @@ pub struct Backend {
     dirty_files: Mutex<HashSet<Utf8PathBuf>>,
     /// Monotonic generation counter used to debounce `didChange` diagnostics per URI.
     diagnostic_generation: Mutex<HashMap<Url, u64>>,
-    /// Open files whose set of defined classes changed in an edit that has not
-    /// yet been followed by a cross-file republish. Set by every `did_change`;
-    /// consumed by whichever edit wins the debounce, so a superseded rename is
-    /// not lost (BT-5078).
-    pending_interface_change: Mutex<HashSet<Utf8PathBuf>>,
+    /// Each open file's interface as other files were last re-checked
+    /// against, recorded at `did_open` and whenever a parse-error-free edit
+    /// changed it (BT-5188). A debounced
+    /// edit compares against this, not against the previous keystroke, so a
+    /// superseded rename is not lost (BT-5078) and recovery from a
+    /// mid-typing parse error does not count as a change.
+    interface_baselines: Mutex<HashMap<Utf8PathBuf, handlers::InterfaceBaseline>>,
+    /// The state a diagnostics publish reads, shared with the cross-file
+    /// republish worker (BT-5188).
+    publisher: publish::Publisher,
+    /// Coalesces "re-check the other open files" requests (BT-5188).
+    cross_file_republish: publish::CrossFileRepublish,
     /// Deferred preload config captured at initialize and consumed after handshake.
+    /// A startup preload that panicked puts it back for a retry (BT-5188).
     preload_config: Mutex<Option<PreloadConfig>>,
+    /// Startup preload attempts that panicked (BT-5188); bounds the retries.
+    startup_preload_failures: std::sync::atomic::AtomicU32,
     /// Paths of stdlib files loaded during preload; used to emit `beamtalk-stdlib://` URIs.
-    stdlib_paths: Mutex<HashSet<Utf8PathBuf>>,
+    stdlib_paths: Arc<Mutex<HashSet<Utf8PathBuf>>>,
     /// What the client declared about `WorkspaceEdit` support (for rename).
     rename_caps: Mutex<handlers::RenameClientCaps>,
     /// Workspace roots discovered at initialization, plus any package root
@@ -270,16 +282,17 @@ pub struct Backend {
     /// `did_open` root load — may claim project completeness (ADR 0100
     /// Rule 2).
     preload_coverage_partial: std::sync::atomic::AtomicBool,
-    /// Sticky "some loaded package's dependency extensions are not all
-    /// known" flag — ADR 0100's pre-WS3 guard input (BT-4611). Each preload
-    /// walk (startup, or a `did_open` root load) ORs in its own verdict, so
-    /// one root with incomplete dependency loading keeps the guard on for the
-    /// whole session, as `set_diagnostics_overrides` is whole-session too.
-    dependency_extensions_unknown: std::sync::atomic::AtomicBool,
     /// Test seam (BT-4383): make the next per-root preload walk task fail,
     /// exercising the unregister-and-retry path.
     #[cfg(test)]
     fail_next_root_walk: std::sync::atomic::AtomicBool,
+    /// Test seam (BT-5188): panic inside the next startup or package-root
+    /// preload, after its guards are armed.
+    #[cfg(test)]
+    panic_next_preload: std::sync::atomic::AtomicBool,
+    /// Test seam (BT-5188): make the next watched-files batch task fail.
+    #[cfg(test)]
+    fail_next_watched_batch: std::sync::atomic::AtomicBool,
     /// Test seam (BT-4383): every root `load_type_cache` actually extracted,
     /// in order, so tests can assert each root is extracted once.
     #[cfg(test)]
@@ -696,7 +709,25 @@ impl LanguageServer for Backend {
         params: DocumentRangeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
         guard_request("range_formatting", async move {
-            Ok(self.format_document_range(&params.text_document.uri, params.range))
+            let Some((edits, unapplied)) =
+                self.format_document_range(&params.text_document.uri, params.range)
+            else {
+                return Ok(None);
+            };
+            if unapplied > 0 {
+                // BT-5188: never leave the selection silently unformatted.
+                self.client
+                    .show_message(
+                        tower_lsp::lsp_types::MessageType::WARNING,
+                        format!(
+                            "{unapplied} formatting change(s) in the selection could not be \
+                             applied without also changing the code next to it. Format the \
+                             whole document to apply them."
+                        ),
+                    )
+                    .await;
+            }
+            Ok(Some(edits))
         })
         .await
     }

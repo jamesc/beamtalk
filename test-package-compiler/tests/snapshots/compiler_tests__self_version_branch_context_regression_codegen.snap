@@ -84,35 +84,43 @@ let _InitMap@2 = call 'maps':'new'() in let _Packed@3 = call 'maps':'put'('__loc
             let <DispArg0> = call 'erlang':'hd'(Args) in
             call 'self_version_branch_context_regression':'withTotal:'(Self, DispArg0)
         <_Other> when 'true' ->
+            case Selector of
+                <'assert:'> when 'true' ->
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                <'assert:equals:'> when 'true' ->
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                <'assertError:equals:'> when 'true' ->
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                <'assertOk:'> when 'true' ->
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                <'deny:'> when 'true' ->
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                <'fail:'> when 'true' ->
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                <'setUp'> when 'true' ->
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                <'setUpOnce'> when 'true' ->
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                <'should:raise:'> when 'true' ->
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                <'skip'> when 'true' ->
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                <'skip:'> when 'true' ->
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                <'suiteFixture'> when 'true' ->
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                <'tearDown'> when 'true' ->
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                <'tearDownOnce'> when 'true' ->
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                <_> when 'true' ->
             %% BT-4260: a memoised verdict picks the direct inherited call.
-            case case Selector of
-                <'assert:'> when 'true' -> 'slow'
-                <'assert:equals:'> when 'true' -> 'slow'
-                <'assertError:equals:'> when 'true' -> 'slow'
-                <'assertOk:'> when 'true' -> 'slow'
-                <'deny:'> when 'true' -> 'slow'
-                <'fail:'> when 'true' -> 'slow'
-                <'setUp'> when 'true' -> 'slow'
-                <'setUpOnce'> when 'true' -> 'slow'
-                <'should:raise:'> when 'true' -> 'slow'
-                <'skip'> when 'true' -> 'slow'
-                <'skip:'> when 'true' -> 'slow'
-                <'suiteFixture'> when 'true' -> 'slow'
-                <'tearDown'> when 'true' -> 'slow'
-                <'tearDownOnce'> when 'true' -> 'slow'
-                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('SelfVersionBranchContextRegressionTest', Selector)
-            end of
+            case call 'beamtalk_dispatch':'inherited_target'('SelfVersionBranchContextRegressionTest', Selector) of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
-                <{'ext', InhExtOwner}> when 'true' ->
-                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@test_case')
                 <_InhSlow> when 'true' ->
-                    case call 'beamtalk_extensions':'lookup'('SelfVersionBranchContextRegressionTest', Selector) of
-                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                            apply ExtFun(Args, Self)
-                        <'not_found'> when 'true' ->
-                            call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
-                    end
+                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+            end
             end
     end
 
@@ -135,21 +143,13 @@ let _InitMap@2 = call 'maps':'new'() in let _Packed@3 = call 'maps':'put'('__loc
 'has_method'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'testSelfFieldReadInsideLoopAfterPriorMutation', 'total', 'withTotal:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('SelfVersionBranchContextRegressionTest', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'bt@stdlib@test_case':'has_method'(Selector)
-            end
+        <'false'> when 'true' -> call 'bt@stdlib@test_case':'has_method'(Selector)
     end
 
 'has_method_local'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'testSelfFieldReadInsideLoopAfterPriorMutation', 'total', 'withTotal:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('SelfVersionBranchContextRegressionTest', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> 'false'
-            end
+        <'false'> when 'true' -> 'false'
     end
 
 
@@ -180,7 +180,6 @@ let _InitMap@2 = call 'maps':'new'() in let _Packed@3 = call 'maps':'put'('__loc
       'package' => 'none',
       'kind' => 'value',
       'fields' => ['total'],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'true',
@@ -192,7 +191,6 @@ let _InitMap@2 = call 'maps':'new'() in let _Packed@3 = call 'maps':'put'('__loc
       'field_types' => ~{'total' => 'none'}~,
       'field_has_default' => ~{'total' => 'true'}~,
       'field_kinds' => ~{'total' => 'eager'}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'testSelfFieldReadInsideLoopAfterPriorMutation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'UndefinedObject', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'total' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withTotal:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Self', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'total:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'SelfVersionBranchContextRegressionTest', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
@@ -220,7 +218,6 @@ let _InitMap@2 = call 'maps':'new'() in let _Packed@3 = call 'maps':'put'('__loc
       'package' => 'none',
       'kind' => 'value',
       'fields' => ['total'],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'true',
@@ -232,7 +229,6 @@ let _InitMap@2 = call 'maps':'new'() in let _Packed@3 = call 'maps':'put'('__loc
       'field_types' => ~{'total' => 'none'}~,
       'field_has_default' => ~{'total' => 'true'}~,
       'field_kinds' => ~{'total' => 'eager'}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'testSelfFieldReadInsideLoopAfterPriorMutation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'UndefinedObject', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'total' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withTotal:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Self', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'total:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'SelfVersionBranchContextRegressionTest', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,

@@ -118,7 +118,7 @@ impl BuildGraphEdges {
     /// full hash when it cannot be keyed on its consulted slice. Returns the
     /// consulted-slice text by value, so the caller owns it.
     fn consulted_part(&self, stored: Option<&ConsultedSurface>) -> Option<String> {
-        self.surface_keys.as_ref()?.key_part(stored?)
+        Some(self.surface_keys.as_ref()?.key_part(stored?))
     }
 }
 

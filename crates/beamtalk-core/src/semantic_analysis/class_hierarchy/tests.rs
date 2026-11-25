@@ -1272,7 +1272,6 @@ fn value_subclass_auto_methods_respect_user_overrides() {
             test_span(),
         )],
         class_methods: vec![],
-        class_variables: vec![],
         type_params: vec![],
         superclass_type_args: vec![],
         uses: vec![],
@@ -1601,253 +1600,6 @@ fn extract_class_infos_captures_methods_and_state() {
     assert!(info.methods.iter().any(|m| m.selector == "increment"));
     assert!(info.methods.iter().any(|m| m.selector == "getValue"));
 }
-// --- Extension method registration tests ---
-//
-// BT-4806: the six `register_extensions_*` tests share their fixture (a builtin hierarchy and
-// a one-entry extension index) but assert six different facets of the result (method counts,
-// the class side, a `Dynamic` return, an unknown class, no override, `resolves_selector`), so
-// they stay separate tests over this shared builder, not rows of one table.
-fn single_extension_index(
-    class_name: &str,
-    side: crate::compilation::extension_index::MethodSide,
-    selector: &str,
-    file: &str,
-    param_types: Vec<Option<ecow::EcoString>>,
-    return_type: Option<&str>,
-) -> crate::compilation::extension_index::ExtensionIndex {
-    use crate::compilation::extension_index::{
-        ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo,
-    };
-    let mut index = ExtensionIndex::new();
-    index.entries_mut().insert(
-        ExtensionKey {
-            class_name: class_name.into(),
-            side,
-            selector: selector.into(),
-        },
-        vec![ExtensionLocation {
-            file_path: std::path::PathBuf::from(file),
-            span: test_span(),
-            type_info: ExtensionTypeInfo {
-                answers_receiver: false,
-                arity: param_types.len(),
-                param_types,
-                return_type: return_type.map(Into::into),
-            },
-        }],
-    );
-    index
-}
-#[test]
-fn register_extensions_adds_instance_method() {
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    let original_count = h.all_methods("String").len();
-    let index = single_extension_index(
-        "String",
-        MethodSide::Instance,
-        "shout",
-        "String+Shout.bt",
-        vec![],
-        Some("String"),
-    );
-    h.register_extensions(&index);
-    let methods = h.all_methods("String");
-    assert_eq!(methods.len(), original_count + 1);
-    let ext = methods.iter().find(|m| m.selector == "shout").unwrap();
-    assert_eq!(ext.arity, 0);
-    assert_eq!(ext.return_type, Some(DeclaredType::simple("String")));
-    assert_eq!(ext.defined_in.as_str(), "String");
-}
-#[test]
-fn register_extensions_instance_side_keeps_compiled_method() {
-    // ADR 0066: on the instance side a compiled method beats an extension on
-    // the same class, so the static model keeps the compiled signature.
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    let before = h.all_methods("String").len();
-    let index = single_extension_index(
-        "String",
-        MethodSide::Instance,
-        "size",
-        "String+Size.bt",
-        vec![],
-        Some("Boolean"),
-    );
-    h.register_extensions(&index);
-    let methods = h.all_methods("String");
-    assert_eq!(methods.len(), before);
-    let m = methods.iter().find(|m| m.selector == "size").unwrap();
-    assert_ne!(m.return_type, Some(DeclaredType::simple("Boolean")));
-}
-
-#[test]
-fn register_extensions_class_side_replaces_compiled_class_method() {
-    // BT-5061 / BT-5111: on the class side the extension is checked before the
-    // class's own class method, so the static model must carry the extension's
-    // signature, not the compiled one it shadows.
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    let existing = h
-        .get_class("Object")
-        .unwrap()
-        .class_methods
-        .first()
-        .map(|m| (m.selector.clone(), m.arity))
-        .expect("Object has a class method");
-    let params = vec![None; existing.1];
-    let index = single_extension_index(
-        "Object",
-        MethodSide::Class,
-        &existing.0,
-        "Object+Patch.bt",
-        params,
-        Some("BtFiveOneOneOneMarker"),
-    );
-    h.register_extensions(&index);
-    let class_methods = &h.get_class("Object").unwrap().class_methods;
-    let matching: Vec<_> = class_methods
-        .iter()
-        .filter(|m| m.selector == existing.0)
-        .collect();
-    assert_eq!(matching.len(), 1, "no duplicate entry for the selector");
-    assert_eq!(
-        matching[0].return_type,
-        Some(DeclaredType::simple("BtFiveOneOneOneMarker"))
-    );
-}
-
-#[test]
-fn register_extensions_class_side_first_pass_wins_over_later_pass() {
-    // BT-5111: the current module's class-side extension is registered before
-    // the project-wide index (which may hold a stale saved copy); the later
-    // pass must not overwrite it.
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    let (selector, arity) = h
-        .get_class("Object")
-        .unwrap()
-        .class_methods
-        .first()
-        .map(|m| (m.selector.clone(), m.arity))
-        .expect("Object has a class method");
-    let mk = |ret| {
-        single_extension_index(
-            "Object",
-            MethodSide::Class,
-            &selector,
-            "Object+Patch.bt",
-            vec![None; arity],
-            Some(ret),
-        )
-    };
-    h.register_extensions(&mk("Integer"));
-    h.register_extensions(&mk("String"));
-    let m = h
-        .get_class("Object")
-        .unwrap()
-        .class_methods
-        .iter()
-        .find(|m| m.selector == selector)
-        .unwrap();
-    assert_eq!(m.return_type, Some(DeclaredType::simple("Integer")));
-}
-
-#[test]
-fn register_extensions_adds_class_method() {
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    let original_count = h.all_class_methods("String").len();
-    let index = single_extension_index(
-        "String",
-        MethodSide::Class,
-        "fromJson:",
-        "String+JSON.bt",
-        vec![Some("String".into())],
-        Some("String"),
-    );
-    h.register_extensions(&index);
-    let methods = h.all_class_methods("String");
-    assert_eq!(methods.len(), original_count + 1);
-    let ext = methods.iter().find(|m| m.selector == "fromJson:").unwrap();
-    assert_eq!(ext.arity, 1);
-    assert_eq!(ext.param_types, vec![Some(DeclaredType::simple("String"))]);
-}
-#[test]
-fn register_extensions_unannotated_uses_dynamic() {
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    let index = single_extension_index(
-        "Array",
-        MethodSide::Instance,
-        "shuffle",
-        "Array+Shuffle.bt",
-        vec![],
-        None,
-    );
-    h.register_extensions(&index);
-    let ext = h
-        .find_method("Array", "shuffle")
-        .expect("extension should be resolvable");
-    assert!(ext.return_type.is_none(), "unannotated = Dynamic");
-}
-#[test]
-fn register_extensions_skips_unknown_class() {
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    let index = single_extension_index(
-        "NonexistentClass",
-        MethodSide::Instance,
-        "doStuff",
-        "Nonexistent+Stuff.bt",
-        vec![],
-        None,
-    );
-    // Should not panic
-    h.register_extensions(&index);
-    assert!(!h.has_class("NonexistentClass"));
-}
-#[test]
-fn register_extensions_does_not_override_existing_method() {
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    // "size" already exists on String
-    let original = h.find_method("String", "size").unwrap().clone();
-    let index = single_extension_index(
-        "String",
-        MethodSide::Instance,
-        "size",
-        "String+Size.bt",
-        vec![],
-        Some("Integer"),
-    );
-    h.register_extensions(&index);
-    // Original method should be unchanged
-    let after = h.find_method("String", "size").unwrap();
-    assert_eq!(after.defined_in, original.defined_in);
-}
-#[test]
-fn register_extensions_resolves_selector() {
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    assert!(
-        !h.resolves_selector("String", "toJson"),
-        "precondition: toJson doesn't exist"
-    );
-    let index = single_extension_index(
-        "String",
-        MethodSide::Instance,
-        "toJson",
-        "String+JSON.bt",
-        vec![],
-        Some("String"),
-    );
-    h.register_extensions(&index);
-    assert!(
-        h.resolves_selector("String", "toJson"),
-        "extension should be resolvable via resolves_selector"
-    );
-}
 // --- ClassKind hierarchy propagation tests ---
 /// BT-4679: the former five `resolve_class_kind_*` tests. Each row seeds the external
 /// superclass index (when non-empty), then resolves a class's `ClassKind`.
@@ -2163,24 +1915,20 @@ fn cross_file_value_sub_subclass_finds_new() {
     assert_eq!(result.unwrap().defined_in.as_str(), "Value");
 }
 
-/// ADR 0124 §1/B5a cross-file test: class `B` (this file) subclasses `A`
-/// (a different file, injected via `add_from_beam_meta` the way a
+/// ADR 0124 §1 cross-file test: class `B` (this file) subclasses `A` (a
+/// different file, injected via `add_from_beam_meta` the way a
 /// cross-package/prior-compiled ancestor is), where `A` declares
-/// `late state: proc` and `late classState: current` alongside an
-/// ordinary eager field/class-variable of each kind. `ClassInfo` for `B`
-/// must report both kinds through the flattened
-/// `state_field_kind`/`class_variable_kind` accessors — the metadata B3's
-/// guarded read depends on — without `A`'s AST being present in this
-/// compilation.
+/// `late state: proc` alongside an ordinary eager field. `ClassInfo` for `B`
+/// must report both kinds through the flattened `state_field_kind` accessor —
+/// the metadata B3's guarded read depends on — without `A`'s AST being
+/// present in this compilation.
 #[test]
-fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
+fn cross_file_state_field_kind_reports_late() {
     let module = module_with_classes(vec![make_user_class("B", "A")]);
     let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
 
-    // Inject cross-file A: `late state: proc`, `state: id`,
-    // `late classState: current`, `classState: total`.
     let a_info = ClassInfo {
         is_typed: true,
         state: vec![EcoString::from("proc"), EcoString::from("id")],
@@ -2188,27 +1936,10 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
             (EcoString::from("proc"), crate::ast::SlotKind::Late),
             (EcoString::from("id"), crate::ast::SlotKind::Eager),
         ]),
-        class_variables: vec![
-            ClassVarInfo {
-                name: EcoString::from("current"),
-                ty: Some(DeclaredType::simple("TranscriptStream")),
-                has_default: false,
-                kind: crate::ast::SlotKind::Late,
-            },
-            ClassVarInfo {
-                name: EcoString::from("total"),
-                ty: None,
-                has_default: true,
-                kind: crate::ast::SlotKind::Eager,
-            },
-        ],
         ..ClassInfo::test("A", Some("Object"))
     };
     h.add_from_beam_meta(vec![a_info]);
 
-    // B declares no state/class-variables of its own (make_user_class's
-    // "count" state field is irrelevant here) — both kinds must be found
-    // by walking B → A.
     assert_eq!(
         h.state_field_kind("B", "proc"),
         crate::ast::SlotKind::Late,
@@ -2219,34 +1950,11 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
         crate::ast::SlotKind::Eager,
         "B should report A's ordinary instance field as SlotKind::Eager"
     );
-    assert_eq!(
-        h.class_variable_kind("B", "current"),
-        crate::ast::SlotKind::Late,
-        "B should report A's late class variable as SlotKind::Late"
-    );
-    assert_eq!(
-        h.class_variable_kind("B", "total"),
-        crate::ast::SlotKind::Eager,
-        "B should report A's ordinary class variable as SlotKind::Eager"
-    );
     // An unknown field degrades to Eager rather than panicking.
     assert_eq!(
         h.state_field_kind("B", "doesNotExist"),
         crate::ast::SlotKind::Eager
     );
-    // ADR 0124 B3: the guarded read's hint names the declared type, walked
-    // the same way as the kind.
-    assert_eq!(
-        h.class_variable_type("B", "current"),
-        Some(DeclaredType::simple("TranscriptStream")),
-        "B should report A's late class variable's declared type"
-    );
-    assert_eq!(
-        h.class_variable_type("B", "total"),
-        None,
-        "an untyped class variable has no declared type"
-    );
-    assert_eq!(h.class_variable_type("B", "doesNotExist"), None);
 }
 
 // --- ADR 0124 A2a: all_initialize_assigns tests ---
@@ -2618,14 +2326,6 @@ fn direct_constructors_table() {
             new0: None,
             new1: Some(false),
             keyword: None,
-        },
-        Row {
-            label: "classState blocks all",
-            source: "Value subclass: Pt\n  state: x :: Integer = 0\n  classState: total = 0\n",
-            class: "Pt",
-            new0: Some(false),
-            new1: Some(false),
-            keyword: Some(None),
         },
         // `new`/`new:` route through the `{new, _}` handler, which rejects abstract
         // classes; keyword constructors go through `class_method_call`, which has no
@@ -3074,78 +2774,40 @@ fn process_bound_selectors_are_never_direct_call_eligible() {
 #[test]
 fn direct_call_eligibility_is_adr_0142s_rule() {
     // BT-4301: no `sealed`/`class sealed` requirement; the class must define
-    // the method itself; no class in its chain may declare class variables
-    // (the runtime's chain-wide rule 2); class-variable reflection selectors
-    // are never eligible.
+    // the method itself. ADR 0153 (BT-5154): with no class variables the
+    // chain plays no part; a process-bound selector keeps the class process.
+    // BT-5155: a class method named after a field-reflection selector is
+    // no exception, since the runtime no longer intercepts it.
     let hierarchy = bt4099_hierarchy_for_source(
         "Object subclass: Open\n  class foo => 1\n  class hasField: x => 2\n\n\
-         Open subclass: OpenSub\n  class bar => 3\n\n\
-         Object subclass: Stateful\n  classState: n :: Integer = 0\n  class foo => 1\n\n\
-         Stateful subclass: StatelessSub\n  class bar => 3\n",
+         Open subclass: OpenSub\n  class bar => 5\n\n\
+         Missing subclass: Orphan\n  class baz => 6\n",
     );
     assert!(hierarchy.is_direct_call_eligible("Open", "foo"));
-    assert!(!hierarchy.is_direct_call_eligible("Open", "hasField:"));
+    assert!(hierarchy.is_direct_call_eligible("Open", "hasField:"));
     assert!(hierarchy.is_direct_call_eligible("OpenSub", "bar"));
     assert!(
         !hierarchy.is_direct_call_eligible("OpenSub", "foo"),
         "an inherited class method is not in the class's own table"
     );
-    assert!(!hierarchy.is_direct_call_eligible("Stateful", "foo"));
     assert!(
-        !hierarchy.is_direct_call_eligible("StatelessSub", "bar"),
-        "a subclass of a class with class variables keeps its process"
+        hierarchy.is_direct_call_eligible("Orphan", "baz"),
+        "an unresolved superclass is no longer a doubt"
     );
-    assert!(hierarchy.chain_has_class_variables("StatelessSub"));
-    assert!(!hierarchy.chain_has_class_variables("OpenSub"));
-    assert!(hierarchy.chain_has_class_variables("NoSuchClass"));
+    assert!(hierarchy.runs_class_method_in_caller("NoSuchClass", "foo"));
+    assert!(!hierarchy.runs_class_method_in_caller("NoSuchClass", "spawn"));
 }
 
-/// BT-4148: the compile-time class-variable reflection selector set agrees
-/// with the runtime's (`beamtalk_object_class:is_class_var_reflection_selector/1`).
-/// Both sides are pinned to the shared fixture; the Erlang half is
-/// `beamtalk_object_class_tests:class_var_reflection_selectors_match_shared_fixture_test/0`.
+/// BT-5155: a user class method named `fieldAt:` / `fieldAt:put:` is what a
+/// send reaches on every route (the class process no longer intercepts it),
+/// so it is direct-call eligible like any other class method.
 #[test]
-fn class_var_reflection_selectors_match_shared_fixture() {
-    let path = crate::source_analysis::corpus_test_support::repo_root().join(
-        "runtime/apps/beamtalk_runtime/test/fixtures/class_var_reflection_selectors_conformance.json",
-    );
-    let raw = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read fixture {}: {e}", path.display()));
-    let fixture: serde_json::Value = serde_json::from_str(&raw).expect("fixture is JSON");
-    let list = |key: &str| -> Vec<String> {
-        fixture[key]
-            .as_array()
-            .unwrap_or_else(|| panic!("fixture.{key} is an array"))
-            .iter()
-            .map(|v| v.as_str().expect("selector is a string").to_string())
-            .collect()
-    };
-    let members = list("selectors");
-    assert!(!members.is_empty());
-    for sel in &members {
-        assert!(
-            ClassInfo::is_class_var_reflection_selector(sel),
-            "{sel} is a class-variable reflection selector at runtime"
-        );
-    }
-    for sel in list("non_selectors") {
-        assert!(
-            !ClassInfo::is_class_var_reflection_selector(&sel),
-            "{sel} is not a class-variable reflection selector"
-        );
-    }
-}
-
-/// BT-4148: a user class method named `fieldAt:` / `fieldAt:put:` is never
-/// what a send reaches (the class process answers it first), so it is never
-/// direct-call eligible.
-#[test]
-fn field_at_class_methods_are_not_direct_call_eligible() {
+fn field_at_class_methods_are_direct_call_eligible() {
     let hierarchy = bt4099_hierarchy_for_source(
         "Object subclass: Reg\n  class fieldAt: k => 1\n  class fieldAt: k put: v => 2\n",
     );
-    assert!(!hierarchy.is_direct_call_eligible("Reg", "fieldAt:"));
-    assert!(!hierarchy.is_direct_call_eligible("Reg", "fieldAt:put:"));
+    assert!(hierarchy.is_direct_call_eligible("Reg", "fieldAt:"));
+    assert!(hierarchy.is_direct_call_eligible("Reg", "fieldAt:put:"));
 }
 
 /// BT-4464: `ClassHierarchy::explicit_class_new_builds_in_caller` over the
@@ -3222,24 +2884,8 @@ fn explicit_class_new_needs_a_concrete_stateless_class() {
         "abstract Object subclass: Tag\n  class new => (Erlang erlang) make_ref\n"
     ));
     assert!(!bt4464_explicit_new_verdict(
-        "Object subclass: Tag\n  classState: count = 0\n  class new => (Erlang erlang) make_ref\n"
-    ));
-    assert!(!bt4464_explicit_new_verdict(
         "Actor subclass: Tag\n  class new => (Erlang erlang) make_ref\n"
     ));
-    // Class variables anywhere in the chain keep the class process.
-    let tokens = crate::source_analysis::lex_with_eof(
-        "Object subclass: Base\n  classState: count = 0\n\
-         Base subclass: Tag\n  class new => (Erlang erlang) make_ref\n",
-    );
-    let (module, _) = crate::source_analysis::parse(tokens);
-    let h = ClassHierarchy::build(&module)
-        .0
-        .expect("fixture hierarchy should build");
-    assert!(
-        !h.explicit_class_new_builds_in_caller(&module.classes[1]),
-        "an ancestor's class variables keep the class process"
-    );
     // An instance-side `new` replaces `new/0`: nothing to call directly.
     assert!(!bt4464_explicit_new_verdict(
         "Object subclass: Tag\n  new => self\n  class new => (Erlang erlang) make_ref\n"
@@ -3324,10 +2970,6 @@ fn explicit_class_new1_needing_the_class_process_stays_there() {
     // A non-parameter, non-literal argument may read anything.
     assert!(!bt4475_explicit_new1_verdict(
         "Object subclass: Tag\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: self name\n"
-    ));
-    // Class variables in the chain keep the class process for `new:` too.
-    assert!(!bt4475_explicit_new1_verdict(
-        "Object subclass: Tag\n  classState: count = 0\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n"
     ));
     // An instance-side `new:` of the same name fails closed.
     assert!(!bt4475_explicit_new1_verdict(
@@ -3430,7 +3072,6 @@ fn explicit_new1_verdict_survives_pass1_extraction_across_files() {
 
     for (base_src, expected) in [
         ("Object subclass: Base\n", true),
-        ("Object subclass: Base\n  classState: n = 0\n", false),
         ("Actor subclass: Base\n", false),
         ("Value subclass: Base\n", true),
     ] {

@@ -549,8 +549,10 @@ impl Parser {
     ) -> (Expression, Option<Box<Expression>>) {
         let mut value = receiver;
         let mut keyword_field = false;
+        let mut links = 0usize;
         while !keyword_field && self.at_attached_field_access(true) {
-            self.advance(); // consume the period
+            let period_span = self.advance().span(); // consume the period
+            let grow = self.chain_may_grow(&mut links, period_span);
             let field_token = self.advance();
             let field_span = field_token.span();
             let field_name: EcoString = match field_token.into_kind() {
@@ -567,6 +569,10 @@ impl Parser {
             } else {
                 field_span
             };
+            if !grow {
+                // Past the chain limit: consume the rest without building it.
+                continue;
+            }
             let span = value.span().merge(field_span);
             value = Expression::FieldAccess {
                 receiver: Box::new(value),
@@ -574,6 +580,7 @@ impl Parser {
                 span,
             };
         }
+        let value = self.finish_chain(value, links);
         self.diagnostics.push(
             Diagnostic::error(
                 "a field access in a binary construction segment must be parenthesized",
@@ -896,6 +903,9 @@ impl Parser {
         // precedes digits, so `raw` may itself be negative (e.g. the second
         // `-` in `<<- -5:8>>` double-negates). Negation must not overflow:
         // `- -9223372036854775808` exceeds `i64::MAX` (review finding 2).
+        if parse_integer(&raw).is_ok() {
+            self.number_spellings.push((span, raw.clone()));
+        }
         let value = match parse_integer(&raw) {
             Ok(val) if !negated => Pattern::Literal(Literal::Integer(val), span),
             Ok(val) => {
@@ -940,6 +950,7 @@ impl Parser {
         let value = match raw.parse::<f64>() {
             // Reject values that overflow `f64` — same rule as `parse_literal`.
             Ok(val) if val.is_finite() => {
+                self.number_spellings.push((span, raw.clone()));
                 let val = if negated { -val } else { val };
                 // Negating a finite float stays finite.
                 Pattern::Literal(Literal::Float(val), span)
@@ -1226,7 +1237,10 @@ impl Parser {
         let span = self.advance().span();
         match parse_integer(&raw) {
             // The guard pins `n` to `1..=256`, so the conversion is exact.
-            Ok(n) if (1..=256).contains(&n) => usize::try_from(n).ok(),
+            Ok(n) if (1..=256).contains(&n) => {
+                self.number_spellings.push((span, raw));
+                usize::try_from(n).ok()
+            }
             Ok(n) => {
                 self.diagnostics.push(Diagnostic::error(
                     format!("binary segment unit must be between 1 and 256, got {n}"),

@@ -28,14 +28,8 @@ pub(crate) fn write_validated_manifest(manifest_path: &Utf8Path, content: &str) 
 /// The line ending a document uses: `\r\n` if it contains one, else `\n`.
 ///
 /// Surgical manifest edits keep the file's own convention instead of
-/// normalising every line.
-pub(crate) fn line_ending(content: &str) -> &'static str {
-    if content.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    }
-}
+/// normalising every line. The rule is shared with `beamtalk fmt`.
+pub(crate) use beamtalk_core::source_analysis::line_ending;
 
 /// The table name of a `[name]` header line, or `None` if `line` is not a
 /// (single-bracket) table header. A trailing `# comment` is allowed, and

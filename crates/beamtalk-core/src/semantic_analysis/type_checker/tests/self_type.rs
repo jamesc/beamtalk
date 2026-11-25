@@ -188,8 +188,7 @@ fn test_self_class_no_false_dnu_warnings() {
     // not produce false DNU warnings for class-side method sends on the result.
     let source = "
 Value subclass: Counter
-  classState: instanceCount = 0
-  class instanceCount => self.instanceCount
+  class instanceCount => 0
   getMyClass -> Self class => self class
 
 Value subclass: User
@@ -637,7 +636,6 @@ fn infer_method_return_types_collects_standalone_methods() {
     let mut module = make_module(vec![]);
     module.method_definitions = vec![StandaloneMethodDefinition {
         class_name: ident("Widget"),
-        package: None,
         is_class_method: false,
         method: method_unannotated("label", vec![str_lit("ok")]),
         span: span(),

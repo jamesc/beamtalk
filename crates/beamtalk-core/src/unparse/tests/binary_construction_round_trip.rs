@@ -102,7 +102,7 @@ fn construction_specifier_spellings_canonicalise_like_patterns() {
         ("<<v :4>>", "<<v:4>>\n"),
     ] {
         assert_eq!(
-            format_source(source).as_deref(),
+            format_source(source).ok().as_deref(),
             Some(canonical),
             "{source}"
         );

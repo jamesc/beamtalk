@@ -19,7 +19,6 @@
 //! └── stdlib class names (pre-indexed from lib/*.bt)
 //! ```
 
-use beamtalk_core::compilation::extension_index::ExtensionIndex;
 use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
 use beamtalk_core::semantic_analysis::{
     AliasInfo, AliasRegistry, ClassHierarchy, ProtocolInfo, ProtocolRegistry, SemanticError,
@@ -130,6 +129,49 @@ pub(crate) fn is_dependency_checkout_file(file: &Utf8Path) -> bool {
     dependency_package_for_path(file).is_some()
 }
 
+/// What a file exports to the rest of the project; see
+/// [`ProjectIndex::file_interface`].
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FileInterface {
+    classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// `(name, expansion, is_internal, package)`, span-free.
+    aliases: Vec<(EcoString, DeclaredType, bool, Option<EcoString>)>,
+    protocols: Vec<ProtocolInfo>,
+}
+
+/// A file's interface borrowed from the index (see
+/// [`ProjectIndex::file_interface_matches`]).
+struct InterfaceView<'a> {
+    classes: Vec<&'a beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    aliases: Vec<(&'a EcoString, DeclaredType, bool, &'a Option<EcoString>)>,
+    protocols: Vec<&'a ProtocolInfo>,
+}
+
+/// `ProtocolInfo` equality ignoring where the protocol is declared: moving a
+/// declaration does not change what other files see. Destructured
+/// exhaustively so a new field must be considered here.
+fn protocol_eq_ignoring_span(a: &ProtocolInfo, b: &ProtocolInfo) -> bool {
+    let ProtocolInfo {
+        name,
+        type_params,
+        type_param_bounds,
+        extending,
+        methods,
+        class_methods,
+        provided,
+        package,
+        span: _,
+    } = a;
+    *name == b.name
+        && *type_params == b.type_params
+        && *type_param_bounds == b.type_param_bounds
+        && *extending == b.extending
+        && *methods == b.methods
+        && *class_methods == b.class_methods
+        && *provided == b.provided
+        && *package == b.package
+}
+
 /// Cross-file project index holding a merged class hierarchy.
 ///
 /// **DDD Context:** Language Service — Aggregate Root
@@ -149,11 +191,6 @@ pub struct ProjectIndex {
     stdlib_class_names: HashSet<EcoString>,
     /// Tracks which files were loaded as stdlib sources.
     stdlib_files: HashSet<Utf8PathBuf>,
-    /// Per-file standalone extension definitions (ADR 0066).
-    ///
-    /// Tracked per file so incremental updates can drop a file's stale
-    /// extensions; merged on demand by [`Self::cross_file_extensions_for`].
-    file_extensions: HashMap<Utf8PathBuf, ExtensionIndex>,
     /// Merged type alias registry across all indexed files (ADR 0108 Phase
     /// 8) — the alias-namespace counterpart to `merged_hierarchy`.
     /// Rebuilt from [`Self::file_aliases`] on every [`Self::update_file_aliases`]
@@ -252,7 +289,6 @@ impl ProjectIndex {
             file_hierarchies: HashMap::new(),
             stdlib_class_names: HashSet::new(),
             stdlib_files: HashSet::new(),
-            file_extensions: HashMap::new(),
             merged_aliases: Arc::new(AliasRegistry::new()),
             file_aliases: HashMap::new(),
             file_protocols: HashMap::new(),
@@ -328,13 +364,6 @@ impl ProjectIndex {
                 .file_hierarchies
                 .insert(path.clone(), file_hierarchy.clone());
             index.merged_hierarchy.merge(&file_hierarchy);
-
-            // Track standalone extensions defined in stdlib sources
-            // so they are visible to cross-file diagnostics like any other
-            // indexed file's extensions.
-            let mut extensions = ExtensionIndex::new();
-            extensions.add_module(&module, path.as_std_path());
-            index.set_file_extensions(path.clone(), extensions);
 
             // ADR 0108 Phase 8: track stdlib `type` declarations
             // too, so a stdlib-defined alias is offered in completions and
@@ -470,8 +499,7 @@ impl ProjectIndex {
     /// `ClassHierarchy` used for alias/class collision detection already
     /// reflects this call's class/protocol changes.
     ///
-    /// An empty `aliases` clears the file's prior entry (mirrors
-    /// [`Self::set_file_extensions`]).
+    /// An empty `aliases` clears the file's prior entry.
     ///
     /// No-ops (skips [`Self::rebuild_alias_registry`] entirely) when `file`
     /// had no tracked aliases before *and* `aliases` is empty now — this
@@ -697,31 +725,6 @@ impl ProjectIndex {
         self.merged_aliases = Arc::new(registry);
     }
 
-    /// Record the standalone extension definitions contributed by `file`
-    /// An empty index clears the file's entry. Call after
-    /// [`Self::update_file`] whenever the file is (re)indexed.
-    pub fn set_file_extensions(&mut self, file: Utf8PathBuf, extensions: ExtensionIndex) {
-        if extensions.is_empty() {
-            self.file_extensions.remove(&file);
-        } else {
-            self.file_extensions.insert(file, extensions);
-        }
-    }
-
-    /// Returns a merged extension index over every indexed file except
-    /// `file` — the extension analogue of
-    /// [`Self::cross_file_class_infos_for`].
-    #[must_use]
-    pub fn cross_file_extensions_for(&self, file: &Utf8PathBuf) -> ExtensionIndex {
-        let mut merged = ExtensionIndex::new();
-        for (path, index) in &self.file_extensions {
-            if path != file {
-                merged.merge(index);
-            }
-        }
-        merged
-    }
-
     /// Remove a file from the index.
     ///
     /// Classes defined only in this file are removed from the merged hierarchy.
@@ -732,7 +735,6 @@ impl ProjectIndex {
             // Stdlib files are never truly removed — preserve their hierarchy
             return;
         }
-        self.file_extensions.remove(file);
         let mut classes_changed = false;
         if let Some(old_names) = self.file_classes.remove(file) {
             self.file_hierarchies.remove(file);
@@ -838,8 +840,15 @@ impl ProjectIndex {
             if others.is_empty() {
                 continue;
             }
-            others.sort();
-            let winner = others[0].min(file).clone();
+            // BT-5131: a project file outranks a dependency checkout copy
+            // (`_build/deps/...`), whatever the paths sort like.
+            let rank = |p: &Utf8PathBuf| (is_dependency_checkout_file(p), p.clone());
+            others.sort_by_key(|p| rank(p));
+            let winner = if rank(file) < rank(others[0]) {
+                file.clone()
+            } else {
+                others[0].clone()
+            };
             out.push((name.clone(), others[0].clone(), winner));
         }
         out
@@ -857,25 +866,106 @@ impl ProjectIndex {
         self.file_classes.get(file).map(Vec::as_slice)
     }
 
-    /// The interface `file` exports to other files (BT-5109): every class it
-    /// defines with its full `ClassInfo` (superclass, methods and their
-    /// signatures, state), sorted by class name. Two calls compare equal
-    /// exactly when nothing another file can observe has changed, so a
-    /// method added, removed or re-typed makes them differ, while an edit to
-    /// a method body does not.
+    /// The interface `file` exports to other files (BT-5109, BT-5131): every
+    /// class it defines with its full `ClassInfo` (superclass, methods and
+    /// their signatures, state), plus its type aliases and protocols, sorted
+    /// by name. Two calls compare equal exactly when nothing another file can
+    /// observe has changed, so a method added, removed or re-typed, an alias
+    /// re-pointed or a protocol requirement edited makes them differ, while
+    /// an edit to a method body, or merely moving a declaration, does not.
     #[must_use]
-    pub fn file_interface(
+    pub fn file_interface(&self, file: &Utf8PathBuf) -> Option<FileInterface> {
+        let view = self.interface_view(file)?;
+        Some(FileInterface {
+            classes: view.classes.into_iter().cloned().collect(),
+            aliases: view
+                .aliases
+                .into_iter()
+                .map(|(name, ty, internal, package)| (name.clone(), ty, internal, package.clone()))
+                .collect(),
+            protocols: view
+                .protocols
+                .into_iter()
+                .map(|p| ProtocolInfo {
+                    span: beamtalk_core::span::Span::default(),
+                    ..p.clone()
+                })
+                .collect(),
+        })
+    }
+
+    /// Whether `file`'s current interface equals `baseline`, as
+    /// [`Self::file_interface`] would compare (a file that is not indexed,
+    /// or `None`, counts as exporting nothing) — but by reference, without
+    /// cloning the file's `ClassInfo`s (BT-5188: it runs under the service
+    /// lock after edits).
+    #[must_use]
+    pub fn file_interface_matches(
         &self,
         file: &Utf8PathBuf,
-    ) -> Option<Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>> {
-        let names = self.file_classes.get(file)?;
-        let hierarchy = self.file_hierarchies.get(file)?;
-        let mut infos: Vec<_> = names
-            .iter()
-            .filter_map(|n| hierarchy.get_class(n).cloned())
+        baseline: Option<&FileInterface>,
+    ) -> bool {
+        let empty = FileInterface::default();
+        let base = baseline.unwrap_or(&empty);
+        let Some(view) = self.interface_view(file) else {
+            return *base == empty;
+        };
+        view.classes.len() == base.classes.len()
+            && view.classes.iter().zip(&base.classes).all(|(a, b)| *a == b)
+            && view.aliases.len() == base.aliases.len()
+            && view.aliases.iter().zip(&base.aliases).all(
+                |((name, ty, internal, package), (bn, bt, bi, bp))| {
+                    *name == bn && ty == bt && internal == bi && *package == bp
+                },
+            )
+            && view.protocols.len() == base.protocols.len()
+            && view
+                .protocols
+                .iter()
+                .zip(&base.protocols)
+                .all(|(a, b)| protocol_eq_ignoring_span(a, b))
+    }
+
+    /// The borrowed parts of `file`'s interface, sorted by name; shared by
+    /// [`Self::file_interface`] and [`Self::file_interface_matches`].
+    fn interface_view(&self, file: &Utf8PathBuf) -> Option<InterfaceView<'_>> {
+        let aliases_indexed = self.file_aliases.get(file);
+        let protocols_indexed = self.file_protocols.get(file);
+        if !self.file_classes.contains_key(file)
+            && aliases_indexed.is_none()
+            && protocols_indexed.is_none()
+        {
+            return None;
+        }
+        let mut classes: Vec<&beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
+            match (self.file_classes.get(file), self.file_hierarchies.get(file)) {
+                (Some(names), Some(hierarchy)) => names
+                    .iter()
+                    .filter_map(|n| hierarchy.get_class(n))
+                    .collect(),
+                _ => Vec::new(),
+            };
+        classes.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut aliases: Vec<_> = aliases_indexed
+            .into_iter()
+            .flatten()
+            .map(|i| {
+                (
+                    &i.name,
+                    DeclaredType::from(&i.annotation),
+                    i.is_internal,
+                    &i.package,
+                )
+            })
             .collect();
-        infos.sort_by(|a, b| a.name.cmp(&b.name));
-        Some(infos)
+        aliases.sort_by(|a, b| a.0.cmp(b.0));
+        let mut protocols: Vec<&ProtocolInfo> = protocols_indexed.into_iter().flatten().collect();
+        protocols.sort_by(|a, b| a.name.cmp(&b.name));
+        Some(InterfaceView {
+            classes,
+            aliases,
+            protocols,
+        })
     }
 
     /// Returns `true` if `file` was loaded as part of the stdlib source set.
@@ -2200,61 +2290,6 @@ mod tests {
             index.alias_registry().has_alias("Foo"),
             "removing the colliding class should let the previously-shadowed alias \
              re-register"
-        );
-    }
-}
-
-#[cfg(test)]
-mod extension_tests {
-    use super::*;
-
-    fn parse_and_index(index: &mut ProjectIndex, path: &str, source: &str) {
-        let tokens = lex_with_eof(source);
-        let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        index.update_file(Utf8PathBuf::from(path), &hierarchy);
-        let mut extensions = ExtensionIndex::new();
-        extensions.add_module(&module, std::path::Path::new(path));
-        index.set_file_extensions(Utf8PathBuf::from(path), extensions);
-    }
-
-    #[test]
-    fn cross_file_extensions_exclude_own_file() {
-        let mut index = ProjectIndex::new();
-        parse_and_index(&mut index, "a.bt", "String >> fromA => self\n");
-        parse_and_index(&mut index, "b.bt", "String >> fromB => self\n");
-
-        let for_a = index.cross_file_extensions_for(&Utf8PathBuf::from("a.bt"));
-        assert_eq!(for_a.len(), 1, "a.bt should see only b.bt's extension");
-        let for_b = index.cross_file_extensions_for(&Utf8PathBuf::from("b.bt"));
-        assert_eq!(for_b.len(), 1, "b.bt should see only a.bt's extension");
-    }
-
-    #[test]
-    fn removed_file_extensions_disappear() {
-        let mut index = ProjectIndex::new();
-        parse_and_index(&mut index, "a.bt", "String >> fromA => self\n");
-        parse_and_index(&mut index, "b.bt", "Object subclass: B\n  m => 1\n");
-
-        index.remove_file(&Utf8PathBuf::from("a.bt"));
-        let for_b = index.cross_file_extensions_for(&Utf8PathBuf::from("b.bt"));
-        assert!(
-            for_b.is_empty(),
-            "removed file's extensions must not linger"
-        );
-    }
-
-    #[test]
-    fn empty_extension_set_clears_entry() {
-        let mut index = ProjectIndex::new();
-        parse_and_index(&mut index, "a.bt", "String >> fromA => self\n");
-        // Re-index the same file without extensions.
-        parse_and_index(&mut index, "a.bt", "Object subclass: A\n  m => 1\n");
-
-        let for_other = index.cross_file_extensions_for(&Utf8PathBuf::from("other.bt"));
-        assert!(
-            for_other.is_empty(),
-            "re-indexing without extensions must clear the stale entry"
         );
     }
 }

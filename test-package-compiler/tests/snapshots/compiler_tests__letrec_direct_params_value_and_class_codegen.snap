@@ -22,17 +22,17 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
 
 'countUpTo:'/2 = fun (Self, _limit@1) ->
     let X@ = 0 in
-    let _WhileResult@13 = letrec 'while'/1 = fun (X@) -> let _CondFun@2 = fun (X@) -> let _BinLeft@3 = X@ in let _BinRight@4 = _limit@1 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft@3), call 'erlang':'is_binary'(_BinLeft@3)) of <'true'> when 'true' -> call 'erlang':'<'(_BinLeft@3, _BinRight@4) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@3, '<', [_BinRight@4]) <_BinOpNoMatch@5> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@5}) end in case apply _CondFun@2 (X@) of <'true'> when 'true' -> let _X@9 = let _BinLeft@6 = X@ in let _BinRight@7 = 1 in case call 'erlang':'is_number'(_BinLeft@6) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@6, _BinRight@7) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@6, '+', [_BinRight@7]) <_BinOpNoMatch@8> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@8}) end in  apply 'while'/1 (_X@9) <'false'> when 'true' -> let _ExitSA@10 = call 'maps':'new'() in let _ExitSA@11 = call 'maps':'put'('__local__x', X@, _ExitSA@10) in {'nil', _ExitSA@11} <_CondBad@12> when 'true' -> call 'erlang':'error'({'case_clause', _CondBad@12}) end in apply 'while'/1 (X@) in
-    let _WhileState@14 = call 'erlang':'element'(2, _WhileResult@13) in
-    let _x@15 = call 'maps':'get'('__local__x', _WhileState@14) in
-    _x@15
+    let _WhileResult@15 = letrec 'while'/1 = fun (X@) -> let _CondFun@2 = fun (X@) -> let _BinLeft@3 = X@ in let _BinRight@4 = _limit@1 in case call 'erlang':'is_number'(_BinLeft@3) of <'true'> when 'true' -> case call 'erlang':'is_number'(_BinRight@4) of <'true'> when 'true' -> call 'erlang':'<'(_BinLeft@3, _BinRight@4) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_comparison'(_BinRight@4, 'lessThanFromNumber:', [_BinLeft@3], '<') <_BinOpNoMatch@5> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@5}) end <'false'> when 'true' -> case call 'erlang':'is_binary'(_BinLeft@3) of <'true'> when 'true' -> call 'erlang':'<'(_BinLeft@3, _BinRight@4) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@3, '<', [_BinRight@4]) <_BinOpNoMatch@6> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@6}) end <_BinOpNoMatch@7> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@7}) end in case apply _CondFun@2 (X@) of <'true'> when 'true' -> let _X@11 = let _BinLeft@8 = X@ in let _BinRight@9 = 1 in case call 'erlang':'is_number'(_BinLeft@8) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@8, _BinRight@9) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@8, '+', [_BinRight@9]) <_BinOpNoMatch@10> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@10}) end in  apply 'while'/1 (_X@11) <'false'> when 'true' -> let _ExitSA@12 = call 'maps':'new'() in let _ExitSA@13 = call 'maps':'put'('__local__x', X@, _ExitSA@12) in {'nil', _ExitSA@13} <_CondBad@14> when 'true' -> call 'erlang':'error'({'case_clause', _CondBad@14}) end in apply 'while'/1 (X@) in
+    let _WhileState@16 = call 'erlang':'element'(2, _WhileResult@15) in
+    let _x@17 = call 'maps':'get'('__local__x', _WhileState@16) in
+    _x@17
 
-'sumTo:'/2 = fun (Self, _limit@16) ->
+'sumTo:'/2 = fun (Self, _limit@18) ->
     let Sum@ = 0 in
-    let _CountedLoopResult@32 = let _temp@17 = 1 in let _temp@18 = _limit@16 in letrec 'loop'/2 = fun (_loopidx@19, Sum@) -> case call 'erlang':'=<'(_loopidx@19, _temp@18) of <'true'> when 'true' -> let _Sum@29 = let _BinLeft@20 = Sum@ in let _BinRight@21 = _loopidx@19 in case call 'erlang':'is_number'(_BinLeft@20) of <'true'> when 'true' -> try call 'erlang':'+'(_BinLeft@20, _BinRight@21) of <_BinCoerceTry@22> -> _BinCoerceTry@22 catch <_BinCoerceType@23, _BinCoerceError@24, _BinCoerceStack@25> -> case {_BinCoerceType@23, _BinCoerceError@24} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight@21) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType@23, _BinCoerceError@24, _BinCoerceStack@25) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight@21, 'plusFromNumber:', [_BinLeft@20], '+') <_BinCoerceNoMatch@27> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch@27}) end <_BinCoerceOther@26> when 'true' -> primop 'raw_raise'(_BinCoerceType@23, _BinCoerceError@24, _BinCoerceStack@25) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@20, '+', [_BinRight@21]) <_BinOpNoMatch@28> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@28}) end in  apply 'loop'/2 (call 'erlang':'+'(_loopidx@19, 1), _Sum@29) <'false'> when 'true' -> let _ExitSA@30 = call 'maps':'new'() in let _ExitSA@31 = call 'maps':'put'('__local__sum', Sum@, _ExitSA@30) in {'nil', _ExitSA@31} end in apply 'loop'/2 (_temp@17, Sum@) in
-    let _CountedLoopState@33 = call 'erlang':'element'(2, _CountedLoopResult@32) in
-    let _sum@34 = call 'maps':'get'('__local__sum', _CountedLoopState@33) in
-    _sum@34
+    let _CountedLoopResult@38 = let _temp@19 = 1 in let _temp@20 = _limit@18 in do case call 'erlang':'is_number'(_temp@20) of <'true'> when 'true' -> 'ok' <'false'> when 'true' -> let _NumMsg@22 = #{#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}# in let _Class@23 = call 'beamtalk_primitive':'class_of'(_temp@19) in let _Err@24 = call 'beamtalk_error':'new'('type_error', _Class@23) in let _Err@25 = call 'beamtalk_error':'with_message'(_Err@24, _NumMsg@22) in call 'beamtalk_error':'raise'(_Err@25) end  letrec 'loop'/2 = fun (_loopidx@21, Sum@) -> case call 'erlang':'=<'(_loopidx@21, _temp@20) of <'true'> when 'true' -> let _Sum@35 = let _BinLeft@26 = Sum@ in let _BinRight@27 = _loopidx@21 in case call 'erlang':'is_number'(_BinLeft@26) of <'true'> when 'true' -> try call 'erlang':'+'(_BinLeft@26, _BinRight@27) of <_BinCoerceTry@28> -> _BinCoerceTry@28 catch <_BinCoerceType@29, _BinCoerceError@30, _BinCoerceStack@31> -> case {_BinCoerceType@29, _BinCoerceError@30} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight@27) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType@29, _BinCoerceError@30, _BinCoerceStack@31) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight@27, 'plusFromNumber:', [_BinLeft@26], '+') <_BinCoerceNoMatch@33> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch@33}) end <_BinCoerceOther@32> when 'true' -> primop 'raw_raise'(_BinCoerceType@29, _BinCoerceError@30, _BinCoerceStack@31) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@26, '+', [_BinRight@27]) <_BinOpNoMatch@34> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@34}) end in  apply 'loop'/2 (call 'erlang':'+'(_loopidx@21, 1), _Sum@35) <'false'> when 'true' -> let _ExitSA@36 = call 'maps':'new'() in let _ExitSA@37 = call 'maps':'put'('__local__sum', Sum@, _ExitSA@36) in {'nil', _ExitSA@37} end in apply 'loop'/2 (_temp@19, Sum@) in
+    let _CountedLoopState@39 = call 'erlang':'element'(2, _CountedLoopResult@38) in
+    let _sum@40 = call 'maps':'get'('__local__sum', _CountedLoopState@39) in
+    _sum@40
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
     case Selector of
@@ -80,50 +80,73 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
             let <DispArg0> = call 'erlang':'hd'(Args) in
             call 'letrec_direct_params_value_and_class':'sumTo:'(Self, DispArg0)
         <_Other> when 'true' ->
+            case Selector of
+                <'class'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'clearField:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'delegate'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'displayString'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'equals:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'error:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'fieldAt:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'fieldAt:put:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'fieldNames'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'hasField:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'hash'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'ifNil:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'ifNil:ifNotNil:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'ifNotNil:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'ifNotNil:ifNil:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'inspect'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'isKindOf:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'isNil'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'notImplemented'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'notNil'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'perform:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'perform:withArguments:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'printString'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'respondsTo:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'show:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'showCr:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'subclassResponsibility'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'then:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'yourself'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <_> when 'true' ->
             %% BT-4260: a memoised verdict picks the direct inherited call.
-            case case Selector of
-                <'class'> when 'true' -> 'slow'
-                <'clearField:'> when 'true' -> 'slow'
-                <'delegate'> when 'true' -> 'slow'
-                <'displayString'> when 'true' -> 'slow'
-                <'equals:'> when 'true' -> 'slow'
-                <'error:'> when 'true' -> 'slow'
-                <'fieldAt:'> when 'true' -> 'slow'
-                <'fieldAt:put:'> when 'true' -> 'slow'
-                <'fieldNames'> when 'true' -> 'slow'
-                <'hasField:'> when 'true' -> 'slow'
-                <'hash'> when 'true' -> 'slow'
-                <'ifNil:'> when 'true' -> 'slow'
-                <'ifNil:ifNotNil:'> when 'true' -> 'slow'
-                <'ifNotNil:'> when 'true' -> 'slow'
-                <'ifNotNil:ifNil:'> when 'true' -> 'slow'
-                <'inspect'> when 'true' -> 'slow'
-                <'isKindOf:'> when 'true' -> 'slow'
-                <'isNil'> when 'true' -> 'slow'
-                <'notImplemented'> when 'true' -> 'slow'
-                <'notNil'> when 'true' -> 'slow'
-                <'perform:'> when 'true' -> 'slow'
-                <'perform:withArguments:'> when 'true' -> 'slow'
-                <'printString'> when 'true' -> 'slow'
-                <'respondsTo:'> when 'true' -> 'slow'
-                <'show:'> when 'true' -> 'slow'
-                <'showCr:'> when 'true' -> 'slow'
-                <'subclassResponsibility'> when 'true' -> 'slow'
-                <'then:'> when 'true' -> 'slow'
-                <'yourself'> when 'true' -> 'slow'
-                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('DirectParamsValue', Selector)
-            end of
+            case call 'beamtalk_dispatch':'inherited_target'('DirectParamsValue', Selector) of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
-                <{'ext', InhExtOwner}> when 'true' ->
-                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@object')
                 <_InhSlow> when 'true' ->
-                    case call 'beamtalk_extensions':'lookup'('DirectParamsValue', Selector) of
-                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                            apply ExtFun(Args, Self)
-                        <'not_found'> when 'true' ->
-                            call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
-                    end
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+            end
             end
     end
 
@@ -146,21 +169,13 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
 'has_method'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'countUpTo:', 'sumTo:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('DirectParamsValue', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'bt@stdlib@object':'has_method'(Selector)
-            end
+        <'false'> when 'true' -> call 'bt@stdlib@object':'has_method'(Selector)
     end
 
 'has_method_local'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'countUpTo:', 'sumTo:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('DirectParamsValue', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> 'false'
-            end
+        <'false'> when 'true' -> 'false'
     end
 
 
@@ -187,7 +202,6 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'package' => 'none',
       'kind' => 'object',
       'fields' => [],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'false',
@@ -199,7 +213,6 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'countUpTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'sumTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
@@ -228,7 +241,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
                     'classMethodSignatures' => ~{'countDownFrom:' => #{#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<68>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<70>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#}~,
                     'methodXref' => [~{'class_side' => 'true', 'selector' => 'countDownFrom:', 'line' => 1, 'sends' => [~{'selector' => 'timesRepeat:', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '+', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'Integer'}~], 'references' => [~{'class' => 'Integer', 'line' => 1}~], 'source_status' => 'indexed'}~],
                     'stateVarXref' => [],
-                    'classState' => ~{'spawnCount' => 0}~,
+                    'classState' => ~{}~,
                     'classDoc' => 'none',
                     'methodDocs' => ~{}~,
                     'classMethodDocs' => ~{}~,
@@ -237,7 +250,6 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'package' => 'none',
       'kind' => 'actor',
       'fields' => [],
-      'class_fields' => ['spawnCount'],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'false',
@@ -249,7 +261,6 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
-      'class_field_kinds' => ~{'spawnCount' => 'eager'}~,
       'initialize_assigns' => [],
       'method_info' => ~{}~,
       'class_method_info' => ~{'countDownFrom:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
@@ -277,7 +288,6 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'package' => 'none',
       'kind' => 'object',
       'fields' => [],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'false',
@@ -289,7 +299,6 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'countUpTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'sumTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,

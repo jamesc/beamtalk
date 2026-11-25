@@ -181,8 +181,8 @@ fn a_bracket_around_a_call_whose_operand_is_bracketed_inside_a_closed_document_s
     assert_eq!(enforce_report(src), None);
 }
 
-/// ADR 0137 §2: every `dispatch/4` exit that is not a compiled Beamtalk method (an
-/// ADR 0066 extension fun, the inherited-method walk) runs through
+/// ADR 0137 §2: every `dispatch/4` exit that is not a compiled Beamtalk method (the
+/// inherited-method walk) runs through
 /// `beamtalk_actor_state:call_foreign/3`; the only other exit is the actor's own
 /// compiled `dispatch/4` (the `doesNotUnderstand:args:` handler). So the default arm
 /// holds no direct call into `beamtalk_dispatch`: each is the `make_fun` argument of a
@@ -225,7 +225,7 @@ fn every_dispatch_exit_is_compiled_or_goes_through_call_foreign() {
     let foreign = default_arm
         .matches("call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', ")
         .count();
-    assert_eq!(foreign, 2, "extension and inherited exits:\n{default_arm}");
+    assert_eq!(foreign, 1, "the inherited exit:\n{default_arm}");
 }
 
 /// A `^` out of a direct-params loop throws with the method's current field-read

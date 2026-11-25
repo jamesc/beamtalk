@@ -55,21 +55,14 @@ pub enum ExpectCategory {
     /// Suppress match-arm-block warnings — a `match:` arm whose body is a
     /// bare block literal answers the Block without running it (BT-4028).
     MatchArmBlock,
-    /// Suppress class-state-abroad warnings — a block literal that touches
-    /// its home class's variables used where it runs outside an invocation of
-    /// that class (ADR 0130 §5).
-    ClassStateAbroad,
-    /// Suppress class-process-ffi warnings — a class-side method that runs in
-    /// its class's process and directly calls a process-sensitive Erlang
-    /// function (BT-4031).
-    ClassProcessFfi,
     /// Suppress class-method-process-resource warnings — a class-side method
     /// that is direct-called in the caller's process directly creates a
     /// resource tied to, or acts on, the calling process (BT-4302).
     ClassMethodProcessResource,
-    /// Suppress class-var-reflection-shadowing warnings — a class-side method
-    /// named `fieldAt:`, `fieldAt:put:`, `hasField:` or `clearField:`, which
-    /// the class process answers itself for a Symbol argument (BT-4422).
+    /// Deprecated, parse-only (ADR 0153, BT-5155): the
+    /// `class-var-reflection-shadowing` lint was removed, because a class
+    /// method named `fieldAt:` etc. now answers on every route; reported as
+    /// a stale expectation.
     ClassVarReflectionShadowing,
     /// Suppress actor-state-abroad warnings — a block literal that touches
     /// its actor's state used where it runs outside the actor's process
@@ -96,6 +89,14 @@ pub enum ExpectCategory {
     /// then falls through the ordinary unused-`@expect` path and is reported
     /// as a stale-expectation warning. New code must not use it.
     StoredClosure,
+    /// Deprecated, parse-only (ADR 0153): the `class-state-abroad` lint was
+    /// removed with class variables. Like [`Self::StoredClosure`], an
+    /// existing `@expect class_state_abroad` keeps compiling and is reported
+    /// as a stale expectation.
+    ClassStateAbroad,
+    /// Deprecated, parse-only (ADR 0153): the `class-process-ffi` lint was
+    /// removed with class variables; reported as a stale expectation.
+    ClassProcessFfi,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -121,8 +122,6 @@ impl ExpectCategory {
             "inheritance" => Some(Self::Inheritance),
             "sendability" => Some(Self::Sendability),
             "match_arm_block" => Some(Self::MatchArmBlock),
-            "class_state_abroad" => Some(Self::ClassStateAbroad),
-            "class_process_ffi" => Some(Self::ClassProcessFfi),
             "class_method_process_resource" => Some(Self::ClassMethodProcessResource),
             "class_var_reflection_shadowing" => Some(Self::ClassVarReflectionShadowing),
             "actor_state_abroad" => Some(Self::ActorStateAbroad),
@@ -131,6 +130,8 @@ impl ExpectCategory {
             "cascade_drops_update" => Some(Self::CascadeDropsUpdate),
             "discarded_update" => Some(Self::DiscardedUpdate),
             "stored_closure" => Some(Self::StoredClosure),
+            "class_state_abroad" => Some(Self::ClassStateAbroad),
+            "class_process_ffi" => Some(Self::ClassProcessFfi),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -156,8 +157,6 @@ impl ExpectCategory {
             Self::Inheritance => "inheritance",
             Self::Sendability => "sendability",
             Self::MatchArmBlock => "match_arm_block",
-            Self::ClassStateAbroad => "class_state_abroad",
-            Self::ClassProcessFfi => "class_process_ffi",
             Self::ClassMethodProcessResource => "class_method_process_resource",
             Self::ClassVarReflectionShadowing => "class_var_reflection_shadowing",
             Self::ActorStateAbroad => "actor_state_abroad",
@@ -166,12 +165,16 @@ impl ExpectCategory {
             Self::CascadeDropsUpdate => "cascade_drops_update",
             Self::DiscardedUpdate => "discarded_update",
             Self::StoredClosure => "stored_closure",
+            Self::ClassStateAbroad => "class_state_abroad",
+            Self::ClassProcessFfi => "class_process_ffi",
             Self::All => "all",
         }
     }
 
     /// Returns the list of valid category name strings, for use in error messages.
-    /// Omits the deprecated parse-only `stored_closure` so it is not advertised.
+    /// Omits the deprecated parse-only names (`stored_closure`,
+    /// `class_state_abroad`, `class_process_ffi`,
+    /// `class_var_reflection_shadowing`) so they are not advertised.
     #[must_use]
     pub const fn valid_names() -> &'static [&'static str] {
         &[
@@ -191,10 +194,7 @@ impl ExpectCategory {
             "inheritance",
             "sendability",
             "match_arm_block",
-            "class_state_abroad",
-            "class_process_ffi",
             "class_method_process_resource",
-            "class_var_reflection_shadowing",
             "actor_state_abroad",
             "ffi_nested_string",
             "binary_string_compare",
@@ -639,6 +639,13 @@ pub enum Literal {
     /// Examples: `42`, `16rFF`, `2r1010`
     Integer(i64),
 
+    /// An integer literal too large for `i64` (BT-5182). Holds the value's
+    /// canonical decimal digits, with a leading `-` when negative; the BEAM
+    /// represents it as a bignum.
+    ///
+    /// Example: `100000000000000000000`, `16rFFFFFFFFFFFFFFFFFF`
+    BigInteger(EcoString),
+
     /// A floating-point literal.
     ///
     /// Examples: `3.14`, `1.5e10`, `2.0e-5`
@@ -664,6 +671,40 @@ pub enum Literal {
     ///
     /// Example: `$a`, `$\n`
     Character(char),
+}
+
+impl Literal {
+    /// The integer literal whose value is `decimal`: canonical decimal digits
+    /// (no leading zeros) with an optional leading `-`. A value that fits
+    /// `i64` is [`Literal::Integer`], any other [`Literal::BigInteger`], so
+    /// each integer has exactly one representation (BT-5182).
+    #[must_use]
+    pub fn integer_from_decimal(decimal: &str) -> Self {
+        decimal.parse::<i64>().map_or_else(
+            |_| Self::BigInteger(EcoString::from(decimal)),
+            Self::Integer,
+        )
+    }
+
+    /// The literal with its sign flipped, for a `-` written before a numeric
+    /// literal (negative patterns). An integer that overflows `i64` on
+    /// negation (`- -9223372036854775808`) becomes a [`Literal::BigInteger`];
+    /// a non-numeric literal is returned unchanged.
+    #[must_use]
+    pub fn negated(self) -> Self {
+        match self {
+            Self::Integer(n) => n.checked_neg().map_or_else(
+                || Self::integer_from_decimal(&n.unsigned_abs().to_string()),
+                Self::Integer,
+            ),
+            Self::BigInteger(digits) => match digits.strip_prefix('-') {
+                Some(magnitude) => Self::integer_from_decimal(magnitude),
+                None => Self::integer_from_decimal(&format!("-{digits}")),
+            },
+            Self::Float(f) => Self::Float(-f),
+            other => other,
+        }
+    }
 }
 
 /// A segment of an interpolated string (ADR 0023).

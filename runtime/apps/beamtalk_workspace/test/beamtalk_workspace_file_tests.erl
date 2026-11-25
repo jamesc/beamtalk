@@ -188,6 +188,64 @@ write_temp_uses_a_fresh_name_per_call_test() ->
         ?assertEqual({ok, <<"two">>}, file:read_file(T2))
     end).
 
+%% BT-5258: Windows has no POSIX permission bits (`file:read_file_info/1`
+%% reports 0666 / 0777 whatever `file:change_mode/2` was asked), so only the
+%% mode-bit comparison is skipped there. Every other assertion in the calling
+%% test still runs on Windows.
+-define(assertPosixMode(Expected, Mode),
+    case os:type() of
+        {win32, _} -> ok;
+        _ -> ?assertEqual(Expected, (Mode) band 8#777)
+    end
+).
+
+write_temp_is_private_and_exclusive_test() ->
+    with_dir(fun(Dir) ->
+        Path = filename:join(Dir, "target.bt"),
+        {ok, T} = beamtalk_workspace_file:write_temp(Path, <<"x">>, #{private => true}),
+        {ok, #file_info{mode = Mode}} = file:read_file_info(T),
+        ?assertPosixMode(8#600, Mode),
+        %% Unpredictable: a random suffix beyond the counter.
+        ?assertMatch([_, _, _ | _], string:split(T, ".", all))
+    end).
+
+atomic_write_keeps_existing_mode_test() ->
+    with_dir(fun(Dir) ->
+        Path = filename:join(Dir, "target.bt"),
+        ok = file:write_file(Path, <<"old">>),
+        ok = file:change_mode(Path, 8#640),
+        ok = beamtalk_workspace_file:atomic_write(Path, <<"new">>, undefined),
+        {ok, #file_info{mode = Mode}} = file:read_file_info(Path),
+        ?assertPosixMode(8#640, Mode),
+        New = filename:join(Dir, "fresh.bt"),
+        ok = beamtalk_workspace_file:atomic_write(New, <<"n">>, undefined, #{private => true}),
+        {ok, #file_info{mode = M2}} = file:read_file_info(New),
+        ?assertPosixMode(8#600, M2),
+        %% A staged (flush-style) temp for an existing file takes its mode.
+        {ok, T} = beamtalk_workspace_file:write_temp(Path, <<"s">>),
+        {ok, #file_info{mode = M3}} = file:read_file_info(T),
+        ?assertPosixMode(8#640, M3)
+    end).
+
+atomic_write_private_tightens_existing_0644_test() ->
+    with_dir(fun(Dir) ->
+        Path = filename:join(Dir, "metadata.json"),
+        ok = file:write_file(Path, <<"old">>),
+        ok = file:change_mode(Path, 8#644),
+        ok = beamtalk_workspace_file:atomic_write(Path, <<"new">>, undefined, #{private => true}),
+        {ok, #file_info{mode = Mode}} = file:read_file_info(Path),
+        ?assertPosixMode(8#600, Mode),
+        ?assertEqual({ok, <<"new">>}, file:read_file(Path))
+    end).
+
+ensure_private_dir_is_0700_test() ->
+    with_dir(fun(Dir) ->
+        Sub = filename:join([Dir, "a", "ws"]),
+        ok = beamtalk_workspace_file:ensure_private_dir(Sub),
+        {ok, #file_info{mode = Mode}} = file:read_file_info(Sub),
+        ?assertPosixMode(8#700, Mode)
+    end).
+
 write_temp_failure_is_tagged_test() ->
     with_dir(fun(Dir) ->
         Path = filename:join([Dir, "missing_dir", "target.bt"]),

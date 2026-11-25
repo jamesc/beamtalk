@@ -658,7 +658,11 @@ load_synth_module() ->
         "dispatch(tearDown, _, Self) -> Self;\n"
         "dispatch(testAlpha, _, Self) -> Self;\n"
         "dispatch(testBravo, _, _Self) -> beamtalk_test_case:fail(<<\"intentional failure\">>);\n"
-        "dispatch(testCharlie, _, _Self) -> beamtalk_test_case:skip(<<\"intentional skip\">>).\n",
+        "dispatch(testCharlie, _, _Self) -> beamtalk_test_case:skip(<<\"intentional skip\">>);\n"
+        %% BT-5189: a test that blocks until killed, announcing its worker.
+        "dispatch(testHang, _, Self) ->\n"
+        "    bt_test_runner_hang_probe ! {hang_started, self()},\n"
+        "    receive never -> Self end.\n",
     {Mod, Bin} = beamtalk_test_module:compile(Src),
     ok = beamtalk_test_module:load_binary(Mod, Bin),
     ok.
@@ -768,6 +772,8 @@ live_execution_test_() ->
                 ?assert(maps:get(total, R) >= 3),
                 ?assert(is_float(maps:get(duration, R)))
             end},
+            {"a killed concurrent runner takes its in-flight class workers with it (BT-5189)",
+                fun killed_runner_kills_workers/0},
             {"run_all (auto / 0 jobs) resolves to scheduler count", fun() ->
                 R = beamtalk_test_runner:run_all(0),
                 ?assertEqual('TestResult', maps:get('$beamtalk_class', R)),
@@ -923,3 +929,36 @@ make_result(Total, Passed, Failed, Skipped, Duration, Tests) ->
         duration => Duration,
         tests => Tests
     }.
+
+%% BT-5189: the LiveView IDE's test-run Stop kills the process running
+%% `run_classes`/`run_all` on the workspace node. Its class workers are
+%% monitored, not linked, so without a watcher they kept running every
+%% in-flight class to the end.
+killed_runner_kills_workers() ->
+    Hang = 'BtTestRunnerHangTest',
+    Info = #{
+        name => Hang,
+        module => ?SYNTH_MODULE,
+        superclass => 'TestCase',
+        instance_methods => #{testHang => #{arity => 0}},
+        instance_variables => []
+    },
+    {ok, _} = beamtalk_object_class:start_link(Hang, Info),
+    true = register(bt_test_runner_hang_probe, self()),
+    try
+        Runner = spawn(fun() -> beamtalk_test_runner:run_classes([Hang, ?SYNTH_CLASS], 2) end),
+        Worker =
+            receive
+                {hang_started, W} -> W
+            after 5000 -> error(hang_test_never_started)
+            end,
+        WorkerRef = erlang:monitor(process, Worker),
+        exit(Runner, kill),
+        receive
+            {'DOWN', WorkerRef, process, Worker, Reason} -> ?assertEqual(killed, Reason)
+        after 5000 -> error(worker_outlived_its_runner)
+        end
+    after
+        unregister(bt_test_runner_hang_probe),
+        stop_synth_class(Hang)
+    end.

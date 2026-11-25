@@ -44,12 +44,24 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
+  # The merge queue's test commit (BT-5247): the PR on top of main and every PR
+  # ahead of it in the queue. `ci-ok` is a required check, so it must report on
+  # this commit or the queue stalls. The `changes` job treats it like a push to
+  # main: the full Linux suite, every OTP in the window. The corpus tier is
+  # not part of it (corpus.yml runs on main after the merge; only its cheap
+  # fixture-reader subset runs here). Never path-filtered: a required check that
+  # never starts stalls the queue.
+  # scripts/ci/test_merge_queue.py pins all of this.
+  merge_group:
+    types: [checks_requested]
 
 # PR runs cancel the superseded run for the same PR. A push to main is keyed on
 # its own SHA and never cancelled: main is the safety net for everything the PR
 # path skips (the older OTP, path-gated jobs), so every merge must get a complete
-# verdict even when the next merge lands minutes later (BT-4209). This workflow
-# never reacts to labels; the opt-in macOS/Windows/desktop run is ci-platforms.yml.
+# verdict even when the next merge lands minutes later (BT-4209). A merge-group
+# run is keyed on its SHA the same way (BT-5247): each queue entry has its own
+# test commit, so no entry cancels another or a PR run. This workflow never
+# reacts to labels; the opt-in macOS/Windows/desktop run is ci-platforms.yml.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -72,8 +84,8 @@ jobs:
   # Every "does this PR touch X?" decision lives here and nowhere else. Jobs
   # gate on these outputs with a job-level `if:`, so a job that has nothing to
   # do never takes a runner (it used to occupy one just to exit from a
-  # step-level filter). On a push to main (or a workflow_dispatch) every path
-  # gate is true: main runs
+  # step-level filter). On a push to main (or a workflow_dispatch, or a
+  # merge_group run in the merge queue) every path gate is true: main runs
   # the full Linux suite, for every OTP in the window. macOS, Windows and the
   # desktop tests are ci-platforms.yml's (schedule / workflow_dispatch / the
   # `ci:all-platforms` PR label); only the ubuntu desktop leg for a PR touching
@@ -86,7 +98,8 @@ jobs:
     outputs:
       # The PR touches something outside the docs-only paths (the `push` list
       # above): the code jobs run. False means a docs-only PR: only `changes`
-      # and `ci-ok` run. Always true on a push to main or a dispatch.
+      # and `ci-ok` run. Always true on a push to main, a dispatch or a
+      # merge_group run.
       code: ${{ steps.filter.outputs.code }}
       # A PR touched the desktop app's own paths: test-desktop (ubuntu) runs.
       # Never true on a push to main.
@@ -110,6 +123,10 @@ jobs:
       # A shared runtime fixture, or a Rust crate that reads one, changed:
       # test-rust runs the corpus-tier fixture readers (BT-5033).
       fixture_readers: ${{ steps.filter.outputs.fixture_readers }}
+      # examples/cluster, the distribution runtime modules or the actor send
+      # path changed: test-cluster runs the three-node end-to-end scenario
+      # (BT-5143). Always true on a push to main.
+      cluster: ${{ steps.filter.outputs.cluster }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -121,16 +138,25 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            # push (main) / workflow_dispatch: the full Linux suite; no
-            # desktop (ci-platforms.yml's).
-            {
-              echo "desktop=false"
-              echo "code=true"
-              for k in core_diff_modes learn runtime rust exec vscode fixture_readers; do echo "$k=true"; done
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          case "$EVENT_NAME" in
+            pull_request) ;;
+            push|workflow_dispatch|merge_group)
+              # push (main) / workflow_dispatch / merge_group (the merge
+              # queue's test commit, BT-5247): the full Linux suite; no
+              # desktop (ci-platforms.yml's).
+              {
+                echo "desktop=false"
+                echo "code=true"
+                for k in core_diff_modes learn runtime rust exec vscode fixture_readers cluster; do echo "$k=true"; done
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+            *)
+              # A new trigger must choose its gates here, not inherit one.
+              echo "::error::changes: no path gates defined for event '$EVENT_NAME'"
+              exit 1
+              ;;
+          esac
 
           git fetch --depth=1 origin "$BASE_SHA"
           # --no-renames: list BOTH paths of a moved file. With rename detection a
@@ -186,7 +212,7 @@ jobs:
           # and the Windows one otherwise compiles only in ci-platforms.yml
           # (opt-in) and nightly.
           exec=$(flag matches 'crates/beamtalk-exec/*' 'crates/beamtalk-etf/*' \
-              'crates/beamtalk-build/*' Cargo.toml Cargo.lock \
+              'crates/beamtalk-process/*' 'crates/beamtalk-build/*' Cargo.toml Cargo.lock \
               rust-toolchain.toml '.github/workflows/ci.yml' '.github/actions/*')
 
           # BT-5033: `npm test` and `tsc` for the extension. Besides the
@@ -212,12 +238,37 @@ jobs:
               'crates/beamtalk-core/*' 'crates/beamtalk-codegen/*' 'crates/beamtalk-repl/*' \
               Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml '.github/actions/*')
 
+          # BT-5143: the three-node example run. Its own sources, the runtime
+          # modules ADR 0126 distribution lives in (remote spawn, the actor
+          # send path, the wire codec, shape migration, node events, the
+          # future protocol), the stdlib classes it calls, and the generated
+          # actor callbacks the wire decodes into, and the release launcher the run
+          # starts its nodes with.
+          cluster=$(flag matches 'examples/cluster/*' \
+              'runtime/apps/beamtalk_runtime/src/beamtalk_actor*' \
+              'runtime/apps/beamtalk_runtime/src/beamtalk_node*' \
+              runtime/apps/beamtalk_runtime/src/beamtalk_wire.erl \
+              runtime/apps/beamtalk_runtime/src/beamtalk_shape_migration.erl \
+              runtime/apps/beamtalk_runtime/src/beamtalk_future.erl \
+              runtime/apps/beamtalk_runtime/src/beamtalk_pid.erl \
+              runtime/apps/beamtalk_runtime/src/beamtalk_announcements.erl \
+              runtime/apps/beamtalk_runtime/src/beamtalk_call_failure.erl \
+              runtime/apps/beamtalk_runtime/src/beamtalk_class_registry.erl \
+              'runtime/apps/beamtalk_runtime/src/beamtalk_supervisor*' \
+              runtime/apps/beamtalk_workspace/src/beamtalk_release_launcher.erl \
+              stdlib/src/pid.bt stdlib/src/actor.bt stdlib/src/node.bt stdlib/src/node_up.bt \
+              stdlib/src/node_down.bt stdlib/src/system_announcer.bt \
+              'crates/beamtalk-codegen/src/core_erlang/gen_server/*' \
+              'crates/beamtalk-cli/src/commands/release/*' \
+              Justfile .github/workflows/ci.yml '.github/actions/*')
+
           # The desktop app's own paths (the crate, the workspace crates it
           # links, the root manifest and lockfile those crates take their
           # `.workspace = true` deps from, the recipe and this workflow).
           # Defined once, here.
           desktop=$(flag matches 'desktop/*' 'crates/beamtalk-desktop-broker/*' \
               'crates/beamtalk-desktop-shell/*' 'crates/beamtalk-env/*' 'crates/beamtalk-workspace/*' \
+              'crates/beamtalk-process/*' \
               'crates/beamtalk-repl-protocol/*' 'crates/beamtalk-build/*' 'crates/beamtalk-cerl-doc/*' \
               Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml '.github/actions/*')
 
@@ -231,6 +282,7 @@ jobs:
             echo "exec=$exec"
             echo "vscode=$vscode"
             echo "fixture_readers=$fixture_readers"
+            echo "cluster=$cluster"
           } >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
@@ -248,6 +300,30 @@ jobs:
   # multiplied into dozens of near-identical entries that pushed the repo
   # past the Actions cache cap and evicted the caches builds rely on. PR
   # runs restore main's entries.
+  # BT-5137: the docs checks (every `just` recipe and path the contributor docs
+  # name exists; every env var the code reads is documented) must run on a
+  # docs-only PR, the very PR that can break them, so this job is NOT gated on
+  # `code`. It is cheap (no Rust, no Erlang). A docs-only push to main is
+  # docs-checks.yml's, because the `push` path list above skips it here.
+  docs-checks:
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup just
+        uses: ./.github/actions/setup-beamtalk
+        with:
+          rust: 'false'
+          erlang: 'false'
+          rust-cache: 'false'
+
+      - name: Docs reference and environment-variable checks
+        run: just lint-docs-refs lint-env-docs
+
   lint:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -302,7 +378,7 @@ jobs:
       # (test-dialyzer job), JS/Elixir formatting beyond fmt-check
       # (the liveview workflow runs lint-elixir).
       - name: Clippy, format and repo lints
-        run: just clippy fmt-check lint-repo lint-docs-refs lint-env-docs test-grammar test-github-extension
+        run: just clippy fmt-check lint-repo test-grammar test-github-extension
 
       - name: Surface parity drift check (BT-2082)
         # Verifies REPL ops × CLI × MCP × LSP coverage matches
@@ -370,9 +446,11 @@ jobs:
       # fixtures are cheap on this job's build (nextest reuses the test
       # binaries above). Without this step a PR that edits a fixture, or the
       # Rust side of one, passed here and went red on main after the merge.
-      # On a push to main the whole tier runs in corpus.yml.
+      # On a push to main the whole tier runs in corpus.yml. corpus.yml does
+      # not run in the merge queue, so a merge_group run (where every gate is
+      # true) runs this cheap subset instead (BT-5247).
       - name: Corpus-tier tests that read the shared runtime fixtures
-        if: github.event_name == 'pull_request' && needs.changes.outputs.fixture_readers == 'true'
+        if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.outputs.fixture_readers == 'true'
         run: just test-fixture-readers
 
       # BT-5035: the CLI unit tests with HOME at an empty directory; fails if a
@@ -503,10 +581,10 @@ jobs:
           key: profile-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Check beamtalk-exec for Windows (warnings denied)
+      - name: Check beamtalk-exec and beamtalk-process for Windows (warnings denied)
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check --target x86_64-pc-windows-msvc -p beamtalk-exec --all-targets
+        run: cargo check --target x86_64-pc-windows-msvc -p beamtalk-exec -p beamtalk-process --all-targets
 
   # ─── core-diff snapshot-only vs full equivalence (BT-3934) ────────────
   # `core-diff`'s snapshot-only mode (BT-3887) is only sound if it leaves
@@ -817,6 +895,39 @@ jobs:
             cat "$f"
           done
 
+  # ─── Multi-node example, end to end (BT-5143) ──────────────────────────
+  # examples/cluster runs on three release nodes on this runner: remote spawn,
+  # sync sends and casts, Values on the wire, a cluster-wide name, NodeUp /
+  # NodeDown, and a worker node halted mid-call with its job reassigned. The
+  # script removes every node it starts and fails if one is left running or
+  # registered with epmd. `timeout` bounds the whole job; the scenario itself
+  # is bounded to 120 s inside the script.
+  test-cluster:
+    needs: changes
+    if: needs.changes.outputs.cluster == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Beamtalk toolchain
+        uses: ./.github/actions/setup-beamtalk
+        with:
+          rust-cache-shared-key: linux-test
+          erlang-cache: 'true'
+
+      - name: Build
+        run: just build
+
+      - name: Three-node cluster scenario
+        run: just test-cluster
+
+      - name: Dump epmd state on failure
+        if: failure()
+        run: epmd -names || true
+
   # ─── Installed-layout smoke test from a clean checkout (BT-4119) ───────
   # `just install` once shipped no stdlib class beams (bt@stdlib@*) from a
   # fresh checkout, and nothing caught it: `just test-install` only ran in
@@ -858,7 +969,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: ${{ always() }}
-    needs: [changes, lint, test-rust, test-vscode, test-desktop, check-release-build, check-exec-windows, core-diff-modes, otp-matrix, test-beam, test-runtime, test-dialyzer, test-integration, test-install]
+    needs: [changes, docs-checks, lint, test-rust, test-vscode, test-desktop, check-release-build, check-exec-windows, core-diff-modes, otp-matrix, test-beam, test-runtime, test-dialyzer, test-integration, test-cluster, test-install]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

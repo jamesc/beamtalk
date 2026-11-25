@@ -519,7 +519,36 @@ impl TypeCache {
             },
             std::process::id()
         ));
-        if let Err(e) = std::fs::write(tmp.as_std_path(), &json) {
+        // Exclusive create (`create_new`): never write through a pre-created
+        // file or symlink at the predictable temp name (BT-5135). A stale
+        // leftover from a crashed run with a recycled pid is removed once.
+        // Owner-only (BT-5185): the shared tier lives outside the project. A
+        // failed write removes the half-written temp file rather than leaving
+        // it in the cache directory.
+        let write_exclusive = || -> std::io::Result<()> {
+            use std::io::Write;
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt as _;
+                options.mode(0o600);
+            }
+            let mut f = options.open(tmp.as_std_path())?;
+            f.write_all(json.as_bytes()).inspect_err(|_| {
+                drop(f);
+                let _ = std::fs::remove_file(tmp.as_std_path());
+            })
+        };
+        let written = write_exclusive().or_else(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                let _ = std::fs::remove_file(tmp.as_std_path());
+                write_exclusive()
+            } else {
+                Err(e)
+            }
+        });
+        if let Err(e) = written {
             debug!("Failed to write type cache temp for {module_name}: {e}");
             return;
         }
@@ -1379,7 +1408,26 @@ fn collect_beam_stems(ebin_dir: &std::path::Path, out: &mut std::collections::Ha
     }
 }
 
+/// The compiled `native/test/` helper ebin of the package at `project_root`
+/// (`_build/dev/native_test/ebin`, BT-5186), when the package still has a
+/// `native/test/` directory and the ebin exists — the one rule for which
+/// helper modules a package's tests may call and be typed against. A package
+/// that dropped `native/test/` gets `None`, so stale helper beams are never
+/// treated as known modules (specs already extracted from them stay in the
+/// shared type cache until it is cleaned). The LSP and `lint` do not consult
+/// this yet, so they flag a test's helper calls as unresolved (BT-5251).
+#[must_use]
+pub fn project_test_helper_ebin_dir(project_root: &Utf8Path) -> Option<Utf8PathBuf> {
+    let helpers = BuildLayout::new(project_root).native_test_ebin_dir();
+    (project_root.join("native").join("test").is_dir() && helpers.is_dir()).then_some(helpers)
+}
+
 /// Collect the ebin directories for a project's native and path dependencies.
+///
+/// Not the package's `native/test/` helpers: those are added only for its
+/// tests, via [`project_test_helper_ebin_dir`]. (Their extracted specs do land
+/// in the shared project type cache, which [`load_type_cache_registry`] reads
+/// whole, as they did when the helpers lived in the native ebin.)
 ///
 /// Scans the standard `_build/` layout for a project rooted at `project_root`:
 /// - `_build/deps/*/ebin/` — Beamtalk path-dependency ebin dirs
@@ -1593,8 +1641,10 @@ pub fn collect_installed_erlang_modules() -> KnownErlangModules {
     }
 }
 
-/// Whether `dir` is the package's own compiled `native/` ebin
-/// (`_build/dev/native/ebin`), as opposed to a path/git dependency
+/// Whether `dir` is the package's own compiled native output — its `native/`
+/// ebin (`_build/dev/native/ebin`) or, under `beamtalk test`, its
+/// `native/test/` helper ebin (`_build/dev/native_test/ebin`, BT-5186) — as
+/// opposed to a path/git dependency
 /// (`_build/deps/*/ebin`) or a hex/rebar3 dependency
 /// (`_build/dev/native/default/lib/*/ebin`). Only the former may prove
 /// result-coercion-free FFI calls (BT-4507).
@@ -1745,8 +1795,25 @@ pub fn extend_with_ebin_type_specs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use std::fs;
     use tempfile::TempDir;
+
+    /// BT-5186: helper beams count only while the package has `native/test/`.
+    #[test]
+    fn test_helper_ebin_is_only_known_while_native_test_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let helpers = BuildLayout::new(&root).native_test_ebin_dir();
+        std::fs::create_dir_all(&helpers).unwrap();
+        assert_eq!(project_test_helper_ebin_dir(&root), None, "no native/test/");
+        std::fs::create_dir_all(root.join("native/test")).unwrap();
+        assert_eq!(project_test_helper_ebin_dir(&root), Some(helpers.clone()));
+        assert!(
+            !collect_project_dependency_ebin_dirs(&root).contains(&helpers),
+            "build, lint and the LSP do not scan the test helper ebin"
+        );
+    }
 
     // -----------------------------------------------------------------------
     // Runtime discovery (moved from beamtalk-cli's repl_startup)
@@ -2145,6 +2212,25 @@ mod tests {
     // -----------------------------------------------------------------------
     // TypeCache tests (ADR 0075)
     // -----------------------------------------------------------------------
+
+    /// BT-5185: a cache entry is created owner-only, and no staging file is
+    /// left beside it.
+    #[cfg(unix)]
+    #[test]
+    fn type_cache_entry_is_private_and_leaves_no_temp() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let temp = TempDir::new().unwrap();
+        let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        let cache = TypeCache::new(cache_dir.clone());
+        cache.store("lists", Utf8Path::new("/x/lists.beam"), 1, 0, "line");
+        let entries: Vec<_> = std::fs::read_dir(&cache_dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        let mode = std::fs::metadata(&entries[0]).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "mode {mode:o}");
+    }
 
     #[test]
     fn type_cache_store_and_lookup() {

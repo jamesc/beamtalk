@@ -137,46 +137,14 @@ impl CoreErlangGenerator {
         self.class_context_mut().class_identity = identity;
     }
 
-    /// Returns a reference to the class variable names set.
-    pub(in crate::core_erlang) fn class_var_names(&self) -> &std::collections::HashSet<String> {
-        static EMPTY: std::sync::LazyLock<std::collections::HashSet<String>> =
-            std::sync::LazyLock::new(std::collections::HashSet::new);
-        self.class_context
-            .as_ref()
-            .map_or(&*EMPTY, |ctx| &ctx.class_var_names)
-    }
-
-    /// Sets the class-side extension's target class (BT-3762), returning the
-    /// previous value so the caller can restore it.
-    pub(in crate::core_erlang) fn replace_extension_target_class(
-        &mut self,
-        value: Option<String>,
-    ) -> Option<String> {
-        std::mem::replace(&mut self.class_context_mut().extension_target_class, value)
-    }
-
     /// The class the current class method belongs to: the `ClassBuilder`
-    /// class, else the extension target, else the class being compiled
-    /// (BT-3762). It names the class whose class variables the method sees and
-    /// keys a class-side `super` send (`class_super_dispatch/4`, BT-4001). The
-    /// innermost scope wins (BT-3804): a builder `classMethods:` block nested
-    /// in a class-side extension sees the builder's `classVars:`, not the
-    /// extension target's variables.
-    pub(in crate::core_erlang) fn class_var_home(&self) -> String {
+    /// class, else the class being compiled (BT-3762). It keys a class-side
+    /// `super` send (`class_super_dispatch/4`, BT-4001). The innermost scope
+    /// wins (BT-3804): a builder `classMethods:` block belongs to the builder's
+    /// class.
+    pub(in crate::core_erlang) fn class_method_home(&self) -> String {
         self.builder_class_method_class()
-            .or_else(|| {
-                self.class_context
-                    .as_ref()
-                    .and_then(|ctx| ctx.extension_target_class.clone())
-            })
             .unwrap_or_else(|| self.class_name())
-    }
-
-    /// Returns a mutable reference to the class variable names set.
-    pub(in crate::core_erlang) fn class_var_names_mut(
-        &mut self,
-    ) -> &mut std::collections::HashSet<String> {
-        &mut self.class_context_mut().class_var_names
     }
 
     /// Returns a reference to the class method selectors set.
@@ -501,40 +469,14 @@ impl CoreErlangGenerator {
             }
         }
         self.current_class_field_types = fields;
-        self.current_class_var_types = classify_fields(&class.class_variables);
-    }
-
-    /// Populates instance-field facts for an **extension** method from the
-    /// *target* class's declared state types, resolved via the class hierarchy
-    /// (the target's AST is unavailable at extension-codegen time). Declared
-    /// fields — own or inherited, unions included — record their type, exactly
-    /// like the in-class path; untyped fields get no fact (their writers are
-    /// not visible here) and are guarded. Class-variable facts are cleared, so
-    /// class-side `self.<name>` reads in an extension are guarded too.
-    pub(in crate::core_erlang) fn set_extension_target_field_types(&mut self, target_class: &str) {
-        let field_types: Vec<(String, FieldTypeFact)> = self
-            .class_hierarchy
-            .as_ref()
-            .map(|h| {
-                h.all_state(target_class)
-                    .iter()
-                    .filter_map(|name| {
-                        h.state_field_type(target_class, name)
-                            .map(|ty| (name.to_string(), FieldTypeFact::Declared(ty)))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        self.current_class_field_types = field_types.into_iter().collect();
-        self.current_class_var_types.clear();
     }
 
     /// The comparison kinds of a `self.<name>` read when its field is declared
     /// with a comparable type (numeric, `Character` or `String`, or a `Nil`-free
     /// union of them): the `DeclaredComparison` guard tests exactly these
-    /// (BT-4823). Inside a class method `self.<name>` is a class variable, so
-    /// the class-side facts are consulted. A name with no such fact gets the
-    /// general guard (BT-3892, BT-3924).
+    /// (BT-4823). A class method has no fields (ADR 0153), so nothing is known
+    /// there. A name with no such fact gets the general guard (BT-3892,
+    /// BT-3924).
     pub(in crate::core_erlang) fn field_comparison_kinds(
         &self,
         name: &str,
@@ -544,12 +486,10 @@ impl CoreErlangGenerator {
     }
 
     fn field_fact(&self, name: &str) -> Option<&FieldTypeFact> {
-        let facts = if self.in_class_method() {
-            &self.current_class_var_types
-        } else {
-            &self.current_class_field_types
-        };
-        facts.get(name)
+        if self.in_class_method() {
+            return None;
+        }
+        self.current_class_field_types.get(name)
     }
 
     /// `self.<field>` is arithmetic-bare when known numeric. A name with no

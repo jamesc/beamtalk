@@ -43,7 +43,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -126,7 +126,7 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: nightly-${{ runner.os }}-arm64-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          key: nightly-${{ runner.os }}-arm64-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.lock', 'runtime/apps/beamtalk_runtime/src/**') }}
           restore-keys: |
             nightly-${{ runner.os }}-arm64-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
@@ -213,7 +213,7 @@ jobs:
           path: |
             ~/AppData/Local/rebar3
             runtime/_build
-          key: nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          key: nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.lock', 'runtime/apps/beamtalk_runtime/src/**') }}
           restore-keys: |
             nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
@@ -308,7 +308,7 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: nightly-${{ runner.os }}-x86_64-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          key: nightly-${{ runner.os }}-x86_64-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.lock', 'runtime/apps/beamtalk_runtime/src/**') }}
           restore-keys: |
             nightly-${{ runner.os }}-x86_64-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
@@ -355,7 +355,7 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          key: nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.lock', 'runtime/apps/beamtalk_runtime/src/**') }}
           restore-keys: |
             nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
@@ -423,7 +423,7 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          key: nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.lock', 'runtime/apps/beamtalk_runtime/src/**') }}
           restore-keys: |
             nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
@@ -603,8 +603,11 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The only job that writes the `nightly` release (BT-5137).
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 

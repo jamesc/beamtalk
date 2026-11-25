@@ -35,6 +35,7 @@ mod dead_returned_assignment;
 mod effect_free_statement;
 mod inspect_in_string_position;
 mod redundant_sealed;
+mod scope;
 mod shadowed_block_param;
 mod sync_send_in_timer_block;
 mod trailing_caret;

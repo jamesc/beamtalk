@@ -77,7 +77,7 @@ mod tests;
 mod value_objects;
 
 // Re-export value objects at the module level
-pub use project_index::{ProjectIndex, STDLIB_PACKAGE_MARKER};
+pub use project_index::{FileInterface, ProjectIndex, STDLIB_PACKAGE_MARKER};
 pub use rename::{FileMove, PreparedRename, RenameEdit, RenameKind, RenamePlan, RenameRefusal};
 pub use runtime_delegate::{
     NavQuery, NavQueryResponse, NavSite, NavSymbolClass, NavSymbolMethod, NavSymbolsResponse,
@@ -212,11 +212,6 @@ pub struct SimpleLanguageService {
     /// finishes within its file budget; stays `false` if the budget was
     /// exhausted (coverage would be partial).
     project_complete: bool,
-    /// ADR 0100's pre-WS3 dependency guard input
-    /// (`CompilerOptions::dependency_extensions_unknown`): whether some
-    /// workspace package declares dependencies whose extensions were not all
-    /// loaded. Decided by the LSP server with the CLI's rule (BT-4611).
-    dependency_extensions_unknown: bool,
     /// Per-category diagnostic severity overrides from the workspace's
     /// `beamtalk.toml` `[diagnostics]` section (ADR 0100 Rule 3).
     /// Empty (the default) preserves today's Rule 1 completeness-ladder
@@ -257,6 +252,9 @@ struct FileData {
     module: Module,
     /// Parse diagnostics.
     diagnostics: Vec<Diagnostic>,
+    /// The parser reported an error, so recovery may have dropped part of
+    /// the file's declarations (BT-5188).
+    has_parse_errors: bool,
 }
 
 /// Tags whether an identifier match from [`SimpleLanguageService::find_identifier_at_position`]
@@ -290,7 +288,6 @@ impl SimpleLanguageService {
             known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules::default(),
             root_qualifier_packages: Vec::new(),
             project_complete: false,
-            dependency_extensions_unknown: false,
             diagnostics_overrides:
                 beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
             preload_in_progress: false,
@@ -311,7 +308,6 @@ impl SimpleLanguageService {
             known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules::default(),
             root_qualifier_packages: Vec::new(),
             project_complete: false,
-            dependency_extensions_unknown: false,
             diagnostics_overrides:
                 beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
             preload_in_progress: false,
@@ -339,31 +335,6 @@ impl SimpleLanguageService {
     #[must_use]
     pub fn is_project_complete(&self) -> bool {
         self.project_complete
-    }
-
-    /// Declare whether some dependency's extension methods may be missing
-    /// from the index (ADR 0100's pre-WS3 guard). When true (and the project
-    /// is complete) the receiver-knowledge classifier keeps every receiver
-    /// `Open`. The LSP server decides it with the CLI's rule,
-    /// `beamtalk_project::dependency_extensions::dependency_extensions_unknown`
-    /// (BT-4611).
-    pub fn set_dependency_extensions_unknown(&mut self, unknown: bool) {
-        self.dependency_extensions_unknown = unknown;
-    }
-
-    /// Whether any indexed file under one of `dirs` is incomplete as a
-    /// dependency source: it had a parse error, or its class hierarchy could
-    /// not be built (so its extensions were never indexed). The same per-file
-    /// rule the CLI's dependency scan applies
-    /// (`DependencyExtensions::file_is_complete`, BT-4611).
-    #[must_use]
-    pub fn any_incomplete_file_under(&self, dirs: &[std::path::PathBuf]) -> bool {
-        self.files.iter().any(|(path, data)| {
-            dirs.iter().any(|dir| path.as_std_path().starts_with(dir))
-                && !beamtalk_project::dependency_extensions::DependencyExtensions::file_is_complete(
-                    &data.diagnostics,
-                )
-        })
     }
 
     /// Declare whether the LSP server's startup workspace preload is
@@ -562,6 +533,16 @@ impl SimpleLanguageService {
         Some(info)
     }
 
+    /// Whether the indexed text of `file` has a parse error, so error
+    /// recovery may have dropped some of its declarations (BT-5188).
+    /// `false` for a file that is not indexed.
+    #[must_use]
+    pub fn has_parse_errors(&self, file: &Utf8PathBuf) -> bool {
+        self.files
+            .get(file)
+            .is_some_and(|data| data.has_parse_errors)
+    }
+
     /// Returns the cached source text for a file, if available.
     #[must_use]
     pub fn file_source(&self, file: &Utf8PathBuf) -> Option<String> {
@@ -626,19 +607,6 @@ impl SimpleLanguageService {
                         selection,
                     ));
                 }
-            }
-        }
-        for smd in &file_data.module.method_definitions {
-            if Self::offset_in_method_header_selector(&smd.method, &file_data.source, offset_val) {
-                let selection = Self::method_header_selection_span(&smd.method, &file_data.source);
-                return Some(CallHierarchyTarget::new(
-                    smd.method.selector.name(),
-                    Some(smd.class_name.name.clone()),
-                    smd.is_class_method,
-                    file.clone(),
-                    smd.method.span,
-                    selection,
-                ));
             }
         }
 
@@ -920,7 +888,7 @@ impl SimpleLanguageService {
     /// This is the cold-file AST fallback for `textDocument/implementation`.
     /// The LSP wraps it in [`Backend::delegate_nav_query`] so the runtime
     /// path is preferred when attached (and sees live patches, stdlib
-    /// classes, ADR-0066 extension methods the walker can't index).
+    /// classes, methods defined live that the walker can't index).
     ///
     /// Returns method-definition locations whose `span` is the full
     /// `MethodDefinition::span` — LSP callers that want only the header
@@ -955,9 +923,7 @@ impl SimpleLanguageService {
         // module is folded, so the fold's own diagnostics (an instance-side
         // extension on a `native:` actor) are kept with the parse diagnostics:
         // analysis of the folded module cannot rediscover them.
-        diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
-            &mut module,
-        ));
+        diagnostics.extend(fold_and_check_extensions(&mut module));
 
         // Build class hierarchy for the project index.
         // This is intentionally lightweight (ClassHierarchy::build only, not full
@@ -1010,8 +976,6 @@ impl SimpleLanguageService {
                 })
                 .cloned()
                 .collect();
-            let mut extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
-            extensions.add_module(&module, file.as_std_path());
             let is_dependency = crate::project_index::is_dependency_file(&file);
             let old_internal_aliases = self.project_index.internal_aliases_of(&file);
             if is_dependency {
@@ -1027,24 +991,15 @@ impl SimpleLanguageService {
                 for info in &mut protocol_infos {
                     expander.expand_protocol_info(info);
                 }
-                beamtalk_project::dependency_extensions::expand_dependency_protocol_defs(
+                beamtalk_project::dependency_aliases::expand_dependency_protocol_defs(
                     &package_aliases,
                     &mut protocol_defs,
-                );
-                beamtalk_project::dependency_extensions::expand_extension_index_aliases(
-                    &expander,
-                    &mut extensions,
                 );
             }
 
             // Update the project-wide index with this file's class hierarchy
             self.project_index
                 .update_file(file.clone(), &class_hierarchy);
-
-            // Track this file's standalone extension definitions so
-            // other files' diagnostics see them (ADR 0066 / ADR 0100 Rule 2 WS1).
-            self.project_index
-                .set_file_extensions(file.clone(), extensions);
 
             // ADR 0108 Phase 8: track this file's `type`
             // declarations in the project-wide alias registry, so
@@ -1086,6 +1041,7 @@ impl SimpleLanguageService {
                     source: content,
                     module,
                     diagnostics: all_diagnostics,
+                    has_parse_errors,
                 },
             );
             return false;
@@ -1097,6 +1053,7 @@ impl SimpleLanguageService {
                 source: content,
                 module,
                 diagnostics,
+                has_parse_errors,
             },
         );
 
@@ -1191,11 +1148,6 @@ impl LanguageService for SimpleLanguageService {
                     options.knowledge_scope =
                         beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete;
                 }
-                // Dependency sources are indexed like project files, so their
-                // extensions are in `cross_file_extensions` below; the server
-                // keeps the pre-WS3 guard on unless that loading was complete
-                // (BT-4611, the CLI's rule).
-                options.dependency_extensions_unknown = self.dependency_extensions_unknown;
                 // BT-4022: project-known Erlang modules (hex-dep/native
                 // ebins + own `native/*.erl`, set by the LSP server at
                 // startup) so the `unresolved_ffi` check agrees with
@@ -1218,10 +1170,6 @@ impl LanguageService for SimpleLanguageService {
                 // package set, so an undeclared `pkg@Class` qualifier shows
                 // the squiggle `beamtalk build` would. `None` skips the check.
                 options.known_packages = self.known_qualifier_packages_for(file);
-                // Cross-file extensions from the ProjectIndex are
-                // passed so a same-project `ClassName >> selector` defined in
-                // another file resolves instead of producing a false Dnu hint.
-                let cross_file_extensions = self.project_index.cross_file_extensions_for(file);
                 // Cross-file type aliases from the ProjectIndex, so a
                 // `type Name = ...` declared in another project file resolves
                 // instead of leaving `Dynamic (dynamic receiver)` behind —
@@ -1257,7 +1205,6 @@ impl LanguageService for SimpleLanguageService {
                     pre_loaded_protocols,
                     pre_loaded_protocol_defs,
                     pre_loaded_aliases,
-                    cross_file_extensions,
                     native_type_registry: self
                         .file_native_types
                         .get(file)
@@ -1536,7 +1483,8 @@ impl LanguageService for SimpleLanguageService {
                     }
                 }
             }
-            // And standalone method bodies
+            // And standalone method bodies: a rejected cross-file `>>` is
+            // still text the user will move into the class's file.
             for smd in &fd.module.method_definitions {
                 for stmt in &smd.method.body {
                     Self::collect_identifiers(&stmt.expression, &ident.name, &mut spans);
@@ -1622,19 +1570,6 @@ impl LanguageService for SimpleLanguageService {
                 }
             }
         }
-        for standalone in &file_data.module.method_definitions {
-            let method = &standalone.method;
-            if method.return_type.is_none() && overlaps(method.span) {
-                candidates.push((
-                    (
-                        standalone.class_name.name.clone(),
-                        method.selector.name(),
-                        standalone.is_class_method,
-                    ),
-                    method.span,
-                ));
-            }
-        }
         if candidates.is_empty() {
             return actions;
         }
@@ -1689,4 +1624,23 @@ impl Default for SimpleLanguageService {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The same-file fold (BT-4721) followed by the ADR 0152 cross-file check: the
+/// file-compile rule the language service shares with the build.
+///
+/// Every standalone definition left after the fold is a rejected cross-file
+/// extension. It stays in the indexed module, so diagnostics match the CLI and
+/// the outline, folding and class references still see its text; but the
+/// method-level queries (implementors, selector declarations and references,
+/// selector rename, call hierarchy) do not treat it as a method of its target
+/// class (BT-5184).
+fn fold_and_check_extensions(
+    module: &mut beamtalk_core::ast::Module,
+) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
+    let mut diagnostics = beamtalk_core::compilation::fold_same_file_extensions(module);
+    diagnostics.extend(beamtalk_core::compilation::reject_cross_file_extensions(
+        module,
+    ));
+    diagnostics
 }

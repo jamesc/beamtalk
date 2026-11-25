@@ -92,6 +92,27 @@ current_node_is_trivially_reachable_test() ->
         beamtalk_node:connect(Current)
     ).
 
+bounded_sync_returns_within_bound_when_sync_hangs_test() ->
+    {Micros, ok} = timer:tc(fun() ->
+        beamtalk_node:bounded_sync(
+            fun() ->
+                receive
+                    never -> ok
+                end
+            end,
+            200
+        )
+    end),
+    ?assert(Micros >= 150000),
+    ?assert(Micros < 2000000).
+
+bounded_sync_returns_promptly_when_sync_completes_test() ->
+    {Micros, ok} = timer:tc(fun() -> beamtalk_node:bounded_sync(fun() -> ok end, 5000) end),
+    ?assert(Micros < 2000000).
+
+bounded_sync_survives_a_crashing_sync_test() ->
+    ?assertEqual(ok, beamtalk_node:bounded_sync(fun() -> error(boom) end, 5000)).
+
 print_string_test() ->
     ?assertEqual(
         {beamtalk_string, <<"Node(worker@localhost)">>},
@@ -116,7 +137,8 @@ policy_refuses_off_host_without_tls_test() ->
     {error, Error} = beamtalk_node:connect_policy(?OFF_HOST_NODE, false),
     ?assertEqual(insecure_distribution, Error#beamtalk_error.kind),
     ?assertEqual(
-        {beamtalk_string, <<"configure TLS distribution (ADR 0091) or use a tunnel">>},
+        {beamtalk_string,
+            <<"configure TLS distribution with peer verification (ADR 0126 §9) or use a tunnel"/utf8>>},
         Error#beamtalk_error.hint
     ),
     ?assertEqual(?OFF_HOST_NODE, maps:get(node, Error#beamtalk_error.details)),
@@ -210,6 +232,52 @@ collect_traces(Acc) ->
 %% touching the network.
 tls_distribution_is_off_in_tests_test() ->
     ?assertNot(beamtalk_node:tls_distribution()).
+
+%% BT-5233 (ADR 0126 amendment D2): `-proto_dist inet_tls` alone is not TLS
+%% distribution; the TLS options must also make both sides verify their peer
+%% and the server refuse a client with no certificate. Each case boots a
+%% fresh, non-distributed VM with those flags (init arguments are fixed at
+%% boot) and asks it. Distribution never starts, so no certificates are
+%% needed: the check reads the option file itself.
+tls_distribution_needs_peer_verification_test_() ->
+    {setup, fun() -> beamtalk_test_fs:tmp_dir("bt5233_node_tls") end, fun beamtalk_test_fs:rm_rf/1,
+        fun(Dir) ->
+            Opt = fun(Name, Content) ->
+                Path = filename:join(Dir, Name),
+                ok = file:write_file(Path, Content),
+                ["-ssl_dist_optfile", Path]
+            end,
+            Full = Opt(
+                "full.conf",
+                "[{server, [{verify, verify_peer}, {fail_if_no_peer_cert, true}]},"
+                " {client, [{verify, verify_peer}]}]."
+            ),
+            NoFail = Opt(
+                "nofail.conf",
+                "[{server, [{verify, verify_peer}]}, {client, [{verify, verify_peer}]}]."
+            ),
+            NoVerify = Opt("noverify.conf", "[{server, [{fail_if_no_peer_cert, true}]}]."),
+            Tls = ["-proto_dist", "inet_tls"],
+            [
+                {timeout, 60, ?_assertNot(tls_distribution_in_fresh_vm(Tls))},
+                {timeout, 60, ?_assertNot(tls_distribution_in_fresh_vm(Tls ++ NoFail))},
+                {timeout, 60, ?_assertNot(tls_distribution_in_fresh_vm(Tls ++ NoVerify))},
+                {timeout, 60, ?_assertNot(tls_distribution_in_fresh_vm(Full))},
+                {timeout, 60, ?_assert(tls_distribution_in_fresh_vm(Tls ++ Full))}
+            ]
+        end}.
+
+tls_distribution_in_fresh_vm(Args) ->
+    {ok, Peer, nonode@nohost} = peer:start_link(#{
+        connection => standard_io,
+        args => lists:append([["-pa", P] || P <- code:get_path()]) ++ Args,
+        wait_boot => 60000
+    }),
+    try
+        peer:call(Peer, beamtalk_node, tls_distribution, [])
+    after
+        peer:stop(Peer)
+    end.
 
 connect_off_host_without_tls_is_insecure_distribution_test() ->
     Result = beamtalk_node:connect(beamtalk_node:from_atom(?OFF_HOST_NODE)),

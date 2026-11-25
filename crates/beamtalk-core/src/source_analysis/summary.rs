@@ -196,10 +196,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::HandleInfoNoCatchAll => "HandleInfoNoCatchAll",
         DiagnosticCategory::NarrowingCast => "NarrowingCast",
         DiagnosticCategory::MatchArmBlock => "MatchArmBlock",
-        DiagnosticCategory::ClassStateAbroad => "ClassStateAbroad",
-        DiagnosticCategory::ClassProcessFfi => "ClassProcessFfi",
         DiagnosticCategory::ClassMethodProcessResource => "ClassMethodProcessResource",
-        DiagnosticCategory::ClassVarReflectionShadowing => "ClassVarReflectionShadowing",
         DiagnosticCategory::ActorStateAbroad => "ActorStateAbroad",
         DiagnosticCategory::FfiNestedString => "FfiNestedString",
         DiagnosticCategory::BinaryStringCompare => "BinaryStringCompare",
@@ -209,6 +206,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::UnthreadedLocalWrite => "UnthreadedLocalWrite",
         DiagnosticCategory::InternalVerifier => "InternalVerifier",
         DiagnosticCategory::CodegenReport => "CodegenReport",
+        DiagnosticCategory::MisplacedExtension => "MisplacedExtension",
     }
 }
 
@@ -434,15 +432,9 @@ mod tests {
             ),
             (DiagnosticCategory::NarrowingCast, "NarrowingCast"),
             (DiagnosticCategory::MatchArmBlock, "MatchArmBlock"),
-            (DiagnosticCategory::ClassStateAbroad, "ClassStateAbroad"),
-            (DiagnosticCategory::ClassProcessFfi, "ClassProcessFfi"),
             (
                 DiagnosticCategory::ClassMethodProcessResource,
                 "ClassMethodProcessResource",
-            ),
-            (
-                DiagnosticCategory::ClassVarReflectionShadowing,
-                "ClassVarReflectionShadowing",
             ),
             (DiagnosticCategory::ActorStateAbroad, "ActorStateAbroad"),
             (DiagnosticCategory::FfiNestedString, "FfiNestedString"),
@@ -462,6 +454,7 @@ mod tests {
             ),
             (DiagnosticCategory::InternalVerifier, "InternalVerifier"),
             (DiagnosticCategory::CodegenReport, "CodegenReport"),
+            (DiagnosticCategory::MisplacedExtension, "MisplacedExtension"),
         ];
         for (cat, expected) in all {
             assert_eq!(category_label(cat), expected);

@@ -43,6 +43,8 @@ export class InspectorPanel {
   private _target: InspectTarget;
   private _client: WorkspaceClient | null;
   private _disposed = false;
+  private _clientChanged = false;
+  private _stopWaiting: (() => void) | undefined;
   /** Monotonic counter — incremented on each _refetch() call to discard stale responses. */
   private _refreshGeneration = 0;
 
@@ -58,12 +60,12 @@ export class InspectorPanel {
     this._panel.onDidDispose(() => this._onPanelDispose());
 
     this._panel.webview.onDidReceiveMessage((msg: unknown) => {
-      if (
-        typeof msg === "object" &&
-        msg !== null &&
-        (msg as Record<string, unknown>).type === "refresh"
-      ) {
+      if (typeof msg !== "object" || msg === null) return;
+      const type = (msg as Record<string, unknown>).type;
+      if (type === "refresh") {
         void this._refetch();
+      } else if (type === "kill") {
+        void this._killActor();
       }
     });
   }
@@ -84,12 +86,14 @@ export class InspectorPanel {
     const existing = InspectorPanel._panels.get(key);
 
     if (existing) {
-      existing._client = client;
       existing._target = target;
       existing._panel.reveal(vscode.ViewColumn.Two);
       // Re-fetch live state so the panel is always up to date on reveal.
       // (`target.value` is only a placeholder — see the binding case below.)
-      void existing._refetch();
+      // `target` comes from the current client, so it is not a session that
+      // ended with an earlier one. BT-5189: through `_useClient`, which also
+      // drops a connect-waiter left from before (it would refetch twice).
+      existing._useClient(client, false);
       return;
     }
 
@@ -112,7 +116,7 @@ export class InspectorPanel {
     // not values), so the real value must come from `bindingValue` via
     // `_fetchContent`, same as actor state comes from `inspect`.
     inspector._initHtml(renderLoading());
-    void inspector._refetch();
+    inspector._useClient(client, false);
   }
 
   /**
@@ -139,8 +143,71 @@ export class InspectorPanel {
         inspector.dispose();
         continue;
       }
-      inspector._client = client;
-      if (client) void inspector._refetch();
+      inspector._setBindingClient(client);
+    }
+  }
+
+  /**
+   * Switch a binding panel to a new client (BT-5130). The session id belongs
+   * to the old node, so a failure after a client change is reported as
+   * "session ended".
+   */
+  private _setBindingClient(client: WorkspaceClient | null): void {
+    this._useClient(client, true);
+  }
+
+  /**
+   * Point this panel at `client` and fetch once it is connected. The client
+   * is often still connecting (a fetch would fail with "Not connected"), so
+   * wait for `connected` — at most `CONNECT_WAIT_MS`, then say so instead of
+   * showing "Loading…" forever (BT-5189). Any earlier wait is dropped first,
+   * so a panel never holds two waiters (each would refetch).
+   */
+  private _useClient(client: WorkspaceClient | null, clientChanged: boolean): void {
+    this._stopWaiting?.();
+    this._stopWaiting = undefined;
+    this._client = client;
+    this._clientChanged = clientChanged;
+    if (this._disposed) return;
+    // The workspace went away: keep showing the last value (refetching would
+    // only replace it with "Not connected"); the next client refetches.
+    if (!client && clientChanged) return;
+    if (!client || client.state === "connected") {
+      void this._refetch();
+      return;
+    }
+    this._postContent(renderLoading());
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = client.onConnectionChange((state) => {
+      if (state !== "connected" || this._disposed) return;
+      stop();
+      void this._refetch();
+    });
+    const stop = (): void => {
+      unsubscribe();
+      if (timer !== undefined) clearTimeout(timer);
+      if (this._stopWaiting === stop) this._stopWaiting = undefined;
+    };
+    timer = setTimeout(() => {
+      stop();
+      if (this._disposed) return;
+      ++this._refreshGeneration;
+      this._postContent(
+        renderError(
+          "Not connected to the workspace — it did not connect in time. Press Refresh to retry."
+        )
+      );
+    }, InspectorPanel.CONNECT_WAIT_MS);
+    this._stopWaiting = stop;
+  }
+
+  /** How long a panel waits for its client to connect before reporting it (BT-5189). */
+  static CONNECT_WAIT_MS = 30_000;
+
+  /** Close every actor panel (the node they were opened against may be gone). */
+  static closeActorPanels(): void {
+    for (const inspector of [...InspectorPanel._panels.values()]) {
+      if (inspector._target.kind === "actor") inspector.dispose();
     }
   }
 
@@ -155,8 +222,47 @@ export class InspectorPanel {
   dispose(): void {
     if (this._disposed) return;
     this._disposed = true;
+    this._stopWaiting?.();
     InspectorPanel._panels.delete(InspectorPanel._targetKey(this._target));
     this._panel.dispose();
+  }
+
+  /**
+   * "Kill Actor" (BT-5199): confirm, send `kill`, then close this panel and
+   * refresh the Workspace Explorer so the actor list drops the killed actor
+   * at once (the `stopped` push does the same, but may lag or be missed
+   * during a reconnect). A refusal (a system actor, an actor that already
+   * stopped) is shown in the panel.
+   */
+  private async _killActor(): Promise<void> {
+    if (this._disposed || this._target.kind !== "actor") return;
+    const { pid, class: className } = this._target.info;
+    const choice = await vscode.window.showWarningMessage(
+      `Kill actor ${className} ${pid}?`,
+      {
+        modal: true,
+        detail:
+          "The actor process exits at once; its state is lost and its supervisor may restart it.",
+      },
+      KILL_ACTOR_CONFIRM
+    );
+    if (choice !== KILL_ACTOR_CONFIRM || this._disposed) return;
+    const client = this._client;
+    if (!client) {
+      this._postContent(renderError("Not connected to workspace"));
+      return;
+    }
+    try {
+      await client.killActor(pid);
+    } catch (err) {
+      if (!this._disposed) {
+        ++this._refreshGeneration;
+        this._postContent(renderError(err instanceof Error ? err.message : String(err)));
+      }
+      return;
+    }
+    this.dispose();
+    await vscode.commands.executeCommand("beamtalk.refreshWorkspace");
   }
 
   // ─── Private helpers ─────────────────────────────────────────────────────
@@ -164,6 +270,7 @@ export class InspectorPanel {
   private _onPanelDispose(): void {
     if (this._disposed) return;
     this._disposed = true;
+    this._stopWaiting?.();
     InspectorPanel._panels.delete(InspectorPanel._targetKey(this._target));
   }
 
@@ -175,7 +282,10 @@ export class InspectorPanel {
         ? `Binding: ${this._target.name}`
         : `Actor: ${this._target.info.class}  ${this._target.info.pid}`;
 
-    this._panel.webview.html = buildPanelHtml(nonce, title, initialContent);
+    // A system actor (`TranscriptStream`) is refused by the node, so it gets
+    // no Kill button (BT-5199).
+    const killable = this._target.kind === "actor" && this._target.info.system !== true;
+    this._panel.webview.html = buildPanelHtml(nonce, title, initialContent, killable);
   }
 
   /**
@@ -196,11 +306,20 @@ export class InspectorPanel {
     try {
       const content = await this._fetchContent();
       if (!this._disposed && generation === this._refreshGeneration) {
+        // BT-5189: a successful fetch on the new client proves the binding's
+        // session is alive there, so a later failure is that failure — not a
+        // "session ended" left over from the client change.
+        this._clientChanged = false;
         this._postContent(content);
       }
     } catch (err) {
       if (!this._disposed && generation === this._refreshGeneration) {
         const message = err instanceof Error ? err.message : String(err);
+        if (this._target.kind === "binding" && this._clientChanged) {
+          // Still show what actually failed, not only the likely cause.
+          this._postContent(renderSessionEnded(message));
+          return;
+        }
         this._postContent(renderError(message));
       }
     }
@@ -315,13 +434,26 @@ function renderLoading(): string {
   return `<p class="bt-loading">Loading…</p>`;
 }
 
+function renderSessionEnded(detail: string): string {
+  return `<p class="bt-error">Session ended — this binding belonged to a REPL session that no longer exists.</p><p class="bt-error">Error: ${escapeHtml(detail)}</p>`;
+}
+
 function renderError(message: string): string {
   return `<p class="bt-error">Error: ${escapeHtml(message)}</p>`;
 }
 
 // ─── Panel HTML template ──────────────────────────────────────────────────────
 
-function buildPanelHtml(nonce: string, title: string, initialContent: string): string {
+/** The confirm button of the "Kill Actor" dialog. */
+const KILL_ACTOR_CONFIRM = "Kill Actor";
+
+function buildPanelHtml(
+  nonce: string,
+  title: string,
+  initialContent: string,
+  killable = false
+): string {
+  const killButton = killable ? `<button id="bt-kill">✕ Kill Actor</button>` : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -370,6 +502,21 @@ function buildPanelHtml(nonce: string, title: string, initialContent: string): s
     font-size: 12px;
   }
   #bt-refresh:hover {
+    background: var(--vscode-button-secondaryHoverBackground, #45494e);
+  }
+
+  #bt-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+  #bt-kill {
+    padding: 3px 10px;
+    background: var(--vscode-button-secondaryBackground, #3a3d41);
+    color: var(--vscode-errorForeground, #f44747);
+    border: 1px solid var(--vscode-button-border, transparent);
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  #bt-kill:hover {
     background: var(--vscode-button-secondaryHoverBackground, #45494e);
   }
 
@@ -434,7 +581,7 @@ function buildPanelHtml(nonce: string, title: string, initialContent: string): s
 <body>
 <div id="bt-header">
   <span id="bt-title">${escapeHtml(title)}</span>
-  <button id="bt-refresh">↻ Refresh</button>
+  <span id="bt-actions">${killButton}<button id="bt-refresh">↻ Refresh</button></span>
 </div>
 <div id="bt-content">${initialContent}</div>
 <script nonce="${nonce}">
@@ -443,6 +590,13 @@ function buildPanelHtml(nonce: string, title: string, initialContent: string): s
   document.getElementById('bt-refresh').addEventListener('click', function() {
     vscode.postMessage({ type: 'refresh' });
   });
+
+  const kill = document.getElementById('bt-kill');
+  if (kill) {
+    kill.addEventListener('click', function() {
+      vscode.postMessage({ type: 'kill' });
+    });
+  }
 
   window.addEventListener('message', function(event) {
     const msg = event.data;

@@ -8,41 +8,29 @@
 // Codegen picks the arity of the native: a block that writes no outer local is
 // a Tier 1 `fun()` and reaches `beamtalk_result:tryDo/1`; a block that
 // writes one is a Tier 2 `fun(StateAcc)` and reaches `tryDo/2`. Each pair
-// of methods below runs the SAME block body (a class-variable write, then the
-// raise or the value) through both arities, the Tier 2 one with an extra local
-// write, and answers what the test compares: the Result, the class-variable
-// state, and (Tier 2 only) the local.
+// of methods below runs the SAME block body (the raise or the value) through both arities, the Tier 2 one with an extra local
+// write, and answers what the test compares: the Result and (Tier 2 only) the local.
 
 Object subclass: ResultTryDoTier2Fixture
-  classState: n = 0
 
   // --- non-raising path ----------------------------------------------------
   class tier1Ok =>
-    self.n := 1
-    r := Result
-      tryDo: [
-        self.n := self.n + 10
-        7
-      ]
-    #[r isOk, r value, self.n]
+    r := Result tryDo: [7]
+    #[r isOk, r value]
 
   class tier2Ok =>
-    self.n := 1
     t := 0
     r := Result
       tryDo: [
-        self.n := self.n + 10
         t := t + 1
         7
       ]
-    #[r isOk, r value, self.n]
+    #[r isOk, r value]
 
   class tier2OkLocal =>
-    self.n := 1
     t := 0
     Result
       tryDo: [
-        self.n := self.n + 10
         t := t + 1
         7
       ]
@@ -50,31 +38,22 @@ Object subclass: ResultTryDoTier2Fixture
 
   // --- raising path --------------------------------------------------------
   class tier1Raise =>
-    self.n := 1
-    r := Result
-      tryDo: [
-        self.n := self.n + 10
-        Error signal: "boom"
-      ]
-    #[r isError, r error class, r error message, self.n]
+    r := Result tryDo: [Error signal: "boom"]
+    #[r isError, r error class, r error message]
 
   class tier2Raise =>
-    self.n := 1
     t := 0
     r := Result
       tryDo: [
-        self.n := self.n + 10
         t := t + 1
         Error signal: "boom"
       ]
-    #[r isError, r error class, r error message, self.n]
+    #[r isError, r error class, r error message]
 
   class tier2RaiseLocal =>
-    self.n := 1
     t := 0
     Result
       tryDo: [
-        self.n := self.n + 10
         t := t + 1
         Error signal: "boom"
       ]

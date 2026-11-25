@@ -35,6 +35,7 @@ Collection. They fold over `to_list/1`; `max`/`min`/`average` raise
     sum/1,
     to_list/1,
     to_list_for_threading/2,
+    guard_writing_fold/2,
     keyed_foldl/5
 ]).
 
@@ -211,6 +212,7 @@ the receiver's representation:
   be `{K, V}` pairs, as a keyed fold answers (BT-5097). A `.beam` compiled
   before BT-5097 answers bare elements here, so running it on this runtime
   raises `badarg`
+- a `Tuple` receiver (per `beamtalk_primitive:class_of/1`) → a tuple (`list_to_tuple/1`; BT-5167)
 - anything else (already an Erlang list, or another collection) → the list as-is
 
 Called from compiler-generated Core Erlang (`list_ops`).
@@ -223,6 +225,13 @@ from_list_like({beamtalk_string, _}, List) ->
     beamtalk_primitive:string_from_binary(
         erlang:iolist_to_binary([beamtalk_primitive:string_to_binary(E) || E <- List])
     );
+from_list_like(Recv, List) when is_tuple(Recv) ->
+    case beamtalk_primitive:class_of(Recv) of
+        %% BT-5167: a writing `collect:`/`select:`/`reject:` over a `Tuple`
+        %% answers a `Tuple`, as the pure path does (`Tuple withAll:`).
+        'Tuple' -> list_to_tuple(List);
+        _ -> List
+    end;
 from_list_like(Recv, List) when is_binary(Recv) ->
     %% BT-4170: elements may be byte integers or `String`s (a `collect:`
     %% block answering text); unwrap the tags, then assemble bytes —
@@ -260,7 +269,7 @@ checks both (`KeyedFoldCall`, `VerifyError::KeyedFoldPathMismatch`).
 keyed_foldl(Lambda, Init, Recv, Selector, ListPath) ->
     case is_map(Recv) andalso not beamtalk_primitive:is_object(Recv) of
         true ->
-            %% The ADR 0133 receiver guard, once per call: a runtime extension of
+            %% The ADR 0133 receiver guard, once per call: a class's own override of
             %% the selector (or of a message it runs through) wins dispatch, so the
             %% in-place fold would skip it.
             ok = guard_writing_fold(Recv, Selector),
@@ -370,8 +379,7 @@ are `self inject:into:`, and `reject:` is `self select:`, so an override of
 those is reached by the pure send and skipped by the fold. Likewise for the
 species-dependent messages (`collect:`, `select:`, `reject:`) when `Collection`'s
 provision answers them: they end in `self species withAll:`, so a class with
-its own `species` or class-side `withAll:` (`overrides_species_construction`,
-or a runtime extension of either) would build a different result than the
+its own `species` or class-side `withAll:` (`overrides_species_construction`) would build a different result than the
 fold (BT-3951). All of these raise `stateful_block_dispatch`. A receiver that does not respond to `Selector`
 raises `does_not_understand`, as the pure path does. Codegen never emits this
 for `do:`, the fold's own source.
@@ -396,7 +404,9 @@ The checks of `to_list_for_threading/2` without the conversion (BT-5097): `ok`
 when the in-place fold may stand in for `Selector` on `Recv`, otherwise the
 `stateful_block_dispatch` / `does_not_understand` it raises. `keyed_foldl/5` runs
 it once per call for a `Dictionary`, which is folded over its pairs instead of
-its `to_list/1`.
+its `to_list/1`. An inlined writing `to:do:` / `to:by:do:` counted loop calls it
+on a start that is not an Integer (BT-5215), so it raises what the pure send of
+that selector to the start raises.
 """.
 -spec guard_writing_fold(term(), atom()) -> ok.
 guard_writing_fold(Recv, Selector) ->
@@ -424,7 +434,7 @@ guard_writing_fold(Recv, Selector) ->
                         )
                     of
                         false ->
-                            ok;
+                            guard_species_rebuild(Recv, Class, Selector);
                         true ->
                             refuse_writing_fold(
                                 Class,
@@ -453,6 +463,37 @@ guard_writing_fold(Recv, Selector) ->
                 ]
             )
     end.
+
+%% BT-5136: a species-built `collect:`/`select:`/`reject:` answers
+%% `self species withAll:` on the pure path. `from_list_like/2` rebuilds only
+%% Array and Set (String, Binary and Dictionary never reach here); a Bag would
+%% answer a raw List instead of a Bag, so refuse. A user `Collection` with the
+%% default `species` answers a List on both paths and is allowed.
+-spec guard_species_rebuild(term(), atom(), atom()) -> ok.
+guard_species_rebuild(#{?BT_CLASS_TAG_KEY := Tag}, _Class, _Selector) when
+    Tag =:= 'Array'; Tag =:= 'Set'
+->
+    ok;
+guard_species_rebuild(Recv, Class, Selector) when is_map(Recv) ->
+    case
+        beamtalk_primitive:is_object(Recv) andalso
+            beamtalk_behaviour_intrinsics:speciesDependentThroughCollectionFromName(Class, Selector)
+    of
+        true ->
+            refuse_writing_fold(
+                Class,
+                Selector,
+                [
+                    <<" builds its '">>,
+                    atom_to_binary(Selector, utf8),
+                    <<"' answer with 'species withAll:', which the in-place fold would answer as a List">>
+                ]
+            );
+        false ->
+            ok
+    end;
+guard_species_rebuild(_Recv, _Class, _Selector) ->
+    ok.
 
 -spec refuse_writing_fold(atom(), atom(), iodata()) -> no_return().
 refuse_writing_fold(Class, Selector, Reason) ->

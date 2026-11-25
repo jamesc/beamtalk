@@ -10,35 +10,22 @@ Cheap per-class "has shadows" flags for the compiled class-side self-send
 fast path (BT-3669).
 
 A compiled class-side `self foo` may call the defining class's `class_foo`
-directly only when nothing shadows it: a class-side extension registered on the
-class (`beamtalk_extensions`) or a runtime-installed class-method fun
-(`beamtalk_class_metadata`, ADR 0084). Checking those used to cost two ETS
-reads per send. Each writer now mirrors its state into a `persistent_term`
+directly only when nothing shadows it: a runtime-installed class-method fun
+(`beamtalk_class_metadata`, ADR 0084). Checking that used to cost ETS reads
+per send. Each writer now mirrors its state into a `persistent_term`
 flag, so the guard in `beamtalk_class_dispatch:class_self_direct_ok/4` is one
 constant-time term read with no ETS access (BT-3700 folded the reads; see below).
 
-Three independent kinds:
-- `extension` keyed by the class-object tag (e.g. `'Counter class'`): set while
-  any extension is registered under that tag.
-- `runtime_fun` keyed by the class name: set while the class has runtime-
-  installed class-method funs.
-- `class_vars` keyed by the class name (ADR 0142 §1 rule 1, BT-4299): set while
-  the class declares class variables (`classState:`). Not a shadow: it mirrors
-  the class-metadata fact `beamtalk_class_metadata:put_class_variables/2`
-  publishes from the compiled `__beamtalk_meta/0` (`class_field_kinds`) or the
-  builder's `classState`, never re-derived from source here. Its single writer
-  is that function, run from the class's own gen_server (`init/1`, reload,
-  rename), like `runtime_fun`. Absent means "declares none" (only a row that
-  never went through a class process lacks the fact).
+One kind, `runtime_fun`, keyed by the class name: set while the class has
+runtime-installed class-method funs. (ADR 0153 removed the second kind,
+`class_vars`, with class variables.)
 
 The flags are conservative: a stale `true` only costs the slow path (the
 hierarchy walk is always correct); `runtime_fun` writers set the flag *before* making the
-shadow visible and clear it only *after* the gate is closed; `extension`
-transitions are serialized per tag under a lock in `beamtalk_extensions`
-(an unlocked erase-then-recheck could leave the flag false beside a visible row).
-BT-4808: the `runtime_fun` and `class_vars` flags hold their writer's pid (`set/3`)
+shadow visible and clear it only *after* the gate is closed.
+BT-4808: the `runtime_fun` flag holds its writer's pid (`set/3`)
 rather than `true`, so the removal of a dead class erases them only while they
-still name it (`clear_if_owner/3`); `extension` flags stay `true`.
+still name it (`clear_if_owner/3`).
 Concurrency: the `runtime_fun` flag is unlocked and relies on a single writer
 per class. All its writers (`insert`, `set_runtime_class_methods`,
 `reset_runtime_class_methods`, `delete` in `beamtalk_class_metadata`) run inside
@@ -48,75 +35,55 @@ owner's own value, under the tag lock: `clear_if_owner/3`). A
 future writer outside the class process would need a lock: e.g. a `set` racing
 a `reset` could have the reset close the gate and then clear the flag just after
 the set raised it (or vice versa), leaving the flag false while the gate is open.
-(`extension` flags, written from arbitrary processes, are instead serialized per
-tag in `beamtalk_extensions`.)
 
 BT-3700: the send-path guard reads ONE key, the derived "direct call is safe"
 flag, keyed by the bare class-object tag (`'Counter class'`, a bare atom: hashing
 an atom key is ~3x cheaper than a tuple key, and the tag contains a space so it
-cannot collide with another module's `persistent_term` key). It is present
-exactly while the class is ready, has no `extension` flag and no `runtime_fun`
-flag; absent means "take the always-correct hierarchy walk". Its value folds
-the `class_vars` input in (BT-4299), taken over the whole chain (BT-4301), so
-both questions stay one read:
-- `true`: no shadow, and no class variables declared by the class or any
-  ancestor. `direct_call_ok/2` holds (ADR 0142 §1 rules 1-2: the class's own
-  methods may run outside the class process).
-- `class_vars`: no shadow, but the class or an ancestor declares class
-  variables, so only its class process may run the method (a subclass holds
-  its ancestors' class variables in its own process, the rule
-  `beamtalk_class_metadata:chain_has_class_variables/1` applies to dynamic
-  sends and Rust's `ClassHierarchy::is_direct_call_eligible` to static ones).
-  `direct_call_ok/2` is false; `shadow_free/2` (the class-side self-send
-  guard, which runs wherever its calling method already runs) is still true,
-  so that path is unchanged.
+cannot collide with another module's `persistent_term` key). It is present,
+with the value `true`, exactly while the class is ready and has no
+`runtime_fun` flag; absent means "take the always-correct hierarchy walk".
+`direct_call_ok/2` and `shadow_free/2` both read it and, since ADR 0153
+removed the class-variable input, give the same answer.
 
 Single writer per derived key, by construction, not by convention: every write
 and erase of it runs under one per-tag node-local FIFO lock (`beamtalk_fifo_lock`, `with_tag_lock/2`), and the
 lock holder re-derives the answer from the raw flags above, never from the
 reader's view.
-- Invalidation (`set/2`, any kind): under the lock, raise the raw flag, then
+- Invalidation (`set/2`): under the lock, raise the raw flag, then
   erase the derived key. Both happen before the caller makes the change visible
-  (`beamtalk_extensions:register/5` raises the flag before its row insert;
-  `beamtalk_class_metadata:set_runtime_class_methods/2` before the gate opens;
-  `beamtalk_class_metadata:put_class_variables/2` before the row field), so a
-  send that can see a shadow, or a class variable the class itself declares,
-  cannot see the class's derived `true`.
-- A class's derived key also reads its chain's published class-variable facts
-  and superclass links, through `beamtalk_class_metadata:chain_has_class_variables/1`
-  (the runtime's one answer, failing closed), so `invalidate/1` erases the
-  class's descendants' keys too (each under its own tag lock, always taken,
-  after the class's own). `beamtalk_class_metadata:put_class_variables/2` calls
-  it once the row field is written, and a reload that re-parents a class calls
-  it again once the new superclass is published
-  (`beamtalk_object_class:apply_class_info/2`) (BT-4301). For a descendant this
-  is erase-after-write, not raise-before-visible: between an ancestor's row
-  write and the erase, a descendant's static send may still see its old
-  `true` and run in the caller, the same window a reload has for its own new
-  code. No stale value outlives the erase.
+  (`beamtalk_class_metadata:set_runtime_class_methods/2` before the gate opens),
+  so a send that can see a shadow cannot see the class's derived `true`.
+- A class's static call keys also depend on its ancestors' metadata (an
+  inherited owner, BT-4270), so `invalidate/1` erases the class's descendants'
+  keys too (each under its own tag lock, always taken, after the class's own),
+  and a reload that re-parents a class calls it again once the new superclass
+  is published (`beamtalk_object_class:apply_class_info/2`) (BT-4301). For a
+  descendant this is erase-after-write, not raise-before-visible: between an
+  ancestor's row write and the erase, a descendant's static send may still use
+  its old key, the same window a reload has for its own new code. No stale
+  value outlives the erase.
 - Erasure on every other class-metadata write (`invalidate/1`, ADR 0142 §2,
   BT-4299): under the lock, erase the derived key. Called on reload
   (`beamtalk_object_class:apply_class_info/2`), a class-side `removeSelector:`,
   a runtime `put_class_method`, and row removal
-  (`beamtalk_class_metadata:delete/1`); a class-variable change erases through
-  `set_class_vars/2`. This does **not** hold the fast path off until the write
+  (`beamtalk_class_metadata:delete/1`). This does **not** hold the fast path off until the write
   is visible: a concurrent `direct_call_ok/2` or `shadow_free/2` miss
   re-derives from the raw flags at once, and answers what they say. The derived
   key is a pure function of the raw flags, so erasing it changes no answer; it
   only forces the next send to re-derive. A fact that must bar the fast path
-  during a write therefore has to be a raw input `derive/2` reads, raised before
-  the write (as `class_vars` is). Other per-class answers (the in-caller
+  during a write therefore has to be a raw input `derive/1` reads, raised before
+  the write (as `runtime_fun` is). Other per-class answers (the in-caller
   class-method owner, BT-4300) live in `beamtalk_class_derived_cache`, whose
   generation counter, not this erasure, keeps them consistent with the write.
 - Install (`direct_call_ok/2` or `shadow_free/2` miss, lazy): outside the lock,
   cheap pre-check of the raw flags (a permanently shadowed class never takes the
   lock per send); then under the lock re-derive from readiness and the raw flags
-  and put the key (`true` or `class_vars`). An
+  and put the key (`true`). An
   install that ran before a `set/2` is erased by it; one that runs after sees the
   raw flag and declines. `clear/2` does not touch the derived key: a stale
   "unsafe" only costs the walk until the next send re-installs.
-- The key is never rewritten while present (either value answers both guards
-  without an install), so a send never pays a global scan.
+- The key is never rewritten while present, so a send never pays a global
+  scan.
 
 BT-4316: static call keys. A static class send that compiles to a guarded
 direct call (ADR 0142 §2) is keyed by its call target, `{Module, FunName, Tag}`
@@ -157,8 +124,7 @@ method's body to be exactly that primitive: the defining module's
 `__beamtalk_meta/0` maps the selector to it under
 `caller_safe_class_primitives` (generated by the compiler from the method
 source). It shares the per-tag index and every eraser with the direct-call
-keys (the same per-class map), so a `class signal:` override, a class-side
-extension, a runtime fun or a reload of the class or an ancestor takes it away.
+keys (the same per-class map), so a `class signal:` override, a runtime fun or a reload of the class or an ancestor takes it away.
 
 BT-4363: a class-literal send of a class-side method whose whole body is one
 scalar literal (`Errors protocolError` with `class protocolError => 1`; since
@@ -173,8 +139,7 @@ module's `__beamtalk_meta/0`, generated by the compiler from the method source;
 `beamtalk_class_metadata:put_constant_class_methods/2`). The row, not the
 module, is read because a reload erases keys inside the new module's
 `-on_load`, while the old code is still current. It shares the per-class map
-and every eraser with the direct-call keys, so a class-side extension, a
-runtime fun (`put_class_method`), `removeSelector:` or a reload that changes the
+and every eraser with the direct-call keys, so a runtime fun (`put_class_method`), `removeSelector:` or a reload that changes the
 body takes it away, and the call site's fallback answers as a dynamic send.
 
 BT-4409: a class-literal `X new` on a Value whose synthesized `new/0` may build
@@ -188,7 +153,7 @@ instead the key needs the dynamic `new` path's own answer,
 runtime fun, `direct_call_ok/2` holds and `Module` exports `new/0`), so the
 static and dynamic paths ask one question. A change to the baked set erases the
 class's keys (`beamtalk_class_metadata:put_direct_constructors/2`), as do the
-erasers above; a later class-side extension or `put_class_method` of `new` is
+erasers above; a later `put_class_method` of `new` is
 then answered by the fallback, whose class process runs it
 (`beamtalk_object_class`'s `{new, _}` handler).
 
@@ -211,10 +176,9 @@ the class's tag lock, records the tag in the per-tag index
 (`beamtalk_class_registry:record_static_call_tag/1`, read only by
 `erase_all_static_call_keys/0`) and then puts the class's map with the target
 added (a target already present is never rewritten). Every erase of the
-class's derived key (`erase_direct_flag/1`: `set/2`, `set_class_vars/2`,
+class's derived key (`erase_direct_flag/1`: `set/2`, `clear_if_owner/3`,
 `invalidate/1`, and through `invalidate/1` an ancestor's write) also erases
-the class's per-class static call key (as does an ancestor gaining or losing a
-class-side extension, `invalidate_descendants_of_tag/1`, BT-4307), unconditionally (it may outlive a
+the class's per-class static call key unconditionally (it may outlive a
 derived key another path erased), so every target is gone wherever the
 dynamic answer could change. Targets are never erased one at a time: any
 write that could change one class's answer erases the whole map, and the next
@@ -236,8 +200,7 @@ names a function it dropped. A method the reload adds is installed only once
 the new code exports it. (Proved by the "reload that drops a method" test in
 `beamtalk_class_shadow_flags_tests`.)
 
-A call site that keeps declining (a shadowed class, a class-variable chain,
-an unregistered or dead class, another owner) has no key, so it pays this
+A call site that keeps declining (a shadowed class, an unregistered or dead class, another owner) has no key, so it pays this
 whole unlocked check on every send, and then `class_send` checks the same
 facts again: dearer than the BT-4301 guard's decline, which was one
 `persistent_term` read. A declining site already takes the gen_server
@@ -275,13 +238,11 @@ actual transitions write (set when unset, erase when set); both are rare
     clear/2,
     clear_if_owner/3,
     is_set/2,
-    is_shadowed/2,
+    is_shadowed/1,
     direct_call_ok/2,
     shadow_free/2,
     invalidate/1,
-    invalidate_descendants_of_tag/1,
     erase_all_static_call_keys/0,
-    set_class_vars/2,
     mark_ready/0,
     is_ready/0,
     with_tag_lock/2,
@@ -308,11 +269,11 @@ actual transitions write (set when unset, erase when set); both are rare
 
 %% BT-3700: the send-path guard (`direct_call_ok/2`) is hot; the slow-path
 %% helpers are inlined so the miss branch is not a chain of calls.
--compile({inline, [key/2, is_set/2, is_shadowed/2, is_ready/0]}).
+-compile({inline, [key/2, is_set/2, is_shadowed/1, is_ready/0]}).
 
--type kind() :: extension | runtime_fun | class_vars.
-%% The derived flag's installed value (BT-4299; see the moduledoc).
--type derived() :: true | class_vars.
+-type kind() :: runtime_fun.
+%% The derived flag's installed value (see the moduledoc).
+-type derived() :: true.
 %% A static call key (BT-4316): `{Module, FunName, Tag}`, the call-site literal,
 %% and since BT-4442 a key in its class's `static_calls_key/1` map.
 %% `{Module, FunName, Tag}` keys a guarded direct call of `Module:FunName`
@@ -337,8 +298,7 @@ key(Kind, Name) -> {beamtalk_class_shadow, Kind, Name}.
 Mark `Name` as having a shadow of `Kind` and invalidate the class's derived
 direct-call flag (BT-3700) before returning, so the caller can then make the
 shadow visible. No-op when already set. Takes the per-tag lock itself; callers
-may hold other locks (`beamtalk_extensions:with_shadow_lock/2`) but must never
-call this from inside `with_tag_lock/2`.
+must never be called from inside `with_tag_lock/2`.
 """.
 -spec set(kind(), atom()) -> ok.
 set(Kind, Name) ->
@@ -368,9 +328,7 @@ set(Kind, Name, Value) ->
     end.
 
 -spec class_tag(kind(), atom()) -> atom().
-class_tag(extension, Tag) -> Tag;
-class_tag(runtime_fun, Name) -> beamtalk_class_registry:class_object_tag(Name);
-class_tag(class_vars, Name) -> beamtalk_class_registry:class_object_tag(Name).
+class_tag(runtime_fun, Name) -> beamtalk_class_registry:class_object_tag(Name).
 
 %% Erase the class's derived key and, unconditionally, its static call key
 %% (BT-4316): a static call key may outlive a derived key another path erased.
@@ -432,15 +390,14 @@ static_calls_key_name(Tag) ->
 Erase `ClassName`'s derived direct-call flag, and its descendants', each under
 its per-tag lock (ADR 0142 §2, BT-4299, BT-4301), so the next send re-derives
 it. Called on a class-metadata write for the class, after the write: reload
-(twice, the second time once a re-parent is published), a change to its
-class variables, a class-side `removeSelector:`, a runtime `put_class_method`,
-row removal. It does not keep the fast path off while the write lands (see the
+(twice, the second time once a re-parent is published), a class-side
+`removeSelector:`, a runtime `put_class_method`, row removal. It does not keep the fast path off while the write lands (see the
 moduledoc).
 
-The lock is taken even when no derived flag is installed (BT-4301): the
-derivation reads published metadata (`chain_has_class_variables/1`), not only
+The lock is taken even when no derived flag is installed (BT-4301): a static
+call key's install reads published metadata (`in_caller_owner/2`), not only
 raw flags raised under the same lock, so an install in flight may have derived
-`true` from the row as it was before the write and not have put it yet. Taking
+its answer from the row as it was before the write and not have put it yet. Taking
 the lock waits for that install, and the erase that follows removes its
 stale value; skipping the lock on "absent" would let it land after the erase
 and stay. Runs only on metadata writes, never on the send path. Must never be
@@ -450,44 +407,6 @@ called from inside `with_tag_lock/2`.
 invalidate(ClassName) ->
     erase_class_flag(ClassName),
     erase_descendant_flags(ClassName).
-
--doc """
-Erase the static call keys of every descendant of the class tagged `Tag`, each
-under its own tag lock (BT-4307). Called by `beamtalk_extensions:register/5`
-and `unregister/3` when a class-side extension row under `Tag` appears or goes
-away, after the row is written and the derived-fact cache is flushed: an
-ancestor's class-side extension counts as that ancestor's method for a send
-to a descendant, so it can change the descendant's in-caller owner
-(`beamtalk_class_dispatch:in_caller_owner/2`), and with it whether a static
-call key whose owner is inherited (BT-4270's caller-safe raise) may stay
-installed. A key for a method the descendant defines itself cannot change
-(its own method is found before an ancestor's extension), but the whole
-per-class map goes, as every eraser does. The descendant's derived flag stays:
-it reads only the class's own shadows and its chain's class variables, never
-an ancestor's extension. The class's own keys are erased by `set/2` already.
-
-Erase-after-write, as `invalidate/1` is for descendants: between the row
-write and the erase, a descendant's warmed static call may still take its old
-key once. The lock is taken for each descendant even when it has no key, for
-the reason `invalidate/1` gives (an install in flight may have validated
-before the write and not have put yet). A tag that names no loaded class, or
-a class with no descendants, erases nothing. Must never be called from inside
-`with_tag_lock/2`.
-""".
--spec invalidate_descendants_of_tag(atom()) -> ok.
-invalidate_descendants_of_tag(Tag) ->
-    case beamtalk_primitive:class_name_from_tag(Tag) of
-        undefined ->
-            ok;
-        ClassName ->
-            lists:foreach(
-                fun(Descendant) ->
-                    DescendantTag = beamtalk_class_registry:class_object_tag(Descendant),
-                    with_tag_lock(DescendantTag, fun() -> erase_static_calls(DescendantTag) end)
-                end,
-                beamtalk_class_registry:all_subclasses(ClassName)
-            )
-    end.
 
 -doc """
 Erase every class's derived key and static call keys, each under its tag lock
@@ -513,38 +432,14 @@ erase_class_flag(ClassName) ->
     Tag = beamtalk_class_registry:class_object_tag(ClassName),
     with_tag_lock(Tag, fun() -> erase_direct_flag(Tag) end).
 
-%% BT-4301: a descendant's derived key folds in this class's published
-%% class-variable fact and superclass link (`chain_class_vars/1`), so it is
-%% erased with this class's, each under its own tag lock. Runs only on
+%% BT-4301 / BT-4270: a descendant's static call keys can name an inherited
+%% owner (this class's method), so they are erased with this class's, each
+%% under its own tag lock. Runs only on
 %% metadata writes (never on the send path); the walk is ETS-only, so it is
 %% safe from inside a class process.
 -spec erase_descendant_flags(atom()) -> ok.
 erase_descendant_flags(ClassName) ->
     lists:foreach(fun erase_class_flag/1, beamtalk_class_registry:all_subclasses(ClassName)).
-
--doc """
-Mirror the class-metadata fact "`ClassName` declares class variables" into the
-`class_vars` raw flag (BT-4299). Every transition erases the derived flag under
-the per-tag lock before returning: raising the fact makes `direct_call_ok/2`
-false before the caller publishes it; dropping it lets the next send re-derive
-`true`. No-op when unchanged. Called only by
-`beamtalk_class_metadata:put_class_variables/2`.
-""".
--spec set_class_vars(atom(), boolean()) -> ok.
-set_class_vars(ClassName, true) ->
-    set(class_vars, ClassName, self());
-set_class_vars(ClassName, false) ->
-    Key = key(class_vars, ClassName),
-    case persistent_term:get(Key, false) of
-        false ->
-            ok;
-        _ ->
-            Tag = class_tag(class_vars, ClassName),
-            with_tag_lock(Tag, fun() ->
-                _ = persistent_term:erase(Key),
-                erase_direct_flag(Tag)
-            end)
-    end.
 
 -doc """
 Run `Fun` holding the per-tag lock that serializes every write of the derived
@@ -636,45 +531,40 @@ is_set(Kind, Name) ->
     persistent_term:get(key(Kind, Name), false) =/= false.
 
 -doc """
-True when a class-side extension under `ClassTag` or a runtime class-method fun
-on `ClassName` may shadow a compiled class method.
+True when a runtime class-method fun on `ClassName` may shadow a compiled class
+method.
 """.
--spec is_shadowed(atom(), atom()) -> boolean().
-is_shadowed(ClassTag, ClassName) ->
-    is_set(extension, ClassTag) orelse is_set(runtime_fun, ClassName).
+-spec is_shadowed(atom()) -> boolean().
+is_shadowed(ClassName) ->
+    is_set(runtime_fun, ClassName).
 
 -doc """
-ADR 0142 §1 rules 1-2 (BT-4299, BT-4301): true exactly when the class is ready,
-nothing shadows its compiled class methods (no `extension`, no `runtime_fun`)
-and neither it nor any ancestor declares class variables. The guard of every
-static class-side direct call (ADR 0142 §2). One `persistent_term` read of the derived flag
-keyed by `ClassTag`; a miss falls to `install_direct_flag/2`, which derives the
-value from the raw flags and installs it when the class is not shadowed.
+True exactly when the class is ready and nothing shadows its compiled class
+methods (no `runtime_fun`). The guard of every static class-side direct call
+(ADR 0142 §2; ADR 0153 removed its class-variable input). One
+`persistent_term` read of the derived flag keyed by `ClassTag`; a miss falls
+to `install_direct_flag/2`, which derives the value from the raw flags and
+installs it when the class is not shadowed.
 """.
 -spec direct_call_ok(atom(), atom()) -> boolean().
 direct_call_ok(ClassTag, ClassName) ->
     case persistent_term:get(ClassTag, false) of
         true -> true;
-        class_vars -> false;
         _ -> install_direct_flag(ClassTag, ClassName) =:= true
     end.
 
 -doc """
-BT-3700: the guard of the compiled class-side self-send fast path, which runs
-inside the class process already: true while the class is ready and nothing
-shadows its compiled class methods, whatever its class variables. The same
-single read of the derived flag as `direct_call_ok/2`; either installed value
-means "not shadowed".
+BT-3700: the guard of the compiled class-side self-send fast path. Since ADR
+0153 removed the class-variable input it is the same question as
+`direct_call_ok/2` (ready and not shadowed); it stays a separate entry point
+because generated code calls it.
 """.
 -spec shadow_free(atom(), atom()) -> boolean().
 shadow_free(ClassTag, ClassName) ->
-    case persistent_term:get(ClassTag, false) of
-        false -> install_direct_flag(ClassTag, ClassName) =/= false;
-        _ -> true
-    end.
+    direct_call_ok(ClassTag, ClassName).
 
 -ifdef(TEST).
--doc "True while the derived flag for `ClassTag` is installed, with either value (test hook).".
+-doc "True while the derived flag for `ClassTag` is installed (test hook).".
 -spec is_direct_flag_set(atom()) -> boolean().
 is_direct_flag_set(ClassTag) ->
     persistent_term:get(ClassTag, false) =/= false.
@@ -687,40 +577,17 @@ direct_flag_value(ClassTag) ->
     persistent_term:get(ClassTag, false).
 -endif.
 
-%% The derived value the raw flags and the chain's published facts imply;
-%% `false` (install nothing) while not ready or shadowed.
--spec derive(atom(), atom()) -> derived() | false.
-derive(ClassTag, ClassName) ->
-    case is_ready() andalso not is_shadowed(ClassTag, ClassName) of
-        false -> false;
-        true -> chain_class_vars(ClassName)
-    end.
-
-%% ADR 0142 §1 rules 1-2 over the whole chain (BT-4301): `class_vars` when the
-%% class's own raw `class_vars` flag is up (raised before the fact is visible,
-%% BT-4299) or when `beamtalk_class_metadata:chain_has_class_variables/1`, the
-%% one runtime answer the dynamic in-caller path also reads, says the class or
-%% an ancestor declares class variables or the chain cannot be followed (it
-%% fails closed: an unpublished fact or superclass link, a missing row, a
-%% cycle). Else `true`. An ancestor's change reaches a descendant's installed
-%% value through `put_class_variables/2` and `apply_class_info/2`, which erase
-%% the descendants' keys after the ancestor's row field is written
-%% (`invalidate/1`).
--spec chain_class_vars(atom()) -> derived().
-chain_class_vars(ClassName) ->
-    case
-        is_set(class_vars, ClassName) orelse
-            beamtalk_class_metadata:chain_has_class_variables(ClassName)
-    of
-        true -> class_vars;
-        false -> true
-    end.
+%% The derived value the raw flags imply; `false` (install nothing) while not
+%% ready or shadowed.
+-spec derive(atom()) -> derived() | false.
+derive(ClassName) ->
+    is_ready() andalso not is_shadowed(ClassName).
 
 -spec install_direct_flag(atom(), atom()) -> derived() | false.
 install_direct_flag(ClassTag, ClassName) ->
     %% Cheap pre-check without the lock: a shadowed or not-yet-ready class must
     %% not take a lock per send.
-    case derive(ClassTag, ClassName) of
+    case derive(ClassName) of
         false ->
             false;
         _ ->
@@ -735,7 +602,7 @@ install_direct_flag(ClassTag, ClassName) ->
 install_direct_flag_locked(ClassTag, ClassName) ->
     case persistent_term:get(ClassTag, false) of
         false ->
-            case derive(ClassTag, ClassName) of
+            case derive(ClassName) of
                 false ->
                     false;
                 Value ->
@@ -755,8 +622,7 @@ When every condition in the moduledoc's "static call keys" holds, adds
 `Key => Ref` to the class's per-class map (`static_calls_key/1`,
 BT-4442) under the class's tag lock, so the call site's next read of that key
 matches it.
-Declines, installing nothing, when the class is shadowed, has class variables
-in its chain, is not registered or not alive, when the dynamic path's owner
+Declines, installing nothing, when the class is shadowed, is not registered or not alive, when the dynamic path's owner
 (`beamtalk_class_dispatch:in_caller_owner/2`) names another module or
 function, when an inherited owner has an ADR 0084 runtime fun for the
 selector (BT-4270), or when the function is not exported.
@@ -988,15 +854,13 @@ static_call_key_value(Key) ->
     end.
 
 -doc """
-Mark the flags authoritative: the extension registry exists, so an unset
-`extension` flag really means "no extension". Called once from
-`beamtalk_extensions:init/0`. Until then (early bootstrap) the compiled
-class-side self-send fast path declines to the always-correct hierarchy walk.
+Mark the flags authoritative: the runtime has started, so an unset flag really
+means "no shadow". Called once from `beamtalk_runtime_app:start/2` (and the
+test boot helper). Until then (early bootstrap) the compiled class-side
+self-send fast path declines to the always-correct hierarchy walk.
 
-BT-3676: this is a `persistent_term` read on the send path, replacing an
-`ets:whereis/1` of the extension table (measurably dearer: a registry lookup
-with a lock per send). The flag is never cleared; a later loss of the table
-cannot make it wrong, because no extension can be registered without the table.
+BT-3676: this is a `persistent_term` read on the send path. The flag is never
+cleared.
 """.
 -spec mark_ready() -> ok.
 mark_ready() ->
@@ -1005,7 +869,7 @@ mark_ready() ->
         false -> persistent_term:put(?READY_KEY, true)
     end.
 
--doc "True once `mark_ready/0` ran (the extension registry was initialised).".
+-doc "True once `mark_ready/0` ran (the runtime has started).".
 -spec is_ready() -> boolean().
 is_ready() ->
     persistent_term:get(?READY_KEY, false).

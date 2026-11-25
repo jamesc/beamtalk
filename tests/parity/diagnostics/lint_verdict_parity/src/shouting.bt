@@ -1,6 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// A standalone extension used from `greeter.bt`: without cross-file
-/// extensions the send there is a false does-not-understand.
-String >> shout -> String => self uppercase ++ "!"
+/// A class used from `greeter.bt`: without cross-file class resolution the
+/// send there is a false does-not-understand.
+Object subclass: Shouting
+
+  class shout: text :: String -> String => text uppercase ++ "!"

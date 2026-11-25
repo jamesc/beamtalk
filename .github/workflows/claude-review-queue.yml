@@ -1,0 +1,42 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+name: Claude Review (merge queue)
+
+# BT-5247: "Claude BeamTalk Review" is a required check on main, so in a merge
+# queue it must also report on the queue's test commit (the `merge_group`
+# event), or the queue stalls. The review already ran, and passed, on the PR,
+# so here the check only reports a pass: no review, no action, no secret, no
+# token scope.
+#
+# This lives in its own workflow, not in claude-review.yml, for two reasons:
+# * claude-code-action refuses to run on a PR that changes the workflow file
+#   invoking it (it must match the default branch), so any edit to
+#   claude-review.yml leaves that PR without a review;
+# * claude-review.yml runs on `pull_request`, where a second job with this
+#   name would report a *skipped* "Claude BeamTalk Review" on every PR commit
+#   next to the running review, and branch protection can count a skip as a
+#   pass.
+# This workflow runs on `merge_group` only, so neither can happen.
+# scripts/ci/test_merge_queue.py pins all of this.
+on:
+  merge_group:
+    types: [checks_requested]
+
+# Keyed on the queue commit: one queue entry never cancels another.
+concurrency:
+  group: claude-review-queue-${{ github.sha }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  review:
+    # Must equal the job name in claude-review.yml: the required check is
+    # matched by this name.
+    name: Claude BeamTalk Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Reviewed on the pull request
+        run: echo "Claude review ran on the pull request; nothing to review on the merge-group commit."

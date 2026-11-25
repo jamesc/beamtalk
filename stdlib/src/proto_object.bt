@@ -86,6 +86,10 @@ abstract nil subclass: ProtoObject
 
   /// Send a message dynamically with an arguments list.
   ///
+  /// Sent to a class, the class method runs in the caller's process, exactly
+  /// as the same send written out would, for every selector that is not
+  /// process-bound (`new`, `spawn`, `startLink`, ...; ADR 0142, ADR 0153).
+  ///
   /// ## Examples
   /// ```beamtalk
   /// 42 perform: #abs withArguments: #()   // => 42

@@ -103,11 +103,15 @@ impl BuildLayout {
 
     // ── Native Erlang ────────────────────────────────────────────────
 
-    /// Whether `dir` is a project's own compiled `native/` ebin
-    /// (`…/_build/dev/native/ebin`), whatever the project root. The single
-    /// recogniser matching [`native_ebin_dir`](Self::native_ebin_dir) (BT-4626).
+    /// Whether `dir` is a project's own compiled native Erlang output — its
+    /// `native/` ebin (`…/_build/dev/native/ebin`) or its `native/test/`
+    /// helper ebin (`…/_build/dev/native_test/ebin`) — whatever the project
+    /// root. The single recogniser matching
+    /// [`native_ebin_dir`](Self::native_ebin_dir) and
+    /// [`native_test_ebin_dir`](Self::native_test_ebin_dir) (BT-4626, BT-5186).
     pub fn is_native_ebin_dir(dir: &Utf8Path) -> bool {
-        dir.ends_with(Self::new("").native_ebin_dir())
+        let any = Self::new("");
+        dir.ends_with(any.native_ebin_dir()) || dir.ends_with(any.native_test_ebin_dir())
     }
 
     /// `_build/dev/native/` — base directory for native Erlang builds.
@@ -118,6 +122,15 @@ impl BuildLayout {
     /// `_build/dev/native/ebin/` — compiled native `.erl` → `.beam` files.
     pub fn native_ebin_dir(&self) -> Utf8PathBuf {
         self.native_dir().join("ebin")
+    }
+
+    /// `_build/dev/native_test/ebin/` — the package's `native/test/*.erl`
+    /// helpers, compiled by `beamtalk test` (BT-5186). Kept apart from
+    /// [`native_ebin_dir`](Self::native_ebin_dir), whose stale-beam pruning
+    /// in `beamtalk build` would otherwise delete them under a running test,
+    /// and outside [`native_dir`](Self::native_dir), which rebar3 owns.
+    pub fn native_test_ebin_dir(&self) -> Utf8PathBuf {
+        self.profile_dir().join("native_test").join("ebin")
     }
 
     /// `_build/dev/native/include/` — generated headers (e.g. `beamtalk_classes.hrl`).
@@ -274,6 +287,25 @@ mod tests {
     fn test_native_dir() {
         let layout = BuildLayout::new("/home/user/my_app");
         assert_eq!(layout.native_dir(), "/home/user/my_app/_build/dev/native");
+    }
+
+    #[test]
+    fn test_native_test_ebin_dir_is_outside_the_pruned_native_ebin() {
+        let layout = BuildLayout::new("/home/user/my_app");
+        assert_eq!(
+            layout.native_test_ebin_dir(),
+            "/home/user/my_app/_build/dev/native_test/ebin"
+        );
+        assert!(
+            !layout
+                .native_test_ebin_dir()
+                .starts_with(layout.native_dir())
+        );
+        assert!(BuildLayout::is_native_ebin_dir(
+            &layout.native_test_ebin_dir()
+        ));
+        assert!(BuildLayout::is_native_ebin_dir(&layout.native_ebin_dir()));
+        assert!(!BuildLayout::is_native_ebin_dir(&layout.dep_ebin_dir("x")));
     }
 
     #[test]

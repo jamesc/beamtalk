@@ -11,7 +11,8 @@ OTP Port interface to the beamtalk-exec Rust binary (ADR 0051, Phase 1).
 Spawns `beamtalk-exec` as an OTP port with `{packet, 4}` framing and
 ETF-encoded commands. The binary manages OS subprocesses and sends
 events back as ETF tuples: `{stdout, ChildId, Data}`,
-`{stderr, ChildId, Data}`, `{exit, ChildId, ExitCode}`.
+`{stderr, ChildId, Data}`, `{exit, ChildId, ExitCode}` and
+`{error, ChildId, Command, Reason}`.
 
 The caller is responsible for receiving port messages and dispatching
 events. This module only handles port open/close/command mechanics.
@@ -33,7 +34,32 @@ Events (binary → BEAM) — ETF tuples on the port:
   {stdout, ChildId, Data}
   {stderr, ChildId, Data}
   {exit,   ChildId, ExitCode}
+  {stdin_queued, ChildId}
+  {error,  ChildId, Command, Reason}
 ```
+
+`exit` is the last event for a child. It is sent once the child has exited
+and its output pipes have closed. If a grandchild still holds them, it is
+sent once they have been quiet for 2 s (at most 30 s after the exit), and
+later output is dropped. A failed `spawn` is answered with
+`{exit, ChildId, -1}`.
+
+`stdin_queued` answers a `write_stdin` the binary accepted. Every
+well-formed `write_stdin` (one naming a `child_id`) gets exactly one answer,
+`stdin_queued` or `error`, in command order, so the caller can tell which
+write was dropped.
+
+`error` reports that `Command` (`spawn`, `write_stdin`, …) for `ChildId`
+failed: malformed `args` or
+`env` (nothing is spawned), an unknown child, or a full stdin queue (8 MiB
+waiting for a child that does not read its input; that write is dropped).
+`Reason` is a binary.
+
+Children die with the port: on `close/1`, and also when the binary is
+killed (Unix: a SIGTERM handler, a watchdog process and, on Linux, a
+parent-death signal; Windows: a kill-on-close Job Object). On Unix this
+covers everything left in the child's process group, including background
+grandchildren, but not a process that started its own session (`setsid`).
 """.
 
 -export([

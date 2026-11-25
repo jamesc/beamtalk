@@ -491,7 +491,7 @@ fn collect_sends(expr: &Expression, source: &str, hits: &mut Vec<SendHit>) {
     walk_expr(expr, source, &mut SendHitVisitor { hits });
 }
 
-fn selector_line(selector: &MessageSelector, fallback: Span, source: &str) -> u32 {
+pub fn selector_line(selector: &MessageSelector, fallback: Span, source: &str) -> u32 {
     selector_span(selector)
         .unwrap_or(fallback)
         .line_number(source)

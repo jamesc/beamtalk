@@ -89,7 +89,7 @@ fn perform_siblings_in_typed_method_are_silent() {
     let dynamic = dynamic_diags(&diags);
     assert!(
         dynamic.is_empty(),
-        "perform: / perform:withArguments:timeout: should all \
+        "perform: / perform:withArguments:timeout: should both \
          be silent, got: {dynamic:?} (all: {diags:?})"
     );
 }

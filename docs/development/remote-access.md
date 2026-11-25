@@ -116,6 +116,32 @@ server {
 }
 ```
 
+The WebSocket handler refuses any `Host` or `Origin` name that is not loopback
+or the bound IP, to block DNS rebinding (ADR 0020). A proxy that forwards
+`Host $host` — or a client that dials a name such as a Tailscale MagicDNS host —
+must be listed, or the upgrade gets `403`:
+
+```bash
+# Comma-separated hostnames, no ports; matched case-insensitively against both
+# the Host and Origin headers. Set it in the environment of the workspace node.
+export BEAMTALK_WS_ALLOWED_HOSTS=repl.example.com,mybox.tailnet-1234.ts.net
+```
+
+The same list can be set as the `beamtalk_workspace` application env
+`ws_allowed_hosts`. Cookie authentication still applies; the list only widens
+which names pass the rebinding check. Alternatively, have the proxy send
+`proxy_set_header Host 127.0.0.1:49152;` and forward no `Origin`.
+
+**Connection caps:** unauthenticated and authenticated WebSockets have separate
+budgets. At most 32 sockets may be waiting to authenticate (`beamtalk_workspace`
+app env `ws_max_preauth_connections`); when that budget is full, a new socket
+takes the slot of the oldest unauthenticated one, which is closed with code
+1013, so idle unauthenticated sockets cannot lock a client out. At most 256
+sockets may be authenticated (`ws_max_connections`); one more is closed with
+code 1013 right after it authenticates. If the REPL server restarts, its open
+WebSockets are closed with code 1012 and clients reconnect. A name in
+`BEAMTALK_WS_ALLOWED_HOSTS` that is not valid Unicode is ignored.
+
 **Important nginx notes:**
 - `proxy_http_version 1.1` is required for WebSocket upgrade
 - `proxy_read_timeout` / `proxy_send_timeout` should be set high to avoid premature disconnects during long evaluations

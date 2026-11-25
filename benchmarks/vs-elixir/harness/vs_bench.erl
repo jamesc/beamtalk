@@ -85,16 +85,6 @@ rows() ->
             'dynClassMethod:c:', math_class, [{dyn_remote_call, math_class}, {remote_call, none}]},
         {"3e", dispatch, "inherited class method, open stateless subclass / Mod.fun(arg)", 50000,
             'inheritedClassMethod:', none, [{remote_call, none}]},
-        {"3f", dispatch, "class method, class with classState: / Mod.fun(arg)", 50000,
-            'statefulClassMethod:', none, [{remote_call, none}]},
-        {"3g", dispatch, "class method, class variables published after compile / Mod.fun(arg)",
-            50000, 'lateStateClassMethod:', none, [{remote_call, none}]},
-        {"3h", dispatch, "as 3g, class in a variable / mod.fun(arg)", 50000, 'dynClassMethod:c:',
-            late_state_math_class, [{dyn_remote_call, late_state_math_class}, {remote_call, none}]},
-        {"3i", dispatch, "class method shadowed by a class-side extension / Mod.fun(arg)", 50000,
-            'shadowedClassMethod:', none, [{remote_call, none}]},
-        {"3j", dispatch, "as 3i, class in a variable / mod.fun(arg)", 50000, 'dynClassMethod:c:',
-            shadowed_math_class, [{dyn_remote_call, shadowed_math_class}, {remote_call, none}]},
         {"3k", dispatch, "integer class-side constant: Errs protocolError / Mod.const()", 200000,
             'intConstant:', none, [{remote_const_int, none}, {module_attr_int, none}]},
         {"3l", dispatch, "string class-side constant: Errs name / Mod.const()", 200000,
@@ -188,6 +178,24 @@ rows() ->
         {"11g", dispatch, "a max: 3, a :: Integer / max(a, 3)", 200000, 'maxTyped:a:', int, [
             {max_of, int}
         ]},
+        {"11h", dispatch, "5 < b, b untyped / 5 < b", 200000, 'litLess:b:', int, [{lit_less, int}]},
+        {"11i", dispatch, "a < b, both untyped / a < b", 200000, 'untypedLess:a:b:', int_pair, [
+            {less_ab, int_pair}
+        ]},
+        {"11j", dispatch, "a < b, a :: Integer, b untyped / a < b", 200000, 'typedLess:a:b:', int_pair, [
+            {less_ab, int_pair}
+        ]},
+        {"11k", dispatch, "5 + b, b untyped / 5 + b", 200000, 'litAdd:b:', int, [{lit_add, int}]},
+        {"11m", dispatch, "\"m\" < b, b untyped / \"m\" < b", 200000, 'litStrLess:b:', string, [
+            {lit_str_less, string}
+        ]},
+        {"11n", dispatch, "a < b, both untyped Strings / a < b", 200000, 'untypedStrLess:a:b:',
+            string_pair, [{less_ab, string_pair}]},
+        {"11o", dispatch, "#m < b, b untyped / :m < b", 200000, 'litSymLess:b:', symbol, [
+            {lit_sym_less, symbol}
+        ]},
+        {"11l", machinery, "actor method [0 < self.n] whileTrue: writing a field / GenServer.call",
+            20000, 'actorSpin:c:', counter, [{gen_spin, counter}]},
         {"12a", dispatch, "p class / p.__struct__", 200000, 'classOf:p:', point, [
             {struct_of, point}
         ]},
@@ -246,6 +254,8 @@ fixtures() ->
     #{
         none => 0,
         int => 5,
+        %% 11i/11j: both operands are 5 on each side (Elixir gets the pair).
+        int_pair => {5, {5, 5}},
         point => {Bt(point), ?EX:point()},
         open_point => {Bt(openPoint), ?EX:point()},
         square => {Bt(square), ?EX:square()},
@@ -256,11 +266,12 @@ fixtures() ->
         dict => {Bt(dict), ?EX:dict()},
         dict100 => {Bt(dict100), ?EX:dict100()},
         string => {Bt(string), ?EX:string()},
+        %% 11n: both operands are the string on each side (Elixir gets the pair).
+        string_pair => {Bt(string), {?EX:string(), ?EX:string()}},
+        symbol => hello,
         binary => {Bt(binary), ?EX:string()},
         tuple => {Bt(tuple), ?EX:tuple()},
         math_class => {Bt(openMathClass), ?EX:math_module()},
-        late_state_math_class => {Bt(lateStateMathClass), ?EX:math_module()},
-        shadowed_math_class => {Bt(shadowedMathClass), ?EX:math_module()},
         bt_ok => {Bt(okResult), none},
         ex_ok => {none, ?EX:ok_result()},
         bt_counter => {Bt(counter), none},
@@ -300,7 +311,9 @@ bt_fun(Sel, Ctx) ->
     Self = bt_self(),
     case arity_of(Sel) of
         1 -> fun(N) -> ?BT:F(Self, N) end;
-        2 -> fun(N) -> ?BT:F(Self, N, Ctx) end
+        2 -> fun(N) -> ?BT:F(Self, N, Ctx) end;
+        %% `n:a:b:` rows (BT-5207): both operands get the row's fixture value.
+        3 -> fun(N) -> ?BT:F(Self, N, Ctx, Ctx) end
     end.
 
 ex_fun(Fun, Ctx) -> fun(N) -> ?EX:Fun(N, Ctx) end.
@@ -348,11 +361,6 @@ boot() ->
     %% Elixir protocol dispatch is only representative when consolidated.
     true = 'Elixir.Protocol':'consolidated?'('Elixir.VeBench.Area'),
     true = 'Elixir.Protocol':'consolidated?'('Elixir.Enumerable'),
-    %% Rows 3g/3h (BT-4431): `VbLateStateMath` was compiled with no class
-    %% state; publish "declares class variables" for it, the metadata write a
-    %% reload adding `classState:` makes, so its static call site declines.
-    ok = beamtalk_class_metadata:put_class_variables('VbLateStateMath', true),
-    true = beamtalk_class_metadata:chain_has_class_variables('VbLateStateMath'),
     timer:sleep(1000).
 
 load_all(Dir, Glob) ->
@@ -591,16 +599,6 @@ compiles_to("3d") ->
     "send(C, 'double:', [21]) -> class_send: runs in the caller (ADR 0142, BT-4300)";
 compiles_to("3e") ->
     "whereis_class + class_send: inherited method resolved by the owner memo, runs in the caller (BT-4300)";
-compiles_to("3f") ->
-    "whereis_class + class_send: gen_server:call; stays there under ADR 0142 (class state)";
-compiles_to("3g") ->
-    "guarded direct call whose key is never installed: no target in the class's static call map -> static_call_target/4 declines (class variables) -> whereis_class + class_send: gen_server:call (BT-4431)";
-compiles_to("3h") ->
-    "send(C, 'double:', [21]) -> class_send: gen_server:call (control for 3g, BT-4431)";
-compiles_to("3i") ->
-    "guarded direct call whose key is never installed: no target in the class's static call map -> static_call_target/4 declines (extension) -> whereis_class + class_send runs the extension (BT-4431)";
-compiles_to("3j") ->
-    "send(C, 'double:', [21]) -> class_send runs the extension (control for 3i, BT-4431)";
 compiles_to("3k") ->
     "folded constant: one persistent_term:get of the class's static call key, its {constant_value, 1, Mod, Fun, Tag} key matched in the map, then the literal 1 in place (BT-4363)";
 compiles_to("3l") ->
@@ -641,8 +639,16 @@ compiles_to("11b") -> "erlang:'+'(A, 1)";
 compiles_to("11c") -> "is_number guard, erlang:'+'";
 compiles_to("11d") -> "send(Bool, 'ifTrue:ifFalse:', [fun, fun]) -> True:dispatch/3";
 compiles_to("11e") -> "is_number guard (declared Integer, BT-4823), erlang:'<'";
-compiles_to("11f") -> "letrec loop; is_number guard on the typed limit (BT-4823), erlang:'>'";
-compiles_to("11g") -> "Number>>max: (self guarded: Number is not a proven class), erlang:'>'";
+compiles_to("11f") -> "letrec loop; is_number guard on the typed limit (BT-4823), its number arm an is_number(I) test (ADR 0116 addendum, BT-5210), erlang:'>'; else send_number_comparison/4";
+compiles_to("11g") -> "Number>>max: (self guarded: Number is not a proven class; the declared other is tested, BT-5210), erlang:'>'";
+compiles_to("11h") -> "case is_number(B): erlang:'<'(5, B); else send_number_comparison(B, 'lessThanFromNumber:', [5], '<') (ADR 0116 addendum, BT-5210; the call arm gives the site a frame)";
+compiles_to("11i") -> "is_number(A) -> is_number(B) ? erlang:'<'(A, B) : send_number_comparison/4; else is_binary(A) ? erlang:'<'(A, B) : send(A, '<', [B]) (BT-5210)";
+compiles_to("11j") -> "as 11e, with B untyped: is_number guard on the declared-Integer A, its true arm is_number(B) ? erlang:'<'(A, B) : send_number_comparison/4 (BT-5210)";
+compiles_to("11k") -> "erlang:'+'(5, B) in a try; on badarith an is_number(B) test then send_number_coercion/4 (the arithmetic reference the comparison addendum matches)";
+compiles_to("11m") -> "case is_record(B, beamtalk_string, 2): erlang:'<'(\"m\", B); else erlang:error({beamtalk_ordering_type_error, \"m\", '<', B}) (BT-5213; frame-free)";
+compiles_to("11n") -> "is_number(A) / is_binary(A) both false for a tagged String: send(A, '<', [B]) -> String>>< body: is_record(B, beamtalk_string, 2) ? erlang:'<' : erlang:error({beamtalk_ordering_type_error, ...}) (BT-5213)";
+compiles_to("11o") -> "send(A, '<', [B]) -> Symbol>>< body: is_atom(B) and not nil/true/false ? erlang:'<' : erlang:error({beamtalk_ordering_type_error, ...}) (BT-5213)";
+compiles_to("11l") -> "as 7a; in the actor the loop is a StateAcc letrec (whole state map threaded, one maps:put per iteration); the condition 0 < self.count is a guarded operator (BT-5210): a BT-4279 fast path is_number(Count) -> erlang:'<', else store, send_number_comparison/4, take";
 compiles_to("12a") -> "typed receiver (BT-4127): is_map + tag guard, erlang:whereis + class-object tuple with the pinned module; untyped: beamtalk_primitive:class_of_object derived-cache hit";
 compiles_to("12b") -> "class ref built per call (whereis_class + module_name_safe) + send(P, 'isKindOf:') -> direct objectIsKindOf/2 call (no FFI proxy, BT-4410): one memoised {is_kind_of, C, B} lookup (BT-4221)";
 compiles_to("12c") -> "as 12b, but the String literal bakes its module (whereis only, no module_name_safe, BT-4411) and String:dispatch/3 takes the memoised inherited_target verdict {value, Object, ...} straight to Object:dispatch/3 (BT-4260; no per-level extensions walk)";
@@ -957,7 +963,6 @@ inv_start(Name, Superclass) ->
         superclass => Superclass,
         module => ?INV_MOD,
         class_methods => maps:from_list([{inv_sel(I), #{arity => 0}} || I <- lists:seq(1, ?INV_MAX_K)]),
-        class_state => #{},
         meta => #{process_bound_class_selectors => [new, spawn]}
     }),
     Pid.

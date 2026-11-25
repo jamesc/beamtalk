@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5210 fixture (ADR 0116 § Addendum): a value type whose reflected
+// comparison hook exists but raises. `5 < aRank` must surface the hook's own
+// error, not relabel it as a `does_not_understand` for the hook.
+
+Value subclass: BrokenRank
+  field: rank :: Integer = 0
+
+  /// `5 < aRank`: present, and always fails.
+  lessThanFromNumber: n :: Number -> Boolean =>
+    self error: "BrokenRank cannot be ordered against {n}"

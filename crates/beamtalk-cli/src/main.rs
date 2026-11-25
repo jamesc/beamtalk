@@ -88,8 +88,10 @@ enum Command {
         #[arg(long)]
         force: bool,
 
-        /// Delete a pre-existing --output directory even if it doesn't
-        /// look like a previous `beamtalk release` output
+        /// Replace a pre-existing --output directory that lacks the
+        /// `.beamtalk-release` marker, provided it is release-shaped (a
+        /// `releases/` directory and only bin/, lib/, releases/, erts-*/ at
+        /// the top level); any other non-empty directory is still refused
         #[arg(long)]
         force_output: bool,
 
@@ -822,6 +824,7 @@ mod tests {
             "beamtalk-exec",
             "beamtalk-lsp",
             "beamtalk-mcp",
+            "beamtalk-process",
         ];
         let directive = verbose_filter_directive(1);
         for name in deps.keys().filter(|k| k.starts_with("beamtalk-")) {

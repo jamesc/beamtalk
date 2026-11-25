@@ -70,7 +70,6 @@ fn test_class_registration_generation() {
             },
         ],
         class_methods: vec![],
-        class_variables: vec![],
         type_params: vec![],
         superclass_type_args: vec![],
         uses: vec![],
@@ -242,71 +241,17 @@ fn test_class_registration_generation() {
 }
 
 #[test]
-fn test_class_state_emits_class_fields_in_meta() {
-    // `classState:` declarations must be reflected into __beamtalk_meta/0
-    // as a `class_fields` key, alongside the instance-side `fields` key.
-    let src = concat!(
-        "Actor subclass: Counter\n",
-        "  state: value = 0\n",
-        "  classState: total = 0\n",
-        "  classState: label = \"unset\"\n\n",
-        "  class total => self.total\n",
-    );
-    let code = codegen_named(src, "counter");
-
-    // Instance-side fields unchanged.
-    assert_has(
-        "Should include instance fields in meta map",
-        &code,
-        &["'fields' => ['value']"],
-    );
-    // Class-side fields emitted in declaration order.
-    assert_has(
-        "Should include class_fields (class variables) in meta map",
-        &code,
-        &["'class_fields' => ['total', 'label']"],
-    );
-}
-
-#[test]
-fn test_no_class_state_emits_empty_class_fields() {
-    // a class with no `classState:` declarations emits an empty
-    // class_fields list so the runtime intrinsic always finds the key.
+fn test_meta_carries_no_class_variable_keys() {
+    // ADR 0153 (BT-5154): classes have no class variables, so
+    // `__beamtalk_meta/0` no longer carries `class_fields` or
+    // `class_field_kinds`; the runtime reads a missing key as empty.
     let src = concat!("Actor subclass: Counter\n", "  state: value = 0\n");
     let code = codegen_named(src, "counter");
 
-    assert_has(
-        "Class with no class state should emit empty class_fields",
+    assert_lacks(
+        "Meta must not carry class-variable keys. Got",
         &code,
-        &["'class_fields' => []"],
-    );
-}
-
-#[test]
-fn test_late_state_and_classstate_emit_field_kinds_in_meta() {
-    // ADR 0124 §1/B5a: a `late state:`/`late classState:` declaration must
-    // be reflected into __beamtalk_meta/0 as 'late' entries in the
-    // 'field_kinds' (instance) and 'class_field_kinds' (class-side) maps,
-    // alongside every ordinary declaration's 'eager' entry.
-    let src = concat!(
-        "typed Actor subclass: CodexClient\n",
-        "  late state: proc :: Subprocess\n",
-        "  state: id :: Integer = 0\n",
-        "  late classState: current :: CodexClient\n",
-        "  classState: total :: Integer = 0\n\n",
-        "  launch => self.proc\n",
-    );
-    let code = codegen_named(src, "codex_client");
-
-    assert_has(
-        "Should include instance field_kinds (late proc, eager id) in meta map",
-        &code,
-        &["'field_kinds' => ~{'proc' => 'late', 'id' => 'eager'}~"],
-    );
-    assert_has(
-        "Should include class_field_kinds (late current, eager total) in meta map",
-        &code,
-        &["'class_field_kinds' => ~{'current' => 'late', 'total' => 'eager'}~"],
+        &["'class_fields'", "'class_field_kinds'"],
     );
 }
 
@@ -346,45 +291,9 @@ fn test_late_state_omitted_from_init_state_literal() {
 }
 
 #[test]
-fn test_late_classstate_omitted_from_classstate_map() {
-    // BT-3548 (ADR 0124 §2/B2): a defaultless `late classState:` slot is
-    // likewise omitted from the class-side `'classState'` map in
-    // `_BuilderState` — the class-side counterpart of the instance-side
-    // omission above.
-    let src = concat!(
-        "typed Actor subclass: CodexClient\n",
-        "  late classState: current :: CodexClient\n",
-        "  classState: total :: Integer = 0\n\n",
-        "  class launch => self.current\n",
-    );
-    let code = codegen_named(src, "codex_client");
-
-    let class_state = code
-        .split("'classState' => ~{")
-        .nth(1)
-        .expect("_BuilderState must emit a 'classState' map literal")
-        .split("}~")
-        .next()
-        .expect("classState map literal must close with }~");
-
-    assert_lacks(
-        "Unassigned `late classState:` slot 'current' must be absent from the classState map entirely. Got classState body",
-        class_state,
-        &["'current'"],
-    );
-    assert_has(
-        "Eager class var 'total' must still get its default in the classState map. Got classState body",
-        class_state,
-        &["'total' => 0"],
-    );
-}
-
-#[test]
 fn test_no_late_fields_emit_empty_field_kinds_when_no_state() {
-    // A class with no state/classState declarations still emits the
-    // 'field_kinds'/'class_field_kinds' keys (empty maps), matching
-    // 'class_fields' emitting `[]` in test_no_class_state_emits_empty_class_fields
-    // — the runtime intrinsic always finds the key.
+    // A class with no state declarations still emits the 'field_kinds' key
+    // (an empty map), so the runtime intrinsic always finds the key.
     let src = "Actor subclass: Empty\n  noop => nil\n";
     let code = codegen_named(src, "empty");
 
@@ -392,11 +301,6 @@ fn test_no_late_fields_emit_empty_field_kinds_when_no_state() {
         "Should emit empty field_kinds map",
         &code,
         &["'field_kinds' => ~{}~"],
-    );
-    assert_has(
-        "Should emit empty class_field_kinds map",
-        &code,
-        &["'class_field_kinds' => ~{}~"],
     );
 }
 
@@ -463,7 +367,6 @@ fn test_multiple_classes_registration() {
             }],
             methods: vec![],
             class_methods: vec![],
-            class_variables: vec![],
             type_params: vec![],
             superclass_type_args: vec![],
             uses: vec![],
@@ -609,7 +512,6 @@ fn test_multi_class_early_error_short_circuits() {
             }],
             methods: vec![],
             class_methods: vec![],
-            class_variables: vec![],
             type_params: vec![],
             superclass_type_args: vec![],
             uses: vec![],
@@ -686,7 +588,6 @@ fn test_three_class_short_circuit_nesting() {
             }],
             methods: vec![],
             class_methods: vec![],
-            class_variables: vec![],
             type_params: vec![],
             superclass_type_args: vec![],
             uses: vec![],

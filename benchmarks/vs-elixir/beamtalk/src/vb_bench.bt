@@ -62,10 +62,6 @@ sealed Object subclass: VbBench
 
   class openMathClass => VbOpenMath
 
-  class lateStateMathClass => VbLateStateMath
-
-  class shadowedMathClass => VbShadowedMath
-
   // === Loop overhead ===
   class baseline: n :: Integer -> Integer =>
     last := 0
@@ -171,28 +167,6 @@ sealed Object subclass: VbBench
   class inheritedClassMethod: n :: Integer -> Integer =>
     last := 0
     n timesRepeat: [last := VbOpenMathSub double: 21]
-    last
-
-  class statefulClassMethod: n :: Integer -> Integer =>
-    last := 0
-    n timesRepeat: [last := VbStatefulMath double: 21]
-    last
-
-  // BT-4431: static call sites whose guard keeps declining. The compiler
-  // emits the guarded direct call (it sees no class state and no shadow), but
-  // the runtime declines every send: VbLateStateMath gains class variables
-  // after compilation (the harness publishes them, as a reload adding
-  // `classState:` does), and a class-side extension shadows VbShadowedMath's
-  // `double:`. Each miss runs `static_call_target/4`'s unlocked check before
-  // the fallback; the dynamic sends of rows 3h and 3j are the controls.
-  class lateStateClassMethod: n :: Integer -> Integer =>
-    last := 0
-    n timesRepeat: [last := VbLateStateMath double: 21]
-    last
-
-  class shadowedClassMethod: n :: Integer -> Integer =>
-    last := 0
-    n timesRepeat: [last := VbShadowedMath double: 21]
     last
 
   // === 4. Dynamic send, receiver of unknown static type ===
@@ -503,6 +477,59 @@ sealed Object subclass: VbBench
   class maxTyped: n :: Integer a: a :: Integer -> Integer =>
     last := 0
     n timesRepeat: [last := a max: 3]
+    last
+
+  // BT-5207 (ADR 0116 comparison addendum, Phase 0): number-on-the-left
+  // comparison baselines. `b` is a parameter the compiler cannot prove numeric,
+  // so these rows measure the arm the addendum changes.
+  // A literal (proven) receiver, untyped right operand.
+  class litLess: n :: Integer b: b -> Object =>
+    last := false
+    n timesRepeat: [last := 5 < b]
+    last
+
+  // Both operands untyped.
+  class untypedLess: n :: Integer a: a b: b -> Object =>
+    last := false
+    n timesRepeat: [last := a < b]
+    last
+
+  // A declared `:: Integer` receiver, untyped right operand.
+  class typedLess: n :: Integer a: a :: Integer b: b -> Object =>
+    last := false
+    n timesRepeat: [last := a < b]
+    last
+
+  // The arithmetic reference: `+` with a proven receiver and untyped right operand.
+  class litAdd: n :: Integer b: b -> Object =>
+    last := 0
+    n timesRepeat: [last := 5 + b]
+    last
+
+  // BT-5213: `String` and `Symbol` receivers order only against their own
+  // kind. A `String` literal (proven) receiver, untyped right operand.
+  class litStrLess: n :: Integer b: b -> Object =>
+    last := false
+    n timesRepeat: [last := "m" < b]
+    last
+
+  // Both operands untyped (Strings at run time): dispatches to `String>><`.
+  class untypedStrLess: n :: Integer a: a b: b -> Object =>
+    last := false
+    n timesRepeat: [last := a < b]
+    last
+
+  // A `Symbol` literal receiver, untyped right operand: dispatches to `Symbol>><`.
+  class litSymLess: n :: Integer b: b -> Object =>
+    last := false
+    n timesRepeat: [last := #m < b]
+    last
+
+  // BT-5207: an actor method looping on a field, the body writing it back
+  // (VbCounter spin:). Five iterations per call at `k` = 5.
+  class actorSpin: n :: Integer c: c :: VbCounter -> Integer =>
+    last := 0
+    n timesRepeat: [last := c spin: 5]
     last
 
   // === 12. Class references and isKindOf: ===

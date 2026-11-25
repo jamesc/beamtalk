@@ -26,6 +26,7 @@ use std::str::CharIndices;
 
 use ecow::EcoString;
 
+use super::parser::MAX_NESTING_DEPTH;
 use super::{Span, Token, TokenKind, Trivia};
 
 /// A lexer that tokenizes Beamtalk source code.
@@ -50,6 +51,153 @@ pub struct Lexer<'src> {
     pending_tokens: Vec<Token>,
     /// Override span for the current token (used for `StringStart`).
     override_span: Option<Span>,
+    /// How many string interpolations this lexer is nested inside: each
+    /// interpolation body is lexed by a sub-lexer, so it is bounded by
+    /// [`MAX_NESTING_DEPTH`] (BT-5181).
+    interpolation_depth: usize,
+    /// Byte offset the lexer may not read past: the source length, or while
+    /// a string literal is open the start of the next definition-header line
+    /// (see [`Self::lex_string`]). The peek and advance helpers stop here as
+    /// if it were end of input.
+    fence: usize,
+    /// Byte offsets of the lines that start a top-level class or protocol
+    /// definition (see [`is_definition_header`]), computed on first use.
+    definition_headers: Option<Vec<usize>>,
+    /// The open string literal's start and the lexer position just after its
+    /// opening quote, so an unterminated string can rewind (BT-5182).
+    open_string: Option<(u32, SavedPosition<'src>)>,
+    /// The whole file this lexer's source is a slice of, and the slice's
+    /// offset in it: a sub-lexer for an interpolation body reports line and
+    /// column numbers in the file, not in the body.
+    origin: &'src str,
+    origin_offset: usize,
+    /// Memo for [`Self::line_col`]: a byte offset in `origin`, its 0-based
+    /// line, and that line's start offset. Lookups usually move forward, so
+    /// counting resumes from here instead of from the start of the file.
+    line_memo: (usize, usize, usize),
+}
+
+/// A saved lexer position: the byte offset and the character iterator.
+type SavedPosition<'src> = (usize, Peekable<CharIndices<'src>>);
+
+/// The message prefix of every lexer error for a literal or comment that is
+/// still open where the input ends (BT-5182). The REPL reads such input as
+/// incomplete and asks for another line; see [`is_unterminated_error`].
+const UNTERMINATED_PREFIX: &str = "unterminated ";
+
+/// `true` if a [`TokenKind::Error`] carries a human-readable message (an
+/// English sentence starting with a lowercase letter, e.g. "single-quoted
+/// strings are no longer supported...") rather than a raw source fragment
+/// (an unknown character, or `$` at end of input).
+#[must_use]
+pub(crate) fn is_message_error(text: &str) -> bool {
+    text.starts_with(|c: char| c.is_ascii_lowercase())
+}
+
+/// `true` if a [`TokenKind::Error`] message reports an unterminated string
+/// literal or block comment, the one family of lexer errors that more input
+/// can fix.
+#[must_use]
+pub(crate) fn is_unterminated_error(message: &str) -> bool {
+    message.starts_with(UNTERMINATED_PREFIX)
+}
+
+/// The character the escape `\c` stands for in a string or character
+/// literal: the one escape table both share (ADR 0138, BT-5182). `\r` (CR),
+/// `\n` (LF), `\t` (TAB), `\\` (backslash), `\"` (quote), `\0` (exactly
+/// NUL, no octal continuation), and `\{` / `\}` (literal braces, which in a
+/// string keep a brace from opening an interpolation). `None` for any other
+/// character: an unknown escape is a compile error in both literals.
+fn escaped_char(c: char) -> Option<char> {
+    match c {
+        'r' => Some('\r'),
+        'n' => Some('\n'),
+        't' => Some('\t'),
+        '\\' => Some('\\'),
+        '"' => Some('"'),
+        '0' => Some('\0'),
+        '{' => Some('{'),
+        '}' => Some('}'),
+        _ => None,
+    }
+}
+
+/// The byte-order mark a UTF-8 file may begin with; the lexer skips it.
+const BYTE_ORDER_MARK: char = '\u{FEFF}';
+
+/// `true` if `line` (the text of one source line, from column 1) starts a
+/// top-level class or protocol definition: optional `abstract` / `sealed` /
+/// `typed` / `internal` modifiers, a superclass name (optionally
+/// package-qualified, `json@Parser`, and with type arguments, `Collection(E)`),
+/// then `subclass:`; or `Protocol define:`. The textual twin of the parser's
+/// `is_at_class_definition` / `is_at_protocol_definition`, used where no
+/// tokens exist yet: an unterminated string or block comment stops at such a
+/// line so the definitions after it still parse (BT-5182). Only a header at
+/// column 1 counts, which is where every definition in a file starts.
+/// `parser::tests::lexer_recovery_tests::definition_header_agrees_with_parser`
+/// holds the two predicates to the same verdict on a table of lines and on
+/// every line of the stdlib and examples.
+pub(super) fn is_definition_header(line: &str) -> bool {
+    fn identifier(s: &str) -> Option<(&str, &str)> {
+        let first = s.chars().next()?;
+        if !(first.is_ascii_alphabetic() || first == '_') {
+            return None;
+        }
+        let end = s
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(s.len());
+        Some((&s[..end], &s[end..]))
+    }
+    fn skip_blanks(s: &str) -> &str {
+        s.trim_start_matches([' ', '\t'])
+    }
+
+    let mut rest = line;
+    let Some((mut name, mut after)) = identifier(rest) else {
+        return false;
+    };
+    if name == "Protocol" {
+        return skip_blanks(after).starts_with("define:");
+    }
+    while matches!(name, "abstract" | "sealed" | "typed" | "internal") {
+        rest = skip_blanks(after);
+        let Some(next) = identifier(rest) else {
+            return false;
+        };
+        (name, after) = next;
+    }
+    rest = after;
+    // Package qualifier: `json@Parser`
+    if let Some(qualified) = rest.strip_prefix('@') {
+        let Some((_, after_class)) = identifier(qualified) else {
+            return false;
+        };
+        rest = after_class;
+    }
+    // Superclass type arguments: `Collection(E)`, `Mapping(K, Seq(V))`
+    if rest.starts_with('(') {
+        let mut depth = 0usize;
+        let mut end = None;
+        for (i, c) in rest.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(i + 1);
+                        break;
+                    }
+                }
+                '\n' => return false,
+                _ => {}
+            }
+        }
+        let Some(end) = end else {
+            return false;
+        };
+        rest = &rest[end..];
+    }
+    skip_blanks(rest).starts_with("subclass:")
 }
 
 impl std::fmt::Debug for Lexer<'_> {
@@ -65,19 +213,46 @@ impl<'src> Lexer<'src> {
     /// Creates a new lexer for the given source text.
     #[must_use]
     pub fn new(source: &'src str) -> Self {
-        Self {
+        let mut lexer = Self {
             source,
             chars: source.char_indices().peekable(),
             position: 0,
             pending_trivia: Vec::new(),
             pending_tokens: Vec::new(),
             override_span: None,
+            interpolation_depth: 0,
+            fence: source.len(),
+            definition_headers: None,
+            open_string: None,
+            origin: source,
+            origin_offset: 0,
+            line_memo: (0, 0, 0),
+        };
+        // A byte-order mark is not part of the program (BT-5182). Spans stay
+        // offsets into `source`, so the first token starts after it.
+        if source.starts_with(BYTE_ORDER_MARK) {
+            lexer.advance();
         }
+        lexer
+    }
+
+    /// A lexer for an interpolation body: `source` is the slice of this
+    /// lexer's source at `offset`, one nesting level deeper.
+    fn sub_lexer(&self, source: &'src str, offset: u32) -> Self {
+        let mut sub = Self::new(source);
+        sub.interpolation_depth = self.interpolation_depth + 1;
+        sub.origin = self.origin;
+        sub.origin_offset = self.origin_offset + offset as usize;
+        sub
     }
 
     /// Peeks at the next character without consuming it.
     fn peek_char(&mut self) -> Option<char> {
-        self.chars.peek().map(|&(_, c)| c)
+        let fence = self.fence;
+        self.chars
+            .peek()
+            .filter(|&&(pos, _)| pos < fence)
+            .map(|&(_, c)| c)
     }
 
     /// Peeks `n+1` characters ahead without consuming (n=0 is same as `peek_char`,
@@ -87,11 +262,14 @@ impl<'src> Lexer<'src> {
         for _ in 0..n {
             iter.next();
         }
-        iter.next().map(|(_, c)| c)
+        iter.next()
+            .filter(|&(pos, _)| pos < self.fence)
+            .map(|(_, c)| c)
     }
 
     /// Consumes the next character and returns it.
     fn advance(&mut self) -> Option<char> {
+        self.peek_char()?;
         let (pos, c) = self.chars.next()?;
         self.position = pos + c.len_utf8();
         Some(c)
@@ -99,14 +277,82 @@ impl<'src> Lexer<'src> {
 
     /// Saves the current lexer position (both byte offset and iterator state)
     /// so it can be restored later with `restore_position`.
-    fn save_position(&self) -> (usize, Peekable<CharIndices<'src>>) {
+    fn save_position(&self) -> SavedPosition<'src> {
         (self.position, self.chars.clone())
     }
 
     /// Restores a previously saved lexer position.
-    fn restore_position(&mut self, saved: (usize, Peekable<CharIndices<'src>>)) {
+    fn restore_position(&mut self, saved: SavedPosition<'src>) {
         self.position = saved.0;
         self.chars = saved.1;
+    }
+
+    /// `true` if the next characters end the current line: `\n`, or the
+    /// `\r\n` of a CRLF line ending.
+    fn at_line_end(&self) -> bool {
+        match self.peek_char_n(0) {
+            Some('\n') => true,
+            Some('\r') => self.peek_char_n(1) == Some('\n'),
+            _ => false,
+        }
+    }
+
+    /// Consumes the rest of the current line, stopping before its line
+    /// ending (`\n` or `\r\n`), which is never part of the consumed text.
+    fn advance_to_line_end(&mut self) {
+        while self.peek_char().is_some() && !self.at_line_end() {
+            self.advance();
+        }
+    }
+
+    /// The start offset of the first definition-header line (see
+    /// [`is_definition_header`]) that begins after byte `offset`.
+    fn next_definition_header_after(&mut self, offset: usize) -> Option<usize> {
+        let source = self.source;
+        let headers = self.definition_headers.get_or_insert_with(|| {
+            std::iter::once(0)
+                .chain(source.match_indices('\n').map(|(i, _)| i + 1))
+                .filter(|&start| is_definition_header(&source[start..]))
+                .collect()
+        });
+        let index = headers.partition_point(|&start| start <= offset);
+        headers.get(index).copied()
+    }
+
+    /// The 1-based line and column (in characters) of byte `offset` of this
+    /// lexer's source, counted in the whole file.
+    fn line_col(&mut self, offset: u32) -> (usize, usize) {
+        let target = self.origin_offset + offset as usize;
+        let (mut at, mut line, mut line_start) = self.line_memo;
+        if target < at {
+            (at, line, line_start) = (0, 0, 0);
+        }
+        for (i, b) in self.origin.as_bytes()[at..target].iter().enumerate() {
+            if *b == b'\n' {
+                line += 1;
+                line_start = at + i + 1;
+            }
+        }
+        at = target;
+        self.line_memo = (at, line, line_start);
+        // A leading byte-order mark is skipped, so it takes no column.
+        let column_start = if line_start == 0 && self.origin.starts_with(BYTE_ORDER_MARK) {
+            BYTE_ORDER_MARK.len_utf8()
+        } else {
+            line_start
+        };
+        let column = self.origin[column_start..target].chars().count();
+        (line + 1, column + 1)
+    }
+
+    /// The error for a `construct` (e.g. "string literal") opened at `start`
+    /// and never closed, which `closer` would close.
+    fn unterminated_error(&mut self, construct: &str, start: u32, closer: &str) -> TokenKind {
+        let (line, column) = self.line_col(start);
+        TokenKind::Error(EcoString::from(format!(
+            "{UNTERMINATED_PREFIX}{construct} starting at line {line}, column {column}: \
+             add a closing {closer}"
+        )))
     }
 
     /// Consumes characters while the predicate is true.
@@ -168,12 +414,13 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Lexes a line comment: `// ...`
+    /// Lexes a line comment: `// ...`, up to but not including the line
+    /// ending, so a CRLF file's `\r` stays out of the comment text.
     fn lex_line_comment(&mut self) {
         let start = self.current_position();
         self.advance(); // /
         self.advance(); // /
-        self.advance_while(|c| c != '\n');
+        self.advance_to_line_end();
         let text = self.text_for(self.span_from(start));
         self.pending_trivia
             .push(Trivia::LineComment(EcoString::from(text)));
@@ -188,7 +435,7 @@ impl<'src> Lexer<'src> {
         self.advance(); // /
         self.advance(); // /
         self.advance(); // /
-        self.advance_while(|c| c != '\n');
+        self.advance_to_line_end();
         let text = self.text_for(self.span_from(start));
         self.pending_trivia
             .push(Trivia::DocComment(EcoString::from(text)));
@@ -196,9 +443,14 @@ impl<'src> Lexer<'src> {
 
     /// Lexes a block comment: `/* ... */`
     ///
-    /// Returns `true` if the comment was unterminated (hit EOF).
+    /// Returns `true` if the comment was unterminated (hit EOF). An
+    /// unterminated comment becomes an error token that ends before the next
+    /// definition-header line (see [`is_definition_header`]), or at end of
+    /// input when there is none, so the definitions after it still parse
+    /// (BT-5182).
     fn lex_block_comment(&mut self) -> bool {
         let start = self.current_position();
+        let at_start = self.save_position();
         self.advance(); // /
         self.advance(); // *
 
@@ -220,18 +472,24 @@ impl<'src> Lexer<'src> {
             }
         }
 
-        let span = self.span_from(start);
-        let text = self.text_for(span);
-
         if unterminated {
+            // Rewind and stop before the next definition header, leaving the
+            // blank lines before it as that header's leading trivia.
+            if let Some(header) = self.next_definition_header_after(start as usize) {
+                let body = &self.source[start as usize..header];
+                let end = start as usize + body.trim_end_matches([' ', '\t', '\r', '\n']).len();
+                self.restore_position(at_start);
+                while self.position < end {
+                    self.advance();
+                }
+            }
+            let span = self.span_from(start);
+            let kind = self.unterminated_error("block comment", start, "*/");
             let leading_trivia = std::mem::take(&mut self.pending_trivia);
-            self.pending_tokens.push(Token::with_trivia(
-                TokenKind::Error(EcoString::from(text)),
-                span,
-                leading_trivia,
-                Vec::new(),
-            ));
+            self.pending_tokens
+                .push(Token::with_trivia(kind, span, leading_trivia, Vec::new()));
         } else {
+            let text = self.text_for(self.span_from(start));
             self.pending_trivia
                 .push(Trivia::BlockComment(EcoString::from(text)));
         }
@@ -476,22 +734,40 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Lexes an integer or float literal.
+    /// Lexes an integer or float literal starting at the current digit.
     fn lex_number(&mut self) -> TokenKind {
         let start = self.current_position();
+        self.lex_number_from(start)
+    }
 
+    /// Lexes the rest of a number literal whose token starts at `start`: the
+    /// first digit, or a `-` already consumed for a negative literal. One
+    /// path for both, so a negative literal gets the same radix and exponent
+    /// rules as a positive one (`-16rFF` is one literal, BT-5182).
+    ///
+    /// A radix with no digits (`16r`) or an exponent with no digits (`1e`,
+    /// `2.5e+`) is an error token naming the problem, not a literal the parser
+    /// rejects later with a generic message.
+    fn lex_number_from(&mut self, start: u32) -> TokenKind {
         // Integer part
         self.advance_while(|c| c.is_ascii_digit());
 
-        // Check for radix notation: 16rFF
+        // Radix notation: 16rFF. The digits are validated against the radix
+        // when the literal is parsed.
         if self.peek_char() == Some('r') {
             self.advance(); // consume 'r'
+            let digits_start = self.current_position();
             self.advance_while(|c| c.is_ascii_alphanumeric());
             let text = self.text_for(self.span_from(start));
+            if self.current_position() == digits_start {
+                return TokenKind::Error(EcoString::from(format!(
+                    "radix integer `{text}` has no digits after `r`, write e.g. `16rFF`"
+                )));
+            }
             return TokenKind::Integer(EcoString::from(text));
         }
 
-        // Check for float: decimal point followed by digit
+        // Float: decimal point followed by digit
         let is_float = if self.peek_char() == Some('.')
             && self.peek_char_n(1).is_some_and(|c| c.is_ascii_digit())
         {
@@ -502,14 +778,20 @@ impl<'src> Lexer<'src> {
             false
         };
 
-        // Check for exponent: e or E
+        // Exponent: e or E, an optional sign, then at least one digit
         if matches!(self.peek_char(), Some('e' | 'E')) {
             self.advance(); // consume 'e' or 'E'
             if matches!(self.peek_char(), Some('+' | '-')) {
                 self.advance(); // consume sign
             }
+            let digits_start = self.current_position();
             self.advance_while(|c| c.is_ascii_digit());
             let text = self.text_for(self.span_from(start));
+            if self.current_position() == digits_start {
+                return TokenKind::Error(EcoString::from(format!(
+                    "float exponent in `{text}` has no digits, write e.g. `1e10` or `2.5e-3`"
+                )));
+            }
             return TokenKind::Float(EcoString::from(text));
         }
 
@@ -532,10 +814,63 @@ impl<'src> Lexer<'src> {
     /// (backslash), `\"` (alongside the existing `""` doubling), and `\0`
     /// (exactly NUL, no octal continuation). Any other `\x` is an
     /// unknown-escape compile error whose span covers the backslash.
+    ///
+    /// A string may span lines, but never a line that starts a top-level
+    /// definition ([`is_definition_header`]): the lexer reads no further than
+    /// the next such line. A string still open there, or at end of input, is
+    /// unterminated: its error token ends at the end of the line it opened
+    /// on, and lexing resumes on the next line, so one missing `"` cannot
+    /// swallow the definitions after it (BT-5182).
     fn lex_string(&mut self) -> TokenKind {
         let string_start = self.current_position();
+        let fence = self
+            .next_definition_header_after(string_start as usize)
+            .map_or(self.fence, |header| header.min(self.fence));
+        let outer_fence = std::mem::replace(&mut self.fence, fence);
         self.advance(); // opening quote
+        self.open_string = Some((string_start, self.save_position()));
+        let kind = self.lex_string_body(string_start);
+        self.open_string = None;
+        self.fence = outer_fence;
+        kind
+    }
 
+    /// The error for the open string literal left unclosed, after rewinding
+    /// to the end of the line its opening quote is on. Unclosed at end of
+    /// input it is unterminated (more input can close it); unclosed before
+    /// a definition header it is a complete-but-invalid error naming that
+    /// definition's line.
+    fn unterminated_string(&mut self) -> TokenKind {
+        let Some((string_start, after_quote)) = self.open_string.clone() else {
+            // Unreachable: only called while `lex_string` has a string open.
+            let at = self.current_position();
+            return self.unterminated_error("string literal", at, "\"");
+        };
+        let stopped_at_definition = self.fence < self.source.len();
+        let definition_at = self.fence;
+        self.restore_position(after_quote);
+        self.advance_to_line_end();
+        self.override_span = None;
+        if !stopped_at_definition {
+            return self.unterminated_error("string literal", string_start, "\"");
+        }
+        // Stopped by a definition header, not end of input: no later line
+        // can close it (the header always comes first), so this is a
+        // complete-but-invalid error, not a request for more input.
+        let (line, column) = self.line_col(string_start);
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "source files over 4GB are not supported"
+        )]
+        let (definition_line, _) = self.line_col(definition_at as u32);
+        TokenKind::Error(EcoString::from(format!(
+            "string literal starting at line {line}, column {column} is not closed \
+             before the definition on line {definition_line}: add a closing \""
+        )))
+    }
+
+    /// [`Self::lex_string`] after the opening quote is consumed.
+    fn lex_string_body(&mut self, string_start: u32) -> TokenKind {
         let mut seg_start = self.current_position();
         let mut content_buf = String::new();
         let mut segments: Vec<(EcoString, u32, u32)> = Vec::new();
@@ -544,10 +879,7 @@ impl<'src> Lexer<'src> {
 
         loop {
             match self.peek_char() {
-                None => {
-                    let text = self.text_for(self.span_from(string_start));
-                    return TokenKind::Error(EcoString::from(text));
-                }
+                None => return self.unterminated_string(),
                 Some('"') if self.peek_char_n(1) == Some('"') => {
                     // Doubled delimiter: "" → literal "
                     self.advance(); // first "
@@ -565,44 +897,15 @@ impl<'src> Lexer<'src> {
                     let escape_pos = self.current_position();
                     self.advance(); // backslash
                     match self.peek_char() {
-                        None => {
-                            // Trailing backslash at EOF — genuinely incomplete
-                            // input. Return raw source text so the REPL's
-                            // `is_input_complete` heuristic treats it as
-                            // incomplete and shows a continuation prompt.
-                            let text = self.text_for(self.span_from(string_start));
-                            return TokenKind::Error(EcoString::from(text));
-                        }
-                        // ADR 0138 escape table (a ceiling, not a starting bid).
-                        Some('r') => {
+                        // Trailing backslash at end of input: the string is
+                        // unterminated, which the REPL reads as incomplete
+                        // input and shows a continuation prompt.
+                        None => return self.unterminated_string(),
+                        // ADR 0138 escape table (a ceiling, not a starting
+                        // bid), shared with character literals.
+                        Some(c) if let Some(escaped) = escaped_char(c) => {
                             self.advance();
-                            content_buf.push('\r');
-                        }
-                        Some('n') => {
-                            self.advance();
-                            content_buf.push('\n');
-                        }
-                        Some('t') => {
-                            self.advance();
-                            content_buf.push('\t');
-                        }
-                        Some('\\') => {
-                            self.advance();
-                            content_buf.push('\\');
-                        }
-                        Some('"') => {
-                            self.advance();
-                            content_buf.push('"');
-                        }
-                        Some('0') => {
-                            self.advance();
-                            content_buf.push('\0');
-                        }
-                        // \{ and \} produce literal braces; backslash is consumed
-                        Some('{' | '}') => {
-                            if let Some(c) = self.advance() {
-                                content_buf.push(c);
-                            }
+                            content_buf.push(escaped);
                         }
                         Some(c) => {
                             // Unknown escape — a compile error, never silent
@@ -615,7 +918,9 @@ impl<'src> Lexer<'src> {
                             // span still covers just the offending backslash.
                             self.advance(); // consume the escaped char
                             let escape_end = self.current_position();
-                            self.skip_to_string_end(string_start);
+                            if let Some(unterminated) = self.skip_to_string_end() {
+                                return unterminated;
+                            }
                             self.override_span = Some(Span::new(escape_pos, escape_end));
                             return TokenKind::Error(EcoString::from(format!(
                                 "unknown escape '\\{c}' in string literal — \
@@ -631,7 +936,7 @@ impl<'src> Lexer<'src> {
                     content_buf.clear();
                     self.advance(); // consume `{`
 
-                    match self.lex_interpolation_body(string_start) {
+                    match self.lex_interpolation_body() {
                         Ok((interp_start, interp_end)) => {
                             interp_ranges.push((interp_start, interp_end));
                             seg_start = self.current_position();
@@ -665,18 +970,21 @@ impl<'src> Lexer<'src> {
     /// delimiter, `\` escapes the next char (so `\"` doesn't end the skip),
     /// and `{...}` interpolation bodies — which may contain nested strings
     /// with their own quotes — are skipped with the real nesting scan.
-    /// Stops after the closing `"` or at EOF.
-    fn skip_to_string_end(&mut self, string_start: u32) {
+    /// Stops after the closing `"` and answers `None`. A string with none is
+    /// unterminated: answers that error instead, with the lexer rewound to
+    /// the end of the line the string opened on, which outranks the unknown
+    /// escape (more input can still close the string).
+    fn skip_to_string_end(&mut self) -> Option<TokenKind> {
         loop {
             match self.peek_char() {
-                None => break,
+                None => return Some(self.unterminated_string()),
                 Some('"') if self.peek_char_n(1) == Some('"') => {
                     self.advance(); // first "
                     self.advance(); // second "
                 }
                 Some('"') => {
                     self.advance(); // closing quote
-                    break;
+                    return None;
                 }
                 Some('\\') => {
                     self.advance(); // backslash
@@ -687,12 +995,16 @@ impl<'src> Lexer<'src> {
                 Some('{') => {
                     self.advance(); // consume `{`
                     // A `"` inside the interpolation must not end the skip;
-                    // reuse the real nesting scan and discard its result —
-                    // the unknown-escape diagnostic (recorded by the caller)
-                    // stands regardless. Every `Err` path leaves the lexer
-                    // at EOF or just past the closing quote, so `break` is safe.
-                    if self.lex_interpolation_body(string_start).is_err() {
-                        break;
+                    // reuse the real nesting scan. An unterminated string
+                    // comes back rewound and is answered; any other error
+                    // (an unescaped `{`) leaves the lexer just past the
+                    // closing quote, and the unknown escape stands.
+                    match self.lex_interpolation_body() {
+                        Ok(_) => {}
+                        Err(TokenKind::Error(message)) if is_unterminated_error(&message) => {
+                            return Some(TokenKind::Error(message));
+                        }
+                        Err(_) => return None,
                     }
                 }
                 Some(_) => {
@@ -704,7 +1016,7 @@ impl<'src> Lexer<'src> {
 
     /// Scans the body of a `{...}` interpolation, tracking brace depth.
     /// Returns `Ok((start, end))` of the expression range, or `Err` on unterminated input.
-    fn lex_interpolation_body(&mut self, string_start: u32) -> Result<(u32, u32), TokenKind> {
+    fn lex_interpolation_body(&mut self) -> Result<(u32, u32), TokenKind> {
         let interp_start = self.current_position();
 
         // Check for empty braces (only whitespace between { and })
@@ -732,14 +1044,9 @@ impl<'src> Lexer<'src> {
         let mut depth: u32 = 1;
         while depth > 0 {
             match self.peek_char() {
-                None => {
-                    // True EOF with no closing `"` — the input is genuinely
-                    // incomplete.  Return raw source text (starts with `"`)
-                    // so the REPL's `is_input_complete` heuristic treats it
-                    // as incomplete and shows a continuation prompt.
-                    let text = self.text_for(self.span_from(string_start));
-                    return Err(TokenKind::Error(EcoString::from(text)));
-                }
+                // End of input with no closing `"`: the string is
+                // unterminated, which the REPL reads as incomplete input.
+                None => return Err(self.unterminated_string()),
                 Some('"') => {
                     let saved = self.save_position();
                     if !self.skip_nested_string() {
@@ -771,11 +1078,7 @@ impl<'src> Lexer<'src> {
                     self.advance(); // *
                     loop {
                         match self.peek_char() {
-                            None => {
-                                // True EOF — return raw text for incomplete-input detection
-                                let text = self.text_for(self.span_from(string_start));
-                                return Err(TokenKind::Error(EcoString::from(text)));
-                            }
+                            None => return Err(self.unterminated_string()),
                             Some('*') if self.peek_char_n(1) == Some('/') => {
                                 self.advance(); // *
                                 self.advance(); // /
@@ -857,9 +1160,18 @@ impl<'src> Lexer<'src> {
                     TokenKind::Error(EcoString::from(message)),
                     Span::new(brace_start, interp.0),
                 ));
+            } else if self.interpolation_depth >= MAX_NESTING_DEPTH {
+                // Too deep to lex recursively: report the body as one error
+                // token instead of sub-lexing it.
+                tokens.push(Token::new(
+                    TokenKind::Error(EcoString::from(format!(
+                        "string interpolation nesting is too deep (maximum {MAX_NESTING_DEPTH} levels)"
+                    ))),
+                    Span::new(interp.0, interp.1),
+                ));
             } else {
                 let expr_source = self.text_for(Span::new(interp.0, interp.1));
-                let sub_lexer = Lexer::new(expr_source);
+                let sub_lexer = self.sub_lexer(expr_source, interp.0);
                 for sub_token in sub_lexer {
                     let adjusted_span = Span::new(
                         sub_token.span().start() + interp.0,
@@ -892,7 +1204,9 @@ impl<'src> Lexer<'src> {
     fn is_empty_interpolation(&self) -> bool {
         let mut offset = 0;
         loop {
-            let ch = self.source[self.position + offset..].chars().next();
+            let ch = self.source[self.position + offset..self.fence]
+                .chars()
+                .next();
             match ch {
                 Some(' ' | '\t' | '\r' | '\n') => offset += 1,
                 Some('}') => return true,
@@ -905,7 +1219,7 @@ impl<'src> Lexer<'src> {
     /// string since we've already consumed the first `{`).
     /// Does not consume any characters.
     fn is_doubled_open_brace(&self) -> bool {
-        self.source[self.position..].starts_with('{')
+        self.source[self.position..self.fence].starts_with('{')
     }
 
     /// Consumes everything up to the matching depth-0 `}` for a doubled-brace
@@ -987,6 +1301,10 @@ impl<'src> Lexer<'src> {
     }
 
     /// Lexes a character literal: `$a`, `$\n`
+    ///
+    /// An escape means what it means in a string ([`escaped_char`]):
+    /// `$\0` is NUL as `"\0"` is, and an unknown escape such as `$\q` is
+    /// an error, never a silent `q` (BT-5182).
     fn lex_character(&mut self) -> TokenKind {
         let start = self.current_position();
         self.advance(); // $
@@ -999,12 +1317,11 @@ impl<'src> Lexer<'src> {
             Some('\\') => {
                 self.advance(); // backslash
                 match self.advance() {
-                    Some('n') => TokenKind::Character('\n'),
-                    Some('t') => TokenKind::Character('\t'),
-                    Some('r') => TokenKind::Character('\r'),
-                    Some('\\') => TokenKind::Character('\\'),
-                    Some('\'') => TokenKind::Character('\''),
-                    Some(c) => TokenKind::Character(c),
+                    Some(c) if let Some(escaped) = escaped_char(c) => TokenKind::Character(escaped),
+                    Some(c) => TokenKind::Error(EcoString::from(format!(
+                        "unknown escape '\\{c}' in character literal — \
+                         write the character itself (${c}), or use $\\\\ for a backslash"
+                    ))),
                     None => {
                         let text = self.text_for(self.span_from(start));
                         TokenKind::Error(EcoString::from(text))
@@ -1201,48 +1518,13 @@ impl<'src> Lexer<'src> {
         if self.peek_char() == Some('-') && self.peek_char_n(1).is_some_and(|c| c.is_ascii_digit())
         {
             self.advance(); // -
-            return self.lex_number_with_prefix(start);
+            return self.lex_number_from(start);
         }
 
         self.advance_while(Self::is_binary_selector_char);
 
         let text = self.text_for(self.span_from(start));
         TokenKind::BinarySelector(EcoString::from(text))
-    }
-
-    /// Lexes a number with a prefix already consumed (e.g., negative sign).
-    fn lex_number_with_prefix(&mut self, start: u32) -> TokenKind {
-        // Integer part
-        self.advance_while(|c| c.is_ascii_digit());
-
-        // Check for float
-        let is_float = if self.peek_char() == Some('.')
-            && self.peek_char_n(1).is_some_and(|c| c.is_ascii_digit())
-        {
-            self.advance();
-            self.advance_while(|c| c.is_ascii_digit());
-            true
-        } else {
-            false
-        };
-
-        // Check for exponent
-        if matches!(self.peek_char(), Some('e' | 'E')) {
-            self.advance();
-            if matches!(self.peek_char(), Some('+' | '-')) {
-                self.advance();
-            }
-            self.advance_while(|c| c.is_ascii_digit());
-            let text = self.text_for(self.span_from(start));
-            return TokenKind::Float(EcoString::from(text));
-        }
-
-        let text = self.text_for(self.span_from(start));
-        if is_float {
-            TokenKind::Float(EcoString::from(text))
-        } else {
-            TokenKind::Integer(EcoString::from(text))
-        }
     }
 }
 
@@ -1580,13 +1862,16 @@ mod tests {
     #[test]
     fn lex_string_trailing_backslash_at_eof_is_incomplete() {
         // A backslash with no following char is genuinely incomplete input:
-        // raw-text error (starts with ") so the REPL shows a continuation
+        // an unterminated-string error, so the REPL shows a continuation
         // prompt rather than an unknown-escape diagnostic.
         let kinds = lex_kinds("\"abc\\");
         assert_eq!(kinds.len(), 1);
         match &kinds[0] {
             TokenKind::Error(msg) => {
-                assert!(msg.starts_with('"'), "expected raw-text error, got: {msg}");
+                assert!(
+                    is_unterminated_error(msg),
+                    "expected an unterminated-string error, got: {msg}"
+                );
             }
             other => panic!("expected Error token, got: {other:?}"),
         }
@@ -2682,15 +2967,15 @@ mod tests {
 
     #[test]
     fn lex_unterminated_interpolation_is_incomplete() {
-        // `"hello {x` (EOF) — genuinely incomplete input.
-        // The error should start with `"` (the raw text), NOT lowercase,
-        // so the REPL treats it as incomplete and shows a continuation prompt.
+        // `"hello {x` (EOF) — genuinely incomplete input. The error is an
+        // unterminated-string error, so the REPL treats it as incomplete
+        // and shows a continuation prompt.
         let kinds = lex_kinds("\"hello {x");
         match &kinds[0] {
             TokenKind::Error(msg) => {
                 assert!(
-                    msg.starts_with('"'),
-                    "unterminated interpolation at EOF should produce raw-text error (starts with \"), got: {msg}"
+                    is_unterminated_error(msg),
+                    "unterminated interpolation at EOF should be an unterminated-string error, got: {msg}"
                 );
             }
             other => panic!("expected Error token, got: {other:?}"),
@@ -2957,7 +3242,11 @@ mod tests {
                     (kind, tokens[0].kind()),
                     ("string", TokenKind::String(_) | TokenKind::StringStart(_))
                         | ("character", TokenKind::Character(_))
-                ),
+                ) || (kind == "unterminated_string"
+                    && matches!(
+                        tokens[0].kind(),
+                        TokenKind::Error(m) if m.contains("string literal starting at")
+                    )),
                 "expected a {kind} token for {source:?}, got {:?} ({why})",
                 tokens[0].kind()
             );
@@ -3014,6 +3303,20 @@ mod tests {
                 !tokens.is_empty(),
                 "expected at least an EOF token for {source:?} ({why})"
             );
+            if kind == "unterminated_block_comment" {
+                // The comment is an error token, the first token (BT-5182).
+                assert!(
+                    matches!(tokens[0].kind(), TokenKind::Error(m) if is_unterminated_error(m)),
+                    "expected an unterminated block comment for {source:?}, got {:?} ({why})",
+                    tokens[0].kind()
+                );
+                assert_eq!(
+                    u64::from(tokens[0].span().end()),
+                    expected_end,
+                    "span-end mismatch for {source:?} ({why})"
+                );
+                continue;
+            }
             let leading = tokens[0].leading_trivia();
             assert!(
                 !leading.is_empty(),

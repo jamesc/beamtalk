@@ -95,7 +95,7 @@ TestCase subclass: ArithmeticOperatorOverloadTest
     @expect type
     hint := [5 + w] on: RuntimeError do: [:e | e hint]
     self assert: (hint includesSubstring: "plusFromNumber:")
-    self assert: (hint includesSubstring: "implement it")
+    self assert: (hint includesSubstring: "'+' cannot combine a number with Widget")
 
   /// "Implement it anyway, to reject with intent" (ADR 0116 § Reflected
   /// method protocol): `Money>>divFromNumber:` exists but deliberately
@@ -117,8 +117,8 @@ TestCase subclass: ArithmeticOperatorOverloadTest
   // BT-3264 (ADR 0116): `badarith` between two genuinely numeric operands
   // (zero divisor, float overflow) must still raise the existing raw
   // `#badarith` (the "bad arithmetic operation" classification, ADR 0028 —
-  // `#type_error` at a class-dispatch/actor boundary per
-  // `class_var_nlr_shadow_test.bt`, `#badarith` directly from a plain
+  // `#type_error` at a class-dispatch/actor boundary
+  // class-dispatch/actor boundary, `#badarith` directly from a plain
   // instance method per `test_case_assertion_test.bt`/`math_test.bt`; these
   // tests don't cross such a boundary, so `#badarith` is the one
   // `should:raise:` actually observes here), NOT misrouted to a

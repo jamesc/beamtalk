@@ -60,36 +60,7 @@ TestCase subclass: SelfSendOverrideTest
     self assert: SsoExplicitSub bar equals: 1
     self assert: SsoExplicitSub barSelf equals: 2
 
-  // BT-4317: `Base baz` run for Sub sends `Base bar`, and a class literal
-  // always denotes that class, so `bar` runs with `self == Base`: its nested
-  // `self foo` reaches Base's `foo`, not Sub's override, and Sub's class
-  // variable is untouched.
-  testClassSideStaticBaseCallBindsTheNamedClass =>
-    before := SsoNestedSub hits
-    self assert: SsoNestedSub baz equals: 1
-    self assert: SsoNestedSub hits equals: before
-
-  testClassSideSealedSelectorInOpenClassKeepsNestedOverrideWrite =>
-    before := SsoNestedSub hits
-    self assert: SsoNestedSub viaSealed equals: 2
-    self assert: SsoNestedSub hits equals: before + 1
-
   testClassSideNestedBaseUnchanged => self assert: SsoNestedBase baz equals: 1
-
-  // The base class declares no classState:, so its methods must still hand
-  // back the ClassVars an override rebound.
-  testClassSideOverrideClassVarWriteFromClassVarLessBase =>
-    before := SsoNoVarsSub hits
-    self assert: SsoNoVarsSub bar equals: 2
-    self assert: SsoNoVarsSub hits equals: before + 1
-
-  // A class-variable write made by an override reached from a base-class site
-  // that looks pure must not be dropped.
-  testClassSideOverrideClassVarWriteFromPureBaseSite =>
-    self assert: SsoClassVarSub bar equals: 2
-    self assert: SsoClassVarSub subHits equals: 1
-    self assert: SsoClassVarSub bar equals: 2
-    self assert: SsoClassVarSub subHits equals: 2
 
   testFlattenedTraitActorReachesOverride =>
     a := SsoTraitActorSub spawn
@@ -127,24 +98,18 @@ TestCase subclass: SelfSendOverrideTest
     self assert: SsoFastSub bar equals: 2
     self assert: SsoFastBase bar equals: 1
 
-  // The fast path must not bypass a class-side extension that shadows the
-  // compiled method (the walk honours it), for the defining class only. Own fixture
-  // classes: the extension registry is global and tests run concurrently.
-  testFastPathHonoursShadowingExtension =>
-    extFun := [:a :s | 99]
-    Erlang beamtalk_extensions
-      register: #'SsoShadowBase class'
+  // The fast path must not bypass an ADR 0084 runtime class-method fun that
+  // shadows the compiled method (the walk honours it), for the defining class
+  // only. Own fixture classes: tests run concurrently.
+  testFastPathHonoursShadowingRuntimeFun =>
+    pid := Erlang beamtalk_class_registry whereis_class: #SsoShadowBase
+    @expect type
+    Erlang beamtalk_object_class
+      put_class_method: pid
       selector: #foo
-      fun: extFun
-      owner: #test
+      fun: [:classSelf | 99]
     [
       self assert: SsoShadowBase bar equals: 99
       self assert: SsoShadowSub bar equals: 2
-    ]
-      ensure: [
-        Erlang beamtalk_extensions
-          unregister: #SsoShadowBase
-          selector: #foo
-          classSide: true
-      ]
+    ] ensure: [SsoShadowBase class removeSelector: #foo]
     self assert: SsoShadowBase bar equals: 1

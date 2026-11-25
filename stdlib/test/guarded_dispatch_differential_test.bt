@@ -119,8 +119,8 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
     r noSuch: 1 selector: 2
 
   // BT-4390: `Pid` special selectors (the future protocol `send_pid/3`
-  // answers through `beamtalk_future`) and a run-time `String` extension;
-  // neither is declared on the class, so the checker would flag the send.
+  // answers through `beamtalk_future`); neither is declared on the class, so
+  // the checker would flag the send.
   typedPidWhenResolved: r :: Pid =>
     @expect dnu
     r whenResolved: [:v | v]
@@ -128,10 +128,6 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
   typedPidWhenRejected: r :: Pid =>
     @expect dnu
     r whenRejected: [:e | e]
-
-  typedStringExtension: r :: String =>
-    @expect dnu
-    r bt4390Extended
 
   // === Open Value class: plain and keyword sends, inheritance, errors ===
   testOpenValueSends =>
@@ -240,20 +236,6 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
           withArguments: #(1, 2)
           timeout: 1000
       ]
-      on: p
-
-  // Extension-registry selectors (ADR 0066), resolved inside `dispatch/3`.
-  testExtensions =>
-    p := self point
-    self
-      send: #extension
-      typed: [:r :: GuardedDiffPoint | r diffExtended]
-      dynamic: [:r | r diffExtended]
-      on: p
-    self
-      send: #extensionOverridesInherited
-      typed: [:r :: GuardedDiffPoint | r shadowedByExtension]
-      dynamic: [:r | r shadowedByExtension]
       on: p
 
   // `doesNotUnderstand:args:` answers every unknown selector.
@@ -763,72 +745,3 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       args: #(#noSuchSelector, #())
       on: p
       in: m
-    self
-      armOutcome: #diffExtended
-      args: #()
-      on: p
-      in: m
-    self
-      armOutcome: #shadowedByExtension
-      args: #()
-      on: p
-      in: m
-
-  // `removeSelector:` of an extension re-exposes the inherited method, and
-  // an extension registered at run time (the in-memory half of a live patch)
-  // is reached at once: both act inside the class module's `dispatch/3`, so
-  // a guarded direct call sees them exactly as the dynamic send does.
-  // (A workspace live patch that recompiles the class body is in the REPL
-  // fixture named in the header.)
-  testRuntimeExtensionAndRemoveSelector =>
-    p := self point
-    self checkShadowed: #beforePatch on: p
-    self assert: p shadowedThenRemoved equals: #fromBase
-    Erlang beamtalk_extensions
-      register: #GuardedDiffPoint
-      selector: #shadowedThenRemoved
-      fun: [:args :receiver | #fromPatch]
-      owner: #bt4292
-    [
-      self checkShadowed: #afterPatch on: p
-      self assert: p shadowedThenRemoved equals: #fromPatch
-      GuardedDiffPoint removeSelector: #shadowedThenRemoved
-      self checkShadowed: #afterRemoveSelector on: p
-      self assert: p shadowedThenRemoved equals: #fromBase
-    ] ensure: [
-      GuardedDiffPoint removeSelector: #shadowedThenRemoved ifAbsent: [nil]
-    ]
-
-  // BT-4390: a `String` extension registered at run time is reached by a
-  // typed `String` send, which now direct-calls `bt@stdlib@string`: that
-  // module's `dispatch/3` consults the extension registry itself, and the
-  // runtime's `beamtalk_extensions:has('String', _)` check only steers the
-  // shared byte-level (special) selectors, which stay dynamic.
-  testRuntimeStringExtension =>
-    Erlang beamtalk_extensions
-      register: #String
-      selector: #bt4390Extended
-      fun: [:args :receiver | receiver size * 10]
-      owner: #bt4390
-    [
-      self
-        send: #stringExtension
-        typed: [:r | self typedStringExtension: r]
-        dynamic: [:r | r bt4390Extended]
-        on: "abcd"
-      self assert: (self typedStringExtension: "abcd") equals: 40
-    ] ensure: [
-      Erlang beamtalk_extensions unregister: #String selector: #bt4390Extended
-    ]
-
-  checkShadowed: label :: Symbol on: p =>
-    self
-      send: label
-      typed: [:r :: GuardedDiffPoint | r shadowedThenRemoved]
-      dynamic: [:r | r shadowedThenRemoved]
-      on: p
-
-// Extension-registry selectors (ADR 0066), resolved inside `dispatch/3`: one
-// adding a selector, one overriding a selector GuardedDiffBase defines.
-GuardedDiffPoint >> diffExtended -> Integer => self sum * 10
-GuardedDiffPoint >> shadowedByExtension -> Symbol => #fromExtension

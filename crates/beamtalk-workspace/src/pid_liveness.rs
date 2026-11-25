@@ -74,7 +74,11 @@ pub fn is_process_alive(pid: u32) -> bool {
 /// 100-nanosecond tick count. Windows recycles PIDs more aggressively than
 /// Linux, so this value is important for the PID-reuse guard in
 /// `beamtalk-desktop-broker`'s orphan-reaping sweep.
-/// On other platforms: always returns `None` ("unknown, trust liveness").
+/// On macOS: `proc_pidinfo(PROC_PIDTBSDINFO)`'s `pbi_start_tvsec`/
+/// `pbi_start_tvusec`, as microseconds since the epoch (BT-5194: without it
+/// the broker's sweep, which never signals a PID it cannot match by start
+/// time, could never reap a macOS orphan).
+/// On other platforms: always returns `None`.
 #[must_use]
 pub fn proc_start_time(pid: u32) -> Option<u64> {
     #[cfg(target_os = "linux")]
@@ -142,7 +146,33 @@ pub fn proc_start_time(pid: u32) -> Option<u64> {
         Some((u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime))
     }
 
-    #[cfg(not(any(target_os = "linux", windows)))]
+    #[cfg(target_os = "macos")]
+    {
+        let pid = i32::try_from(pid).ok()?;
+        // SAFETY: `proc_bsdinfo` is a plain C struct of integers and byte
+        // arrays, for which all-zero is a valid value.
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = i32::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
+        // SAFETY: `info` is a valid, writable `proc_bsdinfo` of `size` bytes,
+        // the buffer `PROC_PIDTBSDINFO` fills.
+        let written = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                (&raw mut info).cast::<libc::c_void>(),
+                size,
+            )
+        };
+        if written != size {
+            return None;
+        }
+        info.pbi_start_tvsec
+            .checked_mul(1_000_000)?
+            .checked_add(info.pbi_start_tvusec)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         let _ = pid;
         None
@@ -181,7 +211,7 @@ pub fn start_time_matches(expected: Option<u64>, actual: Option<u64>) -> bool {
 /// the broker's `classify_record` uses, applied again immediately before killing to
 /// close the PID-reuse window between `classify_record`'s check and the
 /// actual kill call (see the broker's `terminate_process`). Available
-/// wherever `proc_start_time` returns a real value (Linux, Windows).
+/// wherever `proc_start_time` returns a real value (Linux, macOS, Windows).
 pub fn still_same_process(pid: u32, expected_start_time: Option<u64>) -> bool {
     start_time_matches(expected_start_time, proc_start_time(pid))
 }
@@ -190,9 +220,10 @@ pub fn still_same_process(pid: u32, expected_start_time: Option<u64>) -> bool {
 /// `beamtalk workspace stop --force` and the desktop broker's orphan reaper.
 ///
 /// - **Unix:** with `grace = None`, `SIGKILL` at once (if `is_target()` holds).
-///   With `Some(grace)`, `SIGTERM`, sleep `grace`, then `SIGKILL` if the
-///   process is still alive and `is_target()` still holds (the `SIGTERM` result is ignored; a failure
-///   of the final kill is what is reported).
+///   With `Some(grace)`, `SIGTERM`, wait up to `grace` for it to exit (the
+///   shared `beamtalk_process::escalate` policy, BT-5195), then `SIGKILL` if
+///   the process is still alive and `is_target()` still holds (the `SIGTERM`
+///   result is ignored; a failure of the final kill is what is reported).
 /// - **Windows:** a single `TerminateProcess` (there is no graceful signal for
 ///   an arbitrary external process, so `grace` is ignored). `is_target()` is
 ///   checked *after* the handle is open, which closes the PID-reuse window.
@@ -231,10 +262,17 @@ pub fn kill_process(
             )
         })?;
         if let Some(grace) = grace {
-            // SAFETY: kill(2) with a valid pid and standard signal number.
-            unsafe { libc::kill(pid_i, libc::SIGTERM) };
-            std::thread::sleep(grace);
-            if !is_process_alive(pid) {
+            let outcome = beamtalk_process::escalate::terminate_and_wait(
+                grace,
+                std::time::Duration::from_millis(50),
+                std::thread::sleep,
+                || {
+                    // SAFETY: kill(2) with a valid pid and standard signal number.
+                    unsafe { libc::kill(pid_i, libc::SIGTERM) };
+                },
+                || !is_process_alive(pid),
+            );
+            if outcome == beamtalk_process::escalate::Outcome::Exited {
                 return Ok(());
             }
         }
@@ -348,13 +386,40 @@ mod tests {
         kill_process(pid, None, || true).unwrap();
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     #[test]
     fn current_process_has_a_start_time() {
         assert!(proc_start_time(std::process::id()).is_some());
     }
 
-    #[cfg(target_os = "linux")]
+    /// The value identifies the process: stable across reads of one process,
+    /// and a child started later reads a different value.
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    #[test]
+    fn start_time_is_stable_per_process_and_differs_between_processes() {
+        let own = proc_start_time(std::process::id());
+        assert_eq!(own, proc_start_time(std::process::id()));
+        // sleep: start the child at a measurably later time than this process.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        #[cfg(unix)]
+        let mut child = std::process::Command::new("sleep")
+            .arg("5")
+            .spawn()
+            .unwrap();
+        #[cfg(windows)]
+        let mut child = std::process::Command::new("ping")
+            .args(["-n", "6", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let theirs = proc_start_time(child.id());
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(theirs.is_some());
+        assert_ne!(own, theirs);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn nonexistent_pid_has_no_start_time() {
         assert!(proc_start_time(4_194_304).is_none());

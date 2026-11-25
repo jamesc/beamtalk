@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ADR 0152: `Integer` is not defined in this file, so this cross-file
+/// extension method is a compile error on every surface.
+Integer >> adr152Double => self * 2

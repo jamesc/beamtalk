@@ -13,21 +13,11 @@ Object subclass: InCallerProbe
   // InCallerProbeSub, it must answer the subclass's real reference.
   class meVia => self me
 
-  // `clearField:` on a class with no class variables: its state is empty
-  // wherever the method runs (ADR 0142 §3).
-  class clearMissing => self clearField: #missing
-
-  class hasMissing => self hasField: #missing
-
-  // A self-send from an inherited class method resolves through the
-  // class-method chain of the receiving class (BT-4300).
+  // `perform:withArguments:` resolves through the class-method chain of the
+  // receiving class; InCallerProbeSub overrides `overridden`.
   class parentOnly -> Symbol => #parent
 
   class overridden -> Symbol => #parent
-
-  class viaChain => self parentOnly
-
-  class viaChainOverridden => self overridden
 
   class myName -> Symbol => self name
 

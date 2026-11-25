@@ -9,7 +9,6 @@
 // and is not covered here.)
 
 Object subclass: ClassMethodProtectedLocals
-  classState: n = 0
 
   // The cleanup runs after the body and reads what the body wrote.
   class ensureCleanupSeesTheBodysWrite =>
@@ -19,33 +18,6 @@ Object subclass: ClassMethodProtectedLocals
       5
     ] ensure: [t := t + 10]
     t
-
-  // The inner cleanup reads the inner body's write. The outer cleanup does not
-  // read `t`: the inner `ensure:` and its cleanup run after the outer body's
-  // write and may raise, and a cleanup that read the write after a raise would
-  // see the old `t`, a compile error (BT-4003).
-  class nestedEnsureInnerCleanupSeesTheInnerWrite =>
-    t := 0
-    [
-      t := t + 1
-      [
-        t := t + 5
-        3
-      ]
-        ensure: [
-          t := t + 10
-          4
-        ]
-    ] ensure: [self.n := 2]
-    t
-
-  // The outer cleanup reads a write that is the last thing the inner protected
-  // block does: nothing that may raise runs after it (the inner cleanup only
-  // writes a class variable), so the outer cleanup sees it.
-  class nestedEnsureOuterCleanupSeesTheInnerWrite =>
-    t := 0
-    [[t := t + 5] ensure: [self.n := 3]] ensure: [t := t + 10]
-    t * 10 + self.n
 
   // An `on:do:` in the try body of another: erlc rejected the module with
   // `ambiguous_catch_try_state` until the class filter's `case` had a wildcard.
@@ -86,19 +58,3 @@ Object subclass: ClassMethodProtectedLocals
         #(1, 2, 3) do: [:j | t := t + j]
       ]
     t
-
-  class nestedDoInACountedLoop =>
-    t := 0
-    1
-      to: 2
-      do: [:i |
-        t := t + i
-        #(1, 2, 3)
-          do: [:j |
-            t := t + j
-            self.n := j
-          ]
-      ]
-    t * 10 + self.n
-
-  class n => self.n

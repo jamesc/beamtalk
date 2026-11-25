@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-05-26) — accepted 2026-05-17 (all phases 0–5 merged to main, BT-2281 through BT-2292).
 
+> **Superseded in part by [ADR 0152](0152-remove-cross-file-extension-methods.md) (2026-11-24), extension entries.** The ChangeLog rows for extension methods (a patch logged against the extender's file, and multi-extender ambiguity) no longer apply, because a method can no longer be added to a class from another file. Patches to a class whose source the workspace holds are unchanged.
+
 ## Context
 
 ### Problem

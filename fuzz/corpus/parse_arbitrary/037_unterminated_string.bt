@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5182: an unterminated string must not swallow the classes after it.
+Object subclass: A
+  greet => "hello
+  other => "fine"
+
+Object subclass: B
+  size => "b {1 + 2"
+
+Object subclass: C
+  name => "c"

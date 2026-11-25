@@ -1,0 +1,407 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5210 (ADR 0116 § Addendum, BT-5176): number-on-the-left ordering on the
+// inlined path. When the left operand of `<`, `<=`, `>` or `>=` is a number
+// and the right operand is not, the right operand is sent a reflected
+// comparison hook (`lessThanFromNumber:`, `lessOrEqualFromNumber:`,
+// `greaterThanFromNumber:`, `greaterOrEqualFromNumber:`), and a right operand
+// without one raises a hinted `does_not_understand` instead of answering by
+// Erlang term order (`3 <= nil` used to be `true`). Equality stays total.
+//
+// BT-5211: the same rule on the primitive path. A dynamic send (`perform:`)
+// reaches the `@primitive` bodies of `Integer`, `Float` and `Character`
+// rather than the inlined comparison, so the `perform:` tests at the end check
+// those bodies against every right operand above, and that `perform:` and the
+// inlined send agree. A Character is an integer at run time, so only a
+// Character literal receiver reaches the `Character` body (`charPerformLt:`).
+//
+// Every helper below is compiled with its receiver of one kind (a literal,
+// `self` in `Integer`, a typed parameter, an untyped one, a `Float`, a
+// `Character`), so each inlined receiver shape is covered. Fixtures:
+// `fixtures/money.bt` (all four hooks), `fixtures/broken_rank.bt` (a hook that
+// raises) and `fixtures/widget.bt` (no hooks).
+
+TestCase subclass: NumberComparisonArgTest
+
+  // ── Receivers, one helper per operator ───────────────────────────────────
+  litLt: x => 5 < x
+
+  litLe: x => 5 <= x
+
+  litGt: x => 5 > x
+
+  litGe: x => 5 >= x
+
+  intLt: n :: Integer with: x => n < x
+
+  intLe: n :: Integer with: x => n <= x
+
+  intGt: n :: Integer with: x => n > x
+
+  intGe: n :: Integer with: x => n >= x
+
+  lt: a with: x => a < x
+
+  le: a with: x => a <= x
+
+  gt: a with: x => a > x
+
+  ge: a with: x => a >= x
+
+  floatLt: x => 1.5 < x
+
+  floatLe: x => 1.5 <= x
+
+  floatGt: x => 1.5 > x
+
+  floatGe: x => 1.5 >= x
+
+  typedFloatLt: f :: Float with: x => f < x
+
+  typedFloatGe: f :: Float with: x => f >= x
+
+  charLt: x => $m < x
+
+  charLe: x => $m <= x
+
+  charGt: x => $m > x
+
+  charGe: x => $m >= x
+
+  typedCharGt: c :: Character with: x => c > x
+
+  typedCharLe: c :: Character with: x => c <= x
+
+  /// Right operands with no reflected comparison hook: `nil`, a symbol, a
+  /// string, a list, a boolean and an object of a class without hooks.
+  wrongs => #[nil, #sym, "str", #(1, 2), true, (Widget new) withSize: 1]
+
+  errorOf: aBlock => aBlock on: Exception do: [:e | e]
+
+  /// `aBlock` raises `does_not_understand` for `selector`, hinted with the
+  /// operator `op` the caller typed.
+  assertBlock: aBlock raisesHook: selector for: op =>
+    self should: aBlock raise: #does_not_understand
+    e := self errorOf: aBlock
+    self assert: e selector equals: selector
+    self assert: (e hint includesSubstring: "'{op}' cannot order a number against")
+    self assert: (e hint includesSubstring: selector asString)
+
+  /// Every wrong right operand, through the four one-argument helpers
+  /// `lt`/`le`/`gt`/`ge`.
+  assertWrongsRaise: lt le: le gt: gt ge: ge =>
+    self wrongs
+      do: [:w |
+        self
+          assertBlock: [lt value: w]
+          raisesHook: #lessThanFromNumber:
+          for: "<"
+        self
+          assertBlock: [le value: w]
+          raisesHook: #lessOrEqualFromNumber:
+          for: "<="
+        self
+          assertBlock: [gt value: w]
+          raisesHook: #greaterThanFromNumber:
+          for: ">"
+        self
+          assertBlock: [ge value: w]
+          raisesHook: #greaterOrEqualFromNumber:
+          for: ">="
+      ]
+
+  // ── A missing hook raises, for every inlined receiver ────────────────────
+  testLiteralReceiver =>
+    self
+      assertWrongsRaise: [:w | self litLt: w]
+      le: [:w | self litLe: w]
+      gt: [:w | self litGt: w]
+      ge: [:w | self litGe: w]
+
+  testTypedParameterReceiver =>
+    self
+      assertWrongsRaise: [:w | self intLt: 5 with: w]
+      le: [:w | self intLe: 5 with: w]
+      gt: [:w | self intGt: 5 with: w]
+      ge: [:w | self intGe: 5 with: w]
+
+  testUntypedReceiver =>
+    self
+      assertWrongsRaise: [:w | self lt: 5 with: w]
+      le: [:w | self le: 5 with: w]
+      gt: [:w | self gt: 5 with: w]
+      ge: [:w | self ge: 5 with: w]
+
+  testFloatReceiver =>
+    self
+      assertWrongsRaise: [:w | self floatLt: w]
+      le: [:w | self floatLe: w]
+      gt: [:w | self floatGt: w]
+      ge: [:w | self floatGe: w]
+    self
+      assertWrongsRaise: [:w | self lt: 1.5 with: w]
+      le: [:w | self le: 1.5 with: w]
+      gt: [:w | self gt: 1.5 with: w]
+      ge: [:w | self typedFloatGe: 1.5 with: w]
+    self
+      assertBlock: [self typedFloatLt: 1.5 with: nil]
+      raisesHook: #lessThanFromNumber:
+      for: "<"
+
+  testCharacterReceiver =>
+    self
+      assertWrongsRaise: [:w | self charLt: w]
+      le: [:w | self charLe: w]
+      gt: [:w | self charGt: w]
+      ge: [:w | self charGe: w]
+    self
+      assertBlock: [self typedCharGt: $a with: nil]
+      raisesHook: #greaterThanFromNumber:
+      for: ">"
+    self
+      assertBlock: [self typedCharLe: $a with: #sym]
+      raisesHook: #lessOrEqualFromNumber:
+      for: "<="
+
+  /// `self` in `Integer`: `Number>>max:`, `min:` and `between:and:` (whose
+  /// `self` is a number at run time) and `Integer>>to:do:`'s comparisons all
+  /// take the rule.
+  testNumberMethodsRaise =>
+    self wrongs
+      do: [:w |
+        @expect type
+        self
+          assertBlock: [3 max: w]
+          raisesHook: #greaterThanFromNumber:
+          for: ">"
+        @expect type
+        self
+          assertBlock: [3 min: w]
+          raisesHook: #lessThanFromNumber:
+          for: "<"
+        @expect type
+        self
+          assertBlock: [3 between: w and: 5]
+          raisesHook: #greaterOrEqualFromNumber:
+          for: ">="
+        @expect type
+        self
+          assertBlock: [3 between: 1 and: w]
+          raisesHook: #lessOrEqualFromNumber:
+          for: "<="
+      ]
+
+  /// The `3 <= nil` the addendum opens with.
+  testLessOrEqualNilRaises =>
+    @expect type
+    self should: [3 <= nil] raise: #does_not_understand
+
+  /// `3 max: nil` used to answer `nil`.
+  testMaxNilRaises =>
+    @expect type
+    self should: [3 max: nil] raise: #does_not_understand
+
+  // ── A present hook answers ───────────────────────────────────────────────
+  money: cents => (Money new) withCents: cents
+
+  testHooksAnswerForEveryOperator =>
+    m := self money: 500
+    @expect type
+    self assert: (100 < m)
+    @expect type
+    self deny: (500 < m)
+    @expect type
+    self assert: (500 <= m)
+    @expect type
+    self deny: (501 <= m)
+    @expect type
+    self assert: (900 > m)
+    @expect type
+    self deny: (500 > m)
+    @expect type
+    self assert: (500 >= m)
+    @expect type
+    self deny: (499 >= m)
+
+  testHooksAnswerThroughEveryReceiverShape =>
+    m := self money: 500
+    self assert: (self lt: 100 with: m)
+    self assert: (self intGe: 500 with: m)
+    self deny: (self litGt: m)
+    self assert: (self floatLt: m)
+    self assert: (self charLe: m)
+
+  testMaxMinBetweenUseTheHooks =>
+    m := self money: 500
+    @expect type
+    self assert: (3 max: m) equals: m
+    @expect type
+    self assert: (3 min: m) equals: 3
+    @expect type
+    self assert: (900 max: m) equals: 900
+    lo := self money: 100
+    hi := self money: 900
+    @expect type
+    self assert: (500 between: lo and: hi)
+    @expect type
+    self deny: (50 between: lo and: hi)
+
+  /// A hook whose body raises surfaces its own error, not a relabelled
+  /// `does_not_understand` for the hook.
+  testRaisingHookIsNotRelabelled =>
+    r := BrokenRank new
+    @expect type
+    e := self errorOf: [5 < r]
+    self assert: e kind equals: #user_error
+    self assert: (e message includesSubstring: "BrokenRank cannot be ordered against 5")
+    e2 := self errorOf: [self lt: 5 with: r]
+    self assert: e2 kind equals: #user_error
+
+  // ── Unchanged behaviour ──────────────────────────────────────────────────
+  testNumbersStillCompare =>
+    self assert: (3 < 4.0)
+    self assert: (self lt: 3 with: 4.0)
+    self deny: (self ge: 3 with: 4.0)
+    self assert: (self charLt: $z)
+
+  testMoneyAgainstMoneyIsReceiverDispatch =>
+    self assert: (self money: 100) < (self money: 200)
+    self deny: (self lt: (self money: 300) with: (self money: 200))
+
+  testEqualityStaysTotal =>
+    self deny: 3 == nil
+    @expect type
+    self deny: 3 =:= #sym
+    @expect type
+    self assert: 3 /= nil
+    self deny: (self money: 3) == 3
+
+  /// BT-5213: a `String` or `Symbol` receiver raises a `type_error` (no
+  /// hook) for a number argument (`string_symbol_comparison_test.bt`).
+  testStringAndSymbolReceiversRaiseTypeError =>
+    @expect type
+    self should: ["a" < 5] raise: #type_error
+    self should: [self lt: "a" with: 5] raise: #type_error
+    self should: [self lt: #a with: 5] raise: #type_error
+
+  testDefaultSortOfAMixedListIsTermOrder =>
+    self assert: #[nil, "a", 3] sort equals: #[3, nil, "a"]
+
+  // ── The primitive path: `perform:` (BT-5211) ─────────────────────────────
+
+  /// `a op x` as a dynamic send, so it runs `a`'s `@primitive` body rather
+  /// than an inlined comparison.
+  performLt: a with: x => a perform: #'<' withArguments: #(x)
+
+  performLe: a with: x => a perform: #'<=' withArguments: #(x)
+
+  performGt: a with: x => a perform: #'>' withArguments: #(x)
+
+  performGe: a with: x => a perform: #'>=' withArguments: #(x)
+
+  /// A Character is an integer at run time, so `performLt:with:` on `$m`
+  /// reaches the `Integer` body. A Character *literal* receiver dispatches
+  /// through the `Character` module, so these reach the `Character` body.
+  charPerformLt: x => $m perform: #'<' withArguments: #(x)
+
+  charPerformLe: x => $m perform: #'<=' withArguments: #(x)
+
+  charPerformGt: x => $m perform: #'>' withArguments: #(x)
+
+  charPerformGe: x => $m perform: #'>=' withArguments: #(x)
+
+  /// One receiver of each primitive kind (`$m` reaches the `Integer` body;
+  /// see `charPerformLt:`).
+  numericReceivers => #[5, 1.5, $m]
+
+  testCharacterPerformWithAWrongRightOperandRaises =>
+    self
+      assertWrongsRaise: [:w | self charPerformLt: w]
+      le: [:w | self charPerformLe: w]
+      gt: [:w | self charPerformGt: w]
+      ge: [:w | self charPerformGe: w]
+
+  testCharacterPerformAgreesWithTheInlinedSend =>
+    m := self money: 500
+    rights := #[nil, #sym, "str", true, m, 3, 2.5, $a, $z, 500]
+    rights
+      do: [:x |
+        self assert: (self outcomeOf: [
+          self charPerformLt: x
+        ]) equals: (self outcomeOf: [self charLt: x])
+        self assert: (self outcomeOf: [
+          self charPerformLe: x
+        ]) equals: (self outcomeOf: [self charLe: x])
+        self assert: (self outcomeOf: [
+          self charPerformGt: x
+        ]) equals: (self outcomeOf: [self charGt: x])
+        self assert: (self outcomeOf: [
+          self charPerformGe: x
+        ]) equals: (self outcomeOf: [self charGe: x])
+      ]
+
+  testPerformWithAWrongRightOperandRaises =>
+    self numericReceivers
+      do: [:r |
+        self
+          assertWrongsRaise: [:w | self performLt: r with: w]
+          le: [:w | self performLe: r with: w]
+          gt: [:w | self performGt: r with: w]
+          ge: [:w | self performGe: r with: w]
+      ]
+
+  testPerformLessOrEqualNilRaises =>
+    self should: [self performLe: 3 with: nil] raise: #does_not_understand
+
+  testPerformAnswersTheHook =>
+    m := self money: 500
+    self assert: (self performLt: 100 with: m)
+    self deny: (self performLt: 500 with: m)
+    self assert: (self performLe: 500 with: m)
+    self deny: (self performLe: 501 with: m)
+    self assert: (self performGt: 900 with: m)
+    self deny: (self performGt: 500 with: m)
+    self assert: (self performGe: 500 with: m)
+    self deny: (self performGe: 499 with: m)
+    self assert: (self performLt: 1.5 with: m)
+    self assert: (self performLe: $m with: m)
+
+  testPerformRaisingHookIsNotRelabelled =>
+    e := self errorOf: [self performLt: 5 with: BrokenRank new]
+    self assert: e kind equals: #user_error
+
+  /// `perform:` and the inlined send answer the same, or raise the same
+  /// error, for every primitive receiver, operator and right operand.
+  testPerformAgreesWithTheInlinedSend =>
+    m := self money: 500
+    rights := #[nil, #sym, "str", #(1, 2), true, (Widget new) withSize: 1, m, 3, 2.5, $a, 500]
+    pairs := #[#[[:a :x |
+      self performLt: a with: x
+    ], [:a :x |
+      self lt: a with: x
+    ]], #[[:a :x |
+      self performLe: a with: x
+    ], [:a :x |
+      self le: a with: x
+    ]], #[[:a :x |
+      self performGt: a with: x
+    ], [:a :x |
+      self gt: a with: x
+    ]], #[[:a :x | self performGe: a with: x], [:a :x | self ge: a with: x]]]
+    self numericReceivers
+      do: [:r |
+        pairs
+          do: [:pair |
+            rights
+              do: [:x |
+                self assert: (self outcomeOf: [
+                  (pair at: 1) value: r value: x
+                ]) equals: (self outcomeOf: [(pair at: 2) value: r value: x])
+              ]
+          ]
+      ]
+
+  /// A send's result, or its error's kind and selector.
+  outcomeOf: aBlock =>
+    [aBlock value] on: Exception do: [:e | #[e kind, e selector]]

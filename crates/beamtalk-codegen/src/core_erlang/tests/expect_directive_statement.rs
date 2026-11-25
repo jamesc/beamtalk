@@ -21,8 +21,6 @@ fn check(src: &str) {
 fn expect_in_on_do_body_of_class_method() {
     check(
         "Object subclass: ExpectMin
-  classState: n = 0
-
   class foo -> Integer => 0
 
   class withDirective -> Integer =>
@@ -30,13 +28,13 @@ fn expect_in_on_do_body_of_class_method() {
       @expect lint \"directive inside an on:do: body\"
       self foo
     ] on: Error do: [:e | nil]
-    self.n
+    0
 
   class withoutDirective -> Integer =>
     [
       self foo
     ] on: Error do: [:e | nil]
-    self.n
+    0
 ",
     );
 }
@@ -45,8 +43,6 @@ fn expect_in_on_do_body_of_class_method() {
 fn expect_as_last_and_middle_statement_in_on_do_body() {
     check(
         "Object subclass: ExpectLast
-  classState: n = 0
-
   class foo -> Integer => 0
 
   class trailing -> Integer =>
@@ -54,7 +50,7 @@ fn expect_as_last_and_middle_statement_in_on_do_body() {
       self foo
       @expect lint \"trailing\"
     ] on: Error do: [:e | nil]
-    self.n
+    0
 
   class middle -> Integer =>
     [
@@ -62,7 +58,7 @@ fn expect_as_last_and_middle_statement_in_on_do_body() {
       @expect lint \"middle\"
       self foo
     ] on: Error do: [:e | nil]
-    self.n
+    0
 ",
     );
 }
@@ -71,8 +67,6 @@ fn expect_as_last_and_middle_statement_in_on_do_body() {
 fn expect_in_on_do_handler_and_ensure_arms() {
     check(
         "Object subclass: ExpectArms
-  classState: n = 0
-
   class foo -> Integer => 0
 
   class inHandler -> Integer =>
@@ -80,14 +74,14 @@ fn expect_in_on_do_handler_and_ensure_arms() {
       @expect lint \"handler\"
       self foo
     ]
-    self.n
+    0
 
   class inEnsure -> Integer =>
     [self foo] ensure: [
       @expect lint \"cleanup\"
       self foo
     ]
-    self.n
+    0
 ",
     );
 }
@@ -125,18 +119,16 @@ fn expect_in_on_do_body_of_instance_methods() {
 }
 
 /// Wraps `body` (indented statements) in a class method of a class with
-/// `classState:`, once with and once without the directive, so a failure in the
+/// a class, once with and once without the directive, so a failure in the
 /// directive-free form is distinguishable from a directive-specific one.
 fn class_method(body: &str) -> String {
     format!(
         "Object subclass: ExpectPositions
-  classState: n = 0
-
   class foo -> Integer => 0
 
   class probe -> Integer =>
 {body}
-    self.n
+    0
 "
     )
 }

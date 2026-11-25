@@ -141,12 +141,12 @@ queries; both are coarser, file-granularity caches:
 - **Language service (`SimpleLanguageService`, used by the LSP):** caches
   each file's source text, parsed AST, and diagnostics in a per-file
   `FileData` map (`crates/beamtalk-core/src/language_service/mod.rs`), and
-  merges cross-file class/alias/protocol/extension info into a `ProjectIndex`.
+  merges cross-file class/alias/protocol info into a `ProjectIndex`.
   Editing a file reparses only that file and calls `ProjectIndex::update_file`
   (or `remove_file` on delete) to refresh the project-wide index —
   file-granularity invalidation, not whole-project reanalysis.
 - **Batch builds (`beamtalk build`):** a two-pass, content-hash-keyed cache
-  (BT-3120). Pass 1 (class indexing) persists per-file class/alias/extension
+  (BT-3120). Pass 1 (class indexing) persists per-file class/alias
   metadata to `.beamtalk-pass1-cache.json`, keyed by a SHA-256 hash of the
   source file's contents, so unchanged files skip re-parsing
   (`crates/beamtalk-cli/src/commands/build_cache.rs`, BT-1683). Pass 2
@@ -443,11 +443,15 @@ FuturePid
 Every compiled actor class generates its own `dispatch/4`: a `case` on the
 selector, one clause per method the class defines, and a final clause for any
 other selector. That final clause tries, in order, the memoised inherited
-compiled method, an extension method, the superclass walk
-(`beamtalk_dispatch:super`), and the class's own `doesNotUnderstand:args:`
-method if it defines one. If none applies it returns a
+compiled method, the superclass walk (`beamtalk_dispatch:super`), and the
+class's own `doesNotUnderstand:args:` method if it defines one. If none applies it returns a
 `does_not_understand` `#beamtalk_error{}` (`dispatch(Selector, Args, Self, State)`
 returns `{reply, Result, NewState}` or `{error, Error, State}`).
+
+There is no extension-registry step: cross-file extension methods were removed
+(ADR 0152), so the compiler rejects a `Class >> selector => ...` in a file that
+does not define `Class`, and nothing outside a class's own source can change
+which method answers a send to it.
 
 ### doesNotUnderstand: Metaprogramming
 

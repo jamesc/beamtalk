@@ -313,4 +313,12 @@ defmodule BtAttach.SessionRegistryTest do
       eventually(fn -> not Map.has_key?(:sys.get_state(reg).entries, "tab-remon") end)
     end
   end
+
+  # BT-5189: `terminate/2` closes every live session within its own bound; the
+  # supervisor must wait longer than that, or it kills the registry mid-close.
+  test "the supervisor's shutdown bound exceeds the registry's close-all bound" do
+    %{shutdown: shutdown} = Supervisor.child_spec(BtAttach.SessionRegistry, [])
+    assert is_integer(shutdown)
+    assert shutdown > BtAttach.SessionRegistry.close_all_timeout_ms()
+  end
 end

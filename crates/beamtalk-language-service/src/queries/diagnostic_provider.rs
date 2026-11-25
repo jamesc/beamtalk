@@ -71,12 +71,6 @@ pub struct ProjectDiagnosticContext<'a> {
     /// does. Empty for callers that don't (yet) supply project-wide alias
     /// metadata — the pipeline degrades to today's same-file-only resolution.
     pub pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
-    /// Project-wide standalone extension definitions (ADR 0066).
-    /// Registered into the class hierarchy so cross-file
-    /// `ClassName >> selector` extensions resolve instead of producing
-    /// false `Dnu` hints. May include the current file's own entries —
-    /// duplicates are skipped during registration.
-    pub cross_file_extensions: beamtalk_core::compilation::extension_index::ExtensionIndex,
     /// Native type registry for FFI call inference (ADR 0075).
     pub native_type_registry:
         Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>>,
@@ -174,7 +168,6 @@ pub fn compute_project_diagnostics_with_analysis(
         .with_protocol_sources(ctx.pre_loaded_protocol_sources.clone())
         .with_pre_loaded_aliases(ctx.pre_loaded_aliases.clone())
         .with_native_type_registry(ctx.native_type_registry.clone())
-        .with_cross_file_extensions(&ctx.cross_file_extensions)
         .with_is_stub_file(ctx.is_stub_file);
     let mut analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
     // Diagnostics are consumed below (and by every downstream pass
@@ -980,78 +973,6 @@ mod tests {
     }
 
     // ── Class variable access ──
-
-    #[test]
-    fn warn_undefined_classvar() {
-        let source = "Object subclass: Config\n  classState: debug = false\n  check => 1\n\nConfig classState: #verbose";
-        let tokens = lex_with_eof(source);
-        let (module, parse_diags) = parse(tokens);
-        let diagnostics = compute_diagnostics(&module, parse_diags);
-
-        let has_warning = diagnostics.iter().any(|d| {
-            d.message.contains("Undefined class variable") && d.message.contains("verbose")
-        });
-        assert!(
-            has_warning,
-            "Expected undefined classState warning, got: {diagnostics:?}"
-        );
-    }
-
-    #[test]
-    fn no_warn_valid_classvar() {
-        let source = "Object subclass: Config\n  classState: debug = false\n  check => 1\n\nConfig classState: #debug";
-        let tokens = lex_with_eof(source);
-        let (module, parse_diags) = parse(tokens);
-        let diagnostics = compute_diagnostics(&module, parse_diags);
-
-        let has_warning = diagnostics
-            .iter()
-            .any(|d| d.message.contains("Undefined class variable"));
-        assert!(
-            !has_warning,
-            "Should not warn for valid classState, got: {diagnostics:?}"
-        );
-    }
-
-    #[test]
-    fn warn_classvar_has_hint() {
-        let source = "Object subclass: Config\n  classState: debug = false\n  check => 1\n\nConfig classState: #verbose";
-        let tokens = lex_with_eof(source);
-        let (module, parse_diags) = parse(tokens);
-        let diagnostics = compute_diagnostics(&module, parse_diags);
-
-        let diag = diagnostics
-            .iter()
-            .find(|d| d.message.contains("Undefined class variable"))
-            .expect("Should have classState warning");
-        assert!(
-            diag.hint.as_ref().is_some_and(|h| h.contains("debug")),
-            "Should hint about declared class vars, got: {:?}",
-            diag.hint
-        );
-    }
-
-    #[test]
-    fn warn_inherited_only_classvar_is_own_only() {
-        // BT-3801: class variables are not inherited, so a `classState:` send
-        // naming a variable only an ancestor declares warns, with a redeclare hint.
-        let source = "Object subclass: Base\n  classState: n = 0\n  check => 1\n\nBase subclass: Sub\n  check2 => 1\n\nSub classState: #n";
-        let tokens = lex_with_eof(source);
-        let (module, parse_diags) = parse(tokens);
-        let diagnostics = compute_diagnostics(&module, parse_diags);
-
-        let diag = diagnostics
-            .iter()
-            .find(|d| d.message.contains("Undefined class variable"))
-            .expect("inherited-only class variable should warn");
-        assert!(
-            diag.hint
-                .as_ref()
-                .is_some_and(|h| h.contains("Base") && h.contains("redeclare")),
-            "Should hint to redeclare, got: {:?}",
-            diag.hint
-        );
-    }
 
     #[test]
     fn error_actor_new_inside_method_body() {

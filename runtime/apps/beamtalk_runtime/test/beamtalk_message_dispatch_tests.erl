@@ -21,7 +21,7 @@ These tests focus on routing logic that works without compiled stdlib.
 
 actor_setup() ->
     beamtalk_test_boot:registry(),
-    beamtalk_extensions:init(),
+    beamtalk_class_shadow_flags:mark_ready(),
     {ok, _} = beamtalk_bootstrap:start_link(),
     %% Bootstrap only starts pg; classes are registered by the compiled stdlib.
     beamtalk_test_boot:boot_real_stdlib('Integer'),
@@ -424,7 +424,9 @@ number_coercion_test_() ->
         {"a non-DNU exception from inside send/3 passes through unchanged",
             fun number_coercion_passes_through_non_dnu/0},
         {"success case: send/3's result is returned unchanged",
-            fun number_coercion_returns_result_on_success/0}
+            fun number_coercion_returns_result_on_success/0},
+        {"3 + nil: arithmetic hint names the operator and the hook",
+            fun number_coercion_hints_nil/0}
     ]}.
 
 number_coercion_hints_missing_method() ->
@@ -442,7 +444,7 @@ number_coercion_hints_missing_method() ->
             'CoercionActor',
             'timesFromNumber:',
             {beamtalk_string,
-                <<"CoercionActor has no 'timesFromNumber:' — implement it to support 'number * CoercionActor' arithmetic"/utf8>>},
+                <<"'*' cannot combine a number with CoercionActor — the right operand must be a number, or a value whose class implements 'timesFromNumber:'"/utf8>>},
             beamtalk_message_dispatch:send_number_coercion(
                 Obj, 'timesFromNumber:', [5], '*'
             )
@@ -498,3 +500,114 @@ number_coercion_returns_result_on_success() ->
     %% On success, send_number_coercion/4 returns send/3's result unchanged.
     Result = beamtalk_message_dispatch:send_number_coercion(2, '+', [3], '+'),
     ?assertEqual(5, Result).
+
+number_coercion_hints_nil() ->
+    %% `3 + nil` sends `nil plusFromNumber: 3`; UndefinedObject has no such
+    %% hook, so the reworded arithmetic hint is attached (ADR 0116 addendum,
+    %% decision 4).
+    ?assertBtErrorHint(
+        does_not_understand,
+        'UndefinedObject',
+        'plusFromNumber:',
+        {beamtalk_string,
+            <<"'+' cannot combine a number with UndefinedObject — the right operand must be a number, or a value whose class implements 'plusFromNumber:'"/utf8>>},
+        beamtalk_message_dispatch:send_number_coercion(nil, 'plusFromNumber:', [3], '+')
+    ).
+
+%% ============================================================================
+%% ADR 0116 addendum: send_number_comparison/4 — the comparison entry point
+%% shares send_number_coercion/4's body; only the hint wording differs.
+%% ============================================================================
+
+number_comparison_test_() ->
+    {setup, fun actor_setup/0, fun actor_teardown/1, [
+        {"3 <= nil: comparison hint names the operator and the hook",
+            fun number_comparison_hints_nil/0},
+        {"hint added when the reflected comparison hook is genuinely absent",
+            fun number_comparison_hints_missing_method/0},
+        {"DNU inside a present comparison hook (unrelated selector) is not rewritten",
+            fun number_comparison_does_not_rewrite_inner_dnu/0},
+        {"a non-DNU exception from a present comparison hook passes through unchanged",
+            fun number_comparison_passes_through_non_dnu/0},
+        {"success case: send/3's result is returned unchanged",
+            fun number_comparison_returns_result_on_success/0}
+    ]}.
+
+number_comparison_hints_nil() ->
+    ?assertBtErrorHint(
+        does_not_understand,
+        'UndefinedObject',
+        'lessOrEqualFromNumber:',
+        {beamtalk_string,
+            <<"'<=' cannot order a number against UndefinedObject — the right operand must be a number, or a value whose class implements 'lessOrEqualFromNumber:'"/utf8>>},
+        beamtalk_message_dispatch:send_number_comparison(
+            nil, 'lessOrEqualFromNumber:', [3], '<='
+        )
+    ).
+
+number_comparison_hints_missing_method() ->
+    %% CoercionActor has no 'lessOrEqualFromNumber:' at all.
+    {ok, Pid} = test_number_coercion_actor:start_link(),
+    Obj = #beamtalk_object{
+        class = 'CoercionActor', class_mod = test_number_coercion_actor, pid = Pid
+    },
+    try
+        ?assertBtErrorHint(
+            does_not_understand,
+            'CoercionActor',
+            'lessOrEqualFromNumber:',
+            {beamtalk_string,
+                <<"'<=' cannot order a number against CoercionActor — the right operand must be a number, or a value whose class implements 'lessOrEqualFromNumber:'"/utf8>>},
+            beamtalk_message_dispatch:send_number_comparison(
+                Obj, 'lessOrEqualFromNumber:', [5], '<='
+            )
+        )
+    after
+        gen_server:stop(Pid)
+    end.
+
+number_comparison_does_not_rewrite_inner_dnu() ->
+    %% 'lessThanFromNumber:' is present; its body DNUs on 'unrelatedSelector'.
+    %% That DNU is not for the hook selector, so it carries no hint.
+    {ok, Pid} = test_number_coercion_actor:start_link(),
+    Obj = #beamtalk_object{
+        class = 'CoercionActor', class_mod = test_number_coercion_actor, pid = Pid
+    },
+    try
+        ?assertBtErrorHint(
+            does_not_understand,
+            'CoercionActor',
+            unrelatedSelector,
+            undefined,
+            beamtalk_message_dispatch:send_number_comparison(
+                Obj, 'lessThanFromNumber:', [5], '<'
+            )
+        )
+    after
+        gen_server:stop(Pid)
+    end.
+
+number_comparison_passes_through_non_dnu() ->
+    %% 'greaterThanFromNumber:' is present and raises instantiation_error.
+    {ok, Pid} = test_number_coercion_actor:start_link(),
+    Obj = #beamtalk_object{
+        class = 'CoercionActor', class_mod = test_number_coercion_actor, pid = Pid
+    },
+    try
+        ?assertBtErrorHint(
+            instantiation_error,
+            'CoercionActor',
+            'greaterThanFromNumber:',
+            undefined,
+            beamtalk_message_dispatch:send_number_comparison(
+                Obj, 'greaterThanFromNumber:', [5], '>'
+            )
+        )
+    after
+        gen_server:stop(Pid)
+    end.
+
+number_comparison_returns_result_on_success() ->
+    ?assertEqual(
+        true, beamtalk_message_dispatch:send_number_comparison(2, '<', [3], '<')
+    ).

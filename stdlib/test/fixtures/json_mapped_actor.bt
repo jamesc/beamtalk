@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for BT-2819 follow-up; see json_mapping_test.bt.
+
+Actor subclass: JsonMappedActor
+  uses: JsonMappable
+  state: hits = 0
+
+  class jsonMapping -> JsonMapping => JsonMapping new |> mapField: #hits

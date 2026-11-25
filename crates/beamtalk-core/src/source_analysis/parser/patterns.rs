@@ -28,15 +28,22 @@ impl Parser {
     /// Bare `true`/`false` are rejected with a diagnostic rather
     /// than parsed as a variable binding — use `x :: True`/`x :: False`/
     /// `x :: Boolean` instead.
-    #[allow(clippy::too_many_lines)] // one arm per pattern kind
     pub(super) fn parse_pattern(&mut self) -> Pattern {
-        // Guard against stack overflow from deeply nested tuple patterns
+        // Guard against stack overflow from deeply nested patterns. Past the
+        // limit a bracketed pattern is skipped whole, so its contents are
+        // not reparsed as the enclosing pattern's elements.
         let span = self.current_token().span();
-        if self.enter_nesting(span).is_err() {
-            return Pattern::Wildcard(span);
-        }
+        self.with_nesting(
+            span,
+            |p| Pattern::Wildcard(span.merge(p.skip_bracketed_group())),
+            Self::parse_pattern_unguarded,
+        )
+    }
 
-        let result = match self.current_kind() {
+    /// [`Self::parse_pattern`] without the nesting guard.
+    #[allow(clippy::too_many_lines)] // one arm per pattern kind
+    fn parse_pattern_unguarded(&mut self) -> Pattern {
+        match self.current_kind() {
             // Wildcard: `_`
             TokenKind::Identifier(name) if name.as_str() == "_" => {
                 let span = self.advance().span();
@@ -222,12 +229,7 @@ impl Parser {
                         if let Expression::Literal(lit, _) = expr {
                             // `parse_literal` already rejects non-finite floats, so
                             // negating `f` here cannot produce `inf`/`NaN`.
-                            let neg_lit = match lit {
-                                Literal::Integer(n) => Literal::Integer(-n),
-                                Literal::Float(f) => Literal::Float(-f),
-                                other => other,
-                            };
-                            Pattern::Literal(neg_lit, span)
+                            Pattern::Literal(lit.negated(), span)
                         } else {
                             Pattern::Wildcard(span)
                         }
@@ -263,10 +265,7 @@ impl Parser {
                 ));
                 Pattern::Wildcard(span)
             }
-        };
-
-        self.leave_nesting();
-        result
+        }
     }
 
     /// Consumes the malformed token(s) following an errant `::` in a `nil`
@@ -537,12 +536,7 @@ impl Parser {
                         if let Expression::Literal(lit, _) = expr {
                             // `parse_literal` already rejects non-finite floats, so
                             // negating `f` here cannot produce `inf`/`NaN`.
-                            let neg_lit = match lit {
-                                Literal::Integer(n) => Literal::Integer(-n),
-                                Literal::Float(f) => Literal::Float(-f),
-                                other => other,
-                            };
-                            Pattern::Literal(neg_lit, span)
+                            Pattern::Literal(lit.negated(), span)
                         } else {
                             Pattern::Wildcard(span)
                         }

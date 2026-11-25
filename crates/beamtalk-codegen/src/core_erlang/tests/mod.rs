@@ -424,6 +424,9 @@ mod match_scrutinee_state_corpus;
 mod module_info;
 mod nlr;
 mod nlr_closure_call_corpus;
+mod no_class_var_emission;
+mod number_comparison_right_operand;
+mod number_comparison_right_operand_corpus;
 mod open_reach;
 mod operand_evaluation_order;
 mod paren_arm_statements;
@@ -440,6 +443,7 @@ mod residual_dynamic_sends;
 mod shadowed_class_direct_calls;
 mod sibling_snapshot;
 mod stale_read_sites;
+mod string_symbol_comparison_right_operand;
 mod super_send_outside_producer;
 mod super_send_value_position_corpus;
 mod supervisor;
@@ -462,7 +466,6 @@ mod value_type_fold_family_corpus;
 mod verifier_surfacing;
 mod while_condition_binding_corpus;
 mod while_condition_carrier_corpus;
-mod while_condition_class_method;
 
 #[test]
 fn erlc_rejected_rows_names_exactly_the_bad_rows() {

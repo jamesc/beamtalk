@@ -100,6 +100,12 @@ impl ComparisonKinds {
         }
     }
 
+    /// Whether a number or a `Character` (a codepoint integer) is held: the
+    /// kinds a comparison's number arm accepts.
+    pub(in crate::core_erlang) fn has_number_kind(self) -> bool {
+        self.number || self.character
+    }
+
     /// The `erlang` type-test BIFs that together accept exactly these kinds:
     /// the first, and a second to `or` with it when a `String` is also held.
     /// `is_number` covers a `Character`'s `is_integer`, so a numeric
@@ -292,10 +298,6 @@ mod tests {
         classify_fields(&parse_class(src).state)
     }
 
-    fn class_side_facts(src: &str) -> HashMap<String, FieldTypeFact> {
-        classify_fields(&parse_class(src).class_variables)
-    }
-
     fn numeric(facts: &HashMap<String, FieldTypeFact>, f: &str) -> bool {
         facts[f].is_numeric()
     }
@@ -326,20 +328,6 @@ mod tests {
     }
 
     #[test]
-    fn untyped_class_variables_are_never_trusted_even_in_a_sealed_class() {
-        for src in [
-            "Object subclass: H\n  classState: hits = 0\n  \
-             class bump => self.hits := self.hits + 1\n",
-            "sealed Object subclass: H\n  classState: hits = 0\n  \
-             class bump => self.hits := self.hits + 1\n",
-        ] {
-            let facts = class_side_facts(src);
-            assert_eq!(facts["hits"], FieldTypeFact::Untyped, "{src}");
-            assert!(!numeric(&facts, "hits"));
-        }
-    }
-
-    #[test]
     fn numeric_annotation_is_the_fast_path() {
         let facts = instance_facts(
             "Actor subclass: C\n  state: count :: Integer = 0\n  \
@@ -348,9 +336,6 @@ mod tests {
         for f in ["count", "total", "n"] {
             assert!(numeric(&facts, f) && comparable(&facts, f), "{f}");
         }
-        let class_side =
-            class_side_facts("Object subclass: H\n  classState: hits :: Integer = 0\n");
-        assert!(numeric(&class_side, "hits"));
     }
 
     #[test]

@@ -783,10 +783,10 @@ fn paren_needed_operand_shapes_corpus() {
     let hosts = [
         "Actor subclass: NeededParen\n  state: n = 0\n  foo => 1\n",
         "Object subclass: NeededParen\n  state: n = 0\n  foo => 1\n",
-        "Object subclass: NeededParen\n  classState: n = 0\n  class foo => 1\n",
+        "Object subclass: NeededParen\n  class foo => 1\n",
     ];
     let method = |host: &str, k: usize, stmt: &str| {
-        let side = if host.contains("classState:") {
+        let side = if host.contains("class foo") {
             "class "
         } else {
             ""

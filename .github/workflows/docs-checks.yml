@@ -1,0 +1,39 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# Docs checks for a docs-only push to main (BT-5137). ci.yml skips such a push
+# (its `push.paths` list is the code filter), and its `docs-checks` job covers
+# pull requests, so without this a docs-only merge was never checked.
+name: Docs checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '*.md'
+      - 'docs/**'
+      - 'scripts/ci/check_docs_refs.py'
+      - 'scripts/ci/check_env_docs.py'
+      - 'scripts/ci/docs-refs-allowlist.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  docs-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup just
+        uses: ./.github/actions/setup-beamtalk
+        with:
+          rust: 'false'
+          erlang: 'false'
+          rust-cache: 'false'
+
+      - name: Docs reference and environment-variable checks
+        run: just lint-docs-refs lint-env-docs

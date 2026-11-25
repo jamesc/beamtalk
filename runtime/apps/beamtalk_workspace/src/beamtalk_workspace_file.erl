@@ -30,7 +30,9 @@ Durability (BT-5017): `write_temp/2` `fsync`s the staged bytes before
 `atomic_write/3` renames them, so a power loss cannot leave the target
 renamed over an empty file. The containing directory is not fsynced: OTP has
 no portable directory sync, and the worst outcome of skipping it is that the
-rename is lost and the previous, whole file is still there. This helper is
+rename is lost and the previous, whole file is still there. That is the
+intended durability level (BT-5136): every file this helper writes is
+re-derivable from the in-memory ChangeLog and the source tree. This helper is
 the one place the workspace syncs; its callers (flush, ChangeLog bodies,
 `metadata.json`, native saves) add no sync of their own.
 
@@ -43,10 +45,11 @@ A leaf module: it calls only OTP.
     path_inside/2,
     relative_parts/2,
     temp_path/1,
-    write_temp/2,
+    write_temp/2, write_temp/3,
+    ensure_private_dir/1,
     staging_dir/1,
     is_staging_dir_name/1,
-    atomic_write/3,
+    atomic_write/3, atomic_write/4,
     sweep_stale_temps/1, sweep_stale_temps/2,
     sweep_stale_temps_in/1, sweep_stale_temps_in/2,
     sweep_stale_staging_dirs/1
@@ -183,11 +186,15 @@ comparable_parts(Path, _OsType) ->
 
 -doc """
 A fresh temp path next to `Path`: `<Path>.bt-staging.<unique>.tmp`. Unique per
-call, so concurrent writers to the same `Path` never share a temp file.
+call, so concurrent writers to the same `Path` never share a temp file, and
+unpredictable (random suffix), so another local user cannot pre-create the
+name. `write_temp/2` also creates it exclusively.
 """.
 -spec temp_path(string()) -> string().
 temp_path(Path) ->
-    Path ++ ?TEMP_MARKER ++ integer_to_list(erlang:unique_integer([positive])) ++ ".tmp".
+    Rand = binary_to_list(binary:encode_hex(crypto:strong_rand_bytes(8), lowercase)),
+    Path ++ ?TEMP_MARKER ++ integer_to_list(erlang:unique_integer([positive])) ++ "." ++ Rand ++
+        ".tmp".
 
 -doc """
 A fresh scratch directory path next to `Path`: `<dirname>/.bt-staging.<unique>`.
@@ -216,9 +223,25 @@ temp file is deleted.
 """.
 -spec write_temp(string(), iodata()) -> {ok, string()} | {error, {write, term()}}.
 write_temp(Path, Data) ->
+    write_temp(Path, Data, #{}).
+
+-doc """
+`write_temp/2` with options. `#{private => true}` makes the temp file 0600
+(workspace state such as the port file and `metadata.json`); otherwise the
+temp file takes the mode of an existing `Path`, or the default umask for a new
+one, so staging a user's source file never changes its permissions.
+""".
+-spec write_temp(string(), iodata(), #{private => boolean()}) ->
+    {ok, string()} | {error, {write, term()}}.
+write_temp(Path, Data, Opts) ->
     Tmp = temp_path(Path),
-    case write_synced(Tmp, Data) of
+    Private = maps:get(private, Opts, false),
+    case write_synced(Tmp, Data, Private) of
         ok ->
+            case Private of
+                true -> ok;
+                false -> keep_mode(Path, Tmp)
+            end,
             {ok, Tmp};
         {error, Reason} ->
             _ = file:delete(Tmp),
@@ -230,14 +253,21 @@ write_temp(Path, Data) ->
 %% power loss the new name can point at a file whose data never reached disk,
 %% i.e. an empty `metadata.json` or source body. Syncing the temp file first
 %% closes that. The directory entry itself is not synced; see the moduledoc.
--spec write_synced(string(), iodata()) -> ok | {error, term()}.
-write_synced(Tmp, Data) ->
-    case file:open(Tmp, [write, binary, raw]) of
+-spec write_synced(string(), iodata(), boolean()) -> ok | {error, term()}.
+write_synced(Tmp, Data, Private) ->
+    %% `exclusive`: never open (or follow a symlink at) a name someone else
+    %% pre-created. The mode is tightened to 0600 before any data is written.
+    case file:open(Tmp, [write, binary, raw, exclusive]) of
         {ok, Fd} ->
             Result =
-                case file:write(Fd, Data) of
-                    ok -> file:sync(Fd);
-                    {error, _} = Err -> Err
+                case private_mode(Tmp, Private) of
+                    ok ->
+                        case file:write(Fd, Data) of
+                            ok -> file:sync(Fd);
+                            {error, _} = Err -> Err
+                        end;
+                    {error, _} = ModeErr ->
+                        ModeErr
                 end,
             case {Result, file:close(Fd)} of
                 {ok, ok} -> ok;
@@ -264,10 +294,23 @@ Errors are tagged with the step that failed: `{write, Reason}`,
 -spec atomic_write(string(), iodata(), binary() | undefined) ->
     ok | {error, {write | recheck | rename, term()}}.
 atomic_write(Path, Data, ExpectedCurrent) ->
-    case write_temp(Path, Data) of
+    atomic_write(Path, Data, ExpectedCurrent, #{}).
+
+-doc "`atomic_write/3` with `write_temp/3` options (`private => true` for state files).".
+-spec atomic_write(string(), iodata(), binary() | undefined, #{private => boolean()}) ->
+    ok | {error, {write | recheck | rename, term()}}.
+atomic_write(Path, Data, ExpectedCurrent, Opts) ->
+    case write_temp(Path, Data, Opts) of
         {ok, Tmp} ->
             case recheck_unchanged(Path, ExpectedCurrent) of
                 ok ->
+                    %% A rewrite keeps the target's mode, except a private
+                    %% write, which always lands 0600: it tightens an existing
+                    %% group/world-readable `metadata.json` (BT-5174).
+                    case maps:get(private, Opts, false) of
+                        true -> ok;
+                        false -> keep_mode(Path, Tmp)
+                    end,
                     case file:rename(Tmp, Path) of
                         ok ->
                             ok;
@@ -281,6 +324,49 @@ atomic_write(Path, Data, ExpectedCurrent) ->
             end;
         {error, _} = WriteErr ->
             WriteErr
+    end.
+
+%% Windows (BT-5258): there are no POSIX mode bits, so `change_mode/2` only
+%% toggles the read-only attribute and does NOT make the file private. This
+%% module adds no ACL of its own: privacy there ASSUMES the parent directory
+%% inherits an owner-only ACL, as the per-user profile location does. A
+%% workspace under a shared path (a drive root, a shared folder) is not
+%% protected. Exclusive create and atomic rename behave the same on Windows.
+-spec private_mode(string(), boolean()) -> ok | {error, term()}.
+private_mode(Tmp, true) -> file:change_mode(Tmp, 8#600);
+private_mode(_Tmp, false) -> ok.
+
+%% Rewriting an existing file keeps its mode (a 0600 `metadata.json` stays
+%% 0600, a file the user made group-readable stays so); a new file keeps the
+%% temp file's 0600. Best effort: a failure leaves the private mode.
+-spec keep_mode(string(), string()) -> ok.
+keep_mode(Path, Tmp) ->
+    case file:read_file_info(Path) of
+        {ok, #file_info{mode = Mode}} ->
+            _ = file:change_mode(Tmp, Mode band 8#7777),
+            ok;
+        {error, _} ->
+            ok
+    end.
+
+-doc """
+Create `Dir` (and any missing parents) and make `Dir` itself mode 0700, so a
+workspace's state files are not listable by other local users even when the
+node, not the CLI, creates the directory first (BT-5135).
+""".
+%% Windows (BT-5258): `change_mode/2` is effectively a no-op for 0700; privacy
+%% comes from the inherited per-user ACL of the parent directory (see
+%% `private_mode/2`).
+-spec ensure_private_dir(string()) -> ok | {error, term()}.
+ensure_private_dir(Dir) ->
+    case filelib:ensure_dir(filename:join(Dir, "x")) of
+        ok ->
+            case file:change_mode(Dir, 8#700) of
+                ok -> ok;
+                {error, _} = Err -> Err
+            end;
+        {error, _} = Err ->
+            Err
     end.
 
 %% `ok` when `ExpectedCurrent` is `undefined` (no recheck requested) or
@@ -299,7 +385,7 @@ recheck_unchanged(Path, ExpectedCurrent) ->
 
 -doc """
 Delete stale `temp_path/1` leftovers next to `Path`: siblings named
-`<basename>.bt-staging.<digits>.tmp` whose last modification is more than `MaxAgeSeconds`
+`<basename>.bt-staging.<digits>[.<hex>].tmp` whose last modification is more than `MaxAgeSeconds`
 ago. Returns the paths it deleted.
 
 A staged writer (flush Phase A then Phase B) that crashes between its two
@@ -363,15 +449,33 @@ is_temp_name(Prefix, Name) ->
         true ->
             %% Match ".tmp" on what follows the prefix, so the prefix's own
             %% trailing "." can never double as the start of ".tmp".
-            case lists:reverse(lists:nthtail(length(Prefix), Name)) of
-                "pmt." ++ RevDigits when RevDigits =/= [] ->
-                    lists:all(fun(C) -> C >= $0 andalso C =< $9 end, RevDigits);
+            Rest = lists:nthtail(length(Prefix), Name),
+            case lists:reverse(Rest) of
+                "pmt." ++ RevCore when RevCore =/= [] ->
+                    %% `<digits>` (older builds) or `<digits>.<hex>` (random
+                    %% suffix, BT-5135).
+                    case string:split(lists:reverse(RevCore), ".") of
+                        [Digits] -> all_digits(Digits);
+                        [Digits, Hex] -> all_digits(Digits) andalso all_hex(Hex);
+                        _ -> false
+                    end;
                 _ ->
                     false
             end;
         false ->
             false
     end.
+
+-spec all_digits(string()) -> boolean().
+all_digits(S) -> S =/= [] andalso lists:all(fun(C) -> C >= $0 andalso C =< $9 end, S).
+
+-spec all_hex(string()) -> boolean().
+all_hex(S) ->
+    S =/= [] andalso
+        lists:all(
+            fun(C) -> (C >= $0 andalso C =< $9) orelse (C >= $a andalso C =< $f) end,
+            S
+        ).
 
 -spec older_than(string(), integer(), non_neg_integer()) -> boolean().
 older_than(File, Now, MaxAgeSeconds) ->

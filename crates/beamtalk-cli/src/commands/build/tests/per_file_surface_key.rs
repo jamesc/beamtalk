@@ -85,8 +85,6 @@ fn compile_files(
             pre_loaded_protocol_defs: index.all_protocol_defs.clone(),
             pre_loaded_protocol_sources: index.all_protocol_sources.clone(),
             pre_loaded_aliases: index.all_alias_infos.clone(),
-            extension_index: index.extension_index.clone(),
-            dependency_extensions_complete: index.dependency_extensions_complete,
         },
         ..CompileContext::default()
     };
@@ -235,11 +233,6 @@ const FIXTURE: &[(&str, &str)] = &[
         "user_widget.bt",
         "Object subclass: UserWidget\n  run: w :: Widget -> String => w tag\n",
     ),
-    ("ext.bt", "String >> shout -> Integer => 1\n"),
-    (
-        "user_ext.bt",
-        "Value subclass: UserExt\n  run -> Integer => \"x\" shout\n",
-    ),
     (
         "compass.bt",
         "type Direction = #north | #south\nValue subclass: Compass\n  heading -> Direction => #north\n",
@@ -325,15 +318,6 @@ const EDITS: &[(&str, Edit)] = &[
             "tagged.bt",
             Some("Protocol define: Tagged\n  name -> String\n\n  label -> String => self name\n"),
         )],
-    ),
-    (
-        "add an extension",
-        &[("ext2.bt", Some("String >> whisper -> Integer => 1\n"))],
-    ),
-    ("remove the extension", &[("ext.bt", Some("// none\n"))]),
-    (
-        "change an extension signature",
-        &[("ext.bt", Some("String >> shout -> String => \"x\"\n"))],
     ),
     (
         "edit an initialize body",
@@ -452,13 +436,7 @@ fn adding_a_method_rebuilds_only_the_files_that_consulted_the_class() {
         rebuilt.contains("sub.bt"),
         "a subclass inherits it: {rebuilt:?}"
     );
-    for untouched in [
-        "unrelated.bt",
-        "leaf.bt",
-        "user_leaf.bt",
-        "user_widget.bt",
-        "user_ext.bt",
-    ] {
+    for untouched in ["unrelated.bt", "leaf.bt", "user_leaf.bt", "user_widget.bt"] {
         assert!(
             !rebuilt.contains(untouched),
             "{untouched} never consulted Base: {rebuilt:?}"

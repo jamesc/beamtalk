@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0153 decision 7 (BT-5155): the instance-field reflection selectors sent
+// to a class from inside one of its own class methods, through `self`, in a
+// block, and to the class held in a variable. Each raises the ordinary
+// does-not-understand, as the same send from outside does.
+// Fixture for class_field_reflection_dnu_test.bt.
+
+Object subclass: ClassFieldReflectionProbe
+
+  class selfFieldAt => self fieldAt: #x
+
+  class selfFieldAtPut => self fieldAt: #x put: 1
+
+  class selfHasField => self hasField: #x
+
+  class selfClearField => self clearField: #x
+
+  class selfHasFieldInBlock => [self hasField: #x] value
+
+  class fieldAtOf: cls => cls fieldAt: #x
+
+  // `run:` is process-bound (ADR 0142 §1 rule 3): it runs in the class's own
+  // process, so a send there to the class reaches it from its own process.
+  class run: aBlock => aBlock value

@@ -502,7 +502,7 @@ process is evaluating the spawn expression, which linking would tie the
 new actor's lifetime to. A link there meant `exit(ActorPid, kill)` — used
 by REPL actor cleanup and `classRemoveFromSystemByName`'s actor teardown —
 took the caller down with it (e.g. the class gen_server, silently losing
-class vars and hot-patched methods). Lifecycle tracking that needs to know
+hot-patched methods). Lifecycle tracking that needs to know
 when an actor dies (the REPL actor registry, `onExit:`, etc.) already uses
 `erlang:monitor/2`, never the link, so dropping the link changes nothing
 for those consumers.

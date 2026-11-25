@@ -255,6 +255,224 @@ upgrade_allows_loopback_origin_test() ->
         )
     ).
 
+%% BT-5127: operator-listed names pass Host and Origin (reverse proxy,
+%% Tailscale MagicDNS); unlisted names still fail.
+upgrade_allowlist_accepts_listed_names_test() ->
+    L = {127, 0, 0, 1},
+    os:putenv("BEAMTALK_WS_ALLOWED_HOSTS", "Repl.Example.com, box.tail1234.ts.net"),
+    try
+        ?assertEqual(
+            ok,
+            beamtalk_ws_handler:check_upgrade_headers(
+                <<"https://repl.example.com">>, <<"repl.example.com">>, L
+            )
+        ),
+        ?assertEqual(
+            ok,
+            beamtalk_ws_handler:check_upgrade_headers(undefined, <<"box.tail1234.ts.net:9000">>, L)
+        ),
+        ?assertEqual(
+            {error, bad_host},
+            beamtalk_ws_handler:check_upgrade_headers(undefined, <<"evil.example">>, L)
+        )
+    after
+        os:unsetenv("BEAMTALK_WS_ALLOWED_HOSTS")
+    end,
+    ?assertEqual(
+        {error, bad_host},
+        beamtalk_ws_handler:check_upgrade_headers(undefined, <<"repl.example.com">>, L)
+    ).
+
+%% BT-5185: a name with a character outside Latin-1 no longer crashes every
+%% upgrade into a 500 (`list_to_binary/1` raised on it); it is a valid Unicode
+%% name, so it is kept (it can never equal an ASCII `Host`). An entry that is
+%% not a string or not valid Unicode is skipped. The other listed names still
+%% work. The non-Latin-1 name goes through the app env: on a Latin-1 node
+%% `os:putenv/2` itself refuses one, while a Unicode node's `os:getenv/1` hands
+%% the same codepoints to the parser.
+upgrade_allowlist_skips_unusable_entries_test() ->
+    L = {127, 0, 0, 1},
+    Prev = application:get_env(beamtalk_workspace, ws_allowed_hosts),
+    PrevVar = os:getenv("BEAMTALK_WS_ALLOWED_HOSTS"),
+    os:putenv("BEAMTALK_WS_ALLOWED_HOSTS", "ok.example"),
+    application:set_env(
+        beamtalk_workspace,
+        ws_allowed_hosts,
+        [[16#17C | "olw.local"], 42, "app.example", <<255>>]
+    ),
+    try
+        ?assertEqual(
+            ok, beamtalk_ws_handler:check_upgrade_headers(undefined, <<"ok.example">>, L)
+        ),
+        ?assertEqual(
+            ok, beamtalk_ws_handler:check_upgrade_headers(undefined, <<"app.example">>, L)
+        ),
+        ?assertEqual(
+            {error, bad_host},
+            beamtalk_ws_handler:check_upgrade_headers(undefined, <<"evil.example">>, L)
+        )
+    after
+        case PrevVar of
+            false -> os:unsetenv("BEAMTALK_WS_ALLOWED_HOSTS");
+            Var -> os:putenv("BEAMTALK_WS_ALLOWED_HOSTS", Var)
+        end,
+        case Prev of
+            {ok, V} -> application:set_env(beamtalk_workspace, ws_allowed_hosts, V);
+            undefined -> application:unset_env(beamtalk_workspace, ws_allowed_hosts)
+        end
+    end.
+
+%% Run Fun with a fresh conn-cap table and the given limits.
+with_conn_cap(Limits, Fun) ->
+    Created = ets:whereis(beamtalk_ws_conn_cap) =:= undefined,
+    ?assert(Created),
+    ok = beamtalk_ws_conn_cap:new(),
+    Keys = [ws_max_connections, ws_max_preauth_connections],
+    Prev = [{K, application:get_env(beamtalk_workspace, K)} || K <- Keys],
+    [application:set_env(beamtalk_workspace, K, V) || {K, V} <- Limits],
+    try
+        Fun()
+    after
+        [
+            case P of
+                {ok, V} -> application:set_env(beamtalk_workspace, K, V);
+                undefined -> application:unset_env(beamtalk_workspace, K)
+            end
+         || {K, P} <- Prev
+        ],
+        ets:delete(beamtalk_ws_conn_cap)
+    end.
+
+%% A process that takes a pre-auth slot, optionally promotes, reports, then
+%% holds the slot until told to stop (and forwards anything else it gets).
+holder(Parent, Promote) ->
+    spawn_link(fun() ->
+        A = beamtalk_ws_conn_cap:acquire(),
+        P =
+            case {A, Promote} of
+                {ok, true} -> beamtalk_ws_conn_cap:promote();
+                _ -> skipped
+            end,
+        Parent ! {self(), {A, P}},
+        holder_loop(Parent)
+    end).
+
+holder_loop(Parent) ->
+    receive
+        stop ->
+            beamtalk_ws_conn_cap:release();
+        Other ->
+            Parent ! {self(), Other},
+            holder_loop(Parent)
+    end.
+
+held(Pid) ->
+    receive
+        {Pid, R} -> R
+    after 2000 -> error(timeout)
+    end.
+
+ws_conn_cap_acquire_release_test() ->
+    with_conn_cap([{ws_max_connections, 1}, {ws_max_preauth_connections, 1}], fun() ->
+        ?assertEqual(ok, beamtalk_ws_conn_cap:acquire()),
+        ?assertEqual(ok, beamtalk_ws_conn_cap:promote()),
+        ?assertEqual(1, beamtalk_ws_conn_cap:count(authenticated)),
+        ?assertEqual(0, beamtalk_ws_conn_cap:count(pre_auth)),
+        %% The authenticated budget is full: a second socket may connect (its
+        %% own budget) but not authenticate.
+        H = holder(self(), true),
+        ?assertEqual({ok, {error, at_capacity}}, held(H)),
+        H ! stop,
+        ok = beamtalk_ws_conn_cap:release(),
+        ok = beamtalk_test_wait:until(fun() -> beamtalk_ws_conn_cap:count() =:= 0 end)
+    end).
+
+%% BT-5185: idle unauthenticated sockets cannot lock a client out. With the
+%% pre-auth budget full, a new socket evicts the oldest unauthenticated one;
+%% authenticated sockets are never evicted and do not use the pre-auth budget.
+ws_conn_cap_preauth_full_evicts_the_oldest_test() ->
+    with_conn_cap([{ws_max_connections, 8}, {ws_max_preauth_connections, 2}], fun() ->
+        Old = holder(self(), false),
+        ?assertEqual({ok, skipped}, held(Old)),
+        Mid = holder(self(), false),
+        ?assertEqual({ok, skipped}, held(Mid)),
+        New = holder(self(), false),
+        ?assertEqual({ok, skipped}, held(New)),
+        ?assertEqual({beamtalk_ws_conn_cap, evicted}, held(Old)),
+        ?assertEqual(2, beamtalk_ws_conn_cap:count(pre_auth)),
+        %% An evicted socket that then authenticates is refused.
+        Old ! stop,
+        Auth = holder(self(), true),
+        ?assertEqual({ok, ok}, held(Auth)),
+        ?assertEqual({beamtalk_ws_conn_cap, evicted}, held(Mid)),
+        ?assertEqual(1, beamtalk_ws_conn_cap:count(authenticated)),
+        [P ! stop || P <- [Mid, New, Auth]]
+    end).
+
+%% BT-5185: two sockets racing for the last authenticated slot: exactly one
+%% wins, every time (the old insert-then-size check could fail both).
+ws_conn_cap_race_for_the_last_slot_has_one_winner_test() ->
+    with_conn_cap([{ws_max_connections, 1}, {ws_max_preauth_connections, 4}], fun() ->
+        lists:foreach(
+            fun(_) ->
+                Self = self(),
+                Go = make_ref(),
+                Racers = [
+                    spawn_link(fun() ->
+                        ok = beamtalk_ws_conn_cap:acquire(),
+                        Self ! {ready, self()},
+                        receive
+                            Go -> ok
+                        end,
+                        Self ! {self(), beamtalk_ws_conn_cap:promote()},
+                        receive
+                            stop -> beamtalk_ws_conn_cap:release()
+                        end
+                    end)
+                 || _ <- [1, 2]
+                ],
+                [
+                    receive
+                        {ready, R} -> ok
+                    end
+                 || R <- Racers
+                ],
+                [R ! Go || R <- Racers],
+                Results = [held(R) || R <- Racers],
+                ?assertEqual([ok], [X || X <- Results, X =:= ok]),
+                ?assertEqual(1, beamtalk_ws_conn_cap:count(authenticated)),
+                [R ! stop || R <- Racers],
+                ok = beamtalk_test_wait:until(fun() -> beamtalk_ws_conn_cap:count() =:= 0 end)
+            end,
+            lists:seq(1, 200)
+        )
+    end).
+
+%% BT-5185: a handler watches the table's owner; when it goes (the REPL server
+%% restarts and recreates the table empty) the handler is told.
+ws_conn_cap_owner_is_monitored_test() ->
+    ?assertEqual(undefined, beamtalk_ws_conn_cap:monitor_owner()),
+    Self = self(),
+    Owner = spawn(fun() ->
+        ok = beamtalk_ws_conn_cap:new(),
+        Self ! created,
+        receive
+            stop -> ok
+        end
+    end),
+    receive
+        created -> ok
+    after 2000 -> error(timeout)
+    end,
+    Ref = beamtalk_ws_conn_cap:monitor_owner(),
+    ?assert(is_reference(Ref)),
+    Owner ! stop,
+    receive
+        {'DOWN', Ref, process, Owner, _} -> ok
+    after 2000 -> error(timeout)
+    end,
+    ok = beamtalk_test_wait:until(fun() -> ets:whereis(beamtalk_ws_conn_cap) =:= undefined end).
+
 upgrade_rejects_foreign_origin_test() ->
     L = {127, 0, 0, 1},
     ?assertEqual(
@@ -576,6 +794,48 @@ handshake_auth_error_matches_shared_wire_corpus_test() ->
     ),
     {Frames, _State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
     assert_fixed_fields(AuthError, first_text(Frames)).
+
+%% BT-5188: the identity proof agrees with the vector the Rust side checks.
+identity_proof_matches_shared_wire_corpus_test() ->
+    Cases = load_ws_auth_handshake_wire_corpus(),
+    Reply = wire_corpus_case(<<"identity_reply">>, Cases),
+    #{<<"nonce">> := Nonce, <<"challenge">> := Challenge} = maps:get(<<"vector">>, Reply),
+    #{<<"proof">> := Proof} = maps:get(<<"frame">>, Reply),
+    ?assertEqual(Proof, beamtalk_ws_handler:identity_proof(Nonce, Challenge)).
+
+%% Runs `Fun` with `beamtalk_repl_server:get_nonce/0` answering `Nonce`,
+%% whether or not a real server is registered.
+with_fake_repl_server(Nonce, Fun) ->
+    ok = meck:new(beamtalk_repl_server, [passthrough, no_link]),
+    try
+        meck:expect(beamtalk_repl_server, get_nonce, fun() -> {ok, Nonce} end),
+        Fun()
+    after
+        meck:unload(beamtalk_repl_server)
+    end.
+
+%% BT-5188: `identify` is answered with the proof, and the connection stays
+%% unauthenticated and open for the `auth` that follows.
+identify_replies_with_proof_and_stays_unauthenticated_test() ->
+    Cases = load_ws_auth_handshake_wire_corpus(),
+    Reply = wire_corpus_case(<<"identity_reply">>, Cases),
+    #{<<"nonce">> := Nonce, <<"challenge">> := Challenge} = maps:get(<<"vector">>, Reply),
+    Request = maps:get(<<"frame">>, wire_corpus_case(<<"identify_request">>, Cases)),
+    ?assertEqual(Challenge, maps:get(<<"challenge">>, Request)),
+    Json = iolist_to_binary(json:encode(Request)),
+    {Frames, State} = with_fake_repl_server(Nonce, fun() ->
+        beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state())
+    end),
+    ?assertEqual([{text, iolist_to_binary(json:encode(maps:get(<<"frame">>, Reply)))}], Frames),
+    ?assertNot(State#ws_state.authenticated).
+
+%% BT-5188: a challenge outside 16-256 bytes is not an identify request.
+identify_with_short_challenge_is_rejected_test() ->
+    Json = iolist_to_binary(
+        json:encode(#{<<"type">> => <<"identify">>, <<"challenge">> => <<"short">>})
+    ),
+    {Frames, _} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
+    ?assertMatch([{text, _}, {close, 1008, _}], Frames).
 
 %%% ===========================================================================
 %%% websocket_handle/2 — non-text frames + post-auth dispatch
@@ -1603,3 +1863,18 @@ resume_non_binary_creates_new() ->
     {_Frames, State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
     ?assert(State#ws_state.authenticated),
     ?assert(is_pid(State#ws_state.session_pid)).
+
+%% BT-5185: an evicted unauthenticated handler closes with 1013, and a handler
+%% whose cap-table owner went away closes with 1012 (service restart).
+ws_handler_closes_when_evicted_or_owner_restarts_test() ->
+    ?assertMatch(
+        {[{close, 1013, _}], _},
+        beamtalk_ws_handler:websocket_info({beamtalk_ws_conn_cap, evicted}, #ws_state{})
+    ),
+    Ref = make_ref(),
+    ?assertMatch(
+        {[{close, 1012, _}], #ws_state{cap_owner_mon = undefined}},
+        beamtalk_ws_handler:websocket_info(
+            {'DOWN', Ref, process, self(), shutdown}, #ws_state{cap_owner_mon = Ref}
+        )
+    ).

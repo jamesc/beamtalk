@@ -461,12 +461,12 @@ module 'nlr_foreign_relay_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'han
                     letrec '__nlr_body'/0 = fun () ->
     let _NlrToken@14 = call 'erlang':'make_ref'() in
                         try
-                    let _SD@15 = case let _SDArgs@29 = [fun () -> let _Unit = let _temp@18 = _coll@13 in let _temp@19 = let _ASCapture@20 = call 'beamtalk_actor_state':'capture'(Self, State) in fun (_each@21) -> let _Cond@25 = let _BinLeft@22 = _each@21 in let _BinRight@23 = _threshold@12 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft@22), call 'erlang':'is_binary'(_BinLeft@22)) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft@22, _BinRight@23) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@22, '>', [_BinRight@23]) <_BinOpNoMatch@24> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@24}) end in case _Cond@25 of <'true'> when 'true' -> call 'erlang':'throw'({'$bt_nlr', _NlrToken@14, _each@21, call 'beamtalk_actor_state':'view'(Self, _ASCapture@20)}) <'false'> when 'true' -> _Cond@25 <_CondNoMatch@27> when 'true' -> call 'beamtalk_message_dispatch':'send'(_Cond@25, 'ifTrue:', [let _ASCapture@26 = call 'beamtalk_actor_state':'capture'(Self, _ASCapture@20) in fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken@14, _each@21, call 'beamtalk_actor_state':'view'(Self, _ASCapture@26)})]) end in case call 'erlang':'is_list'(_temp@18) of <'true'> when 'true' -> do call 'lists':'foreach'(_temp@19, _temp@18) 'nil' <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_temp@18, 'do:', [_temp@19]) end in -1] in let _ClassMod@28 = call 'maps':'get'('__class_mod__', State, 'nlr_foreign_relay_actor') in case call 'erlang':'function_exported'(_ClassMod@28, 'safe_dispatch', 4) of <'true'> when 'true' -> call _ClassMod@28:'safe_dispatch'('applyBlock:', _SDArgs@29, Self, State) <_> when 'true' -> call _ClassMod@28:'safe_dispatch'('applyBlock:', _SDArgs@29, State) end of <{'reply', _SDResult@16, _SDState@17}> when 'true' -> {_SDResult@16, _SDState@17} <{'error', {'$bt_nlr', _SDErrorNlrTok@30, _SDErrorNlrVal@31, _SDErrorNlrSt@32}, _}> when 'true' -> call 'erlang':'throw'({'$bt_nlr', _SDErrorNlrTok@30, _SDErrorNlrVal@31, _SDErrorNlrSt@32}) <{'error', {_SDErrorType@33, _SDErrorReason@34, _SDErrorStack@35}, _}> when 'true' -> let _SDErrorBuilt@39 = primop 'build_stacktrace'(_SDErrorStack@35) in let _SDErrorClass@37 = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in call 'beamtalk_exception_handler':'reraise'(_SDErrorType@33, _SDErrorReason@34, _SDErrorBuilt@39, ~{'selector' => 'applyBlock:', 'class' => _SDErrorClass@37}~) <{'error', _SDErrorPlain@36, _}> when 'true' -> call 'beamtalk_error':'raise'(_SDErrorPlain@36) <_SDErrorNoMatch@38> when 'true' -> call 'erlang':'error'({'case_clause', _SDErrorNoMatch@38}) end in let State1 = call 'erlang':'element'(2, _SD@15) in {'reply', call 'erlang':'element'(1, _SD@15), State1}
-                        of _NlrResult@40 -> _NlrResult@40
-                        catch <_NlrCls@41, _NlrErr@42, _NlrStk@43> ->
-                          case {_NlrCls@41, _NlrErr@42} of
-                            <{'throw', {'$bt_nlr', _CatchTok@44, _NlrVal@45, _NlrState@46}}> when call 'erlang':'=:='(_CatchTok@44, _NlrToken@14) -> {'reply', _NlrVal@45, call 'beamtalk_actor_state':'commit'(Self, _NlrState@46)}
-                            <_OtherPair@47> when 'true' -> primop 'raw_raise'(_NlrCls@41, _NlrErr@42, _NlrStk@43)
+                    let _SD@15 = case let _SDArgs@31 = [fun () -> let _Unit = let _temp@18 = _coll@13 in let _temp@19 = let _ASCapture@20 = call 'beamtalk_actor_state':'capture'(Self, State) in fun (_each@21) -> let _Cond@27 = let _BinLeft@22 = _each@21 in let _BinRight@23 = _threshold@12 in case call 'erlang':'is_number'(_BinLeft@22) of <'true'> when 'true' -> case call 'erlang':'is_number'(_BinRight@23) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft@22, _BinRight@23) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_comparison'(_BinRight@23, 'greaterThanFromNumber:', [_BinLeft@22], '>') <_BinOpNoMatch@24> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@24}) end <'false'> when 'true' -> case call 'erlang':'is_binary'(_BinLeft@22) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft@22, _BinRight@23) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@22, '>', [_BinRight@23]) <_BinOpNoMatch@25> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@25}) end <_BinOpNoMatch@26> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@26}) end in case _Cond@27 of <'true'> when 'true' -> call 'erlang':'throw'({'$bt_nlr', _NlrToken@14, _each@21, call 'beamtalk_actor_state':'view'(Self, _ASCapture@20)}) <'false'> when 'true' -> _Cond@27 <_CondNoMatch@29> when 'true' -> call 'beamtalk_message_dispatch':'send'(_Cond@27, 'ifTrue:', [let _ASCapture@28 = call 'beamtalk_actor_state':'capture'(Self, _ASCapture@20) in fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken@14, _each@21, call 'beamtalk_actor_state':'view'(Self, _ASCapture@28)})]) end in case call 'erlang':'is_list'(_temp@18) of <'true'> when 'true' -> do call 'lists':'foreach'(_temp@19, _temp@18) 'nil' <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_temp@18, 'do:', [_temp@19]) end in -1] in let _ClassMod@30 = call 'maps':'get'('__class_mod__', State, 'nlr_foreign_relay_actor') in case call 'erlang':'function_exported'(_ClassMod@30, 'safe_dispatch', 4) of <'true'> when 'true' -> call _ClassMod@30:'safe_dispatch'('applyBlock:', _SDArgs@31, Self, State) <_> when 'true' -> call _ClassMod@30:'safe_dispatch'('applyBlock:', _SDArgs@31, State) end of <{'reply', _SDResult@16, _SDState@17}> when 'true' -> {_SDResult@16, _SDState@17} <{'error', {'$bt_nlr', _SDErrorNlrTok@32, _SDErrorNlrVal@33, _SDErrorNlrSt@34}, _}> when 'true' -> call 'erlang':'throw'({'$bt_nlr', _SDErrorNlrTok@32, _SDErrorNlrVal@33, _SDErrorNlrSt@34}) <{'error', {_SDErrorType@35, _SDErrorReason@36, _SDErrorStack@37}, _}> when 'true' -> let _SDErrorBuilt@41 = primop 'build_stacktrace'(_SDErrorStack@37) in let _SDErrorClass@39 = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in call 'beamtalk_exception_handler':'reraise'(_SDErrorType@35, _SDErrorReason@36, _SDErrorBuilt@41, ~{'selector' => 'applyBlock:', 'class' => _SDErrorClass@39}~) <{'error', _SDErrorPlain@38, _}> when 'true' -> call 'beamtalk_error':'raise'(_SDErrorPlain@38) <_SDErrorNoMatch@40> when 'true' -> call 'erlang':'error'({'case_clause', _SDErrorNoMatch@40}) end in let State1 = call 'erlang':'element'(2, _SD@15) in {'reply', call 'erlang':'element'(1, _SD@15), State1}
+                        of _NlrResult@42 -> _NlrResult@42
+                        catch <_NlrCls@43, _NlrErr@44, _NlrStk@45> ->
+                          case {_NlrCls@43, _NlrErr@44} of
+                            <{'throw', {'$bt_nlr', _CatchTok@46, _NlrVal@47, _NlrState@48}}> when call 'erlang':'=:='(_CatchTok@46, _NlrToken@14) -> {'reply', _NlrVal@47, call 'beamtalk_actor_state':'commit'(Self, _NlrState@48)}
+                            <_OtherPair@49> when 'true' -> primop 'raw_raise'(_NlrCls@43, _NlrErr@44, _NlrStk@45)
                           end
                     in apply '__nlr_body'/0 ()
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
@@ -478,41 +478,9 @@ module 'nlr_foreign_relay_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'han
                     <{'compiled', InhOwner, InhModule}> when 'true' ->
                         call 'beamtalk_dispatch':'invoke_resolved'(InhOwner, InhModule, OtherSelector, Args, Self, State)
                     <_InhSlow> when 'true' ->
-                        %% BT-229/ADR 0005: Check extension registry before hierarchy walk
-                        let ExtLookup = try call 'beamtalk_extensions':'lookup'('RelayCtr', OtherSelector)
-                            of ExtLookupResult -> ExtLookupResult
-                            catch <_EType, _EReason, _EStack> -> 'not_found'
-                        in
-                        case ExtLookup of
-                            <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                                %% BT-1512/BT-2250: Invoke via the runtime helper, which
-                                %% accepts both the 3-arity actor shape
-                                %% (fun(Args, Self, State) -> {Result, NewState}) and the
-                                %% 2-arity value shape (fun(Args, Self) -> Result), so a
-                                %% foreign extension whose codegen-time arity could not be
-                                %% resolved still dispatches correctly. Returns {reply, _, _}.
-                                %% BT-3199: Selector/ClassName are threaded through so a
-                                %% crashing extension body is caught and converted to a
-                                %% structured error naming what was sent, instead of
-                                %% re-raising a bare Erlang exception.
-                                %% BT-3920: that structured error comes back as the
-                                %% lookup-shaped 2-tuple {error, E}; lift it to the dispatch/4
-                                %% own {error, E, State} contract (state rolled back, as for a
-                                %% crashing method body) so handle_call replies with it
-                                %% instead of crashing the actor on an unmatched result.
-                                %% ADR 0137 §2: the extension fun is Erlang that does not bracket
-                                %% what it calls, so it runs through call_foreign/3.
-                                case call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'invoke_extension', 6), [ExtFun, OtherSelector, 'RelayCtr', Args, Self, State]) of
-                                    <{'reply', ExtResult, ExtState}> when 'true' ->
-                                        {'reply', ExtResult, ExtState}
-                                    <{'error', ExtError}> when 'true' ->
-                                        {'error', ExtError, State}
-                                end
-                            <'not_found'> when 'true' ->
-                                %% ADR 0006: Try hierarchy walk before DNU
-                                %% ADR 0137 §2: inherited runtime methods run through call_foreign/3.
-                                call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'super', 5), [OtherSelector, Args, Self, State, 'RelayCtr'])
-                        end
+                        %% ADR 0006: Try hierarchy walk before DNU
+                        %% ADR 0137 §2: inherited runtime methods run through call_foreign/3.
+                        call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'super', 5), [OtherSelector, Args, Self, State, 'RelayCtr'])
                 end
             in
             case InheritedOutcome of
@@ -541,8 +509,8 @@ module 'nlr_foreign_relay_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'han
                         <'false'> when 'true' ->
                             call 'beamtalk_exception_handler':'reraise'(DispatchError)
                     end
-                <{'error', ExtError, ExtErrorState}> when 'true' ->
-                    {'error', ExtError, ExtErrorState}
+                <{'error', MethodError, MethodErrorState}> when 'true' ->
+                    {'error', MethodError, MethodErrorState}
             end
     end
 
@@ -558,21 +526,13 @@ module 'nlr_foreign_relay_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'han
 'has_method'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['applyBlock:', 'findOver:in:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('RelayCtr', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
-            end
+        <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
     end
 
 'has_method_local'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['applyBlock:', 'findOver:in:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('RelayCtr', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> 'false'
-            end
+        <'false'> when 'true' -> 'false'
     end
 
 
@@ -588,7 +548,6 @@ module 'nlr_foreign_relay_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'han
       'package' => 'none',
       'kind' => 'actor',
       'fields' => ['n'],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'false',
@@ -600,7 +559,6 @@ module 'nlr_foreign_relay_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'han
       'field_types' => ~{'n' => 'none'}~,
       'field_has_default' => ~{'n' => 'true'}~,
       'field_kinds' => ~{'n' => 'eager'}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'applyBlock:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'findOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
@@ -632,7 +590,6 @@ module 'nlr_foreign_relay_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'han
       'package' => 'none',
       'kind' => 'actor',
       'fields' => ['n'],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'false',
@@ -644,7 +601,6 @@ module 'nlr_foreign_relay_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'han
       'field_types' => ~{'n' => 'none'}~,
       'field_has_default' => ~{'n' => 'true'}~,
       'field_kinds' => ~{'n' => 'eager'}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'applyBlock:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'findOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,

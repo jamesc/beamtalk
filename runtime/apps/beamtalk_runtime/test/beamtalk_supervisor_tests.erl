@@ -4432,8 +4432,7 @@ concurrent_supervise(HookOutcome) ->
     ets:insert(Tab, {coordinator, self()}),
     ClassInfo = #{
         superclass => none,
-        module => Helper,
-        class_state => #{}
+        module => Helper
     },
     %% The class process serves instance dispatch of `initialize`.
     {ok, ClassPid} = beamtalk_object_class:start_link(ClassName, ClassInfo),

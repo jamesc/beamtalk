@@ -18,6 +18,10 @@ Start the Beamtalk runtime application, initializing ETS tables and supervisor t
 """.
 -spec start(application:start_type(), term()) -> {ok, pid()} | {error, term()}.
 start(_StartType, _StartArgs) ->
+    %% BT-5185: first, before any Beamtalk code resolves a path from HOME: a
+    %% release node booted with a private cookie home gets the real one back.
+    _ = beamtalk_cookie_home:restore(),
+
     %% Configure SASL before it starts (started as a beamtalk_workspace dep).
     %% Suppress the legacy SASL error logger — reports flow through the standard
     %% logger framework (OTP 21+) and are captured by the workspace file handler.
@@ -27,8 +31,9 @@ start(_StartType, _StartArgs) ->
     %% `actor_min_heap_size` is set.
     ok = beamtalk_actor:refresh_spawn_options(),
 
-    %% Initialize extension registry ETS tables
-    beamtalk_extensions:init(),
+    %% Class-side shadow flags are authoritative from here on (before this the
+    %% compiled self-send fast path declines to the always-correct walk).
+    beamtalk_class_shadow_flags:mark_ready(),
 
     %% Create the unified class metadata ETS table (hierarchy, module and
     %% method-selector columns share one row) at app startup so it's owned

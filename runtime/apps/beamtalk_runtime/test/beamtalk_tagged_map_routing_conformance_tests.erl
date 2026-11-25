@@ -291,25 +291,21 @@ is_kind_of_builtin_answers_test_without_override() ->
         beamtalk_behaviour_intrinsics:kind_of_builtin(IntegerClass, IntegerClass, true, false)
     ).
 
-%% BT-4473: once any class below `Object` defines `isKindOf:` (here an
-%% extension on `Port`), `isKindOfBuiltin/3` stops answering the compiler's
-%% test and sends, so the override runs. The flag is node-wide and never
-%% lowered, so this test leaves it raised for the rest of the run, which only
-%% sends more.
+%% BT-4473: once any class below `Object` defines `isKindOf:` (recorded here
+%% through `note_override/2`, which a method record write calls), `isKindOfBuiltin/3`
+%% stops answering the compiler's test and sends, so the override runs. The flag
+%% is node-wide and never lowered, so this test leaves it raised for the rest of
+%% the run, which only sends more. The send answers `true` (`Port isKindOf:
+%% Port`), where the compiler's test (passed here as `false`) would not.
 is_kind_of_override_makes_builtin_send() ->
     Port = hd(erlang:ports()),
     PortClass = beamtalk_class_registry:resolve_class_object('Port'),
-    Ext = fun(_Args, _Self) -> overridden end,
-    ok = beamtalk_extensions:register('Port', 'isKindOf:', Ext, bt4473_test),
-    try
-        ?assert(beamtalk_default_method:overridden_anywhere('isKindOf:')),
-        ?assertEqual(
-            overridden,
-            beamtalk_behaviour_intrinsics:isKindOfBuiltin(Port, PortClass, true)
-        )
-    after
-        beamtalk_extensions:unregister('Port', 'isKindOf:')
-    end,
+    ok = beamtalk_default_method:note_override('Port', 'isKindOf:'),
+    ?assert(beamtalk_default_method:overridden_anywhere('isKindOf:')),
+    ?assertEqual(
+        true,
+        beamtalk_behaviour_intrinsics:isKindOfBuiltin(Port, PortClass, false)
+    ),
     %% Unwatched selectors always count as overridden; `Object` itself never
     %% raises the flag.
     ?assert(beamtalk_default_method:overridden_anywhere('printString')),
@@ -319,7 +315,7 @@ is_kind_of_override_makes_builtin_send() ->
 %% sound only if the guard equals `Object>>isKindOf:` for every value. Check
 %% it here, against the dynamic send (never the lowered literal or
 %% `kind_of_builtin/4`), so it runs on every run whatever `isKindOf:`
-%% extensions other tests registered.
+%% overrides other tests defined.
 guards_agree_with_is_kind_of() ->
     ?assertEqual([], guard_disagreements(rows())).
 

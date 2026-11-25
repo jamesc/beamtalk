@@ -985,30 +985,22 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         span: Span,
     },
 
-    /// ADR 0130 §4: a compiled `on:do:`'s class-variable catch boundary, both
-    /// halves as one unit: the `entry` snapshot `let` bound before the `try`,
-    /// the protected region ([`TryRegion`]: `try <body> of <result_var> ->
-    /// <result_var>`), and the catch at which an error discards the
-    /// class-variable writes made inside that region. `clauses` is the outer
-    /// `case {Type, Error}` of the catch in emission order: the two `$bt_nlr`
-    /// pass-through arms and the non-NLR arm whose first step is the
-    /// class-variable restore. [`verify`](super::verify::verify) reports
-    /// [`VerifyError::CatchWithoutClassVarRestore`] unless `entry` binds the
-    /// snapshot, the non-NLR arm begins with the restore of that snapshot and
-    /// both NLR arms precede it, so a `^` crosses the catch without touching
-    /// the map and every other exception restores before anything else runs.
-    /// Built by `exception_handling.rs`'s `on_do_catch_boundary`, the single
-    /// owner of every compiled `on:do:` catch boundary (class-side,
-    /// instance-side, direct-called or not).
+    /// A compiled `on:do:`'s catch boundary as one unit: the protected region
+    /// ([`TryRegion`]: `try <body> of <result_var> -> <result_var>`) and its
+    /// catch. `clauses` is the outer `case {Type, Error}` of the catch in
+    /// emission order: the two `$bt_nlr` pass-through arms and the non-NLR arm
+    /// that wraps the exception and runs the class filter.
+    /// [`verify`](super::verify::verify) reports
+    /// [`VerifyError::CatchNlrNotPassedThrough`] unless both NLR arms precede
+    /// the non-NLR arm, so a `^` crosses the catch untouched and is never
+    /// handed to the handler. Built by `exception_handling.rs`'s
+    /// `on_do_catch_boundary`, the single owner of every compiled `on:do:`
+    /// catch boundary (class-side, instance-side, direct-called or not).
     ///
     /// The region's body is opaque here: a state-threading body is verified by
     /// its own frames when it is built (`push_exception_arm`), not by this node.
     OnDoCatch {
         vars: Box<OnDoCatchVars>,
-        /// The entry half, rendered before the `try`. The builder always sets
-        /// it; `None` exists so `verify()` rejects a node that forgets the
-        /// snapshot instead of `erlc` failing on an unbound variable.
-        entry: Option<CatchEntry>,
         /// ADR 0137 §5: the actor-state cell's half of the boundary, set in an
         /// actor instance method and in an actor closure (`None` elsewhere: a
         /// class method, a value type, the REPL have no cell). The entry makes
@@ -1016,8 +1008,7 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         /// the region's pre-state before anything else runs. When set,
         /// [`verify`](super::verify::verify) reports
         /// [`VerifyError::CatchWithoutStateRestore`] unless the non-NLR clause
-        /// has the matching [`CatchStep::CellRestore`] right after the
-        /// class-variable restore.
+        /// has the matching [`CatchStep::CellRestore`] as its first step.
         cell: Option<CellBoundary>,
         try_region: TryRegion,
         clauses: Vec<CatchClause>,
@@ -1712,8 +1703,7 @@ impl RebindLowering {
 
 /// The Core Erlang variable names an [`ThreadedStmt::OnDoCatch`] clause binds
 /// (no anonymous `_` exists in Core Erlang, so each pattern variable is
-/// unique), plus the `snapshot` variable its [`CatchEntry`] binds before the
-/// `try`.
+/// unique).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) struct OnDoCatchVars {
     pub type_var: String,
@@ -1729,10 +1719,6 @@ pub(in crate::core_erlang) struct OnDoCatchVars {
     pub ex_obj_var: String,
     pub match_var: String,
     pub ex_class_var: String,
-    /// The `let Snap = beamtalk_class_vars:snapshot() in` variable the
-    /// [`CatchEntry::ClassVarSnapshot`] binds and the restore step reads.
-    /// Typed, so the verifier compares the two structurally.
-    pub snapshot_var: ErlangVar,
     /// The pattern variable of the exhaustive fallback clause that closes the
     /// class filter's `case` ([`CatchStep::FilterMiss`]).
     pub filter_fallback_var: String,
@@ -1910,14 +1896,6 @@ pub(in crate::core_erlang) enum NlrThrowShape {
     Tuple3,
 }
 
-/// The entry half of an [`ThreadedStmt::OnDoCatch`], rendered before its `try`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::core_erlang) enum CatchEntry {
-    /// `let Snap = call 'beamtalk_class_vars':'snapshot'() in`, binding the
-    /// node's [`OnDoCatchVars::snapshot_var`].
-    ClassVarSnapshot,
-}
-
 /// How an `on:do:` catch boundary treats the actor-state cell (ADR 0137 §5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum CellBoundary {
@@ -1960,11 +1938,8 @@ pub(in crate::core_erlang) enum CatchClause {
 /// One step of the non-NLR catch clause, in emission order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum CatchStep {
-    /// `do beamtalk_class_vars:restore(Snap)` — must come first.
-    ClassVarRestore { snapshot: ErlangVar },
-    /// ADR 0137 §5: the cell's restore ([`CellBoundary`]) — must come right
-    /// after the class-variable restore, before the exception is wrapped and
-    /// the handler runs.
+    /// ADR 0137 §5: the cell's restore ([`CellBoundary`]) — must come first,
+    /// before the exception is wrapped and the handler runs.
     CellRestore(CellBoundary),
     /// Wrap the raw `{Type, Error, Stack}` as an exception object.
     WrapException,

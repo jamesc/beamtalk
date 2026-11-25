@@ -11,8 +11,8 @@
 //! class metadata to the generators ([`super::generators`]).
 
 use super::generators::{
-    generate_app_file, generate_app_src_file, generate_builtins_rs, generate_class_vars_keys_hrl,
-    generate_erlang_builtins_hrl, generate_sentinel_tags_hrl, generate_supervisor_config_hrl,
+    generate_app_file, generate_app_src_file, generate_builtins_rs, generate_erlang_builtins_hrl,
+    generate_sentinel_tags_hrl, generate_supervisor_config_hrl,
     provision_bearing_protocol_file_names,
 };
 use super::metadata::{
@@ -267,7 +267,6 @@ fn write_stdlib_generated_outputs(
     // Generate the Erlang-side twin of the same builtin-class list,
     // replacing the hand-typed `beamtalk_class_metadata:all_builtins/0` table.
     generate_erlang_builtins_hrl(class_metadata)?;
-    generate_class_vars_keys_hrl()?;
     generate_sentinel_tags_hrl()?;
     generate_supervisor_config_hrl()
 }

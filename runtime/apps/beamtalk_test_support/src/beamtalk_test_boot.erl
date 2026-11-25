@@ -34,7 +34,6 @@ idempotent (a normal stdlib load skips a module whose on_load already ran).
     registry/0,
     start_app/1,
     compiler/0,
-    extensions/0,
     app_owned_table/1,
     no_compiler/0,
     telemetry/0,
@@ -80,37 +79,6 @@ boot_real_stdlib(CanaryClass) ->
             wait_for_class(CanaryClass, 50)
     end,
     ok.
-
--doc """
-Make sure the `beamtalk_extensions` ETS tables exist and outlive the caller.
-`beamtalk_extensions:init/0` makes the calling process the table owner, and an
-eunit setup process exits when its fixture ends, taking the tables with it; the
-next module then fails with `badarg` on `ets:lookup/2` (BT-4962). The runtime
-app creates them from its own long-lived process; this does the same from a
-parked process when the app did not (or the tables were dropped since).
-""".
--spec extensions() -> ok.
-extensions() ->
-    case ets:info(beamtalk_extensions, owner) of
-        undefined ->
-            Self = self(),
-            Ref = make_ref(),
-            Owner = spawn(fun() ->
-                ok = beamtalk_extensions:init(),
-                Self ! {Ref, ready},
-                receive
-                    stop -> ok
-                end
-            end),
-            receive
-                {Ref, ready} -> ok
-            after 5000 ->
-                exit(Owner, kill),
-                error(extensions_tables_not_created)
-            end;
-        _ ->
-            ok
-    end.
 
 -doc """
 Make sure the boot table `Table` is owned and heir-protected the way
@@ -260,7 +228,6 @@ start_app(App, Retries) ->
 %% is alive now, so the idempotent `init/0` of the registries tests have been seen
 %% to lose recreates a missing table with the heir (BT-4962).
 ensure_boot_tables() ->
-    _ = beamtalk_extensions:init(),
     _ = beamtalk_protocol_registry:init(),
     ok.
 

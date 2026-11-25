@@ -12,7 +12,6 @@
 //!
 //! The hierarchy uses simple depth-first MRO (no multiple inheritance).
 use crate::ast::{ClassDefinition, MethodKind, Module};
-use crate::compilation::extension_index::{ExtensionIndex, MethodSide};
 use crate::semantic_analysis::SemanticError;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
@@ -34,8 +33,8 @@ pub(crate) fn generated_stdlib_protocol_files() -> Vec<(&'static str, &'static s
 #[cfg(test)]
 mod tests;
 pub use class_info::{
-    AutoConstructors, ClassInfo, ClassVarInfo, DirectConstructors, InitializeAssignsSummary,
-    MethodInfo, SuperclassTypeArg, format_default_value,
+    AutoConstructors, ClassInfo, DirectConstructors, InitializeAssignsSummary, MethodInfo,
+    SuperclassTypeArg, format_default_value,
 };
 pub use declared_type::{DeclaredShapeField, DeclaredType};
 pub use hierarchy_queries::{Ancestors, AncestorsOrObject, superclass_chain_includes_value};
@@ -86,33 +85,11 @@ pub struct ClassHierarchy {
     /// [`KnowledgeScope::ModuleOnly`]; consulted by the receiver-knowledge
     /// classifier (ADR 0100 Rule 2).
     knowledge_scope: crate::semantic_analysis::receiver_knowledge::KnowledgeScope,
-    /// Whether the compiled package has dependencies whose extension
-    /// contributions were not all loaded (pre-WS3 guard).
-    ///
-    /// A dependency can extend *any* class — including `Object`, which every
-    /// receiver inherits from — so while any dependency's extensions are
-    /// unknown no receiver's method surface is provably complete. When true
-    /// (and the scope is `ProjectComplete`), the receiver-knowledge
-    /// classifier keeps every receiver `Open`. Surfaces that load every
-    /// dependency's extensions (ADR 0070 WS3, BT-4608) leave it `false`.
-    dependency_extensions_unknown: bool,
     /// The class names more than one package in this compilation's scope
     /// declares (BT-4151/BT-4283), installed by `analyse_full` and the
     /// codegen driver from [`crate::semantic_analysis::shadowed_class_names_in_scope`].
     /// Read only through [`Self::is_shadowed_class`].
     shadowed_class_names: crate::semantic_analysis::ShadowedClassNames,
-    /// `(class, selector)` of every standalone instance-side extension method
-    /// (`Class >> sel => ...`) whose body does not answer its receiver
-    /// ([`crate::ast::MethodDefinition::answers_receiver`]). Extensions are not
-    /// `ClassInfo` methods, so `discarded-update` consults this set to learn
-    /// that an extension can replace a self-answering method (BT-4788).
-    updating_extensions: HashSet<(EcoString, EcoString)>,
-    /// `(class, selector)` of every class-side extension already registered
-    /// into `class_methods`. `register_extensions` runs once for the current
-    /// module and again for the project-wide index; the first registration
-    /// wins, so a later pass never overwrites an entry an earlier pass put
-    /// there (BT-5111).
-    registered_class_extensions: HashSet<(EcoString, EcoString)>,
 }
 impl ClassHierarchy {
     /// Runtime-only built-in classes (no `.bt` source), e.g. `Future`. The one
@@ -284,7 +261,6 @@ impl ClassHierarchy {
                     has_dynamic_field_writer: false,
                     methods: vec![],
                     class_methods,
-                    class_variables: vec![],
                     type_params: vec![],
                     type_param_bounds: vec![],
                     superclass_type_args: vec![],
@@ -316,10 +292,7 @@ impl ClassHierarchy {
                     protocol_classes: HashSet::new(),
                     knowledge_scope:
                         crate::semantic_analysis::receiver_knowledge::KnowledgeScope::default(),
-                    dependency_extensions_unknown: false,
                     shadowed_class_names: crate::semantic_analysis::ShadowedClassNames::default(),
-                    updating_extensions: HashSet::new(),
-                    registered_class_extensions: HashSet::new(),
                 }
             })
             .clone()
@@ -390,26 +363,6 @@ impl ClassHierarchy {
         self.knowledge_scope = scope;
     }
 
-    /// Whether dependency extension contributions are unknown.
-    #[must_use]
-    pub fn dependency_extensions_unknown(&self) -> bool {
-        if self.dependency_extensions_unknown {
-            // Some dependency's extensions are not loaded: no receiver's
-            // surface is provably complete, so the reader depends on
-            // everything (BT-4586).
-            crate::semantic_analysis::consulted::record_extensions_unknown();
-        }
-        self.dependency_extensions_unknown
-    }
-
-    /// Declare that the compiled package has dependencies whose extension
-    /// contributions were not all loaded (pre-WS3 guard). Set by
-    /// `analyse_full` from
-    /// `CompilerOptions::dependency_extensions_unknown`.
-    pub fn set_dependency_extensions_unknown(&mut self, unknown: bool) {
-        self.dependency_extensions_unknown = unknown;
-    }
-
     /// Installs the class names declared by more than one package in this
     /// compilation's scope (BT-4283; see
     /// [`crate::semantic_analysis::shadowed_class_names_in_scope`]).
@@ -451,31 +404,26 @@ impl ClassHierarchy {
     /// caller's process instead of the class's `gen_server`, however it is
     /// reached (ADR 0142 §1). THE one rule, the static form of the runtime's
     /// (`beamtalk_class_dispatch`'s in-caller owner memo); nothing keeps a
-    /// second copy. It holds when:
-    ///
-    /// 1. no class in `class_name`'s chain declares class variables
-    ///    ([`Self::chain_has_class_variables`]): rules 1-2 taken over the whole
-    ///    chain, as the runtime takes them
-    ///    (`beamtalk_class_metadata:chain_has_class_variables/1`), because a
-    ///    subclass holds its ancestors' class variables in its own process;
-    /// 2. the selector is not process-bound
-    ///    ([`ClassInfo::is_process_bound_class_selector`], rule 3) and not a
-    ///    class-variable reflection send
-    ///    ([`ClassInfo::is_class_var_reflection_selector`]), which the class
-    ///    process answers from its own state.
+    /// second copy. Since ADR 0153 removed class variables the chain plays no
+    /// part: the selector must not be process-bound
+    /// ([`ClassInfo::is_process_bound_class_selector`]). A class method named
+    /// `fieldAt:`, `hasField:` etc. is no exception: since BT-5155 the class
+    /// process no longer intercepts those selectors.
+    /// A class's own explicit `new:` of the in-caller shape
+    /// ([`ClassInfo::in_caller_new1`]) runs in the caller too, when its chain
+    /// allows it.
     ///
     /// `sealed` and `class sealed` play no part. The method may be inherited:
     /// a dynamic send runs an inherited stateless method in the caller too
     /// (BT-4300). The lints that ask where a class method runs
-    /// (`class-state-abroad`, `actor-state-abroad`, `class-process-ffi` /
-    /// `class-method-process-resource`) and the local-threading escape
-    /// analysis read this (for a class *reference* receiver, through
-    /// [`Self::class_reference_send_runs_in_caller`], which adds shadowing);
-    /// codegen reads [`Self::is_direct_call_eligible`], which adds only the
-    /// own-method condition. Like every compile-time verdict it describes the
-    /// classes as compiled: a class-side extension or ADR 0084 runtime fun
-    /// sends the method back to the class process at run time, which the guard
-    /// of every static direct call re-checks.
+    /// (`actor-state-abroad`, `class-method-process-resource`) and the
+    /// local-threading escape analysis read this (for a class *reference*
+    /// receiver, through [`Self::class_reference_send_runs_in_caller`], which
+    /// adds shadowing); codegen reads [`Self::is_direct_call_eligible`], which
+    /// adds only the own-method condition. Like every compile-time verdict it
+    /// describes the classes as compiled: a class-side extension or ADR 0084
+    /// runtime fun sends the method back to the class process at run time,
+    /// which the guard of every static direct call re-checks.
     #[must_use]
     pub fn runs_class_method_in_caller(&self, class_name: &str, selector: &str) -> bool {
         if selector == "new:"
@@ -490,8 +438,6 @@ impl ClassHierarchy {
             return true;
         }
         !ClassInfo::is_process_bound_class_selector(selector)
-            && !ClassInfo::is_class_var_reflection_selector(selector)
-            && !self.chain_has_class_variables(class_name)
     }
 
     /// Whether a send of the class-side `selector` to the class *reference*
@@ -500,9 +446,8 @@ impl ClassHierarchy {
     /// name is shadowed ([`Self::is_shadowed_class`], BT-4283). A shadowed
     /// name is one last-wins runtime class, so this hierarchy's entry need not
     /// be the class the send reaches, and codegen sends it dynamically: a
-    /// block passed to it may run in that class's process. The block-escape
-    /// validators (`class-state-abroad`, local threading's passed-block
-    /// escape) and the `actor-state-abroad` lint ask this for a class
+    /// block passed to it may run in that class's process. Local threading's
+    /// passed-block escape and the `actor-state-abroad` lint ask this for a class
     /// reference receiver; a `self class` receiver is the running class
     /// itself and asks [`Self::runs_class_method_in_caller`] directly.
     #[must_use]
@@ -522,43 +467,12 @@ impl ClassHierarchy {
     ///
     /// A compile-time verdict only: every call site it enables is guarded at
     /// run time by `beamtalk_class_shadow_flags:direct_call_ok/2`, which
-    /// re-checks shadows and the chain's class variables against the live
-    /// classes.
+    /// re-checks shadows against the live classes.
     #[must_use]
     pub fn is_direct_call_eligible(&self, class_name: &str, selector: &str) -> bool {
         self.get_class(class_name)
             .is_some_and(|class| class.class_methods.iter().any(|m| m.selector == selector))
             && self.runs_class_method_in_caller(class_name, selector)
-    }
-
-    /// Whether `class_name` or any of its ancestors declares class variables
-    /// ([`ClassInfo::has_class_variables`]), or the chain cannot be followed to
-    /// its root (an unknown class or superclass, a cycle, a superclass-index
-    /// stub from [`Self::add_external_superclasses`]): any doubt answers
-    /// `true`, as the runtime's `beamtalk_class_metadata:
-    /// chain_has_class_variables/1` answers for an unpublished fact.
-    #[must_use]
-    pub fn chain_has_class_variables(&self, class_name: &str) -> bool {
-        let mut current = class_name;
-        let mut seen = HashSet::new();
-        loop {
-            if !seen.insert(current) {
-                return true;
-            }
-            let Some(class) = self.get_class(current) else {
-                return true;
-            };
-            // A superclass-index stub (`add_external_superclasses`) carries
-            // only name + superclass: its class variables are unknown, not
-            // absent, so it answers `true` like any other doubt (BT-4644).
-            if class.has_class_variables() || class.is_superclass_index_stub() {
-                return true;
-            }
-            match class.superclass.as_deref() {
-                Some(superclass) => current = superclass,
-                None => return false,
-            }
-        }
     }
 
     /// Look up a class by name.
@@ -680,7 +594,6 @@ impl ClassHierarchy {
                         has_dynamic_field_writer: false,
                         methods: Vec::new(),
                         class_methods: Vec::new(),
-                        class_variables: Vec::new(),
                         type_params: Vec::new(),
                         type_param_bounds: Vec::new(),
                         superclass_type_args: Vec::new(),
@@ -832,94 +745,6 @@ impl ClassHierarchy {
             .cloned()
             .collect()
     }
-    /// Registers extension methods from the [`ExtensionIndex`] into the hierarchy.
-    ///
-    /// Each extension entry is converted to a [`MethodInfo`] and appended to the
-    /// target class's instance or class method list. Unannotated parameters and
-    /// return types remain `None` (Dynamic in the gradual type system), so the
-    /// type checker will skip validation for those positions while still knowing
-    /// the method exists.
-    ///
-    /// Extensions targeting classes not present in the hierarchy are silently
-    /// skipped — they will be caught by the conflict detector or reported as
-    /// errors elsewhere.
-    ///
-    /// For duplicate extensions (same key, multiple locations), only the first
-    /// definition is registered. The conflict detector handles reporting errors
-    /// for duplicates.
-    pub fn register_extensions(&mut self, index: &ExtensionIndex) {
-        let mut changed = false;
-        for (key, locations) in index.entries() {
-            // Only register the first definition; conflicts are handled separately.
-            let Some(first) = locations.first() else {
-                continue;
-            };
-            let method_info = MethodInfo {
-                arity: first.type_info.arity,
-                answers_receiver: first.type_info.answers_receiver,
-                // `ExtensionTypeInfo` stores flattened strings (compilation-layer
-                // metadata, outside `DeclaredType`'s scope) — parse back into
-                // structure rather than carrying the string through as an
-                // opaque `Simple`.
-                ..MethodInfo::synthesized(
-                    key.selector.clone(),
-                    key.class_name.clone(),
-                    first
-                        .type_info
-                        .return_type
-                        .as_deref()
-                        .map(DeclaredType::parse),
-                    first
-                        .type_info
-                        .param_types
-                        .iter()
-                        .map(|p| p.as_deref().map(DeclaredType::parse))
-                        .collect(),
-                    None,
-                )
-            };
-            if key.side == MethodSide::Instance && !first.type_info.answers_receiver {
-                self.updating_extensions
-                    .insert((key.class_name.clone(), key.selector.clone()));
-            }
-            if let Some(class_info) = self.classes.get_mut(key.class_name.as_str()) {
-                let methods = match key.side {
-                    MethodSide::Instance => &mut class_info.methods,
-                    MethodSide::Class => &mut class_info.class_methods,
-                };
-                // Instance side: the class's own definition takes precedence
-                // over an extension on the same class (ADR 0066), so the
-                // extension is not added. Class side: the extension is checked
-                // *before* the class's own class method (BT-5061), so it
-                // replaces the compiled method's static signature — the type
-                // checker must see what a send actually answers (BT-5111).
-                let existing = methods.iter().position(|m| m.selector == key.selector);
-                let class_side = key.side == MethodSide::Class;
-                let pair = (key.class_name.clone(), key.selector.clone());
-                match existing {
-                    None => {
-                        methods.push(method_info);
-                        changed = true;
-                        if class_side {
-                            self.registered_class_extensions.insert(pair);
-                        }
-                    }
-                    // Replace only the *compiled* class method: an entry a
-                    // previous pass registered (the current module's, before
-                    // the project index's) keeps priority.
-                    Some(i) if class_side && !self.registered_class_extensions.contains(&pair) => {
-                        methods[i] = method_info;
-                        changed = true;
-                        self.registered_class_extensions.insert(pair);
-                    }
-                    Some(_) => {}
-                }
-            }
-        }
-        if changed {
-            self.rebuild_all_indexes();
-        }
-    }
     /// Iterate every class. Records a whole-hierarchy scan (BT-4586).
     pub fn iter_classes(&self) -> impl Iterator<Item = (&EcoString, &ClassInfo)> {
         self.classes.iter()
@@ -1062,14 +887,6 @@ impl ClassHierarchy {
     /// Pass 2 runs sealed-override and superclass checks.
     fn add_module_classes(&mut self, module: &Module, stdlib_mode: bool) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        for standalone in &module.method_definitions {
-            if !standalone.is_class_method && !standalone.method.answers_receiver() {
-                self.updating_extensions.insert((
-                    standalone.class_name.name.clone(),
-                    standalone.method.selector.name(),
-                ));
-            }
-        }
         // Pass 1: Build and register ClassInfo for every class in the module.
         // Duplicate-selector checks only need the class's own methods, so they
         // run here too. Sealed checks are deferred to Pass 2.

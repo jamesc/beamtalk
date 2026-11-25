@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0153 decision 7 (BT-5155): a class that defines its own class method
+// named `fieldAt:` / `hasField:`. A class has no fields, so nothing intercepts
+// the send: the class's method answers on every route.
+// Fixture for class_field_reflection_dnu_test.bt.
+
+Object subclass: ClassFieldAtOwner
+
+  class fieldAt: key => #(#own, key)
+
+  class hasField: _key => true
+
+  class viaSelf => self fieldAt: #k

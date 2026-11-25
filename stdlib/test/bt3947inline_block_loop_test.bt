@@ -243,17 +243,11 @@ TestCase subclass: Bt3947InlineBlockLoopTest
   testActorCell30 =>
     self assert: (Bt3947InlineBlockLoopActor spawn cell30) equals: 6
 
-  testClassCell30 => self assert: (Bt3947InlineBlockLoopClass cell30) equals: 6
-
   testActorCell31 =>
     self assert: (Bt3947InlineBlockLoopActor spawn cell31) equals: 0
 
-  testClassCell31 => self assert: (Bt3947InlineBlockLoopClass cell31) equals: 0
-
   testActorCell32 =>
     self assert: (Bt3947InlineBlockLoopActor spawn cell32) equals: 3
-
-  testClassCell32 => self assert: (Bt3947InlineBlockLoopClass cell32) equals: 3
 
   testActorCell33 =>
     self assert: (Bt3947InlineBlockLoopActor spawn cell33) equals: 3
@@ -329,8 +323,6 @@ TestCase subclass: Bt3947InlineBlockLoopTest
 
   testActorCell42 =>
     self assert: (Bt3947InlineBlockLoopActor spawn cell42) equals: 1
-
-  testClassCell42 => self assert: (Bt3947InlineBlockLoopClass cell42) equals: 1
 
   testActorCell43 =>
     self assert: (Bt3947InlineBlockLoopActor spawn cell43) equals: 3

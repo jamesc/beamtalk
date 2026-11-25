@@ -18,9 +18,9 @@ preflight.
 
 This is module-loading policy, kept apart from `beamtalk_class_vars` (the leaf
 that owns the class-variable key and every access). The accepted value comes
-from `?BT_CLASS_VAR_ABI` in the generated `beamtalk_class_vars_keys.hrl`, the
-same Rust constant codegen emits into every module's meta, so the two cannot
-disagree.
+from `?BT_CLASS_VAR_ABI` in `beamtalk_class_vars_keys.hrl`, which must equal the
+`CLASS_VAR_ABI` codegen emits into every module's meta (`class_meta.rs`); the
+Rust test `class_var_abi_matches_the_runtime_header` enforces that.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -37,10 +37,11 @@ disagree.
 
 -doc """
 The `class_var_abi` value this runtime accepts: the calling convention of
-compiled class methods (`class_<sel>(ClassSelf, Args...)`, class variables in
-the class process's dictionary). Generated from the Rust `ABI_VERSION`
-(`class_var_keys` in `beamtalk-codegen`), the same constant codegen emits
-into every module's `__beamtalk_meta/0`, so the two cannot disagree.
+compiled class methods (`class_<sel>(ClassSelf, Args...)`; the class process
+no longer installs a class-variable home since ADR 0153, BT-5160, and BT-5163
+deletes this gate). Must equal codegen's `CLASS_VAR_ABI`
+(`class_meta.rs`), which it emits into every module's `__beamtalk_meta/0`;
+the Rust test `class_var_abi_matches_the_runtime_header` enforces that.
 """.
 -spec abi() -> pos_integer().
 abi() -> ?BT_CLASS_VAR_ABI.

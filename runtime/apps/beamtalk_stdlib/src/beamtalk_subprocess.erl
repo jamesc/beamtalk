@@ -32,7 +32,9 @@ this module only exports `start_link/1` and gen_server callbacks.
   {stderr, waiting} => From | {timer, From, TimerRef} | undefined,
   exit_code     => nil | non_neg_integer(),
   port_closed   => boolean(),
-  child_exited  => boolean()
+  child_exited  => boolean(),
+  stdin_dropped => binary(),    % only once the exec port dropped a write
+  stdin_waiters => queue:queue(From)  % writeLine: callers awaiting the port's answer
 }
 ```
 
@@ -187,8 +189,8 @@ config_type_error(Hint) ->
 handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
     beamtalk_actor:restore_propagated_ctx(PropCtx),
     handle_call({Selector, Args}, From, State);
-handle_call({'writeLine:', [Data]}, _From, State) ->
-    handle_writeLine(Data, State);
+handle_call({'writeLine:', [Data]}, From, State) ->
+    handle_writeLine(Data, From, State);
 handle_call({readLine, []}, From, State) ->
     read_line_for(stdout, From, infinity, State);
 handle_call({'readLine:', [Timeout]}, From, State) when is_integer(Timeout), Timeout > 0 ->
@@ -228,10 +230,11 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             buffer_and_maybe_reply(stderr, Data, State);
         {exit, _ChildId, Code} ->
             ?LOG_INFO("Subprocess exited", #{exit_code => Code, domain => [beamtalk, stdlib]}),
-            %% The beamtalk-exec binary joins its reader threads before sending
-            %% this exit event, so all stdout/stderr data is guaranteed
-            %% to have arrived.  Flush any partial line and close the port now.
-            S0 = flush_pending(stdout, State),
+            %% `exit` is the child's last event: beamtalk-exec sends it once
+            %% the output pipes close, or after a bounded drain if a
+            %% grandchild holds them (BT-5195), and drops anything later.
+            %% Flush any partial line and close the port now.
+            S0 = flush_pending(stdout, fail_pending_writes(State)),
             S1 = flush_pending(stderr, S0),
             (try
                 beamtalk_exec_port:close(Port)
@@ -242,6 +245,22 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             S2 = maybe_reply_eof(stdout, NewState),
             S3 = maybe_reply_eof(stderr, S2),
             {noreply, S3};
+        {stdin_queued, _ChildId} ->
+            %% BT-5248: the oldest writeLine: was accepted.
+            {noreply, beamtalk_subprocess_port:write_queued(State)};
+        {error, _ChildId, write_stdin, Reason} ->
+            %% A line was not delivered (the child is not reading its input,
+            %% or closed it): that writeLine: raises, and so does every later
+            %% one, since the stream the child sees is broken (BT-5248).
+            ?LOG_WARNING("Subprocess stdin write dropped", #{
+                reason => Reason, domain => [beamtalk, stdlib]
+            }),
+            {noreply, beamtalk_subprocess_port:write_dropped('Subprocess', Reason, State)};
+        {error, _ChildId, Command, Reason} ->
+            ?LOG_WARNING("Subprocess command refused by exec port", #{
+                command => Command, reason => Reason, domain => [beamtalk, stdlib]
+            }),
+            {noreply, State};
         _Other ->
             {noreply, State}
     end;
@@ -253,7 +272,7 @@ handle_info({Port, {exit_status, _N}}, #{port := Port, port_closed := true} = St
 handle_info({Port, {exit_status, _N}}, #{port := Port} = State) ->
     %% beamtalk_exec binary itself exited unexpectedly — treat all channels as EOF.
     ?LOG_WARNING("Exec port exited unexpectedly", #{domain => [beamtalk, stdlib]}),
-    S0 = flush_pending(stdout, State),
+    S0 = flush_pending(stdout, fail_pending_writes(State)),
     S1 = flush_pending(stderr, S0),
     NewState = S1#{port_closed => true},
     S2 = maybe_reply_eof(stdout, NewState),
@@ -407,12 +426,17 @@ unwrap_text_entry(Value) ->
 %%% ============================================================================
 
 -doc "Write Data + newline to subprocess stdin.".
--spec handle_writeLine(iodata() | beamtalk_string:t(), map()) ->
-    {reply, nil | {error, #beamtalk_error{}}, map()}.
+-spec handle_writeLine(iodata() | beamtalk_string:t(), term(), map()) ->
+    {reply, {error, #beamtalk_error{}}, map()} | {noreply, map()}.
 %% BT-4173: a String arrives tagged — unwrap to bytes (a tuple is not iodata).
-handle_writeLine({beamtalk_string, Bin}, State) when is_binary(Bin) ->
-    handle_writeLine(Bin, State);
-handle_writeLine(Data, State) ->
+handle_writeLine({beamtalk_string, Bin}, From, State) when is_binary(Bin) ->
+    handle_writeLine(Bin, From, State);
+handle_writeLine(_Data, _From, #{stdin_dropped := Reason} = State) ->
+    %% BT-5195: an earlier line could not be delivered (the child is not
+    %% reading its input, or closed it), so the stream it sees is broken.
+    Err = beamtalk_subprocess_port:stdin_dropped_error('Subprocess', Reason),
+    {reply, {error, Err}, State};
+handle_writeLine(Data, From, State) ->
     #{port := Port, child_id := ChildId, port_closed := PortClosed, child_exited := ChildExited} =
         State,
     case PortClosed orelse ChildExited of
@@ -423,8 +447,14 @@ handle_writeLine(Data, State) ->
             Bin = iolist_to_binary(Data),
             Line = <<Bin/binary, $\n>>,
             beamtalk_exec_port:write_stdin(Port, ChildId, Line),
-            {reply, nil, State}
+            %% BT-5248: the reply is the port's answer (queued or dropped).
+            {noreply, beamtalk_subprocess_port:await_write(From, State)}
     end.
+
+-doc "Fail the `writeLine:` callers still awaiting the port's answer.".
+-spec fail_pending_writes(map()) -> map().
+fail_pending_writes(State) ->
+    beamtalk_subprocess_port:fail_pending_writes('Subprocess', State).
 
 -doc "Kill subprocess and close the exec port.".
 -spec handle_close(map()) -> {reply, nil, map()}.
@@ -434,7 +464,7 @@ handle_close(State) ->
             {reply, nil, State};
         false ->
             #{port := Port, child_id := ChildId} = State,
-            S0 = flush_pending(stdout, State),
+            S0 = flush_pending(stdout, fail_pending_writes(State)),
             S1 = flush_pending(stderr, S0),
             beamtalk_exec_port:kill_child(Port, ChildId),
             beamtalk_exec_port:close(Port),

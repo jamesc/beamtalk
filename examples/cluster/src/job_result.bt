@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// JobResult — what a worker answers for a Job.
+///
+/// Carries the node that did the work, so the coordinator can prove where a
+/// job ran (and that it was reassigned after a node died).
+///
+/// ## Examples
+/// ```beamtalk
+/// (JobResult jobId: 1 value: 49 node: #'w@localhost') value   // => 49
+/// ```
+Value subclass: JobResult
+  field: jobId :: Integer = 0
+  field: value :: Integer = 0
+  field: node :: Symbol = #unknown

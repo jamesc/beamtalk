@@ -13,10 +13,10 @@ class-variable access (ADR 0130 §1, §2, §4, §5).
 A class's variables live in the calling process's dictionary under
 `key(ClassName)`: `{'$bt_class_vars', ClassTag}`, where `ClassTag` is the
 class's metaclass tag (`'Name class'`, `element(2, ClassSelf)`). The key
-shape is owned by Rust (`class_var_keys` in `beamtalk-codegen`) and shared
-through the generated `beamtalk_class_vars_keys.hrl`, because the class-variable
-reads and writes codegen inlines (`erlang:get/1` + `maps:*`, ADR 0130 Phase 0
-gate 3) build the same key. It is keyed by tag so that an access recovers its
+shape is defined in `beamtalk_class_vars_keys.hrl`. Compiled code no longer
+builds it (ADR 0153 Phase 2: codegen emits no class-variable access); this
+module and the class-variable home are its only users until Phase 3 deletes
+them. It is keyed by tag so that an access recovers its
 key from `ClassSelf` with one `element/2`, never a tag-to-name derivation. The
 value is the live `#{VarName => Value}` map (a class-method invocation that
 *installed* it). There is no read-only snapshot region any more (ADR 0153
@@ -51,10 +51,8 @@ tag fully (once per block-literal creation, not a hot path).
 - **Key presence is the "at home" test.** A read with no key and no marker
   raises `class_state_unreachable`; the 3-arity forms fall back to the
   creation-time capture (`capture/2`), raising only when the capture is `none`.
-  The exception is a class whose chain declares no class variables
-  (`beamtalk_class_metadata:chain_has_class_variables/1`): its class methods
-  run in the caller with no home (ADR 0142 §3), and its state reads as the
-  empty map.
+  (ADR 0153 Phase 3a removed the per-chain class-variable fact that let a
+  stateless chain read as the empty map; this module is deleted in Phase 3.)
 - `has/2` is key presence in the map and never raises on the name (as
   `hasField:` is today: reads raise, `hasField:` does not); `clear/2` removes
   the key (as `clearField:` is today). `get/2` on a name absent from the map
@@ -67,26 +65,20 @@ tag fully (once per block-literal creation, not a hot path).
   must redeclare it, BT-3801).
 - `put/3` of a name absent from the map applies the same declared-set rule
   (BT-3808); a name already in the map writes unchecked.
-- The class gen_server's `get_class_var` of an absent name applies the same
-  rule via `check_declared/3` (BT-3807), replying `{error, Error}`.
-- The class gen_server's `{set_class_var, Name, Value}` call
-  (`beamtalk_object_class:set_class_var/3`, `beamtalk_runtime_api:set_class_var/3`)
-  is deliberately **unchecked**: it is the out-of-band assignment path used by
-  the runtime API, bootstrap and ClassBuilder-style setup (ADR 0124), where
-  the write itself is the assignment, so it may create a name the class has
-  not declared. Later in-process `put/3`/`get/2` of that name then find it in
-  the map and skip the declared-set check. Only in-process accesses from
-  class-method bodies are checked.
-- `get_late/2` raises the same `uninitialized_state_error` as the class
-  gen_server's `get_class_var` for an absent variable. A stored `nil` is
-  assigned and answers `nil` (BT-4061).
+- `get_late/2` raises `uninitialized_state_error` for an absent variable. A
+  stored `nil` is assigned and answers `nil` (BT-4061).
+- The class gen_server's `get_class_var` / `set_class_var` calls,
+  `beamtalk_object_class:set_class_var/3` and
+  `beamtalk_runtime_api:set_class_var/3` were removed by ADR 0153 (BT-5160);
+  the class process no longer stores class variables. This module goes in
+  BT-5163.
 
 ## Dependencies
 
 This module is a leaf of the object system: it never calls
 `beamtalk_object_class` or `beamtalk_behaviour_intrinsics`. Declared kinds
 come from `beamtalk_class_metadata:class_var_kinds/1` (own-only), the error values from
-`beamtalk_class_var_errors` (shared with the class gen_server), and the
+`beamtalk_class_var_errors`, and the
 `class_var_abi` load gate lives in `beamtalk_class_var_abi`.
 """.
 
@@ -254,14 +246,8 @@ store(Tag, Name, Value, Declared) ->
             erlang:put(Key, Map#{Name => Value}),
             Value;
         undefined ->
-            %% No home. Unlike a read or `clear/2`, this stays an error even for
-            %% a class whose chain declares no class variables (ADR 0142 §3, its
-            %% methods run in the caller): a write creates a variable, and the
-            %% caller has no state to hold it. Compiled code cannot get here for
-            %% such a class: a class-side `self.x := v` naming a variable no
-            %% class declares is a compile error, and a ClassBuilder class's
-            %% class-method funs raise the `runtime_fun` shadow flag, which keeps
-            %% the class process (`beamtalk_class_shadow_flags:direct_call_ok/2`).
+            %% No home: the caller has no state to hold the write
+            %% (`no_home_map/3`, as for a read or `clear/2`).
             beamtalk_class_var_errors:raise_unreachable(tag_to_name(Tag), Name, write)
     end.
 
@@ -324,10 +310,9 @@ field_at_put(ClassSelf, Name, _Value) ->
 -doc """
 The class-variable read rule over a class-state map `Map` of `Class`:
 `{ok, Value}`, or `{error, Error}` with the structured error *built, not
-raised*, so the class gen_server can reply with it instead of crashing. The one
-read rule behind the class gen_server's `get_class_var` clause, the outside
-`Cls fieldAt: #x` send (BT-4148) and the inside `self fieldAt: #x`
-(`field_at/2`, BT-4421).
+raised*. The one read rule behind the inside `self fieldAt: #x`
+(`field_at/2`, BT-4421); the class gen_server's `get_class_var` clause and the
+outside `Cls fieldAt: #x` send are gone (ADR 0153).
 
 A declared-`late` class variable is an error when unassigned, agreeing with
 the instance-side direct read (`generate_late_field_read`) — keyed on
@@ -338,7 +323,7 @@ a class with unknown metadata (ClassBuilder) answers `nil`. The metadata is
 read once for both decisions.
 
 `Caller` selects the declared-set rule's form: `in_process` (the
-known-empty leniency) for `get_class_var`, `reflective` (strict) for the
+known-empty leniency), `reflective` (strict) for the
 `fieldAt:` reflection sends.
 """.
 -spec read_in(atom(), map(), atom(), in_process | reflective) ->
@@ -381,10 +366,8 @@ check_write(Class, Map, Name) ->
     end.
 
 -doc """
-Remove a class variable (`clearField:`); same errors as `put/3`, except that
-with no home a class whose chain declares no class variables answers
-`ClassSelf` (its state is empty, ADR 0142 §3). Returns `ClassSelf`
-(`clearField: -> Self`).
+Remove a class variable (`clearField:`); same errors as `put/3` (with no home,
+`class_state_unreachable`). Returns `ClassSelf` (`clearField: -> Self`).
 """.
 -spec clear(class_self(), atom()) -> class_self().
 clear(ClassSelf, Name) ->
@@ -395,11 +378,7 @@ clear(ClassSelf, Name) ->
             erlang:put(Key, maps:remove(Name, Map)),
             ClassSelf;
         undefined ->
-            %% ADR 0142 §3 (BT-4300): a class whose chain declares no class
-            %% variables has an empty state (`no_home_map/2`); removing a name
-            %% from it changes nothing, as in the class process.
-            _ = no_home_map(Tag, Name, write),
-            ClassSelf
+            no_home_map(Tag, Name, write)
     end.
 
 -doc "Presence test (`hasField:`).".
@@ -461,8 +440,6 @@ restore the pre-call snapshot and re-raise.
 -spec protect(fun(() -> T)) -> T when T :: term().
 protect(Fun) ->
     Snap = snapshot(),
-    %% bt-catcher-audit: converted - this is protect/1 itself: restores the snapshot, then
-    %% re-raises
     try
         Fun()
     catch
@@ -515,24 +492,17 @@ current_map(Tag, Name) ->
         undefined -> no_home_map(Tag, Name)
     end.
 
-%% No home and no capture. ADR 0142 §3 (BT-4300): a class whose chain declares
-%% no class variables runs its class methods in the caller, which installs no
-%% home; its class state is empty wherever it is read, so the read answers as
-%% it would in the class process against the empty map (`hasField:` false, an
-%% undeclared name per the declared-set rule). Any other class has state only
-%% its class process holds: unreachable. Off the hot path (a read that found a
-%% home never gets here).
--spec no_home_map(atom(), atom()) -> map().
+%% No home and no capture: the class state is held only by the class process,
+%% so it is unreachable. Off the hot path (a read that found a home never gets
+%% here). ADR 0153 Phase 3a removed the per-chain class-variable fact that
+%% used to let a stateless chain read the empty map here.
+-spec no_home_map(atom(), atom()) -> no_return().
 no_home_map(Tag, Name) ->
     no_home_map(Tag, Name, read).
 
--spec no_home_map(atom(), atom(), read | write) -> map().
+-spec no_home_map(atom(), atom(), read | write) -> no_return().
 no_home_map(Tag, Name, Access) ->
-    Class = tag_to_name(Tag),
-    case beamtalk_class_metadata:chain_has_class_variables(Class) of
-        false -> #{};
-        true -> beamtalk_class_var_errors:raise_unreachable(Class, Name, Access)
-    end.
+    beamtalk_class_var_errors:raise_unreachable(tag_to_name(Tag), Name, Access).
 
 -spec map_or_captured(atom(), atom(), map() | none) -> map().
 map_or_captured(Tag, Name, Captured) ->
@@ -613,11 +583,11 @@ assert_declared(Class, Name) ->
     end.
 
 -doc """
-The declared-set rule shared by reads, writes (`put/3`) and the class
-gen_server's `get_class_var` (BT-3801, BT-3807, BT-3808): `ok` when `Name` is
+The declared-set rule shared by reads and writes (`put/3`) (BT-3801, BT-3807,
+BT-3808): `ok` when `Name` is
 declared by `Class` itself or the set is not known, else
 `{error, #beamtalk_error{kind = undeclared_class_variable}}` (built, not
-raised, so the gen_server can reply with it instead of crashing).
+raised).
 
 Class variables are per class and not inherited: only the class's own
 declarations count. The metadata is read once. `unknown` (no metadata, e.g. a
@@ -633,8 +603,8 @@ check_declared(Class, Name) ->
 -doc """
 `check_declared/2` against a declared-kinds value the caller already read with
 `beamtalk_class_metadata:class_var_kinds_or_unknown/1`, so a caller that needs
-the kinds for something else too (the class gen_server's declared-`late`
-branch) reads the metadata once.
+the kinds for something else too (`read_in/4`'s declared-`late` branch) reads
+the metadata once.
 """.
 -spec check_declared(atom(), atom(), unknown | #{atom() => eager | late}) ->
     ok | {error, #beamtalk_error{}}.
@@ -659,9 +629,8 @@ check_declared_reflective(Class, Name) ->
 -doc """
 The declared-set rule with an explicit caller, against kinds already read.
 `in_process` is `check_declared/3`; `reflective` is
-`check_declared_reflective/2`'s strict known-empty form. The class gen_server's
-`read_class_var/4` passes its caller through here so the reflective read and
-write share one rule.
+`check_declared_reflective/2`'s strict known-empty form. `read_in/4` passes
+its caller through here so the reflective read and write share one rule.
 """.
 -spec check_declared(
     atom(), atom(), unknown | #{atom() => eager | late}, in_process | reflective

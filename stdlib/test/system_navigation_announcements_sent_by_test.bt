@@ -45,12 +45,6 @@ TestCase subclass: SystemNavigationAnnouncementsSentByTest
   testHelperAppendAnnounceSitesIsDefined =>
     self assert: (SystemNavigation class includesSelector: #appendAnnounceSitesIn:class:methodSelector:into:)
 
-  // The extension-scan helper is present (the body delegates to it after the
-  // class-side walk). Behavioural coverage of the extension-source path lives
-  // in the E2E REPL-protocol suite.
-  testHelperCollectExtensionAnnounceSitesIsDefined =>
-    self assert: (SystemNavigation class includesSelector: #collectExtensionAnnounceSitesFor:into:)
-
   // The Announcement-subclass gate is present.
   testHelperIsAnnouncementClassIsDefined =>
     self assert: (SystemNavigation class includesSelector: #isAnnouncementClass:)

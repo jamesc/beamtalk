@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for BT-5191; see json_mapping_test.bt.
+
+// Adds no field: inheriting the parent's mapping is fine.
+JsonMappedEvent subclass: JsonMappedEventAlias

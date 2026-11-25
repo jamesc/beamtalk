@@ -794,7 +794,8 @@ mod tests {
             Some(WellKnownSelector::PerformWithArgs)
         );
 
-        // `performLocally:withArguments:` is no longer an intrinsic (ADR 0153 Phase 3e).
+        // ADR 0153 (BT-5155): `performLocally:withArguments:` was removed;
+        // it is an ordinary selector now.
         let sel = MessageSelector::Keyword(vec![
             KeywordPart::new("performLocally:", span),
             KeywordPart::new("withArguments:", span),

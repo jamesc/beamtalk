@@ -78,7 +78,15 @@ pub enum HandshakeMode {
     UnexpectedAuthResponse,
     /// Auth succeeds but the follow-up frame is not `op: session-started`.
     WrongPostAuthOp,
+    /// Answer an `identify` with a proof for a nonce other than
+    /// [`FAKE_NONCE`]: a process that is not the workspace (BT-5188).
+    WrongIdentity,
 }
+
+/// The port-file nonce the fake server proves it knows when a client sends
+/// `identify` (BT-5188). Write it to a test port file to make the fake pass
+/// the client's identity check.
+pub const FAKE_NONCE: &str = "fake-workspace-nonce";
 
 /// Frame(s) the fake server sends back for one received post-handshake
 /// request.
@@ -237,6 +245,17 @@ pub async fn spawn_concurrent(
     }
 }
 
+/// The next text frame as JSON (`{}` if it does not parse), or `None` once
+/// the client hung up.
+async fn read_json(
+    ws: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+) -> Option<Value> {
+    match ws.next().await {
+        Some(Ok(Message::Text(body))) => Some(serde_json::from_str(&body).unwrap_or(json!({}))),
+        _ => None,
+    }
+}
+
 /// Where a connection's received frames are recorded.
 struct SeenLog {
     all: Arc<Mutex<Vec<Value>>>,
@@ -291,12 +310,29 @@ async fn serve_connection(
         }
     }
 
-    // The client's auth frame.
-    let auth = ws.next().await;
-    let Some(Ok(Message::Text(auth))) = auth else {
+    // The client's auth frame, after an optional `identify` (BT-5188).
+    let mut auth = read_json(&mut ws).await;
+    if let Some(frame) = &auth
+        && frame["type"] == crate::handshake::TYPE_IDENTIFY
+    {
+        log.push(connection, frame.clone()).await;
+        let challenge = frame["challenge"].as_str().unwrap_or_default();
+        let nonce = if handshake == HandshakeMode::WrongIdentity {
+            "not-the-workspace"
+        } else {
+            FAKE_NONCE
+        };
+        let proof = crate::handshake::identity_proof(nonce, challenge);
+        let _ = ws
+            .send(text(
+                &json!({"type": crate::handshake::TYPE_IDENTITY, "proof": proof}),
+            ))
+            .await;
+        auth = read_json(&mut ws).await;
+    }
+    let Some(auth) = auth else {
         return false;
     };
-    let auth: Value = serde_json::from_str(&auth).unwrap_or(json!({}));
     log.push(connection, auth).await;
 
     if handshake == HandshakeMode::OkWithBinaryNoise {

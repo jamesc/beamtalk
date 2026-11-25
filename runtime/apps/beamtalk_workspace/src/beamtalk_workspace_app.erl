@@ -56,11 +56,11 @@ is never `nocookie` on a node that ever started distribution, because OTP
 silently falls back to `$HOME/.erlang.cookie` when no `-setcookie` was
 given — exactly the "the operator never actually configured one" case this
 check exists to catch (ADR 0125 §1.6: "The cookie is read from
-`RELEASE_COOKIE`/`vm.args`, never generated into the artifact"). Whichever
-of those two sources supplied a cookie, it reaches `init`'s argument list as
-an ordinary `-setcookie` flag — the launcher's `RELEASE_COOKIE`-derived
-`cookie_args()`, or a line in a user `[release] vm-args` file — so this one
-check covers both.
+`RELEASE_COOKIE`/`vm.args`, never generated into the artifact"). A cookie in
+a user `[release] vm-args` file reaches `init`'s argument list as an ordinary
+`-setcookie` flag; `RELEASE_COOKIE` reaches the node through the launcher's
+private cookie home (BT-5185), which `beamtalk_cookie_home:booted_with_cookie/0`
+reports. Either one passes the check.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -176,9 +176,9 @@ release with `console => false` opens no listener for the cookie to guard.
 -spec ensure_console_cookie(beamtalk_workspace_sup:workspace_config()) ->
     ok | {error, #beamtalk_error{}}.
 ensure_console_cookie(#{mode := release, console := true}) ->
-    case init:get_argument(setcookie) of
-        {ok, _} -> ok;
-        error -> {error, no_console_cookie_error()}
+    case init:get_argument(setcookie) =/= error orelse beamtalk_cookie_home:booted_with_cookie() of
+        true -> ok;
+        false -> {error, no_console_cookie_error()}
     end;
 ensure_console_cookie(_Config) ->
     ok.

@@ -350,7 +350,6 @@ backing_source(Backing) ->
 
 -spec backing_source_file(atom()) -> string() | undefined.
 backing_source_file(Backing) ->
-    %% bt-catcher-audit: not-applicable-no-block - module_info/1 BIF
     try Backing:module_info(compile) of
         Info when is_list(Info) ->
             case lists:keyfind(source, 1, Info) of

@@ -10,7 +10,6 @@
 //!   and block-context classification
 //! - [`bt4573_setup_cascade_single_diagnostic`] — a `setUp` multi-`with*:`
 //!   cascade draws only `cascade-drops-update` (BT-4573)
-//! - [`class_state_abroad`] — ADR 0130 §5 `class-state-abroad` lint (BT-3712)
 //! - [`local_threading`] — ADR 0131 §6 and Phase 0 outer-local threading
 //!   errors (BT-3745)
 //! - [`match_arm_analysis`] — `match:` arm pattern binding and scoping
@@ -27,12 +26,10 @@
 //!   injection and singleton-union type annotations
 //! - [`adr0103_handle_scope_and_sendability`] — `handleScope:` validity
 //!   and block-capture sendability
-//! - [`extension_method_integration`] — extension methods vs. the type
-//!   checker
 //! - [`workspace_bindings_protocols_and_aliases`] — workspace-binding
 //!   shadowing, protocol name resolution, and ADR 0108 alias seeding
 //! - [`typed_params_knowledge_scope_and_cross_file`] — typed block
-//!   parameters, `KnowledgeScope`, and cross-file extension visibility
+//!   parameters and `KnowledgeScope`
 
 use super::test_helpers::test_span;
 use super::*;
@@ -63,10 +60,8 @@ mod bt4573_setup_cascade_single_diagnostic;
 mod bt5025_cascade_later_messages;
 mod bt5026_state_defaults_and_protocol_bodies;
 mod class_hierarchy_and_method_validators;
-mod class_state_abroad;
-mod cross_file_extension_checks;
+mod class_state_removed;
 mod dead_code_super_and_shadowing;
-mod extension_method_integration;
 mod flattened_provision_diagnostics;
 mod hierarchy_injection_and_singleton_types;
 mod local_threading;
@@ -74,6 +69,7 @@ mod match_arm_analysis;
 mod match_arm_block;
 mod native_actor_subclass;
 mod paren_operand_spans;
+mod same_file_extension_checks;
 mod self_misuse_and_unused_variables;
 mod standalone_e0402;
 mod typed_params_knowledge_scope_and_cross_file;

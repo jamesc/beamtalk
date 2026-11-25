@@ -101,7 +101,7 @@ pub mod well_known;
 // Re-export all public types so `use crate::ast::Foo` continues to work.
 pub use class::*;
 pub use expression::*;
-pub use literal_comments::{LiteralCommentSlots, LiteralComments};
+pub use literal_comments::{GapComments, GapSlot, LiteralCommentSlots, LiteralComments};
 pub use method::*;
 pub use pattern::*;
 pub use pipeline::PipelineSends;

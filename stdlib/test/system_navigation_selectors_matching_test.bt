@@ -11,7 +11,7 @@
 // only and queries live on the instance.
 //
 // Behavioural tests (case-insensitive substring match, class-side
-// participation, extension-method participation, dedup, sort, empty-pattern
+// participation, dedup, sort, empty-pattern
 // rejection, no-match returns []) live in the E2E REPL-protocol suite at
 // tests/repl-protocol/cases/workspace_native_api.btscript, which runs in
 // workspace_mode and has the live class registry populated with user
@@ -26,9 +26,8 @@ TestCase subclass: SystemNavigationSelectorsMatchingTest
   // --- composition primitives must be in place ---
 
   // The implementation iterates the navigation scope (via `allClasses`),
-  // collects each class's instance-side `methods`, class-side `class
-  // methods`, and the extension registry, then filters by lowercase
-  // substring. All of those primitives have to be present.
+  // collects each class's instance-side `methods` and class-side `class
+  // methods`, then filters by lowercase substring. All of those primitives have to be present.
   testCompositionPrimitivesPresent =>
     self assert: (SystemNavigation class includesSelector: #allClasses)
     self assert: (Behaviour includesSelector: #methods)
@@ -39,28 +38,7 @@ TestCase subclass: SystemNavigationSelectorsMatchingTest
     self assert: (List includesSelector: #unique)
     self assert: (List includesSelector: #sort)
 
-  // The internal helpers `selectorsForClass:` and `extensionSelectorsFor:`
-  // factor out per-class iteration so they can be unit-checked separately.
+  // The internal helper `selectorsForClass:` factors out per-class iteration
+  // so it can be unit-checked separately.
   testHelperSelectorsForClassIsDefined =>
     self assert: (SystemNavigation class includesSelector: #selectorsForClass:)
-
-  testHelperExtensionSelectorsForIsDefined =>
-    self assert: (SystemNavigation class includesSelector: #extensionSelectorsFor:)
-
-  // --- BT-2302: xref-backed read path + miss-policy fallback ---
-  //
-  // `selectorsMatching:` now reads class-body selectors from the
-  // runtime-maintained xref methods table
-  // (`beamtalk_xref:defined_selectors_bt/0`) instead of probing `methods` /
-  // `class methods` over every class in the scope, falling back to the
-  // `selectorsForClass:` gather only for loaded-but-unindexed classes.
-  // Extension selectors are not in the index yet, so they are still gathered
-  // unconditionally via `extensionSelectorsForBothSides:` over the full scope.
-  // The behavioural coverage — that a registry-loaded class artificially purged
-  // from the index still resolves via fallback and emits exactly one
-  // `xref_miss` warning — lives in the runtime EUnit suite
-  // (`beamtalk_xref_tests:nav_query_miss_policy_test_`), because the live class
-  // registry + xref server are required. The check below covers the extension
-  // gather split out for the index path.
-  testHelperExtensionSelectorsForBothSidesIsDefined =>
-    self assert: (SystemNavigation class includesSelector: #extensionSelectorsForBothSides:)

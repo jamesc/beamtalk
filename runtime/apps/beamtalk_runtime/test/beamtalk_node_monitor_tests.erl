@@ -28,9 +28,17 @@ and are exercised by `beamtalk_dist_shape_skew_tests`.
 %% Reset own_name (element 2) and skew (element 4) in the gen_server state
 %% so every test starts from a clean baseline.  The record is not exported
 %% from the source module, so we address the elements positionally.
+%%
+%% The tally only accepts casts for connected peers (BT-5232), so the two fake
+%% peers these tests cast about start with an open, empty entry — the state a
+%% real `nodeup` leaves behind.
 reset_state() ->
+    Connected = #{
+        'peer@host' => sets:new([{version, 2}]),
+        'peer@testhost' => sets:new([{version, 2}])
+    },
     sys:replace_state(beamtalk_node_monitor, fun(S) ->
-        setelement(4, setelement(2, S, undefined), #{})
+        setelement(4, setelement(2, S, undefined), Connected)
     end).
 
 setup() ->
@@ -182,6 +190,104 @@ peer_nodedown_clears_skew_entry_test_() ->
             ?assertEqual(0, beamtalk_node_monitor:skew_count(Peer))
         end
     ]}.
+
+%%====================================================================
+%% BT-5232 — a skew cast for a node that is not connected leaves no entry
+%%====================================================================
+
+skew_detected_for_unconnected_node_leaves_no_entry_test_() ->
+    {foreach, fun setup/0, fun teardown/1, [
+        fun() ->
+            gen_server:cast(beamtalk_node_monitor, {skew_detected, 'ghost@host', 'MyClass'}),
+            ?assertEqual(0, beamtalk_node_monitor:skew_count('ghost@host')),
+            ?assertNot(maps:is_key('ghost@host', skew_map()))
+        end,
+        fun() ->
+            %% The race from the issue: the spawned check's cast lands after
+            %% the peer's `nodedown` already removed its entry.
+            Peer = 'peer@testhost',
+            beamtalk_node_monitor ! {nodedown, Peer, [{nodedown_reason, disconnect}]},
+            gen_server:cast(beamtalk_node_monitor, {skew_detected, Peer, 'SomeClass'}),
+            ?assertEqual(0, beamtalk_node_monitor:skew_count(Peer)),
+            ?assertNot(maps:is_key(Peer, skew_map()))
+        end
+    ]}.
+
+%% The monitor's tally map (record element 4, see reset_state/0).
+skew_map() ->
+    element(4, sys:get_state(beamtalk_node_monitor)).
+
+%%====================================================================
+%% BT-5232 — a reload reads only the reloaded class's shape entry
+%%====================================================================
+
+reload_reads_one_class_entry_not_full_manifest_test_() ->
+    {setup,
+        fun() ->
+            setup(),
+            ok = meck:new(beamtalk_release, [passthrough, no_link]),
+            ok = meck:expect(beamtalk_release, project_class_shape_entry, fun(_) ->
+                #{version => 1, fields => #{}, migrations => #{}, class_var_abi => null}
+            end)
+        end,
+        fun(X) ->
+            meck:unload(beamtalk_release),
+            teardown(X)
+        end,
+        fun() ->
+            %% `node()` as the "peer": the erpc runs locally, so there is no
+            %% network, and the fake class has no entry there (silent).
+            ok = beamtalk_node_monitor:check_shape_skew_on_reload('Bt5232FakeClass', [node()]),
+            ?assertEqual(0, meck:num_calls(beamtalk_release, shape_manifest, '_')),
+            ?assertEqual(
+                1, meck:num_calls(beamtalk_release, project_class_shape_entry, ['Bt5232FakeClass'])
+            )
+        end}.
+
+%%====================================================================
+%% BT-5232 — NodeVersionSkew fields (ADR 0126 Amendment D3)
+%%====================================================================
+
+version_skew_fields_test_() ->
+    Local = #{wireVersion => 1, beamtalkVersion => <<"0.6.0">>},
+    Peer = 'peer@host',
+    [
+        ?_assertEqual(
+            none, beamtalk_node_monitor:version_skew_fields(Peer, Local, {1, <<"0.6.0">>})
+        ),
+        ?_assertMatch(
+            #{
+                localWireVersion := 1,
+                remoteWireVersion := 2,
+                localBeamtalkVersion := {beamtalk_string, <<"0.6.0">>},
+                remoteBeamtalkVersion := {beamtalk_string, <<"0.6.0">>}
+            },
+            beamtalk_node_monitor:version_skew_fields(Peer, Local, {2, <<"0.6.0">>})
+        ),
+        ?_assertMatch(
+            #{remoteWireVersion := 1, remoteBeamtalkVersion := {beamtalk_string, <<"0.5.0">>}},
+            beamtalk_node_monitor:version_skew_fields(Peer, Local, {1, <<"0.5.0">>})
+        ),
+        ?_assertMatch(
+            #{remoteWireVersion := nil, remoteBeamtalkVersion := nil, localWireVersion := 1},
+            beamtalk_node_monitor:version_skew_fields(Peer, Local, unknown)
+        )
+    ].
+
+%% A failed version read for a peer that is no longer connected is logged,
+%% not announced: it would arrive after that peer's NodeDown.
+version_read_for_unconnected_peer_not_announced_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun() ->
+        Self = self(),
+        Handler = fun(Event) -> Self ! {got_version_skew, Event} end,
+        {ok, Sub} = beamtalk_announcements:subscribe('NodeVersionSkew', Self, Handler, false),
+        try
+            ok = beamtalk_node_monitor:check_version_skew_on_connect('ghost@invalid'),
+            ?assertNoMessage({got_version_skew, _}, 500)
+        after
+            beamtalk_announcements:unsubscribe(Sub)
+        end
+    end}.
 
 %%====================================================================
 %% terminate/2 — both branches

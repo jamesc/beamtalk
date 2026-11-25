@@ -154,8 +154,46 @@ impl PathPolicy {
     /// Confine to the project root discovered from the current directory.
     pub fn project_root_of_cwd() -> std::io::Result<Self> {
         let cwd = std::env::current_dir()?;
-        let root = beamtalk_project::discover_project_root(&cwd);
-        Ok(Self::Confined(beamtalk_core::paths::canonicalize(&root)?))
+        match beamtalk_project::find_project_root(&cwd) {
+            Some(root) => Self::confine_to_root(&root, dirs::home_dir().as_deref(), true),
+            None => Self::confine_to_root(&cwd, dirs::home_dir().as_deref(), false),
+        }
+    }
+
+    /// Confine to `root`, refusing a root that would expose far more than a
+    /// project: the filesystem root or the user's home directory (BT-5174).
+    /// `marked` says whether `root` carries a project marker; discovery falls
+    /// back to the current directory when none exists, so launching from
+    /// `$HOME`, or from a directory above it such as `/home`, `/Users` or
+    /// `C:\Users`, would otherwise confine to every home in it (BT-5185). A
+    /// real project that happens to contain the home directory (a hermetic
+    /// `HOME` inside a checkout) is allowed. `home` is the platform home
+    /// directory ([`dirs::home_dir`]: `HOME` on Unix, the profile folder on
+    /// Windows), never `HOME` alone.
+    fn confine_to_root(
+        root: &std::path::Path,
+        home: Option<&std::path::Path>,
+        marked: bool,
+    ) -> std::io::Result<Self> {
+        let root = beamtalk_core::paths::canonicalize(root)?;
+        let home = home.and_then(|h| beamtalk_core::paths::canonicalize(h).ok());
+        let exposes_home = home
+            .as_ref()
+            .is_some_and(|h| *h == root || (!marked && h.starts_with(&root)));
+        if root.parent().is_none() || exposes_home {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "no beamtalk project found: '{}' is the filesystem root, your home \
+                     directory or a directory containing it, so file tools would not be \
+                     confined to a project. Run beamtalk-mcp from inside a project (a \
+                     directory with beamtalk.toml, .beamtalk or .git), or pass \
+                     --allow-outside-project.",
+                    root.display()
+                ),
+            ));
+        }
+        Ok(Self::Confined(root))
     }
 
     /// Resolve `path` (relative paths against the current directory) to a
@@ -178,8 +216,20 @@ impl PathPolicy {
         let mut existing = abs.as_path();
         let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
         let mut resolved = loop {
-            if let Ok(real) = beamtalk_core::paths::canonicalize(existing) {
-                break real;
+            match beamtalk_core::paths::canonicalize(existing) {
+                Ok(real) => break real,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                // ELOOP, EACCES, ...: never guess where the path lands.
+                Err(e) => return Err(format!("cannot resolve '{path}': {e}")),
+            }
+            // `canonicalize` also reports NotFound for a dangling symlink,
+            // which a write would follow to its target. Only a component that
+            // is genuinely absent may be treated as a not-yet-existing tail.
+            if std::fs::symlink_metadata(existing).is_ok() {
+                return Err(format!(
+                    "cannot resolve '{path}': '{}' is a symlink that does not resolve",
+                    existing.display()
+                ));
             }
             let name = existing
                 .file_name()

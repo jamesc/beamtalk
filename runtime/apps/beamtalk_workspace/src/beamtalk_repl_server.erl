@@ -26,7 +26,7 @@ Op handlers are delegated to domain-specific modules:
 - beamtalk_repl_ops_eval: eval, clear, bindings
 - beamtalk_repl_ops_load: load-source, load-project, unload
 - beamtalk_repl_ops_actors: actors, inspect, kill, interrupt
-- beamtalk_repl_ops_session: sessions, clone, close, health, shutdown
+- beamtalk_repl_ops_session: sessions, close, health, shutdown
 - beamtalk_repl_ops_dev: complete, describe, show-codegen
 - beamtalk_repl_ops_perf: enable-tracing, get-traces, actor-stats, export-traces (ADR 0069)
 
@@ -114,6 +114,9 @@ init(Config) ->
     Nonce = generate_nonce(),
     %% Session registry for interrupt routing.
     beamtalk_session_table:new(),
+    %% BT-5127: ranch stops counting a socket once it upgrades to a WebSocket,
+    %% so the handler counts its own connections against this table.
+    beamtalk_ws_conn_cap:new(),
     %% ADR 0020: Start cowboy WebSocket listener.
     %% Default: bind to 127.0.0.1 so only local processes can connect.
     %% --bind flag allows binding to other addresses.
@@ -129,8 +132,11 @@ init(Config) ->
         socket_opts => [{ip, BindAddr}, {port, Port}],
         num_acceptors => 10,
         %% BT-5066: bounded; connection slots are cheap but not free, and an
-        %% unauthenticated socket is dropped after the auth deadline.
-        max_connections => 256
+        %% unauthenticated socket is dropped after the auth deadline. This
+        %% only bounds sockets *until upgrade* (cowboy_websocket:takeover/7
+        %% removes them from ranch's count); `beamtalk_ws_conn_cap` bounds
+        %% live WebSockets (BT-5127).
+        max_connections => beamtalk_ws_conn_cap:limit()
     },
     ProtocolOpts = #{env => #{dispatch => Dispatch}},
     case cowboy:start_clear(?LISTENER_REF, TransportOpts, ProtocolOpts) of
@@ -210,23 +216,25 @@ write_port_file_to_home(WorkspaceId, Port, Nonce) ->
             ok;
         WsDir ->
             PortFilePath = filename:join(WsDir, "port"),
-            case filelib:ensure_dir(PortFilePath) of
+            case beamtalk_workspace_file:ensure_private_dir(WsDir) of
                 ok ->
                     %% Format: PORT\nNONCE (two lines for stale detection)
                     Content = [integer_to_list(Port), "\n", binary_to_list(Nonce)],
                     %% Write atomically via tmp + rename(2) so the Rust CLI never
                     %% reads a partially-written port file (file:write_file/2 is
                     %% open→write→close, not atomic on its own).
-                    TmpPath = beamtalk_workspace_file:temp_path(PortFilePath),
-                    case file:write_file(TmpPath, Content) of
-                        ok ->
+                    %% `write_temp/2`: exclusive create, random name, mode 0600.
+                    case
+                        beamtalk_workspace_file:write_temp(PortFilePath, Content, #{private => true})
+                    of
+                        {ok, TmpPath} ->
                             case file:rename(TmpPath, PortFilePath) of
                                 ok ->
+                                    %% The nonce is never logged: it proves this
+                                    %% node's identity to clients (BT-5188).
                                     ?LOG_DEBUG(
-                                        "Wrote port file: ~s (port ~p, nonce ~s)",
-                                        [
-                                            PortFilePath, Port, Nonce
-                                        ],
+                                        "Wrote port file: ~s (port ~p)",
+                                        [PortFilePath, Port],
                                         #{domain => [beamtalk, runtime]}
                                     ),
                                     ok;
@@ -244,8 +252,8 @@ write_port_file_to_home(WorkspaceId, Port, Nonce) ->
                                     case file:write_file(PortFilePath, Content) of
                                         ok ->
                                             ?LOG_DEBUG(
-                                                "Wrote port file (fallback): ~s (port ~p, nonce ~s)",
-                                                [PortFilePath, Port, Nonce],
+                                                "Wrote port file (fallback): ~s (port ~p)",
+                                                [PortFilePath, Port],
                                                 #{domain => [beamtalk, runtime]}
                                             ),
                                             ok;
@@ -258,14 +266,13 @@ write_port_file_to_home(WorkspaceId, Port, Nonce) ->
                                             ok
                                     end
                             end;
-                        {error, Reason} ->
+                        {error, {write, Reason}} ->
+                            %% `write_temp/2` already removed any partial temp file.
                             ?LOG_WARNING(
                                 "Failed to write port file ~s: ~p",
-                                [TmpPath, Reason],
+                                [PortFilePath, Reason],
                                 #{domain => [beamtalk, runtime]}
                             ),
-                            %% A failed write (disk full, …) can leave a partial temp file.
-                            _ = file:delete(TmpPath),
                             ok
                     end;
                 {error, Reason} ->

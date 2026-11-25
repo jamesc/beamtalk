@@ -24,25 +24,42 @@ defmodule BtAttach.RevokedSessions do
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
-  @doc "Revoke a session id until `ttl_secs` from now."
-  @spec revoke(String.t() | nil, pos_integer()) :: :ok
-  def revoke(id, ttl_secs) when is_binary(id) do
-    if :ets.whereis(@table) != :undefined do
-      :ets.insert(@table, {id, now() + ttl_secs})
-    end
+  @doc """
+  Revoke a session id until `ttl_secs` from now.
 
-    :ok
+  Returns `{:error, :unavailable}` while the table is down (the GenServer is
+  restarting) rather than dropping the revocation silently (BT-5185); the
+  caller logs it. A non-binary id has nothing to record: `revoked?/1` already
+  refuses it.
+  """
+  @spec revoke(term(), pos_integer()) :: :ok | {:error, :unavailable}
+  def revoke(id, ttl_secs) when is_binary(id) do
+    if :ets.whereis(@table) == :undefined do
+      {:error, :unavailable}
+    else
+      :ets.insert(@table, {id, now() + ttl_secs})
+      :ok
+    end
   end
 
   def revoke(_id, _ttl_secs), do: :ok
 
-  @doc "True when `id` was revoked and its entry has not yet expired."
+  @doc """
+  True when `id` was revoked and its entry has not yet expired.
+
+  Fails closed (BT-5135): with the table absent (the GenServer is down or not
+  yet started) revocations cannot be checked, so every session id reads as
+  revoked rather than letting a logged-out cookie through. A missing or
+  non-binary id also reads as revoked (BT-5185): every login mints one, so a
+  session without it (a cookie from before revocation existed) could never
+  be revoked and must log in again.
+  """
   @spec revoked?(term()) :: boolean()
   def revoked?(id) when is_binary(id) do
-    :ets.whereis(@table) != :undefined and lookup_live(id) != []
+    :ets.whereis(@table) == :undefined or lookup_live(id) != []
   end
 
-  def revoked?(_id), do: false
+  def revoked?(_id), do: true
 
   defp lookup_live(id) do
     case :ets.lookup(@table, id) do

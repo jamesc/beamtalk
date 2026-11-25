@@ -94,21 +94,13 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
 'has_method'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['doWork', 'compute:', 'ping:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('NativeWorker', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
-            end
+        <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
     end
 
 'has_method_local'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['doWork', 'compute:', 'ping:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('NativeWorker', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> 'false'
-            end
+        <'false'> when 'true' -> 'false'
     end
 
 
@@ -130,7 +122,6 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
       'package' => 'none',
       'kind' => 'actor',
       'fields' => [],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'false',
@@ -142,7 +133,6 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'doWork' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Nil', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'compute:' => ~{'arity' => 1, 'param_types' => ['Integer'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'ping:' => ~{'arity' => 1, 'param_types' => ['String'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
@@ -173,7 +163,6 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
       'package' => 'none',
       'kind' => 'actor',
       'fields' => [],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'false',
@@ -185,7 +174,6 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'doWork' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Nil', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'compute:' => ~{'arity' => 1, 'param_types' => ['Integer'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'ping:' => ~{'arity' => 1, 'param_types' => ['String'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,

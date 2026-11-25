@@ -75,22 +75,17 @@ call 'maps':'get'('eventId', Self)
             let <DispArg0> = call 'erlang':'hd'(Args) in
             call 'annotated_local_vars':'withEventId:'(Self, DispArg0)
         <_Other> when 'true' ->
+            case Selector of
+                <'printString'> when 'true' ->
+                    call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)
+                <_> when 'true' ->
             %% BT-4260: a memoised verdict picks the direct inherited call.
-            case case Selector of
-                <'printString'> when 'true' -> 'slow'
-                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('Snapshot', Selector)
-            end of
+            case call 'beamtalk_dispatch':'inherited_target'('Snapshot', Selector) of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
-                <{'ext', InhExtOwner}> when 'true' ->
-                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@value')
                 <_InhSlow> when 'true' ->
-                    case call 'beamtalk_extensions':'lookup'('Snapshot', Selector) of
-                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                            apply ExtFun(Args, Self)
-                        <'not_found'> when 'true' ->
-                            call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)
-                    end
+                    call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)
+            end
             end
     end
 
@@ -113,21 +108,13 @@ call 'maps':'get'('eventId', Self)
 'has_method'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'eventId', 'withEventId:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('Snapshot', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'bt@stdlib@value':'has_method'(Selector)
-            end
+        <'false'> when 'true' -> call 'bt@stdlib@value':'has_method'(Selector)
     end
 
 'has_method_local'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'eventId', 'withEventId:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('Snapshot', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> 'false'
-            end
+        <'false'> when 'true' -> 'false'
     end
 
 
@@ -158,7 +145,6 @@ call 'maps':'get'('eventId', Self)
       'package' => 'none',
       'kind' => 'value',
       'fields' => ['eventId'],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'true',
@@ -170,7 +156,6 @@ call 'maps':'get'('eventId', Self)
       'field_types' => ~{'eventId' => 'Integer'}~,
       'field_has_default' => ~{'eventId' => 'true'}~,
       'field_kinds' => ~{'eventId' => 'eager'}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'eventId' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withEventId:' => ~{'arity' => 1, 'param_types' => ['Integer'], 'return_type' => 'Self', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['Integer'], 'return_type' => 'Snapshot', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
@@ -209,7 +194,6 @@ call 'maps':'get'('eventId', Self)
       'package' => 'none',
       'kind' => 'value',
       'fields' => [],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'true',
@@ -221,7 +205,6 @@ call 'maps':'get'('eventId', Self)
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'simpleAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'parametricAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => {'generic', 'Result', ['Integer', 'Error']}, 'is_sealed' => 'false', 'visibility' => 'public'}~, 'unionAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
@@ -250,7 +233,6 @@ call 'maps':'get'('eventId', Self)
       'package' => 'none',
       'kind' => 'value',
       'fields' => ['eventId'],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'true',
@@ -262,7 +244,6 @@ call 'maps':'get'('eventId', Self)
       'field_types' => ~{'eventId' => 'Integer'}~,
       'field_has_default' => ~{'eventId' => 'true'}~,
       'field_kinds' => ~{'eventId' => 'eager'}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'eventId' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withEventId:' => ~{'arity' => 1, 'param_types' => ['Integer'], 'return_type' => 'Self', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['Integer'], 'return_type' => 'Snapshot', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,

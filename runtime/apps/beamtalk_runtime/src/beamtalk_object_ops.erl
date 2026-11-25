@@ -325,7 +325,7 @@ Object protocol every class object shares.
 That generic-protocol answer used to be the *whole* answer for a
 class-object receiver, so `SomeClass respondsTo: #aClassSpecificSelector`
 was always `false` even when `SomeClass` had a matching local/inherited
-class method or class-side extension (ADR 0066/0084). Delegates to
+class method (ADR 0084). Delegates to
 `beamtalk_primitive:class_responds_to/2` — the same helper the compiled
 `respondsTo:` intrinsic itself calls (`beamtalk_primitive:responds_to/2`) —
 so this reflection-table path (reached via `perform:`/`perform:withArguments:`,

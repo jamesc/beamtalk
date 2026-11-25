@@ -7,12 +7,9 @@
 -moduledoc """
 The structured errors class-variable accesses raise (ADR 0124 §1, ADR 0130 §5).
 
-A leaf below both `beamtalk_class_vars` (the in-process accesses) and
-`beamtalk_object_class` (the class gen_server's `get_class_var`), so each error
-kind's message and hint have one source. `beamtalk_object_class` does call
-`beamtalk_class_vars:check_declared/2` (the shared declared-set rule), but only
-downward; the access leaf never calls the class gen_server, so this leaf is
-where the errors both build their values from.
+A leaf below `beamtalk_class_vars` (the in-process accesses), so each error
+kind's message and hint have one source. The class gen_server's
+`get_class_var`, its other caller, was removed by ADR 0153 (BT-5160).
 """.
 
 -include("beamtalk.hrl").
@@ -36,11 +33,8 @@ uninitialized_hint(Class, Name) ->
     ).
 
 -doc """
-Build (but do not raise) the `uninitialized_state_error` the class gen_server's
-`get_class_var` replies with for an unassigned declared-`late` class variable
-(selector `fieldAt:`). It only builds the value: that `handle_call` clause has
-no `try` wrapper, so a raise there would crash the class gen_server instead of
-answering the caller with `{error, Error}`. No declared-type metadata exists for
+Build (but do not raise) the `uninitialized_state_error` for an unassigned
+declared-`late` class variable (selector `fieldAt:`). No declared-type metadata exists for
 class variables (`__beamtalk_meta/0` carries no `class_field_types`), so the
 hint names the variable without a `(:: Type)` suffix.
 """.
@@ -125,9 +119,7 @@ raise_unreachable(Class, Name, Mode) ->
     beamtalk_error:raise(beamtalk_error:with_hint(Error2, Hint)).
 
 -doc """
-Build (but do not raise) the `undeclared_class_variable` error, for the class
-gen_server's `get_class_var`, which must reply `{error, Error}` rather than
-raise (see `uninitialized_error/2`).
+Build (but do not raise) the `undeclared_class_variable` error.
 """.
 -spec undeclared_error(atom(), atom()) -> #beamtalk_error{}.
 undeclared_error(Class, Name) ->

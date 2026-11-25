@@ -221,11 +221,7 @@ Result tryDo: [1 / 0]                           // => Result error: <RuntimeErro
 """.
 -spec tryDo(function()) -> t() | no_return().
 tryDo(Block) when is_function(Block, 0) ->
-    %% ADR 0130 §4: a catch boundary around a Beamtalk block. `protect/1` restores
-    %% the class-variable map on an error before we wrap it (writes made before
-    %% entering the block are kept; `^` passes through untouched).
-    %% bt-catcher-audit: converted - the block runs under protect/1, which restores on error
-    try beamtalk_class_vars:protect(Block) of
+    try Block() of
         Value ->
             from_tagged_tuple({ok, Value})
     catch
@@ -262,16 +258,15 @@ block literal that writes outer locals. Codegen calls this instead of
 `tryDo/1` when the argument to `tryDo:` is such a literal, and treats the
 `{Result, StateAcc}` answer as a local-threading construct tuple.
 
-It is the same catch boundary as `tryDo/1` — `protect/1` restores the
-class-variable map on a raise, `^` passes through, the exception is wrapped by
-`ensure_wrapped/3` — so the Tier 1 and Tier 2 paths share one implementation of
+It is the same catch boundary as `tryDo/1` — `^` passes through, the exception
+is wrapped by `ensure_wrapped/3` — so the Tier 1 and Tier 2 paths share one implementation of
 it rather than a copy across the Rust/Erlang line.
 
 - On success the answer is `{Result ok: Value, StateAcc1}`: the block's local
   writes are kept.
 - On a raise the answer is `{Result error: Exception, StateAcc}` with the
-  **entry** `StateAcc`: the block's local writes are discarded, exactly as its
-  class-variable writes are (`protect/1`) and as `on:do:` does.
+  **entry** `StateAcc`: the block's local writes are discarded, as `on:do:`
+  does.
 
 ## Examples (Erlang)
 ```erlang
@@ -281,8 +276,7 @@ it rather than a copy across the Rust/Erlang line.
 """.
 -spec tryDo(fun((map()) -> {term(), map()}), map()) -> {t(), map()}.
 tryDo(Block, StateAcc) when is_function(Block, 1) ->
-    %% bt-catcher-audit: converted - the block runs under protect/1, which restores on error
-    try beamtalk_class_vars:protect(fun() -> Block(StateAcc) end) of
+    try Block(StateAcc) of
         {Value, StateAcc1} ->
             {from_tagged_tuple({ok, Value}), StateAcc1}
     catch
