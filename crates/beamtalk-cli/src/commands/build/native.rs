@@ -638,7 +638,7 @@ pub(crate) fn rebar3_tool_command() -> Result<std::process::Command> {
 
 /// Appended to a failed rebar3 run: the inner tool's error never mentions
 /// that the environment was restricted (BT-5103).
-fn rebar3_restricted_env_hint() -> &'static str {
+pub(crate) fn rebar3_restricted_env_hint() -> &'static str {
     "\nNote: rebar3 ran with a restricted environment (only an allowlist of variables is \
      passed; secrets and unlisted toolchain settings are withheld). If a build tool \
      could not find its toolchain or credentials, run with `-v` to see the variable \

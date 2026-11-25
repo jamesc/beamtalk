@@ -99,7 +99,10 @@ fn build_erlfmt(tool_dir: &Utf8Path) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        miette::bail!("rebar3 compile failed: {stderr}");
+        miette::bail!(
+            "rebar3 compile failed: {stderr}{}",
+            crate::commands::build::native::rebar3_restricted_env_hint()
+        );
     }
 
     let ebin_dir = tool_dir.join(ERLFMT_EBIN_REL);

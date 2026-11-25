@@ -154,7 +154,10 @@ fn ensure_runtime_built(
             .map_err(|e| miette!("Failed to build runtime: {e}"))?;
 
         if !status.success() {
-            return Err(miette!("Failed to build Beamtalk runtime"));
+            return Err(miette!(
+                "Failed to build Beamtalk runtime{}",
+                crate::commands::build::native::rebar3_restricted_env_hint()
+            ));
         }
     }
     Ok(())
