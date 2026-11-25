@@ -201,9 +201,9 @@ pub(crate) fn resolve_and_validate_dependencies(
                 if !manifest_path.exists() {
                     return Ok(acc);
                 }
-                let m = manifest::parse_manifest_full(&manifest_path).wrap_err_with(|| {
-                    format!("Failed to parse dependency manifest at {manifest_path}")
-                })?;
+                let m = manifest::parse_dependency_manifest_full(&manifest_path).wrap_err_with(
+                    || format!("Failed to parse dependency manifest at {manifest_path}"),
+                )?;
                 Ok(acc || !m.native_dependencies.is_empty())
             })?;
 
