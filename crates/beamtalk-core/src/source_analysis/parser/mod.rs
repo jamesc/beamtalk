@@ -86,9 +86,9 @@ mod tests;
 
 // The integer-literal reader, shared with the formatter (BT-5183), which
 // checks that a recorded number spelling reads back as the printed value.
-pub(crate) use expressions::parse_integer_literal;
 #[cfg(test)]
 use expressions::parse_integer;
+pub(crate) use expressions::parse_integer_literal;
 
 // ============================================================================
 // Pratt Parsing for Binary Operator Precedence

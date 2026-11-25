@@ -42,7 +42,9 @@ fn classes_after_an_unterminated_string_are_still_indexed() {
     assert!(
         diagnostics
             .iter()
-            .any(|m| m.starts_with("unterminated string literal starting at line 2")),
+            // The missing quote on line 2 pairs with the first quote on
+            // line 3, so the string left open is the one line 3 opens.
+            .any(|m| m.starts_with("unterminated string literal starting at line 3, column 14")),
         "{diagnostics:?}"
     );
     assert!(
