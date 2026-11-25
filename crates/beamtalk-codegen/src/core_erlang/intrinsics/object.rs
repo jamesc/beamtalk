@@ -1371,10 +1371,6 @@ impl CoreErlangGenerator {
     }
 
     /// `fieldAt:put:` — write an instance variable by name.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "fieldAt:put: requires verbose type guards for actor vs primitive dispatch"
-    )]
     fn object_field_at_put(
         &mut self,
         receiver: &Expression,
