@@ -665,3 +665,111 @@ fn dependency_manifest_still_reports_real_errors() {
     .unwrap();
     assert!(parse_dependency_manifest_full(&path).is_err());
 }
+
+/// BT-5186: leniency stops at dependency specs — an unknown key inside one
+/// `[dependencies]` / `[native.dependencies]` / `[native.overrides]` entry
+/// decides what is fetched or how it compiles, so it stays an error.
+#[test]
+fn dependency_manifest_rejects_unknown_keys_inside_dependency_specs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = camino::Utf8PathBuf::from_path_buf(dir.path().join("beamtalk.toml")).unwrap();
+    for spec in [
+        "[dependencies]\nother = { path = \"../other\", future_spec_key = 1 }\n",
+        "[native.dependencies]\ngun = { git = \"https://example.com/gun.git\", tag = \"v1\", future_spec_key = 1 }\n",
+        "[native.overrides]\ngun = { erl_opts = [\"debug_info\"], future_spec_key = 1 }\n",
+    ] {
+        std::fs::write(
+            &path,
+            format!("[package]\nname = \"dep\"\nversion = \"0.1.0\"\n\n{spec}"),
+        )
+        .unwrap();
+        let err = parse_dependency_manifest_full(&path).expect_err(spec);
+        assert!(
+            format!("{err:?}").contains("future_spec_key"),
+            "error must name the key for {spec}: {err:?}"
+        );
+    }
+}
+
+/// BT-5186: `[native]` itself is a closed table: strict in the project's own
+/// manifest (a typo such as `[native.dependancies]` used to be silently
+/// ignored), dropped with a warning in a dependency's.
+#[test]
+fn unknown_native_subtable_is_strict_for_the_project_and_lenient_for_a_dependency() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = camino::Utf8PathBuf::from_path_buf(dir.path().join("beamtalk.toml")).unwrap();
+    std::fs::write(
+        &path,
+        "[package]\nname = \"dep\"\nversion = \"0.1.0\"\n\n[native.dependancies]\ngun = \"2.0.0\"\n",
+    )
+    .unwrap();
+    let err = parse_manifest_full(&path).unwrap_err();
+    assert!(format!("{err:?}").contains("dependancies"), "{err:?}");
+    let parsed = parse_dependency_manifest_full(&path).unwrap();
+    assert!(parsed.native_dependencies.is_empty());
+}
+
+#[test]
+fn unknown_key_warning_is_first_only_per_file_and_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = camino::Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+    let path = root.join("beamtalk.toml");
+    std::fs::write(&path, "").unwrap();
+    assert!(first_unknown_key_warning(&path, "k"));
+    assert!(!first_unknown_key_warning(&path, "k"));
+    // Another spelling of the same file is the same dependency.
+    assert!(!first_unknown_key_warning(
+        &root.join(".").join("beamtalk.toml"),
+        "k"
+    ));
+    assert!(first_unknown_key_warning(&path, "other"));
+}
+
+/// An unknown key inside an inline table cannot be removed alone; dropping
+/// its line would silently drop the table's known keys too (here, `gun`).
+#[test]
+fn dependency_manifest_rejects_unknown_key_inside_an_inline_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = camino::Utf8PathBuf::from_path_buf(dir.path().join("beamtalk.toml")).unwrap();
+    std::fs::write(
+        &path,
+        "native = { dependencies = { gun = \"2.0.0\" }, future_opt = true }\n\n\
+         [package]\nname = \"dep\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let err = parse_dependency_manifest_full(&path).unwrap_err();
+    assert!(format!("{err:?}").contains("future_opt"), "{err:?}");
+}
+
+/// `[release]` and `[diagnostics]` never affect a dependent, so a dependency
+/// whose sections use keys this toolchain does not know still parses.
+#[test]
+fn dependency_manifest_tolerates_unknown_release_and_diagnostics_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = camino::Utf8PathBuf::from_path_buf(dir.path().join("beamtalk.toml")).unwrap();
+    std::fs::write(
+        &path,
+        "[package]\nname = \"dep\"\nversion = \"0.1.0\"\n\n\
+         [release]\nfuture-release-key = true\n\n\
+         [diagnostics]\nfuture-category = \"warning\"\n",
+    )
+    .unwrap();
+    assert!(parse_manifest_full(&path).is_err());
+    let parsed = parse_dependency_manifest_full(&path).unwrap();
+    assert!(parsed.diagnostics.is_empty());
+}
+
+/// A dependency's own compile reads its manifest leniently too, so it keeps
+/// its `pkg@Class` qualifier checks.
+#[test]
+fn dependency_checker_scope_reads_the_manifest_leniently() {
+    let dir = TempDir::new().unwrap();
+    let root = write_manifest(
+        &dir,
+        "[package]\nname = \"dep\"\nversion = \"0.1.0\"\nfuture_package_key = 1\n",
+    );
+    assert_eq!(package_checker_scope(Some(&root)).known_packages, None);
+    let scope = dependency_checker_scope(&root);
+    assert_eq!(scope.package_name.as_deref(), Some("dep"));
+    assert!(scope.known_packages.is_some());
+}
