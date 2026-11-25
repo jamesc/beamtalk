@@ -65,9 +65,17 @@ fn class_side_reflection_in_an_actor_class_method_is_a_plain_send() {
                class probeClear => self clearField: #missing\n";
     let code = codegen(src);
     for selector in ["fieldAt:", "fieldAt:put:", "hasField:", "clearField:"] {
-        let send = "'beamtalk_message_dispatch':'send'(";
-        let atom = format!("'{selector}', [");
-        assert_has(selector, &code, &[send, atom.as_str()]);
+        // The receiver is the class method's `ClassSelf`, possibly rebound to
+        // a sequencing temp first.
+        let send = regex::Regex::new(&format!(
+            r"'beamtalk_message_dispatch':'send'\((ClassSelf|_Receiver@\d+), '{}', \[",
+            regex::escape(selector)
+        ))
+        .expect("valid regex");
+        assert!(
+            send.is_match(&code),
+            "[{selector}] expected a dispatch send of '{selector}' to the class. Got:\n{code}"
+        );
     }
     assert_lacks(
         "class-side reflection",
