@@ -783,12 +783,15 @@ fn configure_unix_child(cmd: &mut Command) {
     }
 }
 
-/// Retire every reaped entry holding `pgid`: its group emptied and the number
-/// has been recycled into a new child's group, so the entry must never
-/// signal it. Called with the children lock held.
+/// Retire every entry holding `pgid`, the PID (and so group) of a child just
+/// spawned. The kernel never hands out a PID that is still a live process, a
+/// zombie or a live group's ID, so such an entry is stale, reaped or not (its
+/// reaper may not have marked it yet): its group emptied and the number now
+/// names the new child's. It must never signal it. Called with the children
+/// lock held.
 #[cfg(unix)]
 fn forget_recycled(map: &HashMap<u32, ChildEntry>, pgid: libc::pid_t, port: &Port) {
-    for stale in map.values().filter(|e| e.pgid == pgid && e.gate.reaped()) {
+    for stale in map.values().filter(|e| e.pgid == pgid) {
         port.forget_pgid(pgid, &stale.gate);
     }
 }
@@ -1902,13 +1905,13 @@ mod tests {
         };
         let mut map = HashMap::new();
         map.insert(1, entry(true, pgid)); // stale: reaped, number recycled
-        map.insert(2, entry(false, pgid)); // not reaped: still its own
+        map.insert(2, entry(false, pgid)); // reaper not done yet: stale all the same
         map.insert(3, entry(true, pgid + 1)); // a different group
         assert_eq!(map[&1].signallable_pgid(), Some(pgid), "group exists");
         forget_recycled(&map, pgid, &port);
         assert_eq!(map[&1].signallable_pgid(), None, "retired: not ours");
         assert!(map[&1].gate.forgotten.load(Ordering::Acquire));
-        assert!(!map[&2].gate.forgotten.load(Ordering::Acquire));
+        assert!(map[&2].gate.forgotten.load(Ordering::Acquire));
         assert!(!map[&3].gate.forgotten.load(Ordering::Acquire));
         live.kill().unwrap();
         live.wait().unwrap();
