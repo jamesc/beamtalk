@@ -1,0 +1,34 @@
+# cargo-audit configuration (picked up by `cargo audit --file <lock>` run from the
+# repo root, see scripts/ci/advisory-scan.sh). Each entry is a *reviewed* exception;
+# add new ones only with the reason and where the crate comes from (BT-5253).
+# Re-check them when tauri, wry/gtk, rmcp or zbus are bumped.
+
+[advisories]
+ignore = [
+    # --- Unmaintained, no fixed version exists ---------------------------------
+    # chrono is unmaintained. Main lockfile: via schemars (chrono04 feature) <- rmcp
+    # <- beamtalk-mcp. Desktop lockfile: via serde_with (tauri stack). The
+    # local-time handling is not used on untrusted input by us.
+    "RUSTSEC-2026-0543",
+    # proc-macro-error: build-time proc-macro only. Desktop: via glib-macros 0.18
+    # (GTK3 bindings pinned by tauri/wry/tao). Gone when tauri leaves gtk3.
+    "RUSTSEC-2024-0370",
+    # unic-* 0.9: desktop only, via urlpattern <- tauri-utils (tauri's own dep).
+    "RUSTSEC-2025-0081", # unic-char-property
+    "RUSTSEC-2025-0075", # unic-char-range
+    "RUSTSEC-2025-0080", # unic-common
+    "RUSTSEC-2025-0100", # unic-ucd-ident
+    "RUSTSEC-2025-0098", # unic-ucd-version
+    # zbus_names / zvariant / zvariant_derive: desktop only, via zbus 5 <-
+    # tauri-plugin-single-instance. Upstream has to move to the successor crates.
+    "RUSTSEC-2026-0371", # zbus_names
+    "RUSTSEC-2026-0370", # zvariant
+    "RUSTSEC-2026-0372", # zvariant_derive
+
+    # --- Unsound, fix needs a tauri major --------------------------------------
+    # glib 0.18.5: unsoundness in VariantStrIter. Patched in glib >= 0.20, but the
+    # whole GTK3 stack (gtk/gdk/atk/cairo 0.18, wry, tao, muda) is pinned to 0.18
+    # by tauri 2.x; it cannot be bumped without a tauri release that drops gtk3.
+    # We do not call glib::VariantStrIter ourselves.
+    "RUSTSEC-2024-0429",
+]
