@@ -192,6 +192,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
 pub(super) fn unparse_literal(lit: &Literal) -> Document<'static> {
     match lit {
         Literal::Integer(n) => leaf::int_lit(*n),
+        Literal::BigInteger(digits) => leaf::big_int_lit(digits),
         Literal::Float(f) => leaf::float_lit(*f),
         Literal::String(s) => {
             // The lexer unescapes doubled delimiters ("" → ") in the AST.

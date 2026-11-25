@@ -55,9 +55,9 @@
   },
   {
     "kind": "character",
-    "source": "$\\(",
+    "source": "$\\\"",
     "expected_end": 3,
-    "why": "backslash-escape form for an otherwise-unspecial payload character"
+    "why": "backslash-escape form for the quote, which must not be read as a string delimiter"
   },
   {
     "kind": "character",

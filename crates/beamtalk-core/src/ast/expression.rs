@@ -639,6 +639,13 @@ pub enum Literal {
     /// Examples: `42`, `16rFF`, `2r1010`
     Integer(i64),
 
+    /// An integer literal too large for `i64` (BT-5182). Holds the value's
+    /// canonical decimal digits, with a leading `-` when negative; the BEAM
+    /// represents it as a bignum.
+    ///
+    /// Example: `100000000000000000000`, `16rFFFFFFFFFFFFFFFFFF`
+    BigInteger(EcoString),
+
     /// A floating-point literal.
     ///
     /// Examples: `3.14`, `1.5e10`, `2.0e-5`
@@ -664,6 +671,40 @@ pub enum Literal {
     ///
     /// Example: `$a`, `$\n`
     Character(char),
+}
+
+impl Literal {
+    /// The integer literal whose value is `decimal`: canonical decimal digits
+    /// (no leading zeros) with an optional leading `-`. A value that fits
+    /// `i64` is [`Literal::Integer`], any other [`Literal::BigInteger`], so
+    /// each integer has exactly one representation (BT-5182).
+    #[must_use]
+    pub fn integer_from_decimal(decimal: &str) -> Self {
+        decimal.parse::<i64>().map_or_else(
+            |_| Self::BigInteger(EcoString::from(decimal)),
+            Self::Integer,
+        )
+    }
+
+    /// The literal with its sign flipped, for a `-` written before a numeric
+    /// literal (negative patterns). An integer that overflows `i64` on
+    /// negation (`- -9223372036854775808`) becomes a [`Literal::BigInteger`];
+    /// a non-numeric literal is returned unchanged.
+    #[must_use]
+    pub fn negated(self) -> Self {
+        match self {
+            Self::Integer(n) => n.checked_neg().map_or_else(
+                || Self::integer_from_decimal(&n.unsigned_abs().to_string()),
+                Self::Integer,
+            ),
+            Self::BigInteger(digits) => match digits.strip_prefix('-') {
+                Some(magnitude) => Self::integer_from_decimal(magnitude),
+                None => Self::integer_from_decimal(&format!("-{digits}")),
+            },
+            Self::Float(f) => Self::Float(-f),
+            other => other,
+        }
+    }
 }
 
 /// A segment of an interpolated string (ADR 0023).

@@ -49,6 +49,13 @@ pub(super) fn int_lit(value: i64) -> Document<'static> {
     Document::Owned(value.to_string())
 }
 
+/// An integer literal too large for `i64` (BT-5182), from the canonical
+/// decimal digits `Literal::BigInteger` holds (an optional `-` then digits).
+#[must_use]
+pub(super) fn big_int_lit(digits: &str) -> Document<'static> {
+    Document::Owned(digits.to_string())
+}
+
 /// A non-negative integer rendered in decimal — e.g. a binary-segment unit size
 /// (`:8`). Distinct from [`int_lit`] only in the source type it accepts.
 #[must_use]

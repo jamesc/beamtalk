@@ -679,13 +679,13 @@ parse_binary_hops([Token | Rest]) ->
 The class a literal receiver token completes against, or `undefined`.
 
 A token is an `Integer` when it is one Integer token of the Rust lexer
-(`lex_number` / `lex_number_with_prefix`): digits, optionally `r` and
-alphanumerics (radix `16rFF`, `2r1010`), or a `-` directly followed by digits
-(`-5`). The sign is part of the token whatever precedes it, which is why only
-a `-` glued to its digit counts here: `a - 5 ab` ends in the token `5`, a
-binary send, and `a -5 ab` in the literal `-5`. A negative radix has no
-lexer form (`-16` then `rFF`), and floats and exponent forms (`3.14`, `-1.5`,
-`1e10`, `1e-3`) are not classified. A token that starts with `"` is a
+(`lex_number` / `lex_number_from`): digits, optionally `r` and
+alphanumerics (radix `16rFF`, `2r1010`), optionally after a `-` directly
+followed by the digits (`-5`, `-16rFF`, BT-5182). The sign is part of the
+token whatever precedes it, which is why only a `-` glued to its digit counts
+here: `a - 5 ab` ends in the token `5`, a binary send, and `a -5 ab` in the
+literal `-5`. Floats and exponent forms (`3.14`, `-1.5`, `1e10`, `1e-3`) are
+not classified. A token that starts with `"` is a
 `String`; anything else is not a literal this rule classifies. Narrower than
 the Rust lexer where completion runs on half-typed lines, and pinned to it by
 the shared corpora `test/fixtures/completion_receiver_literal_corpus.json`
@@ -695,11 +695,9 @@ and `test/fixtures/completion_negative_literal_context_corpus.json`, whose
 -spec receiver_literal_class(binary()) -> 'Integer' | 'String' | undefined.
 receiver_literal_class(<<$", _/binary>>) ->
     'String';
-receiver_literal_class(<<$-, Digits/binary>>) ->
-    case Digits =/= <<>> andalso all_digits(Digits) of
-        true -> 'Integer';
-        false -> undefined
-    end;
+receiver_literal_class(<<$-, H, _/binary>> = Receiver) when H >= $0, H =< $9 ->
+    <<$-, Unsigned/binary>> = Receiver,
+    receiver_literal_class(Unsigned);
 receiver_literal_class(<<H, _/binary>> = Receiver) when H >= $0, H =< $9 ->
     {_Digits, Rest} = lists:splitwith(fun is_digit/1, binary_to_list(Receiver)),
     case Rest of
@@ -716,10 +714,6 @@ radix_class(Radix) ->
         true -> 'Integer';
         false -> undefined
     end.
-
--spec all_digits(binary()) -> boolean().
-all_digits(Bin) ->
-    lists:all(fun is_digit/1, binary_to_list(Bin)).
 
 -spec is_digit(char()) -> boolean().
 is_digit(C) -> C >= $0 andalso C =< $9.
@@ -987,11 +981,11 @@ skip_character_literal([$$]) ->
 
 -doc """
 Skips one `//...` line comment starting at the opening `//`, returning the
-characters from (and including) the terminating `\n`, or `[]` if the
-comment runs to end of input.
+characters from (and including) the terminating `\n` (or the `\r\n` of a
+CRLF line ending), or `[]` if the comment runs to end of input.
 
 Mirrors `lex_line_comment/0` (`source_analysis/lexer.rs`): the comment body
-is everything up to but not including the next `\n`, consumed atomically
+is everything up to but not including the next `\n` or `\r\n`, consumed atomically
 so a `.`, bracket, or `"` inside it is never read as real code. The `\n`
 itself is left in `Rest` so the caller's own newline-boundary check
 (a caller's own newline-boundary check) still applies to
@@ -1012,6 +1006,8 @@ skip_line_comment([$/, $/ | Rest]) ->
 skip_line_comment_body([]) ->
     [];
 skip_line_comment_body([$\n | _] = Chars) ->
+    Chars;
+skip_line_comment_body([$\r, $\n | _] = Chars) ->
     Chars;
 skip_line_comment_body([_ | Rest]) ->
     skip_line_comment_body(Rest).

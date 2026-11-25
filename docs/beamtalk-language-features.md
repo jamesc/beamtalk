@@ -79,6 +79,9 @@ emoji := "Status: {status} ✓"
 // A backslash before anything else is a compile error pointing at the
 // backslash: "\q" → unknown escape '\q' … (use '\\' for a literal backslash).
 // Symbol literals (#'…') have no backslash handling: #'a\nb' is backslash-n.
+// Character literals share the same escape table (BT-5182): $\n, $\t, $\r,
+// $\\, $\", $\0 (NUL, as "\0" is), $\{ and $\}. Any other $\x is the same
+// unknown-escape compile error; write the character itself instead ($q, $').
 quote := """"                    // 1-char string containing "
 dialog := "She said ""hello"""  // → She said "hello"
 crlf := "\r\n"                   // 1 grapheme — byte-identical to (Character value: 13) asString ++ (Character value: 10) asString
@@ -86,6 +89,8 @@ crlf := "\r\n"                   // 1 grapheme — byte-identical to (Character 
 // In Erlang, strings are tagged tuples holding UTF-8 binaries:
 //   "hello"  →  {beamtalk_string, <<"hello">>}
 ```
+
+**Source text and literal limits (BT-5182).** A source file may start with a UTF-8 byte-order mark, which is ignored, and may use CRLF line endings; the `\r` is never part of a comment's text. A string literal may span lines, but not a line that starts a class or protocol definition (`Object subclass: Foo`, `Protocol define: P`, at column 1). A string with no closing `"` is reported as `unterminated string literal starting at line L, column C`, covering only the line it opens on; parsing resumes on the next line, so the definitions after a missing quote still compile and still show in the editor. An unterminated `/* */` comment ends before the next class or protocol definition. Integer literals have no size limit: `100000000000000000000` and `16rFFFFFFFFFFFFFFFFFF` are BEAM bignums, and a `-` written directly before a radix literal is part of it (`-16rFF` is -255).
 
 ### Character Encoding
 

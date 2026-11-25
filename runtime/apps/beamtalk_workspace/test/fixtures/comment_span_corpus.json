@@ -34,5 +34,11 @@
     "source": "/* { */",
     "expected_end": 7,
     "why": "an opening brace immediately inside a block comment must not bump nesting depth"
+  },
+  {
+    "kind": "line_comment",
+    "source": "// note\r\nbeta := 2",
+    "expected_end": 7,
+    "why": "a line comment in a CRLF file ends before the \\r\\n line ending; the \\r is not part of the comment (BT-5182)"
   }
 ]
