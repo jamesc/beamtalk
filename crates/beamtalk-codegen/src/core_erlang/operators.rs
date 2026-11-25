@@ -13,6 +13,7 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf::{atom, var};
 use beamtalk_core::ast::Expression;
+use beamtalk_core::semantic_analysis::number_coercion::{OperatorFamily, reflected_operator};
 use beamtalk_core::source_analysis::Span;
 
 /// Which runtime guard a dispatchable binary operator emits
@@ -89,7 +90,22 @@ pub(in crate::core_erlang) fn is_structurally_lowered_binary(op: &str) -> bool {
 /// Whether `op` is an ordering comparison (`< > <= >=`): a dispatchable
 /// message whose builtin is the Erlang comparison BIF.
 pub(in crate::core_erlang) fn is_ordering_comparison(op: &str) -> bool {
-    matches!(op, "<" | ">" | "<=" | ">=")
+    OperatorFamily::of(op) == Some(OperatorFamily::Ordering)
+}
+
+/// ADR 0116 § Addendum: the `beamtalk_message_dispatch` function a
+/// number-on-the-left fallback of `family` calls.
+fn number_fallback_entry_point(family: OperatorFamily) -> &'static str {
+    match family {
+        OperatorFamily::Arithmetic => "send_number_coercion",
+        OperatorFamily::Ordering => "send_number_comparison",
+    }
+}
+
+/// Whether `op` is a coercing arithmetic operator (`+ - * /`, ADR 0116):
+/// `%` and `**` are not.
+pub(in crate::core_erlang) fn is_arithmetic_operator(op: &str) -> bool {
+    OperatorFamily::of(op) == Some(OperatorFamily::Arithmetic)
 }
 
 /// What the compiler knows about a comparison receiver's kind
@@ -206,7 +222,7 @@ impl CoreErlangGenerator {
         //     the same outcome, one hop slower) — dispatches, so
         //     it reaches its own `<` or raises `does_not_understand` (BT-3924).
         // `%`/`**`/equality are not message-dispatched here.
-        let is_arithmetic = matches!(op, "+" | "-" | "*" | "/");
+        let is_arithmetic = is_arithmetic_operator(op);
         let guard = self.operator_guard(op, left);
         self.record_comparison_lowering(left, guard.is_none());
 
@@ -332,7 +348,7 @@ impl CoreErlangGenerator {
         op: &str,
         left: &Expression,
     ) -> Option<OperatorGuard> {
-        let is_arithmetic = matches!(op, "+" | "-" | "*" | "/");
+        let is_arithmetic = is_arithmetic_operator(op);
         let is_comparison = is_ordering_comparison(op);
         if is_arithmetic && !self.receiver_is_statically_numeric(left) {
             Some(OperatorGuard::Arithmetic)
@@ -577,23 +593,6 @@ struct GuardedOpParts {
 }
 
 impl CoreErlangGenerator {
-    /// ADR 0116: maps an arithmetic operator to its number-on-the-left
-    /// reflected-method selector (`n <op>FromNumber: self`, called on the
-    /// *right* operand with the *left* operand as the argument — see the
-    /// ADR's § Reflected method protocol for why the operand order is
-    /// reversed). Callers only reach this for `+ - * /`, already validated by
-    /// `is_arithmetic` in `generate_binary_op`; any other operator is a
-    /// caller bug, not a runtime possibility.
-    fn coercion_selector(op: &str) -> &'static str {
-        match op {
-            "+" => "plusFromNumber:",
-            "-" => "minusFromNumber:",
-            "*" => "timesFromNumber:",
-            "/" => "divFromNumber:",
-            _ => unreachable!("coercion_selector called for non-arithmetic operator: {op}"),
-        }
-    }
-
     /// ADR 0116: builds the number-on-the-left coercion `try`/`catch`
     /// around a single arithmetic BIF call, for the residual case where the
     /// right operand's type is genuinely unknown at compile time.
@@ -665,7 +664,15 @@ impl CoreErlangGenerator {
         left_doc: Document<'static>,
         right_doc: Document<'static>,
     ) -> Document<'static> {
-        let selector = Self::coercion_selector(op);
+        // ADR 0116: the shared reflected-selector table. Callers only reach
+        // this for `+ - * /` (`is_arithmetic_operator` in `generate_binary_op`
+        // and `operator_guard`); any other operator is a caller bug.
+        let reflected = reflected_operator(op)
+            .filter(|r| r.family == OperatorFamily::Arithmetic)
+            .unwrap_or_else(|| {
+                unreachable!("number_coercion_try_catch called for non-arithmetic operator: {op}")
+            });
+        let selector = reflected.selector;
         let try_result_var = self.fresh_temp_var("BinCoerceTry");
         let type_var = self.fresh_temp_var("BinCoerceType");
         let error_var = self.fresh_temp_var("BinCoerceError");
@@ -686,7 +693,7 @@ impl CoreErlangGenerator {
         let coercion = docvec![
             form::call(
                 "beamtalk_message_dispatch",
-                "send_number_coercion",
+                number_fallback_entry_point(reflected.family),
                 [
                     right_doc.clone(),
                     atom(selector),
