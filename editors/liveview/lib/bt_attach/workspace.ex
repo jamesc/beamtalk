@@ -2377,7 +2377,11 @@ defmodule BtAttach.Workspace do
         # loser sees {:error, {:already_started, _}}, which is fine.
         # BT-5067: bind the distribution listener to loopback (ADR 0125/0126)
         # before it opens; the kernel reads this env at listener start.
-        :ok = :application.set_env(:kernel, :inet_dist_use_interface, {127, 0, 0, 1})
+        # BT-5127: unless the operator opted out with a non-loopback
+        # ERL_EPMD_ADDRESS (same rule as the Rust `loopback_dist_args/0`).
+        if loopback_dist?(System.get_env("ERL_EPMD_ADDRESS")) do
+          :ok = :application.set_env(:kernel, :inet_dist_use_interface, {127, 0, 0, 1})
+        end
 
         case :net_kernel.start(name, dist_start_options()) do
           {:ok, _pid} -> :ok
@@ -2387,6 +2391,20 @@ defmodule BtAttach.Workspace do
       else
         {:error, :epmd_absent}
       end
+    end
+  end
+
+  @doc """
+  Whether the distribution listener should be pinned to loopback, given the
+  operator's `ERL_EPMD_ADDRESS` (BT-5127). Unset, blank or `127.0.0.1` means
+  pin; any other value is a deliberate private-network opt-out. Mirrors
+  `beamtalk_workspace::loopback_dist_args/0` (Rust); the Elixir and Rust
+  rules are the same one-liner over `resolve_epmd_address`.
+  """
+  def loopback_dist?(epmd_address) do
+    case epmd_address && String.trim(epmd_address) do
+      v when v in [nil, "", "127.0.0.1"] -> true
+      _ -> false
     end
   end
 

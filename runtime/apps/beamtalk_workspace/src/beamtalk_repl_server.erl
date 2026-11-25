@@ -114,6 +114,9 @@ init(Config) ->
     Nonce = generate_nonce(),
     %% Session registry for interrupt routing.
     beamtalk_session_table:new(),
+    %% BT-5127: ranch stops counting a socket once it upgrades to a WebSocket,
+    %% so the handler counts its own connections against this table.
+    beamtalk_ws_conn_cap:new(),
     %% ADR 0020: Start cowboy WebSocket listener.
     %% Default: bind to 127.0.0.1 so only local processes can connect.
     %% --bind flag allows binding to other addresses.
@@ -129,8 +132,11 @@ init(Config) ->
         socket_opts => [{ip, BindAddr}, {port, Port}],
         num_acceptors => 10,
         %% BT-5066: bounded; connection slots are cheap but not free, and an
-        %% unauthenticated socket is dropped after the auth deadline.
-        max_connections => 256
+        %% unauthenticated socket is dropped after the auth deadline. This
+        %% only bounds sockets *until upgrade* (cowboy_websocket:takeover/7
+        %% removes them from ranch's count); `beamtalk_ws_conn_cap` bounds
+        %% live WebSockets (BT-5127).
+        max_connections => beamtalk_ws_conn_cap:limit()
     },
     ProtocolOpts = #{env => #{dispatch => Dispatch}},
     case cowboy:start_clear(?LISTENER_REF, TransportOpts, ProtocolOpts) of
