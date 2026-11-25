@@ -71,6 +71,12 @@ impl Default for FileWalker {
     }
 }
 
+/// Directories every source walk skips: VCS metadata, other toolchains'
+/// build output, and `_build` (which holds dependency checkouts; see
+/// [`FileWalker::source_files`]). The one list the presets below and the
+/// LSP's created-directory walk (BT-5188) share.
+pub const SKIPPED_SOURCE_DIRS: [&str; 4] = [".git", "target", "node_modules", BUILD_DIR_NAME];
+
 /// The directory name `beamtalk test` treats as holding fixtures: skipped when
 /// collecting test files ([`FileWalker::test_files`]) and named by stem rather
 /// than by path (`module_name_for_path`, BT-4868). The one spelling both use.
@@ -204,12 +210,9 @@ impl FileWalker {
     /// stamp, which `AliasRegistry::add_pre_loaded`'s identity check cannot
     /// recognise as the same physical declaration.
     pub fn source_files() -> Self {
-        Self::new().extensions(&["bt"]).exclude_dirs(&[
-            ".git",
-            "target",
-            "node_modules",
-            BUILD_DIR_NAME,
-        ])
+        Self::new()
+            .extensions(&["bt"])
+            .exclude_dirs(&SKIPPED_SOURCE_DIRS)
     }
 
     /// Preset for collecting `.bt` test files.
@@ -218,13 +221,9 @@ impl FileWalker {
     /// replaces rather than extends the excluded-dir set, so this repeats
     /// `source_files()`'s list explicitly rather than building on top of it.
     pub fn test_files() -> Self {
-        Self::new().extensions(&["bt"]).exclude_dirs(&[
-            ".git",
-            "target",
-            "node_modules",
-            BUILD_DIR_NAME,
-            FIXTURES_DIR_NAME,
-        ])
+        let mut skipped = SKIPPED_SOURCE_DIRS.to_vec();
+        skipped.push(FIXTURES_DIR_NAME);
+        Self::new().extensions(&["bt"]).exclude_dirs(&skipped)
     }
 
     /// Preset for collecting formattable files (`.bt` and `.btscript`),
@@ -257,7 +256,7 @@ impl FileWalker {
     pub fn preload_files(budget: usize) -> Self {
         Self::new()
             .extensions(&["bt"])
-            .exclude_dirs(&[".git", "target", "node_modules", BUILD_DIR_NAME])
+            .exclude_dirs(&SKIPPED_SOURCE_DIRS)
             .max_files(budget)
             .strict_errors(false)
     }

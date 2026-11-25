@@ -108,26 +108,9 @@ fn trailing_field_assignment_in_actor_infers_assigned_value_type() {
     }
 }
 
-/// A class-side method of a value type writes a class variable and answers
-/// the assigned value: unchanged.
-#[test]
-fn trailing_class_variable_assignment_infers_assigned_value_type() {
-    for last in ["self.m := 5", "(self.m := 5)"] {
-        let src = format!(
-            "Object subclass: ProbeClassSide\n  classState: m = 0\n  class bump =>\n    {last}\n"
-        );
-        let (types, _) = return_types_and_diags(&src);
-        assert_eq!(
-            return_type(&types, "ProbeClassSide", "bump", true),
-            Some(&InferredType::known("Integer")),
-            "`{last}`"
-        );
-    }
-}
-
 /// An instance-side extension on a value type lowers through the value-type
-/// body path, so it answers the receiver too; one on an actor target, or on
-/// the class side, answers the assigned value. (A send to the extension's
+/// body path, so it answers the receiver too; one on an actor target
+/// answers the assigned value. (A send to the extension's
 /// answer is not checked here: `ClassHierarchy::build` alone does not
 /// register extension selectors.)
 #[test]
@@ -148,16 +131,6 @@ fn trailing_field_assignment_in_extension_follows_extension_target_rule() {
             return_type(&types, "ProbeActor", "bump", false),
             Some(&InferredType::known("Integer")),
             "actor extension `{last}`"
-        );
-
-        let src = format!(
-            "Object subclass: ProbeClassSide\n  classState: m = 0\n\nProbeClassSide class >> bump => {last}\n"
-        );
-        let (types, _) = return_types_and_diags(&src);
-        assert_eq!(
-            return_type(&types, "ProbeClassSide", "bump", true),
-            Some(&InferredType::known("Integer")),
-            "class-side extension `{last}`"
         );
     }
 }

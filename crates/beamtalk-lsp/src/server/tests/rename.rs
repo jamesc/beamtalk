@@ -348,6 +348,13 @@ async fn rename_refuses_when_a_closed_file_changed_on_disk() {
         .expect_err("stale closed file must refuse, not edit at old offsets");
     assert!(err.message.contains("changed on disk"), "{}", err.message);
     assert!(err.message.contains("use.bt"), "{}", err.message);
+    // BT-5188: names what was being renamed and says to retry.
+    assert!(err.message.contains("Rename of Counter"), "{}", err.message);
+    assert!(
+        err.message.contains("run the rename again"),
+        "{}",
+        err.message
+    );
     // The index was refreshed from disk, so a retry plans against fresh text.
     assert_eq!(
         backend.service.lock_recover().file_source(&user).as_deref(),

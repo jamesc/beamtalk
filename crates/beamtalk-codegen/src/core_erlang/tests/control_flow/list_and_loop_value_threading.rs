@@ -239,33 +239,6 @@ fn test_value_type_field_write_in_last_position_conditional_is_threaded() {
 }
 
 #[test]
-fn test_class_var_write_in_conditional_nested_in_loop_compiles_and_writes_in_place() {
-    // The class-variable half of the parity pair (ADR 0130 §2): unlike a
-    // value-type field write, a class-var write inside an `ifTrue:` inside a
-    // `to:do:` is an in-place `put` that threads nothing, so it compiles
-    // wherever it sits. The value-type half below stays a clean rejection.
-    let code = codegen(concat!(
-        "Object subclass: CvCondInLoop\n",
-        "  classState: total = 0\n\n",
-        "  class computeTotal: flag =>\n",
-        "    seen := 0\n",
-        "    1 to: 3 do: [:i |\n",
-        "      flag ifTrue: [self.total := self.total + i]\n",
-        "      seen := seen + 1\n",
-        "    ]\n",
-        "    self.total\n",
-    ));
-    assert!(
-        code.contains("call 'erlang':'put'(_CVKey"),
-        "the write is an in-place put. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("ClassVars"),
-        "nothing about class variables is threaded through the loop. Got:\n{code}"
-    );
-}
-
-#[test]
 fn test_value_type_field_write_in_conditional_nested_in_loop_is_compile_error() {
     // The half this fixes — byte-for-byte the class-var fragment above,
     // with `classState:`/`class ` swapped for the `TestCase` value-type

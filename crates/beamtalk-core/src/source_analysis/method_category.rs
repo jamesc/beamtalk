@@ -303,13 +303,6 @@ pub fn categorize_methods(class: &ClassDefinition, source: &str) -> Vec<MethodCa
                 ClassMember::NonMethod,
             )
         })
-        .chain(class.class_variables.iter().map(|s| {
-            (
-                s.span,
-                s.comments.leading.as_slice(),
-                ClassMember::NonMethod,
-            )
-        }))
         .chain(class.methods.iter().map(|m| {
             (
                 m.span,
@@ -714,22 +707,6 @@ Object subclass: Counter
         assert_eq!(categories[1].name.as_deref(), Some("Beta"));
         assert_eq!(categories[1].methods.len(), 1);
         assert_eq!(categories[1].methods[0].selector, "bar");
-    }
-
-    #[test]
-    fn divider_above_a_class_variable_still_starts_a_new_category() {
-        let src = "\
-Object subclass: Counter
-  // === Shared state ===
-  classState: total :: Integer = 0
-
-  foo => 1
-";
-        let class = parse_class(src);
-        let categories = categorize_methods(&class, src);
-        assert_eq!(categories.len(), 1);
-        assert_eq!(categories[0].name.as_deref(), Some("Shared state"));
-        assert_eq!(categories[0].methods[0].selector, "foo");
     }
 
     #[test]

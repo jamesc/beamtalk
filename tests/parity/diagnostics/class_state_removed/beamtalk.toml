@@ -1,0 +1,12 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Diagnostic-parity fixture (ADR 0153): a removed `classState:` declaration.
+# Every surface should report the same compile error.
+
+[package]
+name = "class_state_removed"
+version = "0.1.0"
+description = "Removed classState parity fixture"
+
+[dependencies]

@@ -769,10 +769,6 @@ const FACADE_SOURCE: &str = "\
 sealed Object subclass: Facade
   class sealed osName -> String => \"linux\"
   class plain -> Integer => 1
-
-sealed Object subclass: Stateful
-  classState: count = 0
-  class sealed peek -> Integer => self.count
 ";
 
 /// Generates REPL Core Erlang for `expr_source` against a hierarchy built from
@@ -787,10 +783,7 @@ fn repl_code_with_facade_hierarchy(expr_source: &str) -> String {
         .iter()
         .map(|s| s.expression.clone())
         .collect();
-    let index = std::collections::HashMap::from([
-        ("Facade".to_string(), "bt@facade".to_string()),
-        ("Stateful".to_string(), "bt@stateful".to_string()),
-    ]);
+    let index = std::collections::HashMap::from([("Facade".to_string(), "bt@facade".to_string())]);
     beamtalk_repl::codegen::generate_repl_expressions_with_hierarchy(
         &exprs,
         "repl_direct_call",
@@ -824,13 +817,6 @@ fn repl_non_sealed_class_method_emits_guarded_direct_call() {
         "call 'beamtalk_class_shadow_flags':'static_call_target'({",
     );
     assert_has(&code, ", 'Facade class'}, 'Facade', ");
-}
-
-#[test]
-fn repl_class_with_class_state_still_emits_class_send() {
-    let code = repl_code_with_facade_hierarchy("Stateful peek");
-    assert_has(&code, "'class_send'");
-    assert_lacks(&code, "call 'bt@stateful':");
 }
 
 #[test]

@@ -462,7 +462,6 @@ mod value_type_fold_family_corpus;
 mod verifier_surfacing;
 mod while_condition_binding_corpus;
 mod while_condition_carrier_corpus;
-mod while_condition_class_method;
 
 #[test]
 fn erlc_rejected_rows_names_exactly_the_bad_rows() {

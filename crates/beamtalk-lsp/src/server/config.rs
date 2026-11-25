@@ -224,19 +224,26 @@ pub(in crate::server) fn dependency_src_dirs(root: &Path) -> Vec<PathBuf> {
         .map(|dep| dep.src.into_std_path_buf())
         .collect()
 }
+/// The directories [`collect_preload_files`] walks for `roots`: each root's
+/// `src/` and `test/`, and each dependency's source directory (path
+/// dependencies included). Reads each root's manifest, so call it off the
+/// async executor for many roots.
+pub(in crate::server) fn preload_dirs(roots: &[PathBuf]) -> Vec<PathBuf> {
+    roots
+        .iter()
+        .flat_map(|root| {
+            [root.join("src"), root.join("test")]
+                .into_iter()
+                .chain(dependency_src_dirs(root))
+        })
+        .collect()
+}
 /// Whether `path` lies in a directory [`collect_preload_files`] walks for
-/// some workspace root — `src/`, `test/`, or a dependency's source directory
-/// (path dependencies included).
+/// some workspace root ([`preload_dirs`]).
 /// Must stay in lockstep with that walk: it decides which closed files keep
 /// their on-disk index entry in `did_close`.
 pub(in crate::server) fn preload_covers(path: &Path, roots: &[PathBuf]) -> bool {
-    roots.iter().any(|root| {
-        path.starts_with(root.join("src"))
-            || path.starts_with(root.join("test"))
-            || dependency_src_dirs(root)
-                .iter()
-                .any(|dep_src| path.starts_with(dep_src))
-    })
+    preload_dirs(roots).iter().any(|dir| path.starts_with(dir))
 }
 /// [`collect_preload_files_within`] with a whole fresh [`PRELOAD_MAX_FILES`]
 /// budget — the walk's behaviour in isolation, for tests.

@@ -204,10 +204,6 @@ fn module_has_error_nodes(module: &Module) -> bool {
                     .state
                     .iter()
                     .any(|s| s.default_value.as_ref().is_some_and(has_error_node))
-                || cls
-                    .class_variables
-                    .iter()
-                    .any(|s| s.default_value.as_ref().is_some_and(has_error_node))
         })
         || module
             .method_definitions

@@ -32,8 +32,8 @@
 
 use crate::Location;
 use beamtalk_core::ast::{
-    ClassDefinition, Expression, MethodDefinition, Module, ParameterDefinition, Pattern,
-    ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAliasDefinition,
+    ClassDefinition, Expression, Identifier, MethodDefinition, Module, ParameterDefinition,
+    Pattern, ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAliasDefinition,
     TypeAnnotation, TypeParamDecl,
 };
 use beamtalk_core::ast_walker::{
@@ -134,7 +134,7 @@ fn collect_class_definition_refs(
     collect_type_param_bound_refs(&class.type_params, name, file_path, results);
 
     // State and class-variable type annotations — e.g. `state: x :: Printable = nil`.
-    for state in class.state.iter().chain(class.class_variables.iter()) {
+    for state in &class.state {
         collect_state_type_annotation_refs(state, name, file_path, results);
     }
 
@@ -417,10 +417,19 @@ pub fn find_selector_references<'a>(
     let mut results = Vec::new();
 
     for (file_path, module) in files {
-        // Method definitions in classes
+        // Method definitions in classes, and the selectors their `uses:`
+        // lines name in `excluding:` / `overriding:` (BT-5188).
         for class in &module.classes {
             collect_method_def_refs(&class.methods, selector_name, file_path, &mut results);
             collect_method_def_refs(&class.class_methods, selector_name, file_path, &mut results);
+            for (_, entry) in uses_clause_selectors(class) {
+                if entry.name == selector_name {
+                    results.push(Location::new(
+                        file_path.clone(),
+                        selector_symbol_span(entry),
+                    ));
+                }
+            }
         }
 
         // Standalone method definitions
@@ -437,6 +446,61 @@ pub fn find_selector_references<'a>(
     }
 
     results
+}
+
+/// Which `uses:` clause a selector entry was written in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UsesClause {
+    /// `excluding: #(#sel, …)`.
+    Excluding,
+    /// `overriding: #(#sel, …)`.
+    Overriding,
+}
+
+impl UsesClause {
+    /// The clause's keyword, as written.
+    pub(crate) const fn keyword(self) -> &'static str {
+        match self {
+            Self::Excluding => "excluding:",
+            Self::Overriding => "overriding:",
+        }
+    }
+}
+
+/// The selectors a class's `uses:` lines name in `excluding:` and
+/// `overriding:` clauses, with the line they are on and which clause, in
+/// source order (BT-5188).
+pub(crate) fn uses_clause_entries(
+    class: &ClassDefinition,
+) -> impl Iterator<Item = (&beamtalk_core::ast::ProtocolUse, UsesClause, &Identifier)> {
+    class.uses.iter().flat_map(|used| {
+        used.excluding
+            .iter()
+            .map(move |e| (used, UsesClause::Excluding, e))
+            .chain(
+                used.overriding
+                    .iter()
+                    .map(move |e| (used, UsesClause::Overriding, e)),
+            )
+    })
+}
+
+/// [`uses_clause_entries`] without the `uses:` line.
+fn uses_clause_selectors(
+    class: &ClassDefinition,
+) -> impl Iterator<Item = (UsesClause, &Identifier)> {
+    uses_clause_entries(class).map(|(_, clause, entry)| (clause, entry))
+}
+
+/// The selector text of a `#sel` entry: its span without the `#`, like every
+/// other selector reference. A quoted symbol keeps its whole span.
+fn selector_symbol_span(entry: &Identifier) -> Span {
+    let name_len = u32::try_from(entry.name.len()).unwrap_or(u32::MAX);
+    if entry.span.end() - entry.span.start() == name_len + 1 {
+        Span::new(entry.span.start() + 1, entry.span.end())
+    } else {
+        entry.span
+    }
 }
 
 /// Collect method definition references with matching selector.
@@ -1162,5 +1226,27 @@ mod tests {
         let decls = find_class_declarations("RestartStrategy", [(&file, &module)]);
         assert_eq!(decls.len(), 1, "expected 1 alias declaration");
         assert_eq!(decls[0].span, module.type_aliases[0].name.span);
+    }
+}
+
+#[cfg(test)]
+mod uses_clause_tests {
+    use super::*;
+    use crate::queries::parse_source;
+
+    /// BT-5188: `excluding:` / `overriding:` entries are references to the
+    /// selector they name.
+    #[test]
+    fn selector_references_include_uses_clause_entries() {
+        let source =
+            "Object subclass: Foo\n  uses: Greets excluding: #(#greet) overriding: #(#greet)\n";
+        let module = parse_source(source);
+        let path = Utf8PathBuf::from("/p/Foo.bt");
+        let refs = find_selector_references("greet", [(&path, &module)]);
+        let texts: Vec<&str> = refs
+            .iter()
+            .map(|l| &source[l.span.start() as usize..l.span.end() as usize])
+            .collect();
+        assert_eq!(texts, ["greet", "greet"], "the selector text, without `#`");
     }
 }
