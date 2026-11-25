@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5215: a non-Integer class that answers `to:do:` and `to:by:do:` with its
+// own methods. An inlined writing loop on it would bypass them, so it raises
+// `stateful_block_dispatch`; a read-only block reaches the methods.
+
+Value subclass: Bt5215CustomRangeStart
+
+  to: _end do: _block => #custom
+
+  to: _end by: _step do: _block => #customBy

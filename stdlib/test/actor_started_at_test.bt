@@ -66,9 +66,9 @@ TestCase subclass: ActorStartedAtTest
     self assert: (Erlang erlang is_integer: (self startedAt: a))
     a stop
 
-  // `global:random_exit_name/3` (the fallback when no start time is readable) is
-  // not random: on one node it keeps its SECOND pid argument. So both argument
-  // orders are checked, otherwise one of them passes by accident.
+  // The fallback when no start time is readable keeps, on one node, the lower
+  // pid (BT-5231), which is usually the older actor. So both argument orders
+  // are checked, otherwise one of them passes by accident.
   testResolveGlobalConflictKeepsOlderWhenOlderIsFirst =>
     older := Counter spawn
     Timer sleep: 5

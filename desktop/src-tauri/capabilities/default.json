@@ -1,6 +1,14 @@
 {
   "identifier": "default",
-  "description": "Capabilities for the picker window: our own app commands only, no plugin surface beyond single-instance (which exposes no invokable JS API).",
+  "description": "The picker window only: the app's own commands (one allow-<command> permission each, generated from the AppManifest build.rs declares) and core:default. No other window, webview or remote URL is granted anything, so a workspace window cannot invoke the app's commands (BT-5194).",
   "windows": ["picker"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "allow-list-workspaces",
+    "allow-attach",
+    "allow-detach",
+    "allow-create-workspace",
+    "allow-quit",
+    "allow-get-launcher-logs"
+  ]
 }
