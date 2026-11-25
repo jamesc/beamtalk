@@ -308,6 +308,67 @@ writeLine_after_close_returns_error_test() ->
     gen_server:stop(Pid).
 
 %%% ============================================================================
+%%% writeLine: raises for the line the exec port drops (BT-5248)
+%%% ============================================================================
+
+%% The exec port queues at most 8 MiB for a child that never reads: eight 1 MiB
+%% lines are accepted, the ninth is dropped. That call raises (it used to
+%% return nil, and only the next one raised), and so does every later one.
+writeLine_raises_for_the_line_the_port_drops_test_() ->
+    {timeout, 60, fun() ->
+        {Notify, Collector} = make_collector(),
+        {SleepExe, SleepArgs} = sleep_cmd(),
+        {ok, Pid} = beamtalk_reactive_subprocess:start(#{
+            executable => SleepExe,
+            args => SleepArgs,
+            notify => Notify
+        }),
+        %% 1 MiB less the newline writeLine: appends: each line is exactly 1 MiB.
+        Chunk = binary:copy(<<"x">>, (1 bsl 20) - 1),
+        {Accepted, Err} = write_until_error(Pid, Chunk, 0),
+        ?assertEqual(8, Accepted),
+        ?assertMatch(#beamtalk_error{kind = runtime_error, selector = 'writeLine:'}, Err),
+        ?assertEqual(
+            {beamtalk_string, <<"writeLine: failed: the line was not written">>},
+            Err#beamtalk_error.message
+        ),
+        ?assertMatch({error, #beamtalk_error{}}, gen_server:call(Pid, {'writeLine:', [<<"x">>]})),
+        ?assertEqual(nil, gen_server:call(Pid, {close, []})),
+        Collector ! stop,
+        gen_server:stop(Pid)
+    end}.
+
+write_until_error(_Pid, _Chunk, Accepted) when Accepted > 100 ->
+    error(writes_never_refused);
+write_until_error(Pid, Chunk, Accepted) ->
+    case gen_server:call(Pid, {'writeLine:', [Chunk]}, 10000) of
+        nil -> write_until_error(Pid, Chunk, Accepted + 1);
+        {error, Err} -> {Accepted, Err}
+    end.
+
+%% A writeLine: whose write_stdin raises (the exec port is gone) marks the port
+%% closed; callers already parked for an answer must be failed then, or nothing
+%% would ever reply to them (BT-5248).
+writeLine_failing_write_fails_parked_callers_test() ->
+    Port = beamtalk_subprocess_port:open(),
+    beamtalk_subprocess_port:close(Port),
+    Parked = {self(), make_ref()},
+    State = beamtalk_subprocess_port:await_write(Parked, #{
+        port => Port, child_id => 0, port_closed => false
+    }),
+    {reply, {error, #beamtalk_error{kind = port_closed}}, NewState} =
+        beamtalk_reactive_subprocess:handle_call(
+            {'writeLine:', [<<"x">>]}, {self(), make_ref()}, State
+        ),
+    {_, Ref} = Parked,
+    receive
+        {Ref, {error, #beamtalk_error{kind = port_closed}}} -> ok
+    after 1000 -> error(parked_caller_not_answered)
+    end,
+    ?assertEqual(true, maps:get(port_closed, NewState)),
+    ?assertEqual(0, queue:len(maps:get(stdin_waiters, NewState))).
+
+%%% ============================================================================
 %%% close: terminates subprocess interaction
 %%% ============================================================================
 
