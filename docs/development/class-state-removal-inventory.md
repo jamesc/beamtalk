@@ -610,7 +610,7 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | `docs/development/{erlang-guidelines,class-var-catcher-audit,actor-state-cell,benchmarks,environment-variables,debugging,surface-parity,testing-strategy}.md`, `docs/agents/expanded.md`, `AGENTS.md`, `CHANGELOG.md` | prose, rules | BT-5157 (`class-var-catcher-audit.md` is deleted by BT-5159) |
 | `docs/ADR/*.md` (49 files mention class variables) | annotate 0013, 0019, 0084, 0109, 0111, 0123, 0124, 0127, 0129, 0130, 0133, 0137, 0142 as the ADR lists | BT-5157 |
 | `.github/workflows/fuzz.yml` (job `class-var-corpus`), `fuzz-triage.yml`, `.github/claude-fuzz-triage-prompt.md`, `ci-platforms.yml` | nightly job and triage path; `ci-platforms.yml` is not in the ADR's list: read it | BT-5151 |
-| `Justfile` (`test-class-var-corpus`, `lint-class-var-catchers`), `scripts/ci/lint-class-var-catchers.escript`, `scripts/ci/fixtures/lint-class-var-catchers/*`, `scripts/ci/lint-workaround-comments.sh` | recipes and lint | BT-5151 (corpus), BT-5159 (catcher lint) |
+| `Justfile` (`test-class-var-corpus`, `lint-class-var-catchers`), scripts/ci/lint-class-var-catchers.escript and its fixtures (deleted by BT-5159), `scripts/ci/lint-workaround-comments.sh` | recipes and lint | BT-5151 (corpus), BT-5159 (catcher lint) |
 | `editors/vscode/syntaxes/beamtalk.tmLanguage.json`, `editors/github-chrome/test/tokenize.test.js` | highlight `classState:` as a keyword | BT-5152 decides: the parser keeps the arm to emit the error, so the highlighter can too |
 | `stdlib/src/{behaviour,class_builder,system_navigation,process_dictionary,proto_object,block,telemetry}.bt` | `classVarNames`, `allClassVarNames`, `performLocally:`, class-side slot branches, doc comments | BT-5155 |
 
@@ -677,7 +677,7 @@ A string element is `{beamtalk_string, <<...>>}`, which is a literal too. Beamta
 
 ### `lint-class-var-catchers`, and the `protect/1` call-site list
 
-`just lint-class-var-catchers` on this commit: *"self-test: 4 fixture(s) behave as expected"* and *"Class-variable catcher audit: 89 catching site(s) carry a bt-catcher-audit marker."*
+just lint-class-var-catchers (deleted by BT-5159; on BT-5159's base it reported 86 sites, 9 of them `converted`, matching this list) on this commit: *"self-test: 4 fixture(s) behave as expected"* and *"Class-variable catcher audit: 89 catching site(s) carry a bt-catcher-audit marker."*
 
 Call sites of the class-variable API, from `grep -rnE 'beamtalk_class_vars:(snapshot|restore|with_snapshot|protect)\(' runtime/apps/*/src` (comments excluded):
 
