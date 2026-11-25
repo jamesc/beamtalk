@@ -58,12 +58,12 @@ TestCase subclass: ClassFieldReflectionDnuTest
   // From the class's own process (a process-bound class method).
   testFieldReflectionFromTheClassProcessIsDoesNotUnderstand =>
     cls := ClassFieldReflectionProbe
-    self
-      should: [cls run: [ClassFieldReflectionProbe hasField: #x]]
-      raise: #does_not_understand
-    self
-      should: [cls run: [ClassFieldReflectionProbe fieldAt: #x]]
-      raise: #does_not_understand
+    self should: [
+      cls run: [ClassFieldReflectionProbe hasField: #x]
+    ] raise: #does_not_understand
+    self should: [
+      cls run: [ClassFieldReflectionProbe fieldAt: #x]
+    ] raise: #does_not_understand
 
   testFieldReflectionThroughPerformIsDoesNotUnderstand =>
     cls := self dynamicClass
