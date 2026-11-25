@@ -126,6 +126,39 @@ writeLine_writes_line_and_returns_nil_test() ->
     gen_server:stop(Pid).
 
 %%% ============================================================================
+%%% writeLine — a child that never reads (BT-5195)
+%%% ============================================================================
+
+%% The exec port queues at most 8 MiB for a child; past that it drops the
+%% write and says so. From then on writeLine: fails instead of silently
+%% losing lines (and the port, unlike before BT-5195, never blocks).
+writeLine_fails_after_the_port_drops_input_test_() ->
+    {timeout, 60, fun() ->
+        {SleepExe, SleepArgs} = sleep_cmd(),
+        {ok, Pid} = beamtalk_subprocess:start(#{
+            executable => SleepExe,
+            args => SleepArgs
+        }),
+        Chunk = binary:copy(<<"x">>, 1 bsl 20),
+        Err = write_until_error(Pid, Chunk, 2000),
+        ?assertMatch(#beamtalk_error{kind = runtime_error, selector = 'writeLine:'}, Err),
+        %% Sticky: the next write fails too.
+        ?assertMatch({error, #beamtalk_error{}}, gen_server:call(Pid, {'writeLine:', [<<"x">>]})),
+        ?assertEqual(nil, gen_server:call(Pid, {close, []})),
+        gen_server:stop(Pid)
+    end}.
+
+%% Write Chunk until writeLine: answers an error (the port's refusal arrives
+%% asynchronously), at most N times.
+write_until_error(_Pid, _Chunk, 0) ->
+    error(writes_never_refused);
+write_until_error(Pid, Chunk, N) ->
+    case gen_server:call(Pid, {'writeLine:', [Chunk]}, 10000) of
+        nil -> write_until_error(Pid, Chunk, N - 1);
+        {error, Err} -> Err
+    end.
+
+%%% ============================================================================
 %%% readLine — blocks until data arrives
 %%% ============================================================================
 

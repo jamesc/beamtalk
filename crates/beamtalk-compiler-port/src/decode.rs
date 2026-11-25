@@ -10,7 +10,8 @@
 
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 use beamtalk_etf::{
-    map_get, term_to_atom, term_to_bool, term_to_string, term_to_string_list, term_to_usize,
+    map_get, term_to_atom, term_to_bool, term_to_string_list, term_to_string_map_checked,
+    term_to_usize,
 };
 use eetf::{Map, Term};
 
@@ -18,37 +19,6 @@ use crate::respond::error_response;
 
 // ────────────────────────────────────────────────────────────────
 // Domain-specific ETF helpers (not shared via beamtalk-etf)
-//
-// The compiler port's `term_to_string_map` needs richer error reporting
-// than the generic `Option`-based version in beamtalk-etf, so it remains
-// local.
-
-/// Extract a string->string map from a Term with descriptive errors.
-///
-/// Returns `Err` if the term is present but contains non-string keys or values,
-/// so callers can surface the problem rather than silently falling back.
-pub(crate) fn term_to_string_map_checked(
-    term: &Term,
-    field_name: &str,
-) -> Result<std::collections::HashMap<String, String>, String> {
-    match term {
-        Term::Map(m) => {
-            let mut result = std::collections::HashMap::new();
-            for (k, v) in &m.map {
-                let key = term_to_string(k)
-                    .ok_or_else(|| format!("{field_name} key is not a string: {k:?}"))?;
-                let val = term_to_string(v).ok_or_else(|| {
-                    format!("{field_name} value for '{key}' is not a string: {v:?}")
-                })?;
-                result.insert(key, val);
-            }
-            Ok(result)
-        }
-        _ => Err(format!(
-            "{field_name} must be a map of string->string, got: {term:?}"
-        )),
-    }
-}
 
 /// Extract a list of atom strings from a Term.
 pub(crate) fn term_to_atom_list(term: &Term) -> Vec<ecow::EcoString> {
