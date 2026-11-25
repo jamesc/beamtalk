@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-05-24) — epic BT-2259 complete, all issues Done (see [ADR 0038 Implementation Tracking](0038-subclass-classbuilder-protocol.md))
 
+> **Amended by [ADR 0153](0153-remove-class-variables.md) §5 (2026-11-25), where runtime funs run (BT-5161).** A runtime class-method fun installed on the receiving class itself now runs in the caller too, unless its selector is process-bound: the in-caller owner memo no longer declines on the `runtime_fun` shadow flag, and `beamtalk_class_dispatch:run_in_caller/7` always applies the method through `apply_class_method_body/7`. A module-less (`ClassBuilder`) class, which has no generated module, routes by its nearest ancestor's process-bound list. The `runtime_fun` flag stays, as a condition of the static call keys only: no static call site binds the compiled function while a fun shadows it. Installing a fun still goes through the class process; only execution moved. This supersedes the ADR 0142 note below where they differ.
+
 > **Amended by [ADR 0153](0153-remove-class-variables.md) (2026-11-25), class-method fun bodies.** A runtime class-method fun has no class variables to read or write, and `ClassBuilder classVars:` / `addClassState:default:` are removed.
 
 > **Superseded in part by [ADR 0152](0152-remove-cross-file-extension-methods.md) (2026-11-24), §5.** The "cross-class class-side extensions as future work" in §5 is not planned: cross-file `Class class >> sel` is a compile error, and no class-side extension registry will be built. Runtime class-method funs installed through the class itself are unchanged.

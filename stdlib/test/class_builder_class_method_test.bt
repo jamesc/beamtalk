@@ -107,3 +107,23 @@ TestCase subclass: ClassBuilderClassMethodTest
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BT2276ComputedOk
     self assert: self.cls answer equals: 99
+
+  // ADR 0153 §5 (BT-5161): a builder class method is a runtime fun, and runs
+  // in the caller's process like any other class method, not in the class
+  // process. A block passed into it runs there too.
+  testClassMethodRunsInTheCaller =>
+    Object classBuilder name: #BT5161InCaller;
+      superclass: Object;
+      classMethods: #{
+        #whereAmI => [:self | (Erlang erlang) self],
+        #run: => [:self :blk | blk value]
+      };
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT5161InCaller
+    here := (Erlang erlang) self
+    classPid := (Erlang beamtalk_class_registry) whereis_class: #BT5161InCaller
+    self assert: self.cls whereAmI equals: here
+    // `run:` is process-bound: its fun, and the block passed in, still run
+    // in the class process.
+    self assert: (self.cls run: [(Erlang erlang) self]) equals: classPid
+    self deny: classPid =:= here

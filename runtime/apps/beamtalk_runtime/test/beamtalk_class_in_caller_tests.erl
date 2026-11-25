@@ -197,16 +197,156 @@ errors_match() ->
             testRaise, testSignal, testDnu, testInternalUndef, testScriptExit, testNlrThrow
         ],
         InCaller = [outcome(Pid, S) || S <- Selectors],
-        %% A runtime-fun shadow bars the in-caller path, so the same sends now
-        %% go through the class process.
-        ok = beamtalk_class_shadow_flags:set(runtime_fun, 'Bt4300Errors'),
-        try
-            ?assertEqual(Pid, send(Pid, testSelf, [])),
-            ?assertEqual(InCaller, [outcome(Pid, S) || S <- Selectors])
-        after
-            beamtalk_class_shadow_flags:clear(runtime_fun, 'Bt4300Errors')
-        end
+        %% Listing the selectors as process-bound sends the same sends
+        %% through the class process (a runtime-fun shadow no longer does:
+        %% ADR 0153 §5, BT-5161).
+        ok = beamtalk_class_metadata:put_process_bound_selectors(
+            'Bt4300Errors', [testSelf | Selectors]
+        ),
+        ?assertEqual(Pid, send(Pid, testSelf, [])),
+        ?assertEqual(InCaller, [outcome(Pid, S) || S <- Selectors])
     end).
+
+%% ADR 0153 §5 (BT-5161): a class method that is an ADR 0084 runtime fun runs
+%% in the caller, like any other class method, unless its selector is
+%% process-bound. Installing the fun still goes through the class process.
+runtime_fun_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end, [
+        {"a ClassBuilder class's own fun, shadowing nothing, runs in the caller", fun() ->
+            with_builder_class(
+                'Bt5161Builder',
+                'Object',
+                #{
+                    whereAmI => fun(_Self) -> self() end,
+                    'echo:' => fun(Self, X) -> {Self, X} end,
+                    'run:' => fun(_Self, _X) -> self() end
+                },
+                fun(Pid) ->
+                    ?assertEqual(self(), send(Pid, whereAmI, [])),
+                    ?assertMatch(
+                        {owner, 'Bt5161Builder', _, 'Bt5161Builder', 'Bt5161Builder', _, _},
+                        memo(Pid, whereAmI)
+                    ),
+                    %% `self` is the class's real reference.
+                    ?assertMatch(
+                        {#beamtalk_object{class = 'Bt5161Builder class', pid = Pid}, 3},
+                        send(Pid, 'echo:', [3])
+                    ),
+                    %% A process-bound selector's fun still runs in the class
+                    %% process.
+                    ?assertEqual(Pid, send(Pid, 'run:', [x])),
+                    ?assertEqual(decline, memo(Pid, 'run:'))
+                end
+            )
+        end},
+        {"a module-less subclass runs its ancestor's fun in the caller", fun() ->
+            with_builder_class(
+                'Bt5161BuilderRoot',
+                'Object',
+                #{whereAmI => fun(_Self) -> self() end},
+                fun(_RootPid) ->
+                    with_builder_class(
+                        'Bt5161BuilderLeaf',
+                        'Bt5161BuilderRoot',
+                        #{},
+                        fun(Leaf) -> ?assertEqual(self(), send(Leaf, whereAmI, [])) end
+                    )
+                end
+            )
+        end},
+        {"a fun shadowing a compiled method runs in the caller; no static key binds it", fun() ->
+            with_class('Bt5161Shadow', none, fun(Pid) ->
+                Tag = tag('Bt5161Shadow'),
+                Key = {?HELPER, class_testSelf, Tag},
+                Target = fun() ->
+                    beamtalk_class_shadow_flags:static_call_target(
+                        Key, 'Bt5161Shadow', testSelf, 1
+                    )
+                end,
+                %% Unshadowed: the static key binds the compiled function.
+                ?assertMatch(#beamtalk_object{pid = Pid}, Target()),
+                ?assertMatch(
+                    #beamtalk_object{}, beamtalk_class_shadow_flags:static_call_key_value(Key)
+                ),
+                ok = beamtalk_object_class:put_class_method(
+                    Pid, testSelf, fun(_Self) -> {from_fun, self()} end
+                ),
+                %% The fun answers, in the caller.
+                ?assertEqual({from_fun, self()}, send(Pid, testSelf, [])),
+                ?assertMatch(
+                    {owner, 'Bt5161Shadow', _, _, 'Bt5161Shadow', _, _}, memo(Pid, testSelf)
+                ),
+                %% The install erased the key, and none may bind the
+                %% compiled function while the fun shadows it.
+                ?assertEqual(false, beamtalk_class_shadow_flags:static_call_key_value(Key)),
+                ?assertEqual(false, Target()),
+                ?assertEqual(false, beamtalk_class_shadow_flags:static_call_key_value(Key)),
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(Tag, 'Bt5161Shadow')),
+                %% Removing the fun brings the compiled method back.
+                removed = beamtalk_object_class:remove_class_method(Pid, testSelf),
+                ?assertEqual(self(), send(Pid, testSelf, [])),
+                ?assertMatch(#beamtalk_object{pid = Pid}, Target())
+            end)
+        end},
+        {"a fun installed while a caller loops is seen once installed, in the caller", fun() ->
+            with_class('Bt5161Loop', none, fun(Pid) ->
+                Self = self(),
+                Looper = spawn_link(fun() -> loop_until_fun(Pid, Self, 0) end),
+                ?awaitMessage({looping, Looper}),
+                ok = beamtalk_object_class:put_class_method(
+                    Pid, testSelf, fun(_Self) -> {from_fun, self()} end
+                ),
+                %% Every send after the first that saw the fun sees it too,
+                %% and runs in the looping process.
+                ?awaitMessage({saw_fun, Looper, Looper, 100})
+            end)
+        end}
+    ]}.
+
+%% Send `testSelf` until the fun answers, then 99 more, each of which must be
+%% the fun run in this process. Reports how many fun answers it saw.
+loop_until_fun(Pid, Parent, 0) ->
+    Me = self(),
+    case send(Pid, testSelf, []) of
+        Me ->
+            Parent ! {looping, Me},
+            spin_until_fun(Pid, Parent);
+        Other ->
+            Parent ! {unexpected, Other}
+    end.
+
+spin_until_fun(Pid, Parent) ->
+    Me = self(),
+    case send(Pid, testSelf, []) of
+        Me -> spin_until_fun(Pid, Parent);
+        {from_fun, Runner} -> after_fun(Pid, Parent, Runner, 1);
+        Other -> Parent ! {unexpected, Other}
+    end.
+
+after_fun(_Pid, Parent, Runner, 100) ->
+    Parent ! {saw_fun, Runner, self(), 100};
+after_fun(Pid, Parent, Runner, N) ->
+    case send(Pid, testSelf, []) of
+        {from_fun, Runner} -> after_fun(Pid, Parent, Runner, N + 1);
+        Other -> Parent ! {unexpected, Other}
+    end.
+
+%% Register a module-less class through `ClassBuilder`'s backing
+%% (`beamtalk_class_builder:register/1`) with `ClassMethods` as its runtime
+%% class-method funs, run `Fun(Pid)`, and remove it.
+with_builder_class(Name, Superclass, ClassMethods, Fun) ->
+    {ok, Pid} = beamtalk_class_builder:register(#{
+        className => Name,
+        superclassRef => Superclass,
+        fieldSpecs => #{},
+        methodSpecs => #{},
+        classMethods => ClassMethods
+    }),
+    try
+        Fun(Pid)
+    after
+        beamtalk_test_class:stop(Pid)
+    end.
 
 %% Waits until `Base`'s metadata row is gone (a stand-in install's wait).
 wait_until_row_gone(Base) ->
