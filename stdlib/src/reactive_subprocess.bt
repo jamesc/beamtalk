@@ -91,8 +91,9 @@ typed Actor subclass: ReactiveSubprocess native: beamtalk_reactive_subprocess
   /// The write does not wait for the child to read the line. Up to 8 MiB
   /// can wait for a child that is not reading its input. The `writeLine:`
   /// whose line cannot be queued (past that limit) raises a `runtime_error`
-  /// saying the line was not written, and so does every later `writeLine:`:
-  /// no line is dropped silently.
+  /// saying the line was not written (the reason is in its hint), and so does
+  /// every later `writeLine:`. Lines already queued when the child exits or
+  /// closes its input are lost without an error.
   ///
   /// ## Examples
   /// ```beamtalk

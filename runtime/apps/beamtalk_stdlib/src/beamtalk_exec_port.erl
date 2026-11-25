@@ -45,7 +45,7 @@ later output is dropped. A failed `spawn` is answered with
 `{exit, ChildId, -1}`.
 
 `stdin_queued` answers a `write_stdin` the binary accepted. Every
-`write_stdin` gets exactly one answer, `stdin_queued` or `error`, in command
+well-formed `write_stdin` (one naming a `child_id`) gets exactly one answer, `stdin_queued` or `error`, in command
 order, so the caller can tell which write was dropped.
 
 `error` reports that `Command` (`spawn`, `write_stdin`, …) for `ChildId`
