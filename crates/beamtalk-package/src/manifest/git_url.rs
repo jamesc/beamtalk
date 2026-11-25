@@ -139,10 +139,11 @@ pub fn insecure_git_allowed() -> bool {
 pub fn check_git_transport(what: &str, url: &str, allow: bool) -> Result<()> {
     if !allow && is_plaintext_git_url(url) {
         miette::bail!(
-            "{what} uses the plaintext git URL '{url}'.\n\n  \
+            "{what} uses the plaintext git URL '{}'.\n\n  \
              http:// and git:// transports can be tampered with in transit. \
              Use an https:// or ssh:// URL, or set {ALLOW_INSECURE_GIT_ENV}=1 \
-             to accept the risk."
+             to accept the risk.",
+            redact_url_credentials(url)
         );
     }
     Ok(())
