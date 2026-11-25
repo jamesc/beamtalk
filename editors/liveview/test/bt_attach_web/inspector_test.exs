@@ -381,7 +381,12 @@ defmodule BtAttachWeb.Live.InspectorTest do
           inspect_crumbs: [%{label: "counter", term: killed}],
           windows: [
             window(%{id: "win-1", crumbs: [%{label: "counter", term: killed}]}),
-            window(%{id: "win-2", crumbs: [%{label: "other", term: other}]})
+            window(%{id: "win-2", crumbs: [%{label: "other", term: other}]}),
+            # Drilled from the killed actor into a field: its root is the actor.
+            window(%{
+              id: "win-3",
+              crumbs: [%{label: "counter", term: killed}, %{label: "count", term: 3}]
+            })
           ]
         })
 

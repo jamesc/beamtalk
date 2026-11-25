@@ -1344,12 +1344,18 @@ defmodule BtAttachWeb.Live.Inspector do
     end
   end
 
-  # Close every floating window whose head is the killed actor: like the
-  # docked pane, it would otherwise keep showing a dead actor.
+  # Close every floating window on the killed actor — its head, or its root
+  # (a window drilled into one of the actor's fields; the reconnect stash keys
+  # windows by root, so it would come back as an error window). Like the
+  # docked pane, it would otherwise keep showing a dead actor. A window rooted
+  # on another, live actor stays open.
   defp close_windows_on(socket, pid) do
     socket.assigns.windows
     |> Enum.filter(fn w ->
-      match?(%{term: {:beamtalk_object, _, _, ^pid}}, List.last(w.crumbs))
+      Enum.any?(
+        [List.first(w.crumbs), List.last(w.crumbs)],
+        &match?(%{term: {:beamtalk_object, _, _, ^pid}}, &1)
+      )
     end)
     |> Enum.reduce(socket, fn w, acc -> close_window(acc, w.id) end)
   end
