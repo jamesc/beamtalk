@@ -44,12 +44,24 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
+  # The merge queue's test commit (BT-5247): the PR on top of main and every PR
+  # ahead of it in the queue. `ci-ok` is a required check, so it must report on
+  # this commit or the queue stalls. The `changes` job treats it like a push to
+  # main: the full Linux suite, every OTP in the window. The corpus tier is
+  # not part of it (corpus.yml runs on main after the merge; only its cheap
+  # fixture-reader subset runs here). Never path-filtered: a required check that
+  # never starts stalls the queue.
+  # scripts/ci/test_merge_queue.py pins all of this.
+  merge_group:
+    types: [checks_requested]
 
 # PR runs cancel the superseded run for the same PR. A push to main is keyed on
 # its own SHA and never cancelled: main is the safety net for everything the PR
 # path skips (the older OTP, path-gated jobs), so every merge must get a complete
-# verdict even when the next merge lands minutes later (BT-4209). This workflow
-# never reacts to labels; the opt-in macOS/Windows/desktop run is ci-platforms.yml.
+# verdict even when the next merge lands minutes later (BT-4209). A merge-group
+# run is keyed on its SHA the same way (BT-5247): each queue entry has its own
+# test commit, so no entry cancels another or a PR run. This workflow never
+# reacts to labels; the opt-in macOS/Windows/desktop run is ci-platforms.yml.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -72,8 +84,8 @@ jobs:
   # Every "does this PR touch X?" decision lives here and nowhere else. Jobs
   # gate on these outputs with a job-level `if:`, so a job that has nothing to
   # do never takes a runner (it used to occupy one just to exit from a
-  # step-level filter). On a push to main (or a workflow_dispatch) every path
-  # gate is true: main runs
+  # step-level filter). On a push to main (or a workflow_dispatch, or a
+  # merge_group run in the merge queue) every path gate is true: main runs
   # the full Linux suite, for every OTP in the window. macOS, Windows and the
   # desktop tests are ci-platforms.yml's (schedule / workflow_dispatch / the
   # `ci:all-platforms` PR label); only the ubuntu desktop leg for a PR touching
@@ -86,7 +98,8 @@ jobs:
     outputs:
       # The PR touches something outside the docs-only paths (the `push` list
       # above): the code jobs run. False means a docs-only PR: only `changes`
-      # and `ci-ok` run. Always true on a push to main or a dispatch.
+      # and `ci-ok` run. Always true on a push to main, a dispatch or a
+      # merge_group run.
       code: ${{ steps.filter.outputs.code }}
       # A PR touched the desktop app's own paths: test-desktop (ubuntu) runs.
       # Never true on a push to main.
@@ -125,16 +138,25 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            # push (main) / workflow_dispatch: the full Linux suite; no
-            # desktop (ci-platforms.yml's).
-            {
-              echo "desktop=false"
-              echo "code=true"
-              for k in core_diff_modes learn runtime rust exec vscode fixture_readers cluster; do echo "$k=true"; done
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          case "$EVENT_NAME" in
+            pull_request) ;;
+            push|workflow_dispatch|merge_group)
+              # push (main) / workflow_dispatch / merge_group (the merge
+              # queue's test commit, BT-5247): the full Linux suite; no
+              # desktop (ci-platforms.yml's).
+              {
+                echo "desktop=false"
+                echo "code=true"
+                for k in core_diff_modes learn runtime rust exec vscode fixture_readers cluster; do echo "$k=true"; done
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+            *)
+              # A new trigger must choose its gates here, not inherit one.
+              echo "::error::changes: no path gates defined for event '$EVENT_NAME'"
+              exit 1
+              ;;
+          esac
 
           git fetch --depth=1 origin "$BASE_SHA"
           # --no-renames: list BOTH paths of a moved file. With rename detection a
@@ -424,9 +446,11 @@ jobs:
       # fixtures are cheap on this job's build (nextest reuses the test
       # binaries above). Without this step a PR that edits a fixture, or the
       # Rust side of one, passed here and went red on main after the merge.
-      # On a push to main the whole tier runs in corpus.yml.
+      # On a push to main the whole tier runs in corpus.yml. corpus.yml does
+      # not run in the merge queue, so a merge_group run (where every gate is
+      # true) runs this cheap subset instead (BT-5247).
       - name: Corpus-tier tests that read the shared runtime fixtures
-        if: github.event_name == 'pull_request' && needs.changes.outputs.fixture_readers == 'true'
+        if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.outputs.fixture_readers == 'true'
         run: just test-fixture-readers
 
       # BT-5035: the CLI unit tests with HOME at an empty directory; fails if a
