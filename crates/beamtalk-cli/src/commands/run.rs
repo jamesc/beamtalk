@@ -751,6 +751,8 @@ fn hidden_client_command(
         .arg("-hidden")
         .args(args)
         .args(cookie_env::placeholder_args())
+        // BT-5127: pin this client's distribution listener to loopback too.
+        .args(beamtalk_workspace::loopback_dist_args())
         .current_dir(project_root);
     // BT-5126: the cookie goes in the environment, never argv; the `-eval`
     // in `args` begins with `cookie_env::adopt_then`.
@@ -1203,6 +1205,23 @@ mod tests {
             .find(|(k, _)| *k == std::ffi::OsStr::new("ERL_EPMD_ADDRESS"))
             .and_then(|(_, v)| v);
         assert!(epmd.is_some(), "ERL_EPMD_ADDRESS must be set");
+    }
+
+    /// BT-5127: the client node's distribution listener is pinned to loopback
+    /// (unless the operator opted out with a non-loopback `ERL_EPMD_ADDRESS`).
+    #[test]
+    fn test_hidden_client_command_pins_dist_interface() {
+        let args = [OsString::from("-sname"), OsString::from("probe@localhost")];
+        let cmd = hidden_client_command(&args, std::path::Path::new("."), "c");
+        let cmd_argv: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let pinned = cmd_argv.iter().any(|a| a == "inet_dist_use_interface");
+        assert_eq!(
+            pinned,
+            beamtalk_workspace::loopback_dist_args().contains(&"inet_dist_use_interface")
+        );
     }
 
     /// BT-5126: the probe/RPC client hands the cookie over in the environment;

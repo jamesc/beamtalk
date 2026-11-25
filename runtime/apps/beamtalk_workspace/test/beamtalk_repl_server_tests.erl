@@ -130,6 +130,9 @@ tcp_integration_test_() ->
             %% The /ws route is the shared REPL transport; the Phase-1 browser
             %% static routes (`/`, `/static/[...]`) have been removed.
             {"GET /ws without upgrade returns error", fun() -> http_ws_no_upgrade_test(Port) end},
+            {"WebSocket cap refuses cap+1 live sockets (BT-5127)", fun() ->
+                ws_connection_cap_test(Port)
+            end},
             %% bind:as: / unbind: session refresh
             {"bind:as: appears in bindings immediately", fun() ->
                 tcp_bind_as_updates_bindings_test(Port)
@@ -2310,6 +2313,52 @@ http_ws_no_upgrade_test(Port) ->
     Response = http_get(Port, <<"/ws">>),
     %% Without Upgrade: websocket header, cowboy should not return 101
     ?assert(binary:match(Response, <<"HTTP/1.1 101">>) =:= nomatch).
+
+%% BT-5127: ranch drops a socket from its count once it upgrades, so the
+%% handler counts WebSockets itself. With a cap of 3, three live sockets are
+%% accepted, the fourth is closed with 1013, and closing one frees a slot.
+ws_connection_cap_test(Port) ->
+    Prev = application:get_env(beamtalk_workspace, ws_max_connections),
+    application:set_env(beamtalk_workspace, ws_max_connections, 3),
+    try
+        Socks = [ws_connect_unauthenticated(Port) || _ <- [1, 2, 3]],
+        ?assertEqual(3, beamtalk_ws_conn_cap:count()),
+        %% The 4th upgrades, then is closed straight away: a close frame
+        %% (0x88) with code 1013, not the `auth-required` text frame (0x81).
+        ?assertMatch(<<16#88, _, 1013:16, _/binary>>, ws_first_frame(Port)),
+        [S | Rest] = Socks,
+        gen_tcp:close(S),
+        ok = beamtalk_test_wait:until(fun() -> beamtalk_ws_conn_cap:count() =:= 2 end),
+        ?assertMatch(<<16#81, _/binary>>, ws_first_frame(Port)),
+        [gen_tcp:close(R) || R <- Rest]
+    after
+        case Prev of
+            {ok, V} -> application:set_env(beamtalk_workspace, ws_max_connections, V);
+            undefined -> application:unset_env(beamtalk_workspace, ws_max_connections)
+        end
+    end.
+
+ws_first_frame(Port) ->
+    {ok, Sock} = gen_tcp:connect({127, 0, 0, 1}, Port, [binary, {active, false}], 5000),
+    Key = base64:encode(crypto:strong_rand_bytes(16)),
+    ok = gen_tcp:send(Sock, [
+        <<"GET /ws HTTP/1.1\r\nHost: 127.0.0.1:">>,
+        integer_to_binary(Port),
+        <<"\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ">>,
+        Key,
+        <<"\r\nSec-WebSocket-Version: 13\r\n\r\n">>
+    ]),
+    {ok, Rest} = ws_consume_http_response(Sock),
+    Frame =
+        case Rest of
+            <<>> ->
+                {ok, F} = gen_tcp:recv(Sock, 0, 5000),
+                F;
+            _ ->
+                Rest
+        end,
+    gen_tcp:close(Sock),
+    Frame.
 
 %%====================================================================
 %% write_port_file/3 — direct unit tests (no TCP listener)

@@ -249,6 +249,31 @@ mod tests {
         );
     }
 
+    /// BT-5127: every client verb that starts a distributed node pins its
+    /// listener to loopback (the foreground node gets it from `vm.args`).
+    #[test]
+    fn write_launcher_scripts_pin_client_nodes_to_loopback() {
+        let (root, _temp) = write_scripts(true);
+        let sh = std::fs::read_to_string(root.join("bin/orders").as_std_path()).unwrap();
+        let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
+        assert_eq!(sh.matches("-hidden -sname").count(), 4);
+        assert_eq!(
+            sh.matches(
+                "-hidden -sname \\\"\\$SNAME\\\" -kernel inet_dist_use_interface '{127,0,0,1}'"
+            )
+            .count(),
+            4,
+            "launcher.sh client verbs must pin loopback: {sh}"
+        );
+        assert_eq!(cmd.matches("-hidden -sname").count(), 4);
+        assert_eq!(
+            cmd.matches("-kernel inet_dist_use_interface \"{127,0,0,1}\"")
+                .count(),
+            4,
+            "launcher.cmd client verbs must pin loopback: {cmd}"
+        );
+    }
+
     #[test]
     fn write_launcher_scripts_lists_every_verb() {
         let (root, _temp) = write_scripts(true);

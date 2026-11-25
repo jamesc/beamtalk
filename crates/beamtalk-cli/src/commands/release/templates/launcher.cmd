@@ -259,7 +259,7 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so stop targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+"%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
     -eval "__ADOPT_COOKIE_EVAL__." ^
     -eval "beamtalk_release_launcher:stop_client_main()." -extra "%NODE%"
 exit /b %errorlevel%
@@ -278,7 +278,7 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so ping targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+"%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
     -eval "__ADOPT_COOKIE_EVAL__." ^
     -eval "beamtalk_release_launcher:ping_client_main()." -extra "%NODE%"
 exit /b %errorlevel%
@@ -300,7 +300,7 @@ set "NODE=%THIS_NODE%"
 rem `-remsh` would connect during boot, before any -eval can swap the
 rem placeholder cookie for the real one (BT-5126): adopt first, then start the
 rem same remote shell (OTP 26+).
-"%ERL%" -noshell -hidden -sname "%SNAME%" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+"%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
     -eval "__ADOPT_COOKIE_EVAL__, shell:start_interactive({'%NODE%', {shell, start, []}})."
 exit /b %errorlevel%
 
@@ -347,7 +347,7 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so rpc targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+"%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
     -eval "__ADOPT_COOKIE_EVAL__." ^
     -eval "beamtalk_release_launcher:rpc_client_main()." ^
     -extra "%NODE%" "%CLASS%" "%SELECTOR%" %ENTRY_REST%

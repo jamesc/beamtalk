@@ -54,22 +54,25 @@ init(Req, Opts) ->
     Peer = cowboy_req:peer(Req),
     case check_upgrade_headers(Origin, Host, BindAddr) of
         ok ->
-            {cowboy_websocket, Req,
-                #ws_state{
-                    authenticated = false,
-                    peer = Peer,
-                    pending_eval = undefined,
-                    io_capture_pid = undefined,
-                    stdin_ref = undefined,
-                    log_subscribed = false
-                },
-                #{idle_timeout => ?AUTH_DEADLINE_MS, max_frame_size => ?PRE_AUTH_MAX_FRAME}};
+            upgrade(Req, Peer);
         {error, Reason} ->
             ?LOG_WARNING("WebSocket upgrade rejected", #{
                 reason => Reason, peer => Peer, domain => [beamtalk, runtime]
             }),
             {ok, cowboy_req:reply(403, #{}, <<"Forbidden">>, Req), []}
     end.
+
+upgrade(Req, Peer) ->
+    {cowboy_websocket, Req,
+        #ws_state{
+            authenticated = false,
+            peer = Peer,
+            pending_eval = undefined,
+            io_capture_pid = undefined,
+            stdin_ref = undefined,
+            log_subscribed = false
+        },
+        #{idle_timeout => ?AUTH_DEADLINE_MS, max_frame_size => ?PRE_AUTH_MAX_FRAME}}.
 
 -doc """
 Validate the `Origin` and `Host` upgrade headers (ADR 0020).
@@ -80,6 +83,12 @@ Validate the `Origin` and `Host` upgrade headers (ADR 0020).
 * `Host` must be a loopback name, the address the listener is bound to, or —
   for a wildcard bind — any IP literal. A DNS-rebinding page reaches the port
   under an attacker-controlled *name*, which this refuses.
+* Operators who reach the port by name (a reverse proxy forwarding `Host`, a
+  Tailscale MagicDNS name) list those names in `BEAMTALK_WS_ALLOWED_HOSTS`
+  (comma-separated hostnames, no ports) or the `beamtalk_workspace` app env
+  `ws_allowed_hosts`. A listed name is accepted for both `Host` and `Origin`
+  (BT-5127). Cookie auth still applies; the list only widens which *names*
+  pass the rebinding check.
 """.
 -spec check_upgrade_headers(binary() | undefined, binary() | undefined, inet:ip_address()) ->
     ok | {error, bad_origin | bad_host}.
@@ -98,7 +107,7 @@ origin_ok(undefined) ->
     true;
 origin_ok(Origin) ->
     case uri_string:parse(Origin) of
-        #{host := H} -> is_loopback_host(H);
+        #{host := H} -> is_loopback_host(H) orelse is_allowed_name(H);
         _ -> false
     end.
 
@@ -108,7 +117,7 @@ host_ok(undefined, _BindAddr) ->
 host_ok(HostHeader, BindAddr) ->
     case uri_string:parse(<<"//", HostHeader/binary>>) of
         #{host := H} ->
-            is_loopback_host(H) orelse is_bound_host(H, BindAddr);
+            is_loopback_host(H) orelse is_bound_host(H, BindAddr) orelse is_allowed_name(H);
         _ ->
             false
     end.
@@ -126,6 +135,24 @@ is_loopback_host(H0) ->
             end
     end.
 
+%% BT-5127: operator-listed hostnames (see `check_upgrade_headers/3`).
+is_allowed_name(H0) ->
+    H = string:lowercase(H0),
+    lists:member(H, allowed_names()).
+
+allowed_names() ->
+    FromEnv =
+        case os:getenv("BEAMTALK_WS_ALLOWED_HOSTS") of
+            false -> [];
+            Str -> [list_to_binary(T) || T <- string:tokens(Str, ", ")]
+        end,
+    FromApp =
+        [
+            iolist_to_binary(N)
+         || N <- application:get_env(beamtalk_workspace, ws_allowed_hosts, [])
+        ],
+    [string:lowercase(N) || N <- FromEnv ++ FromApp].
+
 is_bound_host(H, BindAddr) ->
     case inet:parse_address(binary_to_list(H)) of
         {ok, Addr} ->
@@ -140,6 +167,23 @@ WebSocket connection initialized — send auth challenge.
 Session is NOT created yet; deferred until after successful auth (security).
 """.
 websocket_init(State) ->
+    %% BT-5127: count this connection (ranch stops counting it at upgrade). This
+    %% must run here, not in `init/2`: `init/2` runs in cowboy's short-lived
+    %% request process, while this and `terminate/3` run in the process that
+    %% owns the socket. Over the cap: close with 1013 (try again later).
+    case beamtalk_ws_conn_cap:acquire() of
+        ok ->
+            websocket_init_accepted(State);
+        {error, at_capacity} ->
+            ?LOG_WARNING("WebSocket refused: connection cap reached", #{
+                peer => State#ws_state.peer,
+                limit => beamtalk_ws_conn_cap:limit(),
+                domain => [beamtalk, runtime]
+            }),
+            {[{close, 1013, <<"Too many connections">>}], State}
+    end.
+
+websocket_init_accepted(State) ->
     %% Send a minimal welcome so clients know the connection is alive.
     %% Session details are sent after successful authentication.
     Welcome = iolist_to_binary(json:encode(#{<<"op">> => <<"auth-required">>})),
@@ -448,8 +492,10 @@ session_close_code(_Unexpected) -> 1011.
 
 -doc "Connection terminated — clean up or keep session for resume.".
 terminate(_Reason, _Req, #ws_state{session_id = undefined}) ->
-    ok;
+    beamtalk_ws_conn_cap:release();
 terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = SessionPid, peer = Peer}) ->
+    %% BT-5127: give the connection-cap slot back.
+    beamtalk_ws_conn_cap:release(),
     ?LOG_INFO("WebSocket client disconnected", #{
         session => SessionId,
         session_pid => SessionPid,
