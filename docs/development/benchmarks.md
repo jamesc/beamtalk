@@ -1944,6 +1944,41 @@ words vary run to run, as in the BT-5210 runs), and every ns figure is
 inside the other side's spread apart from single outliers in both
 directions (after 11j run 1, 11i run 3; base 11f run 2).
 
+### BT-5213: `String` and `Symbol` receivers test their argument (ADR 0116 addendum follow-up)
+
+A `String` or `Symbol` on the left of `<`, `<=`, `>`, `>=` now orders only
+against its own kind and raises a `type_error` for anything else. The test is
+the class's routing guard (`is_record(R, beamtalk_string, 2)` for a `String`,
+`is_atom(R)` and not `nil`/`true`/`false` for a `Symbol`), and the failing arm
+is a frame-free `erlang:error/1`. It runs inline for a proven `String`
+receiver (a literal, `self` in `String`) and in the `@primitive` bodies of
+`String` and `Symbol`, which every other receiver dispatches to. New rows
+11m (`"m" < b`), 11n (`a < b`, two untyped Strings, dispatch to `String>><`)
+and 11o (`#m < b`, dispatch to `Symbol>><`) were added and measured on both
+sides: `main` at `52539ed` against this change, repo dev builds, three runs
+per side. Full tables:
+`benchmarks/vs-elixir/results/bench-bt5213.md`.
+
+| Row | base ns (1 / 2 / 3) | after ns (1 / 2 / 3) | red / words, both sides |
+|---|---|---|---|
+| 11d `a > 0` | 7.95 / 8.50 / 8.02 | 7.96 / 8.00 / 7.93 | 0 / 0 |
+| 11e `a < 10` | 7.79 / 8.34 / 7.95 | 7.95 / 7.98 / 7.54 | 0 / 0 |
+| 11h `5 < b` | 7.89 / 7.55 / 7.99 | 7.69 / 7.99 / 7.85 | 0 / 0 |
+| 11i `a < b` untyped | 7.97 / 7.97 / 7.98 | 8.20 / 8.20 / 8.06 | 0 / 0 |
+| 11k `5 + b` (reference) | 9.49 / 9.53 / 8.90 | 9.09 / 9.20 / 9.11 | 0 / 0 |
+| 11m `"m" < b` | 16.4 / 15.2 / 15.1 | 15.2 / 15.3 / 15.0 | 0 / 0 |
+| 11n `a < b` Strings | 104 / 100 / 106 | 102 / 97.9 / 101 | 12 / 2 |
+| 11o `#m < b` | 98.7 / 98.3 / 99.5 | 108 / 96.6 / 102 | 9 / 2 |
+
+The gate holds: reductions and words are identical on every row, and every
+ns figure is inside the other side's spread apart from one outlier (after
+11o run 1). 11m, the row the inlined test lands on, is unchanged because the
+failing arm is `erlang:error/1`: a first version that raised through a
+runtime helper call measured 17.6 / 17.6 / 18.0 ns there, the cost of the
+stack frame a returning call gives the site (ADR 0116 § The failing arm).
+11n and 11o go through dispatch (~100 ns) either way; the extra guard in the
+primitive body is lost in it.
+
 ## ADR 0153 baseline: class variables, before removal (BT-5145)
 
 The "before" run for removing `classState:` (epic BT-5144). It records what the class-variable snapshot before every compiled `on:do:`, `protect/1` in `Result tryDo:` and the class-variable input to the per-send class guard cost, so the "after" run (BT-5164, and the ADR 0153 Phase 3 gate) has something to compare against.

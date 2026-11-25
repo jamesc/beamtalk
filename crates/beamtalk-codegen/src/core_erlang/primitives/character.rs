@@ -8,7 +8,8 @@
 //! Characters are integers (Unicode codepoints) at the BEAM level.
 //! Simple operations use direct BIFs; predicates delegate to `beamtalk_character`.
 
-use super::{generate_numeric_comparison_bif, param, wrap_string_result};
+use super::{generate_ordering_comparison_bif, param, wrap_string_result};
+use crate::core_erlang::operators::OrderingKind;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -22,7 +23,7 @@ pub(crate) fn generate_character_bif(
     match selector {
         // Comparison — direct integer comparison (ADR 0002: Erlang operators)
         "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => {
-            generate_numeric_comparison_bif(selector, params)
+            generate_ordering_comparison_bif(OrderingKind::Number, selector, params)
         }
         // Conversion
         "asInteger" => Some(Document::Str("Self")),

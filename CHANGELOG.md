@@ -2,8 +2,13 @@
 
 ## Unreleased
 
+- **Breaking: a `String` or `Symbol` is no longer ordered against another kind (BT-5213, ADR 0116 addendum).** `<`, `<=`, `>` and `>=` with a `String` or `Symbol` on the left and a value of any other kind on the right used to fall back to Erlang term order (`"a" < 5` and `#a < 5` were `false`). They now raise a `type_error` (`TypeError`), for example "'<' cannot order a String against Integer — the argument must be a String". There is no reflected hook, unlike the number side. `Symbol` against `String` raises too, both ways (`#a < "a"`, `"a" < #a`). The rule holds on the inlined path and on dynamic sends (`perform:`).
+  - Unchanged: `"a" < "b"`, `#a < #b`; `==`, `=:=`, `/=`, `=/=`; default `sort` of a mixed list and `Dictionary`/`Set` order.
+  - Migration: convert before comparing (`aSymbol asString < aString`, `aNumber printString < aString`); test for `nil` first (`x isNil`, `ifNil:`); for a deliberate mixed order use default `sort` or an explicit comparator.
+  - Also updates the shape of the `5 < "a"` row of the number entry below: a number on the left still sends `lessThanFromNumber:` to a `String` and raises `does_not_understand`.
+
 - **Breaking: a number is no longer ordered against a non-number (BT-5176, ADR 0116 addendum).** `<`, `<=`, `>` and `>=` with a number on the left and a non-number on the right — and so `max:`, `min:` and `between:and:` — used to fall back to Erlang term order (`3 <= nil` was `true`, `3 max: nil` was `nil`). They now send the right operand a reflected method (`lessThanFromNumber:`, `lessOrEqualFromNumber:`, `greaterThanFromNumber:`, `greaterOrEqualFromNumber:`) and raise `does_not_understand` when it has none.
-  - Unchanged: `==`, `=:=`, `/=`, `=/=`; `String` and `Symbol` receivers; default `sort` and `Dictionary`/`Set` order.
+  - Unchanged: `==`, `=:=`, `/=`, `=/=`; default `sort` and `Dictionary`/`Set` order. (`String` and `Symbol` receivers: see BT-5213 above.)
   - Migration: test for `nil` before comparing (`x isNil`, `ifNil:`), and for a symbol sentinel before comparing against it (`elapsed < timeout` where `timeout` may be `#infinity`); for a deliberate mixed order use default `sort` or an explicit comparator; to make a value type comparable with numbers, implement the four hooks.
   - Reverses BT-3928.
 

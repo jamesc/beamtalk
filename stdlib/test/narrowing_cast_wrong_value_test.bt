@@ -16,9 +16,9 @@
 //     term-order BIF and ANSWERED (`nil > 10` was `true`, `nil < 10`
 //     `false`). BT-4823 puts an inline kind test in front of that BIF, so a
 //     receiver that is not the declared kind is dispatched like any other and
-//     fails with `does_not_understand`. A Symbol is the exception that
-//     proves the rule: it defines its own ordering, so `#foo > 10` reaches
-//     `Symbol>>>`, whose argument is unchecked (BT-3928).
+//     fails with `does_not_understand`. A Symbol defines its own ordering,
+//     so `#foo > 10` reaches `Symbol>>>`, which raises a `type_error` for
+//     its non-Symbol argument (BT-5213).
 //   * Arithmetic on a trusted parameter fails as a raw `type_error`
 //     (badarith), as row 11b of `just bench-vs-elixir` predicts.
 //
@@ -73,9 +73,11 @@ TestCase subclass: NarrowingCastWrongValueTest
     self assert: (self kindOf: [
       self.probe castThenParamGreater: #{#v => true}
     ]) equals: #does_not_understand
-    // A Symbol defines `>`: it reaches `Symbol>>>`, whose argument is
-    // unchecked (BT-3928), so it term-orders against the Integer.
-    self assert: (self.probe castThenParamGreater: #{#v => #foo}) equals: true
+    // A Symbol defines `>`: it reaches `Symbol>>>`, which raises a
+    // `type_error` for the Integer argument (BT-5213).
+    self assert: (self kindOf: [
+      self.probe castThenParamGreater: #{#v => #foo}
+    ]) equals: #type_error
     // An actual Integer or Float still answers correctly.
     self assert: (self.probe castThenParamGreater: #{#v => 11}) equals: true
     self assert: (self.probe castThenParamGreater: #{#v => 7.5}) equals: false

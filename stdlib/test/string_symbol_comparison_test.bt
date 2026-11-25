@@ -1,0 +1,261 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5213 (ADR 0116 § Addendum → String and Symbol receivers): a `String` or
+// `Symbol` on the left of `<`, `<=`, `>` or `>=` orders only against its own
+// kind. Any other right operand raises a `type_error` instead of answering by
+// Erlang term order (`"a" < 5` and `#a < 5` used to be `false`). There are no
+// reflected hooks, unlike the number side, and `Symbol` vs `String` raises
+// too. Equality stays total, and the default `sort` keeps its term order.
+//
+// Both send paths are covered: the inlined comparison (a `String` literal
+// receiver, whose kind the compiler proves) and the `@primitive` bodies of
+// `String` and `Symbol` (an untyped or declared receiver, which dispatches,
+// and `perform:`, a dynamic send). The two must agree.
+//
+// Fixture: `fixtures/widget.bt` (an object with no ordering).
+
+TestCase subclass: StringSymbolComparisonTest
+
+  // ── Inlined: a `String` literal receiver ─────────────────────────────────
+  litLt: x => "m" < x
+
+  litLe: x => "m" <= x
+
+  litGt: x => "m" > x
+
+  litGe: x => "m" >= x
+
+  // ── Dispatched: an untyped or declared receiver ──────────────────────────
+  lt: a with: x => a < x
+
+  le: a with: x => a <= x
+
+  gt: a with: x => a > x
+
+  ge: a with: x => a >= x
+
+  strLt: s :: String with: x => s < x
+
+  strGe: s :: String with: x => s >= x
+
+  symLt: x => #m < x
+
+  symGe: x => #m >= x
+
+  // ── Dynamic sends: `perform:` reaches the `@primitive` bodies ────────────
+  performLt: a with: x => a perform: #'<' withArguments: #(x)
+
+  performLe: a with: x => a perform: #'<=' withArguments: #(x)
+
+  performGt: a with: x => a perform: #'>' withArguments: #(x)
+
+  performGe: a with: x => a perform: #'>=' withArguments: #(x)
+
+  /// Right operands that are not a `String`.
+  notStrings =>
+    #[nil, 5, 1.5, $a, #sym, #(1, 2), true, (Widget new) withSize: 1]
+
+  /// Right operands that are not a `Symbol` (`nil`, `true` and `false` are
+  /// atoms at run time, but not Symbols).
+  notSymbols =>
+    #[nil, true, false, 5, "str", $a, #(1, 2), (Widget new) withSize: 1]
+
+  errorOf: aBlock => aBlock on: Exception do: [:e | e]
+
+  outcomeOf: aBlock =>
+    [aBlock value] on: Exception do: [:e | #[e kind, e selector]]
+
+  /// `aBlock` raises a `type_error` for the operator `op` on a receiver of
+  /// class `name`.
+  assertBlock: aBlock raisesTypeErrorFor: op on: name =>
+    self should: aBlock raise: #type_error
+    e := self errorOf: aBlock
+    self assert: e selector asString equals: op
+    self assert: (e hint includesSubstring: "'{op}' cannot order a {name} against")
+    self assert: (e hint includesSubstring: "the argument must be a {name}")
+
+  /// Every wrong right operand in `wrongs`, through the four one-argument
+  /// helpers `lt`/`le`/`gt`/`ge`.
+  assertWrongs: wrongs raise: lt le: le gt: gt ge: ge on: name =>
+    wrongs
+      do: [:w |
+        self
+          assertBlock: [lt value: w]
+          raisesTypeErrorFor: "<"
+          on: name
+        self
+          assertBlock: [le value: w]
+          raisesTypeErrorFor: "<="
+          on: name
+        self
+          assertBlock: [gt value: w]
+          raisesTypeErrorFor: ">"
+          on: name
+        self
+          assertBlock: [ge value: w]
+          raisesTypeErrorFor: ">="
+          on: name
+      ]
+
+  // ── A wrong-kind right operand raises, on every path ─────────────────────
+  testStringLiteralReceiverRaises =>
+    self
+      assertWrongs: self notStrings
+      raise: [:w | self litLt: w]
+      le: [:w | self litLe: w]
+      gt: [:w | self litGt: w]
+      ge: [:w | self litGe: w]
+      on: "String"
+
+  testUntypedStringReceiverRaises =>
+    self
+      assertWrongs: self notStrings
+      raise: [:w | self lt: "m" with: w]
+      le: [:w | self le: "m" with: w]
+      gt: [:w | self gt: "m" with: w]
+      ge: [:w | self ge: "m" with: w]
+      on: "String"
+
+  testDeclaredStringReceiverRaises =>
+    self notStrings
+      do: [:w |
+        self
+          assertBlock: [self strLt: "m" with: w]
+          raisesTypeErrorFor: "<"
+          on: "String"
+        self
+          assertBlock: [self strGe: "m" with: w]
+          raisesTypeErrorFor: ">="
+          on: "String"
+      ]
+
+  testStringPerformRaises =>
+    self
+      assertWrongs: self notStrings
+      raise: [:w | self performLt: "m" with: w]
+      le: [:w | self performLe: "m" with: w]
+      gt: [:w | self performGt: "m" with: w]
+      ge: [:w | self performGe: "m" with: w]
+      on: "String"
+
+  testSymbolReceiverRaises =>
+    self
+      assertWrongs: self notSymbols
+      raise: [:w | self lt: #m with: w]
+      le: [:w | self le: #m with: w]
+      gt: [:w | self gt: #m with: w]
+      ge: [:w | self ge: #m with: w]
+      on: "Symbol"
+    self notSymbols
+      do: [:w |
+        self
+          assertBlock: [self symLt: w]
+          raisesTypeErrorFor: "<"
+          on: "Symbol"
+        self
+          assertBlock: [self symGe: w]
+          raisesTypeErrorFor: ">="
+          on: "Symbol"
+      ]
+
+  testSymbolPerformRaises =>
+    self
+      assertWrongs: self notSymbols
+      raise: [:w | self performLt: #m with: w]
+      le: [:w | self performLe: #m with: w]
+      gt: [:w | self performGt: #m with: w]
+      ge: [:w | self performGe: #m with: w]
+      on: "Symbol"
+
+  /// The examples the issue opens with.
+  testIssueExamplesRaise =>
+    @expect type
+    self should: ["a" < 5] raise: #type_error
+    @expect type
+    self should: ["a" <= nil] raise: #type_error
+    @expect type
+    self should: [#a < 5] raise: #type_error
+
+  /// `Symbol` vs `String` raises both ways, though both have text.
+  testSymbolAgainstStringRaisesBothWays =>
+    @expect type
+    self should: [#a < "a"] raise: #type_error
+    @expect type
+    self should: ["a" < #a] raise: #type_error
+    self should: [self lt: #a with: "a"] raise: #type_error
+    self should: [self lt: "a" with: #a] raise: #type_error
+
+  /// The error names the right operand's class.
+  testTypeErrorNamesTheArgumentClass =>
+    e := self errorOf: [self litLt: 5]
+    self assert: e kind equals: #type_error
+    self assert: (e hint includesSubstring: "'<' cannot order a String against Integer")
+    e2 := self errorOf: [self lt: #a with: nil]
+    self assert: (e2 hint includesSubstring: "'<' cannot order a Symbol against UndefinedObject")
+
+  // ── Same-kind ordering is unchanged ──────────────────────────────────────
+  testStringsStillOrder =>
+    self assert: "a" < "b"
+    self deny: "b" < "a"
+    self assert: "a" <= "a"
+    self assert: "b" > "a"
+    self assert: "b" >= "b"
+    self assert: (self litLt: "z")
+    self deny: (self litGe: "z")
+    self assert: (self lt: "a" with: "b")
+    self assert: (self strGe: "b" with: "a")
+    self assert: (self performLt: "a" with: "b")
+    self deny: (self performGt: "a" with: "b")
+
+  testSymbolsStillOrder =>
+    self assert: #a < #b
+    self deny: #b < #a
+    self assert: #a <= #a
+    self assert: (self symLt: #z)
+    self deny: (self symGe: #z)
+    self assert: (self lt: #a with: #b)
+    self assert: (self performLt: #a with: #b)
+    self assert: (self performGe: #b with: #b)
+
+  testEqualityStaysTotal =>
+    self deny: "a" =:= 5
+    self deny: #a =:= "a"
+    self assert: "a" /= nil
+    self deny: #a == 5
+
+  testDefaultSortOfAMixedListIsTermOrder =>
+    self assert: #[nil, "a", 3, #b] sort equals: #[3, #b, nil, "a"]
+    self assert: #["b", "a", "c"] sort equals: #["a", "b", "c"]
+    self assert: #[#b, #a] sort equals: #[#a, #b]
+
+  // ── Inlined and dynamic sends agree ──────────────────────────────────────
+  testStringPerformAgreesWithTheInlinedSend =>
+    rights := #[nil, #sym, "a", "z", "m", 5, $a, true, (Widget new) withSize: 1]
+    rights
+      do: [:x |
+        self assert: (self outcomeOf: [
+          self performLt: "m" with: x
+        ]) equals: (self outcomeOf: [self litLt: x])
+        self assert: (self outcomeOf: [
+          self performLe: "m" with: x
+        ]) equals: (self outcomeOf: [self litLe: x])
+        self assert: (self outcomeOf: [
+          self performGt: "m" with: x
+        ]) equals: (self outcomeOf: [self litGt: x])
+        self assert: (self outcomeOf: [
+          self performGe: "m" with: x
+        ]) equals: (self outcomeOf: [self litGe: x])
+      ]
+
+  testSymbolPerformAgreesWithTheSend =>
+    rights := #[nil, #a, #z, #m, "m", 5, true, false]
+    rights
+      do: [:x |
+        self assert: (self outcomeOf: [
+          self performLt: #m with: x
+        ]) equals: (self outcomeOf: [self symLt: x])
+        self assert: (self outcomeOf: [
+          self performGe: #m with: x
+        ]) equals: (self outcomeOf: [self symGe: x])
+      ]

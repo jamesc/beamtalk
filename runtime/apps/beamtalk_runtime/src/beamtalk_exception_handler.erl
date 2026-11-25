@@ -298,6 +298,7 @@ bugs (`internal_error`), C resource/env (`resource_error`/`process_not_found`/
 %% Bucket A — user-input
 classify_kind(badarith) -> type_error;
 classify_kind({badmap, _}) -> type_error;
+classify_kind({?BT_ORDERING_TYPE_ERROR_TAG, _, _, _}) -> type_error;
 classify_kind({badkey, _}) -> key_error;
 classify_kind(badarg) -> argument_error;
 %% Bucket B — internal bugs
@@ -364,7 +365,9 @@ Raw Erlang errors (`badarith`, `{badkey,K}`, `function_clause`, …) are sorted
 into three buckets that are presented differently:
 
 * **Bucket A — user-input** (`type_error`/`key_error`/`argument_error`):
-  `badarith`, `{badkey,K}`, `{badmap,M}`, `badarg`. Carries selector + value
+  `badarith`, `{badkey,K}`, `{badmap,M}`, `badarg`, and the
+  `{?BT_ORDERING_TYPE_ERROR_TAG, Left, Op, Right}` codegen raises for a
+  `String` or `Symbol` ordered against another kind (BT-5213). Carries selector + value
   + an actionable hint.
 * **Bucket B — internal bugs** (`internal_error`): `function_clause`,
   `case_clause`, `badmatch`, `if_clause`. Loud, "please report" — NOT dressed
@@ -411,6 +414,26 @@ wrap_raw(badarith, Context) ->
     Hint =
         <<"Arithmetic requires numbers; check for a non-numeric operand or division by zero.">>,
     wrap_classified(classify_kind(badarith), Cls, Sel, Message, Hint, #{reason => badarith});
+wrap_raw({?BT_ORDERING_TYPE_ERROR_TAG, Left, Op, Right} = Reason, _Context) ->
+    %% BT-5213: a `String` or `Symbol` ordered against another kind. Codegen
+    %% raises the raw term (a frame-free `erlang:error/1` arm); the receiver
+    %% and operator it carries locate the error.
+    LeftClass = beamtalk_primitive:class_of(Left),
+    RightClass = beamtalk_primitive:class_of(Right),
+    Core = beamtalk_error:chars_to_binary(
+        io_lib:format("cannot order a ~ts against ~ts", [LeftClass, RightClass])
+    ),
+    Hint = beamtalk_error:chars_to_binary(
+        io_lib:format(
+            "'~ts' cannot order a ~ts against ~ts — the argument must be a ~ts",
+            [Op, LeftClass, RightClass, LeftClass]
+        )
+    ),
+    wrap_classified(
+        classify_kind(Reason), LeftClass, Op, located(Op, LeftClass, Core), Hint, #{
+            got => RightClass, reason => Reason
+        }
+    );
 wrap_raw({badkey, Key}, Context) ->
     {Sel, Cls} = breadcrumb(Context),
     Core = beamtalk_error:chars_to_binary(io_lib:format("key not found: ~tp", [Key])),
