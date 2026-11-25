@@ -8,11 +8,8 @@
 The structured errors class-variable accesses raise (ADR 0124 §1, ADR 0130 §5).
 
 A leaf below `beamtalk_class_vars` (the in-process accesses), so each error
-kind's message and hint have one source (the class gen_server's
-`get_class_var`, its other caller, was removed by ADR 0153, BT-5160). `beamtalk_object_class` does call
-`beamtalk_class_vars:check_declared/2` (the shared declared-set rule), but only
-downward; the access leaf never calls the class gen_server, so this leaf is
-where the errors both build their values from.
+kind's message and hint have one source. The class gen_server's
+`get_class_var`, its other caller, was removed by ADR 0153 (BT-5160).
 """.
 
 -include("beamtalk.hrl").
