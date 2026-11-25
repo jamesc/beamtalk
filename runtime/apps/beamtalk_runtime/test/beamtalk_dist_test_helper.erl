@@ -27,8 +27,9 @@ cleanup({Peer, _PeerNode}) ->
 ```
 
 `start_peer/0,1` boots the peer with the same code path as the test node
-(`code:get_path/0`, forwarded as `-pa` args) and the same distribution
-cookie, then starts the `beamtalk_runtime` application there via
+(`code:get_path/0`, forwarded as `-pa` args) and a throwaway per-run cookie
+that this node uses for its peers (`erlang:set_cookie/2`; never this node's
+own cookie, BT-5185), then starts the `beamtalk_runtime` application there via
 `rpc:call/4` over ordinary Erlang distribution — not `peer:call/4,5`'s own
 control channel, which this module deliberately avoids driving application
 code through (see start_peer/1's doc).
@@ -76,6 +77,20 @@ into `peer:start_it/2` — the stacktrace only says where it was parked.
 %% this side or the peer did on purpose — see watch_peer_connection/2.
 -define(EXPECTED_NODEDOWN_REASONS, [disconnect, connection_closed]).
 
+%% The throwaway cookie every peer of this test run shares (BT-5185).
+-spec peer_cookie() -> atom().
+peer_cookie() ->
+    Key = {?MODULE, peer_cookie},
+    case persistent_term:get(Key, undefined) of
+        undefined ->
+            Hex = binary_to_list(binary:encode_hex(crypto:strong_rand_bytes(16))),
+            Cookie = list_to_atom("bt_peer_" ++ Hex),
+            persistent_term:put(Key, Cookie),
+            Cookie;
+        Cookie ->
+            Cookie
+    end.
+
 -doc """
 Make this (test) node distributed if it isn't already. Starts epmd first
 (idempotent: `epmd -daemon` against an epmd that is already listening on
@@ -106,8 +121,8 @@ start_peer() ->
 
 -doc """
 Start a second, `peer`-booted node (OTP `peer`, OTP 25+; OTP 28 per
-`.tool-versions`) sharing this node's code path and distribution cookie,
-and start `beamtalk_runtime` on it. Ensures this node is itself
+`.tool-versions`) sharing this node's code path, with a throwaway per-run
+cookie (never this node's own, BT-5185; see `peer_cookie/0`), and start `beamtalk_runtime` on it. Ensures this node is itself
 distributed first (`ensure_distribution/0`).
 
 Deliberately drives the peer through `rpc:call/4` over ordinary
@@ -212,9 +227,15 @@ start_peer(NamePrefix, Opts) ->
     Host = ?PEER_HOST,
     PeerName = unique_short_name(NamePrefix),
     CodePathArgs = lists:append([["-pa", Dir] || Dir <- code:get_path()]),
+    %% BT-5185: the peer gets a random per-run cookie on its command line, never
+    %% this node's own (often the developer's `~/.erlang.cookie`, which `ps`
+    %% would show). `erlang:set_cookie/2` makes this node use it for that
+    %% peer, in both directions; peers share it, so they can reach each other.
+    PeerCookie = peer_cookie(),
+    true = erlang:set_cookie(list_to_atom(atom_to_list(PeerName) ++ "@" ++ Host), PeerCookie),
     %% Warning level so an ERTS dist-rejection warning on the peer shows (BT-3937).
     CookieArgs = [
-        "-setcookie", atom_to_list(erlang:get_cookie()), "-kernel", "logger_level", "warning"
+        "-setcookie", atom_to_list(PeerCookie), "-kernel", "logger_level", "warning"
     ],
     ExtraArgs = maps:get(extra_args, Opts, []),
     PeerOpts0 = #{

@@ -361,7 +361,7 @@ fn lexical_edge_cases_are_decided_by_the_real_grammar() {
     multiple("x := ${ class. y := 2");
     single("x := $( class", "x");
     single("x := $\" class", "x");
-    single("x := $\\( class", "x");
+    single("x := $\\{ class", "x");
 
     // Not assignments at all.
     assert_eq!(assigned_var_with_known("a + 1"), None);

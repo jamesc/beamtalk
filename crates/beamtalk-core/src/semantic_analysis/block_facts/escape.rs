@@ -15,9 +15,9 @@ use crate::ast::{Block, Expression, ExpressionStatement};
 use crate::source_analysis::Span;
 
 /// How a block literal leaves the class-method invocation that created it
-/// (ADR 0130 §5): the shapes the Phase 0 census (BT-3703) counts and the
-/// `class-state-abroad` lint (BT-3712) warns on. One definition, shared by
-/// both, so they cannot disagree about what "escaping" means.
+/// (ADR 0130 §5): the shapes the Phase 0 census (BT-3703) counts and local
+/// threading's escape check reads. One definition, shared by both, so they
+/// cannot disagree about what "escaping" means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EscapeShape {
     /// Returned: the method's last statement, or the operand of `^`.
@@ -43,7 +43,7 @@ fn as_block(expr: &Expression) -> Option<&Block> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReturnedOperands {
     /// Only the method's last statement and the operand of each `^`, as
-    /// written: what the class-state-abroad lint and the Phase 0 census have
+    /// written: what the Phase 0 census has
     /// counted since BT-3703 ([`escaping_blocks`]).
     Direct,
     /// As [`Self::Direct`], and also through what makes up such an operand's
@@ -180,8 +180,8 @@ fn for_each_escape_operand(
 /// not outlive its callback). See [`for_each_escape_operand`] for what counts;
 /// a returned operand is taken as written ([`ReturnedOperands::Direct`]), so a
 /// block that is only the value of a conditional arm or of a last-statement
-/// `b := [..]` is not one here (the census and the class-state-abroad lint
-/// keep the counts they were measured with; the ADR 0131 §6 check follows
+/// `b := [..]` is not one here (the census keeps the counts it was measured
+/// with; the ADR 0131 §6 check follows
 /// both, [`escape_sites`]).
 pub fn escaping_blocks(body: &[ExpressionStatement]) -> Vec<(Block, EscapeShape)> {
     let mut found = Vec::new();

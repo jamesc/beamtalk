@@ -299,6 +299,7 @@ name = "beamtalk-desktop-broker"
 version = "0.6.0"
 dependencies = [
  "base64 0.23.1",
+ "beamtalk-process",
  "beamtalk-repl-protocol",
  "beamtalk-workspace",
  "dirs 7.0.0",
@@ -328,6 +329,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "beamtalk-process"
+version = "0.6.0"
+dependencies = [
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "beamtalk-repl-protocol"
 version = "0.6.0"
 dependencies = [
@@ -343,6 +351,7 @@ name = "beamtalk-workspace"
 version = "0.6.0"
 dependencies = [
  "beamtalk-env",
+ "beamtalk-process",
  "libc",
  "miette",
  "sha2 0.11.0",

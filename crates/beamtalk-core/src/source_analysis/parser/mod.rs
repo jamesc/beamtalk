@@ -86,7 +86,9 @@ mod tests;
 
 // The integer-literal reader, shared with the formatter (BT-5183), which
 // checks that a recorded number spelling reads back as the printed value.
-pub(crate) use expressions::parse_integer;
+#[cfg(test)]
+use expressions::parse_integer;
+pub(crate) use expressions::parse_integer_literal;
 
 // ============================================================================
 // Pratt Parsing for Binary Operator Precedence
@@ -559,14 +561,17 @@ pub fn needs_blank_line_to_complete(source: &str) -> bool {
 }
 
 /// Check if a lexer error message is a human-readable diagnostic (complete but
-/// invalid syntax) rather than a raw source fragment from an unterminated literal.
+/// invalid syntax) rather than an input that more lines could complete.
 ///
-/// Unterminated literal errors contain the raw source text (e.g., `"hello` or `$\`),
-/// which starts with a delimiter character.  Diagnostic errors are English sentences
-/// that start with a lowercase letter (e.g., "single-quoted strings are no longer
-/// supported...").
+/// Diagnostic errors are English sentences that start with a lowercase letter
+/// (e.g., "single-quoted strings are no longer supported..."). An
+/// unterminated string or block comment is also reported as a sentence
+/// (`unterminated string literal starting at ...`, BT-5182) but more input
+/// can close it, so it is not complete. Other incomplete-input errors carry
+/// the raw source text (e.g., `$` at end of input), which starts with a
+/// delimiter character.
 fn is_diagnostic_error(msg: &str) -> bool {
-    msg.starts_with(|c: char| c.is_ascii_lowercase())
+    super::lexer::is_message_error(msg) && !super::lexer::is_unterminated_error(msg)
 }
 
 /// The semantic category of a diagnostic, used by `@expect` for suppression.
@@ -663,22 +668,7 @@ pub enum DiagnosticCategory {
     /// when every arm of the match is a block literal (an intentional
     /// block-valued match). Suppressible with `@expect match_arm_block`.
     MatchArmBlock,
-    /// A block literal that reads or writes a class variable of its home
-    /// class is used where it will run outside an invocation of that class
-    /// (ADR 0130 §5): a reading block handed to an asynchronous send, stored
-    /// or returned sees the values captured at creation; a writing block
-    /// carried into another class's class-side method raises
-    /// `class_state_unreachable`. A lint, not a guarantee.
-    ClassStateAbroad,
-    /// A class-side method that runs in its class's `gen_server` process (it
-    /// is not direct-called) and directly calls a process-sensitive Erlang
-    /// function — one that blocks, or depends on the identity or ownership of
-    /// the calling process (BT-4031, ADR 0129). Suppressible with
-    /// `@expect class_process_ffi` for deliberate serialisation.
-    ClassProcessFfi,
-    /// A class-side method that is direct-called in the caller's process
-    /// (today: `class sealed` in a `sealed` class without class variables;
-    /// after ADR 0142, every class method of a class without class variables)
+    /// A class-side method, which runs in the caller's process (ADR 0142),
     /// directly calls an Erlang function that creates a resource tied to the
     /// calling process (ETS table, port, linked process, link, monitor,
     /// registered name, timer) or acts on the calling process itself
@@ -754,6 +744,28 @@ pub enum DiagnosticCategory {
     /// dynamic-site report among them). Drivers surface exactly this
     /// category alongside `InternalVerifier`. Not a `[diagnostics]` key.
     CodegenReport,
+    /// A standalone `X >> m => ...` that cannot compile where it is written
+    /// (ADR 0152, BT-5184): its target is not a class declared in this file
+    /// (cross-file extension methods were removed), it names another
+    /// package's class (`pkg@Foo >> m`), it targets a protocol, or it is an
+    /// instance-side method on a same-file `native:` actor. An error.
+    /// No `@expect` directive suppresses it, not even `@expect all` (see
+    /// [`Self::is_expect_suppressible`]), and it is not a `[diagnostics]` key:
+    /// the method would otherwise silently not exist.
+    MisplacedExtension,
+}
+
+impl DiagnosticCategory {
+    /// Whether an `@expect` directive (including `@expect all`) may suppress
+    /// a diagnostic of this category. The one place that rule lives: every
+    /// `@expect` pass consults it.
+    #[must_use]
+    pub fn is_expect_suppressible(self) -> bool {
+        // `InternalVerifier` is emitted by codegen, after the `@expect` pass,
+        // so it never meets a directive today; listing it keeps its own
+        // "not suppressible by `@expect`" promise true if that ever changes.
+        !matches!(self, Self::MisplacedExtension | Self::InternalVerifier)
+    }
 }
 
 /// A secondary note attached to a diagnostic.
@@ -1187,6 +1199,43 @@ pub(super) struct Parser {
     /// token's span (BT-5183), so the formatter can print `16rFF` rather
     /// than `255`. Taken by the owning definition like `literal_comments`.
     pub(super) number_spellings: Vec<(Span, EcoString)>,
+    /// The comments written in the gaps between an expression's tokens so
+    /// far (BT-5183), each with its anchor offset and slot. Taken by the
+    /// owning definition like `literal_comments`.
+    pub(super) gap_comments: Vec<(u32, crate::ast::GapSlot, crate::ast::GapComments)>,
+}
+
+/// The [`Comment`] one trivia item holds, with its delimiters stripped
+/// (`// `, `/* … */`, `/// `), or `None` for whitespace. `span` is the span
+/// recorded on the comment (its token's).
+pub(super) fn comment_from_trivia(trivia: &Trivia, span: Span) -> Option<Comment> {
+    match trivia {
+        Trivia::Whitespace(_) => None,
+        Trivia::LineComment(text) => {
+            let s = text.as_str();
+            let content = s
+                .strip_prefix("// ")
+                .or_else(|| s.strip_prefix("//"))
+                .unwrap_or(s);
+            Some(Comment::line(content, span))
+        }
+        Trivia::BlockComment(text) => {
+            let s = text.as_str();
+            let content = s
+                .strip_prefix("/* ")
+                .and_then(|s| s.strip_suffix(" */"))
+                .or_else(|| s.strip_prefix("/*").and_then(|s| s.strip_suffix("*/")))
+                .unwrap_or(s);
+            Some(Comment::block(content, span))
+        }
+        Trivia::DocComment(text) => {
+            let s = text.as_str();
+            let content = s
+                .strip_prefix("/// ")
+                .unwrap_or_else(|| s.strip_prefix("///").unwrap_or(s));
+            Some(Comment::doc(content, span))
+        }
+    }
 }
 
 impl Parser {
@@ -1218,6 +1267,7 @@ impl Parser {
             pipeline_sends: Vec::new(),
             literal_comments: Vec::new(),
             number_spellings: Vec::new(),
+            gap_comments: Vec::new(),
         }
     }
 
@@ -1488,31 +1538,11 @@ impl Parser {
             .map(|(_, positions)| positions);
         for (pos, trivia) in self.current_token().leading_trivia().iter().enumerate() {
             match trivia {
-                super::Trivia::LineComment(text) => {
-                    // Strip `// ` (with space) or `//` — Comment.content is
-                    // documented as "text without delimiters", consistent with
-                    // how collect_doc_comment strips `/// ` from DocComment.
-                    let s = text.as_str();
-                    let content = s
-                        .strip_prefix("// ")
-                        .or_else(|| s.strip_prefix("//"))
-                        .unwrap_or(s);
-                    let mut comment = Comment::line(content, token_span);
-                    comment.preceding_blank_line = saw_blank_line;
-                    leading.push(comment);
-                    saw_blank_line = false;
-                }
-                super::Trivia::BlockComment(text) => {
-                    // Strip `/* ` / ` */` delimiters.
-                    let s = text.as_str();
-                    let content = s
-                        .strip_prefix("/* ")
-                        .and_then(|s| s.strip_suffix(" */"))
-                        .or_else(|| s.strip_prefix("/*").and_then(|s| s.strip_suffix("*/")))
-                        .unwrap_or(s);
-                    let mut comment = Comment::block(content, token_span);
-                    comment.preceding_blank_line = saw_blank_line;
-                    leading.push(comment);
+                super::Trivia::LineComment(_) | super::Trivia::BlockComment(_) => {
+                    if let Some(mut comment) = comment_from_trivia(trivia, token_span) {
+                        comment.preceding_blank_line = saw_blank_line;
+                        leading.push(comment);
+                    }
                     saw_blank_line = false;
                 }
                 super::Trivia::Whitespace(ws) => {
@@ -1530,15 +1560,12 @@ impl Parser {
                 // trivia — preserve it as a `Comment::doc` leading
                 // comment (renders back as `///`, not `//`) so the formatter
                 // doesn't drop or mangle it.
-                super::Trivia::DocComment(text) => {
+                super::Trivia::DocComment(_) => {
                     let already_attached =
                         attached_positions.is_some_and(|positions| positions.contains(&pos));
-                    if !already_attached {
-                        let s = text.as_str();
-                        let content = s
-                            .strip_prefix("/// ")
-                            .unwrap_or_else(|| s.strip_prefix("///").unwrap_or(s));
-                        let mut comment = Comment::doc(content, token_span);
+                    if !already_attached
+                        && let Some(mut comment) = comment_from_trivia(trivia, token_span)
+                    {
                         comment.preceding_blank_line = saw_blank_line;
                         leading.push(comment);
                         saw_blank_line = false;
@@ -1559,6 +1586,66 @@ impl Parser {
         }
     }
 
+    /// The comments in the gap before the token at `idx` (BT-5183): the
+    /// previous token's trailing trivia (comments on its line) and this
+    /// token's leading trivia (comments on their own lines).
+    ///
+    /// Only for gaps inside an expression, which no statement- or
+    /// declaration-level collector reads: each token's trailing trivia is
+    /// read by whichever construct follows it, so a gap is collected once.
+    fn gap_before(&self, idx: usize) -> crate::ast::GapComments {
+        let mut gap = crate::ast::GapComments::default();
+        if let Some(prev) = idx.checked_sub(1).and_then(|i| self.tokens.get(i)) {
+            gap.same_line.extend(
+                prev.trailing_trivia()
+                    .iter()
+                    .filter_map(|t| comment_from_trivia(t, prev.span())),
+            );
+        }
+        if let Some(token) = self.tokens.get(idx) {
+            // A blank line before an own-line comment is kept (as
+            // `collect_comment_attachment` keeps it for statements).
+            let mut saw_blank_line = false;
+            for trivia in token.leading_trivia() {
+                if let Trivia::Whitespace(ws) = trivia {
+                    saw_blank_line |= ws.chars().filter(|&c| c == '\n').count() > 1;
+                } else if let Some(mut comment) = comment_from_trivia(trivia, token.span()) {
+                    comment.preceding_blank_line = saw_blank_line;
+                    saw_blank_line = false;
+                    gap.own_line.push(comment);
+                }
+            }
+        }
+        gap
+    }
+
+    /// The comments in the gap before the current token.
+    pub(super) fn gap_before_current(&self) -> crate::ast::GapComments {
+        self.gap_before(self.current)
+    }
+
+    /// The comments on both sides of the current token: the gap before it
+    /// and the gap after it (for a `;` or a binary operator, whose comments
+    /// are printed together before the token after it).
+    pub(super) fn gaps_around_current(&self) -> crate::ast::GapComments {
+        let mut gap = self.gap_before(self.current);
+        gap.extend(self.gap_before(self.current + 1));
+        gap
+    }
+
+    /// Files the comments of one gap on the parser; the owning definition
+    /// takes them (BT-5183). An empty gap is skipped.
+    pub(super) fn record_gap(
+        &mut self,
+        anchor: u32,
+        slot: crate::ast::GapSlot,
+        gap: crate::ast::GapComments,
+    ) {
+        if !gap.is_empty() {
+            self.gap_comments.push((anchor, slot, gap));
+        }
+    }
+
     /// Collects a trailing end-of-line comment from the last consumed token's trailing trivia.
     ///
     /// After parsing a complete expression, call this to check whether there is a
@@ -1566,9 +1653,9 @@ impl Parser {
     /// lexer places same-line trailing comments in [`Token::trailing_trivia`], so
     /// checking the previously-consumed token is sufficient — no look-ahead needed.
     ///
-    /// Only `//` line comments are considered; doc comments (`///`) and block
-    /// comments (`/* */`) are ignored here (block comments can span multiple lines
-    /// and are already collected as leading comments by [`collect_comment_attachment`]).
+    /// `//` line comments and `///` comments are considered (a `///` after
+    /// code on its line is an end-of-line comment, BT-5183); block comments
+    /// (`/* */`) are not.
     pub(super) fn collect_trailing_comment(&self) -> Option<Comment> {
         if self.current == 0 {
             return None;
@@ -1593,17 +1680,18 @@ impl Parser {
             self.tokens.len()
         );
         let last_token = &self.tokens[token_idx];
-        for trivia in last_token.trailing_trivia() {
-            if let super::Trivia::LineComment(text) = trivia {
-                let s = text.as_str();
-                let content = s
-                    .strip_prefix("// ")
-                    .or_else(|| s.strip_prefix("//"))
-                    .unwrap_or(s);
-                return Some(Comment::line(content, last_token.span()));
-            }
-        }
-        None
+        // `//` and `///` end-of-line comments (a trailing `///` after code is
+        // an end-of-line comment, BT-5183).
+        last_token
+            .trailing_trivia()
+            .iter()
+            .find(|t| {
+                matches!(
+                    t,
+                    super::Trivia::LineComment(_) | super::Trivia::DocComment(_)
+                )
+            })
+            .and_then(|t| comment_from_trivia(t, last_token.span()))
     }
 
     /// Reports an error at the current token.
@@ -1895,12 +1983,20 @@ impl Parser {
     /// - Right brace (`}`) - tuple end
     /// - Semicolon (`;`) - cascade separator
     /// - Newline (when inside method body) - implicit statement separator
+    /// - The start of a class, protocol, type alias, native declaration or
+    ///   standalone method (at top level) - the next definition (BT-5182)
     pub(super) fn synchronize(&mut self) {
         // If we're already at a newline boundary in a method body, don't
         // advance past the first token of the next statement. parse_expression()
         // typically consumes the bad token via advance() in parse_primary, so
         // current may already point to the next statement's first token.
         if !self.is_at_end() && self.in_method_body && self.current_token().has_leading_newline() {
+            return;
+        }
+        // Likewise at top level, never skip the definition right after the
+        // bad token: a stray `)` line before `Object subclass: Foo` must not
+        // swallow the class header.
+        if self.is_at_top_level_definition() {
             return;
         }
 
@@ -1930,6 +2026,10 @@ impl Parser {
         }
 
         if matches!(self.current_kind(), TokenKind::Caret) {
+            return true;
+        }
+
+        if self.is_at_top_level_definition() {
             return true;
         }
 
@@ -2074,8 +2174,24 @@ impl Parser {
             literal_comments: crate::ast::LiteralComments::from_records(
                 std::mem::take(&mut self.literal_comments),
                 std::mem::take(&mut self.number_spellings),
+                std::mem::take(&mut self.gap_comments),
             ),
         }
+    }
+
+    /// Whether the parser is at top level (outside any class, protocol or
+    /// method body) and the current token starts a definition `parse_module`
+    /// dispatches on: a class, protocol, type alias, native declaration or
+    /// standalone method. Such a token is a recovery point there (BT-5182).
+    fn is_at_top_level_definition(&self) -> bool {
+        !self.in_method_body
+            && !self.in_class_body
+            && !self.in_protocol_body
+            && (self.is_at_class_definition()
+                || self.is_at_protocol_definition()
+                || self.is_at_type_alias_definition()
+                || self.is_at_native_declaration()
+                || self.is_at_standalone_method_definition())
     }
 
     /// Checks if the current position looks like the start of a class definition.

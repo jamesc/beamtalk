@@ -241,16 +241,17 @@ fn test_class_registration_generation() {
 }
 
 #[test]
-fn test_no_class_state_emits_empty_class_fields() {
-    // a class with no `classState:` declarations emits an empty
-    // class_fields list so the runtime intrinsic always finds the key.
+fn test_meta_carries_no_class_variable_keys() {
+    // ADR 0153 (BT-5154): classes have no class variables, so
+    // `__beamtalk_meta/0` no longer carries `class_fields` or
+    // `class_field_kinds`; the runtime reads a missing key as empty.
     let src = concat!("Actor subclass: Counter\n", "  state: value = 0\n");
     let code = codegen_named(src, "counter");
 
-    assert_has(
-        "Class with no class state should emit empty class_fields",
+    assert_lacks(
+        "Meta must not carry class-variable keys. Got",
         &code,
-        &["'class_fields' => []"],
+        &["'class_fields'", "'class_field_kinds'"],
     );
 }
 
@@ -291,10 +292,8 @@ fn test_late_state_omitted_from_init_state_literal() {
 
 #[test]
 fn test_no_late_fields_emit_empty_field_kinds_when_no_state() {
-    // A class with no state/classState declarations still emits the
-    // 'field_kinds'/'class_field_kinds' keys (empty maps), matching
-    // 'class_fields' emitting `[]` in test_no_class_state_emits_empty_class_fields
-    // — the runtime intrinsic always finds the key.
+    // A class with no state declarations still emits the 'field_kinds' key
+    // (an empty map), so the runtime intrinsic always finds the key.
     let src = "Actor subclass: Empty\n  noop => nil\n";
     let code = codegen_named(src, "empty");
 
@@ -302,11 +301,6 @@ fn test_no_late_fields_emit_empty_field_kinds_when_no_state() {
         "Should emit empty field_kinds map",
         &code,
         &["'field_kinds' => ~{}~"],
-    );
-    assert_has(
-        "Should emit empty class_field_kinds map",
-        &code,
-        &["'class_field_kinds' => ~{}~"],
     );
 }
 

@@ -39,8 +39,10 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
     }
 
     if url.starts_with('-') {
+        // Not echoed, like the other unrecognised shapes below: such a string
+        // can carry anything, a header with a token included (BT-5185).
         miette::bail!(
-            "Dependency '{name}' has an invalid git URL '{url}' — \
+            "Dependency '{name}' has an invalid git URL — \
              a URL may not begin with '-' (it would be read as a git option)."
         );
     }
@@ -69,7 +71,7 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
     // at this point can only be a helper invocation.
     if url.contains("::") {
         miette::bail!(
-            "Dependency '{name}' has an unsupported git URL '{url}'.\n\n  \
+            "Dependency '{name}' has an unsupported git URL (a '<transport>::' URL).\n\n  \
              '<transport>::' URLs are rejected: git dispatches them to a remote \
              helper, and 'ext::' in particular executes an arbitrary command."
         );
@@ -99,7 +101,7 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
 
     if !scp_like {
         miette::bail!(
-            "Dependency '{name}' has an unsupported git URL '{url}'.\n\n  \
+            "Dependency '{name}' has an unsupported git URL.\n\n  \
              Supported forms are https://, http://, ssh://, git://, file://, \
              and user@host:path."
         );
@@ -143,6 +145,17 @@ pub fn redact_url_credentials(url: &str) -> String {
         Some(at) => format!("{scheme}://***@{}", &rest[at + 1..]),
         None => url.to_string(),
     }
+}
+
+/// `url` as a registry rejection may show it (BT-5185): only its scheme and
+/// host, never userinfo, path or query, any of which can carry a token.
+fn redact_rejected_url(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return "<url>".to_string();
+    };
+    let authority = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
+    let host = authority.rsplit('@').next().unwrap_or("");
+    format!("{scheme}://{host}/...")
 }
 
 /// Environment variable that opts in to plaintext (`http://`, `git://`) git
@@ -200,14 +213,16 @@ pub fn validate_registry_release_url(name: &str, url: &str, allow_file: bool) ->
             return Ok(());
         }
         miette::bail!(
-            "Registry release for '{name}' has a file:// git URL '{url}', which is only \
-             allowed when the registry itself is local."
+            "Registry release for '{name}' has a file:// git URL '{}', which is only \
+             allowed when the registry itself is local.",
+            redact_rejected_url(url)
         );
     }
     if is_plaintext_git_url(url) {
         miette::bail!(
-            "Registry release for '{name}' has an insecure git URL '{url}'. Registry \
-             releases must use https:// or ssh://."
+            "Registry release for '{name}' has an insecure git URL '{}'. Registry \
+             releases must use https:// or ssh://.",
+            redact_rejected_url(url)
         );
     }
     // Remaining form: scp-style `user@host:path`, which git runs over ssh.
@@ -315,6 +330,28 @@ mod tests {
         let err = validate_git_url("dep", "--upload-pack=touch /tmp/pwned").unwrap_err();
         let msg = format!("{err:?}");
         assert!(msg.contains("may not begin with"), "{msg}");
+    }
+
+    /// BT-5185: no rejection message echoes a secret from the URL it rejects.
+    #[test]
+    fn rejection_messages_never_echo_credentials() {
+        for url in [
+            "ext::https://u:s3cret@host.test/r.git",
+            "badscheme://u:s3cret@host.test/r.git",
+            "-c http.extraHeader=s3cret",
+            "/u:s3cret@host.test/r",
+            "ext::sh -c 'curl -H Authorization:s3cret host'",
+            "badscheme://host.test/r?token=s3cret",
+        ] {
+            let msg = format!("{:?}", validate_git_url("dep", url).unwrap_err());
+            assert!(!msg.contains("s3cret"), "{url}: {msg}");
+        }
+        let msg = format!(
+            "{:?}",
+            validate_registry_release_url("dep", "file://s3cret@host.test/r?k=s3cret", false)
+                .unwrap_err()
+        );
+        assert!(!msg.contains("s3cret"), "{msg}");
     }
 
     #[test]

@@ -120,9 +120,9 @@ obj foo:
 // INVALID LITERAL ERRORS
 // ===========================================================================
 
-// Unclosed string literal - lexer produces error token containing the text
+// Unclosed string literal - named, with where it starts (BT-5182)
 "hello
-// => ERROR: "hello
+// => ERROR: unterminated string literal starting at line 1, column 1
 
 // Standalone hash (invalid symbol without identifier) - error token
 #

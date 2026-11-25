@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5182: an unterminated block comment stops at the next class header.
+Object subclass: A
+  /* never closed
+  greet => 1
+
+Object subclass: B
+  size => 2
+)
+Protocol define: P
+  ping

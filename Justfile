@@ -2442,7 +2442,7 @@ test-one TEST:
 # structural validity, BT-3124).
 fuzz DURATION="60":
     @echo "🔀 Fuzzing parser for {{DURATION}} seconds..."
-    @echo "   Corpus: fuzz/corpus/parse_arbitrary/ (35 seed files)"
+    @echo "   Corpus: fuzz/corpus/parse_arbitrary/ (39 seed files)"
     @echo "   Target: parse_arbitrary (lexer + parser crash safety)"
     cargo +nightly fuzz run parse_arbitrary -- -rss_limit_mb=4096 -max_total_time={{DURATION}}
     @echo "✅ parse_arbitrary completed without crashes!"

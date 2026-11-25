@@ -11,7 +11,7 @@ use std::path::Path;
 use std::process::{Child, Stdio};
 use std::time::Duration;
 
-use miette::{Result, miette};
+use miette::{Context, IntoDiagnostic, Result, miette};
 use tracing::{debug, info, warn};
 
 use beamtalk_cli::repl_startup;
@@ -109,18 +109,20 @@ pub(crate) fn start_beam_node(
     // is the constant `nocookie` on a non-distributed node regardless of
     // `-setcookie`. So the foreground node always runs distributed (with a
     // generated name when none was given) under a per-process random cookie.
-    // BT-5126: the cookie is handed over in the child's environment, never in
-    // argv (`-setcookie`, `ERL_AFLAGS` and `-args_file` all land in `ps`); see
-    // `cookie_env`.
+    // BT-5126 / BT-5185: the node boots with the cookie from a private
+    // cookie home, never from argv (`-setcookie`, `ERL_AFLAGS` and
+    // `-args_file` all land in `ps`); see `cookie_env`.
     let cookie = crate::commands::workspace::storage::generate_cookie();
+    let cookie_home = cookie_env::CookieHome::new(&cookie)
+        .into_diagnostic()
+        .wrap_err("Failed to create the private cookie directory")?;
     args.extend(foreground_dist_args(node_name)?);
-    args.extend(cookie_env::placeholder_args());
 
     args.push(OsString::from("-eval"));
-    args.push(OsString::from(cookie_env::adopt_then(&eval_cmd)));
+    args.push(OsString::from(cookie_env::restore_then(&eval_cmd)));
 
-    let mut cmd = beamtalk_workspace::erl_command();
-    cookie_env::hand_over(&mut cmd, &cookie);
+    let mut cmd = cookie_env::erl_command();
+    cookie_home.apply(&mut cmd);
     cmd.arg("-noshell")
         .args(&args)
         // Redirect OTP default logger to stderr from boot. The startup
@@ -149,7 +151,11 @@ pub(crate) fn start_beam_node(
         .spawn()
         .map_err(|e| miette!("Failed to start BEAM node: {e}\nIs Erlang/OTP installed?"))?;
 
-    Ok(ForegroundNode { child, cookie })
+    Ok(ForegroundNode {
+        child,
+        cookie,
+        cookie_home,
+    })
 }
 
 /// A started foreground BEAM node plus the private cookie it was given.
@@ -157,6 +163,9 @@ pub(crate) struct ForegroundNode {
     pub(crate) child: Child,
     /// Per-process random cookie; never `nocookie`.
     pub(crate) cookie: String,
+    /// The private directory the node boots its cookie from; it removes it
+    /// itself, and this removes whatever is left when the node is dropped.
+    pub(crate) cookie_home: cookie_env::CookieHome,
 }
 
 /// VM flags that make the foreground node distributed under a private cookie:
@@ -622,8 +631,11 @@ mod tests {
             root_package: None,
             hex_dep_names: &[],
         };
-        let ForegroundNode { mut child, cookie } =
-            start_beam_node(None, &project, &[], &config).unwrap();
+        let ForegroundNode {
+            mut child,
+            cookie,
+            cookie_home: _cookie_home,
+        } = start_beam_node(None, &project, &[], &config).unwrap();
         let port = read_port_from_child(&mut child);
         let pid = child.id();
         let checked = std::panic::catch_unwind(|| {

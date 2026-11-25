@@ -271,11 +271,6 @@ const CEILINGS: &[(&str, usize)] = &[
     // An assignment value (`a := (Worker spawn)`): not an operand, so
     // `ast::normalize` keeps its parentheses.
     ("beamtalk-core/src/semantic_analysis/actor_spawn.rs", 1),
-    // `SendRef` receivers (cascade shared receivers).
-    (
-        "beamtalk-core/src/semantic_analysis/validators/class_state_abroad.rs",
-        3,
-    ),
     // Shared predicates over statements, assignment values and receivers.
     (
         "beamtalk-core/src/semantic_analysis/validators/lint_validators.rs",

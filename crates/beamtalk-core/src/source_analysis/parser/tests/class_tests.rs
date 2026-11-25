@@ -1153,8 +1153,11 @@ fn parse_method_body_error_recovery_with_newlines() {
     // Should have one diagnostic for the error
     assert_eq!(diagnostics.len(), 1, "Expected one error diagnostic");
     assert!(
-        diagnostics[0].message.contains("Unexpected token"),
-        "Expected error about unexpected token"
+        diagnostics[0]
+            .message
+            .contains("expected directive name after '@'"),
+        "Expected the lexer's error about the bare '@', got: {}",
+        diagnostics[0].message
     );
 
     // Should still parse the class and method

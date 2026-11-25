@@ -48,11 +48,12 @@ pub use signature_text::{
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
     CascadeMessage, ClassDefinition, Comment, CommentAttachment, CommentKind, ExpectCategory,
-    Expression, ExpressionStatement, Identifier, KeywordPart, Literal, LiteralCommentSlots,
-    LiteralComments, MapPair, MapPatternKey, MatchArm, MessageSelector, MethodDefinition, Module,
-    NativeDeclaration, ParameterDefinition, Pattern, PipelineSends, ProtocolDefinition,
-    ProtocolMethodSignature, ProtocolUse, ShapeField, SlotKind, StandaloneMethodDefinition,
-    StateDeclaration, StringSegment, TypeAliasDefinition, TypeAnnotation,
+    Expression, ExpressionStatement, GapComments, GapSlot, Identifier, KeywordPart, Literal,
+    LiteralCommentSlots, LiteralComments, MapPair, MapPatternKey, MatchArm, MessageSelector,
+    MethodDefinition, Module, NativeDeclaration, ParameterDefinition, Pattern, PipelineSends,
+    ProtocolDefinition, ProtocolMethodSignature, ProtocolUse, ShapeField, SlotKind,
+    StandaloneMethodDefinition, StateDeclaration, StringSegment, TypeAliasDefinition,
+    TypeAnnotation,
 };
 use crate::source_analysis::{
     Severity, TokenKind, binary_binding_power, lex_with_eof, line_ending, parse, parse_method,
@@ -530,23 +531,6 @@ fn join_docs(docs: Vec<Document<'static>>, sep: &'static str) -> Document<'stati
         first = false;
     }
     concat(result)
-}
-
-/// Same as `join_docs` but returns a Vec for use with `docs.extend()`.
-fn join_docs_vec(docs: Vec<Document<'static>>, sep: &'static str) -> Vec<Document<'static>> {
-    if docs.is_empty() {
-        return Vec::new();
-    }
-    let mut result: Vec<Document<'static>> = Vec::with_capacity(docs.len() * 2 - 1);
-    let mut first = true;
-    for doc in docs {
-        if !first {
-            result.push(Document::Str(sep));
-        }
-        result.push(doc);
-        first = false;
-    }
-    result
 }
 
 // --- Tests ---
