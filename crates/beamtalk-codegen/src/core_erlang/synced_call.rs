@@ -774,12 +774,32 @@ impl CoreErlangGenerator {
         if !arithmetic && !comparison {
             return UserCodeCall::Yes;
         }
+        // An ordering comparison runs no user code exactly when it is bare
+        // (`comparison_is_bare`, the one predicate `generate_binary_op` lowers
+        // by): a proven number receiver with an unproven right operand sends
+        // that operand its reflected hook when it is not a number (ADR 0116
+        // § Addendum, BT-5176), as arithmetic does for its coercion.
+        if comparison {
+            let bare = if fault!(ComparisonBracketIgnoresRightOperand) {
+                matches!(
+                    self.comparison_receiver(left),
+                    super::operators::ComparisonReceiver::Proven(_)
+                )
+            } else {
+                self.comparison_is_bare(left, right)
+            };
+            return if bare {
+                UserCodeCall::No
+            } else {
+                UserCodeCall::GuardedOperator
+            };
+        }
         // The guard rule is `operators.rs`'s (`operator_guard`); an arithmetic
         // operator with a bare-BIF receiver still reaches the number-on-the-left
         // coercion (a user `plusFromNumber:`) when its right operand is not
         // statically numeric (ADR 0116).
-        let coercion = arithmetic && !self.receiver_is_statically_numeric(right);
-        if self.operator_guard(op, left).is_some() || coercion {
+        let coercion = !self.receiver_is_statically_numeric(right);
+        if self.operator_guard(op, left, right).is_some() || coercion {
             UserCodeCall::GuardedOperator
         } else {
             UserCodeCall::No

@@ -127,7 +127,9 @@ use ecow::EcoString;
 
 use crate::core_erlang::field_types::{ComparisonKinds, trusted_param_types};
 use crate::core_erlang::generator::CoreErlangGenerator;
-use crate::core_erlang::operators::{is_comparable_literal, is_ordering_comparison};
+use crate::core_erlang::operators::{
+    comparison_is_bare, is_ordering_comparison, proven_comparison_kind,
+};
 use beamtalk_cerl_doc::{Document, docvec, leaf};
 
 /// A method's identity within one generation: its span, side and selector. A
@@ -338,6 +340,11 @@ impl Rewriter {
     /// comparisons (BT-4823). It answers a Boolean while the declaration
     /// holds; a receiver that breaks it is dispatched and may answer anything,
     /// which [`helper_guard_sense`] decides through `beamtalk_guard_return`.
+    ///
+    /// A comparison on a proven receiver that is not bare (`0 < x`, the
+    /// right operand unproven) is the same: a Boolean unless its right
+    /// operand is not a number, which is then sent a reflected hook that may
+    /// answer anything (ADR 0116 § Addendum, BT-5176).
     fn is_declared_boolean(&self, expr: &Expression) -> bool {
         if let Expression::MessageSend {
             receiver,
@@ -348,7 +355,8 @@ impl Rewriter {
             && is_ordering_comparison(op)
         {
             return matches!(receiver.as_ref(), Expression::Identifier(id)
-                if self.declared_params.contains(&id.name));
+                if self.declared_params.contains(&id.name))
+                || proven_comparison_kind(receiver, None).is_some();
         }
         self.short_circuit_declared_operands(expr).is_some()
     }
@@ -384,15 +392,20 @@ impl Rewriter {
 
     /// The left operand of `expr` when it is a comparison (`< > <= >=`)
     /// codegen lowers to a bare Erlang BIF, which answers a Boolean and never
-    /// sends: its left operand is a literal with a builtin total order, the
-    /// one operand whose kind the compiler proves
-    /// ([`CoreErlangGenerator::comparison_receiver`]). A typed parameter is
-    /// only declared, so its comparison carries a kind guard that dispatches
-    /// a wrong-kind receiver (BT-4823) and is not a Boolean by construction.
+    /// sends ([`comparison_is_bare`], the one predicate codegen lowers by):
+    /// a `String` literal receiver, or a number or character literal receiver
+    /// with a proven numeric right operand (`0 < 5`, `x`-free). A typed
+    /// parameter is only declared, so its comparison carries a kind guard
+    /// that dispatches a wrong-kind receiver (BT-4823), and an unproven right
+    /// operand is tested and may be sent a reflected hook (ADR 0116
+    /// § Addendum, BT-5176): neither is a Boolean by construction. The
+    /// rewrite proves nothing about `self` (no class name), so a comparison
+    /// on `self` is never taken for one here.
     fn typed_comparison(expr: &Expression) -> Option<&Expression> {
         let Expression::MessageSend {
             receiver,
             selector: MessageSelector::Binary(op),
+            arguments,
             is_cast: false,
             ..
         } = expr
@@ -402,7 +415,15 @@ impl Rewriter {
         if !is_ordering_comparison(op) {
             return None;
         }
-        is_comparable_literal(receiver).then_some(receiver.as_ref())
+        let [right] = arguments.as_slice() else {
+            return None;
+        };
+        let bare = if fault!(LiteralComparisonTrustsRightOperand) {
+            proven_comparison_kind(receiver, None).is_some()
+        } else {
+            comparison_is_bare(receiver, right, None)
+        };
+        bare.then_some(receiver.as_ref())
     }
 
     /// Records `receiver`, a conditional's receiver the rewrite treats as a
@@ -1199,14 +1220,17 @@ mod tests {
 
     #[test]
     fn typed_comparison_allows_every_shape() {
-        // BT-4452: a literal left operand makes `3 > x` a bare BIF, so every
+        // BT-4452: a literal left operand and a proven numeric right one
+        // (ADR 0116 § Addendum, BT-5176) make `3 > 4` a bare BIF, so every
         // shape the helper cannot keep exact on a non-Boolean is exact here.
+        // A `String` literal receiver is bare whatever its argument.
         for body in [
-            "    3 > x ifTrue: [^self withN: 0]\n    2",
-            "    3 > x ifTrue: [self foo. ^1]\n    2",
-            "    3 <= x ifTrue: [^1] ifFalse: [self foo]\n    2",
-            "    3 >= x ifTrue: [^1]",
-            "    0 < x ifFalse: [^x foo]\n    2",
+            "    3 > 4 ifTrue: [^self withN: 0]\n    2",
+            "    3 > 4.5 ifTrue: [self foo. ^1]\n    2",
+            "    3 <= $a ifTrue: [^1] ifFalse: [self foo]\n    2",
+            "    3 >= 1 ifTrue: [^1]",
+            "    0 < 1 ifFalse: [^x foo]\n    2",
+            "    \"m\" < x ifFalse: [^x foo]\n    2",
         ] {
             let src = typed_class(body);
             let (out, helpers) =
@@ -1215,6 +1239,36 @@ mod tests {
             assert_eq!(helpers, 0, "{body}");
             assert_eq!(boolean_comparisons(&src), 1, "{body}");
         }
+    }
+
+    #[test]
+    fn literal_receiver_comparison_with_an_unproven_right_operand_is_decided_by_the_helper() {
+        // ADR 0116 § Addendum (BT-5176): `3 > x` tests `x` and sends a
+        // non-number its reflected hook, which may answer a non-Boolean, so
+        // like a declared comparison it is decided by the helper and nothing
+        // is recorded as a Boolean by construction. A declared right operand
+        // (`x :: Integer`) is tested, not trusted.
+        for body in [
+            "    3 > x ifTrue: [^self withN: 0]\n    2",
+            "    3 > x ifTrue: [self foo. ^1]\n    2",
+            "    0 < x ifFalse: [^x foo]\n    2",
+            "    $a <= x ifTrue: [^1]\n    2",
+            "    (0 < x or: [x > 9]) ifTrue: [^self withN: 0]\n    2",
+        ] {
+            let src = typed_class(body);
+            let (out, helpers) =
+                rewritten_with_conditions(&src).unwrap_or_else(|| panic!("{body}"));
+            assert!(!out.contains('^'), "{out}");
+            assert_eq!(helpers, 1, "{body}");
+            assert_eq!(boolean_comparisons(&src), 0, "{body}");
+        }
+        // A two-branch guard on it keeps its frame, as on a declared one.
+        assert_eq!(
+            rewritten(&typed_class(
+                "    3 <= x ifTrue: [^1] ifFalse: [self foo]\n    2"
+            )),
+            None
+        );
     }
 
     #[test]
@@ -1298,7 +1352,7 @@ mod tests {
             assert_eq!(helpers, 0, "{body}");
         }
         // Typed comparisons inside are recorded for the lowering check.
-        let src = typed_class("    (3 > x and: [3 < x]) ifTrue: [^x foo]\n    2");
+        let src = typed_class("    (3 > 2 and: [3 < 4.0]) ifTrue: [^x foo]\n    2");
         assert!(rewritten(&src).is_some());
         assert_eq!(boolean_comparisons(&src), 2);
     }
