@@ -71,7 +71,7 @@ A `perform:` send naming a secret selector, at any depth of nested
 
 -include("beamtalk.hrl").
 
--export([format_status/2, merge_secrets/3, redacted/0]).
+-export([format_status/2, merge_secrets/3, redacted/0, secret_slots/1]).
 -export([install_crash_report_filter/0, crash_report_filter/2]).
 
 -define(REDACTED, <<"[redacted]">>).
@@ -85,6 +85,30 @@ A `perform:` send naming a secret selector, at any depth of nested
 -doc "The value that stands in for a redacted term.".
 -spec redacted() -> binary().
 redacted() -> ?REDACTED.
+
+-doc """
+The state slots `Module`'s class (with its ancestors) declares in
+`class secretState`, from its compiled `'__beamtalk_secrets'/0`. Loads the
+module if needed. A module without that function (a class with no secrets,
+or not an actor) has none. Fails closed: a module that cannot be loaded, or
+metadata of the wrong shape, raises rather than answer `[]` (BT-5191,
+`JsonMapping` redaction).
+""".
+-spec secret_slots(module()) -> [atom()].
+secret_slots(Module) ->
+    case code:ensure_loaded(Module) of
+        {module, Module} -> ok;
+        {error, Why} -> erlang:error({secret_metadata_unavailable, Module, Why})
+    end,
+    case erlang:function_exported(Module, '__beamtalk_secrets', 0) of
+        false ->
+            [];
+        true ->
+            case Module:'__beamtalk_secrets'() of
+                {Slots, Selectors} when is_list(Slots), is_list(Selectors) -> Slots;
+                Other -> erlang:error({malformed_secret_metadata, Module, Other})
+            end
+    end.
 
 -doc """
 `'__beamtalk_secrets'/0` helper: append a class's own secret slots and

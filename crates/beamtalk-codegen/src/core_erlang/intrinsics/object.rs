@@ -1254,19 +1254,11 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         debug_assert_eq!(arguments.len(), 1);
-        // ADR 0153 decision 7 (BT-5155): a class has no fields, so a
-        // class-method `self` reflection send is not an intrinsic: it
-        // compiles as the ordinary class-side send it is and raises
-        // `does_not_understand` at run time, exactly as the same send
-        // from outside the class does (`beamtalk_object_class:
-        // class_field_reflection_dnu/2`).
-        if self.is_class_side_self_reflection(receiver) {
-            return Ok(None);
-        }
         // Fast-path for `self` receiver in actor context.
         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
         if receiver.is_self()
             && self.context == super::super::CodeGenContext::Actor
+            && !self.in_class_method()
             && self.lookup_var("self").is_none()
         {
             let name_var = self.fresh_var("Name");
@@ -1377,15 +1369,6 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         debug_assert_eq!(arguments.len(), 2);
-        // ADR 0153 decision 7 (BT-5155): a class has no fields, so a
-        // class-method `self` reflection send is not an intrinsic: it
-        // compiles as the ordinary class-side send it is and raises
-        // `does_not_understand` at run time, exactly as the same send
-        // from outside the class does (`beamtalk_object_class:
-        // class_field_reflection_dnu/2`).
-        if self.is_class_side_self_reflection(receiver) {
-            return Ok(None);
-        }
         // Fast-path for `self` receiver in actor context.
         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
         //
@@ -1400,6 +1383,7 @@ impl CoreErlangGenerator {
         // state back into the actor's State variable.
         if receiver.is_self()
             && self.context == super::super::CodeGenContext::Actor
+            && !self.in_class_method()
             && self.lookup_var("self").is_none()
         {
             let name_var = self.fresh_var("Name");
@@ -1502,15 +1486,6 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         debug_assert_eq!(arguments.len(), 1);
-        // ADR 0153 decision 7 (BT-5155): a class has no fields, so a
-        // class-method `self` reflection send is not an intrinsic: it
-        // compiles as the ordinary class-side send it is and raises
-        // `does_not_understand` at run time, exactly as the same send
-        // from outside the class does (`beamtalk_object_class:
-        // class_field_reflection_dnu/2`).
-        if self.is_class_side_self_reflection(receiver) {
-            return Ok(None);
-        }
         // Fast-path for `self` receiver in actor instance
         // context. Avoids sync_send(self()) → deadlock.
         if receiver.is_self()
@@ -1566,15 +1541,6 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         debug_assert_eq!(arguments.len(), 1);
-        // ADR 0153 decision 7 (BT-5155): a class has no fields, so a
-        // class-method `self` reflection send is not an intrinsic: it
-        // compiles as the ordinary class-side send it is and raises
-        // `does_not_understand` at run time, exactly as the same send
-        // from outside the class does (`beamtalk_object_class:
-        // class_field_reflection_dnu/2`).
-        if self.is_class_side_self_reflection(receiver) {
-            return Ok(None);
-        }
         // Fast-path for `self` receiver in actor instance
         // context. Avoids sync_send(self()) → deadlock.
         // Method-body-level state threading is handled by
@@ -1591,6 +1557,7 @@ impl CoreErlangGenerator {
         // actor's `State` variable.
         if receiver.is_self()
             && self.context == super::super::CodeGenContext::Actor
+            && !self.in_class_method()
             && self.lookup_var("self").is_none()
         {
             let name_var = self.fresh_var("Name");

@@ -31,14 +31,14 @@ TestCase subclass: ClassBuilderIncrementalTest
       superclass: Object;
       addField: #count default: 0;
       addMethod: #answer body: [:inst | 42];
-      addClassMethod: #scaled: body: [:self :n | n * 10];
+      addClassMethod: #bump body: [:self | 7];
       register
     // Instance-side piece is callable.
     instance := self.cls new
     self assert: instance answer equals: 42
     self assert: (instance fieldAt: #count) equals: 0
     // Class-side piece is callable.
-    self assert: (self.cls scaled: 2) equals: 20
+    self assert: self.cls bump equals: 7
 
   // AC: an incrementally-added instance method with a keyword selector is
   // callable (block args bind positionally after the receiver).

@@ -105,9 +105,9 @@ pub(super) use ir::RebindFrameKind;
 #[cfg(test)]
 pub(super) use ir::STATIC_LOOP_FNS;
 pub(super) use ir::{
-    BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, ConsPerCall, EnsureCatchVars,
-    EnsureCleanup, EnsureForeignNlr, EnsureNlrRelay, FOLD_RESULT_LIST_SLOT, FastPath, FoldAccShape,
-    FoldCarry, FoldResultList, ForeignCleanupBody, FrameId, KeyedFoldCall, LoopCounter, NlrCarry,
+    BindOp, CatchClause, CatchStep, CellBoundary, ConsPerCall, EnsureCatchVars, EnsureCleanup,
+    EnsureForeignNlr, EnsureNlrRelay, FOLD_RESULT_LIST_SLOT, FastPath, FoldAccShape, FoldCarry,
+    FoldResultList, ForeignCleanupBody, FrameId, KeyedFoldCall, LoopCounter, NlrCarry,
     NlrThrowShape, OnDoCatchVars, RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadedValue,
     ThreadingMode, TokenId, TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix,
     VersionedVar,
@@ -138,7 +138,7 @@ pub(super) use verify::{
 pub(super) use ir::{AccParam, CloseContext};
 #[cfg(test)]
 pub(super) use verify::{
-    CatchRestoreDefect, EnsureRelayDefect, ForeignStoreDefect, ScopeKind, verify, verify_in_scope,
+    CatchNlrDefect, EnsureRelayDefect, ForeignStoreDefect, ScopeKind, verify, verify_in_scope,
     verify_in_scope_after,
 };
 

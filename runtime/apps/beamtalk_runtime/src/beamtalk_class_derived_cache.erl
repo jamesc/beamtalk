@@ -46,7 +46,9 @@ names: foreign modules (`lists`, `gen_server`, supervisor callbacks) are the
 common miss, and a miss that bypassed the cache would copy the whole map. The
 rows are bounded by the distinct module atoms asked about and flushed by the
 next class write),
-`{direct_constructor, ClassPid, Selector}`).
+`{direct_constructor, ClassPid, Selector}`,
+`{json_mapping, Class}` (a `JsonMappable` class's validated `JsonMapping`,
+`beamtalk_json_mapping:cached/2`, BT-5191)).
 `chain_has_user_new1` is whether an ancestor of `Class` defines a user
 class-side `new:` (`beamtalk_class_metadata:chain_has_user_new1/1`, BT-4409);
 `direct_constructor` is the dynamic `new`/`new:` verdict built on it

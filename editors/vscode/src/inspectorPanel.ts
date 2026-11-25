@@ -86,13 +86,14 @@ export class InspectorPanel {
     const existing = InspectorPanel._panels.get(key);
 
     if (existing) {
-      existing._client = client;
-      existing._clientChanged = false;
       existing._target = target;
       existing._panel.reveal(vscode.ViewColumn.Two);
       // Re-fetch live state so the panel is always up to date on reveal.
       // (`target.value` is only a placeholder — see the binding case below.)
-      void existing._refetch();
+      // `target` comes from the current client, so it is not a session that
+      // ended with an earlier one. BT-5189: through `_useClient`, which also
+      // drops a connect-waiter left from before (it would refetch twice).
+      existing._useClient(client, false);
       return;
     }
 
@@ -115,7 +116,7 @@ export class InspectorPanel {
     // not values), so the real value must come from `bindingValue` via
     // `_fetchContent`, same as actor state comes from `inspect`.
     inspector._initHtml(renderLoading());
-    void inspector._refetch();
+    inspector._useClient(client, false);
   }
 
   /**
@@ -147,30 +148,61 @@ export class InspectorPanel {
   }
 
   /**
-   * Switch a binding panel to a new client (BT-5130). The client is usually
-   * still connecting here, so a fetch would fail with "Not connected"; wait
-   * for `connected` instead. The session id belongs to the old node, so a
-   * failure after a client change is reported as "session ended".
+   * Switch a binding panel to a new client (BT-5130). The session id belongs
+   * to the old node, so a failure after a client change is reported as
+   * "session ended".
    */
   private _setBindingClient(client: WorkspaceClient | null): void {
+    this._useClient(client, true);
+  }
+
+  /**
+   * Point this panel at `client` and fetch once it is connected. The client
+   * is often still connecting (a fetch would fail with "Not connected"), so
+   * wait for `connected` — at most `CONNECT_WAIT_MS`, then say so instead of
+   * showing "Loading…" forever (BT-5189). Any earlier wait is dropped first,
+   * so a panel never holds two waiters (each would refetch).
+   */
+  private _useClient(client: WorkspaceClient | null, clientChanged: boolean): void {
     this._stopWaiting?.();
     this._stopWaiting = undefined;
     this._client = client;
-    this._clientChanged = true;
-    if (!client) return;
-    if (client.state === "connected") {
+    this._clientChanged = clientChanged;
+    if (this._disposed) return;
+    // The workspace went away: keep showing the last value (refetching would
+    // only replace it with "Not connected"); the next client refetches.
+    if (!client && clientChanged) return;
+    if (!client || client.state === "connected") {
       void this._refetch();
       return;
     }
     this._postContent(renderLoading());
-    const stop = client.onConnectionChange((state) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = client.onConnectionChange((state) => {
       if (state !== "connected" || this._disposed) return;
       stop();
-      this._stopWaiting = undefined;
       void this._refetch();
     });
+    const stop = (): void => {
+      unsubscribe();
+      if (timer !== undefined) clearTimeout(timer);
+      if (this._stopWaiting === stop) this._stopWaiting = undefined;
+    };
+    timer = setTimeout(() => {
+      stop();
+      if (this._disposed) return;
+      ++this._refreshGeneration;
+      this._postContent(
+        renderError(
+          "Not connected to the workspace — it did not connect in time. Press Refresh to retry."
+        )
+      );
+    }, InspectorPanel.CONNECT_WAIT_MS);
     this._stopWaiting = stop;
   }
+
+  /** How long a panel waits for its client to connect before reporting it (BT-5189). */
+  static CONNECT_WAIT_MS = 30_000;
 
   /** Close every actor panel (the node they were opened against may be gone). */
   static closeActorPanels(): void {
@@ -233,15 +265,20 @@ export class InspectorPanel {
     try {
       const content = await this._fetchContent();
       if (!this._disposed && generation === this._refreshGeneration) {
+        // BT-5189: a successful fetch on the new client proves the binding's
+        // session is alive there, so a later failure is that failure — not a
+        // "session ended" left over from the client change.
+        this._clientChanged = false;
         this._postContent(content);
       }
     } catch (err) {
       if (!this._disposed && generation === this._refreshGeneration) {
+        const message = err instanceof Error ? err.message : String(err);
         if (this._target.kind === "binding" && this._clientChanged) {
-          this._postContent(renderSessionEnded());
+          // Still show what actually failed, not only the likely cause.
+          this._postContent(renderSessionEnded(message));
           return;
         }
-        const message = err instanceof Error ? err.message : String(err);
         this._postContent(renderError(message));
       }
     }
@@ -356,8 +393,8 @@ function renderLoading(): string {
   return `<p class="bt-loading">Loading…</p>`;
 }
 
-function renderSessionEnded(): string {
-  return `<p class="bt-error">Session ended — this binding belonged to a REPL session that no longer exists.</p>`;
+function renderSessionEnded(detail: string): string {
+  return `<p class="bt-error">Session ended — this binding belonged to a REPL session that no longer exists.</p><p class="bt-error">Error: ${escapeHtml(detail)}</p>`;
 }
 
 function renderError(message: string): string {

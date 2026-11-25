@@ -307,9 +307,7 @@ impl CoreErlangGenerator {
     ///       let Site = call 'erlang':'process_info'(self(), 'current_stacktrace') in
     ///       call 'beamtalk_erlang_proxy':'ffi_call_raised'(C, E, S, 'M', 'F', [A1], Mode, Site)
     ///       (a `String`/`Binary`-typed argument adds `is_binary` to its guard, a
-    ///       `Dictionary`-typed one `is_map` (BT-4770), and either adds a
-    ///       `let Snap = beamtalk_class_vars:snapshot()` before the `try`, passed as
-    ///       the last argument: `ffi_call_raised/9`)
+    ///       `Dictionary`-typed one `is_map` (BT-4770))
     ///   <> when 'true' -> call 'beamtalk_erlang_proxy':'direct_call'('M', 'F', [A1], Mode)
     /// end
     /// ```
@@ -435,14 +433,6 @@ impl CoreErlangGenerator {
                 sep.into_iter().chain([leaf::var(var.clone())])
             })
             .collect();
-        // BT-4759: a binary argument lets the `badarg` charlist retry run (so
-        // does a map, whose nested Strings the retry unwraps, BT-4770), and a
-        // retry is a fresh attempt (ADR 0130 §4), so the call site keeps the
-        // pre-call class-variable snapshot for it, as the proxy does. It must be
-        // read before the call, so it cannot be taken lazily in the handler. A
-        // call with only scalar arguments never retries and takes none.
-        let any_retry = args.iter().any(|(_, kinds)| kinds.may_retry());
-        let snap_var = any_retry.then(|| self.fresh_temp_var("FfiSnap"));
         let module_atom = leaf::atom(module_name.to_string());
         let function_atom = leaf::atom(function_name.to_string());
         let mode_atom = leaf::atom(crate::core_erlang::util::ffi_coercion_mode(module_name));
@@ -460,7 +450,6 @@ impl CoreErlangGenerator {
             &function_atom,
             &mode_atom,
             &arg_vars,
-            snap_var.as_deref(),
             context_doc.as_ref(),
             inline_result,
         );
@@ -470,14 +459,6 @@ impl CoreErlangGenerator {
         // Static types are not enforced at run time: check each argument with
         // the table's runtime guards and keep the proxy for anything else.
         let guard = ffi_arg_runtime_guard(args);
-        let snap_binding = match &snap_var {
-            Some(snap) => docvec![
-                "let ",
-                leaf::var(snap.clone()),
-                " = call 'beamtalk_class_vars':'snapshot'() in "
-            ],
-            None => Document::Str(""),
-        };
         let fallback = match &context_doc {
             None => docvec![
                 "call 'beamtalk_erlang_proxy':'direct_call'(",
@@ -508,7 +489,6 @@ impl CoreErlangGenerator {
             "case <> of <> when ",
             guard,
             " -> ",
-            snap_binding,
             direct,
             " <> when 'true' -> ",
             fallback,
@@ -518,16 +498,15 @@ impl CoreErlangGenerator {
 
     /// The `try` of a direct FFI call (see [`Self::proved_direct_ffi_call`]):
     /// the remote call, and on any exception the hand-off to
-    /// `beamtalk_erlang_proxy:ffi_call_raised/8` (`/9`, `/10`) with the built stacktrace and
-    /// the call site's frame.
-    #[allow(clippy::too_many_arguments)] // the call's atoms and arguments plus its three optional shapes
+    /// `beamtalk_erlang_proxy:ffi_call_raised/8` (`/10` with a delegate's
+    /// context) with the built stacktrace and the call site's frame.
+    #[allow(clippy::too_many_arguments)] // the call's atoms and arguments plus its optional shapes
     fn ffi_try_direct_doc(
         &mut self,
         module_atom: &Document<'static>,
         function_atom: &Document<'static>,
         mode_atom: &Document<'static>,
         arg_vars: &[Document<'static>],
-        snap_var: Option<&str>,
         context: Option<&Document<'static>>,
         inline_result: bool,
     ) -> Document<'static> {
@@ -553,15 +532,13 @@ impl CoreErlangGenerator {
             mode_atom.clone(),
             leaf::var(site_var.clone()),
         ];
-        // `/8` for scalar arguments, `/9` adds the snapshot (BT-4759), `/10`
-        // the `{Class, Selector}` context of a delegate (BT-4765).
-        match (snap_var, context) {
-            (None, None) => {}
-            (Some(snap), None) => raised_args.push(leaf::var(snap.to_string())),
-            (snap, Some(context)) => {
-                raised_args.push(snap.map_or(leaf::atom("none"), |s| leaf::var(s.to_string())));
-                raised_args.push(context.clone());
-            }
+        // `/8` without a context; `/10` adds the `{Class, Selector}` context of
+        // a delegate (BT-4765) after a `'none'` snapshot slot (ADR 0153: compiled
+        // code reads no class-variable snapshot; the runtime's slot stays until
+        // Phase 3 removes it).
+        if let Some(context) = context {
+            raised_args.push(leaf::atom("none"));
+            raised_args.push(context.clone());
         }
         let raised = form::call("beamtalk_erlang_proxy", "ffi_call_raised", raised_args);
         let handler = form::let_in(

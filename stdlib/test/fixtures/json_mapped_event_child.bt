@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for BT-5191; see json_mapping_test.bt.
+
+// Inherits JsonMappedEvent's class jsonMapping but adds a field: asJson raises.
+JsonMappedEvent subclass: JsonMappedEventChild
+  field: extra = "added"

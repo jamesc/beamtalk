@@ -200,24 +200,24 @@ fn parse_block(src: &str) -> Block {
     }
 }
 
-fn cv_accesses(src: &str) -> ClassVarAccesses {
+fn cv_accesses(src: &str) -> SelfSlotAccesses {
     let vars: HashSet<String> = ["n".to_string(), "m".to_string()].into();
-    class_var_accesses(&parse_block(src), &vars)
+    self_slot_accesses(&parse_block(src), &vars)
 }
 
 fn names(items: &[&str]) -> std::collections::BTreeSet<String> {
     items.iter().map(ToString::to_string).collect()
 }
 
-fn written(acc: &ClassVarAccesses) -> std::collections::BTreeSet<String> {
+fn written(acc: &SelfSlotAccesses) -> std::collections::BTreeSet<String> {
     acc.writes.keys().cloned().collect()
 }
 
 #[test]
-fn class_var_accesses_write_only_block_reads_nothing() {
+fn self_slot_accesses_write_only_block_reads_nothing() {
     let acc = cv_accesses("[:x | self.n := x]");
     assert_eq!(written(&acc), names(&["n"]));
-    assert!(!acc.reads_class_state(), "{acc:?}");
+    assert!(!acc.reads_slots(), "{acc:?}");
     // `self.n := self.n + 1` both writes and reads.
     let acc = cv_accesses("[self.n := self.n + 1]");
     assert_eq!(written(&acc), names(&["n"]));
@@ -225,7 +225,7 @@ fn class_var_accesses_write_only_block_reads_nothing() {
 }
 
 #[test]
-fn class_var_accesses_records_the_first_write_site() {
+fn self_slot_accesses_records_the_first_write_site() {
     let src = "[self.n := 1. self.n := 2]";
     let acc = cv_accesses(src);
     let first = u32::try_from(src.find("self.n").expect("fixture")).expect("small");
@@ -233,24 +233,24 @@ fn class_var_accesses_records_the_first_write_site() {
 }
 
 #[test]
-fn class_var_accesses_sees_reads_in_nested_blocks_and_cascade_messages() {
+fn self_slot_accesses_sees_reads_in_nested_blocks_and_cascade_messages() {
     let acc = cv_accesses("[:x | x foo; bar: self.n]");
     assert_eq!(acc.reads, names(&["n"]));
     let acc = cv_accesses("[[:y | y + self.m]]");
     assert_eq!(acc.reads, names(&["m"]));
     // An instance field of the same spelling is not a class variable.
     let acc = cv_accesses("[self.other + other.n]");
-    assert!(!acc.reads_class_state(), "{acc:?}");
+    assert!(!acc.reads_slots(), "{acc:?}");
 }
 
 #[test]
-fn class_var_accesses_has_field_probe_is_a_read_unless_cascaded() {
+fn self_slot_accesses_has_field_probe_is_a_read_unless_cascaded() {
     let acc = cv_accesses("[self hasField: #n]");
     assert_eq!(
         acc.has_field_probes,
         [HasFieldProbe::Symbol("n".to_string())].into()
     );
-    assert!(acc.reads_class_state());
+    assert!(acc.reads_slots());
     assert!(
         acc.reads.is_empty(),
         "a probe is not a variable read: {acc:?}"
@@ -264,17 +264,17 @@ fn class_var_accesses_has_field_probe_is_a_read_unless_cascaded() {
     let acc = cv_accesses("[:k | self hasField: k]");
     assert_eq!(acc.has_field_probes, [HasFieldProbe::Computed].into());
     let acc = cv_accesses("[self hasField: #n; hasField: #m]");
-    assert!(!acc.reads_class_state(), "{acc:?}");
+    assert!(!acc.reads_slots(), "{acc:?}");
     // Not to `self`: not a probe of the class-variable home.
     let acc = cv_accesses("[:o | o hasField: #n]");
-    assert!(!acc.reads_class_state(), "{acc:?}");
+    assert!(!acc.reads_slots(), "{acc:?}");
 }
 
 #[test]
-fn class_var_accesses_field_at_is_a_read_of_a_named_variable() {
+fn self_slot_accesses_field_at_is_a_read_of_a_named_variable() {
     let acc = cv_accesses("[self fieldAt: #n]");
     assert_eq!(acc.field_at_reads, names(&["n"]));
-    assert!(acc.reads_class_state());
+    assert!(acc.reads_slots());
     assert!(acc.reads.is_empty(), "not a `self.n` read: {acc:?}");
     assert_eq!(
         acc.field_at_read_noun("class variable").as_deref(),
@@ -283,23 +283,23 @@ fn class_var_accesses_field_at_is_a_read_of_a_named_variable() {
     // A literal name that is no variable reads no captured state (it
     // raises anyway).
     let acc = cv_accesses("[self fieldAt: #nope]");
-    assert!(!acc.reads_class_state(), "{acc:?}");
+    assert!(!acc.reads_slots(), "{acc:?}");
     // A computed name may name one.
     let acc = cv_accesses("[:k | self fieldAt: k]");
-    assert!(acc.computed_field_at_read && acc.reads_class_state());
+    assert!(acc.computed_field_at_read && acc.reads_slots());
     assert_eq!(acc.field_at_read_noun("field").as_deref(), Some("a field"));
     // A write is not a read; a cascade message or another receiver is
     // an ordinary send.
     let acc = cv_accesses("[self fieldAt: #n put: 1]");
-    assert!(!acc.reads_class_state(), "{acc:?}");
+    assert!(!acc.reads_slots(), "{acc:?}");
     let acc = cv_accesses("[self fieldAt: #n; fieldAt: #m]");
-    assert!(!acc.reads_class_state(), "{acc:?}");
+    assert!(!acc.reads_slots(), "{acc:?}");
     let acc = cv_accesses("[:o | o fieldAt: #n]");
-    assert!(!acc.reads_class_state(), "{acc:?}");
+    assert!(!acc.reads_slots(), "{acc:?}");
 }
 
 #[test]
-fn class_var_accesses_reads_phrase_names_each_variable_once() {
+fn self_slot_accesses_reads_phrase_names_each_variable_once() {
     let acc = cv_accesses("[self.n printString. self fieldAt: #n. self fieldAt: #m]");
     assert_eq!(
         acc.reads_phrase("class variable", "C").as_deref(),
@@ -322,7 +322,7 @@ fn class_var_accesses_reads_phrase_names_each_variable_once() {
 }
 
 #[test]
-fn class_var_accesses_records_reflective_writes_in_walk_order() {
+fn self_slot_accesses_records_reflective_writes_in_walk_order() {
     let src = "[:k | self clearField: #nope. [self fieldAt: k put: 1]. self fieldAt: #n put: 2]";
     let acc = cv_accesses(src);
     let found: Vec<(ReflectiveWriteKind, Option<&str>)> = acc
@@ -349,7 +349,7 @@ fn class_var_accesses_records_reflective_writes_in_walk_order() {
         "writes a field of C with `fieldAt:put:`"
     );
     // A write is not a read.
-    assert!(!acc.reads_class_state(), "{acc:?}");
+    assert!(!acc.reads_slots(), "{acc:?}");
     // A cascade message, a cast or another receiver is an ordinary send.
     for src in [
         "[self fieldAt: #n put: 1; clearField: #m]",

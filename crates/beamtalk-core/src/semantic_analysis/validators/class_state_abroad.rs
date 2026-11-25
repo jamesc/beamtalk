@@ -63,8 +63,8 @@ use crate::ast_walker::{SendRef, walk_sends};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::actor_spawn::{actor_locals, is_actor_spawn};
 use crate::semantic_analysis::block_facts::{
-    ClassVarAccesses, EscapeShape, ReflectiveWriteKind, analyze_method_body, class_var_accesses,
-    compute_class_var_mutating_selectors, escaping_blocks, probe_clause,
+    EscapeShape, ReflectiveWriteKind, SelfSlotAccesses, analyze_method_body,
+    compute_class_var_mutating_selectors, escaping_blocks, probe_clause, self_slot_accesses,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use std::collections::{HashMap, HashSet};
@@ -166,8 +166,8 @@ fn check_method_body(
 
     // (a) reads: returned or stored.
     for (block, shape) in escaping_blocks(body) {
-        let accesses = class_var_accesses(&block, &ctx.class_vars);
-        if accesses.reads_class_state() {
+        let accesses = self_slot_accesses(&block, &ctx.class_vars);
+        if accesses.reads_slots() {
             report(
                 &block,
                 reads_diagnostic(ctx, &block, &accesses, &shape_clause(shape)),
@@ -203,8 +203,8 @@ fn check_send(
     // (a) reads: passed to a send that runs or keeps it elsewhere.
     if let Some(how) = ctx.abroad_send_clause(receiver, sel, send.is_cast, actors) {
         for block in blocks() {
-            let accesses = class_var_accesses(block, &ctx.class_vars);
-            if accesses.reads_class_state() {
+            let accesses = self_slot_accesses(block, &ctx.class_vars);
+            if accesses.reads_slots() {
                 report(block, reads_diagnostic(ctx, block, &accesses, &how));
             }
         }
@@ -304,7 +304,7 @@ impl ClassCtx<'_> {
 
     /// The first class-variable write `block` makes, in source order, as a
     /// verb phrase: a direct `self.n := ...` or a reflective `self fieldAt:
-    /// #n put: v` / `self clearField: #n` (both [`class_var_accesses`],
+    /// #n put: v` / `self clearField: #n` (both [`self_slot_accesses`],
     /// BT-4428), or a `self`/own-class send, cascade messages included, that
     /// may write one, whichever starts first. Nested blocks included.
     ///
@@ -315,7 +315,7 @@ impl ClassCtx<'_> {
     /// `class_state_unreachable`.
     fn first_class_var_write(&self, block: &Block) -> Option<String> {
         let class = self.class_name;
-        let accesses = class_var_accesses(block, &self.class_vars);
+        let accesses = self_slot_accesses(block, &self.class_vars);
         let direct = accesses
             .writes
             .iter()
@@ -490,7 +490,7 @@ fn shape_clause(shape: EscapeShape) -> String {
 fn reads_diagnostic(
     ctx: &ClassCtx<'_>,
     block: &Block,
-    accesses: &ClassVarAccesses,
+    accesses: &SelfSlotAccesses,
     how: &str,
 ) -> Diagnostic {
     let class = ctx.class_name;

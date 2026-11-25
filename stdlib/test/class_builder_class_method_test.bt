@@ -15,9 +15,11 @@
 TestCase subclass: ClassBuilderClassMethodTest
   field: cls = nil
   field: parentCls = nil
+  field: midCls = nil
 
   tearDown =>
     self.cls isNil ifFalse: [self.cls removeFromSystem]
+    self.midCls isNil ifFalse: [self.midCls removeFromSystem]
     self.parentCls isNil ifFalse: [self.parentCls removeFromSystem]
 
   // Plain-value and keyword class methods.
@@ -56,12 +58,33 @@ TestCase subclass: ClassBuilderClassMethodTest
     self.cls := (Erlang beamtalk_interface) findClass: #BT2267BSuperChild
     self assert: self.cls greeting equals: "base"
 
+  // ADR 0130 §3: a builder `super` send runs the superclass method with the
+  // LIVE receiver (`ClassSelf` of the subclass), not the static builder
+  // class: the inherited method sees the subclass as `self`.
+  testSuperFromSubclassReceiverUsesLiveReceiver =>
+    Object classBuilder name: #BT3709SuperVarBase;
+      superclass: Object;
+      classMethods: #{#who => [:self | self name]};
+      register
+    self.parentCls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarBase
+    Object classBuilder name: #BT3709SuperVarMid;
+      superclass: #BT3709SuperVarBase;
+      classMethods: #{#who => [:self | super who]};
+      register
+    self.midCls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarMid
+    Object classBuilder name: #BT3709SuperVarLeaf;
+      superclass: #BT3709SuperVarMid;
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarLeaf
+    self assert: self.cls who equals: #BT3709SuperVarLeaf
+    self assert: self.midCls who equals: #BT3709SuperVarMid
+
   // BT-2276: a computed (non-block-literal) classMethods: fun whose arity does
   // not match the class-method calling convention `fun(ClassSelf, ...)`
   // is rejected at register time with a structured #arity_mismatch error, instead
   // of installing successfully and crashing with an opaque error:undef when the
   // class method is first called. Here `blk` is arity 2 but unary `#size` needs
-  // arity 1 (ClassSelf; class variables are not passed, ADR 0130).
+  // arity 1 (ClassSelf).
   testWrongArityComputedFunRejected =>
     blk := [:_self :_extra | "x" size]
     self
