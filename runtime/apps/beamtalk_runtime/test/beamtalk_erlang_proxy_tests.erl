@@ -2519,14 +2519,14 @@ function_clause_in_recursive_call_to_target_is_reported_at_head_test() ->
 %% such a call (here a binary `badarg` that retries with a charlist) answers
 %% exactly what `/8` does, whatever term the old module passes there.
 ffi_call_raised_ignores_legacy_snapshot_slot_test() ->
+    Args = [<<"bt5159_legacy">>],
     Raise = fun(Call) ->
         try
-            erlang:list_to_atom(<<"bt5159_legacy">>)
+            erlang:apply(erlang, list_to_atom, Args)
         catch
             C:E:S -> Call(C, E, S, erlang:process_info(self(), current_stacktrace))
         end
     end,
-    Args = [<<"bt5159_legacy">>],
     Expected = Raise(fun(C, E, S, Site) ->
         beamtalk_erlang_proxy:ffi_call_raised(C, E, S, erlang, list_to_atom, Args, stock, Site)
     end),
