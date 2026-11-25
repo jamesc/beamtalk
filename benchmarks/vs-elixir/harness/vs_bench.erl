@@ -85,12 +85,6 @@ rows() ->
             'dynClassMethod:c:', math_class, [{dyn_remote_call, math_class}, {remote_call, none}]},
         {"3e", dispatch, "inherited class method, open stateless subclass / Mod.fun(arg)", 50000,
             'inheritedClassMethod:', none, [{remote_call, none}]},
-        {"3f", dispatch, "class method, class with classState: / Mod.fun(arg)", 50000,
-            'statefulClassMethod:', none, [{remote_call, none}]},
-        {"3g", dispatch, "class method, class variables published after compile / Mod.fun(arg)",
-            50000, 'lateStateClassMethod:', none, [{remote_call, none}]},
-        {"3h", dispatch, "as 3g, class in a variable / mod.fun(arg)", 50000, 'dynClassMethod:c:',
-            late_state_math_class, [{dyn_remote_call, late_state_math_class}, {remote_call, none}]},
         {"3k", dispatch, "integer class-side constant: Errs protocolError / Mod.const()", 200000,
             'intConstant:', none, [{remote_const_int, none}, {module_attr_int, none}]},
         {"3l", dispatch, "string class-side constant: Errs name / Mod.const()", 200000,
@@ -255,7 +249,6 @@ fixtures() ->
         binary => {Bt(binary), ?EX:string()},
         tuple => {Bt(tuple), ?EX:tuple()},
         math_class => {Bt(openMathClass), ?EX:math_module()},
-        late_state_math_class => {Bt(lateStateMathClass), ?EX:math_module()},
         bt_ok => {Bt(okResult), none},
         ex_ok => {none, ?EX:ok_result()},
         bt_counter => {Bt(counter), none},
@@ -343,11 +336,6 @@ boot() ->
     %% Elixir protocol dispatch is only representative when consolidated.
     true = 'Elixir.Protocol':'consolidated?'('Elixir.VeBench.Area'),
     true = 'Elixir.Protocol':'consolidated?'('Elixir.Enumerable'),
-    %% Rows 3g/3h (BT-4431): `VbLateStateMath` was compiled with no class
-    %% state; publish "declares class variables" for it, the metadata write a
-    %% reload adding `classState:` makes, so its static call site declines.
-    ok = beamtalk_class_metadata:put_class_variables('VbLateStateMath', true),
-    true = beamtalk_class_metadata:chain_has_class_variables('VbLateStateMath'),
     timer:sleep(1000).
 
 load_all(Dir, Glob) ->
@@ -586,12 +574,6 @@ compiles_to("3d") ->
     "send(C, 'double:', [21]) -> class_send: runs in the caller (ADR 0142, BT-4300)";
 compiles_to("3e") ->
     "whereis_class + class_send: inherited method resolved by the owner memo, runs in the caller (BT-4300)";
-compiles_to("3f") ->
-    "whereis_class + class_send: gen_server:call; stays there under ADR 0142 (class state)";
-compiles_to("3g") ->
-    "guarded direct call whose key is never installed: no target in the class's static call map -> static_call_target/4 declines (class variables) -> whereis_class + class_send: gen_server:call (BT-4431)";
-compiles_to("3h") ->
-    "send(C, 'double:', [21]) -> class_send: gen_server:call (control for 3g, BT-4431)";
 compiles_to("3k") ->
     "folded constant: one persistent_term:get of the class's static call key, its {constant_value, 1, Mod, Fun, Tag} key matched in the map, then the literal 1 in place (BT-4363)";
 compiles_to("3l") ->

@@ -258,15 +258,15 @@ Recorded result files under `benchmarks/vs-elixir/results/` are history and are 
 
 | File | Disposition | What |
 |---|---|---|
-| `benchmarks/vs-elixir/beamtalk/src/vb_stateful_math.bt` (`calls :: Integer = 0`) | delete | the class behind row **3f** (`VbStatefulMath`, `vb_bench.bt:178` `statefulClassMethod:`) |
-| `benchmarks/vs-elixir/beamtalk/src/vb_late_state_math.bt` | delete | no declaration: the harness publishes "declares class variables" with `beamtalk_class_metadata:put_class_variables/2` (`vs_bench.erl:351-355`). Rows **3g** and **3h** |
+| vb_stateful_math.bt (deleted by BT-5150) (`calls :: Integer = 0`) | delete | the class behind row **3f** (`VbStatefulMath`, `vb_bench.bt:178` `statefulClassMethod:`) |
+| vb_late_state_math.bt (deleted by BT-5150) | delete | no declaration: the harness publishes "declares class variables" with `beamtalk_class_metadata:put_class_variables/2` (`vs_bench.erl:351-355`). Rows **3g** and **3h** |
 | `benchmarks/vs-elixir/beamtalk/src/vb_bench.bt` (`lateStateMathClass`, `statefulClassMethod:`, `dynClassMethod:c:` and the comment at line 185) | edit | drop `lateStateMathClass` and `statefulClassMethod:`. Keep `dynClassMethod:c:` (rows 3d and 3j use it) |
 | `benchmarks/vs-elixir/harness/vs_bench.erl` (rows 3f, 3g, 3h; `compiles_to("3f"|"3g"|"3h")`; `put_class_variables` / `chain_has_class_variables` calls at 351-355; `late_state_math_class` at 262) | edit | delete rows 3f-3h. Row 3d (class in a variable) and 3i/3j (class-side extension shadow) stay, but their Elixir / BT comparison text that names `classState:` changes. Rows 3i/3j (class-side extension shadow) belong to ADR 0152 / BT-5141: leave them to it |
 | `benchmarks/vs-elixir/README.md` | edit | mentions `classState:` |
-| `benchmarks/dispatch-overhead/beamtalk/src/vd_stateful_math.bt` (`calls :: Integer = 0`) | delete | the class behind row **c4** (`classStateful:`) |
+| vd_stateful_math.bt (deleted by BT-5150) (`calls :: Integer = 0`) | delete | the class behind row **c4** (`classStateful:`) |
 | `benchmarks/dispatch-overhead/harness/vd_bench.erl:51` (row c4) and `benchmarks/dispatch-overhead/README.md` | edit | delete row c4 and its row-table line |
-| `runtime/perf/self_send_bench/src/ssb_class_var_class.bt` (`a`, `b`, `c`) | delete | `SsbClassVarClass`, driven from `ssb_main.bt:44` |
-| `runtime/perf/self_send_bench/src/ssb_class_var_threaded_loop_class.bt` (`a`, `b`, `c`) | delete | `SsbClassVarThreadedLoopClass`, `ssb_main.bt:48` |
+| ssb_class_var_class.bt (deleted by BT-5150) (`a`, `b`, `c`) | delete | `SsbClassVarClass`, driven from `ssb_main.bt:44` |
+| ssb_class_var_threaded_loop_class.bt (deleted by BT-5150) (`a`, `b`, `c`) | delete | `SsbClassVarThreadedLoopClass`, `ssb_main.bt:48` |
 | `runtime/perf/self_send_bench/src/ssb_on_do_raise_class.bt` (`hits = 0`) | rewrite | `SsbOnDoRaiseClass`, `ssb_main.bt:59`, measures a raising `on:do:` in a class method. The class variable only keeps the class in class-process mode. Its Object twin `ssb_on_do_raise_object.bt` is the control row; after the rewrite the two are the same shape, so delete the class variant or turn it into a stateless class-method row |
 | `runtime/perf/beamtalk_perf_tests.erl:1173-1201` | check | runs `SsbMain run`; confirm the row-name assertions after the three classes change |
 
