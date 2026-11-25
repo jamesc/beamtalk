@@ -341,27 +341,18 @@ List all active REPL sessions in the workspace.
 {"id": "msg-012", "sessions": [{"id": "session_1234_5678"}, {"id": "session_2345_6789"}], "status": ["done"]}
 ```
 
-#### `clone` — Clone Session
-
-Create a new session (returns the new session ID).
-
-**Request:**
-```json
-{"op": "clone", "id": "msg-013"}
-```
-
-**Response:**
-```json
-{"id": "msg-013", "value": "session_1234_5678", "status": ["done"]}
-```
-
 #### `close` — Close Session
 
 Close the current session. Terminates the shell process, removes the session from the workspace, and closes the WebSocket connection (close code 1000). Detached sessions that are not resumed within the idle timeout (default 4 hours) are automatically cleaned up.
 
+With a `session` field, `close` ends that session instead of the sender's own (BT-5199). VS Code uses this to end the session of a REPL terminal it started once the terminal is gone; the sender's own connection stays open. An unknown `session` closes nothing and still answers `ok` — it never falls back to the sender's session.
+
+Senders: the CLI REPL on `:exit` / Ctrl-D, VS Code when its workspace client is disposed (its own session) and when its REPL terminal ends (that REPL's session), and the LiveView IDE when a tab's session is torn down (dispatched through `beamtalk_repl_ops:dispatch/4` with the session as its SessionPid).
+
 **Request:**
 ```json
 {"op": "close", "id": "msg-014"}
+{"op": "close", "id": "msg-015", "session": "session_1234_5678"}
 ```
 
 **Response:**
@@ -430,7 +421,9 @@ Get the internal state of an actor process.
 
 #### `kill` — Kill Actor
 
-Terminate an actor process.
+Terminate an actor process. A system actor (one the runtime started, such as `Transcript`) is refused with a `system_actor` error.
+
+Senders: the "Kill Actor" action in the VS Code inspector and the "Kill actor" button in the LiveView Inspector (Owner role only), each after a confirmation and followed by a fresh actor list (BT-5199).
 
 **Request:**
 ```json
@@ -861,7 +854,6 @@ this table drifts from the fixture. To refresh it after editing the op table:
 | `save-native-source` | `module`, `source` | — | `workspace` | `beamtalk_repl_ops_load` |
 | `save-section` | `class`, `new_name` | `old_name`, `before_selector`, `before_side` | `workspace` | `beamtalk_repl_ops_load` |
 | `sessions` | — | — | `always` | `beamtalk_repl_ops_session` |
-| `clone` | — | — | `always` | `beamtalk_repl_ops_session` |
 | `close` | — | — | `always` | `beamtalk_repl_ops_session` |
 | `health` | — | — | `always` | `beamtalk_repl_ops_session` |
 | `shutdown` | `cookie` | — | `always` | `beamtalk_repl_ops_session` |
@@ -931,7 +923,7 @@ Text that is not valid UTF-8 (for example from `asStringUnchecked`) is pushed as
 
 ### Logs Channel
 
-Live OTP log events, started by `subscribe-logs` (optional `level`: `emergency`, `alert`, `critical`, `error`, `warning`, `notice`, `info` or `debug`; default `debug`) and stopped by `unsubscribe-logs`. Sending `subscribe-logs` again changes the level. An unknown `level` is answered with an `invalid_argument` error and leaves any existing subscription unchanged.
+Live OTP log events, started by `subscribe-logs` (optional `level`: `emergency`, `alert`, `critical`, `error`, `warning`, `notice`, `info` or `debug`; default `debug`) and stopped by `unsubscribe-logs`. Sending `subscribe-logs` again changes the level. VS Code sends `unsubscribe-logs` when `beamtalk.logs.level` is set to `off` and before it disconnects (BT-5199). An unknown `level` is answered with an `invalid_argument` error and leaves any existing subscription unchanged.
 
 ```json
 {"type": "push", "channel": "logs", "event": "entry", "data": {"level": "info", "time": "...", "msg": "..."}}

@@ -182,6 +182,15 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   def session_alive?(_pid), do: true
   def close_session(_pid), do: :ok
 
+  # BT-5199: the Inspector's "Kill actor" and the actor/session lists. `kill`
+  # records the call; `actors` answers whatever `put_actors/1` seeded.
+  def kill_actor(term), do: record({:kill_actor, term}) && :ok
+  def actors, do: {:ok, get(:actors) || []}
+  def sessions, do: {:ok, [%{id: "sess-1"}]}
+
+  @doc "Test helper (BT-5199): seed the actor list the `actors` op answers."
+  def put_actors(actors) when is_list(actors), do: put(:actors, actors)
+
   # ── Subscription ops ─────────────────────────────────────────────────────
 
   def subscribe_transcript(_pid), do: :ok

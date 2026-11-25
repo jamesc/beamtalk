@@ -31,6 +31,32 @@ export function scanSessionChunk(
   return { sessionId: undefined, tail: text.length > 80 ? text.slice(-80) : text };
 }
 
+/** The slice of `WorkspaceClient` closing a REPL session needs. */
+export interface SessionCloser {
+  readonly state: string;
+  closeSession(sessionId: string): Promise<unknown>;
+}
+
+/**
+ * End the node session of a REPL that has stopped (BT-5199). A REPL killed with
+ * its terminal never sends `close` itself, so without this its session stays
+ * resumable until the node's idle bound (4 h by default). Clears the recorded
+ * id first, so a terminal close after the REPL exited sends one `close`, not two.
+ */
+export function closeReplSession(
+  client: SessionCloser | undefined,
+  warn: (msg: string) => void
+): void {
+  const sessionId = state.replSessionId;
+  state.replSessionId = undefined;
+  if (sessionId === undefined || !client || client.state !== "connected") return;
+  client.closeSession(sessionId).catch((err) => {
+    warn(
+      `Failed to close REPL session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  });
+}
+
 /**
  * Read chunks from a shell execution until the session ID is found.
  * Updates `workspaceTreeProvider` with the captured session ID so bindings
@@ -55,6 +81,7 @@ async function captureSessionId(
           break;
         }
         setReplRunning(true);
+        state.replSessionId = sessionId;
         state.workspaceTreeProvider?.setSessionId(sessionId);
         // Don't break — keep reading. The REPL may reconnect and emit a new
         // session ID (BT-1021); we need to pick up the updated value.
@@ -68,6 +95,7 @@ async function captureSessionId(
   // Clear the session so bindings disappear and the Start button returns.
   if (state.replTerminal === terminal) {
     setReplRunning(false);
+    closeReplSession(state.workspaceWsClient, (msg) => state.outputChannel?.warn(msg));
     state.workspaceTreeProvider?.setSessionId(null);
     state.outputChannel?.info("REPL session ended; session bindings cleared.");
   }
@@ -177,6 +205,7 @@ export function setupTerminalMonitoring(context: vscode.ExtensionContext): void 
       }
       state.replTerminal = undefined;
       setReplRunning(false);
+      closeReplSession(state.workspaceWsClient, (msg) => state.outputChannel?.warn(msg));
       // Clear session ID — bindings from the closed session are gone.
       state.workspaceTreeProvider?.setSessionId(null);
       state.outputChannel?.info("Beamtalk Session terminal closed; session bindings cleared.");

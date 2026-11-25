@@ -95,7 +95,7 @@ tcp_integration_test_() ->
             {"reload module not loaded", fun() -> tcp_reload_module_not_loaded_test(Port) end},
             {"docs unknown class", fun() -> tcp_docs_unknown_class_test(Port) end},
             {"modules op", fun() -> tcp_modules_test(Port) end},
-            {"clone op", fun() -> tcp_clone_test(Port) end},
+            {"clone op removed", fun() -> tcp_clone_removed_test(Port) end},
             {"inspect dead actor", fun() -> tcp_inspect_dead_actor_test(Port) end},
             {"malformed json", fun() -> tcp_malformed_json_test(Port) end},
             {"raw expression", fun() -> tcp_raw_expression_test(Port) end},
@@ -122,8 +122,6 @@ tcp_integration_test_() ->
             {"gen_server info unknown", fun() -> tcp_info_unknown_check2() end},
             {"health op", fun() -> tcp_health_op_test(Port) end},
             {"start_link integer port", fun() -> tcp_start_link_integer_test() end},
-            %% session ID uniqueness test
-            {"clone uniqueness", fun() -> tcp_clone_uniqueness_test(Port) end},
             %% interrupt operation tests
             {"interrupt no eval", fun() -> tcp_interrupt_no_eval_test(Port) end},
             {"interrupt unknown session", fun() -> tcp_interrupt_unknown_session_test(Port) end},
@@ -659,13 +657,15 @@ tcp_modules_test(Port) ->
     ErrorMsg = maps:get(<<"error">>, Resp),
     ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
 
-%% Test: clone op creates a new session
-tcp_clone_test(Port) ->
+%% BT-5199: `clone` had no sender in any client and was removed; sending it
+%% returns an unknown_op error like any other removed op.
+tcp_clone_removed_test(Port) ->
     Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"t18">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t18">>}, Resp),
-    %% Clone should return a session ID as value, or error if sup not ready
-    ?assert(maps:is_key(<<"value">>, Resp) orelse maps:is_key(<<"error">>, Resp)).
+    ?assertNot(maps:is_key(<<"value">>, Resp)),
+    ErrorMsg = maps:get(<<"error">>, Resp),
+    ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
 
 %% Test: inspect a dead actor by valid PID format
 tcp_inspect_dead_actor_test(Port) ->
@@ -1169,29 +1169,6 @@ start_link_integer_port_test() ->
     %% Basic verification that the export exists
     Exports = beamtalk_repl_server:module_info(exports),
     ?assert(lists:member({start_link, 1}, Exports)).
-
-%%% generate_session_id format and uniqueness tests (via clone op)
-
-%% Clone creates new sessions, each with a unique generated ID.
-%% This tests generate_session_id indirectly via the clone TCP op.
-%% The test is in tcp_integration_test_ as tcp_clone_uniqueness_test.
-
-%% Test: two clone ops produce different session IDs
-tcp_clone_uniqueness_test(Port) ->
-    Msg1 = iolist_to_binary(json:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"cu1">>})),
-    Msg2 = iolist_to_binary(json:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"cu2">>})),
-    Resp1 = tcp_send_op(Port, Msg1),
-    Resp2 = tcp_send_op(Port, Msg2),
-    %% Both clones must succeed — if the session sup isn't ready, fail loudly
-    ?assertMatch(#{<<"value">> := _}, Resp1),
-    ?assertMatch(#{<<"value">> := _}, Resp2),
-    V1 = maps:get(<<"value">>, Resp1),
-    V2 = maps:get(<<"value">>, Resp2),
-    ?assertNotEqual(V1, V2),
-    %% Verify session ID format: "session_<timestamp>_<random>"
-    %% BT-4167: session IDs are Strings, so they display quoted.
-    ?assert(binary:match(V1, <<"\"session_">>) =:= {0, 9}),
-    ?assert(binary:match(V2, <<"\"session_">>) =:= {0, 9}).
 
 %%% ===========================================================================
 %%% Coverage tests for internal helper functions

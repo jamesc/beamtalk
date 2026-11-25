@@ -805,6 +805,7 @@ pub(crate) fn repl_loop(
                 continue;
             }
             Err(ReadlineError::Eof) => {
+                client.close_session();
                 println!("Goodbye!");
                 break;
             }
@@ -850,6 +851,7 @@ pub(crate) fn repl_loop(
             match handle_repl_command(line, client) {
                 CommandResult::Handled => continue,
                 CommandResult::Exit => {
+                    client.close_session();
                     println!("Goodbye!");
                     break;
                 }

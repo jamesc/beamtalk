@@ -309,10 +309,26 @@ export class WorkspaceClient {
     this._doConnect();
   }
 
-  /** Close the connection, cancel pending reconnect, and reject all in-flight requests. */
+  /**
+   * Close the connection, cancel pending reconnect, and reject all in-flight requests.
+   *
+   * A connected client first ends its log subscription and its session on the
+   * node (`unsubscribe-logs`, then `close`, BT-5199). Closing the socket alone
+   * would leave the session resumable until the node's idle bound (4 h by
+   * default). Both frames are sent without waiting for replies: the socket is
+   * closed straight after, and a reply would find no pending request.
+   */
   dispose(): void {
     this.disposed = true;
     this._cancelReconnect();
+    if (this.connectionState === "connected" && this.ws) {
+      try {
+        this.ws.send(JSON.stringify({ op: "unsubscribe-logs", id: `wsc-${++this.msgCounter}` }));
+        this.ws.send(JSON.stringify({ op: "close", id: `wsc-${++this.msgCounter}` }));
+      } catch {
+        // The socket is going away regardless; the node reaps the session.
+      }
+    }
     this.ws?.close();
     this.ws = null;
     this._rejectAllPending(new Error("WorkspaceClient disposed"));
@@ -577,6 +593,32 @@ export class WorkspaceClient {
       params.level = level;
     }
     await this._request(params);
+  }
+
+  /**
+   * Stop live log streaming (BT-5199): sent when the log level is set to
+   * `off`. The subscription otherwise lasts as long as the socket.
+   */
+  async unsubscribeLogs(): Promise<void> {
+    await this._request({ op: "unsubscribe-logs" });
+  }
+
+  /**
+   * End another session on the node (BT-5199): the session of a REPL terminal
+   * this extension started, once that terminal has ended. The session would
+   * otherwise stay resumable until the idle bound. An unknown id closes
+   * nothing; the node never falls back to this client's own session.
+   */
+  async closeSession(sessionId: string): Promise<void> {
+    await this._request({ op: "close", session: sessionId });
+  }
+
+  /**
+   * Kill an actor (BT-5199): the inspector's "Kill Actor" action. The node
+   * refuses a system actor (`TranscriptStream`) with an error.
+   */
+  async killActor(pid: string): Promise<void> {
+    await this._request({ op: "kill", actor: pid });
   }
 
   // ─── Events ──────────────────────────────────────────────────────────────

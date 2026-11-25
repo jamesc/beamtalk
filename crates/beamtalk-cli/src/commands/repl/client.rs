@@ -377,6 +377,17 @@ impl ReplClient {
         ))
     }
 
+    /// End this client's session on the node (`close`), for `:exit` and Ctrl-D
+    /// (BT-5199). Without it the session stays resumable until the idle bound
+    /// (4 h by default) after the REPL has gone. Best effort and sent on the
+    /// current connection only: a dead connection is not reconnected just to
+    /// close a session the node is already reaping.
+    pub(crate) fn close_session(&mut self) {
+        let _ = self
+            .inner
+            .send_request::<ReplResponse>(&RequestBuilder::close());
+    }
+
     /// List running actors.
     pub(crate) fn list_actors(&mut self) -> Result<ReplResponse> {
         self.send_request(&RequestBuilder::actors())
@@ -549,6 +560,29 @@ mod tests {
         let mut client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
         let resp = client.list_actors().expect("list_actors should succeed");
         assert!(resp.actors.is_some_and(|a| a.is_empty()));
+    }
+
+    /// BT-5199: `:exit` / Ctrl-D end the session with a `close` request.
+    #[test]
+    fn close_session_sends_close_on_the_current_connection() {
+        let close_seen = Arc::new(AtomicBool::new(false));
+        let close_seen_srv = Arc::clone(&close_seen);
+        let port = spawn_auth_ok_server(move |req, ws| {
+            if req.get("op").and_then(|v| v.as_str()) == Some("close") {
+                close_seen_srv.store(true, Ordering::SeqCst);
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({"status": ["done"], "value": "ok"})
+                        .to_string()
+                        .into(),
+                ));
+            }
+        });
+        let mut client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
+        client.close_session();
+        assert!(
+            close_seen.load(Ordering::SeqCst),
+            "no `close` request reached the node"
+        );
     }
 
     #[test]

@@ -248,14 +248,72 @@ defmodule BtAttach.Workspace do
   Stop a workspace-supervised session started by `start_session/1`.
 
   The session is owned by the workspace's `beamtalk_session_sup`, so it does not
-  go away just because the LiveView process exits; we must ask the supervisor to
-  terminate it or it leaks one orphaned session per mount/reconnect. Idempotent
-  and best-effort: a session that is already gone returns `{:error, :not_found}`
-  and an unreachable workspace returns `{:badrpc, _}` — both are non-fatal at the
-  call site (the LiveView is terminating anyway).
+  go away just because the LiveView process exits; we must ask the workspace to
+  terminate it or it leaks one orphaned session per mount/reconnect. Goes
+  through the `close` operation (BT-5199) — the same runtime path VS Code and
+  the CLI REPL use — dispatched with `session_pid` as the session to close.
+  Idempotent and best-effort: a session that is already gone still answers
+  `:ok`, and an unreachable workspace returns `{:error, {:unreachable, _}}` —
+  non-fatal at the call site (the LiveView is terminating anyway).
   """
   def close_session(session_pid) when is_pid(session_pid) do
-    rpc(:beamtalk_session_sup, :stop_session, [session_pid])
+    case dispatch_simple("close", %{}, session_pid) do
+      {:status, :ok} -> :ok
+      {:error, reason} -> {:error, reason}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc """
+  Kill the actor behind the inspected `term` through the `kill` operation
+  (BT-5199) — the Inspector's "Kill actor" action. Answers `:ok`, or
+  `{:error, reason}`: a `#beamtalk_error{}` when the workspace refuses (a
+  system actor such as `Transcript`, an actor that already stopped),
+  `{:error, :not_inspectable}` for a term that is not a pid-backed object.
+  """
+  def kill_actor({:beamtalk_object, _class, _module, pid} = _term) when is_pid(pid) do
+    case rpc(:erlang, :pid_to_list, [pid]) do
+      pid_chars when is_list(pid_chars) ->
+        case dispatch_simple("kill", %{"actor" => to_string(pid_chars)}) do
+          {:status, :ok} -> :ok
+          {:error, reason} -> {:error, reason}
+          {:badrpc, reason} -> {:error, {:unreachable, reason}}
+          other -> {:error, {:unexpected_reply, other}}
+        end
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+    end
+  end
+
+  def kill_actor(_term), do: {:error, :not_inspectable}
+
+  @doc """
+  List the running actors through the `actors` operation (BT-5199): one map per
+  actor (`pid`, `class`, `module`, `spawned_at`, and `system` for a
+  runtime-started one). Answers `{:ok, actors}` or `{:error, reason}`.
+  """
+  def actors do
+    case dispatch_simple("actors", %{}) do
+      {:actors, actors} when is_list(actors) -> {:ok, actors}
+      {:error, reason} -> {:error, reason}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc """
+  List the workspace's resumable sessions through the `sessions` operation
+  (BT-5199). Answers `{:ok, [%{id: id}]}` or `{:error, reason}`.
+  """
+  def sessions do
+    case dispatch_simple("sessions", %{}) do
+      {:sessions, sessions} when is_list(sessions) -> {:ok, sessions}
+      {:error, reason} -> {:error, reason}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
   end
 
   @doc """
@@ -1087,9 +1145,10 @@ defmodule BtAttach.Workspace do
   defp stringify_detail(detail) when is_binary(detail), do: detail
   defp stringify_detail(detail), do: inspect(detail)
 
-  # Decode + dispatch a session-less term op (workspace-global: discovery,
-  # test runs). `self()` is passed as `dispatch/4`'s SessionPid only to satisfy
-  # its arity — these ops do not read session bindings — mirroring
+  # Decode + dispatch a term op (workspace-global: discovery, test runs, actors,
+  # sessions, kill; plus `close`, which names its session). For the global ops
+  # `self()` is passed as `dispatch/4`'s SessionPid only to satisfy its arity —
+  # they do not read session bindings — mirroring
   # `dispatch_browse/2`. Unlike `dispatch_browse/2`, which normalises everything
   # to `{:value, _} | {:error, _}`, this returns the op-result term VERBATIM (no
   # JSON edge): **callers own the op-specific term-shape match** (`list_tests/0`
@@ -1100,7 +1159,10 @@ defmodule BtAttach.Workspace do
   defp simple_op_timeout(op) when op in ["test", "test-all"], do: @rpc_test_run_timeout
   defp simple_op_timeout(_op), do: @rpc_long_timeout
 
-  defp dispatch_simple(op, params) when is_binary(op) and is_map(params) do
+  # `session_pid` is `dispatch/4`'s SessionPid: `self()` for the workspace-global
+  # ops, the session to close for `close` (BT-5199).
+  defp dispatch_simple(op, params, session_pid \\ self())
+       when is_binary(op) and is_map(params) and is_pid(session_pid) do
     request = Map.put(params, "op", op)
 
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
@@ -1110,7 +1172,7 @@ defmodule BtAttach.Workspace do
         rpc(
           :beamtalk_repl_ops,
           :dispatch,
-          [op, decoded_params, msg, self()],
+          [op, decoded_params, msg, session_pid],
           simple_op_timeout(op)
         )
 

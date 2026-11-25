@@ -17,6 +17,11 @@ defmodule BtAttach.FacadeTest do
     def inspect_value(term), do: record({:inspect, term}) && {:ok, %{a: 1}}
     def list_bindings(pid), do: record({:bindings, pid}) && [{"x", 1}]
     def change_history, do: record({:changes}) && []
+
+    # BT-5199: the wire `kill`, `actors` and `sessions` operations.
+    def kill_actor(term), do: record({:kill, term}) && :ok
+    def actors, do: record({:actors}) && {:ok, []}
+    def sessions, do: record({:sessions}) && {:ok, [%{id: "s1"}]}
     def flush, do: record({:flush}) && {:ok, %{}}
     def save_method(c, s, src), do: record({:save, c, s, src}) && {:ok, c}
 
@@ -244,10 +249,29 @@ defmodule BtAttach.FacadeTest do
     end
 
     test "a catalog op with no UI binding is unsupported, not a dist call" do
-      # `kill` is in the vocabulary (so RBAC can reason about it) but has no route
+      # `info` is in the vocabulary (so RBAC can reason about it) but has no route
       # yet — it must not silently no-op or hit the client.
-      assert Facade.dispatch(:kill, %{}) == {:error, {:unsupported_op, :kill}}
+      assert Facade.dispatch(:info, %{}) == {:error, {:unsupported_op, :info}}
       assert RecordingClient.calls() == []
+    end
+
+    test "kill, actors and sessions route to the client's wire operations (BT-5199)" do
+      term = {:beamtalk_object, :Counter, :counter, self()}
+
+      assert Facade.dispatch(:kill, %{term: term}) == :ok
+      assert Facade.dispatch(:actors, %{}) == {:ok, []}
+      assert Facade.dispatch(:sessions, %{}) == {:ok, [%{id: "s1"}]}
+
+      assert Enum.reverse(RecordingClient.calls()) == [{:kill, term}, {:actors}, {:sessions}]
+    end
+
+    test "an Observer may list actors but not kill one (kill is :admin)" do
+      term = {:beamtalk_object, :Counter, :counter, self()}
+      observer = %{role: :observer}
+
+      assert Facade.dispatch(:kill, %{term: term}, observer) == {:error, :unauthorized}
+      assert Facade.dispatch(:actors, %{}, observer) == {:ok, []}
+      assert RecordingClient.calls() == [{:actors}]
     end
   end
 

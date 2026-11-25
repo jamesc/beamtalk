@@ -50,7 +50,7 @@ These are the settings the extension contributes (`contributes.configuration` in
 | `beamtalk.trace.server` | `"off"` | Trace communication between VS Code and the language server: `off`, `messages` or `verbose` |
 | `beamtalk.workspace.autoConnect` | `true` | Auto-connect the Workspace Explorer to a running workspace when a workspace port file appears |
 | `beamtalk.repl.ephemeral` | `false` | Start the Beamtalk REPL in ephemeral mode (`-e`): bindings are not persisted across sessions |
-| `beamtalk.logs.level` | `"warning"` | Minimum level streamed to the Beamtalk Logs output channel (`debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency`) |
+| `beamtalk.logs.level` | `"warning"` | Minimum level streamed to the Beamtalk Logs output channel (`debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency`), or `off` to stop streaming |
 
 ### External stdlib sources
 

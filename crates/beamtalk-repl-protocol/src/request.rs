@@ -192,13 +192,8 @@ impl RequestBuilder {
     // Session state is read and reset via the `Session` API
     // (`Session current bindings keys`, `Session current clear`) over `eval`.
 
-    /// Build a `sessions` request.
-    #[must_use]
-    pub fn sessions() -> serde_json::Value {
-        Self::no_param("sessions")
-    }
-
-    /// Build a `close` request.
+    /// Build a `close` request: ends the sender's own session (the CLI REPL's
+    /// `:exit` / Ctrl-D, BT-5199).
     #[must_use]
     pub fn close() -> serde_json::Value {
         Self::no_param("close")
@@ -687,12 +682,6 @@ mod tests {
     }
 
     #[test]
-    fn sessions_request_has_correct_op() {
-        let req = RequestBuilder::sessions();
-        assert_eq!(req["op"], "sessions");
-    }
-
-    #[test]
     fn close_request_has_correct_op() {
         let req = RequestBuilder::close();
         assert_eq!(req["op"], "close");
@@ -1004,7 +993,6 @@ mod tests {
                 RequestBuilder::load_project_with_force("p", true, true),
                 Some("pkg"),
             ),
-            RequestBuilder::sessions(),
             RequestBuilder::close(),
             RequestBuilder::actors(),
             RequestBuilder::inspect("a"),

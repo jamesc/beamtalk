@@ -78,7 +78,7 @@ Start a new session carrying origin/debug metadata.
 here against `known_kinds/0` so an unknown or spoofed value collapses to
 `<<"unknown">>`; other keys (`peer`, `node`, `user`, `connected_at`, …) are
 passed through verbatim. This is the single gate every creation path
-(WebSocket, `clone`, dist-attached LiveView) funnels through, so kind
+(WebSocket, dist-attached LiveView) funnels through, so kind
 normalisation happens exactly once.
 """.
 -spec start_session(atom() | binary(), map()) -> {ok, pid()} | {error, term()}.
