@@ -58,7 +58,10 @@ restore_never_removes_other_files_test() ->
     true = os:putenv("BEAMTALK_COOKIE_HOME", Dir),
     try
         ?assertEqual(restored, beamtalk_cookie_home:restore()),
-        ?assert(filelib:is_file(Other))
+        ?assert(filelib:is_file(Other)),
+        %% No cookie file was there, so no configured cookie (a stale
+        %% variable alone does not satisfy the release console check).
+        ?assertNot(beamtalk_cookie_home:booted_with_cookie())
     after
         os:unsetenv("BEAMTALK_COOKIE_HOME"),
         _ = persistent_term:erase({beamtalk_cookie_home, booted_with_cookie}),

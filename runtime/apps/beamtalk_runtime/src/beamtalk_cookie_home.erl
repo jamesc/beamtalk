@@ -30,7 +30,8 @@ starts later sees the private home. It is the first `-eval` of every
 CLI-started node and the first step of `beamtalk_runtime_app:start/2` (the
 earliest Beamtalk code in a release); a second call is a no-op.
 
-Two things stay as they were at boot: `init:get_argument(home)` names the
+In a release, applications the boot script starts before `beamtalk_runtime`
+still see the private `HOME`. Two things stay as they were at boot: `init:get_argument(home)` names the
 (removed) private directory, so code should read `HOME` instead; and a
 `~/.erlang` file in the real home is not evaluated at boot. Ports and epmd
 started before `restore/0` inherit the private `HOME`.
@@ -64,10 +65,12 @@ restore() ->
             lists:foreach(fun restore_var/1, home_vars()),
             %% Only the one file we wrote, and a non-recursive rmdir: nothing
             %% else can be removed even if the variable was tampered with.
-            _ = file:delete(filename:join(Dir, ".erlang.cookie")),
+            Removed = file:delete(filename:join(Dir, ".erlang.cookie")),
             _ = file:del_dir(Dir),
             true = os:unsetenv(?HOME_ENV),
-            persistent_term:put({?MODULE, booted_with_cookie}, true),
+            %% Only a cookie file the launcher actually wrote counts as a
+            %% configured cookie; a stale variable alone does not.
+            Removed =:= ok andalso persistent_term:put({?MODULE, booted_with_cookie}, true),
             restored;
         _ ->
             none
