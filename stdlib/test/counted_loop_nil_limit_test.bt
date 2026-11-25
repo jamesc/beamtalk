@@ -57,8 +57,7 @@ TestCase subclass: CountedLoopNilLimitTest
 
   // BT-5175: the pure (read-only block) `to:do:` raises on a nil limit instead
   // of looping forever, with the same error shape as the writing path.
-  pureToDo: limit =>
-    1 to: limit do: [:i | i]
+  pureToDo: limit => 1 to: limit do: [:i | i]
 
   testPureToDoNilLimitRaises =>
     self should: [self pureToDo: nil] raise: #type_error
@@ -88,8 +87,12 @@ TestCase subclass: CountedLoopNilLimitTest
   testFloatStepInlinedCollectsAllValues =>
     self assert: self collectedFloatSteps size equals: 5
 
-  testFloatStepPureCompletes =>
-    self assert: self pureFloatStep equals: nil
+  testFloatStepPureCompletes => self assert: self pureFloatStep equals: nil
 
   testFloatStepNegativePure =>
-    self assert: (3 to: 1 by: -0.5 do: [:i | i]) equals: nil
+    self
+      assert: (3
+        to: 1
+        by: -0.5
+        do: [:i | i])
+      equals: nil
