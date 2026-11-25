@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
-use super::{binary_bif, generate_comparison_bif, param, power_bif, wrap_string_result};
+use super::{binary_bif, generate_numeric_comparison_bif, param, power_bif, wrap_string_result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -22,7 +22,9 @@ pub(crate) fn generate_integer_bif(selector: &str, params: &[String]) -> Option<
         "%" => binary_bif("rem", params),
         "**" => power_bif(params),
         // Comparison (ADR 0002: Erlang operators)
-        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),
+        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => {
+            generate_numeric_comparison_bif(selector, params)
+        }
         // Conversion
         "asString" | "printString" => Some(wrap_string_result(Document::Str(
             "call 'erlang':'integer_to_binary'(Self)",
@@ -198,20 +200,8 @@ mod tests {
                     &["Other"],
                     "call 'erlang':'=/='(Self, Other)",
                 ),
-                ("test_lt", "<", &["Other"], "call 'erlang':'<'(Self, Other)"),
-                ("test_gt", ">", &["Other"], "call 'erlang':'>'(Self, Other)"),
-                (
-                    "test_le",
-                    "<=",
-                    &["Other"],
-                    "call 'erlang':'=<'(Self, Other)",
-                ),
-                (
-                    "test_ge",
-                    ">=",
-                    &["Other"],
-                    "call 'erlang':'>='(Self, Other)",
-                ),
+                // `< > <= >=` are guarded (BT-5211):
+                // `mod.rs`'s `numeric_ordering_primitives_test_the_argument`.
                 // Conversion
                 (
                     "test_as_string",
