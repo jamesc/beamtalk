@@ -991,7 +991,7 @@ defmodule BtAttach.Workspace do
         name -> {"test", %{"class" => name}}
       end
 
-    case dispatch_simple(op, params, @rpc_test_run_timeout) do
+    case dispatch_simple(op, params) do
       {:test_results, result} when is_map(result) ->
         {:ok, normalize_test_result(result)}
 
@@ -1095,14 +1095,24 @@ defmodule BtAttach.Workspace do
   # JSON edge): **callers own the op-specific term-shape match** (`list_tests/0`
   # matches `{:value, _}`, `run_tests/1` matches `{:test_results, _}`). A new
   # caller must match its op's own result tag, not assume browse-style normalising.
-  defp dispatch_simple(op, params, timeout \\ @rpc_long_timeout)
-       when is_binary(op) and is_map(params) do
+  # A whole test run is bounded by the suite, not a lookup (BT-5129); the other
+  # simple ops (list/load) stay on the long tier.
+  defp simple_op_timeout(op) when op in ["test", "test-all"], do: @rpc_test_run_timeout
+  defp simple_op_timeout(_op), do: @rpc_long_timeout
+
+  defp dispatch_simple(op, params) when is_binary(op) and is_map(params) do
     request = Map.put(params, "op", op)
 
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->
         decoded_params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-        rpc(:beamtalk_repl_ops, :dispatch, [op, decoded_params, msg, self()], timeout)
+
+        rpc(
+          :beamtalk_repl_ops,
+          :dispatch,
+          [op, decoded_params, msg, self()],
+          simple_op_timeout(op)
+        )
 
       {:badrpc, reason} ->
         {:error, {:unreachable, reason}}
