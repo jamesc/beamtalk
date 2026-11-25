@@ -52,6 +52,58 @@ verify_peer_without_fail_if_no_peer_cert_is_not_verified_test() ->
     Opts = [{server, [{verify, verify_peer}]}, ?CLIENT_OK],
     ?assertNot(beamtalk_dist_tls:verified(["inet_tls"], [], Opts)).
 
+%% Code review of BT-5233: OTP runs only the first `-proto_dist`, and listens
+%% on every protocol in it, so each must be TLS.
+mixed_or_tcp_first_proto_dist_is_not_verified_test() ->
+    ?assertNot(beamtalk_dist_tls:verified(["inet_tcp", "inet_tls"], [], [?SERVER_OK, ?CLIENT_OK])),
+    ?assert(beamtalk_dist_tls:verified(["inet_tls", "inet6_tls"], [], [?SERVER_OK, ?CLIENT_OK])).
+
+%% A `verify_fun` or `partial_chain` can accept a peer the CA did not sign.
+overriding_options_are_refused_test_() ->
+    Accept = {fun(_, _, S) -> {valid, S} end, []},
+    [
+        ?_assertEqual(
+            {error, {peer_verification, [{forbidden, server, verify_fun}]}},
+            beamtalk_dist_tls:peer_verification([], [
+                {server, [
+                    {verify, verify_peer}, {fail_if_no_peer_cert, true}, {verify_fun, Accept}
+                ]},
+                ?CLIENT_OK
+            ])
+        ),
+        ?_assertEqual(
+            {error, {peer_verification, [{forbidden, client, partial_chain}]}},
+            beamtalk_dist_tls:peer_verification([], [
+                ?SERVER_OK,
+                {client, [{verify, verify_peer}, {partial_chain, fun(_) -> unknown_ca end}]}
+            ])
+        ),
+        ?_assertEqual(
+            {error, {peer_verification, [{forbidden, client, verify_fun}]}},
+            beamtalk_dist_tls:peer_verification(["client_verify_fun", "m,f,s"], [
+                ?SERVER_OK, ?CLIENT_OK
+            ])
+        ),
+        ?_assert(
+            has(
+                "remove verify_fun from the server list",
+                beamtalk_dist_tls:format_error(
+                    {peer_verification, [{forbidden, server, verify_fun}]}
+                )
+            )
+        )
+    ].
+
+%% The launcher's check counts `-ssl_dist_opt` words (from `vm.args` or
+%% `ERL_*FLAGS`) with the file: OTP puts them ahead of the file's options.
+weaker_words_override_a_good_file_test() ->
+    ?assertEqual(
+        {error, {peer_verification, [server_verify_peer]}},
+        beamtalk_dist_tls:peer_verification(["server_verify", "verify_none"], [
+            ?SERVER_OK, ?CLIENT_OK
+        ])
+    ).
+
 plain_tcp_is_never_verified_test() ->
     ?assertNot(beamtalk_dist_tls:verified([], [], [?SERVER_OK, ?CLIENT_OK])),
     ?assertNot(beamtalk_dist_tls:verified(["inet_tcp"], [], [?SERVER_OK, ?CLIENT_OK])).
@@ -88,7 +140,7 @@ conflicting_value_fails_closed_test_() ->
     ].
 
 %%====================================================================
-%% read_optfile/1 and check_optfile/1
+%% read_optfile/1 and check_optfile/2
 %%====================================================================
 
 optfile_test_() ->
@@ -116,20 +168,21 @@ optfile_test_() ->
             Garbage = Write("garbage.conf", "[{server, ["),
             Missing = filename:join(Dir, "absent.conf"),
             [
-                ?_assertEqual(ok, beamtalk_dist_tls:check_optfile(Good)),
+                ?_assertEqual(ok, beamtalk_dist_tls:check_optfile(Good, [])),
                 ?_assertEqual(
                     {error, {peer_verification, [server_fail_if_no_peer_cert]}},
-                    beamtalk_dist_tls:check_optfile(NoFail)
+                    beamtalk_dist_tls:check_optfile(NoFail, [])
                 ),
                 ?_assertEqual(
                     {error, {peer_verification, [client_verify_peer]}},
-                    beamtalk_dist_tls:check_optfile(NoClient)
+                    beamtalk_dist_tls:check_optfile(NoClient, [])
                 ),
                 ?_assertMatch(
-                    {error, {optfile_malformed, _, _}}, beamtalk_dist_tls:check_optfile(Garbage)
+                    {error, {optfile_malformed, _, _}}, beamtalk_dist_tls:check_optfile(Garbage, [])
                 ),
                 ?_assertEqual(
-                    {error, {optfile_missing, Missing}}, beamtalk_dist_tls:check_optfile(Missing)
+                    {error, {optfile_missing, Missing}},
+                    beamtalk_dist_tls:check_optfile(Missing, [])
                 ),
                 ?_assert(
                     has(

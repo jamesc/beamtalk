@@ -29,9 +29,13 @@ rpc_entry_empty_class_returns_invalid_argument_error_test() ->
     Result = beamtalk_release_launcher:rpc_entry(<<>>, <<"run">>, []),
     ?assertMatch({error, #beamtalk_error{kind = invalid_argument}}, Result).
 
-%%% `tls_preflight/1` — the `RELEASE_DISTRIBUTION=tls` refusal (ADR 0126
+%%% `tls_preflight/2` — the `RELEASE_DISTRIBUTION=tls` refusal (ADR 0126
 %%% amendment D2, BT-5233). `tls_preflight_main/0` halts, so the launcher
 %%% scripts' use of it is covered by `cli_release.rs`.
+
+-define(NO_EPMD, #{
+    dist_opt_words => [], extra_optfiles => [], epmd_listening => fun(_, _) -> false end
+}).
 
 tls_preflight_test_() ->
     {setup, fun() -> beamtalk_test_fs:tmp_dir("bt5233_preflight") end, fun beamtalk_test_fs:rm_rf/1,
@@ -56,10 +60,16 @@ tls_preflight_test_() ->
                 Map = maps:merge(Base, Overrides),
                 fun(Name) -> maps:get(Name, Map, false) end
             end,
-            Problems = fun(Overrides) ->
-                {error, Ps} = beamtalk_release_launcher:tls_preflight(Env(Overrides)),
+            Preflight = fun(Overrides) ->
+                beamtalk_release_launcher:tls_preflight(Env(Overrides), ?NO_EPMD)
+            end,
+            ProblemsWith = fun(Overrides, Args) ->
+                {error, Ps} = beamtalk_release_launcher:tls_preflight(
+                    Env(Overrides), maps:merge(?NO_EPMD, Args)
+                ),
                 [unicode:characters_to_list(P) || P <- Ps]
             end,
+            Problems = fun(Overrides) -> ProblemsWith(Overrides, #{}) end,
             [
                 ?_assertEqual(
                     {ok, #{
@@ -69,26 +79,20 @@ tls_preflight_test_() ->
                         optfile => Good,
                         notes => []
                     }},
-                    beamtalk_release_launcher:tls_preflight(Env(#{}))
+                    Preflight(#{})
                 ),
                 ?_assertMatch(
                     {ok, #{proto := "inet6_tls", interface := {16#fd00, 0, 0, 0, 0, 0, 0, 5}}},
-                    beamtalk_release_launcher:tls_preflight(
-                        Env(#{"RELEASE_DIST_INTERFACE" => "fd00::5"})
-                    )
+                    Preflight(#{"RELEASE_DIST_INTERFACE" => "fd00::5"})
                 ),
                 %% 0.0.0.0 only when the operator names it.
                 ?_assertMatch(
                     {ok, #{interface := {0, 0, 0, 0}}},
-                    beamtalk_release_launcher:tls_preflight(
-                        Env(#{"RELEASE_DIST_INTERFACE" => "0.0.0.0"})
-                    )
+                    Preflight(#{"RELEASE_DIST_INTERFACE" => "0.0.0.0"})
                 ),
                 ?_assertMatch(
                     {ok, #{notes := [_]}},
-                    beamtalk_release_launcher:tls_preflight(
-                        Env(#{"RELEASE_DIST_INTERFACE" => "127.0.0.1"})
-                    )
+                    Preflight(#{"RELEASE_DIST_INTERFACE" => "127.0.0.1"})
                 ),
                 ?_assertMatch(
                     ["RELEASE_SSL_DIST_OPTFILE is not set" ++ _],
@@ -99,8 +103,21 @@ tls_preflight_test_() ->
                     Problems(#{"RELEASE_SSL_DIST_OPTFILE" => filename:join(Dir, "absent.conf")})
                 ),
                 ?_assertMatch(
-                    ["the TLS distribution option file does not make both sides verify" ++ _],
+                    ["the TLS distribution options " ++ _],
                     Problems(#{"RELEASE_SSL_DIST_OPTFILE" => NoFail})
+                ),
+                %% A weaker -ssl_dist_opt in vm.args overrides a good file.
+                ?_assertMatch(
+                    ["the TLS distribution options " ++ _],
+                    ProblemsWith(#{}, #{dist_opt_words => ["client_verify", "verify_none"]})
+                ),
+                ?_assertMatch(
+                    ["vm.args (or ERL_FLAGS) also sets -ssl_dist_optfile" ++ _],
+                    ProblemsWith(#{}, #{extra_optfiles => ["/etc/other.conf"]})
+                ),
+                ?_assertMatch(
+                    ["RELEASE_SSL_DIST_OPTFILE '" ++ _],
+                    Problems(#{"RELEASE_SSL_DIST_OPTFILE" => filename:join(Dir, "my!node.conf")})
                 ),
                 ?_assertMatch(
                     ["RELEASE_DIST_INTERFACE is not set" ++ _],
@@ -111,6 +128,10 @@ tls_preflight_test_() ->
                     Problems(#{"RELEASE_DIST_INTERFACE" => "eth0"})
                 ),
                 ?_assertMatch(
+                    ["RELEASE_DIST_INTERFACE 'fe80::5%eth0' has a %zone" ++ _],
+                    Problems(#{"RELEASE_DIST_INTERFACE" => "fe80::5%eth0"})
+                ),
+                ?_assertMatch(
                     ["RELEASE_HOST is not set" ++ _], Problems(#{"RELEASE_HOST" => false})
                 ),
                 ?_assertMatch(
@@ -119,7 +140,7 @@ tls_preflight_test_() ->
                 ),
                 ?_assertMatch(
                     {ok, #{host := "192.0.2.7"}},
-                    beamtalk_release_launcher:tls_preflight(Env(#{"RELEASE_HOST" => "192.0.2.7"}))
+                    Preflight(#{"RELEASE_HOST" => "192.0.2.7"})
                 ),
                 %% Every problem at once.
                 ?_assertEqual(
@@ -132,5 +153,55 @@ tls_preflight_test_() ->
                         })
                     )
                 )
+            ]
+        end}.
+
+%% An epmd that already runs on loopback only would hide the node from other
+%% hosts; one that listens on the interface (or none at all) is fine.
+tls_preflight_epmd_test_() ->
+    {setup, fun() -> beamtalk_test_fs:tmp_dir("bt5233_epmd") end, fun beamtalk_test_fs:rm_rf/1, fun(
+            Dir
+        ) ->
+            Good = filename:join(Dir, "good.conf"),
+            ok = file:write_file(
+                Good,
+                "[{server, [{verify, verify_peer}, {fail_if_no_peer_cert, true}]},"
+                " {client, [{verify, verify_peer}]}]."
+            ),
+            Env = fun(Iface, Port) ->
+                Map = #{
+                    "RELEASE_HOST" => "node1.example.com",
+                    "RELEASE_DIST_INTERFACE" => Iface,
+                    "RELEASE_SSL_DIST_OPTFILE" => Good,
+                    "ERL_EPMD_PORT" => Port
+                },
+                fun(Name) -> maps:get(Name, Map, false) end
+            end,
+            Run = fun(Iface, Listening) ->
+                Self = self(),
+                Probe = fun(Addr, Port) ->
+                    Self ! {probed, Addr, Port},
+                    lists:member(Addr, Listening)
+                end,
+                beamtalk_release_launcher:tls_preflight(
+                    Env(Iface, "4400"),
+                    #{dist_opt_words => [], extra_optfiles => [], epmd_listening => Probe}
+                )
+            end,
+            [
+                ?_assertMatch(
+                    {error, [
+                        "an epmd is already running on this host but does not listen on 10.0.0.5 (port 4400)" ++
+                            _
+                    ]},
+                    (fun() ->
+                        {error, Ps} = Run("10.0.0.5", [{127, 0, 0, 1}]),
+                        {error, [unicode:characters_to_list(P) || P <- Ps]}
+                    end)()
+                ),
+                ?_assertMatch({ok, _}, Run("10.0.0.5", [{127, 0, 0, 1}, {10, 0, 0, 5}])),
+                ?_assertMatch({ok, _}, Run("10.0.0.5", [])),
+                ?_assertMatch({ok, _}, Run("0.0.0.0", [{127, 0, 0, 1}])),
+                ?_assertMatch({ok, _}, Run("127.0.0.1", [{127, 0, 0, 1}]))
             ]
         end}.

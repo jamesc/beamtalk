@@ -44,7 +44,7 @@ WebSocket `run-entry` op and these launcher verbs — never a second one.
     ping_client_main/0,
     stop_client_main/0,
     tls_preflight_main/0,
-    tls_preflight/1
+    tls_preflight/2
 ]).
 
 %%% ============================================================================
@@ -313,15 +313,21 @@ stop_client_main() ->
 
 -doc """
 The `RELEASE_DISTRIBUTION=tls` check `bin/<name>` runs (in a VM with no
-distribution) before it starts any distributed node (ADR 0126 amendment D2,
-BT-5233). On success it prints one `tls-<key>=<value>` line per value the
-launcher needs and halts with 0; otherwise it prints each problem with its fix
-to stderr and halts with 2, so the launcher refuses to start. See
-`tls_preflight/1` for what it checks.
+distribution, but the release's `vm.args` and the `ERL_*FLAGS` variables, so
+it sees every `-ssl_dist_opt` flag the node will) before it starts any
+distributed node (ADR 0126 amendment D2, BT-5233). On success it prints one
+`tls-<key>=<value>` line per value the launcher needs and halts with 0;
+otherwise it prints each problem with its fix to stderr and halts with 2, so
+the launcher refuses to start. See `tls_preflight/2` for what it checks.
 """.
 -spec tls_preflight_main() -> no_return().
 tls_preflight_main() ->
-    case tls_preflight(fun os:getenv/1) of
+    Args = #{
+        dist_opt_words => init_words(ssl_dist_opt),
+        extra_optfiles => init_words(ssl_dist_optfile),
+        epmd_listening => fun epmd_listening/2
+    },
+    case tls_preflight(fun os:getenv/1, Args) of
         {ok, #{proto := Proto, interface := Ip, host := Host, optfile := OptFile} = Result} ->
             [io:format(standard_error, "note: ~ts~n", [Note]) || Note <- maps:get(notes, Result)],
             io:format(
@@ -346,16 +352,26 @@ Check a `RELEASE_DISTRIBUTION=tls` opt-in, reading the environment with
 * `RELEASE_HOST` names this host as the other nodes reach it (a DNS name its
   certificate names, or an IP address); it becomes the host part of `-name`.
 * `RELEASE_DIST_INTERFACE` is one IP address of this host to listen on, parsed
-  by the shared rule (`beamtalk_dist_address:parse/1`). There is no default,
-  so the node listens on every interface (`0.0.0.0`) only if the operator
-  names it. An IPv6 address selects `inet6_tls`.
-* `RELEASE_SSL_DIST_OPTFILE` is the `-ssl_dist_optfile` file, and it must set
-  `{verify, verify_peer}` on both sides and `{fail_if_no_peer_cert, true}` on
-  the server side (`beamtalk_dist_tls:check_optfile/1`).
+  by the shared rule (`beamtalk_dist_address:parse/1`; a `%zone` is refused,
+  since the listener cannot carry one). There is no default, so the node
+  listens on every interface (`0.0.0.0`) only if the operator names it. An
+  IPv6 address selects `inet6_tls`. If an epmd already runs on this host (on
+  loopback) but does not listen on the interface, other hosts could never
+  find the node: epmd keeps the address of whatever started it first.
+* `RELEASE_SSL_DIST_OPTFILE` is the `-ssl_dist_optfile` file. With the
+  `-ssl_dist_opt` words the node will also get (`dist_opt_words`), it must
+  pass `beamtalk_dist_tls:check_optfile/2`. A second option file from
+  `vm.args` (`extra_optfiles`) is refused.
 
-Returns every problem at once, each with its fix.
+`Args` carries what the VM supplies: `dist_opt_words`, `extra_optfiles` and
+`epmd_listening(Address, Port) -> boolean()`. Returns every problem at once,
+each with its fix.
 """.
--spec tls_preflight(fun((string()) -> string() | false)) ->
+-spec tls_preflight(fun((string()) -> string() | false), #{
+    dist_opt_words := [string()],
+    extra_optfiles := [string()],
+    epmd_listening := fun((inet:ip_address(), inet:port_number()) -> boolean())
+}) ->
     {ok, #{
         proto := string(),
         interface := inet:ip_address(),
@@ -364,11 +380,16 @@ Returns every problem at once, each with its fix.
         notes := [string()]
     }}
     | {error, [unicode:chardata(), ...]}.
-tls_preflight(GetEnv) ->
+tls_preflight(GetEnv, #{dist_opt_words := Words, extra_optfiles := Extra, epmd_listening := Epmd}) ->
     Host = tls_host(read_env("RELEASE_HOST", GetEnv)),
     Interface = tls_interface(read_env("RELEASE_DIST_INTERFACE", GetEnv)),
-    OptFile = tls_optfile(read_env("RELEASE_SSL_DIST_OPTFILE", GetEnv)),
-    case [Problem || {error, Problem} <- [Host, Interface, OptFile]] of
+    OptFile = tls_optfile(read_env("RELEASE_SSL_DIST_OPTFILE", GetEnv), Words, Extra),
+    EpmdCheck =
+        case Interface of
+            {ok, {Ip0, _}} -> tls_epmd(Ip0, epmd_port(GetEnv), Epmd);
+            {error, _} -> ok
+        end,
+    case [Problem || {error, Problem} <- [Host, Interface, OptFile, EpmdCheck]] of
         [] ->
             {ok, H} = Host,
             {ok, {Ip, Notes}} = Interface,
@@ -381,6 +402,50 @@ tls_preflight(GetEnv) ->
             {ok, #{proto => Proto, interface => Ip, host => H, optfile => F, notes => Notes}};
         Problems ->
             {error, Problems}
+    end.
+
+init_words(Flag) ->
+    case init:get_argument(Flag) of
+        {ok, Values} -> lists:append(Values);
+        error -> []
+    end.
+
+%% Whether something accepts TCP connections at `Address:Port` (epmd's).
+epmd_listening(Address, Port) ->
+    case gen_tcp:connect(Address, Port, [], 1000) of
+        {ok, Socket} ->
+            gen_tcp:close(Socket),
+            true;
+        {error, _} ->
+            false
+    end.
+
+epmd_port(GetEnv) ->
+    case string:to_integer(read_env("ERL_EPMD_PORT", GetEnv)) of
+        {Port, ""} when Port > 0, Port < 65536 -> Port;
+        _ -> 4369
+    end.
+
+%% An epmd already running on loopback but not on the interface keeps its
+%% address (it is shared, and binds whatever the first starter gave it), so
+%% this node would register where no other host can look it up. Nothing to
+%% check for a loopback or every-interface listener.
+tls_epmd(Ip, Port, Epmd) ->
+    Skip =
+        beamtalk_dist_address:is_loopback(Ip) orelse
+            Ip =:= {0, 0, 0, 0} orelse Ip =:= {0, 0, 0, 0, 0, 0, 0, 0},
+    case Skip orelse not Epmd({127, 0, 0, 1}, Port) orelse Epmd(Ip, Port) of
+        true ->
+            ok;
+        false ->
+            {error,
+                io_lib:format(
+                    "an epmd is already running on this host but does not listen on ~ts "
+                    "(port ~b), so other hosts could not find this node; it keeps the address "
+                    "of whatever started it first (a loopback release or a beamtalk REPL). "
+                    "Stop the nodes using it and run `epmd -kill`, then start this node first",
+                    [inet:ntoa(Ip), Port]
+                )}
     end.
 
 read_env(Name, GetEnv) ->
@@ -432,6 +497,19 @@ tls_interface("") ->
         "the other nodes connect to, e.g. RELEASE_DIST_INTERFACE=10.0.0.5 "
         "(name 0.0.0.0 to listen on every interface)"};
 tls_interface(Value) ->
+    case lists:member($%, Value) of
+        true ->
+            {error,
+                io_lib:format(
+                    "RELEASE_DIST_INTERFACE '~ts' has a %zone, which the distribution listener "
+                    "cannot use; name a global or unique-local address instead",
+                    [Value]
+                )};
+        false ->
+            tls_interface_address(Value)
+    end.
+
+tls_interface_address(Value) ->
     case beamtalk_dist_address:parse(Value) of
         {ok, Ip} ->
             Notes =
@@ -457,18 +535,32 @@ tls_interface(Value) ->
                 )}
     end.
 
-tls_optfile("") ->
+tls_optfile("", _Words, _Extra) ->
     {error,
         "RELEASE_SSL_DIST_OPTFILE is not set: set it to the TLS distribution option file "
         "that names this node's certificate, key and CA, and makes both sides verify their "
         "peer (see docs/development/deploying.md, \"Clustering across hosts\")"};
-tls_optfile(Path0) ->
+tls_optfile(_Path, _Words, [_ | _] = Extra) ->
+    {error,
+        io_lib:format(
+            "vm.args (or ERL_FLAGS) also sets -ssl_dist_optfile ~ts; remove it and set "
+            "RELEASE_SSL_DIST_OPTFILE instead",
+            [lists:join(" ", Extra)]
+        )};
+tls_optfile(Path0, Words, []) ->
     Path = filename:absname(Path0),
-    case lists:member($", Path) of
-        true ->
-            {error, io_lib:format("RELEASE_SSL_DIST_OPTFILE '~ts' must not contain '\"'", [Path])};
-        false ->
-            case beamtalk_dist_tls:check_optfile(Path) of
+    %% The launchers splice the path into `erl`'s command line; `launcher.cmd`
+    %% runs under delayed expansion, where `!`, `^` and `%` are not literal.
+    case [C || C <- Path, lists:member(C, "\"!^%") orelse C < 32] of
+        [_ | _] ->
+            {error,
+                io_lib:format(
+                    "RELEASE_SSL_DIST_OPTFILE '~ts' must not contain '\"', '!', '^', '%' "
+                    "or control characters",
+                    [Path]
+                )};
+        [] ->
+            case beamtalk_dist_tls:check_optfile(Path, Words) of
                 ok ->
                     {ok, Path};
                 {error, Reason} ->

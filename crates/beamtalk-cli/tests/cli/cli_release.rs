@@ -1330,6 +1330,30 @@ fn release_launcher_tls_distribution_opt_in_test() {
             "{file}: {stderr}"
         );
     }
+    // A weaker `-ssl_dist_opt` in `vm.args` (a `[release] vm-args` overlay)
+    // overrides the option file in the node, so the check counts it too.
+    let vm_args = output_dir.join("releases").join("0.1.0").join("vm.args");
+    let original_vm_args = std::fs::read_to_string(&vm_args).expect("read vm.args");
+    std::fs::write(
+        &vm_args,
+        format!("{original_vm_args}\n-ssl_dist_opt server_verify verify_none\n"),
+    )
+    .expect("write vm.args");
+    let out = launcher_command(&output_dir, name)
+        .arg("foreground")
+        .envs(tls_env(&tls_dir.join("good.conf")))
+        .env("RELEASE_NODE", &node)
+        .env("RELEASE_COOKIE", &cookie)
+        .output()
+        .expect("spawn bin/<name> foreground");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "vm.args override: {stderr}");
+    assert!(
+        stderr.contains("{verify, verify_peer} to the server list"),
+        "vm.args override: {stderr}"
+    );
+    std::fs::write(&vm_args, original_vm_args).expect("restore vm.args");
+
     // The client verbs refuse the same way.
     let out = launcher_command(&output_dir, name)
         .arg("ping")

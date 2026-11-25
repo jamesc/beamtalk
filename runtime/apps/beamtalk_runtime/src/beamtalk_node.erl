@@ -26,8 +26,10 @@ Membership changes are observed through `beamtalk_node_monitor`'s
 ## Connect policy (ADR 0126 §9 item 2)
 
 `connect` (and `ping`, which auto-connects) to a host that is not this host
-succeeds only when this node runs TLS distribution (`-proto_dist inet_tls`
-or `inet6_tls`); otherwise it answers
+succeeds only when this node runs TLS distribution with peer verification
+(`-proto_dist inet_tls` or `inet6_tls`, with `{verify, verify_peer}` on both
+sides and `{fail_if_no_peer_cert, true}` on the server side; ADR 0126
+amendment D2, `beamtalk_dist_tls:enabled/0`); otherwise it answers
 `#beamtalk_error{kind = insecure_distribution}`. "This host" means the host
 part names `localhost` or this machine's own hostname, or every address it
 resolves to is a loopback address or one of this machine's interface

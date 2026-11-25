@@ -280,7 +280,8 @@ exit /b 0
 
 rem RELEASE_DISTRIBUTION=tls (BT-5233): run beamtalk_release_launcher's
 rem tls_preflight_main in a VM with no distribution, as launcher.sh's
-rem `select_distribution` does. It refuses (exit 2, each problem and its fix
+rem `select_distribution` does (with vm.args, so it sees every -ssl_dist_opt
+rem the node will). It refuses (exit 2, each problem and its fix
 rem on stderr) unless RELEASE_HOST and RELEASE_DIST_INTERFACE are valid and
 rem the RELEASE_SSL_DIST_OPTFILE file makes both sides verify their peer;
 rem otherwise it prints one tls-KEY=VALUE line per setting. The output goes
@@ -304,7 +305,7 @@ if not defined TLS_PROBE_DIR (
     exit /b 1
 )
 set "TLS_PROBE=!TLS_PROBE_DIR!\preflight.txt"
-"%ERL%" -noshell %BOOT_ARGS% %PA_ARGS% -eval "beamtalk_release_launcher:tls_preflight_main()." >"!TLS_PROBE!"
+"%ERL%" -noshell %BOOT_ARGS% %PA_ARGS% -args_file "%CONFIG_DIR%\vm.args" -eval "beamtalk_release_launcher:tls_preflight_main()." >"!TLS_PROBE!"
 set "TLS_RC=!errorlevel!"
 set "TLS_PROTO="
 set "TLS_INTERFACE="

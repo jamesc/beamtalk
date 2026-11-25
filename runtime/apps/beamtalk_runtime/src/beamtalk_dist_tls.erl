@@ -11,24 +11,28 @@ Whether Erlang distribution runs over TLS *with peer verification* (ADR 0126
 
 `-proto_dist inet_tls` alone encrypts the link but authenticates nothing: with
 OTP's defaults a node accepts any client and trusts any server certificate.
-Distribution counts as TLS here only when all three of these hold:
+Distribution counts as TLS here only when every protocol in the (first, the
+one OTP uses) `-proto_dist` is a TLS one, and:
 
 * the server side sets `{verify, verify_peer}`;
 * the server side sets `{fail_if_no_peer_cert, true}`, so a client with no
   certificate is refused rather than let in unverified;
-* the client side sets `{verify, verify_peer}`.
+* the client side sets `{verify, verify_peer}`;
+* neither side sets `verify_fun` or `partial_chain`: either can accept a peer
+  the CA did not sign, so a node that wants them is outside what this check
+  can vouch for.
 
 The settings come from where OTP's `inet_tls_dist` reads them: the
 `-ssl_dist_optfile` file (`[{server, Opts}, {client, Opts}]`) and the
 `-ssl_dist_opt server_<opt> <value> client_<opt> <value>` flags. OTP uses both
-sources, so each setting must appear in at least one of them, and every place
-that sets it must set the safe value; a conflicting value anywhere fails
-closed.
+sources, so each required setting must appear in at least one of them, and
+every place that sets it must set the safe value; a conflicting value anywhere
+fails closed.
 
 `enabled/0` is the check `beamtalk_node:tls_distribution/0` makes before an
-off-host connect. `check_optfile/1` is the release launcher's refusal to start
-with `RELEASE_DISTRIBUTION=tls` and an optfile that misses one of the three
-(`beamtalk_release_launcher:tls_preflight/1`). Both use `peer_verification/2`.
+off-host connect. `check_optfile/2` is the release launcher's refusal to start
+with `RELEASE_DISTRIBUTION=tls` (`beamtalk_release_launcher:tls_preflight/2`).
+Both use `peer_verification/2`.
 """.
 
 -export([
@@ -36,17 +40,21 @@ with `RELEASE_DISTRIBUTION=tls` and an optfile that misses one of the three
     verified/3,
     peer_verification/2,
     read_optfile/1,
-    check_optfile/1,
+    check_optfile/2,
     format_error/1
 ]).
 
 -type side() :: server | client.
--type setting() :: server_verify_peer | server_fail_if_no_peer_cert | client_verify_peer.
+-type problem() ::
+    server_verify_peer
+    | server_fail_if_no_peer_cert
+    | client_verify_peer
+    | {forbidden, side(), verify_fun | partial_chain}.
 -type reason() ::
     {optfile_missing, file:filename_all()}
     | {optfile_unreadable, file:filename_all(), term()}
     | {optfile_malformed, file:filename_all(), term()}
-    | {peer_verification, [setting(), ...]}.
+    | {peer_verification, [problem(), ...]}.
 -export_type([reason/0]).
 
 %% Each required setting: its name, the side, the ssl option and the value.
@@ -56,60 +64,73 @@ with `RELEASE_DISTRIBUTION=tls` and an optfile that misses one of the three
     {client_verify_peer, client, verify, verify_peer}
 ]).
 
+%% Options that can accept a peer the CA did not sign.
+-define(FORBIDDEN, [verify_fun, partial_chain]).
+
 -doc """
-Whether this node runs TLS distribution with peer verification: a
-`-proto_dist` ending in `_tls`, and the three settings above. The optfile's
-options are read from the table OTP loaded them into at boot
-(`ssl_dist_opts`) when distribution is up, else from the file itself; a file
-that cannot be read counts as setting nothing.
+Whether this node runs TLS distribution with peer verification (see the
+module doc). The optfile's options are read from the table OTP loaded them
+into at boot (`ssl_dist_opts`) when distribution is up, else from the file
+itself; a file that cannot be read counts as setting nothing.
 """.
 -spec enabled() -> boolean().
 enabled() ->
-    verified(arg_words(proto_dist), arg_words(ssl_dist_opt), optfile_opts()).
+    Protos =
+        case init:get_argument(proto_dist) of
+            {ok, [First | _]} -> First;
+            _ -> []
+        end,
+    verified(Protos, arg_words(ssl_dist_opt), optfile_opts()).
 
 -doc """
-The decision `enabled/0` makes, from explicit inputs: the `-proto_dist`
-values, the `-ssl_dist_opt` words and the optfile's options.
+The decision `enabled/0` makes, from explicit inputs: the protocols of the
+`-proto_dist` OTP uses, the `-ssl_dist_opt` words and the optfile's options.
 """.
 -spec verified([string()], [string()], [{side(), list()}]) -> boolean().
 verified(ProtoDists, DistOptWords, FileOpts) ->
-    lists:any(fun(P) -> lists:suffix("_tls", P) end, ProtoDists) andalso
+    ProtoDists =/= [] andalso
+        lists:all(fun(P) -> lists:suffix("_tls", P) end, ProtoDists) andalso
         peer_verification(DistOptWords, FileOpts) =:= ok.
 
 -doc """
 `ok` if the `-ssl_dist_opt` words and the optfile's options together set all
-three peer-verification settings, else the ones that are missing (or set to
-anything else somewhere).
+three peer-verification settings and neither side sets an option that can
+override them; else every problem found.
 """.
 -spec peer_verification([string()], [{side(), list()}]) ->
-    ok | {error, {peer_verification, [setting(), ...]}}.
+    ok | {error, {peer_verification, [problem(), ...]}}.
 peer_verification(DistOptWords, FileOpts) ->
     Pairs = word_pairs(DistOptWords),
-    case
-        [
-            Name
-         || {Name, Side, Key, Want} <- ?REQUIRED, not settled(Side, Key, Want, Pairs, FileOpts)
-        ]
-    of
+    Missing = [
+        Name
+     || {Name, Side, Key, Want} <- ?REQUIRED, not settled(Side, Key, Want, Pairs, FileOpts)
+    ],
+    Forbidden = [
+        {forbidden, Side, Key}
+     || Side <- [server, client], Key <- ?FORBIDDEN, sets(Side, Key, Pairs, FileOpts)
+    ],
+    case Missing ++ Forbidden of
         [] -> ok;
-        Missing -> {error, {peer_verification, Missing}}
+        Problems -> {error, {peer_verification, Problems}}
     end.
 
 -doc """
-Read an `-ssl_dist_optfile` the way OTP's `ssl_dist_sup` does: one Erlang
-expression (normally `[{server, Opts}, {client, Opts}].`) with no free
-variables, evaluating to a list.
+Read an `-ssl_dist_optfile` exactly as the node will: with OTP's own
+`ssl_dist_sup:consult/1` (one Erlang expression, normally `[{server, Opts},
+{client, Opts}].`, with no free variables), which must evaluate to a list.
 """.
 -spec read_optfile(file:filename_all()) -> {ok, [{side(), list()}]} | {error, reason()}.
 read_optfile(Path) ->
-    case file:read_file(Path) of
-        {ok, Bin} ->
-            try consult(Bin) of
+    case file:read_file_info(Path) of
+        {ok, _} ->
+            try ssl_dist_sup:consult(Path) of
                 Opts when is_list(Opts) -> {ok, Opts};
                 Other -> {error, {optfile_malformed, Path, {not_a_list, Other}}}
             catch
-                throw:Detail -> {error, {optfile_malformed, Path, Detail}};
-                Class:Detail -> {error, {optfile_malformed, Path, {Class, Detail}}}
+                error:{bad_ssl_dist_optfile, Detail} ->
+                    {error, {optfile_malformed, Path, Detail}};
+                Class:Detail ->
+                    {error, {optfile_malformed, Path, {Class, Detail}}}
             end;
         {error, enoent} ->
             {error, {optfile_missing, Path}};
@@ -118,13 +139,13 @@ read_optfile(Path) ->
     end.
 
 -doc """
-`ok` if the optfile at `Path` exists, parses, and sets all three
-peer-verification settings by itself.
+`ok` if the optfile at `Path` exists, parses, and, together with the
+`-ssl_dist_opt` words the node will also get, passes `peer_verification/2`.
 """.
--spec check_optfile(file:filename_all()) -> ok | {error, reason()}.
-check_optfile(Path) ->
+-spec check_optfile(file:filename_all(), [string()]) -> ok | {error, reason()}.
+check_optfile(Path, DistOptWords) ->
     case read_optfile(Path) of
-        {ok, Opts} -> peer_verification([], Opts);
+        {ok, Opts} -> peer_verification(DistOptWords, Opts);
         {error, _} = Error -> Error
     end.
 
@@ -147,32 +168,46 @@ format_error({optfile_malformed, Path, Detail}) ->
         "[{server, [...]}, {client, [...]}]. (~0tp)",
         [Path, Detail]
     );
-format_error({peer_verification, Missing}) ->
+format_error({peer_verification, Problems}) ->
     [
-        "the TLS distribution option file does not make both sides verify their peer; add ",
-        lists:join("; ", [setting_fix(S) || S <- Missing])
+        "the TLS distribution options (the option file and any -ssl_dist_opt flags) "
+        "do not make both sides verify their peer: ",
+        lists:join("; ", [problem_fix(P) || P <- Problems])
     ].
 
 %%% ============================================================================
 %%% Internal
 %%% ============================================================================
 
-setting_fix(server_verify_peer) -> "{verify, verify_peer} to the server list";
-setting_fix(server_fail_if_no_peer_cert) -> "{fail_if_no_peer_cert, true} to the server list";
-setting_fix(client_verify_peer) -> "{verify, verify_peer} to the client list".
+problem_fix(server_verify_peer) ->
+    "add {verify, verify_peer} to the server list";
+problem_fix(server_fail_if_no_peer_cert) ->
+    "add {fail_if_no_peer_cert, true} to the server list";
+problem_fix(client_verify_peer) ->
+    "add {verify, verify_peer} to the client list";
+problem_fix({forbidden, Side, Key}) ->
+    io_lib:format("remove ~ts from the ~ts list (it can accept an unverified peer)", [
+        Key, Side
+    ]).
 
 %% Every place that sets `Key` on `Side` must set `Want`, and at least one must.
 settled(Side, Key, Want, Pairs, FileOpts) ->
-    Flag = atom_to_list(Side) ++ "_" ++ atom_to_list(Key),
-    FromWords = [V =:= atom_to_list(Want) || {F, V} <- Pairs, F =:= Flag],
-    FromFile = [
-        V =:= Want
-     || {S, Opts} <- FileOpts, S =:= Side, is_list(Opts), {K, V} <- Opts, K =:= Key
-    ],
+    FromWords = [V =:= atom_to_list(Want) || V <- word_values(Side, Key, Pairs)],
+    FromFile = [V =:= Want || V <- file_values(Side, Key, FileOpts)],
     case FromWords ++ FromFile of
         [] -> false;
         Seen -> lists:all(fun(Ok) -> Ok end, Seen)
     end.
+
+sets(Side, Key, Pairs, FileOpts) ->
+    word_values(Side, Key, Pairs) =/= [] orelse file_values(Side, Key, FileOpts) =/= [].
+
+word_values(Side, Key, Pairs) ->
+    Flag = atom_to_list(Side) ++ "_" ++ atom_to_list(Key),
+    [V || {F, V} <- Pairs, F =:= Flag].
+
+file_values(Side, Key, FileOpts) ->
+    [V || {S, Opts} <- FileOpts, S =:= Side, is_list(Opts), {K, V} <- Opts, K =:= Key].
 
 word_pairs([Flag, Value | Rest]) -> [{Flag, Value} | word_pairs(Rest)];
 word_pairs(_) -> [].
@@ -197,32 +232,4 @@ optfile_opts() ->
                 _ ->
                     []
             end
-    end.
-
-consult(Bin) ->
-    Encoding =
-        case epp:read_encoding_from_binary(Bin) of
-            none -> latin1;
-            Enc -> Enc
-        end,
-    String =
-        case unicode:characters_to_list(Bin, Encoding) of
-            S when is_list(S) -> S;
-            _ -> throw(encoding_error)
-        end,
-    Tokens =
-        case erl_scan:string(String) of
-            {ok, Ts, _} -> Ts;
-            {error, Info, Location} -> throw({scan_error, Info, Location})
-        end,
-    Expr =
-        case erl_parse:parse_exprs(Tokens) of
-            {ok, [E]} -> E;
-            {ok, _} -> throw(not_one_expression);
-            {error, Info2} -> throw({parse_error, Info2})
-        end,
-    {value, Value, Bindings} = erl_eval:expr(Expr, erl_eval:new_bindings()),
-    case erl_eval:bindings(Bindings) of
-        [] -> Value;
-        Other -> throw({bindings, Other})
     end.
