@@ -3719,14 +3719,14 @@ An `on:do:` or `ensure:` threads a write only when its protected block and its h
 These lookup handlers are lowered inline, behind a runtime check that the receiver is a `Dictionary`: a handler that writes an outer local sent to anything else (an `Ets`, a value-type instance with its own `at:ifAbsent:`, a user class) raises a structured `type_error` instead of dropping the write. A receiver statically known not to be a `Dictionary` (`self`/`super` outside one, or an inferred type that is a known other class such as `Ets`) keeps the compile error. In a closure that is not inlined (a stored block, a block passed to another method) the enclosing block escapes, and in the REPL the handler is still a compile error.
 
 ```text
-error: `count` is assigned in a block passed to a class method (`ap:`); it would run in another process
+error: `count` is assigned in a block passed to a class method (`new:`); it would run in another process
   = the block
   = a block that is stored, returned, or passed to a method the compiler does not lower in place
     may read captured variables but not assign them (ADR 0133). The messages that thread
     assignments, with the block written directly as the argument, are the control constructs
     (ifTrue:, ..., value:value:value:) and the collection messages (do:, ..., at:ifPresent:ifAbsent:)
   help: return the new value from the block and assign it where it is called:
-        `count := ... ap: [... count + 1]`
+        `count := ... new: [... count + 1]`
 ```
 
 The note's list is generated from `crates/beamtalk-core/src/state_threading_selectors.rs`, the one list codegen reads.
