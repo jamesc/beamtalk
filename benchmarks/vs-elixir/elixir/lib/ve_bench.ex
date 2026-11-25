@@ -269,6 +269,8 @@ defmodule VeBench do
   defbench(:lit_less, b, do: 5 < b)
   defbench(:less_ab, {a, b}, do: a < b)
   defbench(:lit_add, b, do: 5 + b)
+
+  # 11l: an actor loop on a field.
   defbench(:gen_spin, pid, do: GenServer.call(pid, {:spin, 5}))
 
   defp count_to(i, a) when a > i, do: count_to(i + 1, a)

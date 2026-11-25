@@ -246,8 +246,8 @@ fixtures() ->
     #{
         none => 0,
         int => 5,
-        %% 11i/11j: Beamtalk gets the integer for both operands, Elixir a distinct pair.
-        int_pair => {5, {5, 6}},
+        %% 11i/11j: both operands are 5 on each side (Elixir gets the pair).
+        int_pair => {5, {5, 5}},
         point => {Bt(point), ?EX:point()},
         open_point => {Bt(openPoint), ?EX:point()},
         square => {Bt(square), ?EX:square()},
