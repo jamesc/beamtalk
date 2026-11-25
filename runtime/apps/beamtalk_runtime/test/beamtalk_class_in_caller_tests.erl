@@ -254,6 +254,32 @@ runtime_fun_test_() ->
                 end
             )
         end},
+        {"a module-less class keeps every selector any ancestor lists as process-bound", fun() ->
+            %% BT-4475's own-class `new:` exemption is not inherited: a
+            %% compiled parent whose list leaves `new:` out does not take
+            %% it out for a ClassBuilder subclass, because `Object` lists it.
+            Root = beamtalk_test_class:start('Bt5161NoNew1Root', #{
+                superclass => 'Object',
+                module => ?HELPER,
+                class_methods => #{testSelf => #{arity => 0}},
+                meta => #{process_bound_class_selectors => [new]}
+            }),
+            try
+                with_builder_class(
+                    'Bt5161NoNew1Leaf',
+                    'Bt5161NoNew1Root',
+                    #{'new:' => fun(_Self, _X) -> self() end},
+                    fun(Leaf) ->
+                        ?assertEqual(Leaf, send(Leaf, 'new:', [#{}])),
+                        ?assertEqual(decline, memo(Leaf, 'new:')),
+                        %% The parent's compiled method runs in the caller.
+                        ?assertEqual(self(), send(Leaf, testSelf, []))
+                    end
+                )
+            after
+                beamtalk_test_proc:stop(Root)
+            end
+        end},
         {"a fun shadowing a compiled method runs in the caller; no static key binds it", fun() ->
             with_class('Bt5161Shadow', none, fun(Pid) ->
                 Tag = tag('Bt5161Shadow'),
@@ -312,7 +338,7 @@ loop_until_fun(Pid, Parent, 0) ->
             Parent ! {looping, Me},
             spin_until_fun(Pid, Parent);
         Other ->
-            Parent ! {unexpected, Other}
+            exit({unexpected, Other})
     end.
 
 spin_until_fun(Pid, Parent) ->
@@ -320,7 +346,7 @@ spin_until_fun(Pid, Parent) ->
     case send(Pid, testSelf, []) of
         Me -> spin_until_fun(Pid, Parent);
         {from_fun, Runner} -> after_fun(Pid, Parent, Runner, 1);
-        Other -> Parent ! {unexpected, Other}
+        Other -> exit({unexpected, Other})
     end.
 
 after_fun(_Pid, Parent, Runner, 100) ->
@@ -328,7 +354,7 @@ after_fun(_Pid, Parent, Runner, 100) ->
 after_fun(Pid, Parent, Runner, N) ->
     case send(Pid, testSelf, []) of
         {from_fun, Runner} -> after_fun(Pid, Parent, Runner, N + 1);
-        Other -> Parent ! {unexpected, Other}
+        Other -> exit({unexpected, Other})
     end.
 
 %% Register a module-less class through `ClassBuilder`'s backing

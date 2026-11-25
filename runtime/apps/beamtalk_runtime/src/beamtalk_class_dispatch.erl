@@ -410,9 +410,12 @@ routed by. A compiled class publishes its own generated list. A module-less
 class (built at run time by `ClassBuilder`; its row names its own class name
 as its module, as `ClassInfo::registered_module_is_module_less` decides on the
 Rust side) has no generated module and so no list of its own: it answers with
-its nearest ancestor's, so its ADR 0084 runtime funs run in the caller like
-any other class method (ADR 0153 §5, BT-5161). `unknown` when no class in that
-walk published one. A class with a module that published nothing (one
+the union of the lists its ancestors published, so its ADR 0084 runtime funs
+run in the caller like any other class method (ADR 0153 §5, BT-5161). The
+union, not the nearest ancestor's list: a list may leave out a selector only
+for its own class (BT-4475's own-class `new:` exemption is not inherited), so
+any ancestor naming a selector keeps it process-bound. `unknown` when no
+ancestor published one. A class with a module that published nothing (one
 compiled before the list existed) stays `unknown`. Reads metadata rows only;
 every row write flushes the memo built from it (`beamtalk_class_derived_cache`
 invalidates globally, so an ancestor's write is seen).
@@ -423,20 +426,38 @@ process_bound_selectors(ClassName) ->
         {ok, _} = Found ->
             Found;
         unknown ->
-            case
-                {
-                    beamtalk_class_metadata:lookup_module(ClassName),
-                    beamtalk_class_metadata:lookup_superclass(ClassName)
-                }
-            of
-                {{ok, ClassName}, {ok, Superclass}} when
-                    is_atom(Superclass), Superclass =/= none, Superclass =/= ClassName
-                ->
-                    process_bound_selectors(Superclass);
-                _ ->
-                    unknown
+            case beamtalk_class_metadata:lookup_module(ClassName) of
+                {ok, ClassName} -> ancestors_process_bound_selectors(ClassName, [ClassName], []);
+                _ -> unknown
             end
     end.
+
+%% The union of the process-bound lists `ClassName`'s ancestors published
+%% (see `process_bound_selectors/1`), `unknown` when none did. `Seen` guards
+%% the walk against a malformed (cyclic) chain.
+-spec ancestors_process_bound_selectors(class_name(), [class_name()], [[selector()]]) ->
+    {ok, [selector()]} | unknown.
+ancestors_process_bound_selectors(ClassName, Seen, Acc) ->
+    case beamtalk_class_metadata:lookup_superclass(ClassName) of
+        {ok, Superclass} when is_atom(Superclass), Superclass =/= none ->
+            case lists:member(Superclass, Seen) of
+                true ->
+                    union_or_unknown(Acc);
+                false ->
+                    Acc1 =
+                        case beamtalk_class_metadata:lookup_process_bound_selectors(Superclass) of
+                            {ok, Selectors} -> [Selectors | Acc];
+                            unknown -> Acc
+                        end,
+                    ancestors_process_bound_selectors(Superclass, [Superclass | Seen], Acc1)
+            end;
+        _ ->
+            union_or_unknown(Acc)
+    end.
+
+-spec union_or_unknown([[selector()]]) -> {ok, [selector()]} | unknown.
+union_or_unknown([]) -> unknown;
+union_or_unknown(Lists) -> {ok, lists:usort(lists:append(Lists))}.
 
 -spec derive_class_method_owner(class_name(), selector(), [selector()]) ->
     verdict().
@@ -1499,9 +1520,20 @@ compiled function only while this answers `compiled`.
 """.
 -spec class_method_body(class_name(), selector()) -> {runtime_fun, fun()} | compiled.
 class_method_body(DefiningClass, Selector) ->
-    case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
-        {ok, #{block := Fun}} -> {runtime_fun, Fun};
-        error -> compiled
+    %% One `persistent_term` read first (BT-5161): the `runtime_fun` raw flag
+    %% is raised before a class's fun gate opens and cleared only after it
+    %% closes (`beamtalk_class_metadata:set_runtime_class_methods/2`,
+    %% `reset_runtime_class_methods/1`), so while it is clear the gated fun
+    %% lookup would answer `error`. A class with no funs, which is every
+    %% compiled class on the in-caller hot path, pays no ETS read.
+    case beamtalk_class_shadow_flags:is_shadowed(DefiningClass) of
+        false ->
+            compiled;
+        true ->
+            case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
+                {ok, #{block := Fun}} -> {runtime_fun, Fun};
+                error -> compiled
+            end
     end.
 
 -doc """
@@ -1642,6 +1674,14 @@ is_beamtalk_signal(_ErrClass, _Error) -> false.
     {error, #beamtalk_error{}} | {error, undef_in_body}.
 classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST) ->
     case is_dispatch_undef(DefiningModule, FunName, ST) of
+        {true, module_not_loaded} when DefiningModule =:= DefiningClass ->
+            %% A module-less (`ClassBuilder`) class has no module: the method
+            %% was a runtime fun, removed after this send resolved it (the
+            %% lock-free window `do_remove_class_method/2` documents, which an
+            %% in-caller send can now reach for the class's own funs, ADR 0153
+            %% §5). It is not understood any more, not a load failure.
+            Hint = method_not_found_hint(ClassName, DefiningClass, Selector),
+            {error, beamtalk_error:new(does_not_understand, ClassName, Selector, Hint)};
         {true, module_not_loaded} ->
             Hint = module_not_loaded_hint(ClassName, DefiningClass, DefiningModule),
             {error, beamtalk_error:new(class_not_found, ClassName, Selector, Hint)};
