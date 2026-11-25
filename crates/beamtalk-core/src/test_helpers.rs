@@ -24,12 +24,6 @@ pub fn unique_temp_dir(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{prefix}_{}_{}_{n}", std::process::id(), nanos))
 }
 
-// BT-3705 (ADR 0130 Phase 1): generated class-variable programs and the
-// reference interpreter. A sibling module (not part of `test_support`) because
-// it is plain data + a pure interpreter with no parser/AST dependency.
-#[cfg(any(test, feature = "test"))]
-pub mod class_var_program;
-
 // BT-3841 (ADR 0131): the statement-position probe matrix, shared by the
 // Phase 0 pin tests and the BEAM measurement harness in `beamtalk-cli`.
 #[cfg(any(test, feature = "test"))]
@@ -1056,8 +1050,7 @@ pub mod test_support {
     }
 
     /// Draws `n` programs from [`arb_program`] with a fixed RNG, so a case
-    /// budget is the same corpus on every run and every machine (the sibling
-    /// of [`draw_class_programs`]). Every program is one `run` method on an
+    /// budget is the same corpus on every run and every machine. Every program is one `run` method on an
     /// `Object subclass: <class_name>`.
     ///
     /// # Panics
@@ -1178,54 +1171,6 @@ pub mod test_support {
             }
             _ => {}
         }
-    }
-
-    /// Generates class-variable programs (BT-3705, ADR 0130 Phase 1): the
-    /// sibling of [`arb_program`] for class state, loops, exception handling
-    /// and late-bound sends. A program is a pure function of `(seed, size)`,
-    /// so a failing case is reproducible from the printed pair.
-    ///
-    /// See [`super::class_var_program`] for the program model, the three
-    /// spellings and the ADR 0130 §4 reference interpreter.
-    pub fn arb_class_program(
-        shapes: super::class_var_program::Shapes,
-    ) -> impl Strategy<Value = (u64, u32, super::class_var_program::Program)> {
-        (any::<u64>(), 1u32..=3).prop_map(move |(seed, size)| {
-            (
-                seed,
-                size,
-                super::class_var_program::gen_program(seed, size, shapes),
-            )
-        })
-    }
-
-    /// Draws `n` class programs from [`arb_class_program`] with a fixed RNG,
-    /// so a case budget is the same corpus on every run and every machine.
-    /// Each item is `(seed, size, program)`; the pair reproduces the program.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the strategy cannot produce a value (it never fails).
-    pub fn draw_class_programs(
-        shapes: super::class_var_program::Shapes,
-        n: usize,
-    ) -> Vec<(u64, u32, super::class_var_program::Program)> {
-        use proptest::strategy::ValueTree;
-        use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
-
-        let mut runner = TestRunner::new_with_rng(
-            Config::default(),
-            TestRng::deterministic_rng(RngAlgorithm::ChaCha),
-        );
-        let strategy = arb_class_program(shapes);
-        (0..n)
-            .map(|_| {
-                strategy
-                    .new_tree(&mut runner)
-                    .expect("strategy draws a value")
-                    .current()
-            })
-            .collect()
     }
 
     /// `EcoString` alias local to this generator: proptest's `Strategy`
@@ -1363,25 +1308,6 @@ pub mod test_support {
             cases: default.cases.max(512),
             ..default
         }
-    }
-
-    /// A proptest configuration with a smaller per-run budget than
-    /// [`proptest_config_default`], for properties too slow to run 512 cases
-    /// in every `cargo test` (BT-3767: the class-variable agreement codegen
-    /// properties).
-    ///
-    /// `cases` is `default_cases`, unless the `PROPTEST_CASES` env var is
-    /// set, in which case it wins (that is how `just test-class-var-corpus`
-    /// and the nightly job ask for the full budget).
-    #[must_use]
-    pub fn proptest_config_cases(default_cases: u32) -> proptest::prelude::ProptestConfig {
-        let default = proptest::prelude::ProptestConfig::default();
-        let cases = if std::env::var_os("PROPTEST_CASES").is_some() {
-            default.cases
-        } else {
-            default_cases
-        };
-        proptest::prelude::ProptestConfig { cases, ..default }
     }
 
     #[cfg(test)]
