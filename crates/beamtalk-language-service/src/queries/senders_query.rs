@@ -199,13 +199,11 @@ mod tests {
         assert_eq!(lines, vec![2]);
     }
 
-    // Scanning extension method source (registered via
-    // `beamtalk_extensions:register/5`) should produce hits the same way
-    // class-body methods do. This is the canonical shape passed by
-    // `SystemNavigation collectExtensionSendersFor:into:` when iterating
-    // the extension sources table.
+    // Scanning a bare method source (no class wrapper) should produce hits
+    // the same way class-body methods do. This is the shape passed by
+    // `SystemNavigation collectSendersFor:in:into:` for a fallback class.
     #[test]
-    fn finds_send_in_extension_style_source() {
+    fn finds_send_in_bare_method_source() {
         let lines = find_senders_in_source("describe => self asString", "asString");
         assert_eq!(lines, vec![1]);
     }
