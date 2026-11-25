@@ -1,21 +1,21 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3795 (ADR 0131 Phase 2d): a loop or fold in the value of a field or
-// class-variable write (`self.n := <here>`) is a local-threading producer: the
-// write's value is a sequenced operand site, so the construct's locals are
-// rebound before the write and visible to everything after it. Each test runs
-// one shape (fixtures/adr0131field_value_{class,actor}.bt) in a class method
-// and an actor method and asserts the answer Smalltalk semantics give. A value
-// type cannot write `self.n :=` (ADR 0042), so it has no column.
+// BT-3795 (ADR 0131 Phase 2d): a loop or fold in the value of a field write
+// (`self.n := <here>`) is a local-threading producer: the write's value is a
+// sequenced operand site, so the construct's locals are rebound before the
+// write and visible to everything after it. Each test runs one shape
+// (fixtures/adr0131field_value_actor.bt) in an actor method and asserts the
+// answer Smalltalk semantics give. A value type cannot write `self.n :=`
+// (ADR 0042), and class methods have no state, so neither has a column.
 
 TestCase subclass: Adr0131FieldValueTest
 
   answersOf: selector =>
-    #[Adr0131FieldValueClass perform: selector, (Adr0131FieldValueActor spawn) perform: selector]
+    (Adr0131FieldValueActor spawn) perform: selector
 
   assertBoth: selector equal: expected =>
-    self assert: (self answersOf: selector) equals: #[expected, expected]
+    self assert: (self answersOf: selector) equals: expected
 
   testCollectSize => self assertBoth: #collectSize equal: #[2, 3]
 
@@ -46,12 +46,6 @@ TestCase subclass: Adr0131FieldValueTest
   testViaLocal => self assertBoth: #viaLocal equal: #[5, 2, 3]
 
   testInLiteral => self assertBoth: #inLiteral equal: #[2, 3]
-
-  testSelfSendNeighbourClass =>
-    self assert: Adr0131FieldValueClass selfSendNeighbour equals: #[12, 3]
-
-  testWriteInBodyClass =>
-    self assert: Adr0131FieldValueClass writeInBody equals: #[2, 3]
 
   testSelfSendNeighbourActor =>
     self assert: (Adr0131FieldValueActor spawn) selfSendNeighbour equals: #[12, 3, 10]

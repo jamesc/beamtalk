@@ -34,5 +34,3 @@ TestCase subclass: Bt4014ClassSideOperandProducerTest
   testNestedSend =>
     self assert: Bt4014ClassSideOperandProducer nestedSend equals: 0
 
-  testClassVarWrite =>
-    self assert: Bt4014ClassSideOperandProducer classVarWrite equals: #[7, 7]

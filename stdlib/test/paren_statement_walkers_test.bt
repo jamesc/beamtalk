@@ -12,12 +12,10 @@ TestCase subclass: ParenStatementWalkersTest
 
   setUp =>
     self.actor := ParenStmtActor spawn
-    ParenStmtClassMethods reset
     self
 
   tearDown =>
     self.actor stop
-    ParenStmtClassMethods reset
 
   // --- actor ---
   testActorLocalNonLast => self assert: self.actor localNonLast equals: 2
@@ -51,23 +49,3 @@ TestCase subclass: ParenStatementWalkersTest
     self assert: ParenStmtClassMethods localNonLast equals: 2
 
   testClassLocalLast => self assert: ParenStmtClassMethods localLast equals: 2
-
-  testClassFieldNonLast =>
-    self assert: ParenStmtClassMethods fieldNonLast equals: 1
-
-  testClassFieldLast =>
-    ParenStmtClassMethods fieldLast
-    self assert: ParenStmtClassMethods getCount equals: 1
-
-  testClassCondNonLast =>
-    self assert: ParenStmtClassMethods condNonLast equals: 1
-
-  testClassCondLast =>
-    ParenStmtClassMethods condLast
-    self assert: ParenStmtClassMethods getCount equals: 1
-
-  testClassDoNonLast => self assert: ParenStmtClassMethods doNonLast equals: 6
-
-  testClassDoLast =>
-    ParenStmtClassMethods doLast
-    self assert: ParenStmtClassMethods getCount equals: 6

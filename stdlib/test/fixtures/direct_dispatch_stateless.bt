@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3639 / ADR 0142: a class with no `classState:`, whose class methods run
+// BT-3639 / ADR 0142: a class with no class variables, whose class methods run
 // in the caller's process however they are sent, static or dynamic.
 
 sealed Object subclass: DirectDispatchStateless

@@ -53,12 +53,6 @@ TestCase subclass: Adr0131DoProducerTest
   testDoReadsAndWrites =>
     self assert: #[Adr0131DoProducerClass doReadsAndWrites, (Adr0131DoProducerValue new) doReadsAndWrites, (Adr0131DoProducerActor spawn) doReadsAndWrites] equals: #[#[nil, 10], #[nil, 10], #[nil, 10]]
 
-  testDoWithFieldWrite =>
-    self assert: #[Adr0131DoProducerClass doWithFieldWrite, (Adr0131DoProducerActor spawn) doWithFieldWrite] equals: #[#[nil, 3, 2], #[nil, 3, 2]]
-
-  testDoInFieldAssignment =>
-    self assert: #[Adr0131DoProducerClass doInFieldAssignment, (Adr0131DoProducerActor spawn) doInFieldAssignment] equals: #[#["nil", 3], #["nil", 3]]
-
   testKeyedDoReturnedInArm =>
     self assert: #[Adr0131DoProducerClass keyedDoReturnedInArm: true, (Adr0131DoProducerValue new) keyedDoReturnedInArm: true] equals: #[nil, nil]
 
@@ -97,6 +91,3 @@ TestCase subclass: Adr0131DoProducerTest
   testDoReturnedInSortBlock =>
     self assert: #[Adr0131DoProducerClass doReturnedInSortBlock, (Adr0131DoProducerValue new) doReturnedInSortBlock] equals: #[nil, nil]
 
-  testDoWithClassVarWriteReturnedInClosure =>
-    self assert: (Adr0131DoProducerClass doWithClassVarWriteReturnedInClosure: 5) equals: nil
-    self assert: Adr0131DoProducerClass classVarN equals: 3

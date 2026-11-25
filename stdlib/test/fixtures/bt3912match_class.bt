@@ -10,7 +10,6 @@
 // stdlib/test/bt3912match_test.bt.
 
 Object subclass: Bt3912MatchClass
-  classState: n = 0
 
   class stmt: x =>
     t := 0

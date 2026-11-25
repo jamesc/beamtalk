@@ -17,7 +17,6 @@
 // block is the same arm (`{[:y | t := y] value: 5, t}` answers `{5, 5}`).
 
 Object subclass: Adr0131EvalBlockClass
-  classState: n = 0
 
   class stA =>
     t := 0
@@ -217,27 +216,6 @@ Object subclass: Adr0131EvalBlockClass
       ]
     #[r, t]
 
-  class fieldMix =>
-    self.n := 0
-    t := 0
-    [
-      self.n := self.n + 1
-      t := t + 1
-    ] value
-    #[self.n, t]
-
-  class fieldInDo =>
-    self.n := 0
-    t := 0
-    #(1, 2)
-      do: [:e |
-        [
-          self.n := self.n + e
-          t := t + 1
-        ] value
-      ]
-    #[self.n, t]
-
   class take: v => v
 
   class argStA =>
@@ -422,15 +400,6 @@ Object subclass: Adr0131EvalBlockClass
     t := 0
     [:c | c ifTrue: [t := t + 1]] value: 4 > 3
     t
-
-  class argFieldMix =>
-    self.n := 0
-    t := 0
-    [:k |
-      self.n := self.n + k
-      t := t + k
-    ] value: 1
-    #[self.n, t]
 
   class argFoldLoopInBlock =>
     t := 0

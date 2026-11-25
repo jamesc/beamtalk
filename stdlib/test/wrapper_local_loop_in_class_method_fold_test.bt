@@ -8,14 +8,3 @@
 
 TestCase subclass: WrapperLocalLoopInClassMethodFoldTest
 
-  testWrapperLocalLoopInFoldCompilesAndRuns =>
-    self assert: WrapperOuterLocalThreadingHelper wrapperLocalInFold equals: 0
-
-  testEnsureThreadsOuterLocalOut =>
-    self assert: WrapperOuterLocalThreadingHelper ensureOuter equals: 3
-
-  testOnDoThreadsOuterLocalOut =>
-    self assert: WrapperOuterLocalThreadingHelper onDoOuter equals: 3
-
-  testConditionalThreadsOuterLocalOut =>
-    self assert: WrapperOuterLocalThreadingHelper conditionalOuter equals: 3

@@ -10,7 +10,6 @@
 // stdlib/test/adr0131do_producer_test.bt.
 
 Object subclass: Adr0131DoProducerClass
-  classState: n = 0
 
   class plain => 0
 
@@ -88,22 +87,6 @@ Object subclass: Adr0131DoProducerClass
     t := 5
     r := #(1, 2) do: [:x | t := t * x]
     #[r, t]
-
-  class doWithFieldWrite =>
-    self.n := 0
-    t := 0
-    r := #(1, 2)
-      do: [:x |
-        t := t + x
-        self.n := self.n + 1
-      ]
-    #[r, t, self.n]
-
-  class doInFieldAssignment =>
-    self.n := 0
-    t := 0
-    self.n := (#(1, 2) do: [:x | t := t + x]) printString
-    #[self.n, t]
 
   class keyedDoReturnedInArm: c =>
     t := 0
@@ -183,20 +166,3 @@ Object subclass: Adr0131DoProducerClass
     #(2, 1) sort: [:a :b | ^#(1, 2) do: [:x | t := t + x]]
     t
 
-  // BT-3813: the class-variable write in the returned `do:` is written in
-  // place (ADR 0130), so it is kept past the `^`.
-  class doWithClassVarWriteReturnedInClosure: c =>
-    self.n := 0
-    t := 0
-    #(1, 2)
-      detect: [:y | y > c]
-      ifNone: [
-        ^#(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + x
-          ]
-      ]
-    t
-
-  class classVarN => self.n

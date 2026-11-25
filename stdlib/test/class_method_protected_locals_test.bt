@@ -10,12 +10,6 @@ TestCase subclass: ClassMethodProtectedLocalsTest
   testEnsureCleanupSeesTheBodysWrite =>
     self assert: ClassMethodProtectedLocals ensureCleanupSeesTheBodysWrite equals: 11
 
-  testNestedEnsureInnerCleanupSeesTheInnerWrite =>
-    self assert: ClassMethodProtectedLocals nestedEnsureInnerCleanupSeesTheInnerWrite equals: 16
-
-  testNestedEnsureOuterCleanupSeesTheInnerWrite =>
-    self assert: ClassMethodProtectedLocals nestedEnsureOuterCleanupSeesTheInnerWrite equals: 153
-
   testOnDoNestedInATryBody =>
     self assert: ClassMethodProtectedLocals onDoNestedInATryBody equals: 2
 
@@ -28,5 +22,3 @@ TestCase subclass: ClassMethodProtectedLocalsTest
   testNestedDoWritesTheLoopsLocal =>
     self assert: ClassMethodProtectedLocals nestedDoWritesTheLoopsLocal equals: 15
 
-  testNestedDoInACountedLoop =>
-    self assert: ClassMethodProtectedLocals nestedDoInACountedLoop equals: 153

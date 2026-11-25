@@ -1,22 +1,28 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3407: classState value set via one class-method call must be visible to
-// the supervisor's configuration (instance-side `childSpecs` since ADR 0135,
-// which runs inside the supervisor's own `init`). See
+// BT-3407: a value held by a named actor and set before `supervise` must be
+// visible to the supervisor's configuration (instance-side `childSpecs` since
+// ADR 0135, which runs inside the supervisor's own `init`). See
 // stdlib/test/fixtures/class_state_sup_app.bt.
 //
-// BT-3962: `supervise` starts the tree in the caller, so `childSpecs` can read
-// the class variable through its own class (`ClassStateSupApp cfg`) while
-// `ClassStateSupApp supervise` runs.
+// BT-3962: `supervise` starts the tree in the caller, so `childSpecs` can
+// message the named actor while `ClassStateSupApp supervise` runs.
 
 TestCase subclass: ClassStateSupervisorTest
   field: sup = nil
+  field: config = nil
 
-  tearDown => self.sup isNil ifFalse: [self.sup stop]
+  setUp =>
+    self.config := (ClassStateSupConfig spawnAs: #bt3407_sup_cfg) unwrap
+    self
 
-  testClassStateSetBeforeSuperviseIsVisibleInChildren =>
-    ClassStateSupApp configure: #{#label => "hello"}
+  tearDown =>
+    self.sup isNil ifFalse: [self.sup stop]
+    self.config stop
+
+  testConfigSetBeforeSuperviseIsVisibleInChildren =>
+    self.config configure: #{#label => "hello"}
     self.sup := ClassStateSupApp supervise unwrap
     w :: ClassStateSupWorker := (self.sup which: ClassStateSupWorker) unwrap
     self assert: w label equals: "hello"

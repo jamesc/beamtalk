@@ -308,23 +308,6 @@ TestCase subclass: MetamorphicThreadingTest
     self assert: MutationCorpusClassMethod nestedToDoNonLastReadWrite equals: ref
     self assert: self fragNestedToDoNonLastReadWrite equals: ref
 
-  // ── self-send as the mutation mechanism (BT-3176 axis 2) ────────────────────
-  // Actor (state field) vs. class-method (class var) only — Value has no
-  // mutable field for a self-send to mutate, so there's no third context to
-  // compare.
-  testContextInvarianceSelfSendWhileTrueNonLastReadWrite =>
-    self assert: self actorCorpus selfSendWhileTrueNonLastReadWrite equals: MutationCorpusClassMethod selfSendWhileTrueNonLastReadWrite
-
-  // BT-3178 (fixed): the Actor-context "true" branch used to be a
-  // known-broken cell (the self-send's state mutation didn't thread back
-  // through ifTrue:) — see value_type_mutation_matrix_test.bt's
-  // `bt3178ActorSelfSendInConditionalPending`.
-  testContextInvarianceSelfSendIfTrueNonLastReadWriteTrue =>
-    self assert: (self actorCorpus selfSendIfTrueNonLastReadWrite: true) equals: (MutationCorpusClassMethod selfSendIfTrueNonLastReadWrite: true)
-
-  testContextInvarianceSelfSendIfTrueNonLastReadWriteFalse =>
-    self assert: (self actorCorpus selfSendIfTrueNonLastReadWrite: false) equals: (MutationCorpusClassMethod selfSendIfTrueNonLastReadWrite: false)
-
   // ── on:do:/ensure: + nested conditional / self-send (BT-3176 axis 3) ────────
   // BT-3177 (fixed): `ensureNestedConditionalLastReadWrite` used to only
   // compile in Actor context; `onDoSelfSendLastReadWrite` used to only
@@ -337,11 +320,6 @@ TestCase subclass: MetamorphicThreadingTest
   testContextInvarianceEnsureNestedConditionalLastReadWriteFalse =>
     self assert: (self actorCorpus ensureNestedConditionalLastReadWrite: false) equals: (self valueCorpus ensureNestedConditionalLastReadWrite: false)
     self assert: (self valueCorpus ensureNestedConditionalLastReadWrite: false) equals: (MutationCorpusClassMethod ensureNestedConditionalLastReadWrite: false)
-
-  // Actor vs. class-method only — Value has no mutable field for a self-send
-  // to mutate (same reasoning as the ifTrue: self-send relation above).
-  testContextInvarianceOnDoSelfSendLastReadWrite =>
-    self assert: self actorCorpus onDoSelfSendLastReadWrite equals: MutationCorpusClassMethod onDoSelfSendLastReadWrite
 
   // ════════════════════════════════════════════════════════════════════════
   //  RELATION 2 — Position invariance

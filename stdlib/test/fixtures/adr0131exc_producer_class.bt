@@ -12,7 +12,6 @@
 // expected answers are in stdlib/test/adr0131exc_producer_test.bt.
 
 Object subclass: Adr0131ExcProducerClass
-  classState: n = 0
 
   class stA =>
     t := 0
@@ -412,85 +411,3 @@ Object subclass: Adr0131ExcProducerClass
     [t := t + 1] on: Error do: [:e | nil]
     #[a, t]
 
-  class fieldValueInLoop =>
-    t := 0
-    1
-      to: 2
-      do: [:x |
-        self.n := ([
-          t := t + x
-          x
-        ] on: Error do: [:e | 0]) + 1
-      ]
-    #[self.n, t]
-
-  class fieldValueFoldInLoop =>
-    t := 0
-    1
-      to: 2
-      do: [:x |
-        self.n := #(1, 2)
-          inject: 0
-          into: [:a :y |
-            t := t + y
-            a + y
-          ]
-      ]
-    #[self.n, t]
-
-  class fieldAssignOnDoInLoop =>
-    t := 0
-    2
-      to: 3
-      do: [:x |
-        self.n := [
-          t := t + 1
-          x
-        ] on: Error do: [:e | 0]
-      ]
-    #[self.n, t]
-
-  class fieldValueInCondArm: c =>
-    t := 0
-    self.n := 0
-    c ifTrue: [self.n := (#(1, 2) collect: [:x | t := t + x]) size]
-    #[self.n, t]
-
-  class fieldValueInArm: c =>
-    t := 0
-    self.n := 0
-    c
-      ifTrue: [
-        self.n := ([
-          t := t + 1
-          5
-        ] on: Error do: [:e | 0]) + 1
-      ]
-    #[self.n, t]
-
-  class cvarInBody =>
-    t := 0
-    self.n := 0
-    [
-      self.n := self.n + 1
-      t := t + 1
-    ] on: Error do: [:e | nil]
-    #[self.n, t]
-
-  class cvarRaise =>
-    t := 0
-    self.n := 0
-    [
-      self.n := 5
-      t := t + 1
-      Error signal: "x"
-    ] on: Error do: [:e | nil]
-    #[self.n, t]
-
-  class cvarFieldAssign =>
-    t := 0
-    self.n := [
-      t := t + 1
-      4
-    ] on: Error do: [:e | 0]
-    #[self.n, t]

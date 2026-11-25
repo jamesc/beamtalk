@@ -14,7 +14,6 @@
 // stdlib/test/adr0131loop_matrix_test.bt.
 
 Object subclass: Adr0131LoopMatrixClass
-  classState: n = 0
 
   class plain => 0
 
@@ -25,44 +24,12 @@ Object subclass: Adr0131LoopMatrixClass
     1 to: 2 do: [:k | #(1, 2) do: [:x | t := t + x]]
     #[t, r, s]
 
-  class do_toDo_bare_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    1
-      to: 2
-      do: [:k |
-        #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_toDo_assign_plain =>
     t := 0
     s := 0
     r := 0
     1 to: 2 do: [:k | r := #(1, 2) do: [:x | t := t + x]]
     #[t, r, s]
-
-  class do_toDo_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    1
-      to: 2
-      do: [:k |
-        r := #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class do_toDo_literal_plain =>
     t := 0
@@ -71,44 +38,12 @@ Object subclass: Adr0131LoopMatrixClass
     1 to: 2 do: [:k | r := #[#(1, 2) do: [:x | t := t + x], t]]
     #[t, r, s]
 
-  class do_toDo_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    1
-      to: 2
-      do: [:k |
-        r := #[#(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-      ]
-    #[t, r, s, self.n]
-
   class do_toDo_afterRead_plain =>
     t := 0
     s := 0
     r := 0
     1 to: 2 do: [:k | r := #[t, #(1, 2) do: [:x | t := t + x], t]]
     #[t, r, s]
-
-  class do_toDo_afterRead_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    1
-      to: 2
-      do: [:k |
-        r := #[t, #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-      ]
-    #[t, r, s, self.n]
 
   class do_do_bare_plain =>
     t := 0
@@ -117,42 +52,12 @@ Object subclass: Adr0131LoopMatrixClass
     #(1, 2) do: [:k | #(1, 2) do: [:x | t := t + x]]
     #[t, r, s]
 
-  class do_do_bare_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_do_assign_plain =>
     t := 0
     s := 0
     r := 0
     #(1, 2) do: [:k | r := #(1, 2) do: [:x | t := t + x]]
     #[t, r, s]
-
-  class do_do_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        r := #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class do_do_literal_plain =>
     t := 0
@@ -161,42 +66,12 @@ Object subclass: Adr0131LoopMatrixClass
     #(1, 2) do: [:k | r := #[#(1, 2) do: [:x | t := t + x], t]]
     #[t, r, s]
 
-  class do_do_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        r := #[#(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-      ]
-    #[t, r, s, self.n]
-
   class do_do_afterRead_plain =>
     t := 0
     s := 0
     r := 0
     #(1, 2) do: [:k | r := #[t, #(1, 2) do: [:x | t := t + x], t]]
     #[t, r, s]
-
-  class do_do_afterRead_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        r := #[t, #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-      ]
-    #[t, r, s, self.n]
 
   class do_times_bare_plain =>
     t := 0
@@ -205,42 +80,12 @@ Object subclass: Adr0131LoopMatrixClass
     2 timesRepeat: [#(1, 2) do: [:x | t := t + x]]
     #[t, r, s]
 
-  class do_times_bare_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    2
-      timesRepeat: [
-        #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_times_assign_plain =>
     t := 0
     s := 0
     r := 0
     2 timesRepeat: [r := #(1, 2) do: [:x | t := t + x]]
     #[t, r, s]
-
-  class do_times_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    2
-      timesRepeat: [
-        r := #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class do_times_literal_plain =>
     t := 0
@@ -249,42 +94,12 @@ Object subclass: Adr0131LoopMatrixClass
     2 timesRepeat: [r := #[#(1, 2) do: [:x | t := t + x], t]]
     #[t, r, s]
 
-  class do_times_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    2
-      timesRepeat: [
-        r := #[#(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-      ]
-    #[t, r, s, self.n]
-
   class do_times_afterRead_plain =>
     t := 0
     s := 0
     r := 0
     2 timesRepeat: [r := #[t, #(1, 2) do: [:x | t := t + x], t]]
     #[t, r, s]
-
-  class do_times_afterRead_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    2
-      timesRepeat: [
-        r := #[t, #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-      ]
-    #[t, r, s, self.n]
 
   class do_while_bare_plain =>
     t := 0
@@ -297,22 +112,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_while_bare_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 3]
-      whileTrue: [
-        s := s + 1
-        #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_while_assign_plain =>
     t := 0
     s := 0
@@ -323,22 +122,6 @@ Object subclass: Adr0131LoopMatrixClass
         r := #(1, 2) do: [:x | t := t + x]
       ]
     #[t, r, s]
-
-  class do_while_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 3]
-      whileTrue: [
-        s := s + 1
-        r := #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class do_while_literal_plain =>
     t := 0
@@ -351,22 +134,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_while_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 3]
-      whileTrue: [
-        s := s + 1
-        r := #[#(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-      ]
-    #[t, r, s, self.n]
-
   class do_while_afterRead_plain =>
     t := 0
     s := 0
@@ -377,22 +144,6 @@ Object subclass: Adr0131LoopMatrixClass
         r := #[t, #(1, 2) do: [:x | t := t + x], t]
       ]
     #[t, r, s]
-
-  class do_while_afterRead_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 3]
-      whileTrue: [
-        s := s + 1
-        r := #[t, #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-      ]
-    #[t, r, s, self.n]
 
   class do_collect_bare_plain =>
     t := 0
@@ -406,23 +157,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_collect_bare_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    @expect discarded_update
-    #(1, 2)
-      collect: [:k |
-        #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-        k
-      ]
-    #[t, r, s, self.n]
-
   class do_collect_assign_plain =>
     t := 0
     s := 0
@@ -434,23 +168,6 @@ Object subclass: Adr0131LoopMatrixClass
         k
       ]
     #[t, r, s]
-
-  class do_collect_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    @expect discarded_update
-    #(1, 2)
-      collect: [:k |
-        r := #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-        k
-      ]
-    #[t, r, s, self.n]
 
   class do_collect_literal_plain =>
     t := 0
@@ -464,23 +181,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_collect_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    @expect discarded_update
-    #(1, 2)
-      collect: [:k |
-        r := #[#(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-        k
-      ]
-    #[t, r, s, self.n]
-
   class do_collect_afterRead_plain =>
     t := 0
     s := 0
@@ -492,23 +192,6 @@ Object subclass: Adr0131LoopMatrixClass
         k
       ]
     #[t, r, s]
-
-  class do_collect_afterRead_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    @expect discarded_update
-    #(1, 2)
-      collect: [:k |
-        r := #[t, #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-        k
-      ]
-    #[t, r, s, self.n]
 
   class do_inject_bare_plain =>
     t := 0
@@ -522,23 +205,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_inject_bare_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      inject: 0
-      into: [:a :k |
-        #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-        a + k
-      ]
-    #[t, r, s, self.n]
-
   class do_inject_assign_plain =>
     t := 0
     s := 0
@@ -550,23 +216,6 @@ Object subclass: Adr0131LoopMatrixClass
         a + k
       ]
     #[t, r, s]
-
-  class do_inject_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      inject: 0
-      into: [:a :k |
-        r := #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-        a + k
-      ]
-    #[t, r, s, self.n]
 
   class do_inject_literal_plain =>
     t := 0
@@ -580,23 +229,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_inject_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      inject: 0
-      into: [:a :k |
-        r := #[#(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-        a + k
-      ]
-    #[t, r, s, self.n]
-
   class do_inject_afterRead_plain =>
     t := 0
     s := 0
@@ -609,23 +241,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_inject_afterRead_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      inject: 0
-      into: [:a :k |
-        r := #[t, #(1, 2)
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-        a + k
-      ]
-    #[t, r, s, self.n]
-
   class do_doDo_bare_plain =>
     t := 0
     s := 0
@@ -633,48 +248,12 @@ Object subclass: Adr0131LoopMatrixClass
     #(1, 2) do: [:k | #(1, 2) do: [:m | #(1, 2) do: [:x | t := t + x]]]
     #[t, r, s]
 
-  class do_doDo_bare_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        #(1, 2)
-          do: [:m |
-            #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ]
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_doDo_assign_plain =>
     t := 0
     s := 0
     r := 0
     #(1, 2) do: [:k | #(1, 2) do: [:m | r := #(1, 2) do: [:x | t := t + x]]]
     #[t, r, s]
-
-  class do_doDo_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        #(1, 2)
-          do: [:m |
-            r := #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ]
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class do_doDo_literal_plain =>
     t := 0
@@ -685,24 +264,6 @@ Object subclass: Adr0131LoopMatrixClass
     ]
     #[t, r, s]
 
-  class do_doDo_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        #(1, 2)
-          do: [:m |
-            r := #[#(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ], t]
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_doDo_afterRead_plain =>
     t := 0
     s := 0
@@ -712,24 +273,6 @@ Object subclass: Adr0131LoopMatrixClass
     ]
     #[t, r, s]
 
-  class do_doDo_afterRead_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        #(1, 2)
-          do: [:m |
-            r := #[t, #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ], t]
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_doToDo_bare_plain =>
     t := 0
     s := 0
@@ -737,50 +280,12 @@ Object subclass: Adr0131LoopMatrixClass
     #(1, 2) do: [:k | 1 to: 2 do: [:m | #(1, 2) do: [:x | t := t + x]]]
     #[t, r, s]
 
-  class do_doToDo_bare_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        1
-          to: 2
-          do: [:m |
-            #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ]
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_doToDo_assign_plain =>
     t := 0
     s := 0
     r := 0
     #(1, 2) do: [:k | 1 to: 2 do: [:m | r := #(1, 2) do: [:x | t := t + x]]]
     #[t, r, s]
-
-  class do_doToDo_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        1
-          to: 2
-          do: [:m |
-            r := #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ]
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class do_doToDo_literal_plain =>
     t := 0
@@ -791,25 +296,6 @@ Object subclass: Adr0131LoopMatrixClass
     ]
     #[t, r, s]
 
-  class do_doToDo_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        1
-          to: 2
-          do: [:m |
-            r := #[#(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ], t]
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_doToDo_afterRead_plain =>
     t := 0
     s := 0
@@ -818,25 +304,6 @@ Object subclass: Adr0131LoopMatrixClass
       1 to: 2 do: [:m | r := #[t, #(1, 2) do: [:x | t := t + x], t]]
     ]
     #[t, r, s]
-
-  class do_doToDo_afterRead_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        1
-          to: 2
-          do: [:m |
-            r := #[t, #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ], t]
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class do_collectTimes_bare_plain =>
     t := 0
@@ -850,26 +317,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_collectTimes_bare_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    @expect discarded_update
-    #(1, 2)
-      collect: [:k |
-        2
-          timesRepeat: [
-            #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ]
-          ]
-        k
-      ]
-    #[t, r, s, self.n]
-
   class do_collectTimes_assign_plain =>
     t := 0
     s := 0
@@ -881,26 +328,6 @@ Object subclass: Adr0131LoopMatrixClass
         k
       ]
     #[t, r, s]
-
-  class do_collectTimes_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    @expect discarded_update
-    #(1, 2)
-      collect: [:k |
-        2
-          timesRepeat: [
-            r := #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ]
-          ]
-        k
-      ]
-    #[t, r, s, self.n]
 
   class do_collectTimes_literal_plain =>
     t := 0
@@ -914,26 +341,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_collectTimes_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    @expect discarded_update
-    #(1, 2)
-      collect: [:k |
-        2
-          timesRepeat: [
-            r := #[#(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ], t]
-          ]
-        k
-      ]
-    #[t, r, s, self.n]
-
   class do_collectTimes_afterRead_plain =>
     t := 0
     s := 0
@@ -946,26 +353,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_collectTimes_afterRead_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    @expect discarded_update
-    #(1, 2)
-      collect: [:k |
-        2
-          timesRepeat: [
-            r := #[t, #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ], t]
-          ]
-        k
-      ]
-    #[t, r, s, self.n]
-
   class do_threeDeep_bare_plain =>
     t := 0
     s := 0
@@ -975,28 +362,6 @@ Object subclass: Adr0131LoopMatrixClass
     ]
     #[t, r, s]
 
-  class do_threeDeep_bare_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        1
-          to: 2
-          do: [:m |
-            2
-              timesRepeat: [
-                #(1, 2)
-                  do: [:x |
-                    t := t + x
-                    self.n := self.n + 1
-                  ]
-              ]
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_threeDeep_assign_plain =>
     t := 0
     s := 0
@@ -1005,28 +370,6 @@ Object subclass: Adr0131LoopMatrixClass
       1 to: 2 do: [:m | 2 timesRepeat: [r := #(1, 2) do: [:x | t := t + x]]]
     ]
     #[t, r, s]
-
-  class do_threeDeep_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        1
-          to: 2
-          do: [:m |
-            2
-              timesRepeat: [
-                r := #(1, 2)
-                  do: [:x |
-                    t := t + x
-                    self.n := self.n + 1
-                  ]
-              ]
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class do_threeDeep_literal_plain =>
     t := 0
@@ -1040,28 +383,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_threeDeep_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        1
-          to: 2
-          do: [:m |
-            2
-              timesRepeat: [
-                r := #[#(1, 2)
-                  do: [:x |
-                    t := t + x
-                    self.n := self.n + 1
-                  ], t]
-              ]
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_threeDeep_afterRead_plain =>
     t := 0
     s := 0
@@ -1074,28 +395,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_threeDeep_afterRead_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        1
-          to: 2
-          do: [:m |
-            2
-              timesRepeat: [
-                r := #[t, #(1, 2)
-                  do: [:x |
-                    t := t + x
-                    self.n := self.n + 1
-                  ], t]
-              ]
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_whileDo_bare_plain =>
     t := 0
     s := 0
@@ -1106,25 +405,6 @@ Object subclass: Adr0131LoopMatrixClass
         #(1, 2) do: [:m | #(1, 2) do: [:x | t := t + x]]
       ]
     #[t, r, s]
-
-  class do_whileDo_bare_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 2]
-      whileTrue: [
-        s := s + 1
-        #(1, 2)
-          do: [:m |
-            #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ]
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class do_whileDo_assign_plain =>
     t := 0
@@ -1137,25 +417,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_whileDo_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 2]
-      whileTrue: [
-        s := s + 1
-        #(1, 2)
-          do: [:m |
-            r := #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ]
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_whileDo_literal_plain =>
     t := 0
     s := 0
@@ -1167,25 +428,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_whileDo_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 2]
-      whileTrue: [
-        s := s + 1
-        #(1, 2)
-          do: [:m |
-            r := #[#(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ], t]
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_whileDo_afterRead_plain =>
     t := 0
     s := 0
@@ -1196,25 +438,6 @@ Object subclass: Adr0131LoopMatrixClass
         #(1, 2) do: [:m | r := #[t, #(1, 2) do: [:x | t := t + x], t]]
       ]
     #[t, r, s]
-
-  class do_whileDo_afterRead_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 2]
-      whileTrue: [
-        s := s + 1
-        #(1, 2)
-          do: [:m |
-            r := #[t, #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ], t]
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class do_whileInject_bare_plain =>
     t := 0
@@ -1232,27 +455,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_whileInject_bare_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 2]
-      whileTrue: [
-        s := s + 1
-        #(1, 2)
-          inject: 0
-          into: [:a :m |
-            #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ]
-            a + m
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_whileInject_assign_plain =>
     t := 0
     s := 0
@@ -1268,27 +470,6 @@ Object subclass: Adr0131LoopMatrixClass
           ]
       ]
     #[t, r, s]
-
-  class do_whileInject_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 2]
-      whileTrue: [
-        s := s + 1
-        #(1, 2)
-          inject: 0
-          into: [:a :m |
-            r := #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ]
-            a + m
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class do_whileInject_literal_plain =>
     t := 0
@@ -1306,27 +487,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class do_whileInject_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 2]
-      whileTrue: [
-        s := s + 1
-        #(1, 2)
-          inject: 0
-          into: [:a :m |
-            r := #[#(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ], t]
-            a + m
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class do_whileInject_afterRead_plain =>
     t := 0
     s := 0
@@ -1342,27 +502,6 @@ Object subclass: Adr0131LoopMatrixClass
           ]
       ]
     #[t, r, s]
-
-  class do_whileInject_afterRead_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 2]
-      whileTrue: [
-        s := s + 1
-        #(1, 2)
-          inject: 0
-          into: [:a :m |
-            r := #[t, #(1, 2)
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ], t]
-            a + m
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class do_toDo_assign_selfsend =>
     t := 0
@@ -1468,24 +607,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class inject_toDo_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    1
-      to: 2
-      do: [:k |
-        r := #(1, 2)
-          inject: 0
-          into: [:a :x |
-            t := t + x
-            self.n := self.n + 1
-            a
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class inject_toDo_literal_plain =>
     t := 0
     s := 0
@@ -1501,24 +622,6 @@ Object subclass: Adr0131LoopMatrixClass
           ], t]
       ]
     #[t, r, s]
-
-  class inject_toDo_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    1
-      to: 2
-      do: [:k |
-        r := #[#(1, 2)
-          inject: 0
-          into: [:a :x |
-            t := t + x
-            self.n := self.n + 1
-            a
-          ], t]
-      ]
-    #[t, r, s, self.n]
 
   class inject_while_assign_plain =>
     t := 0
@@ -1536,24 +639,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class inject_while_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 3]
-      whileTrue: [
-        s := s + 1
-        r := #(1, 2)
-          inject: 0
-          into: [:a :x |
-            t := t + x
-            self.n := self.n + 1
-            a
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class inject_while_literal_plain =>
     t := 0
     s := 0
@@ -1569,24 +654,6 @@ Object subclass: Adr0131LoopMatrixClass
           ], t]
       ]
     #[t, r, s]
-
-  class inject_while_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 3]
-      whileTrue: [
-        s := s + 1
-        r := #[#(1, 2)
-          inject: 0
-          into: [:a :x |
-            t := t + x
-            self.n := self.n + 1
-            a
-          ], t]
-      ]
-    #[t, r, s, self.n]
 
   class inject_doToDo_assign_plain =>
     t := 0
@@ -1607,27 +674,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class inject_doToDo_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        1
-          to: 2
-          do: [:m |
-            r := #(1, 2)
-              inject: 0
-              into: [:a :x |
-                t := t + x
-                self.n := self.n + 1
-                a
-              ]
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class inject_doToDo_literal_plain =>
     t := 0
     s := 0
@@ -1647,27 +693,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class inject_doToDo_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        1
-          to: 2
-          do: [:m |
-            r := #[#(1, 2)
-              inject: 0
-              into: [:a :x |
-                t := t + x
-                self.n := self.n + 1
-                a
-              ], t]
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class inject_collect_assign_plain =>
     t := 0
     s := 0
@@ -1684,25 +709,6 @@ Object subclass: Adr0131LoopMatrixClass
         k
       ]
     #[t, r, s]
-
-  class inject_collect_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    @expect discarded_update
-    #(1, 2)
-      collect: [:k |
-        r := #(1, 2)
-          inject: 0
-          into: [:a :x |
-            t := t + x
-            self.n := self.n + 1
-            a
-          ]
-        k
-      ]
-    #[t, r, s, self.n]
 
   class inject_collect_literal_plain =>
     t := 0
@@ -1721,25 +727,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class inject_collect_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    @expect discarded_update
-    #(1, 2)
-      collect: [:k |
-        r := #[#(1, 2)
-          inject: 0
-          into: [:a :x |
-            t := t + x
-            self.n := self.n + 1
-            a
-          ], t]
-        k
-      ]
-    #[t, r, s, self.n]
-
   class times_toDo_assign_plain =>
     t := 0
     s := 0
@@ -1747,44 +734,12 @@ Object subclass: Adr0131LoopMatrixClass
     1 to: 2 do: [:k | r := 2 timesRepeat: [t := t + 1]]
     #[t, r, s]
 
-  class times_toDo_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    1
-      to: 2
-      do: [:k |
-        r := 2
-          timesRepeat: [
-            t := t + 1
-            self.n := self.n + 1
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class times_toDo_literal_plain =>
     t := 0
     s := 0
     r := 0
     1 to: 2 do: [:k | r := #[2 timesRepeat: [t := t + 1], t]]
     #[t, r, s]
-
-  class times_toDo_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    1
-      to: 2
-      do: [:k |
-        r := #[2
-          timesRepeat: [
-            t := t + 1
-            self.n := self.n + 1
-          ], t]
-      ]
-    #[t, r, s, self.n]
 
   class times_while_assign_plain =>
     t := 0
@@ -1797,22 +752,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class times_while_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 3]
-      whileTrue: [
-        s := s + 1
-        r := 2
-          timesRepeat: [
-            t := t + 1
-            self.n := self.n + 1
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class times_while_literal_plain =>
     t := 0
     s := 0
@@ -1824,22 +763,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class times_while_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 3]
-      whileTrue: [
-        s := s + 1
-        r := #[2
-          timesRepeat: [
-            t := t + 1
-            self.n := self.n + 1
-          ], t]
-      ]
-    #[t, r, s, self.n]
-
   class times_doToDo_assign_plain =>
     t := 0
     s := 0
@@ -1847,50 +770,12 @@ Object subclass: Adr0131LoopMatrixClass
     #(1, 2) do: [:k | 1 to: 2 do: [:m | r := 2 timesRepeat: [t := t + 1]]]
     #[t, r, s]
 
-  class times_doToDo_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        1
-          to: 2
-          do: [:m |
-            r := 2
-              timesRepeat: [
-                t := t + 1
-                self.n := self.n + 1
-              ]
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class times_doToDo_literal_plain =>
     t := 0
     s := 0
     r := 0
     #(1, 2) do: [:k | 1 to: 2 do: [:m | r := #[2 timesRepeat: [t := t + 1], t]]]
     #[t, r, s]
-
-  class times_doToDo_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        1
-          to: 2
-          do: [:m |
-            r := #[2
-              timesRepeat: [
-                t := t + 1
-                self.n := self.n + 1
-              ], t]
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class times_collect_assign_plain =>
     t := 0
@@ -1904,23 +789,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class times_collect_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    @expect discarded_update
-    #(1, 2)
-      collect: [:k |
-        r := 2
-          timesRepeat: [
-            t := t + 1
-            self.n := self.n + 1
-          ]
-        k
-      ]
-    #[t, r, s, self.n]
-
   class times_collect_literal_plain =>
     t := 0
     s := 0
@@ -1933,23 +801,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class times_collect_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    @expect discarded_update
-    #(1, 2)
-      collect: [:k |
-        r := #[2
-          timesRepeat: [
-            t := t + 1
-            self.n := self.n + 1
-          ], t]
-        k
-      ]
-    #[t, r, s, self.n]
-
   class toDo_toDo_assign_plain =>
     t := 0
     s := 0
@@ -1957,46 +808,12 @@ Object subclass: Adr0131LoopMatrixClass
     1 to: 2 do: [:k | r := 1 to: 2 do: [:x | t := t + x]]
     #[t, r, s]
 
-  class toDo_toDo_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    1
-      to: 2
-      do: [:k |
-        r := 1
-          to: 2
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class toDo_toDo_literal_plain =>
     t := 0
     s := 0
     r := 0
     1 to: 2 do: [:k | r := #[1 to: 2 do: [:x | t := t + x], t]]
     #[t, r, s]
-
-  class toDo_toDo_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    1
-      to: 2
-      do: [:k |
-        r := #[1
-          to: 2
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-      ]
-    #[t, r, s, self.n]
 
   class toDo_while_assign_plain =>
     t := 0
@@ -2009,23 +826,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class toDo_while_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 3]
-      whileTrue: [
-        s := s + 1
-        r := 1
-          to: 2
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-      ]
-    #[t, r, s, self.n]
-
   class toDo_while_literal_plain =>
     t := 0
     s := 0
@@ -2037,49 +837,12 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class toDo_while_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    [s < 3]
-      whileTrue: [
-        s := s + 1
-        r := #[1
-          to: 2
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-      ]
-    #[t, r, s, self.n]
-
   class toDo_doToDo_assign_plain =>
     t := 0
     s := 0
     r := 0
     #(1, 2) do: [:k | 1 to: 2 do: [:m | r := 1 to: 2 do: [:x | t := t + x]]]
     #[t, r, s]
-
-  class toDo_doToDo_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        1
-          to: 2
-          do: [:m |
-            r := 1
-              to: 2
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ]
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class toDo_doToDo_literal_plain =>
     t := 0
@@ -2089,26 +852,6 @@ Object subclass: Adr0131LoopMatrixClass
       1 to: 2 do: [:m | r := #[1 to: 2 do: [:x | t := t + x], t]]
     ]
     #[t, r, s]
-
-  class toDo_doToDo_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    #(1, 2)
-      do: [:k |
-        1
-          to: 2
-          do: [:m |
-            r := #[1
-              to: 2
-              do: [:x |
-                t := t + x
-                self.n := self.n + 1
-              ], t]
-          ]
-      ]
-    #[t, r, s, self.n]
 
   class toDo_collect_assign_plain =>
     t := 0
@@ -2122,24 +865,6 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class toDo_collect_assign_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    @expect discarded_update
-    #(1, 2)
-      collect: [:k |
-        r := 1
-          to: 2
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ]
-        k
-      ]
-    #[t, r, s, self.n]
-
   class toDo_collect_literal_plain =>
     t := 0
     s := 0
@@ -2152,20 +877,3 @@ Object subclass: Adr0131LoopMatrixClass
       ]
     #[t, r, s]
 
-  class toDo_collect_literal_cvar =>
-    self.n := 0
-    t := 0
-    s := 0
-    r := 0
-    @expect discarded_update
-    #(1, 2)
-      collect: [:k |
-        r := #[1
-          to: 2
-          do: [:x |
-            t := t + x
-            self.n := self.n + 1
-          ], t]
-        k
-      ]
-    #[t, r, s, self.n]
