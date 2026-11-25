@@ -323,12 +323,14 @@ writeLine_raises_for_the_line_the_port_drops_test_() ->
             args => SleepArgs,
             notify => Notify
         }),
-        Chunk = binary:copy(<<"x">>, 1 bsl 20),
+        %% 1 MiB less the newline writeLine: appends: each line is exactly 1 MiB.
+        Chunk = binary:copy(<<"x">>, (1 bsl 20) - 1),
         {Accepted, Err} = write_until_error(Pid, Chunk, 0),
         ?assertEqual(8, Accepted),
         ?assertMatch(#beamtalk_error{kind = runtime_error, selector = 'writeLine:'}, Err),
-        ?assertNotEqual(
-            nomatch, binary:match(Err#beamtalk_error.message, <<"the line was not written">>)
+        ?assertEqual(
+            {beamtalk_string, <<"writeLine: failed: the line was not written">>},
+            Err#beamtalk_error.message
         ),
         ?assertMatch({error, #beamtalk_error{}}, gen_server:call(Pid, {'writeLine:', [<<"x">>]})),
         ?assertEqual(nil, gen_server:call(Pid, {close, []})),
