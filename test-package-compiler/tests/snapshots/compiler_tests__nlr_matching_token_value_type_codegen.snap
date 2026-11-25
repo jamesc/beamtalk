@@ -21,13 +21,13 @@ module 'nlr_matching_token_value_type' ['new'/0, 'new'/1, 'findFirstOver:in:'/3,
 'findFirstOver:in:'/3 = fun (Self, _threshold@1, _coll@2) ->
     let _NlrToken@3 = call 'erlang':'make_ref'() in
     try
-    let _seq@4 = let _temp@5 = _coll@2 in let _temp@6 = fun (_each@7) -> let _Cond@11 = let _BinLeft@8 = _each@7 in let _BinRight@9 = _threshold@1 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft@8), call 'erlang':'is_binary'(_BinLeft@8)) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft@8, _BinRight@9) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@8, '>', [_BinRight@9]) <_BinOpNoMatch@10> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@10}) end in case _Cond@11 of <'true'> when 'true' -> call 'erlang':'throw'({'$bt_nlr', _NlrToken@3, _each@7, Self}) <'false'> when 'true' -> _Cond@11 <_CondNoMatch@12> when 'true' -> call 'beamtalk_message_dispatch':'send'(_Cond@11, 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken@3, _each@7, Self})]) end in case call 'erlang':'is_list'(_temp@5) of <'true'> when 'true' -> do call 'lists':'foreach'(_temp@6, _temp@5) 'nil' <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_temp@5, 'do:', [_temp@6]) end in
+    let _seq@4 = let _temp@5 = _coll@2 in let _temp@6 = fun (_each@7) -> let _Cond@13 = let _BinLeft@8 = _each@7 in let _BinRight@9 = _threshold@1 in case call 'erlang':'is_number'(_BinLeft@8) of <'true'> when 'true' -> case call 'erlang':'is_number'(_BinRight@9) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft@8, _BinRight@9) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_comparison'(_BinRight@9, 'greaterThanFromNumber:', [_BinLeft@8], '>') <_BinOpNoMatch@10> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@10}) end <'false'> when 'true' -> case call 'erlang':'is_binary'(_BinLeft@8) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft@8, _BinRight@9) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@8, '>', [_BinRight@9]) <_BinOpNoMatch@11> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@11}) end <_BinOpNoMatch@12> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@12}) end in case _Cond@13 of <'true'> when 'true' -> call 'erlang':'throw'({'$bt_nlr', _NlrToken@3, _each@7, Self}) <'false'> when 'true' -> _Cond@13 <_CondNoMatch@14> when 'true' -> call 'beamtalk_message_dispatch':'send'(_Cond@13, 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken@3, _each@7, Self})]) end in case call 'erlang':'is_list'(_temp@5) of <'true'> when 'true' -> do call 'lists':'foreach'(_temp@6, _temp@5) 'nil' <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_temp@5, 'do:', [_temp@6]) end in
     0
-    of _NlrResult@13 -> _NlrResult@13
-    catch <_NlrCls@14, _NlrErr@15, _NlrStk@16> ->
-      case {_NlrCls@14, _NlrErr@15} of
-        <{'throw', {'$bt_nlr', _CatchTok@17, _NlrVal@18, _NlrState@19}}> when call 'erlang':'=:='(_CatchTok@17, _NlrToken@3) -> _NlrVal@18
-        <_OtherPair@20> when 'true' -> primop 'raw_raise'(_NlrCls@14, _NlrErr@15, _NlrStk@16)
+    of _NlrResult@15 -> _NlrResult@15
+    catch <_NlrCls@16, _NlrErr@17, _NlrStk@18> ->
+      case {_NlrCls@16, _NlrErr@17} of
+        <{'throw', {'$bt_nlr', _CatchTok@19, _NlrVal@20, _NlrState@21}}> when call 'erlang':'=:='(_CatchTok@19, _NlrToken@3) -> _NlrVal@20
+        <_OtherPair@22> when 'true' -> primop 'raw_raise'(_NlrCls@16, _NlrErr@17, _NlrStk@18)
       end
 
 
