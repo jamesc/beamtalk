@@ -146,18 +146,20 @@ defmodule BtAttachWeb.Live.TestRunner do
     {:noreply, MethodEditor.open_method_tab(socket, class, "instance", selector)}
   end
 
-  # Fallback clauses for the guarded test handlers: a crafted WebSocket message
-  # with a missing / non-binary `class`/`selector` must be ignored, not crash the
-  # socket on a FunctionClauseError before RBAC is reached (matching `save_method`,
-  # `revert`, `browser_select_class`, etc.).
   # Stop a running test run/load (BT-5189). A run can take minutes (its
   # workspace call is bounded at 10 min), so it needs the same way out an eval
   # has: kill the workspace-side worker running it, drop the waiting task, and
-  # free the controls.
+  # free the controls. Deliberately not RBAC-gated: it only touches this
+  # socket's own run (`test_op_pid`), which the facade already gated when it
+  # started, so it can never reach another session's work.
   def handle_event("tests_stop", _params, socket) do
     {:noreply, stop_test_op(socket)}
   end
 
+  # Fallback clauses for the guarded test handlers: a crafted WebSocket message
+  # with a missing / non-binary `class`/`selector` must be ignored, not crash the
+  # socket on a FunctionClauseError before RBAC is reached (matching `save_method`,
+  # `revert`, `browser_select_class`, etc.).
   def handle_event("run_test_class", _params, socket), do: {:noreply, socket}
   def handle_event("open_test_method", _params, socket), do: {:noreply, socket}
 
