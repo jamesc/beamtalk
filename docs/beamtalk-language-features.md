@@ -7682,6 +7682,11 @@ worker isConnected                              // => true
 worker disconnect                               // => true
 ```
 
+> **`disconnect` does not keep the node away.** The next send to an actor on
+> that node (or `connect`/`ping`) reconnects it automatically (ADR 0126 §9, item 4),
+> and `NodeUp` fires again. Use it to drop a connection, not to fence a node
+> off.
+
 `connect` (and `ping`, which auto-connects) apply a security policy (see
 Security, below): a same-host connection always succeeds; an off-host
 connection is refused with `kind = insecure_distribution` unless this node
@@ -7905,8 +7910,8 @@ lookup, cluster events); a **hidden** node (`-hidden`) never appears in
 `Node connected`, never fires `NodeUp`/`NodeDown`, and is excluded from
 shape-skew checks — hidden nodes are for tooling that observes or attaches
 to a cluster without joining it as a peer. Beamtalk's own attach front (ADR
-0097) does not yet start as a hidden node; that is a tracked follow-up, not
-part of this ADR.
+0097) starts as a hidden node (BT-3616), so attaching to a cluster never fires
+`NodeUp` on its members.
 
 ---
 
