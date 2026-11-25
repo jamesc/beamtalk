@@ -85,9 +85,7 @@ TestCase subclass: ThenTest
     self assert: (InCallerProbe then: [:c | c == InCallerProbe]) equals: true
 
   testClassReceiverWithBlockBody =>
-    self assert: (InCallerProbe then: [:c |
-      c name
-    ]) equals: #InCallerProbe
+    self assert: (InCallerProbe then: [:c | c name]) equals: #InCallerProbe
 
   // --- A class's own `then:` wins (not sealed) ---
   testOwnThenOverrides =>

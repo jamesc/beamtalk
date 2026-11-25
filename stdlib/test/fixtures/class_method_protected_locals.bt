@@ -58,4 +58,3 @@ Object subclass: ClassMethodProtectedLocals
         #(1, 2, 3) do: [:j | t := t + j]
       ]
     t
-

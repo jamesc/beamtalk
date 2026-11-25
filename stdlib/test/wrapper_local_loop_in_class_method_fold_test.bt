@@ -7,4 +7,3 @@
 // wrapper reassigns through a nested loop still is.
 
 TestCase subclass: WrapperLocalLoopInClassMethodFoldTest
-

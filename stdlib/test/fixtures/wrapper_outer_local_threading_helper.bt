@@ -8,4 +8,3 @@
 // itself are exempt (see wrapper_local_loop_in_class_method_fold_test.bt).
 
 Object subclass: WrapperOuterLocalThreadingHelper
-

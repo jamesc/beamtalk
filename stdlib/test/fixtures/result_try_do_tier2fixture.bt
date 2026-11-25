@@ -15,10 +15,7 @@ Object subclass: ResultTryDoTier2Fixture
 
   // --- non-raising path ----------------------------------------------------
   class tier1Ok =>
-    r := Result
-      tryDo: [
-        7
-      ]
+    r := Result tryDo: [7]
     #[r isOk, r value]
 
   class tier2Ok =>
@@ -41,10 +38,7 @@ Object subclass: ResultTryDoTier2Fixture
 
   // --- raising path --------------------------------------------------------
   class tier1Raise =>
-    r := Result
-      tryDo: [
-        Error signal: "boom"
-      ]
+    r := Result tryDo: [Error signal: "boom"]
     #[r isError, r error class, r error message]
 
   class tier2Raise =>

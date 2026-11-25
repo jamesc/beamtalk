@@ -165,4 +165,3 @@ Object subclass: Adr0131DoProducerClass
     @expect discarded_update
     #(2, 1) sort: [:a :b | ^#(1, 2) do: [:x | t := t + x]]
     t
-

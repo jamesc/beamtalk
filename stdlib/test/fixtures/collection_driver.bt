@@ -10,6 +10,7 @@
 // to compare the two paths.
 
 Value subclass: CollectionDriver
+
   // BT-3032 / ADR 0110: class-side run counter, mutated before the driver
   // invokes the caller's block — the mutation must survive a foreign `^`
   // escaping through the block (shadow write-through).

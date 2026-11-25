@@ -80,4 +80,3 @@ Object subclass: Bt4014ClassSideOperandProducer
     n := 3
     self take: (self take: ([n > 0] whileTrue: [n := n - 1]))
     n
-

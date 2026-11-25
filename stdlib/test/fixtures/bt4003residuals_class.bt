@@ -48,4 +48,3 @@ Object subclass: Bt4003ResidualsClass
         x == 2 ifTrue: [^t]
       ]
     -1
-

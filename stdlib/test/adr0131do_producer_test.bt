@@ -90,4 +90,3 @@ TestCase subclass: Adr0131DoProducerTest
 
   testDoReturnedInSortBlock =>
     self assert: #[Adr0131DoProducerClass doReturnedInSortBlock, (Adr0131DoProducerValue new) doReturnedInSortBlock] equals: #[nil, nil]
-

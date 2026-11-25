@@ -14,8 +14,7 @@ TestCase subclass: ParenStatementWalkersTest
     self.actor := ParenStmtActor spawn
     self
 
-  tearDown =>
-    self.actor stop
+  tearDown => self.actor stop
 
   // --- actor ---
   testActorLocalNonLast => self assert: self.actor localNonLast equals: 2

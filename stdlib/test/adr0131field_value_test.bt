@@ -11,8 +11,7 @@
 
 TestCase subclass: Adr0131FieldValueTest
 
-  answersOf: selector =>
-    (Adr0131FieldValueActor spawn) perform: selector
+  answersOf: selector => (Adr0131FieldValueActor spawn) perform: selector
 
   assertBoth: selector equal: expected =>
     self assert: (self answersOf: selector) equals: expected

@@ -6,6 +6,7 @@
 // rather than the eval worker.
 
 Value subclass: CollectionProbe
+
   // BT-3164: own class-var, mutated as the LAST statement of a method that
   // also contains a literal `^` (below) — the shape that mints a real local
   // NlrCatch AND a real class-var Bind in the SAME method body, closing the
@@ -37,4 +38,3 @@ Value subclass: CollectionProbe
     k := CollectionDriver class class
     k run: [:x | x > 1 ifTrue: [^x]] over: aList
     0
-
