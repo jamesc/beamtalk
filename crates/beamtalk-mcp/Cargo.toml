@@ -63,6 +63,10 @@ camino.workspace = true
 # Shared workspace utilities (ID generation, port/cookie file I/O)
 beamtalk-workspace.workspace = true
 
+# why: the platform home directory (`USERPROFILE` on Windows, not only `HOME`)
+# for the path policy's refuse-home guard (BT-5185)
+dirs.workspace = true
+
 # Logging
 tracing.workspace = true
 tracing-subscriber.workspace = true
