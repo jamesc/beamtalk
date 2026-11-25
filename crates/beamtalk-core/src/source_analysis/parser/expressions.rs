@@ -781,7 +781,9 @@ impl Parser {
         };
         if let Some(op) = binary_op {
             let selector = MessageSelector::Binary(op);
-            let gap = self.gaps_around_current();
+            // Only the comments after the operator: those before it (after
+            // the `;`) are the cascade's own gap (BT-5183).
+            let gap = self.gap_before(self.current + 1);
             self.advance();
             let anchor = self.current_token().span().start();
             self.record_gap(anchor, GapSlot::AroundBinaryOperator, gap);

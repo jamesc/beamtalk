@@ -419,6 +419,10 @@ fn comment_around_a_concatenation_is_kept() {
 #[test]
 fn comment_around_a_binary_cascade_message_is_kept() {
     assert_formats_to("x foo; + // c\n  2\n", "x foo; +  // c\n  2\n");
+    // A comment after the `;` belongs to the cascade gap only; reading it
+    // again at the operator would print it twice.
+    assert_formats_to("x foo; // c\n  + 2\n", "x foo;  // c\n  + 2\n");
+    assert_formats_to("x foo // c\n  ; + 2\n", "x foo;  // c\n  + 2\n");
 }
 
 #[test]
