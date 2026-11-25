@@ -27,8 +27,7 @@ TestCase subclass: CountedLoopNilLimitTest
   testWritingTimesRepeatNilRaises =>
     self should: [self writingTimesRepeat: nil] raise: #type_error
 
-  testWritingToDoStillRuns =>
-    self assert: (self writingToDo: 4) equals: 10
+  testWritingToDoStillRuns => self assert: (self writingToDo: 4) equals: 10
 
   testWritingTimesRepeatStillRuns =>
     self assert: (self writingTimesRepeat: 3) equals: 3
