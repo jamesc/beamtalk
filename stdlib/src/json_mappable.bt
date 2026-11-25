@@ -3,7 +3,7 @@
 /// JsonMappable — derive `asJson` from a declarative `JsonMapping` (BT-2819).
 ///
 /// A using class implements the class-side `jsonMapping`, and `asJson` is
-/// provided: `self class jsonMapping encode: self`. `Json generate:` finds it
+/// provided: `(JsonMapping forClass: self class) encode: self`. `Json generate:` finds it
 /// through the ordinary `asJson` hook (see `JsonRepresentable`), so no runtime
 /// change is involved, and nested mapped objects convert recursively.
 ///
@@ -18,6 +18,20 @@
 ///
 /// A hand-written `asJson` in the class body wins over the provided one
 /// (ADR 0127 §3a).
+///
+/// ## Caching, inheritance, nil and secrets (BT-5191)
+/// - `jsonMapping` runs **once per class**: the validated mapping is cached
+///   and reused for every instance until a class is loaded, reloaded or
+///   removed. It must answer the same mapping every time.
+/// - A subclass inherits `asJson` and its parent's `class jsonMapping`. If it
+///   declares fields of its own, `asJson` raises a `user_error` rather than
+///   leave them off silently: override `class jsonMapping`, typically as
+///   `super jsonMapping |> mapField: #extra`, or as `super jsonMapping` to
+///   keep them off on purpose.
+/// - A nil field is emitted as `null`; build the mapping with `omittingNil`
+///   to leave such keys out.
+/// - On an Actor, a mapped `secretState` slot without a converter is emitted
+///   as `"[redacted]"`. See `JsonMapping` for the details.
 ///
 /// ## Examples
 /// ```beamtalk
@@ -36,4 +50,4 @@ Protocol define: JsonMappable
   class jsonMapping -> JsonMapping
 
   /// The mapped Dictionary for the receiver.
-  asJson -> Dictionary => self class jsonMapping encode: self
+  asJson -> Dictionary => (JsonMapping forClass: self class) encode: self

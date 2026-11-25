@@ -1535,29 +1535,22 @@ fn test_field_assignment_open_value_type_threads_self() {
     );
 }
 
-/// ADR 0130 §2: a class-variable write reaching `generate_field_assignment_open`
-/// (a loop, conditional or block body) is an in-place `put` bound to a value
-/// variable, never a `ClassVars` rebind.
+/// ADR 0153: a field write reaching `generate_field_assignment_open` in a class
+/// method (a loop, conditional or block body) is rejected: a class has no slots.
 #[test]
-fn test_field_assignment_open_class_var_is_an_in_place_put() {
+fn test_field_assignment_open_in_a_class_method_is_rejected() {
     let mut generator = CoreErlangGenerator::new("test");
     generator.set_in_class_method(true);
-    generator.class_var_names_mut().insert("total".to_string());
     let expr = self_field_assignment_expr("total", Expression::Literal(Literal::Integer(42), s()));
-    let (doc, val_var) = generator.generate_field_assignment_open(&expr).unwrap();
-    let output = doc.to_pretty_string();
+    let err = generator
+        .generate_field_assignment_open(&expr)
+        .expect_err("a class-side field write must not lower");
     assert!(
-        output.starts_with(&format!("let {val_var} = ")) && output.ends_with(" in "),
-        "an open write binds its value for the caller's continuation. Got: {output}"
-    );
-    assert!(
-        output.contains("call 'maps':'put'('total', ")
-            && output.contains("call 'erlang':'put'({'$bt_class_vars', "),
-        "class-var write should be an inlined in-place put. Got: {output}"
-    );
-    assert!(
-        !output.contains("ClassVars") && !output.contains("'$bt_class_vars_shadow'"),
-        "nothing is threaded and there is no shadow write. Got: {output}"
+        matches!(
+            err,
+            crate::core_erlang::CodeGenError::UnsupportedFeature { .. }
+        ),
+        "got: {err:?}"
     );
 }
 
@@ -1647,7 +1640,6 @@ fn binary_send_dispatches_to_self_admits_an_own_class_reference() {
         context,
         in_class_method,
         in_cell_closure: false,
-        class_var_names: &empty,
         class_method_selectors: &empty,
         class_name: "C".to_string(),
         self_var_bound: false,

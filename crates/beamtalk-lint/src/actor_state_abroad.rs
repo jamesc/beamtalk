@@ -52,7 +52,7 @@
 //! process); and there is no transitive write analysis (a `self` send from an
 //! away block messages home, where its writes are kept — only direct field
 //! writes raise). Field reads, writes and `hasField:` probes are read off
-//! [`class_var_accesses`], which is generic over the name set it is given:
+//! [`self_slot_accesses`], which is generic over the name set it is given:
 //! here the actor's mutable instance fields, not class variables.
 //!
 //! Overlap: a synchronous `self` send in a `Timer` block also fires
@@ -98,7 +98,7 @@ use beamtalk_core::ast_walker::{SendRef, SendSite, walk_expression, walk_sends};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::semantic_analysis::actor_spawn::{actor_locals, is_actor_spawn};
 use beamtalk_core::semantic_analysis::block_facts::{
-    ClassVarAccesses, class_var_accesses, probe_clause,
+    SelfSlotAccesses, probe_clause, self_slot_accesses,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory};
 
@@ -451,13 +451,13 @@ fn check_block(
     skip_reads: bool,
     report: &mut impl FnMut(&Block, Diagnostic),
 ) {
-    // `class_var_accesses` is generic over the name set it is given: here
+    // `self_slot_accesses` is generic over the name set it is given: here
     // the actor's mutable fields, so `reads`/`writes` are field reads/writes
     // and `has_field_probes` are actor-state probes (nested blocks included).
     // Its `reflective_writes` (`fieldAt:put:`/`clearField:` on `self`,
     // BT-4184) are the same cell writes, reflectively, of any name: a write
     // away from home raises whatever field it names.
-    let accesses = class_var_accesses(block, &ctx.fields);
+    let accesses = self_slot_accesses(block, &ctx.fields);
     let first_write = accesses
         .writes
         .iter()
@@ -476,7 +476,7 @@ fn check_block(
         .min_by_key(|(start, _)| *start);
     if let Some((_, what)) = first_write {
         report(block, writes_diagnostic(ctx, block, &what, shape));
-    } else if !skip_reads && accesses.reads_class_state() {
+    } else if !skip_reads && accesses.reads_slots() {
         report(block, reads_diagnostic(ctx, block, &accesses, shape));
     } else if let Some(self_send) = first_sync_self_send(block) {
         report(block, self_send_diagnostic(ctx, block, &self_send, shape));
@@ -733,7 +733,7 @@ fn writes_diagnostic(
 fn reads_diagnostic(
     ctx: &ClassCtx<'_>,
     block: &Block,
-    accesses: &ClassVarAccesses,
+    accesses: &SelfSlotAccesses,
     shape: &AbroadShape,
 ) -> Diagnostic {
     let class = ctx.class_name;

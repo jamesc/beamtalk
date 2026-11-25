@@ -1362,4 +1362,29 @@ defmodule BtAttachWeb.Live.MethodEditorTest do
       end
     end
   end
+
+  describe "queued class compile (BT-5189)" do
+    test "a compile dropped from the queue by Stop says so in the editor status" do
+      tabs = [def_tab("def:Counter", "Counter")]
+      socket = base_socket(%{tabs: tabs, active_tab: "def:Counter", eval_running: true})
+
+      {:noreply, socket} =
+        MethodEditor.handle_event(
+          "save_method",
+          %{
+            "class" => "Counter",
+            "selector" => "",
+            "source" => "Object subclass: Counter",
+            "tab" => "def:Counter"
+          },
+          socket
+        )
+
+      assert length(socket.assigns.eval_queue) == 1
+      {:noreply, socket} = BtAttachWeb.Live.Dock.handle_event("eval_interrupt", %{}, socket)
+
+      assert socket.assigns.save_error ==
+               "Compiling Counter did not complete: Stopped before it ran."
+    end
+  end
 end
