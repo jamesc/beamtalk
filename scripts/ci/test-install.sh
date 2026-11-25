@@ -211,4 +211,14 @@ PATH="$T/nocurl" BEAMTALK_PREFIX="$T/p11" sh "$SCRIPT" --version 9.9.9 >"$T/out"
 [ $rc -ne 0 ] && grep -q "does not support --https-only" "$T/out" && [ ! -e "$T/p11/bin/beamtalk" ]
 check "BusyBox wget gets a clear error, nothing installed" $?
 
+# 12. BT-5185: a bare top-level directory an older install.sh recorded is
+# carried forward as its children, so --uninstall still removes them
+P="$T/p12"
+mkdir -p "$P/legacy"
+echo old > "$P/legacy/old.txt"
+printf 'legacy\n' > "$P/.beamtalk-installed"
+run_install "$P" && PATH="$T/fakebin:$PATH" BEAMTALK_PREFIX="$P" sh "$SCRIPT" --uninstall >/dev/null 2>&1
+[ ! -e "$P/legacy/old.txt" ]
+check "--uninstall removes what a legacy bare manifest entry installed" $?
+
 exit $FAILED

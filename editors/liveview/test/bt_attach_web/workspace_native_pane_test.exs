@@ -49,7 +49,7 @@ defmodule BtAttachWeb.WorkspaceNativePaneTest do
     Plug.Test.init_test_session(conn, %{
       "bt_user" => %{"sub" => "alice", "groups" => ["beamtalk-owners"]},
       "bt_logged_in_at" => System.system_time(:second),
-      "live_socket_id" => "bt_session:test"
+      "live_socket_id" => "bt_session:#{System.unique_integer([:positive])}"
     })
   end
 
@@ -57,7 +57,7 @@ defmodule BtAttachWeb.WorkspaceNativePaneTest do
     Plug.Test.init_test_session(conn, %{
       "bt_user" => %{"sub" => "bob", "groups" => ["beamtalk-observers"]},
       "bt_logged_in_at" => System.system_time(:second),
-      "live_socket_id" => "bt_session:test"
+      "live_socket_id" => "bt_session:#{System.unique_integer([:positive])}"
     })
   end
 

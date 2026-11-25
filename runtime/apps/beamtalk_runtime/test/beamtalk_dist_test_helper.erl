@@ -27,8 +27,9 @@ cleanup({Peer, _PeerNode}) ->
 ```
 
 `start_peer/0,1` boots the peer with the same code path as the test node
-(`code:get_path/0`, forwarded as `-pa` args) and the same distribution
-cookie, then starts the `beamtalk_runtime` application there via
+(`code:get_path/0`, forwarded as `-pa` args) and a throwaway per-run cookie
+that this node uses for its peers (`erlang:set_cookie/2`; never this node's
+own cookie, BT-5185), then starts the `beamtalk_runtime` application there via
 `rpc:call/4` over ordinary Erlang distribution — not `peer:call/4,5`'s own
 control channel, which this module deliberately avoids driving application
 code through (see start_peer/1's doc).
@@ -120,8 +121,8 @@ start_peer() ->
 
 -doc """
 Start a second, `peer`-booted node (OTP `peer`, OTP 25+; OTP 28 per
-`.tool-versions`) sharing this node's code path and distribution cookie,
-and start `beamtalk_runtime` on it. Ensures this node is itself
+`.tool-versions`) sharing this node's code path, with a throwaway per-run
+cookie (never this node's own, BT-5185; see `peer_cookie/0`), and start `beamtalk_runtime` on it. Ensures this node is itself
 distributed first (`ensure_distribution/0`).
 
 Deliberately drives the peer through `rpc:call/4` over ordinary

@@ -283,14 +283,17 @@ upgrade_allowlist_accepts_listed_names_test() ->
         beamtalk_ws_handler:check_upgrade_headers(undefined, <<"repl.example.com">>, L)
     ).
 
-%% BT-5185: a name with a character outside Latin-1 (or a malformed entry) is
-%% skipped, not a crash that turns every upgrade into a 500; the other listed
-%% names still work. The non-Latin-1 name goes through the app env: on a
-%% Latin-1 node `os:putenv/2` itself refuses one, while a Unicode node's
-%% `os:getenv/1` hands the same codepoints to the parser.
+%% BT-5185: a name with a character outside Latin-1 no longer crashes every
+%% upgrade into a 500 (`list_to_binary/1` raised on it); it is a valid Unicode
+%% name, so it is kept (it can never equal an ASCII `Host`). An entry that is
+%% not a string or not valid Unicode is skipped. The other listed names still
+%% work. The non-Latin-1 name goes through the app env: on a Latin-1 node
+%% `os:putenv/2` itself refuses one, while a Unicode node's `os:getenv/1` hands
+%% the same codepoints to the parser.
 upgrade_allowlist_skips_unusable_entries_test() ->
     L = {127, 0, 0, 1},
     Prev = application:get_env(beamtalk_workspace, ws_allowed_hosts),
+    PrevVar = os:getenv("BEAMTALK_WS_ALLOWED_HOSTS"),
     os:putenv("BEAMTALK_WS_ALLOWED_HOSTS", "ok.example"),
     application:set_env(
         beamtalk_workspace,
@@ -309,7 +312,10 @@ upgrade_allowlist_skips_unusable_entries_test() ->
             beamtalk_ws_handler:check_upgrade_headers(undefined, <<"evil.example">>, L)
         )
     after
-        os:unsetenv("BEAMTALK_WS_ALLOWED_HOSTS"),
+        case PrevVar of
+            false -> os:unsetenv("BEAMTALK_WS_ALLOWED_HOSTS");
+            Var -> os:putenv("BEAMTALK_WS_ALLOWED_HOSTS", Var)
+        end,
         case Prev of
             {ok, V} -> application:set_env(beamtalk_workspace, ws_allowed_hosts, V);
             undefined -> application:unset_env(beamtalk_workspace, ws_allowed_hosts)

@@ -35,7 +35,7 @@ defmodule BtAttachWeb.SessionLifecycleTest do
     Plug.Test.init_test_session(conn, %{
       "bt_user" => %{"sub" => "alice", "groups" => ["beamtalk-owners"]},
       "bt_logged_in_at" => System.system_time(:second) - age_secs,
-      "live_socket_id" => "bt_session:test"
+      "live_socket_id" => "bt_session:#{System.unique_integer([:positive])}"
     })
   end
 
@@ -205,7 +205,6 @@ defmodule BtAttachWeb.SessionLifecycleTest do
         |> Plug.Test.init_test_session(%{
           "bt_user" => %{"sub" => "alice", "groups" => ["beamtalk-owners"]},
           "bt_logged_in_at" => System.system_time(:second),
-          "live_socket_id" => "bt_session:test",
           "live_socket_id" => id
         })
         |> get(~p"/")
@@ -226,7 +225,6 @@ defmodule BtAttachWeb.SessionLifecycleTest do
                  Plug.Test.init_test_session(build_conn(), %{
                    "bt_user" => %{"sub" => "alice", "groups" => ["beamtalk-owners"]},
                    "bt_logged_in_at" => System.system_time(:second),
-                   "live_socket_id" => "bt_session:test",
                    "live_socket_id" => id
                  }),
                  "/"
@@ -277,7 +275,7 @@ defmodule BtAttachWeb.SessionLifecycleTest do
       Plug.Test.init_test_session(conn, %{
         "bt_user" => %{"sub" => "alice", "groups" => ["beamtalk-owners"]},
         "bt_logged_in_at" => System.system_time(:second),
-        "live_socket_id" => "bt_session:test"
+        "live_socket_id" => "bt_session:#{System.unique_integer([:positive])}"
       })
       |> put_req_header("x-csrf-token", Plug.CSRFProtection.get_csrf_token())
     end

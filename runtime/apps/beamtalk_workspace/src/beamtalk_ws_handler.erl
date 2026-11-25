@@ -190,9 +190,9 @@ websocket_init(State) ->
                 cap_owner_mon = beamtalk_ws_conn_cap:monitor_owner()
             });
         {error, at_capacity} ->
-            ?LOG_WARNING("WebSocket refused: connection cap reached", #{
+            ?LOG_WARNING("WebSocket refused: unauthenticated connection budget full", #{
                 peer => State#ws_state.peer,
-                limit => beamtalk_ws_conn_cap:limit(),
+                limit => beamtalk_ws_conn_cap:preauth_limit(),
                 domain => [beamtalk, runtime]
             }),
             {[{close, 1013, <<"Too many connections">>}], State}
@@ -215,24 +215,10 @@ First message must be auth; subsequent messages are protocol ops.
 websocket_handle({text, Data}, State = #ws_state{authenticated = false}) ->
     case handle_auth(Data, State) of
         {Cmds, NewState = #ws_state{authenticated = true}} ->
-            %% BT-5185: move from the pre-auth budget to the authenticated one.
-            case beamtalk_ws_conn_cap:promote() of
-                ok ->
-                    %% Lift the pre-auth deadline and frame cap (BT-5066).
-                    Lift =
-                        {set_options, #{
-                            idle_timeout => infinity, max_frame_size => ?POST_AUTH_MAX_FRAME
-                        }},
-                    {[Lift | Cmds], NewState};
-                {error, Why} ->
-                    ?LOG_WARNING("WebSocket refused after auth: connection cap", #{
-                        peer => State#ws_state.peer,
-                        reason => Why,
-                        limit => beamtalk_ws_conn_cap:limit(),
-                        domain => [beamtalk, runtime]
-                    }),
-                    {[{close, 1013, <<"Too many connections">>}], State}
-            end;
+            %% Lift the pre-auth deadline and frame cap (BT-5066).
+            Lift =
+                {set_options, #{idle_timeout => infinity, max_frame_size => ?POST_AUTH_MAX_FRAME}},
+            {[Lift | Cmds], NewState};
         Other ->
             Other
     end;
@@ -706,7 +692,7 @@ handle_auth_message(Decoded, State) ->
                                 peer => format_peer(State#ws_state.peer),
                                 connected_at => erlang:system_time(microsecond)
                             },
-                            start_or_resume_session(
+                            admit_and_start(
                                 ResumeId, Meta, State#ws_state{shutdown_only = ShutdownOnly}
                             );
                         {error, VersionMessage} ->
@@ -747,6 +733,28 @@ handle_auth_message(Decoded, State) ->
                 })
             ),
             {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}
+    end.
+
+-doc """
+Take an authenticated connection slot, then start or resume the session
+(BT-5185). The slot comes first, so a socket refused at the authenticated cap
+(or evicted from the pre-auth budget meanwhile) never starts a session.
+""".
+-spec admit_and_start(binary() | undefined, map(), #ws_state{}) -> {list(), #ws_state{}}.
+admit_and_start(ResumeId, Meta, State) ->
+    case beamtalk_ws_conn_cap:promote() of
+        ok ->
+            start_or_resume_session(ResumeId, Meta, State);
+        {error, at_capacity} ->
+            ?LOG_WARNING("WebSocket refused after auth: authenticated connection cap reached", #{
+                peer => State#ws_state.peer,
+                limit => beamtalk_ws_conn_cap:limit(),
+                domain => [beamtalk, runtime]
+            }),
+            {[{close, 1013, <<"Too many connections">>}], State};
+        {error, evicted} ->
+            %% Evicted from the pre-auth budget while this auth was in flight.
+            {[{close, 1013, <<"Too many unauthenticated connections">>}], State}
     end.
 
 -doc """

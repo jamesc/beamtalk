@@ -417,8 +417,21 @@ swap_into_prefix() {
     # so a unit a newer release dropped is not orphaned.
     if [ -f "${PREFIX}/${MANIFEST_NAME}" ]; then
         while IFS= read -r rel; do
-            [ -n "${rel}" ] || continue
-            if [ -e "${PREFIX}/${rel}" ] || [ -L "${PREFIX}/${rel}" ]; then
+            case "${rel}" in
+                ''|/*|..|../*|*/..|*/../*) continue ;;
+            esac
+            if [ -d "${PREFIX}/${rel}" ] && [ ! -L "${PREFIX}/${rel}" ] \
+                && [ "${rel}" = "${rel%%/*}" ]; then
+                # A bare top-level directory an older install.sh installed
+                # wholesale: carry its children as units instead, since
+                # --uninstall never removes a bare directory.
+                for child in "${PREFIX}/${rel}/"*; do
+                    [ -e "${child}" ] || [ -L "${child}" ] || continue
+                    unit="${rel}/$(basename "${child}")"
+                    grep -qxF -- "${unit}" "${OLD}/manifest" \
+                        || printf '%s\n' "${unit}" >> "${OLD}/manifest" || rollback_swap
+                done
+            elif [ -e "${PREFIX}/${rel}" ] || [ -L "${PREFIX}/${rel}" ]; then
                 grep -qxF -- "${rel}" "${OLD}/manifest" \
                     || printf '%s\n' "${rel}" >> "${OLD}/manifest" || rollback_swap
             fi
