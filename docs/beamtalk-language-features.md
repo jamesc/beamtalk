@@ -2124,7 +2124,11 @@ lenient — `SomeClass fieldAt: #typo` answers `nil` and `SomeClass fieldAt:
 #typo put: v` creates the variable. Because the class process answers these
 four selectors itself whenever the name argument is a Symbol, a class-side
 method named `hasField:`, `clearField:`, `fieldAt:` or `fieldAt:put:` is
-never reached by such a send (a non-Symbol argument still reaches it). Inside a class method, `self fieldAt: #x`
+never reached by such a send; the compiler warns at its declaration
+(`class-var-reflection-shadowing`; rename it). A non-Symbol argument still
+reaches the method, so a deliberate `class fieldAt: index :: Integer` is
+legitimate: put `@expect class_var_reflection_shadowing` above it, or set
+`class-var-reflection-shadowing = "off"` under `[diagnostics]`. Inside a class method, `self fieldAt: #x`
 and `self fieldAt: #x put: v` read and write in place, like `self.x` and
 `self.x := v`, under the same rules. So do the four reflection sends written
 as a cascade on `self` (`self fieldAt: #x put: 1; yourself`) or with the
@@ -8977,6 +8981,7 @@ anything                    // any diagnostic suppressed (discouraged — use a 
 | `type_annotation` | Missing or redundant type annotation warnings in typed classes |
 | `inheritance` | Sealed-class/sealed-method constraint errors |
 | `class_method_process_resource` | A class-side method that runs in the caller's process (ADR 0142) directly creates a resource tied to the caller (`ets:new`, `open_port`, `link`, `monitor`, timers, …) or acts on the caller (`self()`, the process dictionary, `process_flag`) (BT-4302) |
+| `class_var_reflection_shadowing` | A class-side method named `fieldAt:`, `fieldAt:put:`, `hasField:` or `clearField:`, which the class process answers itself for a Symbol argument (BT-4422, BT-4426) |
 | `cascade_drops_update` | A non-final cascade message on a value receiver that answers an updated copy, which the cascade discards (`p withX: 5; withY: 10`, ADR 0145 § 3, BT-4512) |
 | `discarded_update` | A non-final statement-level send on a value receiver that answers an updated copy, which is thrown away (`p withX: 5.` alone, ADR 0145 § 3, BT-4522) |
 | `ffi_nested_string` | A `String` nested in a collection argument (`List(String)`, `Dictionary` keys/values, `Tuple`) to a stock Erlang call reaches it tagged; an Erlang comparison against raw binaries misses (BT-4243, see [Strings at the FFI boundary](beamtalk-native-erlang.md#strings-at-the-ffi-boundary)) |

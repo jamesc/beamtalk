@@ -893,6 +893,7 @@ impl ClassHierarchy {
                 .iter()
                 .all(|arg| plain_argument(method, arg, keyword))
             && !ClassInfo::is_process_bound_class_selector(&sent)
+            && !ClassInfo::is_class_var_reflection_selector(&sent)
             && primary(&class.class_methods, &sent).is_some_and(|target| {
                 matches!(target.body.as_slice(), [only] if
                 plain_ffi_forward(target, &only.expression, true)

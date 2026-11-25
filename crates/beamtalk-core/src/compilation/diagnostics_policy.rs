@@ -156,6 +156,10 @@ const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
         "class-method-process-resource",
         DiagnosticCategory::ClassMethodProcessResource,
     ),
+    (
+        "class-var-reflection-shadowing",
+        DiagnosticCategory::ClassVarReflectionShadowing,
+    ),
     ("actor-state-abroad", DiagnosticCategory::ActorStateAbroad),
     ("ffi-nested-string", DiagnosticCategory::FfiNestedString),
     (
@@ -633,6 +637,7 @@ fn expect_category_unchecked(
         | ExpectCategory::Sendability
         | ExpectCategory::MatchArmBlock
         | ExpectCategory::ClassMethodProcessResource
+        | ExpectCategory::ClassVarReflectionShadowing
         | ExpectCategory::FfiNestedString
         | ExpectCategory::BinaryStringCompare
         | ExpectCategory::CascadeDropsUpdate
@@ -642,8 +647,7 @@ fn expect_category_unchecked(
         | ExpectCategory::StoredClosure
         // Deprecated, parse-only (ADR 0153): the lints were removed.
         | ExpectCategory::ClassStateAbroad
-        | ExpectCategory::ClassProcessFfi
-        | ExpectCategory::ClassVarReflectionShadowing => false,
+        | ExpectCategory::ClassProcessFfi => false,
     }
 }
 
@@ -974,6 +978,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     Some(DiagnosticCategory::ClassMethodProcessResource)
                 )
                 | (
+                    ExpectCategory::ClassVarReflectionShadowing,
+                    Some(DiagnosticCategory::ClassVarReflectionShadowing)
+                )
+                | (
                     ExpectCategory::ActorStateAbroad,
                     Some(DiagnosticCategory::ActorStateAbroad)
                 )
@@ -1162,6 +1170,7 @@ definite-assignment = "error"
 unguarded-late-read = "error"
 match-arm-block = "off"
 class-method-process-resource = "off"
+class-var-reflection-shadowing = "off"
 actor-state-abroad = "off"
 ffi-nested-string = "off"
 binary-string-compare = "off"
@@ -1468,11 +1477,7 @@ dnu = "error"
     /// still parse and are reported stale, like `stored_closure`.
     #[test]
     fn expect_removed_class_variable_lint_names_parse_and_are_reported_stale() {
-        for name in [
-            "class_state_abroad",
-            "class_process_ffi",
-            "class_var_reflection_shadowing",
-        ] {
+        for name in ["class_state_abroad", "class_process_ffi"] {
             let source = format!("@expect {name}\n42");
             let (module, parse_diags) = parse(lex_with_eof(&source));
             assert!(parse_diags.is_empty(), "{name}: {parse_diags:?}");

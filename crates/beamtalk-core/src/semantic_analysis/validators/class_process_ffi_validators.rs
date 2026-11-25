@@ -503,16 +503,16 @@ mod tests {
     }
 
     #[test]
-    fn former_reflection_selectors_run_in_the_caller() {
-        // ADR 0153: `hasField:`/`fieldAt:`/`fieldAt:put:`/`clearField:` are no
-        // longer class-variable reflection, so a class method of that name is
-        // an ordinary in-caller class method.
+    fn reflection_selector_methods_do_not_run_in_the_caller() {
+        // The class process still answers `hasField:`/`fieldAt:`/
+        // `fieldAt:put:`/`clearField:` itself until BT-5160, so a class
+        // method of that name does not run in the caller and is not reported.
         for src in [
             "Object subclass: Probe\n  class hasField: x => Erlang erlang self\n",
             "Object subclass: Reg\n  class fieldAt: k => Erlang erlang self\n",
             "Object subclass: Reg\n  class fieldAt: k put: v => Erlang erlang self\n",
         ] {
-            assert_eq!(in_caller(src).len(), 1, "{src}");
+            assert!(in_caller(src).is_empty(), "{src}");
         }
     }
 

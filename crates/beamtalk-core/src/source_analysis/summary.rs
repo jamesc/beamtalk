@@ -197,6 +197,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::NarrowingCast => "NarrowingCast",
         DiagnosticCategory::MatchArmBlock => "MatchArmBlock",
         DiagnosticCategory::ClassMethodProcessResource => "ClassMethodProcessResource",
+        DiagnosticCategory::ClassVarReflectionShadowing => "ClassVarReflectionShadowing",
         DiagnosticCategory::ActorStateAbroad => "ActorStateAbroad",
         DiagnosticCategory::FfiNestedString => "FfiNestedString",
         DiagnosticCategory::BinaryStringCompare => "BinaryStringCompare",
@@ -434,6 +435,10 @@ mod tests {
             (
                 DiagnosticCategory::ClassMethodProcessResource,
                 "ClassMethodProcessResource",
+            ),
+            (
+                DiagnosticCategory::ClassVarReflectionShadowing,
+                "ClassVarReflectionShadowing",
             ),
             (DiagnosticCategory::ActorStateAbroad, "ActorStateAbroad"),
             (DiagnosticCategory::FfiNestedString, "FfiNestedString"),

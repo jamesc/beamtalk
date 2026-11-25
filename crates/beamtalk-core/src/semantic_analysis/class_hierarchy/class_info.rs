@@ -582,6 +582,29 @@ impl ClassInfo {
         PROCESS_BOUND_CLASS_SELECTORS.contains(&selector)
     }
 
+    /// Whether `selector` is a class-variable reflection send (`hasField:`,
+    /// `clearField:`, `fieldAt:`, `fieldAt:put:`; BT-4148): the class process
+    /// answers it from its own state ahead of the class-method lookup
+    /// (`beamtalk_object_class:is_class_var_reflection_selector/1`), so a
+    /// class method of that name is never what a send reaches and is never
+    /// direct-call eligible. Both sides are pinned to
+    /// `runtime/apps/beamtalk_runtime/test/fixtures/class_var_reflection_selectors_conformance.json`.
+    /// ADR 0153: deleted together with the runtime intercept (BT-5160), so the
+    /// compile-time and run-time routing never disagree.
+    #[must_use]
+    pub fn is_class_var_reflection_selector(selector: &str) -> bool {
+        use crate::ast::WellKnownSelector;
+        matches!(
+            WellKnownSelector::from_name(selector),
+            Some(
+                WellKnownSelector::HasField
+                    | WellKnownSelector::ClearField
+                    | WellKnownSelector::FieldAt
+                    | WellKnownSelector::FieldAtPut
+            )
+        )
+    }
+
     /// The process-bound class-side selectors (ADR 0142 §1 rule 3), in a fixed
     /// order: see [`PROCESS_BOUND_CLASS_SELECTORS`]. Codegen emits them into
     /// every class's `__beamtalk_meta/0`.

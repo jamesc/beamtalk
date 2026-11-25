@@ -1479,6 +1479,9 @@ fn run_class_aware_validators(
     // lowers straight to Erlang BIFs (`=:=`, `=/=`, `==`, `/=`, ADR 0002) —
     // they never dispatch, so such a method is silently dead code.
     validators::check_non_overridable_operator_methods(module, &mut result.diagnostics);
+    // Warn on a class method named after a class-variable reflection
+    // selector, which the class process answers ahead of it (BT-4422).
+    validators::check_class_var_reflection_shadowing(module, &mut result.diagnostics);
     validators::check_empty_method_bodies(module, &mut result.diagnostics);
     // ADR 0153: a class has no slots, so class-side `self.x` is an error.
     validators::check_class_side_self_field_access(module, &mut result.diagnostics);
