@@ -2718,7 +2718,7 @@ bt4808_rename_copies_its_own_facts_not_a_same_name_class_test() ->
     New = 'BT4808RenameNew',
     Pid = bt4808_builder_class(Old, 'Object'),
     ok = beamtalk_class_monitor:unwatch(Old),
-    ?assertEqual(unknown, beamtalk_class_metadata:lookup_process_bound_selectors(Old)),
+    ok = beamtalk_class_metadata:put_process_bound_selectors(Old, [ping]),
     Test = self(),
     ok = meck:new(beamtalk_class_publish, [passthrough, no_link]),
     ok = meck:expect(beamtalk_class_publish, sync_identity, fun(N, M, S, A, C, Mode) ->
@@ -2748,7 +2748,7 @@ bt4808_rename_copies_its_own_facts_not_a_same_name_class_test() ->
         Parked ! bt4808_go,
         ?awaitMessage({bt4808_renamed, Result}),
         ?assertEqual({ok, Pid}, Result),
-        ?assertEqual(unknown, beamtalk_class_metadata:lookup_process_bound_selectors(New)),
+        ?assertEqual({ok, [ping]}, beamtalk_class_metadata:lookup_process_bound_selectors(New)),
         %% And the same-name class keeps its own row and fact.
         ?assertEqual({ok, Interloper}, beamtalk_class_metadata:lookup_owner(Old)),
         ?assertEqual({ok, [make]}, beamtalk_class_metadata:lookup_process_bound_selectors(Old)),

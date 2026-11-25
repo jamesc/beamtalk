@@ -265,14 +265,8 @@ store(Tag, Name, Value, Declared) ->
         ?BT_CLASS_VARS_RO(_) ->
             beamtalk_class_var_errors:raise_read_only(tag_to_name(Tag), Name);
         undefined ->
-            %% No home. Unlike a read or `clear/2`, this stays an error even for
-            %% a class whose chain declares no class variables (ADR 0142 §3, its
-            %% methods run in the caller): a write creates a variable, and the
-            %% caller has no state to hold it. Compiled code cannot get here for
-            %% such a class: a class-side `self.x := v` naming a variable no
-            %% class declares is a compile error, and a ClassBuilder class's
-            %% class-method funs raise the `runtime_fun` shadow flag, which keeps
-            %% the class process (`beamtalk_class_shadow_flags:direct_call_ok/2`).
+            %% No home: the caller has no state to hold the write
+            %% (`no_home_map/3`, as for a read or `clear/2`).
             beamtalk_class_var_errors:raise_unreachable(tag_to_name(Tag), Name, write)
     end.
 
@@ -394,10 +388,8 @@ check_write(Class, Map, Name) ->
     end.
 
 -doc """
-Remove a class variable (`clearField:`); same errors as `put/3`, except that
-with no home a class whose chain declares no class variables answers
-`ClassSelf` (its state is empty, ADR 0142 §3). Returns `ClassSelf`
-(`clearField: -> Self`).
+Remove a class variable (`clearField:`); same errors as `put/3` (with no home,
+`class_state_unreachable`). Returns `ClassSelf` (`clearField: -> Self`).
 """.
 -spec clear(class_self(), atom()) -> class_self().
 clear(ClassSelf, Name) ->
@@ -410,8 +402,7 @@ clear(ClassSelf, Name) ->
         ?BT_CLASS_VARS_RO(_) ->
             beamtalk_class_var_errors:raise_read_only(tag_to_name(Tag), Name);
         undefined ->
-            _ = no_home_map(Tag, Name, write),
-            ClassSelf
+            no_home_map(Tag, Name, write)
     end.
 
 -doc "Presence test (`hasField:`).".
