@@ -54,7 +54,9 @@ use crate::ast::{
     ProtocolMethodSignature, ProtocolUse, ShapeField, SlotKind, StandaloneMethodDefinition,
     StateDeclaration, StringSegment, TypeAliasDefinition, TypeAnnotation,
 };
-use crate::source_analysis::{Severity, binary_binding_power, lex_with_eof, parse, parse_method};
+use crate::source_analysis::{
+    Severity, TokenKind, binary_binding_power, lex_with_eof, line_ending, parse, parse_method,
+};
 use crate::span::Span;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{DEFAULT_LINE_WIDTH, Document, break_, concat, group, line, nest, nil};
@@ -228,13 +230,26 @@ fn shift_method_indent(base_indent: &str, source: &str) -> String {
 }
 
 /// The indices of the `\n`-separated lines of `source` whose first byte lies
-/// strictly inside a token (a raw multi-line string literal's continuation
-/// lines).
+/// strictly inside a string or symbol literal (a raw multi-line string's
+/// continuation lines).
 fn lines_starting_inside_a_token(source: &str) -> std::collections::HashSet<usize> {
     // Tokens come out of the lexer in source order and do not overlap, so
     // one forward walk over them serves every line start.
+    // Only literal tokens hold source text as their value. An unterminated
+    // string lexes as an error token running to the end of the input; the
+    // lines after it are still code to re-indent.
     let spans: Vec<Span> = lex_with_eof(source)
         .iter()
+        .filter(|t| {
+            matches!(
+                t.kind(),
+                TokenKind::String(_)
+                    | TokenKind::StringStart(_)
+                    | TokenKind::StringSegment(_)
+                    | TokenKind::StringEnd(_)
+                    | TokenKind::Symbol(_)
+            )
+        })
         .map(crate::source_analysis::Token::span)
         .collect();
     let mut next = 0usize;
@@ -312,45 +327,74 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     } else {
         format!("{formatted}\n")
     };
-    let formatted = apply_line_endings(&formatted, LineEnding::of(source));
+    let formatted = apply_line_endings(&formatted, layout_line_ending(source));
 
     round_trip::verify_round_trip(source, &module, &formatted)?;
     Ok(formatted)
 }
 
-/// The line-ending style of a source file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LineEnding {
-    Lf,
-    CrLf,
-}
-
-impl LineEnding {
-    /// The style of `source`, decided by its first line break (`\n` when it
-    /// has none).
-    fn of(source: &str) -> Self {
-        match source.find('\n') {
-            Some(i) if source[..i].ends_with('\r') => Self::CrLf,
-            _ => Self::Lf,
+/// The line ending of `source`'s layout (BT-5183): the shared
+/// [`line_ending`] rule applied to the text outside multi-line literal
+/// tokens, so a CRLF written inside a string or quoted symbol of an LF file
+/// does not make the file count as CRLF.
+fn layout_line_ending(source: &str) -> &'static str {
+    let mut layout = String::with_capacity(source.len());
+    for piece in split_at_multiline_tokens(source) {
+        if let SourcePiece::Layout(text) = piece {
+            layout.push_str(text);
         }
     }
+    line_ending(&layout)
 }
 
-/// Rewrites every line break of the printer's output in one `style`
-/// (BT-5183).
+/// Rewrites every line break of the printer's output to `eol` (`"\n"` or
+/// `"\r\n"`, from [`layout_line_ending`]; BT-5183).
 ///
-/// The printer emits `\n` everywhere except inside comment text, which it
-/// copies verbatim, so a CRLF file's comments arrive with a `\r` still
-/// attached. String literals cannot carry a raw line break into the output
-/// (the printer escapes CR and LF as `\r` and `\n`), so every `\r\n` or
-/// `\n` here is a line break of the layout or of a comment, and folding them
-/// all to one style changes no value.
-fn apply_line_endings(printed: &str, style: LineEnding) -> String {
-    let lf = printed.replace("\r\n", "\n");
-    match style {
-        LineEnding::Lf => lf,
-        LineEnding::CrLf => lf.replace('\n', "\r\n"),
+/// The printer emits `\n` for its own layout but copies comment text
+/// verbatim, so a CRLF file's comments arrive with a `\r` still attached.
+/// String literals print CR and LF as `\r` and `\n` escapes, but a quoted
+/// symbol (`#'a<newline>b'`) keeps its raw line break, which is part of its
+/// value: a break inside such a token is copied unchanged.
+fn apply_line_endings(printed: &str, eol: &str) -> String {
+    let mut out = String::with_capacity(printed.len() + printed.len() / 16);
+    for piece in split_at_multiline_tokens(printed) {
+        match piece {
+            SourcePiece::Layout(text) => {
+                let lf = text.replace("\r\n", "\n");
+                if eol == "\n" {
+                    out.push_str(&lf);
+                } else {
+                    out.push_str(&lf.replace('\n', eol));
+                }
+            }
+            SourcePiece::Token(text) => out.push_str(text),
+        }
     }
+    out
+}
+
+/// A piece of source text: layout (code, whitespace and comments) or the
+/// whole of a token whose value holds a raw line break.
+enum SourcePiece<'a> {
+    Layout(&'a str),
+    Token(&'a str),
+}
+
+/// `text` cut into alternating [`SourcePiece`]s, in order.
+fn split_at_multiline_tokens(text: &str) -> Vec<SourcePiece<'_>> {
+    let mut pieces = Vec::new();
+    let mut copied = 0usize;
+    for span in lex_with_eof(text)
+        .iter()
+        .map(crate::source_analysis::Token::span)
+        .filter(|span| text[span.as_range()].contains('\n'))
+    {
+        pieces.push(SourcePiece::Layout(&text[copied..span.start() as usize]));
+        pieces.push(SourcePiece::Token(&text[span.as_range()]));
+        copied = span.end() as usize;
+    }
+    pieces.push(SourcePiece::Layout(&text[copied..]));
+    pieces
 }
 
 /// Escapes an arbitrary string for embedding inside a Beamtalk double-quoted

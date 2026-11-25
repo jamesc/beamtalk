@@ -304,6 +304,24 @@ fn source_number_spelling(lit: &Literal, span: Span) -> Option<Document<'static>
         .then(|| docvec!["- ", leaf::number_spelling(recorded)])
 }
 
+/// A binary segment's `unit:` value, in its source spelling (`unit:16r8`)
+/// when one was recorded (BT-5183). The AST keeps no span for the unit, but
+/// it is the last number written in its segment (the value and size come
+/// before the `/`), so the segment's last recorded spelling is the unit's
+/// when it reads back as the unit.
+fn unparse_unit(unit: usize, segment: Span) -> Document<'static> {
+    let spelling =
+        LITERAL_COMMENTS.with(|current| current.borrow().spellings_within(segment).pop());
+    match (spelling, i64::try_from(unit)) {
+        (Some(spelling), Ok(value))
+            if number_reads_back_as(&spelling, &Literal::Integer(value)) =>
+        {
+            leaf::number_spelling(spelling)
+        }
+        _ => leaf::nat_lit(unit),
+    }
+}
+
 /// `-lit` for a number literal, if it is representable.
 fn negate_literal(lit: &Literal) -> Option<Literal> {
     match lit {
@@ -1372,7 +1390,7 @@ fn unparse_binary_segment<V>(
         }));
     }
     if let Some(unit) = seg.unit {
-        specs.push(docvec!["unit:", leaf::nat_lit(unit)]);
+        specs.push(docvec!["unit:", unparse_unit(unit, seg.span)]);
     }
     if !specs.is_empty() {
         docs.push(Document::Str("/"));

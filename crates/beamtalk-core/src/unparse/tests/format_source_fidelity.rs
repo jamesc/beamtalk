@@ -64,6 +64,7 @@ fn safety_net_rejects_a_respelled_number() {
         verify("x := 16rFF\n", "x := 255\n"),
         Err(FormatError::NumberSpellingChanged {
             missing: vec!["16rFF".to_string()],
+            added: vec!["255".to_string()],
         })
     );
 }
@@ -193,6 +194,13 @@ fn negated_pattern_numbers_keep_their_spelling() {
 }
 
 #[test]
+fn binary_unit_keeps_its_spelling() {
+    assert_kept("x := <<y:2/unit:16r8>>\n");
+    assert_kept("x := <<y:16r2/integer-unit:2r1000>>\n");
+    assert_kept("x match: [\n  <<a:2/unit:16r8>> -> a;\n  _ -> 0\n]\n");
+}
+
+#[test]
 fn shape_version_keeps_its_spelling() {
     assert_kept("Object subclass: Foo\n  shapeVersion: 16r2\n\n  bar => 1\n");
 }
@@ -229,6 +237,14 @@ fn crlf_block_comment_keeps_crlf_line_endings() {
 }
 
 #[test]
+fn line_break_inside_a_quoted_symbol_is_part_of_its_value() {
+    // The symbol's raw line break is its value, not layout: it is kept as
+    // written whatever the file's line endings are.
+    assert_kept("x := #'a\r\nb'\n");
+    assert_kept("x := #'a\nb'\r\ny := 1\r\n");
+}
+
+#[test]
 fn lf_file_keeps_lf_line_endings() {
     let out = fmt("x := 1  // c\ny := 2\n").expect("formats");
     assert!(!out.contains('\r'), "{out:?}");
@@ -245,6 +261,17 @@ fn reindent_fallback_leaves_raw_multi_line_strings_alone() {
     assert!(
         out.contains("\"line one\n    line two\n  line three\""),
         "string value changed: {out:?}"
+    );
+}
+
+#[test]
+fn reindent_fallback_still_indents_code_after_an_unterminated_string() {
+    // A half-edited body: the stray `"` lexes as an error token running to
+    // the end, but the lines after it are still code.
+    let source = "foo =>\n  x := \"abc\n  y bar\n  z baz";
+    assert_eq!(
+        reindent_method_source("  ", source),
+        "  foo =>\n    x := \"abc\n    y bar\n    z baz"
     );
 }
 

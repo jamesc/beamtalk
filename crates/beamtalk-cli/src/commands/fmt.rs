@@ -216,16 +216,19 @@ fn run_fmt_with(
         }
     }
 
-    if !refused_files.is_empty() {
+    // A refusal is a formatter bug and fails the run in both modes; in check
+    // mode it joins the rest of the summary rather than hiding it.
+    let refused_summary = (!refused_files.is_empty()).then(|| {
         let count = refused_files.len();
         let plural = if count == 1 { "" } else { "s" };
-        miette::bail!(
+        format!(
             "{count} file{plural} could not be formatted without losing source (formatter bug; files left unchanged)"
-        );
-    }
+        )
+    });
 
     if check_only {
         let mut parts: Vec<String> = Vec::new();
+        parts.extend(refused_summary);
         if !changed_files.is_empty() {
             let count = changed_files.len();
             let plural = if count == 1 { "" } else { "s" };
@@ -248,6 +251,8 @@ fn run_fmt_with(
         if !parts.is_empty() {
             miette::bail!("{}", parts.join("; "));
         }
+    } else if let Some(summary) = refused_summary {
+        miette::bail!("{summary}");
     }
 
     Ok(())
@@ -321,6 +326,30 @@ mod tests {
             let after = std::fs::read_to_string(path.as_std_path()).expect("read");
             assert_eq!(after, source, "a refused file must not be rewritten");
         }
+    }
+
+    /// In check mode a refusal joins the summary instead of hiding the other
+    /// problems (here, a file with parse errors).
+    #[test]
+    fn fmt_check_reports_refusals_alongside_other_problems() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("a.bt"), "x := 1\n").expect("write");
+        std::fs::write(dir.path().join("b.bt"), "@@@ broken\n").expect("write");
+        let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8");
+        let refuse_valid = |source: &str| {
+            if source.starts_with("@@@") {
+                Err(FormatError::ParseErrors)
+            } else {
+                lossy_formatter(source)
+            }
+        };
+        let err = run_fmt_with(&[dir_path.to_string()], true, refuse_valid).expect_err("must fail");
+        let text = err.to_string();
+        assert!(text.contains("1 file could not be formatted"), "{text}");
+        assert!(
+            text.contains("could not be checked (parse errors)"),
+            "{text}"
+        );
     }
 
     #[test]

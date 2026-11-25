@@ -1230,7 +1230,10 @@ impl Parser {
         let span = self.advance().span();
         match parse_integer(&raw) {
             // The guard pins `n` to `1..=256`, so the conversion is exact.
-            Ok(n) if (1..=256).contains(&n) => usize::try_from(n).ok(),
+            Ok(n) if (1..=256).contains(&n) => {
+                self.number_spellings.push((span, raw));
+                usize::try_from(n).ok()
+            }
             Ok(n) => {
                 self.diagnostics.push(Diagnostic::error(
                     format!("binary segment unit must be between 1 and 256, got {n}"),

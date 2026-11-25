@@ -45,6 +45,8 @@ pub enum FormatError {
     NumberSpellingChanged {
         /// Spellings in the input that are missing from the output.
         missing: Vec<String>,
+        /// Spellings in the output that are not in the input.
+        added: Vec<String>,
     },
     /// The formatted text parses to a different program. This is a formatter
     /// bug.
@@ -80,11 +82,19 @@ impl std::fmt::Display for FormatError {
                 }
                 Ok(())
             }
-            Self::NumberSpellingChanged { missing } => write!(
-                f,
-                "formatter bug: formatting would respell number literals ({}); the file was left unchanged",
-                missing.join(", ")
-            ),
+            Self::NumberSpellingChanged { missing, added } => {
+                write!(
+                    f,
+                    "formatter bug: formatting would respell number literals; the file was left unchanged"
+                )?;
+                if !missing.is_empty() {
+                    write!(f, " (lost: {})", missing.join(", "))?;
+                }
+                if !added.is_empty() {
+                    write!(f, " (added: {})", added.join(", "))?;
+                }
+                Ok(())
+            }
             Self::AstChanged { first_difference } => write!(
                 f,
                 "formatter bug: formatting would change the program; the file was left unchanged (first difference: {first_difference})"
@@ -121,6 +131,7 @@ pub(super) fn verify_round_trip(
     if before != after {
         return Err(FormatError::NumberSpellingChanged {
             missing: multiset_difference(&before, &after),
+            added: multiset_difference(&after, &before),
         });
     }
 

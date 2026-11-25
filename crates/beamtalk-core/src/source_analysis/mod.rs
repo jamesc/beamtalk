@@ -236,6 +236,17 @@ pub fn completion_word_start(text: &str) -> usize {
         .map_or(0, |(i, c)| i + c.len_utf8())
 }
 
+/// The line ending a text file uses: `"\r\n"` if it contains one, else
+/// `"\n"`.
+///
+/// The one rule for "which line endings does this file use", shared by
+/// `beamtalk fmt` (which writes a CRLF file back with CRLF endings, BT-5183)
+/// and the CLI's surgical manifest edits.
+#[must_use]
+pub fn line_ending(text: &str) -> &'static str {
+    if text.contains("\r\n") { "\r\n" } else { "\n" }
+}
+
 #[cfg(test)]
 mod naming_tests {
     use super::*;
