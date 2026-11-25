@@ -27,7 +27,9 @@
 //! configuration is, so an `erl` shim started with the private home cannot
 //! find its Erlang. [`erl_command`] therefore starts the real `erl` script
 //! (`<code:root_dir()>/bin/erl`, resolved once with the caller's own
-//! environment), which needs no `HOME`.
+//! environment), which needs no `HOME`. Behind a shim it first asks the
+//! manager (`mise which erl`, `asdf which erl`) and boots a VM to ask only if
+//! that gives no usable answer (BT-5243).
 //!
 //! The generated release launchers follow the same recipe; their scripts are
 //! generated from [`COOKIE_HOME_ENV`], [`ORIG_PREFIX`] and
@@ -37,7 +39,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::io::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Environment variable naming the private cookie home (Erlang:
@@ -176,8 +178,8 @@ pub(crate) fn erl_program() -> OsString {
     static PROGRAM: std::sync::OnceLock<OsString> = std::sync::OnceLock::new();
     PROGRAM
         .get_or_init(|| {
-            installed_erl_on_path()
-                .or_else(resolve_erl_program)
+            std::env::var_os("PATH")
+                .and_then(|path| resolve_erl_in(&path, resolve_erl_program))
                 .unwrap_or_else(|| {
                     tracing::warn!(
                         "could not resolve the real `erl`; starting `erl` from PATH. A version \
@@ -190,14 +192,105 @@ pub(crate) fn erl_program() -> OsString {
         .clone()
 }
 
+/// Resolve the real `erl` for `path`, cheapest source first: an installed
+/// `erl` on `PATH` (no shim), then the version manager's own answer
+/// ([`shim_hint_in`], BT-5243), and only then `probe`, which boots a VM.
+fn resolve_erl_in(path: &OsStr, probe: impl FnOnce() -> Option<OsString>) -> Option<OsString> {
+    installed_erl_in(path)
+        .or_else(|| shim_hint_in(path))
+        .or_else(probe)
+}
+
+/// How long a version manager gets to answer `which erl`.
+const SHIM_HINT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Ask `mise which erl` / `asdf which erl` (found on `path`) where the shim's
+/// Erlang is, without booting a VM (BT-5243). The answer is trusted only when
+/// it is an absolute, existing, executable file named `erl` under a `bin/`
+/// directory. Any failure (no such manager, non-zero exit, timeout, bad path)
+/// is `None`, so the caller falls back to the boot probe.
+fn shim_hint_in(path: &OsStr) -> Option<OsString> {
+    ["mise", "asdf"].into_iter().find_map(|manager| {
+        let exe = find_on_path(path, manager)?;
+        let mut cmd = Command::new(exe);
+        cmd.args(["which", "erl"]);
+        let out = output_within(&mut cmd, SHIM_HINT_TIMEOUT)?;
+        let line = String::from_utf8_lossy(&out)
+            .lines()
+            .next()?
+            .trim()
+            .to_owned();
+        valid_erl_hint(Path::new(&line)).then(|| OsString::from(line))
+    })
+}
+
+/// `name` (with `.exe` on Windows) as the first executable on `path`.
+fn find_on_path(path: &OsStr, name: &str) -> Option<PathBuf> {
+    let file = if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    };
+    std::env::split_paths(path)
+        .map(|dir| dir.join(&file))
+        .find(|candidate| is_executable(candidate))
+}
+
+/// An absolute, existing, executable file named `erl` in a `bin` directory.
+fn valid_erl_hint(path: &Path) -> bool {
+    let name = if cfg!(windows) { "erl.exe" } else { "erl" };
+    path.is_absolute()
+        && path.file_name() == Some(OsStr::new(name))
+        && path
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|dir| dir == "bin")
+        && is_executable(path)
+}
+
+/// Stdout of `cmd` when it exits successfully within `timeout`; the child is
+/// killed on timeout.
+fn output_within(cmd: &mut Command, timeout: std::time::Duration) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+    use std::process::Stdio;
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdout = child.stdout.take()?;
+    // Drain on a thread so a chatty child cannot block on a full pipe.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = tx.send(stdout.read_to_end(&mut buf).ok().map(|_| buf));
+    });
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    // A grandchild holding the pipe open must not stall us past the deadline.
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    let buf = rx
+        .recv_timeout(remaining.max(std::time::Duration::from_millis(200)))
+        .ok()??;
+    status.success().then_some(buf)
+}
+
 /// The `erl` on `PATH`, when it already is an installation's own launcher
 /// (its canonical path is `<root>/bin/erl` with a `<root>/releases`
 /// directory): no shim, so no probe is needed.
-fn installed_erl_on_path() -> Option<OsString> {
-    installed_erl_in(&std::env::var_os("PATH")?)
-}
-
-/// [`installed_erl_on_path`] for an explicit `PATH` value.
 fn installed_erl_in(path: &OsStr) -> Option<OsString> {
     let name = if cfg!(windows) { "erl.exe" } else { "erl" };
     // The first entry the OS itself would run: it skips non-executables.
@@ -293,6 +386,98 @@ mod tests {
                 .unwrap();
         let expected = std::fs::canonicalize(runnable.path().join("bin").join("erl")).unwrap();
         assert_eq!(installed_erl_in(&path), Some(expected.into_os_string()));
+    }
+
+    /// A fake version-manager layout in a temp dir: `shims/erl` is a plain
+    /// executable (not an install), and `<manager>` prints `answer`.
+    #[cfg(unix)]
+    struct FakeShim {
+        _dir: tempfile::TempDir,
+        path: OsString,
+        real_erl: PathBuf,
+    }
+
+    #[cfg(unix)]
+    fn fake_shim(manager: &str, script_body: &str) -> FakeShim {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let exec = |p: &Path, body: &str| {
+            std::fs::write(p, body).unwrap();
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        let real_bin = dir.path().join("install").join("bin");
+        std::fs::create_dir_all(&real_bin).unwrap();
+        let real_erl = real_bin.join("erl");
+        exec(&real_erl, "#!/bin/sh\n");
+        let shims = dir.path().join("shims");
+        std::fs::create_dir_all(&shims).unwrap();
+        exec(&shims.join("erl"), "#!/bin/sh\n"); // a shim: no `releases` dir
+        let body = script_body.replace("@ERL@", real_erl.to_str().unwrap());
+        exec(&shims.join(manager), &format!("#!/bin/sh\n{body}\n"));
+        FakeShim {
+            path: std::env::join_paths([&shims]).unwrap(),
+            real_erl,
+            _dir: dir,
+        }
+    }
+
+    /// BT-5243: the manager's answer is used and no VM is booted.
+    #[cfg(unix)]
+    #[test]
+    fn shim_hint_is_used_without_booting_a_vm() {
+        let shim = fake_shim("mise", r#"[ "$1 $2" = "which erl" ] && echo "@ERL@""#);
+        let resolved = resolve_erl_in(&shim.path, || panic!("probe must not run"));
+        assert_eq!(resolved, Some(shim.real_erl.clone().into_os_string()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn asdf_hint_is_used_too() {
+        let shim = fake_shim("asdf", r#"echo "@ERL@""#);
+        let resolved = resolve_erl_in(&shim.path, || panic!("probe must not run"));
+        assert_eq!(resolved, Some(shim.real_erl.clone().into_os_string()));
+    }
+
+    /// Bad answers fall back to the boot probe.
+    #[cfg(unix)]
+    #[test]
+    fn bad_shim_hint_falls_back_to_the_probe() {
+        for body in [
+            "echo /nonexistent/bin/erl", // missing file
+            "echo @ERL@.txt",            // wrong name
+            "echo erl",                  // relative
+            "echo @ERL@; exit 1",        // non-zero exit
+            "echo ''",                   // empty
+            "echo /bin/sh",              // executable, not `erl`
+            "exec sleep 30",             // timeout
+        ] {
+            let shim = fake_shim("mise", body);
+            let started = std::time::Instant::now();
+            let resolved = resolve_erl_in(&shim.path, || Some(OsString::from("probed")));
+            assert_eq!(resolved, Some(OsString::from("probed")), "{body}");
+            assert!(started.elapsed() < SHIM_HINT_TIMEOUT * 3, "{body}");
+        }
+    }
+
+    /// An `erl` outside a `bin/` directory is not trusted.
+    #[cfg(unix)]
+    #[test]
+    fn hint_outside_bin_is_rejected() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let erl = dir.path().join("erl");
+        std::fs::write(&erl, "").unwrap();
+        std::fs::set_permissions(&erl, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!valid_erl_hint(&erl));
+    }
+
+    /// No manager on `PATH`: straight to the probe.
+    #[cfg(unix)]
+    #[test]
+    fn missing_manager_falls_back_to_the_probe() {
+        let empty = tempfile::tempdir().unwrap();
+        let resolved = resolve_erl_in(empty.path().as_os_str(), || Some(OsString::from("probed")));
+        assert_eq!(resolved, Some(OsString::from("probed")));
     }
 
     #[cfg(unix)]
