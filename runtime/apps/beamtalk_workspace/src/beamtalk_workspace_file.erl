@@ -304,8 +304,13 @@ atomic_write(Path, Data, ExpectedCurrent, Opts) ->
         {ok, Tmp} ->
             case recheck_unchanged(Path, ExpectedCurrent) of
                 ok ->
-                    %% A rewrite keeps the target's mode, even a private one.
-                    keep_mode(Path, Tmp),
+                    %% A rewrite keeps the target's mode, except a private
+                    %% write, which always lands 0600: it tightens an existing
+                    %% group/world-readable `metadata.json` (BT-5174).
+                    case maps:get(private, Opts, false) of
+                        true -> ok;
+                        false -> keep_mode(Path, Tmp)
+                    end,
                     case file:rename(Tmp, Path) of
                         ok ->
                             ok;

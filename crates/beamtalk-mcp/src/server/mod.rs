@@ -155,7 +155,34 @@ impl PathPolicy {
     pub fn project_root_of_cwd() -> std::io::Result<Self> {
         let cwd = std::env::current_dir()?;
         let root = beamtalk_project::discover_project_root(&cwd);
-        Ok(Self::Confined(beamtalk_core::paths::canonicalize(&root)?))
+        Self::confine_to_root(&root, std::env::var_os("HOME").as_deref())
+    }
+
+    /// Confine to `root`, refusing a root that would expose far more than a
+    /// project: the filesystem root or the user's home directory (BT-5174).
+    /// Discovery falls back to the current directory when no marker exists,
+    /// so launching from `$HOME` would otherwise confine to all of it.
+    fn confine_to_root(
+        root: &std::path::Path,
+        home: Option<&std::ffi::OsStr>,
+    ) -> std::io::Result<Self> {
+        let root = beamtalk_core::paths::canonicalize(root)?;
+        let is_home = home
+            .and_then(|h| beamtalk_core::paths::canonicalize(std::path::Path::new(h)).ok())
+            .is_some_and(|h| h == root);
+        if root.parent().is_none() || is_home {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "no beamtalk project found: '{}' is the filesystem root or your home \
+                     directory, so file tools would not be confined to a project. Run \
+                     beamtalk-mcp from inside a project (a directory with beamtalk.toml, \
+                     .beamtalk or .git), or pass --allow-outside-project.",
+                    root.display()
+                ),
+            ));
+        }
+        Ok(Self::Confined(root))
     }
 
     /// Resolve `path` (relative paths against the current directory) to a

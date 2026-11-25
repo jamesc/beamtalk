@@ -49,6 +49,17 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
         .iter()
         .any(|scheme| url.starts_with(scheme))
     {
+        // A URL is written to the committed `beamtalk.lock` and shown in logs,
+        // so a secret in it would leak (BT-5174). `ssh://git@host` carries only
+        // a username and stays valid.
+        if url_embeds_credentials(url) {
+            miette::bail!(
+                "Dependency '{name}' has a git URL with embedded credentials ('{}').\n\n  \
+                 Credentials in a URL would be written to beamtalk.lock. Remove them and \
+                 authenticate with a git credential helper or an SSH key instead.",
+                redact_url_credentials(url)
+            );
+        }
         return Ok(());
     }
 
@@ -95,6 +106,21 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Whether a `scheme://` URL carries a secret in its userinfo: any userinfo on
+/// `http(s)://` / `git://` (a token or `user:pass`), or a `user:password` pair
+/// on any scheme. A bare `ssh://git@host` username is not a secret.
+fn url_embeds_credentials(url: &str) -> bool {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return false;
+    };
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let Some(at) = rest[..authority_end].rfind('@') else {
+        return false;
+    };
+    let userinfo = &rest[..at];
+    userinfo.contains(':') || matches!(scheme, "http" | "https" | "git")
 }
 
 /// Whether `url` uses an unauthenticated plaintext transport (`http://` or
@@ -203,6 +229,23 @@ mod tests {
             "git@github.com:jamesc/beamtalk-json.git",
         ] {
             assert!(validate_git_url("dep", url).is_ok(), "should accept {url}");
+        }
+    }
+
+    #[test]
+    fn rejects_credentials_in_url_without_echoing_them() {
+        for url in [
+            "https://user:s3cret@example.test/repo.git",
+            "https://ghp_token@example.test/repo.git",
+            "ssh://user:s3cret@example.test/repo.git",
+        ] {
+            let err = validate_git_url("dep", url).unwrap_err();
+            let msg = format!("{err:?}");
+            assert!(msg.contains("embedded credentials"), "{url}: {msg}");
+            assert!(
+                !msg.contains("s3cret") && !msg.contains("ghp_token"),
+                "{msg}"
+            );
         }
     }
 

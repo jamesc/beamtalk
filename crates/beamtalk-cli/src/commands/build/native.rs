@@ -657,6 +657,30 @@ fn screen_native_git_url(name: &str, url: &str) -> Result<()> {
     )
 }
 
+/// Screen every git URL rebar3 resolved, transitive ones included.
+///
+/// A dependency's own `rebar.config` can name further git dependencies that
+/// never pass through our manifest. rebar3 has fetched them by the time we see
+/// `rebar.lock`, but they get the same screen as direct ones here, before they
+/// reach `beamtalk.lock` or the build output; and `prepare_rebar_lock`
+/// re-screens them on every later build (BT-5174).
+fn screen_resolved_native_git_urls(
+    packages: &[NativePackageLock],
+    allow_insecure: bool,
+) -> Result<()> {
+    for pkg in packages {
+        if let NativeLockSource::Git { url, .. } = &pkg.source {
+            manifest::validate_git_url(&pkg.name, url)?;
+            manifest::check_git_transport(
+                &format!("Native dependency '{}' (resolved by rebar3)", pkg.name),
+                url,
+                allow_insecure,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 /// Render one `{deps, [...]}` entry for `rebar.config` from the manifest.
 ///
 /// Pinning to locked versions and commits is done by the generated
@@ -1077,6 +1101,7 @@ fn compile_with_rebar3(
     // ADR 0072 Phase 2: Extract resolved versions from rebar.lock and
     // write them to beamtalk.lock as [[native_package]] entries.
     let resolved_native = lockfile::read_rebar_lock(&rebar_base_dir)?;
+    screen_resolved_native_git_urls(&resolved_native, manifest::insecure_git_allowed())?;
     if !resolved_native.is_empty() {
         let mut lockfile = existing_lock.unwrap_or_default();
         // Replace all native entries with the freshly resolved set
@@ -1474,5 +1499,44 @@ mod rebar3_env_tests {
                 "{var}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod transitive_screen_tests {
+    use super::*;
+    use crate::commands::deps::lockfile::NativePackageLock;
+
+    fn git_pkg(name: &str, url: &str) -> NativePackageLock {
+        NativePackageLock {
+            name: name.to_string(),
+            level: Some(1),
+            source: NativeLockSource::Git {
+                url: url.to_string(),
+                reference: None,
+                sha: "0".repeat(40),
+            },
+        }
+    }
+
+    #[test]
+    fn transitive_plaintext_git_is_refused_unless_opted_in() {
+        let pkgs = [git_pkg("dep", "http://example.test/dep.git")];
+        let err = screen_resolved_native_git_urls(&pkgs, false).unwrap_err();
+        assert!(format!("{err:?}").contains("plaintext git URL"), "{err:?}");
+        assert!(screen_resolved_native_git_urls(&pkgs, true).is_ok());
+    }
+
+    #[test]
+    fn transitive_credentials_and_helper_transports_are_refused() {
+        for url in ["https://u:pw@example.test/d.git", "ext::sh -c id"] {
+            let pkgs = [git_pkg("dep", url)];
+            assert!(
+                screen_resolved_native_git_urls(&pkgs, true).is_err(),
+                "{url}"
+            );
+        }
+        let ok = [git_pkg("dep", "https://example.test/d.git")];
+        assert!(screen_resolved_native_git_urls(&ok, false).is_ok());
     }
 }

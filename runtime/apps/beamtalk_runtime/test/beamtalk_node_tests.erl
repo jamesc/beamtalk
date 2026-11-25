@@ -92,6 +92,27 @@ current_node_is_trivially_reachable_test() ->
         beamtalk_node:connect(Current)
     ).
 
+bounded_sync_returns_within_bound_when_sync_hangs_test() ->
+    {Micros, ok} = timer:tc(fun() ->
+        beamtalk_node:bounded_sync(
+            fun() ->
+                receive
+                    never -> ok
+                end
+            end,
+            200
+        )
+    end),
+    ?assert(Micros >= 150000),
+    ?assert(Micros < 2000000).
+
+bounded_sync_returns_promptly_when_sync_completes_test() ->
+    {Micros, ok} = timer:tc(fun() -> beamtalk_node:bounded_sync(fun() -> ok end, 5000) end),
+    ?assert(Micros < 2000000).
+
+bounded_sync_survives_a_crashing_sync_test() ->
+    ?assertEqual(ok, beamtalk_node:bounded_sync(fun() -> error(boom) end, 5000)).
+
 print_string_test() ->
     ?assertEqual(
         {beamtalk_string, <<"Node(worker@localhost)">>},
