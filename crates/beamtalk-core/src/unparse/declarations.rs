@@ -12,7 +12,7 @@ use super::{
     leading_ends_with_orphaned_doc_comment, leaf, line, nest, nil, unparse_comment,
     unparse_comment_attachment_leading, unparse_expression, unparse_expression_statement,
     unparse_literal, unparse_literal_at, unparse_method_display_signature_doc,
-    unparse_selector_and_params, unparse_type_annotation,
+    unparse_selector_and_params, unparse_type_annotation, value_with_separator,
 };
 
 /// One of the four top-level declaration kinds that can appear in a
@@ -942,8 +942,8 @@ pub(crate) fn unparse_state_declaration(state: &StateDeclaration) -> Document<'s
     }
 
     if let Some(default) = &state.default_value {
-        decl.push(Document::Str(" = "));
-        decl.push(unparse_expression(default));
+        decl.push(Document::Str(" ="));
+        decl.push(value_with_separator(default, " "));
     }
 
     // Trailing comment

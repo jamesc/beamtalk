@@ -200,7 +200,36 @@ Module {
     file_leading_comments: [],
     file_trailing_comments: [],
     pipeline_sends: {},
-    literal_comments: {},
+    literal_comments: {
+        AroundBinaryOperator: GapComments {
+            same_line: [],
+            own_line: [
+                Comment {
+                    content: "Invalid assignment target",
+                    span: Span {
+                        start: 249,
+                        end: 251,
+                    },
+                    kind: Line,
+                    preceding_blank_line: true,
+                },
+            ],
+        },
+        AfterKeyword: GapComments {
+            same_line: [],
+            own_line: [
+                Comment {
+                    content: "Code after errors should parse",
+                    span: Span {
+                        start: 360,
+                        end: 365,
+                    },
+                    kind: Line,
+                    preceding_blank_line: true,
+                },
+            ],
+        },
+    },
 }
 
 Diagnostics:

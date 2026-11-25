@@ -88,11 +88,13 @@ impl Parser {
         let pipeline_mark = self.pipeline_sends.len();
         let literal_mark = self.literal_comments.len();
         let spelling_mark = self.number_spellings.len();
+        let gap_mark = self.gap_comments.len();
         let body = self.parse_method_body();
         let pipeline_sends = self.pipeline_sends.drain(pipeline_mark..).collect();
         let literal_comments = crate::ast::LiteralComments::from_records(
             self.literal_comments.drain(literal_mark..),
             self.number_spellings.drain(spelling_mark..),
+            self.gap_comments.drain(gap_mark..),
         );
         self.current_method_header_indent = previous_method_header_indent;
         self.current_method_selector = previous_method_selector;
