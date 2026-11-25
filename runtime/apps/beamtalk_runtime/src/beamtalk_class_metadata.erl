@@ -1740,17 +1740,16 @@ reads as missing (ADR 0153 §5, BT-5161), and only the stale ones go.
 """.
 -spec delete_class_method_funs_except(class_name(), [selector()]) -> ok.
 delete_class_method_funs_except(Name, Keep) ->
-    try ets:match(?FUN_TABLE, {{Name, '$1'}, '_', '_'}) of
-        Rows ->
-            lists:foreach(
-                fun([Selector]) ->
-                    case lists:member(Selector, Keep) of
-                        true -> ok;
-                        false -> ets:delete(?FUN_TABLE, {Name, Selector})
-                    end
-                end,
-                Rows
-            )
+    try
+        lists:foreach(
+            fun([Selector]) ->
+                case lists:member(Selector, Keep) of
+                    true -> ok;
+                    false -> ets:delete(?FUN_TABLE, {Name, Selector})
+                end
+            end,
+            ets:match(?FUN_TABLE, {{Name, '$1'}, '_', '_'})
+        )
     catch
         error:badarg -> ok
     end,

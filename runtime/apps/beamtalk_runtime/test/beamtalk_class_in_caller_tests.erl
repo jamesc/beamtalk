@@ -239,6 +239,30 @@ runtime_fun_test_() ->
                 end
             )
         end},
+        {"self new in a ClassBuilder fun builds with the class's field defaults", fun() ->
+            %% The fun runs in the caller, which has none of the class
+            %% process's dictionary: the class's own defaults are asked of
+            %% the class process. What codegen emits for `self new`.
+            Make = fun(#beamtalk_object{class = Tag}) ->
+                ClassName = beamtalk_primitive:class_name_from_tag(Tag),
+                Module = beamtalk_class_instantiation:resolve_module_or_raise(ClassName, 'new'),
+                {self(), beamtalk_class_instantiation:class_self_new(ClassName, Module, [])}
+            end,
+            {ok, Pid} = beamtalk_class_builder:register(#{
+                className => 'Bt5161SelfNew',
+                superclassRef => 'Object',
+                fieldSpecs => #{a => 7},
+                methodSpecs => #{},
+                classMethods => #{make => Make}
+            }),
+            try
+                Me = self(),
+                {Me, Instance} = send(Pid, make, []),
+                ?assertEqual(7, maps:get(a, Instance))
+            after
+                beamtalk_test_class:stop(Pid)
+            end
+        end},
         {"a module-less subclass runs its ancestor's fun in the caller", fun() ->
             with_builder_class(
                 'Bt5161BuilderRoot',
