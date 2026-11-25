@@ -128,7 +128,8 @@ defmodule BtAttachWeb.Live.TestRunnerTest do
         "load_tests" => %{},
         "run_test_class" => %{"class" => "Counter"},
         "open_test_method" => %{"class" => "Counter", "selector" => "increment"},
-        "dismiss_notice" => %{"key" => "tests_error"}
+        "dismiss_notice" => %{"key" => "tests_error"},
+        "tests_stop" => %{}
       }
 
       for event <- TestRunner.__test_runner_events__() do
@@ -476,5 +477,32 @@ defmodule BtAttachWeb.Live.TestRunnerTest do
       assert TestRunner.test_status_label("weird") == "? weird"
       assert TestRunner.test_status_class("weird") == "st-skip"
     end
+  end
+
+  # BT-5189: Stop kills the workspace-side `:erpc` worker the run's task is
+  # waiting on — only processes on another node, never a local one.
+  test "kill_remote_workers leaves local processes the task monitors alone" do
+    local = spawn(fn -> Process.sleep(:infinity) end)
+    parent = self()
+
+    task =
+      spawn(fn ->
+        Process.monitor(local)
+        send(parent, :monitoring)
+        Process.sleep(:infinity)
+      end)
+
+    assert_receive :monitoring
+    assert :ok = TestRunner.kill_remote_workers(task)
+    assert Process.alive?(local)
+    Process.exit(task, :kill)
+    Process.exit(local, :kill)
+  end
+
+  test "kill_remote_workers is a no-op for a task that already exited" do
+    task = spawn(fn -> :ok end)
+    ref = Process.monitor(task)
+    assert_receive {:DOWN, ^ref, :process, ^task, _}
+    assert :ok = TestRunner.kill_remote_workers(task)
   end
 end

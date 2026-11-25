@@ -1,6 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type * as WsModule from "ws";
@@ -217,6 +218,12 @@ export class WorkspaceClient {
   private msgCounter = 0;
   private pending = new Map<string, PendingRequest>();
 
+  /** Reads the node's current identity (its port-file nonce); see `nodeChangedOnLastConnect`. */
+  private readonly nodeIdentity: () => string | undefined;
+  /** The identity seen at the last `connected`; `null` before the first one. */
+  private connectedIdentity: string | undefined | null = null;
+  private nodeChanged = false;
+
   private connectionHandlers: Array<(state: ConnectionState) => void> = [];
   private authErrorHandlers: Array<(message: string) => void> = [];
   private pushHandlers: Array<(event: PushEvent) => void> = [];
@@ -225,12 +232,14 @@ export class WorkspaceClient {
     workspaceId: string,
     port: number,
     cookie: string,
-    wsFactory: WebSocketFactory = defaultWsFactory
+    wsFactory: WebSocketFactory = defaultWsFactory,
+    nodeIdentity: () => string | undefined = () => undefined
   ) {
     this.workspaceId = workspaceId;
     this.port = port;
     this.cookie = cookie;
     this.wsFactory = wsFactory;
+    this.nodeIdentity = nodeIdentity;
   }
 
   /**
@@ -267,7 +276,18 @@ export class WorkspaceClient {
       throw new Error(`Empty cookie in ${path.join(wsDir, "cookie")}`);
     }
 
-    return new WorkspaceClient(workspaceId, port, cookie, options?.wsFactory);
+    // A restarted node rewrites its port file with a fresh nonce, so the nonce
+    // tells a transient reconnect to the same node from one to a new node.
+    const portFile = path.join(wsDir, "port");
+    const nodeIdentity = (): string | undefined => {
+      try {
+        const reread = parsePortFileContent(fs.readFileSync(portFile, "utf8"));
+        return reread.ok ? reread.nonce : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    return new WorkspaceClient(workspaceId, port, cookie, options?.wsFactory, nodeIdentity);
   }
 
   /**
@@ -562,6 +582,17 @@ export class WorkspaceClient {
     return this.connectionState;
   }
 
+  /**
+   * Whether the latest `connected` reached a different node than the one
+   * before it (BT-5189): the node restarted, so actors and sessions from the
+   * earlier connection are gone. `false` for the first connect and for a
+   * transient reconnect to the same node (same port-file nonce). When the
+   * identity cannot be read, a reconnect is assumed to be a new node.
+   */
+  get nodeChangedOnLastConnect(): boolean {
+    return this.nodeChanged;
+  }
+
   onConnectionChange(handler: (state: ConnectionState) => void): () => void {
     this.connectionHandlers.push(handler);
     return () => {
@@ -693,6 +724,11 @@ export class WorkspaceClient {
     if (msg.op === "session-started") {
       this.sessionId = msg.session as string;
       this.reconnectAttempts = 0;
+      const identity = this.nodeIdentity();
+      this.nodeChanged =
+        this.connectedIdentity !== null &&
+        (identity === undefined || identity !== this.connectedIdentity);
+      this.connectedIdentity = identity;
       this._setConnectionState("connected");
       return;
     }
@@ -967,8 +1003,11 @@ function assertPortFileFresh(wsDir: string, port: number, fileNonce: string | un
         `Stale port file in ${wsDir}: node pid ${info.pid} is not running, or its process is not visible from where the extension runs. If the node is running, this can happen when BEAMTALK_HOME is shared across containers or pid namespaces.`
       );
     }
-    // Same rule as the CLI's `still_same_process` / `start_time_matches`.
-    const expected = typeof info.start_time === "number" ? info.start_time : undefined;
+    // Same rule as the CLI's `still_same_process` / `start_time_matches`, on
+    // every platform the CLI records a start time on (BT-5189: Linux, macOS,
+    // Windows). Read as digits from the raw text: a Windows FILETIME tick count
+    // is past 2^53, so `JSON.parse` would round it.
+    const expected = rawStartTime(raw, info.start_time);
     if (!startTimeMatches(expected, procStartTime(info.pid))) {
       throw new Error(
         `Stale port file in ${wsDir}: pid ${info.pid} is alive but its start time differs from node.info (pid reused)`
@@ -977,33 +1016,154 @@ function assertPortFileFresh(wsDir: string, port: number, fileNonce: string | un
   }
 }
 
+/** `node.info`'s `start_time` as an exact integer, or `undefined` when absent. */
+function rawStartTime(raw: string, parsed: unknown): bigint | undefined {
+  if (typeof parsed !== "number") return undefined;
+  const digits = /"start_time"\s*:\s*(\d+)/.exec(raw)?.[1];
+  return digits === undefined ? BigInt(Math.trunc(parsed)) : BigInt(digits);
+}
+
 /**
- * Process start time (Linux `/proc/<pid>/stat` field 22, as the CLI's
- * `proc_start_time`). `undefined` where it cannot be read (other platforms).
+ * What could be learned about a process's start time, in the unit the CLI's
+ * `pid_liveness::proc_start_time` records on this platform:
+ *
+ * - `time` — observed. `resolution` is the granularity it was observed at (in
+ *   that unit): 1 where the extension reads the same value the CLI does, larger
+ *   where it can only read a coarser one (macOS `ps` reports whole seconds; the
+ *   CLI records microseconds).
+ * - `gone` — the probe ran and found no such process (or, on Linux, its
+ *   `/proc` entry could not be read — as the CLI, a mismatch).
+ * - `unknown` — this host cannot observe it (the probe tool is missing or
+ *   failed, or the platform records none): liveness is trusted.
  */
-export function procStartTime(pid: number): number | undefined {
-  if (process.platform !== "linux") return undefined;
+export type StartTimeObservation =
+  | { kind: "time"; value: bigint; resolution: bigint }
+  | { kind: "gone" }
+  | { kind: "unknown" };
+
+/** Runs a probe command: its stdout, or throws (a spawn error or non-zero exit). */
+export type ProbeRunner = (file: string, args: string[]) => string;
+
+const runProbe: ProbeRunner = (file, args) =>
+  execFileSync(file, args, {
+    encoding: "utf8",
+    timeout: 10_000,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "ignore"],
+    env: { ...process.env, LC_ALL: "C" },
+  });
+
+/** A spawn failure (tool missing, timed out) rather than the tool's own non-zero exit. */
+function probeUnavailable(err: unknown): boolean {
+  const e = err as { code?: unknown; status?: unknown; signal?: unknown };
+  return typeof e.code === "string" || (e.status == null && e.signal != null);
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * Process start time, as the CLI's `pid_liveness::proc_start_time` records it:
+ *
+ * - Linux: `/proc/<pid>/stat` field 22 (clock ticks since boot).
+ * - Windows: `GetProcessTimes` creation time, a FILETIME 100 ns tick count —
+ *   read through .NET's `Process.StartTime.ToFileTimeUtc()`, the same value.
+ * - macOS: microseconds since the epoch. `ps -o lstart=` gives whole seconds,
+ *   so the observation's resolution is one second.
+ */
+export function procStartTime(
+  pid: number,
+  platform: NodeJS.Platform = process.platform,
+  run: ProbeRunner = runProbe
+): StartTimeObservation {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return { kind: "gone" };
+  switch (platform) {
+    case "linux":
+      return linuxStartTime(pid);
+    case "win32":
+      return windowsStartTime(pid, run);
+    case "darwin":
+      return macosStartTime(pid, run);
+    default:
+      return { kind: "unknown" };
+  }
+}
+
+function linuxStartTime(pid: number): StartTimeObservation {
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
     const rest = stat
       .slice(stat.lastIndexOf(")") + 1)
       .trim()
       .split(/\s+/);
-    const value = Number(rest[19]);
-    return Number.isFinite(value) ? value : undefined;
+    return /^\d+$/.test(rest[19] ?? "")
+      ? { kind: "time", value: BigInt(rest[19]), resolution: 1n }
+      : { kind: "gone" };
   } catch {
-    return undefined;
+    return { kind: "gone" };
   }
 }
 
-/** Twin of `beamtalk_workspace::pid_liveness::start_time_matches`. */
+function windowsStartTime(pid: number, run: ProbeRunner): StartTimeObservation {
+  // `gone` only when the process does not exist; any other failure (access
+  // denied reading another user's process) is `unknown`, never a mismatch.
+  const script =
+    `try { $p = [System.Diagnostics.Process]::GetProcessById(${pid}) } catch { 'gone'; exit 0 }; ` +
+    `try { $p.StartTime.ToFileTimeUtc() } catch { 'unknown' }`;
+  let out: string;
+  try {
+    out = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]).trim();
+  } catch {
+    return { kind: "unknown" };
+  }
+  if (out === "gone") return { kind: "gone" };
+  return /^\d+$/.test(out)
+    ? { kind: "time", value: BigInt(out), resolution: 1n }
+    : { kind: "unknown" };
+}
+
+function macosStartTime(pid: number, run: ProbeRunner): StartTimeObservation {
+  let out: string;
+  try {
+    out = run("ps", ["-o", "lstart=", "-p", String(pid)]).trim();
+  } catch (err) {
+    // `ps` exits non-zero when no process has that pid.
+    return probeUnavailable(err) ? { kind: "unknown" } : { kind: "gone" };
+  }
+  // `lstart` (LC_ALL=C), local time: "Wed Nov 25 11:00:00 2026".
+  const m = /^\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})$/.exec(out);
+  const month = m ? MONTHS.indexOf(m[1]) : -1;
+  if (!m || month < 0) return out === "" ? { kind: "gone" } : { kind: "unknown" };
+  const ms = new Date(
+    Number(m[6]),
+    month,
+    Number(m[2]),
+    Number(m[3]),
+    Number(m[4]),
+    Number(m[5])
+  ).getTime();
+  if (!Number.isFinite(ms)) return { kind: "unknown" };
+  return { kind: "time", value: BigInt(ms / 1000) * 1_000_000n, resolution: 1_000_000n };
+}
+
+/**
+ * Twin of `beamtalk_workspace::pid_liveness::start_time_matches`: no recorded
+ * start time matches; a recorded one needs an observed, equal one (compared at
+ * the observation's resolution). A process that is gone is a mismatch; one
+ * whose start time this host cannot observe is trusted on liveness alone.
+ */
 export function startTimeMatches(
-  expected: number | undefined,
-  actual: number | undefined
+  expected: bigint | undefined,
+  actual: StartTimeObservation
 ): boolean {
   if (expected === undefined) return true;
-  if (actual === undefined) return process.platform !== "linux"; // cannot observe elsewhere: trust liveness
-  return expected === actual;
+  switch (actual.kind) {
+    case "gone":
+      return false;
+    case "unknown":
+      return true;
+    case "time":
+      return expected / actual.resolution === actual.value / actual.resolution;
+  }
 }
 
 // ─── Beamtalk source-literal helpers ────────────────────────────────────────

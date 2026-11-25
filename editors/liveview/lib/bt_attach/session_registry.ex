@@ -60,7 +60,14 @@ defmodule BtAttach.SessionRegistry do
   never be allowed to grant access to another user's session.
   """
 
-  use GenServer
+  # BT-5129/BT-5189: `terminate/2` closes every live session, bounded by
+  # `@close_all_timeout_ms`. The supervisor's shutdown bound for this child
+  # must be larger, or it kills the registry mid-close (the default 5000 ms
+  # used to equal the close bound, so slow closes were cut off).
+  @close_all_timeout_ms 4_000
+  @shutdown_ms @close_all_timeout_ms + 2_000
+
+  use GenServer, shutdown: @shutdown_ms
 
   require Logger
 
@@ -232,7 +239,8 @@ defmodule BtAttach.SessionRegistry do
     {:ok, %{entries: %{}, reap_after_ms: reap_after}}
   end
 
-  @close_all_timeout_ms 5_000
+  @doc false
+  def close_all_timeout_ms, do: @close_all_timeout_ms
 
   # BT-5129: a graceful front stop used to leave every session to the
   # workspace's 4 h idle bound, because `release/1` only arms a grace timer the

@@ -1,23 +1,34 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { panels } = vi.hoisted(() => ({
-  panels: [] as Array<{ disposed: boolean; posted: unknown[] }>,
+  panels: [] as Array<{
+    disposed: boolean;
+    posted: unknown[];
+    send: (msg: unknown) => void;
+  }>,
 }));
 
 vi.mock("vscode", () => ({
   ViewColumn: { Two: 2 },
   window: {
     createWebviewPanel: () => {
-      const state = { disposed: false, posted: [] as unknown[] };
+      const state = {
+        disposed: false,
+        posted: [] as unknown[],
+        send: (_msg: unknown) => {},
+      };
       panels.push(state);
       let onDispose: () => void = () => {};
       return {
         webview: {
           html: "",
-          onDidReceiveMessage: () => ({ dispose() {} }),
+          onDidReceiveMessage: (cb: (msg: unknown) => void) => {
+            state.send = cb;
+            return { dispose() {} };
+          },
           postMessage: (m: unknown) => {
             state.posted.push(m);
             return Promise.resolve(true);
@@ -163,5 +174,84 @@ describe("InspectorPanel reconnect (BT-5130)", () => {
     InspectorPanel.show(fakeClient(1), { kind: "actor", info: { pid: "<0.9.0>", class: "Foo" } });
     InspectorPanel.closeActorPanels();
     expect(panels[0].disposed).toBe(true);
+  });
+});
+
+describe("InspectorPanel error states and waiters (BT-5189)", () => {
+  beforeEach(() => {
+    InspectorPanel.disposeAll();
+    panels.length = 0;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const binding = { kind: "binding" as const, name: "x", value: "", sessionId: "s1" };
+  const lastPosted = (i = 0) => JSON.stringify(panels[i].posted.at(-1));
+
+  it("shows the real error once the new client has served the binding", async () => {
+    InspectorPanel.show(fakeClient("old"), binding);
+    await flush();
+    const next = connectingClient("fresh");
+    InspectorPanel.setClient(next.client);
+    next.connect();
+    await flush();
+    expect(lastPosted()).toContain("fresh");
+
+    // The session is alive on the new client; a later failure is just that.
+    next.bindingValue.mockRejectedValue(new Error("boom"));
+    panels[0].send({ type: "refresh" });
+    await flush();
+    expect(lastPosted()).toContain("boom");
+    expect(lastPosted()).not.toContain("Session ended");
+  });
+
+  it("says what failed alongside session-ended after a client change", async () => {
+    InspectorPanel.show(fakeClient("old"), binding);
+    await flush();
+    const next = connectingClient("unused");
+    next.bindingValue.mockRejectedValue(new Error("unknown session s1"));
+    InspectorPanel.setClient(next.client);
+    next.connect();
+    await flush();
+    expect(lastPosted()).toContain("Session ended");
+    expect(lastPosted()).toContain("unknown session s1");
+  });
+
+  it("show() on an existing panel replaces its connect waiter (one refetch, not two)", async () => {
+    const next = connectingClient("v");
+    InspectorPanel.show(next.client, binding);
+    InspectorPanel.show(next.client, binding);
+    await flush();
+    expect(next.bindingValue).not.toHaveBeenCalled();
+
+    next.connect();
+    await flush();
+    expect(next.bindingValue).toHaveBeenCalledTimes(1);
+    expect(lastPosted()).toContain("v");
+  });
+
+  it("stops waiting and says so when the client never connects", async () => {
+    vi.useFakeTimers();
+    const next = connectingClient("never");
+    InspectorPanel.show(next.client, binding);
+    expect(lastPosted()).toContain("Loading");
+
+    await vi.advanceTimersByTimeAsync(InspectorPanel.CONNECT_WAIT_MS);
+    expect(lastPosted()).toContain("did not connect in time");
+
+    // The waiter is gone: a late connect does not refetch behind the message.
+    next.connect();
+    await flush();
+    expect(next.bindingValue).not.toHaveBeenCalled();
+  });
+
+  it("drops its waiter when disposed", async () => {
+    const next = connectingClient("v");
+    InspectorPanel.show(next.client, binding);
+    InspectorPanel.disposeAll();
+    next.connect();
+    await flush();
+    expect(next.bindingValue).not.toHaveBeenCalled();
   });
 });

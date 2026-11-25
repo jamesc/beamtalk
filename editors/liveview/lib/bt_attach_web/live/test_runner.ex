@@ -86,7 +86,7 @@ defmodule BtAttachWeb.Live.TestRunner do
   # exactly the body the LiveView used to run directly.
   @test_runner_events ~w(
     tests_refresh run_tests load_tests run_test_class open_test_method
-    dismiss_notice
+    dismiss_notice tests_stop
   )
 
   @doc false
@@ -150,6 +150,14 @@ defmodule BtAttachWeb.Live.TestRunner do
   # with a missing / non-binary `class`/`selector` must be ignored, not crash the
   # socket on a FunctionClauseError before RBAC is reached (matching `save_method`,
   # `revert`, `browser_select_class`, etc.).
+  # Stop a running test run/load (BT-5189). A run can take minutes (its
+  # workspace call is bounded at 10 min), so it needs the same way out an eval
+  # has: kill the workspace-side worker running it, drop the waiting task, and
+  # free the controls.
+  def handle_event("tests_stop", _params, socket) do
+    {:noreply, stop_test_op(socket)}
+  end
+
   def handle_event("run_test_class", _params, socket), do: {:noreply, socket}
   def handle_event("open_test_method", _params, socket), do: {:noreply, socket}
 
@@ -251,11 +259,17 @@ defmodule BtAttachWeb.Live.TestRunner do
   # the right result-application path runs; either way the op is no longer in
   # flight, so the controls re-enable.
   def handle_async(:test_op, {:ok, {:run, dispatch_result}}, socket) do
-    {:noreply, socket |> apply_test_result(dispatch_result) |> assign(tests_running: false)}
+    {:noreply,
+     socket
+     |> apply_test_result(dispatch_result)
+     |> assign(tests_running: false, test_op_pid: nil)}
   end
 
   def handle_async(:test_op, {:ok, {:load, dispatch_result}}, socket) do
-    {:noreply, socket |> apply_test_load(dispatch_result) |> assign(tests_running: false)}
+    {:noreply,
+     socket
+     |> apply_test_load(dispatch_result)
+     |> assign(tests_running: false, test_op_pid: nil)}
   end
 
   # A newer run/load `cancel_async`-ed this one. Safe as a no-op only because
@@ -275,10 +289,21 @@ defmodule BtAttachWeb.Live.TestRunner do
     {:noreply,
      assign(socket,
        tests_running: false,
+       test_op_pid: nil,
        test_results: nil,
        tests_error: "The test run failed unexpectedly.",
        tests_error_owner: :run_load
      )}
+  end
+
+  # The `:test_op` task announces its pid (`start_test_op/2`), so Stop can find
+  # the workspace-side worker it waits on. A stale announcement (a run that was
+  # replaced or stopped meanwhile) carries an old token and is ignored.
+  @doc false
+  def handle_info({:test_op_task, token, pid}, socket) do
+    if socket.assigns[:test_op_token] == token,
+      do: {:noreply, assign(socket, test_op_pid: pid)},
+      else: {:noreply, socket}
   end
 
   # ── Test-runner pane data source (BT-2557) ──────────────────────────────────
@@ -378,10 +403,7 @@ defmodule BtAttachWeb.Live.TestRunner do
   defp run_tests(socket, class) do
     ctx = RequestContext.build(socket)
 
-    socket
-    |> assign(tests_running: true, tests_error: nil, tests_error_owner: nil)
-    |> cancel_async(:test_op, :cancelled)
-    |> start_async(:test_op, fn ->
+    start_test_op(socket, fn ->
       # Off the LiveView process — capture only `ctx`, never `socket`.
       {:run, Facade.dispatch(:run_tests, %{class: class}, ctx)}
     end)
@@ -395,12 +417,79 @@ defmodule BtAttachWeb.Live.TestRunner do
   defp load_tests(socket) do
     ctx = RequestContext.build(socket)
 
-    socket
-    |> assign(tests_running: true, tests_error: nil, tests_error_owner: nil)
-    |> cancel_async(:test_op, :cancelled)
-    |> start_async(:test_op, fn ->
+    start_test_op(socket, fn ->
       {:load, Facade.dispatch(:load_tests, %{}, ctx)}
     end)
+  end
+
+  # Start a run/load in the `:test_op` task. The task first tells the LiveView
+  # its pid (tagged with a fresh token), so `stop_test_op/1` can reach the
+  # workspace-side worker its `:erpc` call is waiting on (BT-5189).
+  defp start_test_op(socket, op) do
+    lv = self()
+    token = make_ref()
+
+    socket
+    |> stop_remote_test_worker()
+    |> assign(
+      tests_running: true,
+      tests_error: nil,
+      tests_error_owner: nil,
+      test_op_token: token,
+      test_op_pid: nil
+    )
+    |> cancel_async(:test_op, :cancelled)
+    |> start_async(:test_op, fn ->
+      send(lv, {:test_op_task, token, self()})
+      op.()
+    end)
+  end
+
+  # Stop: kill the workspace-side worker, drop the task, and say so. A no-op
+  # when nothing is running.
+  defp stop_test_op(%{assigns: %{tests_running: true}} = socket) do
+    socket
+    |> stop_remote_test_worker()
+    |> cancel_async(:test_op, :cancelled)
+    |> assign(
+      tests_running: false,
+      test_op_token: nil,
+      test_op_pid: nil,
+      test_results: nil,
+      tests_error: "Test run stopped.",
+      tests_error_owner: :run_load
+    )
+  end
+
+  defp stop_test_op(socket), do: socket
+
+  defp stop_remote_test_worker(socket) do
+    case socket.assigns[:test_op_pid] do
+      pid when is_pid(pid) -> kill_remote_workers(pid)
+      _ -> :ok
+    end
+
+    socket
+  end
+
+  # The run/load is an `:erpc` call whose worker process lives on the
+  # workspace node and is monitored by the waiting task; cancelling the task
+  # alone would leave it running for up to 10 minutes. Kill every remote
+  # process the task monitors (that is only the call's worker) before the task
+  # itself is cancelled.
+  @doc false
+  def kill_remote_workers(task_pid) do
+    case Process.info(task_pid, :monitors) do
+      {:monitors, monitors} ->
+        for {:process, pid} <- monitors, is_pid(pid), node(pid) != node() do
+          Process.exit(pid, :kill)
+        end
+
+        :ok
+
+      nil ->
+        :ok
+    end
   end
 
   # Apply a completed `run_tests` dispatch to the socket. Pure (no dispatch);

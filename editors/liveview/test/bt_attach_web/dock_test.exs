@@ -58,6 +58,7 @@ defmodule BtAttachWeb.Live.DockTest do
   use ExUnit.Case, async: false
 
   alias BtAttachWeb.Live.Dock
+  alias BtAttachWeb.Live.Dock.GitChanges
   alias BtAttachWeb.Live.DockFakeClient
   alias BtAttachWeb.StubWorkspaceClient
 
@@ -440,6 +441,20 @@ defmodule BtAttachWeb.Live.DockTest do
   end
 
   describe "destructive-flush confirmation path" do
+    test "BT-5189: a second click while the flush is queued is ignored; Stop reports it" do
+      socket = base_socket(%{eval_running: true})
+      params = %{"class" => "Foo", "kind" => "remove-class"}
+
+      {:noreply, socket} = Dock.handle_event("flush_destructive", params, socket)
+      {:noreply, socket} = Dock.handle_event("flush_destructive", params, socket)
+      assert length(socket.assigns.eval_queue) == 1
+      assert Dock.eval_pending?(socket, GitChanges.flush_destructive_key("Foo", "remove-class"))
+
+      {:noreply, socket} = Dock.handle_event("eval_interrupt", %{}, socket)
+      assert socket.assigns.flush_error == "Flushing Foo did not complete: Stopped before it ran."
+      refute Dock.eval_pending?(socket, GitChanges.flush_destructive_key("Foo", "remove-class"))
+    end
+
     test "a non-owner (Observer) click is a no-op — the button isn't even rendered for them" do
       socket = base_socket(%{role: :observer})
 
@@ -1044,12 +1059,18 @@ defmodule BtAttachWeb.Live.DockTest do
     end
   end
 
-  describe "eval_async/5 (BT-5129: the single off-process path for non-dock eval sites)" do
+  describe "eval_async/6 (BT-5129: the single off-process path for non-dock eval sites)" do
     test "folds the raw eval result through the caller's fold on the socket" do
       socket =
-        Dock.eval_async(base_socket(), self(), "1 + 1", fn socket, result ->
-          Phoenix.Component.assign(socket, error: "folded #{inspect(result)}")
-        end)
+        Dock.eval_async(
+          base_socket(),
+          self(),
+          "1 + 1",
+          fn socket, result ->
+            Phoenix.Component.assign(socket, error: "folded #{inspect(result)}")
+          end,
+          &no_reject/2
+        )
 
       assert socket.assigns.error =~ "folded {:ok"
       assert socket.assigns.eval_running == false
@@ -1073,12 +1094,93 @@ defmodule BtAttachWeb.Live.DockTest do
     test "the queue is bounded by source size as well as entry count" do
       big = String.duplicate("x", 600_000)
       socket = base_socket(%{eval_running: true})
-      socket = Dock.eval_async(socket, self(), big, fn s, _ -> s end)
+      socket = Dock.eval_async(socket, self(), big, fn s, _ -> s end, &reject_to_error/2)
       assert length(socket.assigns.eval_queue) == 1
 
-      socket = Dock.eval_async(socket, self(), big, fn s, _ -> s end)
+      socket = Dock.eval_async(socket, self(), big, fn s, _ -> s end, &reject_to_error/2)
       assert length(socket.assigns.eval_queue) == 1
       assert socket.assigns.error =~ "too large"
+    end
+  end
+
+  defp no_reject(_socket, message), do: flunk("unexpected rejection: #{message}")
+  defp reject_to_error(socket, message), do: Phoenix.Component.assign(socket, error: message)
+
+  # BT-5189: every internal eval names where its failure goes, and is told when
+  # it is dropped from the queue instead of silently never running.
+  describe "dropped and failed internal evals (BT-5189)" do
+    defp queue_fold(socket, tag, opts \\ []) do
+      Dock.eval_async(
+        socket,
+        self(),
+        "1",
+        fn s, _ -> Phoenix.Component.assign(s, [{tag, :folded}]) end,
+        fn s, message -> Phoenix.Component.assign(s, [{tag, message}]) end,
+        opts
+      )
+    end
+
+    test "Stop tells each queued operation's own UI and reports how many it cancelled" do
+      socket = base_socket(%{eval_running: true}) |> queue_fold(:a) |> queue_fold(:b)
+      assert length(socket.assigns.eval_queue) == 2
+
+      {:noreply, socket} = Dock.handle_event("eval_interrupt", %{}, socket)
+
+      assert socket.assigns.eval_queue == []
+      assert socket.assigns.a == "Stopped before it ran."
+      assert socket.assigns.b == "Stopped before it ran."
+      assert socket.assigns.eval_notice == "Stopped. 2 waiting evaluations were cancelled."
+    end
+
+    test "Stop with nothing queued reports nothing cancelled" do
+      {:noreply, socket} =
+        Dock.handle_event("eval_interrupt", %{}, base_socket(%{eval_running: true}))
+
+      assert socket.assigns[:eval_notice] == nil
+    end
+
+    test "a crashed eval task tells the running operation and every queued one" do
+      running = %{kind: :fold, fold: fn s, _ -> s end, reject: &reject_to_error/2, key: nil}
+
+      socket =
+        base_socket(%{eval_running: true, eval_current: running})
+        |> queue_fold(:queued)
+
+      {:noreply, socket} = Dock.handle_async(:eval, {:exit, :boom}, socket)
+
+      assert socket.assigns.error =~ "The evaluation failed unexpectedly: :boom"
+      assert socket.assigns.queued =~ "Cancelled: an evaluation ahead of it failed unexpectedly."
+      assert socket.assigns.eval_running == false
+      assert socket.assigns.eval_queue == []
+    end
+
+    test "abandon_evals (workspace DOWN) tells the running and queued operations" do
+      running = %{kind: :fold, fold: fn s, _ -> s end, reject: &reject_to_error/2, key: nil}
+
+      socket =
+        base_socket(%{eval_running: true, eval_current: running})
+        |> queue_fold(:queued, key: :k)
+        |> Dock.abandon_evals("lost while running", "lost while queued")
+
+      assert socket.assigns.error == "lost while running"
+      assert socket.assigns.queued == "lost while queued"
+      refute Dock.eval_pending?(socket, :k)
+    end
+
+    test "a keyed operation is pending until it folds; a duplicate submit is ignored" do
+      socket = base_socket(%{eval_running: true}) |> queue_fold(:a, key: :k)
+      assert Dock.eval_pending?(socket, :k)
+
+      socket = queue_fold(socket, :a, key: :k)
+      assert length(socket.assigns.eval_queue) == 1
+
+      # The running eval finishes; the queued one runs (inline on this
+      # disconnected socket) and folds, releasing its key.
+      dummy = %{kind: :fold, fold: fn s, _ -> s end, reject: &reject_to_error/2, key: nil}
+      {:noreply, socket} = Dock.handle_async(:eval, {:ok, {dummy, {:ok, 1, "", []}}}, socket)
+
+      assert socket.assigns.a == :folded
+      refute Dock.eval_pending?(socket, :k)
     end
   end
 end

@@ -116,8 +116,9 @@ function connectWorkspace(workspaceId: string, attempt = 0): void {
 
   // Subscribe to log streaming once connected (BT-1433).
   newClient.onConnectionChange((connectionState) => {
-    if (connectionState === "reconnecting") {
-      // A same-client reconnect may land on a restarted node: its actors are gone.
+    if (connectionState === "connected" && newClient.nodeChangedOnLastConnect) {
+      // A same-client reconnect landed on a restarted node: its actors are
+      // gone. A transient reconnect to the same node keeps them (BT-5189).
       InspectorPanel.closeActorPanels();
     }
     if (connectionState === "connected") {

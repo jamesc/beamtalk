@@ -177,6 +177,14 @@ defmodule BtAttachWeb.Live.SessionLifecycle do
       # The tab stays interactive; the dock shows a Stop control meanwhile.
       |> assign(:eval_running, false)
       |> assign(:eval_queue, [])
+      # BT-5189: the job whose task is running (so a crash or `DOWN` can tell
+      # its own UI) and the keys of `Dock.eval_async/6` operations still queued
+      # or running (so their submit controls stay disabled meanwhile).
+      |> assign(:eval_current, nil)
+      |> assign(:eval_pending, MapSet.new())
+      # BT-5189: what the last Stop cancelled ("Stopped. N waiting evaluations
+      # were cancelled."), shown beside the cockpit-wide Stop.
+      |> assign(:eval_notice, nil)
       |> assign(:output, nil)
       |> assign(:eval_warnings, nil)
       |> assign(:error, nil)
@@ -204,6 +212,10 @@ defmodule BtAttachWeb.Live.SessionLifecycle do
       # `phx-disable-with` alone reverts as soon as the (now-immediate) event
       # handler re-renders, since the work moved off-socket to `start_async`.
       |> assign(:tests_running, false)
+      # BT-5189: the running `:test_op` task's pid (announced by the task) and
+      # the token of the run it belongs to — Stop kills its workspace worker.
+      |> assign(:test_op_token, nil)
+      |> assign(:test_op_pid, nil)
       # BT-2599: a transient flag for the off-socket `:test_discover` catalogue
       # discovery — true only while a partial-load re-discovery is in flight so
       # `TestRunner.handle_async(:test_discover, …)` keeps the partial-load
@@ -547,8 +559,16 @@ defmodule BtAttachWeb.Live.SessionLifecycle do
     # Cancel the in-flight eval task too: its late completion would otherwise
     # clear `eval_running` while a post-Reconnect eval runs and start a second
     # concurrent one.
+    #
+    # BT-5189: every internal operation that was running or queued is told so
+    # in its own UI (a rename modal, the method editor's status, a poke bar)
+    # before the eval state is cleared, rather than silently never running.
     socket
     |> Phoenix.LiveView.cancel_async(:eval)
+    |> BtAttachWeb.Live.Dock.abandon_evals(
+      "The workspace connection was lost before it finished; it may not have run.",
+      "Cancelled: the workspace connection was lost."
+    )
     |> Phoenix.LiveView.stream(:transcript, [], reset: true)
     |> Phoenix.LiveView.stream(:repl, [], reset: true)
     |> assign(
@@ -556,7 +576,9 @@ defmodule BtAttachWeb.Live.SessionLifecycle do
       repl_terms: %{},
       repl_history_pos: nil,
       eval_running: false,
-      eval_queue: []
+      eval_current: nil,
+      eval_queue: [],
+      eval_pending: MapSet.new()
     )
   end
 
