@@ -1053,13 +1053,17 @@ fix. Each has since changed:
    The check below is elided when the right operand is proven numeric, the
    BT-5176 research measured the remaining cost at +0.1–0.3 ns per
    comparison (the same order as the receiver guard those sites already
-   pay), and `benchmarks/vs-elixir` now has comparison rows and a baseline
-   (BT-5145).
+   pay), and `benchmarks/vs-elixir` now has comparison rows (11d–11g,
+   added for BT-4823) to measure against.
 2. *"Arithmetic doesn't raise `type_error` for a wrong-kind argument; it
    goes through reflected dispatch and ends in `does_not_understand`, so a
    comparison `type_error` would be a new, inconsistent precedent."* This
-   addendum does not add that precedent. It uses the same reflected
-   dispatch and the same `does_not_understand`.
+   addendum does not add that precedent for *numeric operators*. It uses
+   the same reflected dispatch and the same `does_not_understand`. (The
+   objection was narrower than it sounds: stdlib value types already
+   raise `type_error` from their own comparisons — `aDuration < 5` is
+   "Argument must be a Duration", `beamtalk_duration.erl`. See
+   § Consequences.)
 3. *"The static checker already catches the numeric case."* Only when the
    argument's static type is known. BT-5175 is the counter-example: `1 to:
    nil do: [...]` compiled, and the pure `Integer>>to:do:` body
@@ -1076,8 +1080,8 @@ this is an addendum, not a new ADR.
 
 1. **Rule.** When the left operand of `<`, `<=`, `>` or `>=` is a number at
    run time and the right operand is not, the right operand is sent a
-   **reflected comparison method**. Nothing term-orders a number against a
-   non-number any more. `max:`, `min:`, `between:and:` and every other
+   **reflected comparison method**. The four operators no longer
+   term-order a number against a non-number. `max:`, `min:`, `between:and:` and every other
    caller of the four operators inherit the rule. Equality (`==`, `=:=`,
    `/=`, `=/=`) is untouched and stays total: `3 == nil` is `false`.
 2. **Hook shape: one reflected method per operator**, named on this ADR's
@@ -1088,7 +1092,7 @@ this is an addendum, not a new ADR.
 4. **Trigger: a proactive `is_number` test on the right operand**, on both
    the inlined and the primitive path, elided only where the compiler
    *proves* the right operand numeric. The failing arm is a single call to
-   the existing runtime helper.
+   a runtime helper that shares the arithmetic one's implementation.
 5. **Type checker:** the hook is an ordinary declared method; the checker
    looks it up on the argument's class, so a present hook silences the
    existing warning and supplies the send's type.
@@ -1135,8 +1139,9 @@ Three points of guidance go into the language documentation:
   error. (This differs from the arithmetic guidance, "implement it anyway,
   to reject with intent": arithmetic operators are independent, so a type
   can support `+` but not `/`; the four orderings stand or fall together.)
-- **`n` arrives unconverted** — an `Integer` or a `Float`, exactly as
-  written. The BEAM has no NaN or infinite float (float overflow raises
+- **`n` arrives unconverted** — an `Integer` or a `Float`. (A `Character`
+  on the left arrives as its codepoint, and the hint calls it a number;
+  see `Character` below.) The BEAM has no NaN or infinite float (float overflow raises
   `badarith`), so the number side never brings an unordered value. A user
   type that has one (an undefined `Decimal`, an empty `Interval`) answers
   `false` from each hook.
@@ -1154,7 +1159,7 @@ the operator the caller actually typed. Kind `does_not_understand`
 // => ERROR: '<=' cannot order a number against UndefinedObject — the right operand must be a number, or a value whose class implements 'lessOrEqualFromNumber:'
 
 500 < aMoney     // => true    (aMoney lessThanFromNumber: 500)
-aMoney > 500     // receiver dispatch to Money>>'>', unchanged
+aMoney < bMoney  // receiver dispatch to Money>>'<', unchanged
 3 max: nil       // => ERROR: UndefinedObject does not understand 'greaterThanFromNumber:'
 3 == nil         // => false   (equality stays total)
 nil < 3          // => ERROR: UndefinedObject does not understand '<'   (unchanged, BT-3924)
@@ -1166,17 +1171,22 @@ the hint that `format/1` renders on the `Hint:` line.)
 The two failures are now symmetric: `nil < 3` is a `does_not_understand`
 for `<` on `UndefinedObject`, and `3 < nil` is a `does_not_understand` for
 `lessThanFromNumber:` on `UndefinedObject`. One `on: RuntimeError do:`
-handler covers both, and covers `3 + nil` too.
+handler covers both, and covers `3 + nil` too. The symmetry is between a
+number and a value with no ordering; it does not extend to types that
+validate their own argument (`aDuration < 5` raises `TypeError`, and
+`TypeError` and `RuntimeError` are siblings under `Error`).
 
-The hint is produced by the existing
-`beamtalk_message_dispatch:send_number_coercion/4`, which already receives
-the original operator. It picks the wording by operator family: the
-arithmetic text is unchanged; the four ordering operators get the text
-above (the arithmetic template, "implement it to support …", reads as
-advice to add a method to `nil`, which is the common case here and the
-wrong advice). No second helper and no new export. Its narrow catch — only
-a `does_not_understand` for *this* class and *this* selector — is what
-keeps a bug inside a present hook from being relabelled.
+The hint comes from the same code as the arithmetic one. The body of
+`beamtalk_message_dispatch:send_number_coercion/4` is kept as the one
+implementation, and a second entry point, `send_number_comparison/4`,
+calls it with the ordering wording; codegen chooses the entry point, so
+the runtime holds no table of which operators are comparisons (a rule that
+would otherwise be duplicated across the Rust/Erlang boundary). The
+arithmetic text is unchanged. The ordering text differs because the
+arithmetic template ("implement it to support …") reads as advice to add
+a method to `nil`, the common case here and the wrong advice. The narrow
+catch — only a `does_not_understand` for *this* class and *this* selector
+— is what keeps a bug inside a present hook from being relabelled.
 
 ### Trigger and codegen
 
@@ -1193,6 +1203,7 @@ right operand is proven numeric" (§ Elision):
 | Proven `String` (`"a" < x`) | bare BIF | unchanged (follow-up) |
 | Declared number or `Character` (`n :: Integer`) | kind test on `L`: BIF / send | true arm gains `R?` `case is_number(R)`: BIF / hook |
 | Declared `String` | `is_binary(L)`: BIF / send | unchanged |
+| Declared union with `String` (`:: Integer \| String`) | `is_number(L) or is_binary(L)`: BIF / send | split by kind like the unknown receiver: only the number arm gains the test |
 | Unknown | `is_number(L) or is_binary(L)`: BIF / send | number arm gains the `R?` test; binary arm unchanged |
 
 Reference shape for the unknown receiver, hand-compiled with `erlc +clint`
@@ -1209,7 +1220,7 @@ case call 'erlang':'is_number'(BinLeft) of
       <'true'> when 'true' ->
         call 'erlang':'<'(BinLeft, BinRight)
       <'false'> when 'true' ->
-        call 'beamtalk_message_dispatch':'send_number_coercion'(
+        call 'beamtalk_message_dispatch':'send_number_comparison'(
             BinRight, 'lessThanFromNumber:', [BinLeft], '<')
     end
   <'false'> when 'true' ->
@@ -1233,7 +1244,11 @@ does not go through `ThreadedIr`.
 is_number(P0) of true -> BIF; false -> hook`. `String`'s stay bare. The
 call is in tail position in the method body, so it costs nothing on the
 numeric arm. This is what makes `perform:` and every other dynamic send
-agree with the inlined path.
+agree with the inlined path. `generate_comparison_bif` takes no class and
+is shared with `String` (`string.rs`) and `reflection.rs`, and also emits
+the equality BIFs, so it is split: a numeric-ordering variant for the three
+classes, the existing one for everything else. The unit tests in
+`primitives/integer.rs` that pin the bare output change with it.
 
 **`Character`.** A `Character` is a codepoint integer at run time
 (`beamtalk_primitive:class_of/1` answers `Integer`), so a character held in
@@ -1245,7 +1260,7 @@ so that `$a < nil` behaves the same whether or not the compiler can see the
 number-versus-character confusion (`$a < 5`), which no runtime test can
 see.
 
-**Three analyses read "a comparison on a proven receiver cannot run user
+**Four places read "a comparison on a proven receiver cannot run user
 code and answers a Boolean". Each must take the right operand into
 account, from one shared predicate:**
 
@@ -1259,11 +1274,21 @@ account, from one shared predicate:**
   BT-4452) treats a literal-receiver comparison as a Boolean by
   construction. That holds only with a proven right operand; otherwise it
   decides through `beamtalk_guard_return`, as declared comparisons do.
+- `record_comparison_lowering(left, guard.is_none())` (`operators.rs`)
+  reports "lowered bare" to the BT-4452 backstop. A proven receiver with a
+  tested right operand has no receiver guard but is no longer bare; the
+  flag must come from the shared predicate, with a test that fails when it
+  does not.
+
+A proven-receiver site that gains the test should also offer the BT-4279
+fast path (`is_number(R)`), which the bare path has never needed to.
 
 #### Elision: proven, not declared
 
 The right-operand test is omitted only when the compiler **proves** the
-right operand is a number:
+right operand is a number. This is a new predicate, "proven numeric". It
+is not `ComparisonReceiver::Proven`, which also accepts a `String` literal
+and `self` in `String` and records no kind (`5 < "abc"` must be tested):
 
 - a numeric or character literal (`x < 10`);
 - `self` inside `Integer`, `Float` or `Character`;
@@ -1282,17 +1307,19 @@ declared right operands would leave exactly the motivating cases broken —
 `Number>>max:`, `min:` and `between:and:` all declare `other :: Number`,
 and `Integer>>to:do:` declares `end :: Integer`, so `3 max: nil` would
 still answer `nil` and `1 to: nil do:` would still depend on a local guard.
-The right operand gets the receiver's three-way classification (proven /
-declared / unknown), not a second, looser rule.
+The right operand gets the receiver's standard of evidence (only a proof
+removes the test), not a second, looser rule.
 
 Counted loops are unaffected: an inlined `to:do:` / `timesRepeat:` emits its
-own `erlang:'=<'` on bounds it has already number-checked once in the loop
-preamble (`counted_loops.rs`, BT-5136, BT-5167), and never goes through
-`generate_binary_op`. BT-5175's local guard in the pure `Integer>>to:do:`
-stays as well: it raises a `type_error` that names the limit, once, before
-the first iteration, matching the inlined path. With this addendum the
-comparison inside that loop would raise too, so the two are layered, not
-dependent.
+own `erlang:'=<'` against a limit it has already number-checked once in the
+loop preamble (`counted_loops.rs`, BT-5136, BT-5167), and never goes
+through `generate_binary_op`. BT-5175 (in flight, PR #5762; not on `main`
+as this is written) adds the same check to the pure `Integer>>to:do:`,
+whose body today is a bare `self <= end`. That guard is worth keeping
+after this addendum: it raises a `type_error` that names the limit, once,
+before the first iteration, matching the inlined path. With this addendum
+the comparison inside the loop would raise as well, so neither depends on
+the other.
 
 #### The failing arm, and what it costs
 
@@ -1351,9 +1378,12 @@ method with a declared signature, and nothing is looked up through
 - **`check_binary_operand_types`** (`type_checker/validation/arguments.rs`).
   For a numeric receiver and an argument whose static type is known and not
   numeric, look the reflected selector up on the argument's class:
-  - found — no diagnostic; the send's type is the hook's declared return
-    type, and the hook's parameter is checked against the receiver's type
-    like any other argument;
+  - found — no diagnostic, and the hook's parameter is checked against
+    the receiver's type like any other argument. This function only emits
+    diagnostics (it returns a `bool` to its caller in `receiver.rs`); the
+    send's *type* is inferred separately from `Integer>><`'s declared
+    `-> Boolean`. Phase 3 must find that inference site and make it use
+    the hook's declared return type;
   - not found — today's warning (`` `<` on Integer expects a numeric
     argument, got Nil ``), with its hint changed from "Comparison operators
     require compatible types" to say that it raises `does_not_understand`
@@ -1362,6 +1392,10 @@ method with a declared signature, and nothing is looked up through
   silent, as today. The check is the same code for arithmetic, so the
   false positive this ADR recorded for `5 + aVector` (§ Consequences,
   Negative) is closed by the same change.
+- **Not covered:** `3 max: aMoney`, `min:` and `between:and:` are keyword
+  sends checked against `other :: Number` (`number.bt`). They work at run
+  time through the hooks but still warn at the call site and infer
+  `Number`. Widening those signatures is not proposed.
 
 ### What this addendum does not do
 
@@ -1376,6 +1410,12 @@ method with a declared signature, and nothing is looked up through
   `aMoney > 5` does not imply `5 < aMoney`.
 - **Default sort order.** `List sort`, `Dictionary` and `Set` ordering use
   Erlang term order directly, never `<`.
+- **Collection `max` / `min`.** These call `lists:max` / `lists:min`
+  (`beamtalk_collection.erl`), so `#(3, nil) max` still answers `nil` and
+  ignores hooks, while `3 max: nil` raises. Follow-up.
+- **The start of an inlined `to:do:`.** The inlined loop number-checks its
+  limit, not its start (`counted_loops.rs`). Pre-existing; not changed
+  here.
 
 ### Prior art
 
@@ -1481,13 +1521,40 @@ four, consistent by construction, and it would cover `max:`, `min:` and
 - This ADR already asked that a comparison hook "reuse `<verb>FromNumber:`
   naming, not invent a second scheme".
 
+**One hook that carries the operator** (Squeak's
+`adaptToInteger:andCompare:` shape, e.g. `compareFromNumber: n op: #<`).
+One method, any answer, and no trichotomy problem. Rejected for the reason
+this ADR rejected `adaptTo:andSend:`: the operator becomes data, the body
+is a `perform:` or a four-way branch, and the return type no longer depends
+on a selector the checker can look up.
+
+**Convert, then re-send** (Ruby's `coerce`: ask the right operand to turn
+the number into its own kind, then send the operator receiver-side). One
+method, it reuses `Money>><` and `Comparable`, and it has no recursion
+trap — the strongest alternative on boilerplate. Rejected: it only fits
+types a number converts *into* (is `500` five hundred cents or dollars? a
+`Vector` has no such conversion), which is the generality-tower model this
+ADR rejected for arithmetic; and it would give comparison a different
+protocol from the `plusFromNumber:` family it sits beside. A type that
+does have a natural conversion can write each hook as one line through it.
+
+**Fix only the primitive path and the stdlib callers** (`is_number` checks
+in the `@primitive` bodies and in `max:`, `min:`, `between:and:`,
+`to:do:`), leaving inlined codegen alone. Far smaller. Rejected: almost
+every comparison in user code is inlined, so `3 <= nil` and `x < y` would
+keep term-ordering and the two paths would disagree, which is the state
+BT-4823 removed for receivers.
+
 **Plain `type_error` (the BT-5176 research recommendation).** Raise
 `type_error` "Comparison argument must be a number" with a frame-free
 `erlang:error/1` arm. It is cheaper and smaller. Rejected by the owner for
 consistency, and the consistency argument is concrete: BT-3928's own
 objection to a runtime check was that a comparison `type_error` would
 diverge from arithmetic; `3 + nil` and `3 < nil` would raise different
-exception classes for the same mistake; and `aMoney < 5` working while
+exception classes for the same mistake (though the language is not
+uniform here either way: `aDuration < 5` already raises `TypeError` from
+`Duration`'s own check, so with hooks `5 < aDuration` and `aDuration < 5`
+differ instead); and `aMoney < 5` working while
 `5 < aMoney` is a hard error with no opt-in is the asymmetry this ADR
 exists to remove. Shipping `type_error` now and hooks later is not a
 cheap middle path either: the second step would change the error's class
@@ -1519,8 +1586,9 @@ for comparison and `RuntimeError` for arithmetic, and a missing method
 
 **Positive**
 
-- No number is ever term-ordered against a non-number through `<`, `<=`,
-  `>`, `>=`, `max:`, `min:` or `between:and:`, on any path.
+- No number is term-ordered against a non-number through `<`, `<=`, `>`,
+  `>=`, `max:`, `min:` or `between:and:`, on the inlined or the primitive
+  path. (The exceptions are listed in § What this addendum does not do.)
 - `5 < aMoney` can be made to work, with a checked signature.
 - One mechanism, one helper and one error kind for both operator families.
 - The receiver and argument sides now follow the same proven / declared /
@@ -1531,6 +1599,12 @@ for comparison and `RuntimeError` for arithmetic, and a missing method
 - **Breaking change** for code that relied on term order (§ Migration).
 - Literal-receiver comparisons with an unproven right operand pay a stack
   frame in otherwise call-free code (§ The failing arm).
+- A comparison that becomes a `GuardedOperator` can change a loop's
+  shape: a field-writing loop whose condition is `0 < self.n` moves from
+  the hybrid shape to `StateAcc` (BT-4121), which costs a store and reload
+  per iteration, not just a frame. Variable-first conditions
+  (`self.n > 0`) are already guarded and do not change. Phase 0 adds a row
+  for it.
 - Four more one-line methods for a type that wants full number interop: up
   to sixteen with arithmetic. BT-2714 (derivers) is still the place to
   reduce that.
@@ -1544,10 +1618,12 @@ for comparison and `RuntimeError` for arithmetic, and a missing method
   explicit conversion at the call site.
 - A hook can disagree with equality: `5 <= aMoney` and `5 >= aMoney` may
   both be `true` while `5 == aMoney` is `false`.
-- Counted loops raise `type_error` for a non-number bound and operators
-  raise `does_not_understand`. Both are deliberate (a validated keyword
+- Counted loops raise `type_error` for a non-number bound, stdlib value
+  types raise `type_error` from their own comparisons (`aDuration < 5`),
+  and number operators raise `does_not_understand` (`5 < aDuration`). Both are deliberate (a validated keyword
   argument versus a message the argument does not understand), but they
-  are two classes for what a user may see as one mistake.
+  are two sibling classes for what a user may see as one mistake, and
+  only `on: Error do:` catches all of them.
 
 **Neutral**
 
@@ -1572,7 +1648,9 @@ form:
 > `does_not_understand` when it has none.
 > - Unchanged: `==`, `=:=`, `/=`, `=/=`; `String` and `Symbol` receivers;
 >   default `sort` and `Dictionary`/`Set` order.
-> - Migration: test for `nil` before comparing (`x isNil`, `ifNil:`); for a
+> - Migration: test for `nil` before comparing (`x isNil`, `ifNil:`), and
+>   for a symbol sentinel before comparing against it (`elapsed < timeout`
+>   where `timeout` may be `#infinity`); for a
 >   deliberate mixed order use default `sort` or an explicit comparator; to
 >   make a value type comparable with numbers, implement the four hooks.
 > - Reverses BT-3928.
@@ -1617,8 +1695,8 @@ cost table in § The failing arm is measured.
 
 | Phase | Size | Content | Acceptance |
 |---|---|---|---|
-| **0. Baseline** | S | Add `benchmarks/vs-elixir` rows before any behaviour change: `5 < b` with `b` untyped (proven receiver, unknown right — the new row BT-5176 asked for), `a < b` both untyped, `a :: Integer < b` untyped, and `5 + b` untyped as the arithmetic reference. Record them. | Rows run under `just bench-vs-elixir`; baseline committed under `benchmarks/vs-elixir/results/`. |
-| **1. Runtime** | S | `send_number_coercion/4` chooses its hint by operator family. EUnit: comparison hint text; arithmetic hint unchanged; a DNU raised inside a present hook is not relabelled. | `just test` green; no new export. |
+| **0. Baseline** | S | Add `benchmarks/vs-elixir` rows before any behaviour change: `5 < b` with `b` untyped (proven receiver, unknown right — the new row BT-5176 asked for), `a < b` both untyped, `a :: Integer < b` untyped, `5 + b` untyped as the arithmetic reference, and an actor loop `[0 < self.n] whileTrue:` that writes a field. Record them together with the existing rows 11d–11g, which are in the harness (`vs_bench.erl`) but in no committed results file. | Rows run under `just bench-vs-elixir`; baseline committed under `benchmarks/vs-elixir/results/`. |
+| **1. Runtime** | S | `send_number_comparison/4`, sharing `send_number_coercion/4`'s body. EUnit: comparison hint text; arithmetic hint unchanged; a DNU raised inside a present hook is not relabelled. | `just test` and `just dialyzer` green. |
 | **2. Codegen and behaviour** | M–L, `ci:corpus` | Shared selector table in `beamtalk-core` (replaces `coercion_selector`). Right-operand test on both inlined arms and in `generate_comparison_bif` for `Integer`/`Float`/`Character`. The shared "bare and Boolean" predicate for `classify_binary`, the BT-4279 fast path and the guard-return rewrite. Flip the two pins. New `stdlib/test/number_comparison_arg_test.bt`. CHANGELOG entry and language-features rewrite in the same PR. | See below. |
 | **3. Type checker** | S | Hook lookup in `check_binary_operand_types` for all eight operators; new hint text; inferred type from the hook. Blocked by phase 2. | Tests: a class with the hook produces no diagnostic and the send has the hook's return type; a class without it warns with the new hint; an untyped argument is silent; `5 + aVector` with `plusFromNumber:` no longer warns. |
 | **4. Follow-ups** (separate issues) | — | `String`/`Symbol` receivers; proving more right operands (loop counters, arithmetic results); match-arm guards. | — |
@@ -1650,7 +1728,9 @@ cost table in § The failing arm is measured.
   (`[a > i] whileTrue:`, `a max: 3`) and the two new unknown/declared-
   receiver rows gain one `is_number` test: reductions and heap words
   identical, ns inside the run-to-run spread. The new `5 < b` row is no
-  slower than the `5 + b` row. All of it is recorded in
+  slower than the `5 + b` row. The actor-loop row is reported with its
+  before and after loop shape (see § Consequences); a regression there is
+  a decision for the owner, not an automatic stop. All of it is recorded in
   `docs/development/benchmarks.md`. A result outside those bounds stops
   the PR and goes back to open question 1.
 
@@ -1658,10 +1738,14 @@ cost table in § The failing arm is measured.
 
 1. **The frame on literal-receiver sites.** Hooks make the failing arm a
    returning call, so `0 < x` (proven receiver, unproven right) pays a
-   stack frame in call-free code — what `5 + x` already pays. Accept that
-   (recommended: the shape is rare, since comparisons are idiomatically
-   written variable-first, and everything else is free), or fall back to a
-   frame-free `type_error` with no hooks?
+   stack frame in call-free code — what `5 + x` already pays — and can
+   move a field-writing actor loop to `StateAcc`. The consistency that
+   buys is with number arithmetic and with `nil < 3`, not with every
+   comparison: stdlib value types already raise `type_error` for a
+   wrong-kind argument. Accept the cost (recommended: the shape is rare,
+   since comparisons are idiomatically written variable-first, and
+   everything else is free), or fall back to a frame-free `type_error`
+   with no hooks?
 2. **Declared right operands are tested, not trusted.** This departs from
    the BT-5176 proposal and from arithmetic, in order to make `max:`,
    `min:`, `between:and:` and `to:do:` actually raise. Confirm.
@@ -1705,6 +1789,7 @@ duplicate Epic)
   (counted-loop limit guard, PR #5762), BT-3928 (term-order fallback,
   reversed), BT-3924 and BT-4823 (receiver side), BT-5136 / BT-5167
   (counted-loop number guards), BT-4279 (fast path), BT-4452 (guard-return
-  rewrite), BT-5145 (benchmark baseline); ADR 0127 (`Comparable`), ADR 0137
+  rewrite); ADR 0002 (comparison operators are the Erlang BIFs — amended
+  here for a number against a non-number), ADR 0127 (`Comparable`), ADR 0137
   (cell brackets), ADR 0152 (no cross-file extensions: a hook can only be
   declared in the class's own file)
