@@ -86,7 +86,9 @@ mod tests;
 
 // The integer-literal reader, shared with the formatter (BT-5183), which
 // checks that a recorded number spelling reads back as the printed value.
-pub(crate) use expressions::parse_integer;
+#[cfg(test)]
+use expressions::parse_integer;
+pub(crate) use expressions::parse_integer_literal;
 
 // ============================================================================
 // Pratt Parsing for Binary Operator Precedence
@@ -559,14 +561,17 @@ pub fn needs_blank_line_to_complete(source: &str) -> bool {
 }
 
 /// Check if a lexer error message is a human-readable diagnostic (complete but
-/// invalid syntax) rather than a raw source fragment from an unterminated literal.
+/// invalid syntax) rather than an input that more lines could complete.
 ///
-/// Unterminated literal errors contain the raw source text (e.g., `"hello` or `$\`),
-/// which starts with a delimiter character.  Diagnostic errors are English sentences
-/// that start with a lowercase letter (e.g., "single-quoted strings are no longer
-/// supported...").
+/// Diagnostic errors are English sentences that start with a lowercase letter
+/// (e.g., "single-quoted strings are no longer supported..."). An
+/// unterminated string or block comment is also reported as a sentence
+/// (`unterminated string literal starting at ...`, BT-5182) but more input
+/// can close it, so it is not complete. Other incomplete-input errors carry
+/// the raw source text (e.g., `$` at end of input), which starts with a
+/// delimiter character.
 fn is_diagnostic_error(msg: &str) -> bool {
-    msg.starts_with(|c: char| c.is_ascii_lowercase())
+    super::lexer::is_message_error(msg) && !super::lexer::is_unterminated_error(msg)
 }
 
 /// The semantic category of a diagnostic, used by `@expect` for suppression.
@@ -663,22 +668,7 @@ pub enum DiagnosticCategory {
     /// when every arm of the match is a block literal (an intentional
     /// block-valued match). Suppressible with `@expect match_arm_block`.
     MatchArmBlock,
-    /// A block literal that reads or writes a class variable of its home
-    /// class is used where it will run outside an invocation of that class
-    /// (ADR 0130 §5): a reading block handed to an asynchronous send, stored
-    /// or returned sees the values captured at creation; a writing block
-    /// carried into another class's class-side method raises
-    /// `class_state_unreachable`. A lint, not a guarantee.
-    ClassStateAbroad,
-    /// A class-side method that runs in its class's `gen_server` process (it
-    /// is not direct-called) and directly calls a process-sensitive Erlang
-    /// function — one that blocks, or depends on the identity or ownership of
-    /// the calling process (BT-4031, ADR 0129). Suppressible with
-    /// `@expect class_process_ffi` for deliberate serialisation.
-    ClassProcessFfi,
-    /// A class-side method that is direct-called in the caller's process
-    /// (today: `class sealed` in a `sealed` class without class variables;
-    /// after ADR 0142, every class method of a class without class variables)
+    /// A class-side method, which runs in the caller's process (ADR 0142),
     /// directly calls an Erlang function that creates a resource tied to the
     /// calling process (ETS table, port, linked process, link, monitor,
     /// registered name, timer) or acts on the calling process itself
@@ -1993,12 +1983,20 @@ impl Parser {
     /// - Right brace (`}`) - tuple end
     /// - Semicolon (`;`) - cascade separator
     /// - Newline (when inside method body) - implicit statement separator
+    /// - The start of a class, protocol, type alias, native declaration or
+    ///   standalone method (at top level) - the next definition (BT-5182)
     pub(super) fn synchronize(&mut self) {
         // If we're already at a newline boundary in a method body, don't
         // advance past the first token of the next statement. parse_expression()
         // typically consumes the bad token via advance() in parse_primary, so
         // current may already point to the next statement's first token.
         if !self.is_at_end() && self.in_method_body && self.current_token().has_leading_newline() {
+            return;
+        }
+        // Likewise at top level, never skip the definition right after the
+        // bad token: a stray `)` line before `Object subclass: Foo` must not
+        // swallow the class header.
+        if self.is_at_top_level_definition() {
             return;
         }
 
@@ -2028,6 +2026,10 @@ impl Parser {
         }
 
         if matches!(self.current_kind(), TokenKind::Caret) {
+            return true;
+        }
+
+        if self.is_at_top_level_definition() {
             return true;
         }
 
@@ -2175,6 +2177,21 @@ impl Parser {
                 std::mem::take(&mut self.gap_comments),
             ),
         }
+    }
+
+    /// Whether the parser is at top level (outside any class, protocol or
+    /// method body) and the current token starts a definition `parse_module`
+    /// dispatches on: a class, protocol, type alias, native declaration or
+    /// standalone method. Such a token is a recovery point there (BT-5182).
+    fn is_at_top_level_definition(&self) -> bool {
+        !self.in_method_body
+            && !self.in_class_body
+            && !self.in_protocol_body
+            && (self.is_at_class_definition()
+                || self.is_at_protocol_definition()
+                || self.is_at_type_alias_definition()
+                || self.is_at_native_declaration()
+                || self.is_at_standalone_method_definition())
     }
 
     /// Checks if the current position looks like the start of a class definition.

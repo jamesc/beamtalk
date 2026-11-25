@@ -92,9 +92,14 @@ if not "!CK_CHECK!"=="!RELEASE_COOKIE!" (
 )
 if "!RELEASE_COOKIE:~0,1!"=="-" goto :cookie_dash
 if "!RELEASE_COOKIE:~0,1!"=="+" goto :cookie_dash
+rem `set /p "=..."` (export_cookie) cannot write a value starting with `=`.
+if "!RELEASE_COOKIE:~0,1!"=="=" goto :cookie_equals
 goto :cookie_ok
 :cookie_dash
 echo error: RELEASE_COOKIE must not start with '-' or '+' 1>&2
+exit /b 2
+:cookie_equals
+echo error: RELEASE_COOKIE must not start with '=' on Windows 1>&2
 exit /b 2
 :cookie_ok
 
@@ -195,17 +200,65 @@ for /d %%D in ("%ROOT%\lib\*") do (
 exit /b 0
 
 :export_cookie
-rem BT-5126: pass the cookie through the process environment, never argv.
-rem `-setcookie`, ERL_AFLAGS and -args_file all expand into the emulator's
-rem command line, which other local users can read from the process list.
-rem erl gets a random throwaway -setcookie (so OTP never touches
-rem %USERPROFILE%\.erlang.cookie) and the node adopts the real cookie from
-rem __COOKIE_ENV__ on boot. See launcher.sh's `export_cookie`.
-set "PLACEHOLDER_ARGS="
-if defined RELEASE_COOKIE (
-    set "__COOKIE_ENV__=!RELEASE_COOKIE!"
-    set "PLACEHOLDER_ARGS=-setcookie bt!RANDOM!!RANDOM!!RANDOM!!RANDOM!!RANDOM!!RANDOM!!RANDOM!!RANDOM!"
+rem BT-5126 / BT-5185: the cookie never goes on erl's command line (a cookie
+rem flag, ERL_AFLAGS and -args_file all expand into the emulator's argv, which other
+rem local users can read from the process list), and the node never runs with
+rem any other cookie, even while it boots. It goes in .erlang.cookie in a fresh
+rem directory under the per-user %TEMP%, which erl is started with as its home:
+rem erlexec derives -home from HOMEDRIVE + HOMEPATH on Windows, so OTP's auth
+rem reads the cookie there as the kernel boots. The node puts HOMEDRIVE and
+rem HOMEPATH back and removes the directory first thing. RELEASE_COOKIE is
+rem cleared so no process erl starts inherits it. See launcher.sh's
+rem `export_cookie`.
+set "COOKIE_HOME="
+if not defined RELEASE_COOKIE exit /b 0
+rem %RANDOM% is clock-seeded, so two launchers started together draw the same
+rem name; retry with a fresh delayed !RANDOM! draw (as check_otp_window does).
+rem mkdir fails on an existing path, so a directory is never reused.
+for /l %%N in (1,1,50) do if not defined COOKIE_HOME (
+    set "COOKIE_TRY=%TEMP%\__COOKIE_DIR_PREFIX__!RANDOM!!RANDOM!!RANDOM!!RANDOM!"
+    mkdir "!COOKIE_TRY!" >nul 2>&1 && set "COOKIE_HOME=!COOKIE_TRY!"
 )
+set "COOKIE_TRY="
+if not defined COOKIE_HOME (
+    echo error: could not create a private directory for the cookie 1>&2
+    exit /b 1
+)
+rem `set /p` writes the value with no trailing newline.
+<nul set /p "=!RELEASE_COOKIE!" > "!COOKIE_HOME!\.erlang.cookie"
+if not exist "!COOKIE_HOME!\.erlang.cookie" (
+    rmdir /s /q "!COOKIE_HOME!" 2>nul
+    echo error: could not write the cookie file 1>&2
+    exit /b 1
+)
+for %%F in ("!COOKIE_HOME!\.erlang.cookie") do if %%~zF==0 (
+    rmdir /s /q "!COOKIE_HOME!" 2>nul
+    echo error: could not write the cookie file 1>&2
+    exit /b 1
+)
+if defined HOMEDRIVE (
+    set "__ORIG_PREFIX__HOMEDRIVE=set:!HOMEDRIVE!"
+) else (
+    set "__ORIG_PREFIX__HOMEDRIVE=unset"
+)
+if defined HOMEPATH (
+    set "__ORIG_PREFIX__HOMEPATH=set:!HOMEPATH!"
+) else (
+    set "__ORIG_PREFIX__HOMEPATH=unset"
+)
+for %%I in ("!COOKIE_HOME!") do (
+    set "HOMEDRIVE=%%~dI"
+    set "HOMEPATH=%%~pnxI"
+)
+set "__COOKIE_HOME_ENV__=!COOKIE_HOME!"
+set "RELEASE_COOKIE="
+exit /b 0
+
+rem BT-5185: remove the private cookie home once erl has exited, in case the
+rem node died before its own restore step removed it. cmd does not exec, so
+rem this runs after every verb that made one, the foreground node included.
+:cleanup_cookie
+if defined COOKIE_HOME if exist "!COOKIE_HOME!" rmdir /s /q "!COOKIE_HOME!" 2>nul
 exit /b 0
 
 rem This node's own -sname: RELEASE_NODE if set, else the release name
@@ -240,21 +293,25 @@ exit /b 0
 call :check_otp_window
 if errorlevel 1 exit /b 1
 call :export_cookie
+if errorlevel 1 exit /b 1
 call :node_sname
 rem -noshell -noinput: see launcher.sh's foreground comment — no
 rem interactive shell attaches stdin, so a supervisor with no tty
 rem (a Windows service, a container) does not make the node see EOF
 rem and terminate right after boot. Console output is unaffected.
 "%ERL%" -noshell -noinput -boot "%CONFIG_DIR%\start" -boot_var RELEASE_DIR "%ROOT%" ^
-    -sname "%THIS_NODE%" %PLACEHOLDER_ARGS% ^
+    -sname "%THIS_NODE%" ^
     -config "%CONFIG_DIR%\sys" -args_file "%CONFIG_DIR%\vm.args"
-exit /b %errorlevel%
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :stop
 call :check_otp_window
 if errorlevel 1 exit /b 1
 call :lib_pa_args
 call :export_cookie
+if errorlevel 1 exit /b 1
 call :minimal_boot_args
 call :node_sname
 rem `%RANDOM%` three times over: a single 15-bit draw collides often enough
@@ -270,16 +327,19 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so stop targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
-    -eval "__ADOPT_COOKIE_EVAL__." ^
+"%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %BOOT_ARGS% %PA_ARGS% ^
+    -eval "__RESTORE_HOME_EVAL__." ^
     -eval "beamtalk_release_launcher:stop_client_main()." -extra "%NODE%"
-exit /b %errorlevel%
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :ping
 call :check_otp_window
 if errorlevel 1 exit /b 1
 call :lib_pa_args
 call :export_cookie
+if errorlevel 1 exit /b 1
 call :minimal_boot_args
 call :node_sname
 rem See `:stop`'s comment above: three `%RANDOM%` draws, not one, to keep
@@ -289,16 +349,19 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so ping targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
-    -eval "__ADOPT_COOKIE_EVAL__." ^
+"%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %BOOT_ARGS% %PA_ARGS% ^
+    -eval "__RESTORE_HOME_EVAL__." ^
     -eval "beamtalk_release_launcher:ping_client_main()." -extra "%NODE%"
-exit /b %errorlevel%
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :remote_console
 call :check_otp_window
 if errorlevel 1 exit /b 1
 call :lib_pa_args
 call :export_cookie
+if errorlevel 1 exit /b 1
 call :minimal_boot_args
 call :node_sname
 rem See `:stop`'s comment above: three `%RANDOM%` draws, not one, to keep
@@ -308,12 +371,13 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so remote_console attaches to whichever instance was
 rem started with the same value).
 set "NODE=%THIS_NODE%"
-rem `-remsh` would connect during boot, before any -eval can swap the
-rem placeholder cookie for the real one (BT-5126): adopt first, then start the
-rem same remote shell (OTP 26+).
-"%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
-    -eval "__ADOPT_COOKIE_EVAL__, shell:start_interactive({'%NODE%', {shell, start, []}})."
-exit /b %errorlevel%
+rem Put HOMEDRIVE and HOMEPATH back first (BT-5185), then start the same
+rem remote shell `-remsh` does (OTP 26+).
+"%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %BOOT_ARGS% %PA_ARGS% ^
+    -eval "__RESTORE_HOME_EVAL__, shell:start_interactive({'%NODE%', {shell, start, []}})."
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :eval
 call :check_otp_window
@@ -349,6 +413,7 @@ if not defined CLASS goto :usage
 if not defined SELECTOR goto :usage
 call :lib_pa_args
 call :export_cookie
+if errorlevel 1 exit /b 1
 call :minimal_boot_args
 call :node_sname
 rem See `:stop`'s comment above: three `%RANDOM%` draws, not one, to keep
@@ -358,11 +423,13 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so rpc targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %PLACEHOLDER_ARGS% %BOOT_ARGS% %PA_ARGS% ^
-    -eval "__ADOPT_COOKIE_EVAL__." ^
+"%ERL%" -noshell -hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}" %BOOT_ARGS% %PA_ARGS% ^
+    -eval "__RESTORE_HOME_EVAL__." ^
     -eval "beamtalk_release_launcher:rpc_client_main()." ^
     -extra "%NODE%" "%CLASS%" "%SELECTOR%" %ENTRY_REST%
-exit /b %errorlevel%
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :version
 if exist "%PROVENANCE%" (

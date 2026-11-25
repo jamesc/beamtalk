@@ -339,9 +339,12 @@ pub fn run(
             hex_dep_names: &hex_dep_names,
         };
 
+        // `_cookie_home` holds the node's private cookie directory until this
+        // scope ends; the node has removed it by then (BT-5185).
         let ForegroundNode {
             mut child,
             cookie: fg_cookie,
+            cookie_home: _cookie_home,
         } = start_beam_node(
             node_name.as_ref(),
             &project_root,

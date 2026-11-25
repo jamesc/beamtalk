@@ -98,13 +98,15 @@ fn render_template(
     // spell another placeholder verbatim (e.g. `[release] name =
     // "__RELEASE_VSN__"`) would otherwise have its own already-substituted
     // occurrence corrupted by a later `.replace()` in the chain.
-    let placeholders: [(&str, &str); 7] = [
+    let placeholders: [(&str, &str); 9] = [
         // A literal TAB for `launcher.cmd`'s `RELEASE_COOKIE` check (BT-5107).
         ("__TAB__", "\t"),
         // The cookie handoff names come from `cookie_env`, the one source
-        // for the CLI's own nodes too (BT-5126).
-        ("__COOKIE_ENV__", cookie_env::COOKIE_ENV),
-        ("__ADOPT_COOKIE_EVAL__", cookie_env::ADOPT_COOKIE_EVAL),
+        // for the CLI's own nodes too (BT-5126, BT-5185).
+        ("__COOKIE_HOME_ENV__", cookie_env::COOKIE_HOME_ENV),
+        ("__ORIG_PREFIX__", cookie_env::ORIG_PREFIX),
+        ("__RESTORE_HOME_EVAL__", cookie_env::RESTORE_HOME_EVAL),
+        ("__COOKIE_DIR_PREFIX__", cookie_env::COOKIE_DIR_PREFIX),
         ("__RELEASE_NAME__", release_name),
         ("__RELEASE_VSN__", release_vsn),
         ("__ERTS_VERSION__", erts_version),
@@ -426,6 +428,12 @@ mod tests {
         ] {
             assert!(cmd.contains(stripped), "launcher.cmd must strip {stripped}");
         }
+        // `export_cookie` writes it with `set /p "=..."`, which writes nothing
+        // for a leading `=`: reject that up front with a clear message.
+        assert!(
+            cmd.contains(r#"if "!RELEASE_COOKIE:~0,1!"=="=" goto :cookie_equals"#),
+            "launcher.cmd must reject a leading '='"
+        );
         let reject = cmd
             .find("RELEASE_COOKIE must not contain whitespace, quotes or backslashes")
             .expect("launcher.cmd must print a cookie rejection");
@@ -439,49 +447,59 @@ mod tests {
         assert!(sh.contains("RELEASE_COOKIE must not contain whitespace, quotes or backslashes"));
     }
 
-    /// BT-5126: no verb may put the cookie on the `erl` command line, in
-    /// `ERL_AFLAGS` or in an `-args_file` — all of them expand into the BEAM's
-    /// argv. The cookie travels in `BEAMTALK_ERL_COOKIE`; text inspection of
-    /// the scripts here, a real node's `/proc/<pid>/cmdline` in
-    /// `tests/cli/cli_release.rs`.
+    /// BT-5126 / BT-5185: no verb may put a cookie on the `erl` command line,
+    /// in `ERL_AFLAGS` or in an `-args_file` (all of them expand into the
+    /// BEAM's argv): not the real one and not a placeholder. The cookie goes
+    /// in a private cookie home; text inspection of the scripts here, a real
+    /// node's `/proc/<pid>/cmdline` in `tests/cli/cli_release.rs`.
     #[test]
-    fn write_launcher_scripts_hand_the_cookie_over_in_the_environment() {
+    fn write_launcher_scripts_boot_erl_from_a_private_cookie_home() {
         let (root, _temp) = write_scripts(true);
         let sh = std::fs::read_to_string(root.join("bin/orders").as_std_path()).unwrap();
         let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
         for (name, script) in [("launcher.sh", &sh), ("launcher.cmd", &cmd)] {
             assert!(
-                !script.contains("-setcookie $RELEASE_COOKIE")
-                    && !script.contains("-setcookie !RELEASE_COOKIE!")
-                    && !script.contains("-setcookie %RELEASE_COOKIE%"),
-                "{name} must not expand the cookie into argv"
+                !script.contains("-setcookie"),
+                "{name} must not put any cookie in argv"
             );
             assert!(
                 !script.contains("ERL_AFLAGS="),
                 "{name} must not put the cookie in ERL_AFLAGS"
             );
-            assert!(
-                script.contains(cookie_env::COOKIE_ENV),
-                "{name} must hand the cookie over in {}",
-                cookie_env::COOKIE_ENV
-            );
-            assert!(
-                script.contains(cookie_env::ADOPT_COOKIE_EVAL),
-                "{name} must adopt it with {}",
-                cookie_env::ADOPT_COOKIE_EVAL
-            );
-            assert!(!script.contains("__COOKIE_ENV__"), "{name}: placeholder");
-            assert!(
-                !script.contains("__ADOPT_COOKIE_EVAL__"),
-                "{name}: placeholder"
-            );
+            for needed in [
+                cookie_env::COOKIE_HOME_ENV,
+                cookie_env::ORIG_PREFIX,
+                cookie_env::RESTORE_HOME_EVAL,
+                cookie_env::COOKIE_DIR_PREFIX,
+            ] {
+                assert!(script.contains(needed), "{name} must use {needed}");
+            }
+            for placeholder in [
+                "__COOKIE_HOME_ENV__",
+                "__ORIG_PREFIX__",
+                "__RESTORE_HOME_EVAL__",
+                "__COOKIE_DIR_PREFIX__",
+            ] {
+                assert!(!script.contains(placeholder), "{name}: {placeholder}");
+            }
         }
+        assert!(
+            cmd.contains("set \"RELEASE_COOKIE=\""),
+            "launcher.cmd must clear it"
+        );
+        assert!(
+            sh.contains("unset RELEASE_COOKIE"),
+            "launcher.sh must clear it"
+        );
     }
 
-    /// BT-5067: run each client verb against a fake `erl` from a release root
-    /// containing a space; assert every `-pa` path survives as one argument and
-    /// the cookie is only in `BEAMTALK_ERL_COOKIE`, never an argument or
-    /// `ERL_AFLAGS` (BT-5126).
+    /// BT-5067 / BT-5126 / BT-5185: run each client verb against a fake `erl`
+    /// from a release root containing a space. Every `-pa` path survives as
+    /// one argument; no cookie is an argument, in `ERL_AFLAGS` or in the
+    /// environment (`RELEASE_COOKIE` is cleared, so epmd and every other child
+    /// inherits nothing); `erl` boots with `HOME` set to a private (0700)
+    /// directory whose `.erlang.cookie` (0400) holds the cookie, and the
+    /// original `HOME` is recorded for the node to restore.
     #[cfg(unix)]
     #[test]
     fn write_launcher_scripts_sh_handles_spaced_root_and_hides_cookie() {
@@ -495,17 +513,26 @@ mod tests {
         let erl = fake.join("erl");
         std::fs::write(
             &erl,
-            "#!/bin/sh\nfor a; do echo \"ARG[$a]\"; done\necho \"AFLAGS=$ERL_AFLAGS\"\necho \"COOKIEENV=$BEAMTALK_ERL_COOKIE\"\n",
+            "#!/bin/sh\nfor a; do echo \"ARG[$a]\"; done\necho \"AFLAGS=$ERL_AFLAGS\"\n\
+             echo \"RELEASECOOKIE=$RELEASE_COOKIE\"\necho \"HOME=$HOME\"\n\
+             echo \"COOKIEHOME=$BEAMTALK_COOKIE_HOME\"\necho \"ORIG=$BEAMTALK_ORIG_HOME\"\n\
+             echo \"FILE=$(cat \"$HOME/.erlang.cookie\")\"\n\
+             echo \"DIRMODE=$(stat -c %a \"$HOME\" 2>/dev/null || stat -f %Lp \"$HOME\")\"\n\
+             echo \"FILEMODE=$(stat -c %a \"$HOME/.erlang.cookie\" 2>/dev/null || stat -f %Lp \"$HOME/.erlang.cookie\")\"\n",
         )
         .unwrap();
         std::fs::set_permissions(&erl, std::fs::Permissions::from_mode(0o755)).unwrap();
         let path = format!("{}:{}", fake.display(), std::env::var("PATH").unwrap());
+        let tmpdir = temp.path().join("tmp");
+        std::fs::create_dir_all(&tmpdir).unwrap();
 
         for verb in ["ping", "stop"] {
             let out = std::process::Command::new("sh")
                 .arg(base.join("bin/orders").as_std_path())
                 .arg(verb)
                 .env("PATH", &path)
+                .env("HOME", "/the/real/home")
+                .env("TMPDIR", &tmpdir)
                 .env("RELEASE_COOKIE", "s3cr3t-cookie")
                 .output()
                 .unwrap();
@@ -521,16 +548,30 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n");
             assert!(!args.contains("s3cr3t"), "{verb}: {args}");
+            assert!(!args.contains("-setcookie"), "{verb}: {args}");
             assert!(stdout.contains("AFLAGS=\n"), "{verb}: {stdout}");
+            assert!(stdout.contains("RELEASECOOKIE=\n"), "{verb}: {stdout}");
+            assert!(stdout.contains("FILE=s3cr3t-cookie\n"), "{verb}: {stdout}");
             assert!(
-                stdout.contains("COOKIEENV=s3cr3t-cookie"),
+                stdout.contains("ORIG=set:/the/real/home\n"),
                 "{verb}: {stdout}"
             );
-            // A random, non-secret placeholder `-setcookie` keeps OTP off
-            // `~/.erlang.cookie`.
+            let home = stdout
+                .lines()
+                .find_map(|l| l.strip_prefix("HOME="))
+                .unwrap()
+                .to_string();
             assert!(
-                args.contains("ARG[-setcookie]\nARG["),
-                "{verb}: expected placeholder -setcookie: {args}"
+                stdout.contains(&format!("COOKIEHOME={home}\n")),
+                "{verb}: {stdout}"
+            );
+            assert!(stdout.contains("DIRMODE=700\n"), "{verb}: {stdout}");
+            assert!(stdout.contains("FILEMODE=400\n"), "{verb}: {stdout}");
+            // The launcher removes the private home once erl exits, even
+            // though this fake erl never ran the node's restore step.
+            assert!(
+                !std::path::Path::new(&home).exists(),
+                "{verb}: private cookie home left behind"
             );
         }
     }

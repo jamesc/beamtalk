@@ -52,7 +52,7 @@ impl CoreErlangGenerator {
     /// Generates code for a literal value: the Core Erlang term a Beamtalk
     /// literal is.
     ///
-    /// - Integers: `42` → `42`
+    /// - Integers: `42` → `42` (a bignum literal renders its digits verbatim)
     /// - Floats: `3.14` → `3.14`
     /// - Strings: `"hello"` → tagged `{'beamtalk_string', #{#<104>(8,1,...), ...}#}` (BT-4170)
     /// - Symbols: `#foo` → atom `'foo'`
@@ -61,6 +61,7 @@ impl CoreErlangGenerator {
     pub(super) fn literal_doc(lit: &Literal) -> Document<'static> {
         match lit {
             Literal::Integer(n) => leaf::int_lit(*n),
+            Literal::BigInteger(digits) => leaf::big_int_lit(digits),
             Literal::Float(f) => leaf::float_lit(*f),
             Literal::String(s) => leaf::tagged_string_lit(s),
             Literal::Symbol(s) => leaf::atom(s.to_string()),

@@ -7,12 +7,9 @@
 //!
 //! This module contains validation checks that run after the main analysis
 //! pipeline. Validators are organized by concern:
-//! - `class_process_ffi_validators` — class-side methods that run
-//!   process-sensitive FFI in the class process (`class-process-ffi`,
-//!   BT-4031), or create process-owned resources in the caller
-//!   (`class-method-process-resource`, ADR 0142, BT-4302)
-//! - `class_state_abroad` — blocks that touch their home class's variables
-//!   where they run outside an invocation of it (ADR 0130 §5, BT-3712)
+//! - `class_process_ffi_validators` — class-side methods that create
+//!   process-owned resources in the caller (`class-method-process-resource`,
+//!   ADR 0142, BT-4302)
 //! - `class_validators` — class-hierarchy-dependent checks
 //! - `handleinfo_catch_all_validators` — `handleInfo:` written as a `match:`
 //!   with no catch-all arm (ADR 0134, BT-3959)
@@ -41,7 +38,6 @@
 //!   (ADR 0071)
 
 mod class_process_ffi_validators;
-mod class_state_abroad;
 mod class_validators;
 mod handleinfo_catch_all_validators;
 mod late_slot_validators;
@@ -63,11 +59,10 @@ mod visibility_validators;
 pub(crate) use class_process_ffi_validators::{
     check_class_method_ffi, ffi_call_is_process_sensitive,
 };
-pub(crate) use class_state_abroad::check_class_state_abroad;
 pub use class_validators::check_stdlib_name_shadowing;
 pub(crate) use class_validators::{
     check_abstract_instantiation, check_actor_new_usage, check_cast_on_value_type,
-    check_class_side_self_field_access, check_class_variable_access, check_data_keyword_class_kind,
+    check_class_side_self_field_access, check_data_keyword_class_kind,
     check_handle_scope_on_object, check_new_field_names, check_object_new_usage,
     check_shape_version_and_migrations, check_value_nil_return, check_value_slot_assignment,
     check_value_slot_case_collision,

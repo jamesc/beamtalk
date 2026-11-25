@@ -205,9 +205,13 @@ pub(in crate::core_erlang) fn proven_comparison_kind(
 ) -> Option<ProvenKind> {
     use beamtalk_core::ast::Literal;
     match expr {
-        Expression::Literal(Literal::Integer(_) | Literal::Float(_) | Literal::Character(_), _) => {
-            Some(ProvenKind::Number)
-        }
+        Expression::Literal(
+            Literal::Integer(_)
+            | Literal::BigInteger(_)
+            | Literal::Float(_)
+            | Literal::Character(_),
+            _,
+        ) => Some(ProvenKind::Number),
         Expression::Literal(Literal::String(_), _) => Some(ProvenKind::String),
         _ if expr.is_self() => match class_name? {
             "Integer" | "Float" | "Character" => Some(ProvenKind::Number),
@@ -535,7 +539,10 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn receiver_is_statically_numeric(&self, expr: &Expression) -> bool {
         use beamtalk_core::ast::Literal;
         match expr {
-            Expression::Literal(Literal::Integer(_) | Literal::Float(_), _) => true,
+            Expression::Literal(
+                Literal::Integer(_) | Literal::BigInteger(_) | Literal::Float(_),
+                _,
+            ) => true,
             _ if expr.is_self() => matches!(
                 self.self_instance_class().as_deref(),
                 Some("Integer" | "Float")
