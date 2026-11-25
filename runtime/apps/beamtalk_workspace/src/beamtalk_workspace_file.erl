@@ -46,6 +46,7 @@ A leaf module: it calls only OTP.
     relative_parts/2,
     temp_path/1,
     write_temp/2,
+    ensure_private_dir/1,
     staging_dir/1,
     is_staging_dir_name/1,
     atomic_write/3,
@@ -185,11 +186,15 @@ comparable_parts(Path, _OsType) ->
 
 -doc """
 A fresh temp path next to `Path`: `<Path>.bt-staging.<unique>.tmp`. Unique per
-call, so concurrent writers to the same `Path` never share a temp file.
+call, so concurrent writers to the same `Path` never share a temp file, and
+unpredictable (random suffix), so another local user cannot pre-create the
+name. `write_temp/2` also creates it exclusively with mode 0600.
 """.
 -spec temp_path(string()) -> string().
 temp_path(Path) ->
-    Path ++ ?TEMP_MARKER ++ integer_to_list(erlang:unique_integer([positive])) ++ ".tmp".
+    Rand = binary_to_list(binary:encode_hex(crypto:strong_rand_bytes(8), lowercase)),
+    Path ++ ?TEMP_MARKER ++ integer_to_list(erlang:unique_integer([positive])) ++ "." ++ Rand ++
+        ".tmp".
 
 -doc """
 A fresh scratch directory path next to `Path`: `<dirname>/.bt-staging.<unique>`.
@@ -234,12 +239,19 @@ write_temp(Path, Data) ->
 %% closes that. The directory entry itself is not synced; see the moduledoc.
 -spec write_synced(string(), iodata()) -> ok | {error, term()}.
 write_synced(Tmp, Data) ->
-    case file:open(Tmp, [write, binary, raw]) of
+    %% `exclusive`: never open (or follow a symlink at) a name someone else
+    %% pre-created. The mode is tightened to 0600 before any data is written.
+    case file:open(Tmp, [write, binary, raw, exclusive]) of
         {ok, Fd} ->
             Result =
-                case file:write(Fd, Data) of
-                    ok -> file:sync(Fd);
-                    {error, _} = Err -> Err
+                case file:change_mode(Tmp, 8#600) of
+                    ok ->
+                        case file:write(Fd, Data) of
+                            ok -> file:sync(Fd);
+                            {error, _} = Err -> Err
+                        end;
+                    {error, _} = ModeErr ->
+                        ModeErr
                 end,
             case {Result, file:close(Fd)} of
                 {ok, ok} -> ok;
@@ -270,6 +282,7 @@ atomic_write(Path, Data, ExpectedCurrent) ->
         {ok, Tmp} ->
             case recheck_unchanged(Path, ExpectedCurrent) of
                 ok ->
+                    keep_mode(Path, Tmp),
                     case file:rename(Tmp, Path) of
                         ok ->
                             ok;
@@ -283,6 +296,36 @@ atomic_write(Path, Data, ExpectedCurrent) ->
             end;
         {error, _} = WriteErr ->
             WriteErr
+    end.
+
+%% Rewriting an existing file keeps its mode (a 0600 `metadata.json` stays
+%% 0600, a file the user made group-readable stays so); a new file keeps the
+%% temp file's 0600. Best effort: a failure leaves the private mode.
+-spec keep_mode(string(), string()) -> ok.
+keep_mode(Path, Tmp) ->
+    case file:read_file_info(Path) of
+        {ok, #file_info{mode = Mode}} ->
+            _ = file:change_mode(Tmp, Mode band 8#7777),
+            ok;
+        {error, _} ->
+            ok
+    end.
+
+-doc """
+Create `Dir` (and any missing parents) and make `Dir` itself mode 0700, so a
+workspace's state files are not listable by other local users even when the
+node, not the CLI, creates the directory first (BT-5135).
+""".
+-spec ensure_private_dir(string()) -> ok | {error, term()}.
+ensure_private_dir(Dir) ->
+    case filelib:ensure_dir(filename:join(Dir, "x")) of
+        ok ->
+            case file:change_mode(Dir, 8#700) of
+                ok -> ok;
+                {error, _} = Err -> Err
+            end;
+        {error, _} = Err ->
+            Err
     end.
 
 %% `ok` when `ExpectedCurrent` is `undefined` (no recheck requested) or
@@ -301,7 +344,7 @@ recheck_unchanged(Path, ExpectedCurrent) ->
 
 -doc """
 Delete stale `temp_path/1` leftovers next to `Path`: siblings named
-`<basename>.bt-staging.<digits>.tmp` whose last modification is more than `MaxAgeSeconds`
+`<basename>.bt-staging.<digits>[.<hex>].tmp` whose last modification is more than `MaxAgeSeconds`
 ago. Returns the paths it deleted.
 
 A staged writer (flush Phase A then Phase B) that crashes between its two
@@ -365,15 +408,33 @@ is_temp_name(Prefix, Name) ->
         true ->
             %% Match ".tmp" on what follows the prefix, so the prefix's own
             %% trailing "." can never double as the start of ".tmp".
-            case lists:reverse(lists:nthtail(length(Prefix), Name)) of
-                "pmt." ++ RevDigits when RevDigits =/= [] ->
-                    lists:all(fun(C) -> C >= $0 andalso C =< $9 end, RevDigits);
+            Rest = lists:nthtail(length(Prefix), Name),
+            case lists:reverse(Rest) of
+                "pmt." ++ RevCore when RevCore =/= [] ->
+                    %% `<digits>` (older builds) or `<digits>.<hex>` (random
+                    %% suffix, BT-5135).
+                    case string:split(lists:reverse(RevCore), ".") of
+                        [Digits] -> all_digits(Digits);
+                        [Digits, Hex] -> all_digits(Digits) andalso all_hex(Hex);
+                        _ -> false
+                    end;
                 _ ->
                     false
             end;
         false ->
             false
     end.
+
+-spec all_digits(string()) -> boolean().
+all_digits(S) -> S =/= [] andalso lists:all(fun(C) -> C >= $0 andalso C =< $9 end, S).
+
+-spec all_hex(string()) -> boolean().
+all_hex(S) ->
+    S =/= [] andalso
+        lists:all(
+            fun(C) -> (C >= $0 andalso C =< $9) orelse (C >= $a andalso C =< $f) end,
+            S
+        ).
 
 -spec older_than(string(), integer(), non_neg_integer()) -> boolean().
 older_than(File, Now, MaxAgeSeconds) ->

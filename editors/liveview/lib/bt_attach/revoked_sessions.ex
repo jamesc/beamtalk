@@ -36,10 +36,16 @@ defmodule BtAttach.RevokedSessions do
 
   def revoke(_id, _ttl_secs), do: :ok
 
-  @doc "True when `id` was revoked and its entry has not yet expired."
+  @doc """
+  True when `id` was revoked and its entry has not yet expired.
+
+  Fails closed (BT-5135): with the table absent (the GenServer is down or not
+  yet started) revocations cannot be checked, so every session id reads as
+  revoked rather than letting a logged-out cookie through.
+  """
   @spec revoked?(term()) :: boolean()
   def revoked?(id) when is_binary(id) do
-    :ets.whereis(@table) != :undefined and lookup_live(id) != []
+    :ets.whereis(@table) == :undefined or lookup_live(id) != []
   end
 
   def revoked?(_id), do: false

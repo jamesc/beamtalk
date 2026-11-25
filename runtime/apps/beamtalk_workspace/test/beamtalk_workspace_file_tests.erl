@@ -188,6 +188,38 @@ write_temp_uses_a_fresh_name_per_call_test() ->
         ?assertEqual({ok, <<"two">>}, file:read_file(T2))
     end).
 
+write_temp_is_private_and_exclusive_test() ->
+    with_dir(fun(Dir) ->
+        Path = filename:join(Dir, "target.bt"),
+        {ok, T} = beamtalk_workspace_file:write_temp(Path, <<"x">>),
+        {ok, #file_info{mode = Mode}} = file:read_file_info(T),
+        ?assertEqual(8#600, Mode band 8#777),
+        %% Unpredictable: a random suffix beyond the counter.
+        ?assertMatch([_, _, _ | _], string:split(T, ".", all))
+    end).
+
+atomic_write_keeps_existing_mode_test() ->
+    with_dir(fun(Dir) ->
+        Path = filename:join(Dir, "target.bt"),
+        ok = file:write_file(Path, <<"old">>),
+        ok = file:change_mode(Path, 8#640),
+        ok = beamtalk_workspace_file:atomic_write(Path, <<"new">>, undefined),
+        {ok, #file_info{mode = Mode}} = file:read_file_info(Path),
+        ?assertEqual(8#640, Mode band 8#777),
+        New = filename:join(Dir, "fresh.bt"),
+        ok = beamtalk_workspace_file:atomic_write(New, <<"n">>, undefined),
+        {ok, #file_info{mode = M2}} = file:read_file_info(New),
+        ?assertEqual(8#600, M2 band 8#777)
+    end).
+
+ensure_private_dir_is_0700_test() ->
+    with_dir(fun(Dir) ->
+        Sub = filename:join([Dir, "a", "ws"]),
+        ok = beamtalk_workspace_file:ensure_private_dir(Sub),
+        {ok, #file_info{mode = Mode}} = file:read_file_info(Sub),
+        ?assertEqual(8#700, Mode band 8#777)
+    end).
+
 write_temp_failure_is_tagged_test() ->
     with_dir(fun(Dir) ->
         Path = filename:join([Dir, "missing_dir", "target.bt"]),

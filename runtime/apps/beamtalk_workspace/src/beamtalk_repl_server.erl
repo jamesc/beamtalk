@@ -216,16 +216,16 @@ write_port_file_to_home(WorkspaceId, Port, Nonce) ->
             ok;
         WsDir ->
             PortFilePath = filename:join(WsDir, "port"),
-            case filelib:ensure_dir(PortFilePath) of
+            case beamtalk_workspace_file:ensure_private_dir(WsDir) of
                 ok ->
                     %% Format: PORT\nNONCE (two lines for stale detection)
                     Content = [integer_to_list(Port), "\n", binary_to_list(Nonce)],
                     %% Write atomically via tmp + rename(2) so the Rust CLI never
                     %% reads a partially-written port file (file:write_file/2 is
                     %% open→write→close, not atomic on its own).
-                    TmpPath = beamtalk_workspace_file:temp_path(PortFilePath),
-                    case file:write_file(TmpPath, Content) of
-                        ok ->
+                    %% `write_temp/2`: exclusive create, random name, mode 0600.
+                    case beamtalk_workspace_file:write_temp(PortFilePath, Content) of
+                        {ok, TmpPath} ->
                             case file:rename(TmpPath, PortFilePath) of
                                 ok ->
                                     ?LOG_DEBUG(
@@ -264,14 +264,13 @@ write_port_file_to_home(WorkspaceId, Port, Nonce) ->
                                             ok
                                     end
                             end;
-                        {error, Reason} ->
+                        {error, {write, Reason}} ->
+                            %% `write_temp/2` already removed any partial temp file.
                             ?LOG_WARNING(
                                 "Failed to write port file ~s: ~p",
-                                [TmpPath, Reason],
+                                [PortFilePath, Reason],
                                 #{domain => [beamtalk, runtime]}
                             ),
-                            %% A failed write (disk full, …) can leave a partial temp file.
-                            _ = file:delete(TmpPath),
                             ok
                     end;
                 {error, Reason} ->

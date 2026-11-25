@@ -82,6 +82,13 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# The swap journal is `dest|slot` per line, so a `|` or newline in the prefix
+# would truncate a rollback path.
+case "${PREFIX}" in
+    *'|'*|*'
+'*) echo "Error: --prefix may not contain '|' or a newline"; exit 1 ;;
+esac
+
 # ─── Detect platform ────────────────────────────────────────────────────
 
 detect_platform() {
@@ -126,6 +133,13 @@ resolve_version() {
     if [ -n "${VERSION}" ]; then
         # Strip leading 'v' if present for consistency, then add it back
         VERSION="${VERSION#v}"
+        # It is spliced into a download URL and a file name: no path or URL
+        # metacharacters.
+        case "${VERSION}" in
+            ''|*[!A-Za-z0-9._+-]*|[!A-Za-z0-9]*)
+                echo "Error: invalid version '${VERSION}'"
+                exit 1 ;;
+        esac
         TAG="v${VERSION}"
         return
     fi
@@ -164,15 +178,15 @@ resolve_version() {
     TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
     if command -v curl >/dev/null 2>&1; then
         if [ -n "${TOKEN}" ]; then
-            RELEASE_JSON=$(curl -sS --retry 3 -H "Authorization: Bearer ${TOKEN}" "${RELEASE_URL}")
+            RELEASE_JSON=$(curl -sS --proto '=https' --retry 3 -H "Authorization: Bearer ${TOKEN}" "${RELEASE_URL}")
         else
-            RELEASE_JSON=$(curl -sS --retry 3 "${RELEASE_URL}")
+            RELEASE_JSON=$(curl -sS --proto '=https' --retry 3 "${RELEASE_URL}")
         fi
     elif command -v wget >/dev/null 2>&1; then
         if [ -n "${TOKEN}" ]; then
-            RELEASE_JSON=$(wget -qO- --header="Authorization: Bearer ${TOKEN}" "${RELEASE_URL}")
+            RELEASE_JSON=$(wget -qO- --https-only --header="Authorization: Bearer ${TOKEN}" "${RELEASE_URL}")
         else
-            RELEASE_JSON=$(wget -qO- "${RELEASE_URL}")
+            RELEASE_JSON=$(wget -qO- --https-only "${RELEASE_URL}")
         fi
     else
         echo "Error: curl or wget required"
@@ -205,7 +219,7 @@ download() {
     if command -v curl >/dev/null 2>&1; then
         curl --proto '=https' -LsSf "${URL}" -o "${DEST}"
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO "${DEST}" "${URL}"
+        wget -qO "${DEST}" --https-only "${URL}"
     else
         echo "Error: curl or wget required"
         exit 1
@@ -304,6 +318,7 @@ install_beamtalk() {
 # What --uninstall removes (the paths a release archive installs).
 OWNED_DIRS="lib/beamtalk share/beamtalk"
 OWNED_BINS="beamtalk beamtalk-compiler-port beamtalk-lsp beamtalk-mcp beamtalk-exec"
+MANIFEST_NAME=".beamtalk-installed"
 
 # Every unit the archive supplies is replaced wholesale: each child of bin/,
 # lib/ and share/ (bin/beamtalk, lib/beamtalk, share/beamtalk, ...) and any
@@ -341,8 +356,13 @@ install_unit() {
     if [ -e "${dest}" ] || [ -L "${dest}" ]; then
         mv "${dest}" "${slot}" || rollback_swap
     fi
-    printf '%s|%s\n' "${dest}" "${slot}" >> "${OLD}/journal"
+    if ! printf '%s|%s\n' "${dest}" "${slot}" >> "${OLD}/journal"; then
+        # Not journalled, so rollback cannot restore it: put the old copy back.
+        if [ -e "${slot}" ] || [ -L "${slot}" ]; then mv "${slot}" "${dest}" || true; fi
+        rollback_swap
+    fi
     mv "${src}" "${dest}" || rollback_swap
+    printf '%s\n' "${dest#"${PREFIX}"/}" >> "${OLD}/manifest" || rollback_swap
 }
 
 swap_into_prefix() {
@@ -362,6 +382,7 @@ swap_into_prefix() {
     # deletes them.
     OLD=$(mktemp -d "${PREFIX}/.beamtalk-old.XXXXXX")
     : > "${OLD}/journal"
+    : > "${OLD}/manifest"
     UNIT_N=0
     for top in "${STAGE}/"*; do
         [ -e "${top}" ] || continue
@@ -378,6 +399,9 @@ swap_into_prefix() {
                 ;;
         esac
     done
+    # Record what this install owns so --uninstall removes exactly it, even
+    # for units a release adds later (the OWNED_* lists are only a fallback).
+    cp "${OLD}/manifest" "${PREFIX}/${MANIFEST_NAME}" || rollback_swap
     rm -rf "${OLD}"
 }
 
@@ -389,6 +413,15 @@ uninstall_beamtalk() {
     for d in ${OWNED_DIRS}; do
         rm -rf "${PREFIX:?}/${d}"
     done
+    if [ -f "${PREFIX}/${MANIFEST_NAME}" ]; then
+        while IFS= read -r rel; do
+            case "${rel}" in
+                ''|/*|..|../*|*/..|*/../*) continue ;;
+            esac
+            rm -rf "${PREFIX:?}/${rel}"
+        done < "${PREFIX}/${MANIFEST_NAME}"
+        rm -f "${PREFIX}/${MANIFEST_NAME}"
+    fi
     rm -f "${PREFIX}/.beamtalk-build.sha256"
     # Tidy up now-empty directories; rmdir refuses non-empty ones, so a shared
     # prefix keeps whatever else lives in it.

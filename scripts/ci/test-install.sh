@@ -98,8 +98,6 @@ P4="$P"
 # 4b. an archive entry outside bin/ lib/beamtalk share/beamtalk is still installed
 [ -f "$P/extra/file.txt" ]
 check "other top-level archive entries are merged, not dropped" $?
-# --uninstall only removes what beamtalk owns, so drop the fixture's extra entry first
-rm -rf "$P/extra"
 
 # 4c. a failure part-way through the swap rolls back every unit already swapped
 mkdir -p "$T/mvbin"
@@ -135,13 +133,24 @@ check "a directory in place of a binary is refused before any change" $?
 # 5. uninstall removes beamtalk, keeps unrelated files, needs no network
 P="$P4"
 PATH="$T/fakebin:$PATH" FAKE_RELEASE_DIR="$T/none" BEAMTALK_PREFIX="$P" sh "$SCRIPT" --uninstall >"$T/out" 2>&1; rc=$?
-[ $rc -eq 0 ] && [ ! -e "$P/bin/beamtalk" ] && [ ! -e "$P/lib/beamtalk" ] && [ -f "$P/lib/other/keep.txt" ]
+[ $rc -eq 0 ] && [ ! -e "$P/bin/beamtalk" ] && [ ! -e "$P/lib/beamtalk" ] && [ ! -e "$P/extra" ] && [ -f "$P/lib/other/keep.txt" ]
 check "--uninstall removes beamtalk and keeps unrelated files" $?
 
 # 6. uninstall of a beamtalk-only prefix removes the prefix
 P="$T/p6"
-run_install "$P"; rm -rf "$P/extra"; PATH="$T/fakebin:$PATH" BEAMTALK_PREFIX="$P" sh "$SCRIPT" --uninstall >/dev/null 2>&1
+run_install "$P"; PATH="$T/fakebin:$PATH" BEAMTALK_PREFIX="$P" sh "$SCRIPT" --uninstall >/dev/null 2>&1
 [ ! -e "$P" ]
 check "--uninstall removes an otherwise empty prefix" $?
+
+# 7. hostile --version / --prefix are refused before any download
+for v in 'v1/../x' '1.0;rm' '../x' ''; do
+    [ -z "$v" ] && continue
+    PATH="$T/fakebin:$PATH" FAKE_RELEASE_DIR="$T/none" BEAMTALK_PREFIX="$T/p7" sh "$SCRIPT" --version "$v" >"$T/out" 2>&1; rc=$?
+    [ $rc -ne 0 ] && grep -q "invalid version" "$T/out"
+    check "--version '$v' is rejected" $?
+done
+PATH="$T/fakebin:$PATH" FAKE_RELEASE_DIR="$T/release" sh "$SCRIPT" --version 9.9.9 --prefix "$T/a|b" >"$T/out" 2>&1; rc=$?
+[ $rc -ne 0 ] && [ ! -e "$T/a|b" ]
+check "--prefix containing '|' is rejected" $?
 
 exit $FAILED
