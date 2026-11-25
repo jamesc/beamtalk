@@ -134,7 +134,7 @@ fn collect_class_definition_refs(
     collect_type_param_bound_refs(&class.type_params, name, file_path, results);
 
     // State and class-variable type annotations — e.g. `state: x :: Printable = nil`.
-    for state in class.state.iter().chain(class.class_variables.iter()) {
+    for state in &class.state {
         collect_state_type_annotation_refs(state, name, file_path, results);
     }
 

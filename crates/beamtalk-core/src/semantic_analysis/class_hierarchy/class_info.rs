@@ -722,16 +722,7 @@ impl ClassInfo {
             ),
             methods: instance_methods,
             class_methods,
-            class_variables: class
-                .class_variables
-                .iter()
-                .map(|cv| ClassVarInfo {
-                    name: cv.name.name.clone(),
-                    ty: cv.type_annotation.as_ref().map(DeclaredType::from),
-                    has_default: cv.default_value.is_some(),
-                    kind: cv.slot_kind,
-                })
-                .collect(),
+            class_variables: Vec::new(),
             type_params: class
                 .type_params
                 .iter()

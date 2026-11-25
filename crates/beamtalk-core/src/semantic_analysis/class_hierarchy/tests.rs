@@ -1272,7 +1272,6 @@ fn value_subclass_auto_methods_respect_user_overrides() {
             test_span(),
         )],
         class_methods: vec![],
-        class_variables: vec![],
         type_params: vec![],
         superclass_type_args: vec![],
         uses: vec![],
@@ -2372,14 +2371,6 @@ fn direct_constructors_table() {
             new1: Some(false),
             keyword: None,
         },
-        Row {
-            label: "classState blocks all",
-            source: "Value subclass: Pt\n  state: x :: Integer = 0\n  classState: total = 0\n",
-            class: "Pt",
-            new0: Some(false),
-            new1: Some(false),
-            keyword: Some(None),
-        },
         // `new`/`new:` route through the `{new, _}` handler, which rejects abstract
         // classes; keyword constructors go through `class_method_call`, which has no
         // abstract check — the direct call preserves both paths.
@@ -2833,8 +2824,7 @@ fn direct_call_eligibility_is_adr_0142s_rule() {
     let hierarchy = bt4099_hierarchy_for_source(
         "Object subclass: Open\n  class foo => 1\n  class hasField: x => 2\n\n\
          Open subclass: OpenSub\n  class bar => 3\n\n\
-         Object subclass: Stateful\n  classState: n :: Integer = 0\n  class foo => 1\n\n\
-         Stateful subclass: StatelessSub\n  class bar => 3\n",
+         ",
     );
     assert!(hierarchy.is_direct_call_eligible("Open", "foo"));
     assert!(!hierarchy.is_direct_call_eligible("Open", "hasField:"));
@@ -2843,12 +2833,6 @@ fn direct_call_eligibility_is_adr_0142s_rule() {
         !hierarchy.is_direct_call_eligible("OpenSub", "foo"),
         "an inherited class method is not in the class's own table"
     );
-    assert!(!hierarchy.is_direct_call_eligible("Stateful", "foo"));
-    assert!(
-        !hierarchy.is_direct_call_eligible("StatelessSub", "bar"),
-        "a subclass of a class with class variables keeps its process"
-    );
-    assert!(hierarchy.chain_has_class_variables("StatelessSub"));
     assert!(!hierarchy.chain_has_class_variables("OpenSub"));
     assert!(hierarchy.chain_has_class_variables("NoSuchClass"));
 }
@@ -2975,24 +2959,8 @@ fn explicit_class_new_needs_a_concrete_stateless_class() {
         "abstract Object subclass: Tag\n  class new => (Erlang erlang) make_ref\n"
     ));
     assert!(!bt4464_explicit_new_verdict(
-        "Object subclass: Tag\n  classState: count = 0\n  class new => (Erlang erlang) make_ref\n"
-    ));
-    assert!(!bt4464_explicit_new_verdict(
         "Actor subclass: Tag\n  class new => (Erlang erlang) make_ref\n"
     ));
-    // Class variables anywhere in the chain keep the class process.
-    let tokens = crate::source_analysis::lex_with_eof(
-        "Object subclass: Base\n  classState: count = 0\n\
-         Base subclass: Tag\n  class new => (Erlang erlang) make_ref\n",
-    );
-    let (module, _) = crate::source_analysis::parse(tokens);
-    let h = ClassHierarchy::build(&module)
-        .0
-        .expect("fixture hierarchy should build");
-    assert!(
-        !h.explicit_class_new_builds_in_caller(&module.classes[1]),
-        "an ancestor's class variables keep the class process"
-    );
     // An instance-side `new` replaces `new/0`: nothing to call directly.
     assert!(!bt4464_explicit_new_verdict(
         "Object subclass: Tag\n  new => self\n  class new => (Erlang erlang) make_ref\n"
@@ -3077,10 +3045,6 @@ fn explicit_class_new1_needing_the_class_process_stays_there() {
     // A non-parameter, non-literal argument may read anything.
     assert!(!bt4475_explicit_new1_verdict(
         "Object subclass: Tag\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: self name\n"
-    ));
-    // Class variables in the chain keep the class process for `new:` too.
-    assert!(!bt4475_explicit_new1_verdict(
-        "Object subclass: Tag\n  classState: count = 0\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n"
     ));
     // An instance-side `new:` of the same name fails closed.
     assert!(!bt4475_explicit_new1_verdict(
@@ -3183,7 +3147,6 @@ fn explicit_new1_verdict_survives_pass1_extraction_across_files() {
 
     for (base_src, expected) in [
         ("Object subclass: Base\n", true),
-        ("Object subclass: Base\n  classState: n = 0\n", false),
         ("Actor subclass: Base\n", false),
         ("Value subclass: Base\n", true),
     ] {

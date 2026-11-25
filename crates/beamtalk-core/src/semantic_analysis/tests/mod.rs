@@ -61,7 +61,7 @@ mod bt4573_setup_cascade_single_diagnostic;
 mod bt5025_cascade_later_messages;
 mod bt5026_state_defaults_and_protocol_bodies;
 mod class_hierarchy_and_method_validators;
-mod class_state_abroad;
+mod class_state_removed;
 mod cross_file_extension_checks;
 mod dead_code_super_and_shadowing;
 mod flattened_provision_diagnostics;

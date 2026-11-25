@@ -1488,6 +1488,8 @@ fn run_class_aware_validators(
         &mut result.diagnostics,
     );
     validators::check_empty_method_bodies(module, &mut result.diagnostics);
+    // ADR 0153: a class has no slots, so class-side `self.x` is an error.
+    validators::check_class_side_self_field_access(module, &mut result.diagnostics);
     // ADR 0130 §5 (BT-3712): a block that touches its home class's variables
     // where it runs outside an invocation of that class.
     validators::check_class_state_abroad(module, &result.class_hierarchy, &mut result.diagnostics);
@@ -1522,13 +1524,9 @@ fn run_class_aware_validators(
         &mut result.diagnostics,
     );
     // ADR 0123 §1–§2: `shapeVersion:`/`migrateFromVN:` native refusal,
-    // unreachable-migration warning, class-variable-access rejection, and
+    // unreachable-migration warning and
     // Dictionary-return-type check.
-    validators::check_shape_version_and_migrations(
-        module,
-        &result.class_hierarchy,
-        &mut result.diagnostics,
-    );
+    validators::check_shape_version_and_migrations(module, &mut result.diagnostics);
     // ADR 0103: nudge undeclared FFI-wrapping handle classes. Suppressed for
     // stdlib compilation — the builtin tier table already covers the stdlib.
     if !cx.stdlib_mode {
