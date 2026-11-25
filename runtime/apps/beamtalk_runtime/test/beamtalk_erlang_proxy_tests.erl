@@ -225,8 +225,8 @@ send_erlang_module_print_string_test() ->
 %%% ===================================================================
 
 %% These tests send to the `Erlang` class object, which dispatches through
-%% the compiled `bt@stdlib@erlang` and the extensions table; a fresh node has
-%% neither the runtime nor the stdlib class loaded (BT-4934).
+%% the compiled `bt@stdlib@erlang`; a fresh node has neither the runtime nor
+%% the stdlib class loaded (BT-4934).
 boot_erlang_class() ->
     beamtalk_test_boot:boot_real_stdlib('Erlang').
 

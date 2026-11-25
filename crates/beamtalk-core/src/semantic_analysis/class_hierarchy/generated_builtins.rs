@@ -83,6 +83,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "NodeDown"
             | "NodeShapeSkew"
             | "NodeUp"
+            | "NodeVersionSkew"
             | "Number"
             | "OS"
             | "Object"
@@ -3204,6 +3205,41 @@ fn class_info_NodeUp() -> ClassInfo {
 #[allow(clippy::too_many_lines)] // auto-generated: one literal per method
 #[inline(never)] // keep each class's literal temporaries in their own frame
 #[rustfmt::skip] // preserve compact generated layout
+fn class_info_NodeVersionSkew() -> ClassInfo {
+    ClassInfo {
+            name: "NodeVersionSkew".into(),
+            superclass: Some("Announcement".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            in_caller_new1: false,
+            is_module_less: false,
+            auto_ctors: Some(AutoConstructors { keyword_constructor: Some("node:localWireVersion:remoteWireVersion:localBeamtalkVersion:remoteBeamtalkVersion:".into()) }),
+            state: vec!["node".into(), "localWireVersion".into(), "remoteWireVersion".into(), "localBeamtalkVersion".into(), "remoteBeamtalkVersion".into()],
+            state_types: HashMap::from([("node".into(), DeclaredType::simple("Node")), ("localWireVersion".into(), DeclaredType::simple("Integer")), ("remoteWireVersion".into(), DeclaredType::union(vec![DeclaredType::simple("Integer"), DeclaredType::simple("Nil")])), ("localBeamtalkVersion".into(), DeclaredType::simple("String")), ("remoteBeamtalkVersion".into(), DeclaredType::union(vec![DeclaredType::simple("String"), DeclaredType::simple("Nil")]))]),
+            state_has_default: HashMap::from([("node".into(), false), ("localWireVersion".into(), false), ("remoteWireVersion".into(), true), ("localBeamtalkVersion".into(), false), ("remoteBeamtalkVersion".into(), true)]),
+            state_kinds: HashMap::from([("node".into(), SlotKind::Eager), ("localWireVersion".into(), SlotKind::Eager), ("remoteWireVersion".into(), SlotKind::Eager), ("localBeamtalkVersion".into(), SlotKind::Eager), ("remoteBeamtalkVersion".into(), SlotKind::Eager)]),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+    }
+}
+
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
 fn class_info_Number() -> ClassInfo {
     ClassInfo {
             name: "Number".into(),
@@ -3956,7 +3992,7 @@ fn class_info_ReactiveSubprocess() -> ClassInfo {
             initialize_assigns: BTreeSet::new(),
             has_dynamic_field_writer: false,
             methods: vec![
-                MethodInfo { selector: "writeLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("String"))], doc: Some("Write a line to the subprocess's stdin (appends newline).\n\n## Examples\n```beamtalk\nproc writeLine: \"\\{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"ping\\\"}\"\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
+                MethodInfo { selector: "writeLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("String"))], doc: Some("Write a line to the subprocess's stdin (appends newline).\n\nThe write does not wait for the child to read the line. Up to 8 MiB\ncan wait for a child that is not reading its input. A line that cannot\nbe delivered (past that limit, or after the child closed its input) is\nlost, and from then on every `writeLine:` raises a `runtime_error`.\n\n## Examples\n```beamtalk\nproc writeLine: \"\\{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"ping\\\"}\"\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
                 MethodInfo { selector: "exitCode".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("Integer"), DeclaredType::simple("Nil")])), param_types: vec![], doc: Some("Get the exit code. Returns nil if the subprocess is still running.\n\n## Examples\n```beamtalk\nproc exitCode.   // => 0\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
                 MethodInfo { selector: "close".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![], doc: Some("Force-close the subprocess (sends kill to process group).\n\n## Examples\n```beamtalk\nproc close.\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
             ],
@@ -4629,7 +4665,7 @@ fn class_info_Subprocess() -> ClassInfo {
             initialize_assigns: BTreeSet::new(),
             has_dynamic_field_writer: false,
             methods: vec![
-                MethodInfo { selector: "writeLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("String"))], doc: Some("Write a line to the subprocess's stdin (appends newline).\n\n## Examples\n```beamtalk\nagent writeLine: \"\\{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"ping\\\"}\"\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
+                MethodInfo { selector: "writeLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("String"))], doc: Some("Write a line to the subprocess's stdin (appends newline).\n\nThe write does not wait for the child to read the line. Up to 8 MiB\ncan wait for a child that is not reading its input. A line that cannot\nbe delivered (past that limit, or after the child closed its input) is\nlost, and from then on every `writeLine:` raises a `runtime_error`.\n\n## Examples\n```beamtalk\nagent writeLine: \"\\{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"ping\\\"}\"\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
                 MethodInfo { selector: "readLine".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("String"), DeclaredType::simple("Nil")])), param_types: vec![], doc: Some("Read one line from stdout. Blocks until a line is available. Returns nil at EOF.\n\n## Examples\n```beamtalk\nline := agent readLine.   // => \"hello\" or nil\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
                 MethodInfo { selector: "readLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("String"), DeclaredType::simple("Nil")])), param_types: vec![Some(DeclaredType::simple("Integer"))], doc: Some("Read one line from stdout with a timeout in milliseconds. Returns nil on timeout or EOF.\n\n## Examples\n```beamtalk\nline := agent readLine: 5000.   // => String or nil\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
                 MethodInfo { selector: "readStderrLine".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("String"), DeclaredType::simple("Nil")])), param_types: vec![], doc: Some("Read one line from stderr. Blocks until a line is available. Returns nil at EOF.\n\n## Examples\n```beamtalk\nerrLine := agent readStderrLine.\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
@@ -6331,6 +6367,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     classes.insert("NodeDown".into(), class_info_NodeDown());
     classes.insert("NodeShapeSkew".into(), class_info_NodeShapeSkew());
     classes.insert("NodeUp".into(), class_info_NodeUp());
+    classes.insert("NodeVersionSkew".into(), class_info_NodeVersionSkew());
     classes.insert("Number".into(), class_info_Number());
     classes.insert("OS".into(), class_info_OS());
     classes.insert("Object".into(), class_info_Object());

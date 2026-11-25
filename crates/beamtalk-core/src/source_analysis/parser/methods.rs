@@ -10,7 +10,7 @@ use crate::ast::{
 use crate::source_analysis::TokenKind;
 
 use super::declarations::{SelectorContext, is_state_like_declaration_keyword, is_uses_keyword};
-use super::{Diagnostic, Parser};
+use super::{Diagnostic, DiagnosticCategory, Parser};
 
 impl Parser {
     /// Parses a method definition.
@@ -88,11 +88,13 @@ impl Parser {
         let pipeline_mark = self.pipeline_sends.len();
         let literal_mark = self.literal_comments.len();
         let spelling_mark = self.number_spellings.len();
+        let gap_mark = self.gap_comments.len();
         let body = self.parse_method_body();
         let pipeline_sends = self.pipeline_sends.drain(pipeline_mark..).collect();
         let literal_comments = crate::ast::LiteralComments::from_records(
             self.literal_comments.drain(literal_mark..),
             self.number_spellings.drain(spelling_mark..),
+            self.gap_comments.drain(gap_mark..),
         );
         self.current_method_header_indent = previous_method_header_indent;
         self.current_method_selector = previous_method_selector;
@@ -489,7 +491,8 @@ impl Parser {
                     "Define the method in the file that defines the class, or write a method \
                      on a class of your own that takes the value."
                         .to_string(),
-                ),
+                )
+                .with_category(DiagnosticCategory::MisplacedExtension),
             );
             cls_ident
         } else {

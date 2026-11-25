@@ -18,8 +18,8 @@
 
 use crate::ast::{
     Block, BlockParameter, CascadeMessage, CommentAttachment, Expression, ExpressionStatement,
-    Identifier, KeywordPart, Literal, MapPair, MapPatternKey, MapPatternPair, MatchArm,
-    MessageSelector, Pattern, StringSegment,
+    GapComments, GapSlot, Identifier, KeywordPart, Literal, MapPair, MapPatternKey, MapPatternPair,
+    MatchArm, MessageSelector, Pattern, StringSegment,
 };
 use crate::source_analysis::{Span, Token, TokenKind};
 use ecow::EcoString;
@@ -69,11 +69,42 @@ impl Parser {
     /// Parses a return statement.
     fn parse_return(&mut self) -> Expression {
         let start = self.tokens[self.current - 1].span();
-        let value = Box::new(self.parse_assignment());
+        let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, Self::parse_assignment));
         let end = value.span();
         let span = start.merge(end);
 
         Expression::Return { value, span }
+    }
+
+    /// Parses, with `parse`, the value after a just-consumed `:=`, `^`, `=`
+    /// or keyword, filing the comments written before it under `slot`
+    /// (BT-5183).
+    pub(super) fn parse_after_gap(
+        &mut self,
+        slot: GapSlot,
+        parse: impl FnOnce(&mut Self) -> Expression,
+    ) -> Expression {
+        let gap = self.gap_before_current();
+        self.parse_with_gap(gap, slot, parse)
+    }
+
+    /// Parses a value with `parse`, filing `gap` (the comments written just
+    /// before it) under `slot`, anchored at the value's first token — but
+    /// only when a value starting there was parsed. In broken code
+    /// (`foo:` with its argument missing) the next token starts the next
+    /// statement, and the comments before it are that statement's.
+    fn parse_with_gap(
+        &mut self,
+        gap: GapComments,
+        slot: GapSlot,
+        parse: impl FnOnce(&mut Self) -> Expression,
+    ) -> Expression {
+        let anchor = self.current_token().span().start();
+        let value = parse(self);
+        if !value.is_error() && value.span().start() == anchor {
+            self.record_gap(anchor, slot, gap);
+        }
+        value
     }
 
     /// Parses an assignment or regular expression.
@@ -132,7 +163,9 @@ impl Parser {
         let start = self.current_token().span();
         let pattern = self.parse_tuple_pattern();
         self.expect(&TokenKind::Assign, "Expected ':=' after tuple pattern");
-        let value = Box::new(self.with_expression_nesting(start, Self::parse_assignment));
+        let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, |p| {
+            p.with_expression_nesting(start, Self::parse_assignment)
+        }));
         let span = start.merge(value.span());
         Expression::DestructureAssignment {
             pattern,
@@ -202,8 +235,9 @@ impl Parser {
     ) -> Expression {
         match Self::collection_elements_to_pattern(elements, lhs_span, list_syntax) {
             Ok(pattern) => {
-                let value =
-                    Box::new(self.with_expression_nesting(lhs_span, Self::parse_assignment));
+                let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, |p| {
+                    p.with_expression_nesting(lhs_span, Self::parse_assignment)
+                }));
                 let span = lhs_span.merge(value.span());
                 Expression::DestructureAssignment {
                     pattern,
@@ -228,8 +262,9 @@ impl Parser {
     fn parse_map_destructure(&mut self, pairs: &[MapPair], lhs_span: Span) -> Expression {
         match Self::map_pairs_to_pattern(pairs, lhs_span) {
             Ok(pattern) => {
-                let value =
-                    Box::new(self.with_expression_nesting(lhs_span, Self::parse_assignment));
+                let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, |p| {
+                    p.with_expression_nesting(lhs_span, Self::parse_assignment)
+                }));
                 let span = lhs_span.merge(value.span());
                 Expression::DestructureAssignment {
                     pattern,
@@ -268,7 +303,9 @@ impl Parser {
             };
         }
 
-        let value = Box::new(self.with_expression_nesting(expr.span(), Self::parse_assignment));
+        let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, |p| {
+            p.with_expression_nesting(expr.span(), Self::parse_assignment)
+        }));
         let span = expr.span().merge(value.span());
         Expression::Assignment {
             target: Box::new(expr),
@@ -300,7 +337,9 @@ impl Parser {
             };
         }
 
-        let value = Box::new(self.with_expression_nesting(start, Self::parse_assignment));
+        let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, |p| {
+            p.with_expression_nesting(start, Self::parse_assignment)
+        }));
         let span = start.merge(value.span());
         Expression::Assignment {
             target: Box::new(target),
@@ -394,14 +433,13 @@ impl Parser {
                 self.report_cascade_pipeline_mix();
                 // Recover: parse the cascade onto the pipeline's last send
                 // so its messages do not surface as stray statements.
-                self.advance();
                 return self.parse_cascade_messages(pipeline);
             }
             return pipeline;
         }
 
         // Check if this is a cascade
-        if !self.match_token(&TokenKind::Semicolon) {
+        if !self.check(&TokenKind::Semicolon) {
             return head;
         }
         let cascade = self.parse_cascade_messages(head);
@@ -606,19 +644,20 @@ impl Parser {
         );
     }
 
-    /// Parses the `; message` parts of a cascade whose first `;` has been
-    /// consumed, onto `receiver` (the cascade's first send).
+    /// Parses the `; message` parts of a cascade onto `receiver` (the
+    /// cascade's first send); the current token is the first `;`.
     fn parse_cascade_messages(&mut self, receiver: Expression) -> Expression {
         let mut messages = Vec::new();
 
-        loop {
+        // Each message follows a `;`. The comments on either side of the
+        // `;` are filed against the message after it (BT-5183).
+        while self.check(&TokenKind::Semicolon) {
+            let gap = self.gaps_around_current();
+            self.advance();
+            let anchor = self.current_token().span().start();
+            self.record_gap(anchor, GapSlot::BeforeCascadeMessage, gap);
             let message = self.parse_cascade_message();
             messages.push(message);
-
-            // Continue if there's another semicolon
-            if !self.match_token(&TokenKind::Semicolon) {
-                break;
-            }
         }
 
         self.report_trailing_cascade_messages();
@@ -714,12 +753,21 @@ impl Parser {
                 ) {
                     break;
                 }
+                let keyword = keyword.clone();
                 let span = self.current_token().span();
-                keywords.push(KeywordPart::new(keyword.clone(), span));
+                // The gap before the first keyword is the cascade's own,
+                // recorded around its `;` (BT-5183).
+                if !keywords.is_empty() {
+                    let gap = self.gap_before_current();
+                    self.record_gap(span.start(), GapSlot::BeforeKeyword, gap);
+                }
+                keywords.push(KeywordPart::new(keyword, span));
                 self.advance();
 
-                // Parse argument (which is a binary message)
-                arguments.push(self.parse_binary_message());
+                // Parse argument (which is a binary message), after any
+                // comments between the keyword and it (BT-5183).
+                arguments
+                    .push(self.parse_after_gap(GapSlot::AfterKeyword, Self::parse_binary_message));
             }
 
             if keywords.is_empty() {
@@ -750,8 +798,15 @@ impl Parser {
         };
         if let Some(op) = binary_op {
             let selector = MessageSelector::Binary(op);
+            // Only the comments after the operator: those before it (after
+            // the `;`) are the cascade's own gap (BT-5183).
+            let gap = self.gap_before(self.current + 1);
             self.advance();
-            let arg = self.parse_unary_message();
+            let arg = self.parse_with_gap(
+                gap,
+                GapSlot::AroundBinaryOperator,
+                Self::parse_unary_message,
+            );
             let span = start_span.merge(arg.span());
             return CascadeMessage::new(selector, vec![arg], span);
         }
@@ -900,6 +955,9 @@ impl Parser {
             && self.peek_at(1) == Some(&TokenKind::LeftBracket)
         {
             let exhaustive = matches!(self.current_kind(), TokenKind::Keyword(k) if k.as_str() == "matchExhaustive:");
+            // Comments between the receiver and `match:` (BT-5183).
+            let gap = self.gap_before_current();
+            self.record_gap(receiver.span().end(), GapSlot::BeforeMatch, gap);
             return self.parse_match_expression(receiver, exhaustive);
         }
 
@@ -921,10 +979,15 @@ impl Parser {
             }
             let span = self.current_token().span();
             keywords.push(KeywordPart::new(keyword.clone(), span));
+            // Comments between the receiver or previous argument and this
+            // keyword (BT-5183).
+            let gap = self.gap_before_current();
+            self.record_gap(span.start(), GapSlot::BeforeKeyword, gap);
             self.advance();
 
-            // Parse argument (which is a binary message)
-            arguments.push(self.parse_binary_message());
+            // Parse argument (which is a binary message), after any
+            // comments between the keyword and it (BT-5183).
+            arguments.push(self.parse_after_gap(GapSlot::AfterKeyword, Self::parse_binary_message));
         }
 
         // Safety: the pre-loop guard above returns early for any leading-newline
@@ -1014,7 +1077,9 @@ impl Parser {
                 break;
             }
 
-            // Consume the operator
+            // Consume the operator, filing the comments on either side of
+            // it against its argument (BT-5183).
+            let gap = self.gaps_around_current();
             let op_span = self.advance().span();
 
             // Parse the right-hand side with the operator's right binding
@@ -1023,18 +1088,20 @@ impl Parser {
             // (`2 ** 2 ** ...`) and goes through the nesting guard; a
             // left-associative operator's recursion is bounded by the number
             // of precedence levels.
-            let right = if bp.right < bp.left {
-                self.with_nesting(
-                    op_span,
-                    |p| {
-                        let end = p.skip_binary_operands();
-                        Self::nesting_error(op_span.merge(end))
-                    },
-                    |p| p.parse_binary_with_pratt(bp.right),
-                )
-            } else {
-                self.parse_binary_with_pratt(bp.right)
-            };
+            let right = self.parse_with_gap(gap, GapSlot::AroundBinaryOperator, |p| {
+                if bp.right < bp.left {
+                    p.with_nesting(
+                        op_span,
+                        |p| {
+                            let end = p.skip_binary_operands();
+                            Self::nesting_error(op_span.merge(end))
+                        },
+                        |p| p.parse_binary_with_pratt(bp.right),
+                    )
+                } else {
+                    p.parse_binary_with_pratt(bp.right)
+                }
+            });
 
             if !self.chain_may_grow(&mut links, op_span) {
                 // Past the chain limit: consume the rest without building it.
@@ -1537,45 +1604,7 @@ impl Parser {
             .expect(&TokenKind::LeftBracket, "Expected '['")
             .map_or_else(|| self.current_token().span(), |t: Token| t.span());
 
-        let mut parameters = Vec::new();
-
-        // Parse block parameters: [:x :y | ...] or [:x :: Type :y :: Type | ...]
-        //
-        // Optional `:: Type` annotations after each parameter are accepted
-        // and stored on the parameter so `beamtalk fmt` round-trips them
-        // (BT-4108). Block parameter types are still inferred by the type
-        // checker from the message signature rather than from these
-        // annotations; storing (rather than merely consuming, as was done
-        // for BT-2042 / BT-2043 to avoid cascading parse errors and false
-        // "Unused variable" warnings) loses no information.
-        //
-        // Use `parse_single_type_annotation` — not `parse_type_annotation` —
-        // because union `|` would otherwise swallow the block's `|` separator.
-        // Callers that need a union type on a block parameter can wrap the
-        // type in grouping parentheses, e.g. `:x :: (Integer | String)`.
-        while self.match_token(&TokenKind::Colon) {
-            if let TokenKind::Identifier(name) = self.current_kind() {
-                let span = self.current_token().span();
-                let name = name.clone();
-                self.advance();
-
-                // Optional `:: Type` annotation.
-                if self.match_token(&TokenKind::DoubleColon) {
-                    let annotation = self.parse_single_type_annotation();
-                    parameters.push(BlockParameter::with_type(name, annotation, span));
-                } else {
-                    parameters.push(BlockParameter::new(name, span));
-                }
-            } else {
-                self.error("Expected parameter name after ':'");
-                break;
-            }
-        }
-
-        // Expect pipe separator if there are parameters
-        if !parameters.is_empty() {
-            self.expect(&TokenKind::Pipe, "Expected '|' after block parameters");
-        }
+        let (parameters, bar_gap, mut open_gap) = self.parse_block_header();
 
         // Parse block body — statements separated by periods or newlines
         let mut body = Vec::new();
@@ -1585,6 +1614,11 @@ impl Parser {
             let has_blank_line =
                 !body.is_empty() && self.current_token().has_blank_line_before_first_comment();
             let mut comments = self.collect_comment_attachment();
+            if body.is_empty() && !open_gap.same_line.is_empty() {
+                let mut leading = std::mem::take(&mut open_gap.same_line);
+                leading.append(&mut comments.leading);
+                comments.leading = leading;
+            }
             let expr = self.parse_expression();
             // Only collect trailing comment if parse_expression consumed tokens;
             // otherwise collect_trailing_comment() reads the previous token's
@@ -1639,16 +1673,107 @@ impl Parser {
             }
         }
 
+        // Own-line comments before the `]`, after the last statement
+        // (BT-5183); for an empty block, also the opener's same-line ones.
+        let mut close_gap = open_gap;
+        if self.check(&TokenKind::RightBracket) {
+            close_gap
+                .own_line
+                .extend(self.gap_before_current().own_line);
+        }
+
         let end = self
             .expect(&TokenKind::RightBracket, "Expected ']' to close block")
             .map_or(start, |t: Token| t.span());
 
         let span = start.merge(end);
+        self.record_gap(span.start(), GapSlot::BeforeBlockBar, bar_gap);
+        self.record_gap(span.end(), GapSlot::BeforeBlockClose, close_gap);
         // A parsed block is never zero-width (its span covers at least `[`):
         // `ast::normalize::written_unary_loop` reads a zero-width empty block as
         // the body it added to a unary `whileTrue`/`whileFalse` (BT-4313).
         let block = Block::new(parameters, body, span);
         Expression::Block(block)
+    }
+
+    /// Parses a block's parameters and `|` (after the `[`), answering the
+    /// parameters, the comments between the last parameter and the `|`, and
+    /// the comments on the line of the `[` or `|` before the body (BT-5183).
+    fn parse_block_header(&mut self) -> (Vec<BlockParameter>, GapComments, GapComments) {
+        let mut parameters = Vec::new();
+
+        // Parse block parameters: [:x :y | ...] or [:x :: Type :y :: Type | ...]
+        //
+        // Optional `:: Type` annotations after each parameter are accepted
+        // and stored on the parameter so `beamtalk fmt` round-trips them
+        // (BT-4108). Block parameter types are still inferred by the type
+        // checker from the message signature rather than from these
+        // annotations; storing (rather than merely consuming, as was done
+        // for BT-2042 / BT-2043 to avoid cascading parse errors and false
+        // "Unused variable" warnings) loses no information.
+        //
+        // Use `parse_single_type_annotation` — not `parse_type_annotation` —
+        // because union `|` would otherwise swallow the block's `|` separator.
+        // Callers that need a union type on a block parameter can wrap the
+        // type in grouping parentheses, e.g. `:x :: (Integer | String)`.
+        while self.check(&TokenKind::Colon) {
+            // Comments before this parameter: after the `[` or the previous
+            // parameter (BT-5183).
+            let gap = self.gap_before_current();
+            self.advance();
+            if let TokenKind::Identifier(name) = self.current_kind() {
+                let span = self.current_token().span();
+                let name = name.clone();
+                self.record_gap(span.start(), GapSlot::BeforeBlockParam, gap);
+                self.advance();
+
+                // Optional `:: Type` annotation.
+                if self.match_token(&TokenKind::DoubleColon) {
+                    let annotation = self.parse_single_type_annotation();
+                    parameters.push(BlockParameter::with_type(name, annotation, span));
+                } else {
+                    parameters.push(BlockParameter::new(name, span));
+                }
+            } else {
+                self.error("Expected parameter name after ':'");
+                break;
+            }
+        }
+
+        // Expect pipe separator if there are parameters. Comments between
+        // the last parameter and the `|` are the block's (BT-5183).
+        let bar_gap = if parameters.is_empty() {
+            GapComments::default()
+        } else {
+            let gap = if self.check(&TokenKind::Pipe) {
+                self.gap_before_current()
+            } else {
+                GapComments::default()
+            };
+            self.expect(&TokenKind::Pipe, "Expected '|' after block parameters");
+            gap
+        };
+        // A comment on the line of the `[` (or the `|`), before the body:
+        // the opener's trailing trivia, which no statement collector reads
+        // (BT-5183). It leads the first statement, or the `]` gap of an
+        // empty block.
+        let open_gap = self
+            .current
+            .checked_sub(1)
+            .map(|i| {
+                let mut gap = GapComments::default();
+                let opener = &self.tokens[i];
+                gap.same_line.extend(
+                    opener
+                        .trailing_trivia()
+                        .iter()
+                        .filter_map(|t| super::comment_from_trivia(t, opener.span())),
+                );
+                gap
+            })
+            .unwrap_or_default();
+
+        (parameters, bar_gap, open_gap)
     }
 
     /// Parses a match expression: `receiver match: [pattern -> body ...]`
@@ -1667,10 +1792,28 @@ impl Parser {
         let mut arms = Vec::new();
 
         while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
-            arms.push(self.parse_match_arm());
+            let arm = self.parse_match_arm();
+            // End-of-line comments after the arm's body or its `;`, and for
+            // the last arm the own-line comments before the `]` (BT-5183).
+            // The own-line comments before a later arm are that arm's.
+            let anchor = arm.body.span().end();
+            arms.push(arm);
+            let mut gap = GapComments {
+                same_line: self.gap_before_current().same_line,
+                ..GapComments::default()
+            };
+            let at_semicolon = self.check(&TokenKind::Semicolon);
+            if at_semicolon {
+                self.advance();
+                gap.same_line.extend(self.gap_before_current().same_line);
+            }
+            if self.check(&TokenKind::RightBracket) {
+                gap.own_line = self.gap_before_current().own_line;
+            }
+            self.record_gap(anchor, GapSlot::AfterMatchArm, gap);
 
             // Semicolon or newline separates arms
-            if self.match_token(&TokenKind::Semicolon) {
+            if at_semicolon {
                 // Explicit semicolon — continue
             } else if !self.is_at_end()
                 && !self.check(&TokenKind::RightBracket)
@@ -1943,13 +2086,22 @@ impl Parser {
             .expect(&TokenKind::LeftParen, "Expected '('")
             .map_or_else(|| self.current_token().span(), |t: Token| t.span());
 
+        // Comments just inside the parentheses (BT-5183).
+        let open_gap = self.gap_before_current();
         let inner = self.parse_expression();
+        let close_gap = if self.check(&TokenKind::RightParen) {
+            self.gap_before_current()
+        } else {
+            GapComments::default()
+        };
 
         let end = self
             .expect(&TokenKind::RightParen, "Expected ')' to close parentheses")
             .map_or(start, |t: Token| t.span());
 
         let span = start.merge(end);
+        self.record_gap(span.start(), GapSlot::AfterOpenParen, open_gap);
+        self.record_gap(span.end(), GapSlot::BeforeCloseParen, close_gap);
 
         Expression::Parenthesized {
             expression: Box::new(inner),

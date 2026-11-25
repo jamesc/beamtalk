@@ -1591,12 +1591,6 @@ fn run_native_and_match_validators(
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
-    // BT-4930: cross-file `self delegate` on a native class never reaches the backing module
-    validators::check_cross_file_native_delegate(
-        module,
-        &result.class_hierarchy,
-        &mut result.diagnostics,
-    );
     // BT-4961/BT-4964: a concrete class under a native class must declare its own `native:`
     validators::check_native_subclass_declares_native(
         module,

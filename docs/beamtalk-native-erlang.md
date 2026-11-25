@@ -231,9 +231,7 @@ Not an error, and left as it was: an `abstract` subclass of a native actor (it i
 
 ### `self delegate` must be in the class's own file (BT-4930)
 
-`self delegate` reaches the backing module only for a method written in the class body or as a `Foo >> sel` extension in the same file as `Foo` (for a native `Actor`, class side only: an instance-side same-file extension on a native actor is its own compile error). A `Foo >> sel => self delegate` extension in a different file, on a `native:` class (an `Object` or an `Actor`, instance or class side), is a compile error at the definition: "`self delegate` method `sel` on native class `Foo` is defined outside the class's own file and will not reach the backing module". Before, it compiled and always raised "delegate called on a non-native Object" when called. Define the method in the file that declares the class. The return-type warning and the reserved-word error do not run for the cross-file form; only this error does. The check also applies to a native class that comes from a compiled dependency, as long as that dependency was built by a compiler that records the `native` flag in the class metadata; an older `.beam` is treated as non-native and gets no check.
-
-Since ADR 0152, a `Foo >> sel` in a file that does not define `Foo` is a compile error for every class, native or not. The `self delegate` message above is the more specific one for this case.
+`self delegate` reaches the backing module only for a method written in the class body or as a `Foo >> sel` extension in the same file as `Foo` (for a native `Actor`, class side only: an instance-side same-file extension on a native actor is its own compile error). A `Foo >> sel` in any other file is a compile error for every class, native or not (ADR 0152), so a `self delegate` method must be defined in the file that declares the class. No `@expect` directive suppresses either error (BT-5184).
 
 ### Reserved-word constraint
 

@@ -799,3 +799,36 @@ fn add_annotation_inserts_before_the_real_body_arrow_not_one_in_a_comment() {
     let arrow = u32::try_from(source.rfind("=>").unwrap()).unwrap();
     assert_eq!(action.edits[0].span.start(), arrow, "{action:?}");
 }
+
+/// BT-5184: a cross-file `Foo >> sel` is a compile error (ADR 0152), so the
+/// language service reports it and does not treat it as a method of `Foo`:
+/// it is not an implementor, a declaration, or a references target. A
+/// same-file `>>` is folded into its class and still is.
+#[test]
+fn rejected_cross_file_extension_is_not_indexed_as_a_method() {
+    let mut service = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("ext.bt");
+    service.update_file(
+        file.clone(),
+        "Object subclass: Foo\n  foo => 1\n\nFoo >> local => 2\nInteger >> doubled => self * 2\n"
+            .to_string(),
+    );
+
+    let diags = service.diagnostics(&file);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("Integer >> doubled") && d.message.contains("ADR 0152")),
+        "{diags:?}"
+    );
+    assert!(service.find_implementors("doubled").is_empty());
+    assert!(service.find_selector_declarations("doubled").is_empty());
+    // Cursor on the rejected header's `doubled`: nothing to navigate.
+    assert!(
+        service
+            .find_references(&file, Position::new(4, 11))
+            .is_empty()
+    );
+
+    assert_eq!(service.find_implementors("local").len(), 1);
+}
