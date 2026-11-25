@@ -624,11 +624,11 @@ is surface-specific.
   its defining class alone
   ([BT-3717](https://linear.app/beamtalk/issue/BT-3717)).
 - The runtime errors the lint predicts, `class_state_unreachable`,
-  `class_state_read_only` and `abi_mismatch` (ADR 0130), are ordinary
+  and `abi_mismatch` (ADR 0130), are ordinary
   `#beamtalk_error{}` values and reach every surface through its existing
   error path; none is surface-specific. A
-  class-variable write from a supervisor factory or `performLocally:` raises
-  `class_state_read_only` on every surface.
+  class-variable write from a supervisor factory raises
+  `class_state_unreachable` on every surface.
 
 ### `actor-state-abroad` lint (ADR 0137, BT-4011)
 

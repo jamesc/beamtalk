@@ -165,7 +165,7 @@ all_groups_test_() ->
             fun new_on_primitive_not_double_wrapped_group/0,
             fun qualified_drain_isolates_packages_group/0,
             fun apply_class_info_corrects_stale_superclass_group/0,
-            fun local_call_snapshot_group/0,
+            fun local_call_group/0,
             fun put_class_method_arity_group/0,
             fun crash_recovery_restart_group/0,
             fun bt1982_set_class_var_unknown_raises_group/0,
@@ -1432,37 +1432,27 @@ test_local_call_non_object() ->
     ?assertBtError(type_error, beamtalk_object_class:local_call(not_an_object, testSuccess, [])).
 
 %%====================================================================
-%% local_call/3 class-variable snapshot region (ADR 0130 §5, BT-3708)
+%% local_call/3 runs in the caller with no class-variable region (ADR 0153)
 %%====================================================================
 
-%% Class methods the local_call/3 snapshot tests reach (`class_mod = ?MODULE`).
-class_lcRead(ClassSelf) -> beamtalk_class_vars:get(ClassSelf, n).
-class_lcWrite(ClassSelf) -> beamtalk_class_vars:put(ClassSelf, n, 99).
+%% Class methods the local_call/3 tests reach (`class_mod = ?MODULE`).
 class_lcSelf(ClassSelf) -> ClassSelf.
+class_lcKey(#beamtalk_object{class = Tag}) -> erlang:get(beamtalk_class_vars:key_for_tag(Tag)).
 
-local_call_snapshot_group() ->
+local_call_group() ->
     {foreach, fun setup/0, fun teardown/1, [
         {"passes the receiver as ClassSelf, not nil", fun test_local_call_passes_receiver/0},
-        {"reads the mirror snapshot", fun test_local_call_reads_snapshot/0},
-        {"write raises class_state_read_only and erases the snapshot",
-            fun test_local_call_write_raises/0},
-        {"mid-invocation on the same class reads and writes the live map",
-            fun test_local_call_live_same_class/0},
-        {"mid-invocation of X calling performLocally: on Y keeps X's home",
-            fun test_local_call_other_class_keeps_home/0}
+        {"installs no class-variable key or snapshot marker", fun test_local_call_installs_no_key/0}
     ]}.
 
-lc_class(Name, N) ->
+lc_class(Name) ->
     ClassInfo = #{
         name => Name,
         module => ?MODULE,
         superclass => none,
-        %% BT-4300: performLocally: resolves through the published class-method
+        %% BT-4300: local_call/3 resolves through the published class-method
         %% selectors (the class-method chain), not any export of the module.
-        class_methods => #{
-            lcRead => #{arity => 0}, lcWrite => #{arity => 0}, lcSelf => #{arity => 0}
-        },
-        class_state => #{n => N}
+        class_methods => #{lcSelf => #{arity => 0}, lcKey => #{arity => 0}}
     },
     {ok, Pid} = beamtalk_object_class:start_link(Name, ClassInfo),
     #beamtalk_object{
@@ -1472,50 +1462,12 @@ lc_class(Name, N) ->
     }.
 
 test_local_call_passes_receiver() ->
-    Obj = lc_class('BT3708LcSelf', 1),
+    Obj = lc_class('BT3708LcSelf'),
     ?assertEqual(Obj, beamtalk_object_class:local_call(Obj, lcSelf, [])).
 
-test_local_call_reads_snapshot() ->
-    Obj = lc_class('BT3708LcRead', 5),
-    ?assertEqual(5, beamtalk_object_class:local_call(Obj, lcRead, [])).
-
-test_local_call_write_raises() ->
-    Obj = lc_class('BT3708LcWrite', 5),
-    ?assertBtError(class_state_read_only, beamtalk_object_class:local_call(Obj, lcWrite, [])),
-    ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key('BT3708LcWrite'))),
-    ?assertEqual(5, beamtalk_object_class:local_call(Obj, lcRead, [])).
-
-test_local_call_live_same_class() ->
-    Obj = lc_class('BT3708LcLive', 5),
-    Key = beamtalk_class_vars:key('BT3708LcLive'),
-    ok = beamtalk_class_vars:install(Key, #{n => 123}),
-    try
-        ?assertEqual(123, beamtalk_object_class:local_call(Obj, lcRead, [])),
-        ?assertEqual(99, beamtalk_object_class:local_call(Obj, lcWrite, [])),
-        ?assertEqual(#{n => 99}, erlang:get(Key))
-    after
-        beamtalk_class_vars:uninstall(Key)
-    end.
-
-test_local_call_other_class_keeps_home() ->
-    _X = lc_class('BT3708LcX', 1),
-    Y = lc_class('BT3708LcY', 2),
-    KeyX = beamtalk_class_vars:key('BT3708LcX'),
-    ok = beamtalk_class_vars:install(KeyX, #{n => 10}),
-    try
-        %% Y is read through its mirror; X's home entry is untouched.
-        Snap = beamtalk_class_vars:snapshot(),
-        ?assertEqual(2, beamtalk_object_class:local_call(Y, lcRead, [])),
-        ?assertEqual(KeyX, beamtalk_class_vars_test_support:home_key()),
-        ?assertEqual(#{n => 10}, erlang:get(KeyX)),
-        ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key('BT3708LcY'))),
-        %% X's restore still works afterwards.
-        erlang:put(KeyX, #{n => 11}),
-        ok = beamtalk_class_vars:restore(Snap),
-        ?assertEqual(#{n => 10}, erlang:get(KeyX))
-    after
-        beamtalk_class_vars:uninstall(KeyX)
-    end.
+test_local_call_installs_no_key() ->
+    Obj = lc_class('BT3708LcKey'),
+    ?assertEqual(undefined, beamtalk_object_class:local_call(Obj, lcKey, [])).
 
 %%====================================================================
 %% put_class_method/4 arity gate (ADR 0130 §3, BT-3708)
@@ -1877,9 +1829,7 @@ crash_recovery_restart_group() ->
                 %% `nil` — agreeing with `beamtalk_class_vars:has_value/2`
                 %% (the presence test `hasField:` uses) — not an error.
                 ?assertEqual(nil, gen_server:call(Pid, {set_class_var, current, nil})),
-                ?assertEqual(nil, gen_server:call(Pid, {get_class_var, current})),
-                {ok, Snapshot} = beamtalk_class_registry:class_state_snapshot_lookup(Pid),
-                ?assertEqual(true, beamtalk_class_vars:has_value(Snapshot, current))
+                ?assertEqual(nil, gen_server:call(Pid, {get_class_var, current}))
             after
                 beamtalk_test_module:unload(Mod)
             end

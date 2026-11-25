@@ -158,20 +158,6 @@ impl CoreErlangGenerator {
                 )
                 .map(Some)
             }
-            // Execute a class method in the caller's process,
-            // bypassing the class object's gen_server.
-            Some(WellKnownSelector::PerformLocallyWithArgs) => {
-                debug_assert_eq!(arguments.len(), 2);
-                // Hoist open-scope receiver + args (e.g. class method self-sends).
-                self.sequenced_runtime_call(
-                    "beamtalk_object_class",
-                    "local_call",
-                    &[receiver, &arguments[0], &arguments[1]],
-                    "PerfLoc",
-                    |operands| operands,
-                )
-                .map(Some)
-            }
             Some(WellKnownSelector::Perform) => {
                 debug_assert_eq!(arguments.len(), 1);
                 // Hoist open-scope receiver + selector arg.

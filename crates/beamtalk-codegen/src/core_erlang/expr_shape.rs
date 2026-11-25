@@ -511,8 +511,7 @@ pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
     }
     // Well-known selectors that the intrinsics
     // layer **unconditionally** handles before `try_handle_self_dispatch`.
-    // Covers ProtoObject (`class`, `perform:`/`perform:withArguments:`/
-    // `performLocally:withArguments:`), Object reflection (`respondsTo:`,
+    // Covers ProtoObject (`class`, `perform:`/`perform:withArguments:`), Object reflection (`respondsTo:`,
     // `fieldAt:`, `fieldAt:put:`, `fieldNames`, `hasField:`, `clearField:`
     // — ADR 0124 §1/B4), Nil protocol
     // (`isNil`/`notNil`/`ifNil:`/`ifNotNil:`/`ifNil:ifNotNil:`/
@@ -555,7 +554,6 @@ pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
                 | WellKnownSelector::ClearField
                 | WellKnownSelector::Perform
                 | WellKnownSelector::PerformWithArgs
-                | WellKnownSelector::PerformLocallyWithArgs
         )
     {
         return false;

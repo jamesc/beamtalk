@@ -4092,24 +4092,6 @@ See [ADR 0104](ADR/0104-typed-actor-protocols.md) for the full rationale, prior 
 | `!` send (async cast) | `gen_server:cast` — returns immediately |
 | Timeout | `gen_server:call` default 5000ms timeout |
 | `withTimeout:` | Proxy wrapping `gen_server:call/3` with custom timeout |
-| `performLocally:withArguments:` | Direct in-process call bypassing gen_server |
-
-### Caller-Process Class Method Dispatch
-
-Since [ADR 0142](ADR/0142-class-process-owns-only-class-state.md) a class method already runs in the caller unless its class's chain declares class variables or the selector is process-bound (see [Class-Side Methods](#class-side-methods-adr-0048)), so `performLocally:withArguments:` matters only for those. For a long-running class method of such a class (batch processing, report generation) that would block all other messages to the class, use `performLocally:withArguments:` to execute in the caller's process instead:
-
-```beamtalk
-// Normal dispatch — runs in MyClass's class process when MyClass has classState:
-MyClass computeReport
-
-// Local dispatch — runs in caller's process, doesn't block the class
-MyClass performLocally: #computeReport withArguments: #()
-
-// With arguments
-MyClass performLocally: #add:to: withArguments: #(3, 7)
-```
-
-**Limitations:** Local dispatch resolves the selector through the class-method chain from the receiving class, so an inherited class method is found and a subclass override wins (BT-4300). It applies compiled methods only: it does not apply ADR 0084 runtime class-method funs, so a selector whose nearest definition is a runtime fun raises `does_not_understand`. Class variables follow the read-only snapshot rule ([ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md) §5): the method *reads* the class variables as of the last completed class-method invocation, and a *write* raises `class_state_read_only`. When `performLocally:withArguments:` is reached from inside the class's own method mid-invocation, it reads and writes the live class variables instead. Use this only for stateless or read-only class methods.
 
 ### Passing Blocks Through Class Methods
 
@@ -4212,11 +4194,10 @@ The write made inside the protected block is discarded when the error crosses th
 
 | Error kind | Raised when |
 |---|---|
-| `class_state_unreachable` | A block writes a class variable (or a read finds no live or snapshotted state) away from its home class's invocation. `details` carries `class_variable`; the hint says to return the value and assign it in the home class's method. |
-| `class_state_read_only` | Code that runs against a read-only snapshot writes a class variable. See below. |
+| `class_state_unreachable` | A block writes a class variable (or a read finds no live state) away from its home class's invocation. `details` carries `class_variable`; the hint says to return the value and assign it in the home class's method. |
 | `abi_mismatch` | The loader refuses a compiled class module built with a different class-variable calling convention. See below. |
 
-**Runtime-owned out-of-process calls read a snapshot.** Supervisor definition (the instance-side configuration methods `static_init`/`dynamic_init` read, ADR 0135, and the `withClassMethod:` factory) and `performLocally:withArguments:` run outside the class process. They read the class variables as of the last completed invocation (a snapshot), and a *write* there raises `class_state_read_only`. When the caller is the class process itself, mid-invocation, they read and write the live variables. A supervisor factory or `performLocally:` method that used to assign a class variable (the assignment was dropped, or for supervisor configuration crashed supervisor startup) now raises; assign the variable from a normal class-side message instead.
+**Runtime-owned out-of-process calls.** Supervisor definition (the instance-side configuration methods `static_init`/`dynamic_init` read, ADR 0135, and the `withClassMethod:` factory) run a class method in the calling process with no class-variable home. There is no read-only snapshot any more (ADR 0153 Phase 3e): a class-variable access from such a call raises `class_state_unreachable`.
 
 **Class-module ABI.** Every compiled class module records its class-variable calling convention as `class_var_abi` in `__beamtalk_meta/0`. The loader (class registration, hot reload, and the release upgrade preflight) refuses a module whose `class_var_abi` is missing or differs from the running runtime's, including every module compiled before ADR 0130, with a structured `abi_mismatch` error that names the module and says to recompile. Hot upgrades across the release that changed the convention are not supported: restart the node and recompile every package.
 
@@ -6474,8 +6455,7 @@ the nearest ancestor's `class new` in the calling process, so an inherited
 factory (`Base class >> make => self new`, sent as `Sub make`) builds what
 `Sub new` builds, with `Sub` as `self`. The compiler rejects `self new` in an
 Object subclass's class methods only when neither the class nor an ancestor
-defines a `new`. One exception remains:
-`performLocally:withArguments:` applies compiled class methods only.
+defines a `new`.
 
 ---
 

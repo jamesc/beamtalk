@@ -16,7 +16,6 @@ use std::collections::HashSet;
 use super::super::errors::{BeamtalkErrorChain, ErrorBinding};
 use super::super::selector_mangler::dispatch_fn_name;
 use super::super::spec_codegen;
-use super::super::util::omit_late_defaultless_slot;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use super::spawn::SpawnVariant;
 use beamtalk_cerl_doc::docvec;
@@ -656,16 +655,6 @@ impl CoreErlangGenerator {
             }
             let class_method_source_doc = Document::Vec(class_method_source_docs);
 
-            // Class variable initial values. ADR 0124 §2/B2: a defaultless
-            // `late classState:` slot is omitted from the map entirely — see
-            // `omit_late_defaultless_slot`.
-            let class_vars: Vec<&beamtalk_core::ast::StateDeclaration> = class
-                .class_variables
-                .iter()
-                .filter(|cv| !omit_late_defaultless_slot(cv))
-                .collect();
-            let class_vars_doc = self.class_var_map_doc(&class_vars)?;
-
             // Class-level doc comment
             let class_doc_value: Document<'static> = if let Some(ref doc) = class.doc_comment {
                 leaf::binary_lit(doc)
@@ -738,10 +727,6 @@ impl CoreErlangGenerator {
                         // wrapped only by build_method_xref_list.
                         "'methodXref' => ",
                         method_xref_doc,
-                        ",",
-                        line(),
-                        "'classState' => ",
-                        class_vars_doc,
                         ",",
                         line(),
                         "'classDoc' => ",

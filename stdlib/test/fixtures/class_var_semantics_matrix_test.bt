@@ -24,10 +24,6 @@ abstract TestCase subclass: ClassVarSemanticsMatrixTest
   // The spelling's supervisor whose `initialize` hook writes `n`.
   initSubject => self subclassResponsibility
 
-  // A selector the subject defines itself that answers `n`, for the
-  // `performLocally:` snapshot row.
-  snapshotSelector => #n
-
   // ADR 0130 §4
   testTop => self assert: self subject rowTop equals: 2
 
@@ -177,22 +173,6 @@ abstract TestCase subclass: ClassVarSemanticsMatrixTest
   // escapes is a compile error, so none of the direct-write rows (BT-3760)
   // exist here; the diagnostic is pinned in
   // semantic_analysis/tests/local_threading.rs.
-
-  // ADR 0130 §5 runtime-owned snapshot
-  testPerformLocallyReadsSnapshot =>
-    self subject reset
-    self subject bump
-    self assert: (self subject performLocally: self snapshotSelector withArguments: #()) equals: 1
-
-  // ADR 0130 §5 runtime-owned snapshot
-  testPerformLocallyWriteRaises =>
-    self subject reset
-    self
-      assert: ([
-        self subject performLocally: #bump withArguments: #()
-      ] on: Error do: [:e | e kind])
-      equals: #class_state_read_only
-    self assert: self subject n equals: 0
 
   // ADR 0130 §4 non-local return
   testOwnNlrKeepsWriteBeforeCaret =>

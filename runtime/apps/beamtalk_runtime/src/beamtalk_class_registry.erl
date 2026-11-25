@@ -76,11 +76,6 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     record_backing_module_entry/3,
     forget_backing_module_entries/2,
     classes_backing_module/1,
-    ensure_class_state_table/0,
-    record_class_state_snapshot/2,
-    record_class_state_snapshot_if_changed/3,
-    class_state_snapshot_lookup/1,
-    forget_class_state_snapshot/1,
     ensure_static_call_keys_table/0,
     record_static_call_tag/1,
     forget_static_call_tag/1,
@@ -988,111 +983,6 @@ rename_class_pids(OldName, NewName) ->
         ok
     catch
         error:badarg -> ok
-    end.
-
-%%====================================================================
-%% Class-State (classState:) Live Snapshot
-%%====================================================================
-
--doc """
-Ensure the classVars live-snapshot table exists (idempotent).
-
-`beamtalk_supervisor:static_init/2`, `dynamic_init/2`, and the
-`class_initialize:`/`withClassMethod:` direct-call helpers all invoke a
-class method *without* going through the class gen_server — calling
-`gen_server:call` back into it from inside a supervisor's `init/1` (or from
-the supervisor process itself) would deadlock, since that class gen_server
-is the one blocked waiting for `supervisor:start_link` to return. Those
-call sites previously used a hardcoded empty `ClassVars = #{}`, silently
-discarding any `classState:` value set via an ordinary class-method call
-before `supervise` — this table lets them read the current, live snapshot
-instead, without messaging the (possibly blocked) class process.
-Read-concurrency + `{heir, ...}` mirrors `ensure_pid_table/0`.
-""".
--spec ensure_class_state_table() -> ok.
-ensure_class_state_table() ->
-    beamtalk_ets_heir:ensure_shared_table(beamtalk_class_state_snapshot, [
-        set, public, named_table, {read_concurrency, true}
-    ]).
-
--doc """
-Record the current `classState:` map for a class process.
-
-Called from `beamtalk_object_class:init/1` (the initial, default-seeded
-map) and every `handle_call` clause that rebinds `State#class_state.class_state`
-to a new map, so the snapshot never lags more than one `handle_call` behind
-the class gen_server's own authoritative state.
-
-The class process is the sole writer of its snapshot row (BT-4758): only
-`beamtalk_object_class` calls this or `record_class_state_snapshot_if_changed/3`.
-Because the `_if_changed` variant skips the write when the map is unchanged, a
-call that rebinds nothing does not repair a row that has diverged from the
-class process's state; only the next rebind to a different map rewrites it.
-""".
--spec record_class_state_snapshot(pid(), map()) -> ok.
-record_class_state_snapshot(Pid, ClassVars) ->
-    ensure_class_state_table(),
-    ets:insert(beamtalk_class_state_snapshot, {Pid, ClassVars}),
-    ok.
-
--doc """
-`record_class_state_snapshot/2`, skipped when `NewClassVars` is the map the
-snapshot already holds (BT-4758). `OldClassVars` is the class process's own
-state before the mutation, which the snapshot mirrors (init and every rebind
-record it), so an unchanged map needs no ETS write. The comparison is
-pointer-equal in the common no-change case.
-""".
--spec record_class_state_snapshot_if_changed(pid(), map(), map()) -> ok.
-record_class_state_snapshot_if_changed(_Pid, ClassVars, ClassVars) ->
-    ok;
-record_class_state_snapshot_if_changed(Pid, _OldClassVars, NewClassVars) ->
-    record_class_state_snapshot(Pid, NewClassVars).
-
--doc """
-Look up the current `classState:` map for a class process, telling "no row for this pid" (`not_found`:
-the table is absent, or a restarted class process is registered but has not yet
-recorded its snapshot) apart from "the row is an empty map" (`{ok, #{}}`).
-`beamtalk_class_vars` mirror reads use it to raise `class_state_unreachable`
-for the former instead of reading an empty map.
-""".
--spec class_state_snapshot_lookup(pid() | undefined) -> {ok, map()} | not_found.
-class_state_snapshot_lookup(undefined) ->
-    not_found;
-class_state_snapshot_lookup(Pid) ->
-    case ets:info(beamtalk_class_state_snapshot) of
-        undefined ->
-            not_found;
-        _ ->
-            case ets:lookup(beamtalk_class_state_snapshot, Pid) of
-                [{_, ClassVars}] -> {ok, ClassVars};
-                [] -> not_found
-            end
-    end.
-
--doc """
-Remove a class process's row from the classVars live-snapshot table.
-
-Called from `beamtalk_object_class:terminate/1` alongside
-`forget_loaded_class/2` and `forget_backing_module_entries/2` — this table
-is Pid-keyed like those two (not name-keyed like `beamtalk_class_pids`,
-which deliberately keeps its rows forever for crash-recovery lookup by dead
-pid), so a row for a dead or hot-reloaded class process can never be read
-again: nothing looks it up by class name, only by the live pid a caller
-already resolved via `whereis_class/1`. Without this cleanup, rows
-accumulate for the life of the node — unbounded growth across a long
-hot-reload session, which is a core REPL/dev workflow. On a hard crash
-`terminate/1` does not run, so a dead row can linger there too; harmless,
-since `class_state_snapshot_lookup/1` is only ever called with a pid a caller just
-resolved as live.
-""".
--spec forget_class_state_snapshot(pid()) -> ok.
-forget_class_state_snapshot(Pid) when is_pid(Pid) ->
-    case ets:info(beamtalk_class_state_snapshot) of
-        undefined ->
-            ok;
-        _ ->
-            ets:delete(beamtalk_class_state_snapshot, Pid),
-            ok
     end.
 
 %%====================================================================

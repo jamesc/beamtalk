@@ -205,11 +205,11 @@ fn test_method_xref_baked_into_register_class() {
     // (`stdlib/src/actor.bt`), so a subclass like `Counter` genuinely
     // *inherits* them rather than *defining* them, and its own methodXref
     // carries no row for them at all (the honest Smalltalk answer). Bound the methodXref
-    // payload to the next class-info field (`'classState'`) so the assertions
+    // payload to the next class-info field (`'classDoc'`) so the assertions
     // below cannot be satisfied by unrelated parts of the generated module.
     let mx_start = code.find("'methodXref' => [").expect("methodXref present");
     let mx_tail = &code[mx_start..];
-    let mx_seg = &mx_tail[..mx_tail.find("'classState'").unwrap_or(mx_tail.len())];
+    let mx_seg = &mx_tail[..mx_tail.find("'classDoc'").unwrap_or(mx_tail.len())];
 
     // The optional synthetic_origin key is omitted for the user-authored indexed
     // rows. Scope the check to the `increment` row (an indexed user method) so it
@@ -279,7 +279,7 @@ fn test_state_var_xref_baked_into_register_class() {
         .find("'stateVarXref' => [")
         .expect("stateVarXref present");
     let sv_tail = &code[sv_start..];
-    let sv_seg = &sv_tail[..sv_tail.find("'classState'").unwrap_or(sv_tail.len())];
+    let sv_seg = &sv_tail[..sv_tail.find("'classDoc'").unwrap_or(sv_tail.len())];
 
     assert!(
         sv_seg.contains("'name' => 'count', 'line' => 2"),
@@ -309,10 +309,10 @@ fn test_method_xref_emits_synthetic_accessors_for_value_class() {
     // Scope the assertions to the `methodXref` payload so they cannot be
     // satisfied by unrelated parts of the generated module (exports, dispatch,
     // method signatures, etc.). The payload runs from `'methodXref' => [` up to
-    // the next class-info field, `'classState'`.
+    // the next class-info field, `'classDoc'`.
     let mx_start = code.find("'methodXref' => [").expect("methodXref present");
     let mx_tail = &code[mx_start..];
-    let mx_seg = &mx_tail[..mx_tail.find("'classState'").unwrap_or(mx_tail.len())];
+    let mx_seg = &mx_tail[..mx_tail.find("'classDoc'").unwrap_or(mx_tail.len())];
 
     // Synthetic getter rows for both slots, tagged synthetic.
     assert!(
@@ -385,11 +385,11 @@ fn test_method_xref_user_accessor_suppresses_synthetic() {
     // `x` is suppressed. The `withX:` setter is still synthetic.
     //
     // Scope to the `methodXref` payload (between `'methodXref' => [` and the
-    // next class-info field `'classState'`) so a global `'withX:'` substring in
+    // next class-info field `'classDoc'`) so a global `'withX:'` substring in
     // exports/dispatch cannot satisfy the assertion.
     let mx_start = code.find("'methodXref' => [").expect("methodXref present");
     let mx_tail = &code[mx_start..];
-    let mx_seg = &mx_tail[..mx_tail.find("'classState'").unwrap_or(mx_tail.len())];
+    let mx_seg = &mx_tail[..mx_tail.find("'classDoc'").unwrap_or(mx_tail.len())];
 
     // Exactly one synthetic row survives.
     let synthetic_count = mx_seg.matches("'source_status' => 'synthetic'").count();
@@ -442,7 +442,7 @@ fn test_method_xref_drops_oversized_selectors() {
     // dropped from it: the single method's `sends` list is empty.
     let mx_start = code.find("'methodXref' => [").expect("methodXref present");
     let mx_tail = &code[mx_start..];
-    let mx_seg = &mx_tail[..mx_tail.find("'classState'").unwrap_or(mx_tail.len())];
+    let mx_seg = &mx_tail[..mx_tail.find("'classDoc'").unwrap_or(mx_tail.len())];
     assert!(
         !mx_seg.contains("longKeywordPartNumber"),
         "oversized selector must be dropped from methodXref. Got:\n{mx_seg}"

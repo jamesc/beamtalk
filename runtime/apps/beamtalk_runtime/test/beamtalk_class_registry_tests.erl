@@ -2820,24 +2820,19 @@ bt4758_class_object_tag_memoised_test() ->
         persistent_term:get({beamtalk_class_registry, class_object_tag, Name})
     ).
 
-bt4758_snapshot_if_changed_writes_only_on_change_test() ->
-    ok = beamtalk_class_registry:ensure_class_state_table(),
-    Pid = spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end),
-    Old = #{a => 1},
-    %% Changed map: written.
-    ok = beamtalk_class_registry:record_class_state_snapshot_if_changed(Pid, #{}, Old),
-    ?assertEqual({ok, Old}, beamtalk_class_registry:class_state_snapshot_lookup(Pid)),
-    %% Unchanged map: no write (a sentinel row proves the skip).
-    ets:insert(beamtalk_class_state_snapshot, {Pid, sentinel}),
-    ok = beamtalk_class_registry:record_class_state_snapshot_if_changed(Pid, Old, Old),
-    ?assertEqual({ok, sentinel}, beamtalk_class_registry:class_state_snapshot_lookup(Pid)),
-    %% A later change overwrites again.
-    New = Old#{b => 2},
-    ok = beamtalk_class_registry:record_class_state_snapshot_if_changed(Pid, Old, New),
-    ?assertEqual({ok, New}, beamtalk_class_registry:class_state_snapshot_lookup(Pid)),
-    ets:delete(beamtalk_class_state_snapshot, Pid),
-    Pid ! stop.
+%% ADR 0153 Phase 3e: the class-state snapshot rows are gone. A class has no
+%% state of its own, so the registry exports no snapshot API and no
+%% `beamtalk_class_state_snapshot` table exists after the runtime boots.
+snapshot_rows_removed_test() ->
+    Exports = beamtalk_class_registry:module_info(exports),
+    [
+        ?assertEqual(false, lists:keymember(F, 1, Exports))
+     || F <- [
+            ensure_class_state_table,
+            record_class_state_snapshot,
+            record_class_state_snapshot_if_changed,
+            class_state_snapshot_lookup,
+            forget_class_state_snapshot
+        ]
+    ],
+    ?assertEqual(undefined, ets:info(beamtalk_class_state_snapshot)).

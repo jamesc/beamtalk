@@ -508,11 +508,10 @@ Run a class method in the caller (ADR 0142 §3). `ClassSelf` is the real class
 reference of the receiving class, the value its class literal evaluates to
 (its metaclass tag, its own module and its registered pid), even for an
 inherited method, as every class-side path now builds it
-(the caller's own `ClassSelf`, `invoke_class_method/7`). `performLocally:`
-(`beamtalk_object_class:local_call/3`) used to apply its selector from
-`class_mod` alone; it now walks the class-method chain from the receiving
-class, so an inherited selector is found and a subclass override wins
-(BT-4300). No class-variable
+(the caller's own `ClassSelf`, `invoke_class_method/7`).
+`beamtalk_object_class:local_call/3` (the migration runner's entry) walks the
+class-method chain from the receiving class, so an inherited selector is found
+and a subclass override wins (BT-4300). No class-variable
 home is installed: the chain has no class variables, and ADR 0130 §1's
 no-nesting rule concerns only homes. The class-process services (session
 context seeding, the mirrored caller pid, the entry group leader, the call
@@ -2000,8 +1999,8 @@ method_not_found_hint(ClassName, DefiningClass, Selector) ->
 Walk the class-method tables from `ClassName` itself up the superclass chain,
 ignoring class-side extensions: `{ok, DefiningClass, Module}` for the first
 class whose published selector list (compiled methods and ADR 0084 runtime
-funs) has `Selector`. Used by `performLocally:`
-(`beamtalk_object_class:local_call/3`), which applies only compiled exports.
+funs) has `Selector`. Used by
+`beamtalk_object_class:local_call/3`, which applies only compiled exports.
 Every send path uses `find_class_side_method/3` instead, which also counts
 each class's class-side extensions (BT-4307).
 

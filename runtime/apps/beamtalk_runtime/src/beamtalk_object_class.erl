@@ -453,11 +453,11 @@ Resolves `Selector` through the class-method chain starting at the receiving
 class (`beamtalk_class_dispatch:find_class_method_from_class/2`, the walk the
 class process uses), so a subclass override wins and an inherited method is
 found (BT-4300), then calls DefiningModule:class_<Selector>(Receiver, Args...)
-directly — bypassing the class object's gen_server. The receiver class object is passed as `ClassSelf` and the
-call runs inside `beamtalk_class_vars:with_snapshot/2` (ADR 0130 §5):
-class-variable reads see the snapshot (the ETS mirror as of the last completed
-invocation), writes raise `class_state_read_only`, and when called from inside
-the class's own method mid-invocation the live map is read and written.
+directly — bypassing the class object's gen_server. The receiver class object
+is passed as `ClassSelf`. A class has no state of its own (ADR 0153), so there is
+nothing to snapshot: the call is an ordinary in-caller class send.
+
+Used by the shape-migration runner for `migrateFromVN:` steps (ADR 0123 §3).
 
 Raises beamtalk_error if the receiver is not a class object, or if the
 class does not define the requested method.
@@ -471,9 +471,7 @@ local_call(Receiver = #beamtalk_object{class = Tag}, Selector, Args) when
             FunName = beamtalk_class_dispatch:class_method_fun_name(Selector),
             case local_call_module(Tag, Selector, FunName, length(Args) + 1) of
                 {ok, Module} ->
-                    beamtalk_class_vars:with_snapshot(Receiver, fun() ->
-                        erlang:apply(Module, FunName, [Receiver | Args])
-                    end);
+                    erlang:apply(Module, FunName, [Receiver | Args]);
                 not_found ->
                     ClassName = Receiver#beamtalk_object.class,
                     Error = beamtalk_error:new(
@@ -489,7 +487,7 @@ local_call(Receiver = #beamtalk_object{class = Tag}, Selector, Args) when
             Error = beamtalk_error:new(
                 type_error,
                 ClassName,
-                'performLocally:withArguments:',
+                local_call,
                 <<"Receiver is not a class object">>
             ),
             beamtalk_error:raise(Error)
@@ -503,7 +501,7 @@ local_call(Receiver, _Selector, _Args) ->
     Error = beamtalk_error:new(
         type_error,
         ClassName,
-        'performLocally:withArguments:',
+        local_call,
         <<"Receiver is not a class object">>
     ),
     beamtalk_error:raise(Error).
@@ -512,7 +510,7 @@ local_call(Receiver, _Selector, _Args) ->
 %% sent to the class tagged `Tag`: the defining class the class-method chain
 %% walk reaches from the receiving class (BT-4300), or `not_found` when no
 %% class in the chain defines it or its definition has no compiled export
-%% (an ADR 0084 runtime fun, which `performLocally:` has never applied).
+%% (an ADR 0084 runtime fun, which `local_call/3` has never applied).
 -spec local_call_module(atom(), atom(), atom(), arity()) -> {ok, module()} | not_found.
 local_call_module(Tag, Selector, FunName, Arity) ->
     case beamtalk_primitive:class_name_from_tag(Tag) of
@@ -869,7 +867,6 @@ join_class_registry() ->
     beamtalk_class_registry:ensure_pid_table(),
     beamtalk_class_registry:ensure_loaded_classes_table(),
     beamtalk_class_registry:ensure_backing_module_index_table(),
-    beamtalk_class_registry:ensure_class_state_table(),
     ok = pg:join(beamtalk_classes, self()).
 
 %% The class's `__beamtalk_meta/0` map, preferring the one the compiler baked into
@@ -983,16 +980,10 @@ register_class_indexes(ClassName, Meta) ->
             ok
     end.
 
-%% Publish the freshly built state to the readers outside this process: the live
-%% classVars snapshot, the reflection rows, the xref index, the protocol registry
-%% and the system bus. The order is the init/1 contract.
+%% Publish the freshly built state to the readers outside this process: the
+%% reflection rows, the xref index, the protocol registry and the system bus. The order is the init/1 contract.
 -spec publish_init_state(#class_state{}, map(), map()) -> ok.
 publish_init_state(#class_state{name = ClassName} = State, ClassInfo, Meta) ->
-    %% Seed the live classVars snapshot with the declared defaults
-    %% before this init/1 returns, so a `static_init`/`dynamic_init`/direct
-    %% class-method-call reader never observes a gap between the class
-    %% process existing and its snapshot existing.
-    beamtalk_class_registry:record_class_state_snapshot(self(), State#class_state.class_state),
     ok = beamtalk_class_publish:publish_reflection(reflection_view(State)),
     %% ADR 0087 Phase 2: Forward the per-method cross-reference index
     %% to beamtalk_xref synchronously, before init returns. Running inside init/1
@@ -1214,8 +1205,6 @@ handle_call({get_class_var, Name}, _From, State) ->
     call_get_class_var(Name, State);
 handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = ClassVars} = State) ->
     NewClassVars = ClassVars#{Name => Value},
-    %% Keep the live snapshot in sync with this mutation.
-    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
     {reply, Value, State#class_state{class_state = NewClassVars}}.
 
 %% ADR 0114: see rename/2's doc.
@@ -1560,11 +1549,6 @@ call_new(
         end,
     case DispatchResult of
         {reply, Result, NewClassVars} ->
-            %% Keep the live snapshot in sync with this mutation (BT-4758:
-            %% only when the map changed).
-            beamtalk_class_registry:record_class_state_snapshot_if_changed(
-                self(), ClassVars, NewClassVars
-            ),
             {reply, Result, State#class_state{class_state = NewClassVars}};
         {error, not_found} when not InheritedNew orelse ShadowedOrChain ->
             Err = beamtalk_error:new(does_not_understand, ClassName, Selector),
@@ -1637,18 +1621,6 @@ terminate(Reason, #class_state{name = ClassName}) ->
         true -> beamtalk_object_class_teardown:remove_class_registration(ClassName);
         false -> ok
     end,
-    %% Drop this class's classVars live-snapshot row, whatever the reason.
-    %% It is keyed by this pid and only read through a live class pid
-    %% (`beamtalk_class_vars`), so a row for a dead/reloaded pid could never
-    %% be read again — pure accumulation for the life of the node across
-    %% hot-reload, a core dev workflow. A restart starts from fresh class
-    %% variables anyway.
-    _ =
-        (try
-            beamtalk_class_registry:forget_class_state_snapshot(self())
-        catch
-            _:_ -> ok
-        end),
     ok.
 
 %% ADR 0032 Phase 1: No flattened tables to rebuild after hot reload.
@@ -1736,7 +1708,6 @@ dispatch_class_method(Selector, Args, From, State, Restore) ->
             Restore(),
             #class_state{class_state = ClassVars} = State,
             NewClassVars = maps:remove(Name, ClassVars),
-            beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
             NewState = State#class_state{class_state = NewClassVars},
             {reply, {ok, beamtalk_class_registry:class_object_from_pid(self())}, NewState};
         {get, Name} ->
@@ -1755,7 +1726,6 @@ dispatch_class_method(Selector, Args, From, State, Restore) ->
             #class_state{name = ClassName, class_state = ClassVars} = State,
             case write_class_var(ClassName, ClassVars, Name, Value) of
                 {ok, NewClassVars} ->
-                    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
                     {reply, {ok, Value}, State#class_state{class_state = NewClassVars}};
                 {error, _} = Err ->
                     {reply, Err, State}
@@ -1822,11 +1792,6 @@ dispatch_class_method_lookup(Selector, Args, From, State, Restore) ->
         )
     of
         {reply, Result, NewClassVars} ->
-            %% Keep the live snapshot in sync with this mutation (BT-4758:
-            %% only when the map changed).
-            beamtalk_class_registry:record_class_state_snapshot_if_changed(
-                self(), ClassVars, NewClassVars
-            ),
             {reply, Result, State#class_state{class_state = NewClassVars}};
         test_spawn ->
             beamtalk_test_case:spawn_test_execution(

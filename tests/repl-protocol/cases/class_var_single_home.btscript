@@ -12,7 +12,7 @@
 //
 // Error assertions are substrings of what the REPL actually prints (the
 // structured kind is not in the display; the message text is). Abroad write:
-// runtime `class_state_unreachable`; performLocally: write: `class_state_read_only`.
+// runtime `class_state_unreachable`.
 // No display behaviour is changed or specified here.
 //
 // Class names are prefixed Cvsh* to stay unique in the shared workspace.
@@ -129,20 +129,6 @@ reader value
 
 bumper value
 // => ERROR: class variable total cannot be read from this process
-
-CvshTally total
-// => 5
-
-// ---------------------------------------------------------------------------
-// performLocally: runs the method in the caller against a read-only snapshot
-// of the last completed state: reads work, writes raise class_state_read_only.
-// ---------------------------------------------------------------------------
-
-CvshTally performLocally: #total withArguments: #()
-// => 5
-
-CvshTally performLocally: #add: withArguments: #(1)
-// => ERROR: class variable total is read-only here
 
 CvshTally total
 // => 5

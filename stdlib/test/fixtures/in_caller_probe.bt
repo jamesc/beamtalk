@@ -19,16 +19,15 @@ Object subclass: InCallerProbe
 
   class hasMissing => self hasField: #missing
 
-  // `performLocally:` from an inherited class method resolves through the
+  // A self-send from an inherited class method resolves through the
   // class-method chain of the receiving class (BT-4300).
   class parentOnly -> Symbol => #parent
 
   class overridden -> Symbol => #parent
 
-  class viaLocally => self performLocally: #parentOnly withArguments: #()
+  class viaChain => self parentOnly
 
-  class viaLocallyOverridden =>
-    self performLocally: #overridden withArguments: #()
+  class viaChainOverridden => self overridden
 
   class myName -> Symbol => self name
 

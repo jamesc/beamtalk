@@ -32,8 +32,6 @@ use beamtalk_cerl_doc::{Document, docvec, leaf};
 pub(super) const KEY_TAG: &str = "$bt_class_vars";
 /// Process-dictionary key of the live-invocation entry.
 pub(super) const HOME_KEY: &str = "$bt_class_vars_home";
-/// First element of the read-only marker tuple.
-pub(super) const RO_TAG: &str = "$bt_class_vars_ro";
 
 /// The class-variable calling-convention version a compiled module declares in
 /// `__beamtalk_meta/0` as `class_var_abi` (ADR 0130 §3): `1` was "class methods
@@ -115,9 +113,6 @@ pub fn erlang_header() -> String {
          %% The process-dictionary key naming the live invocation's class key.\n\
          -define(BT_CLASS_VARS_HOME, '{HOME_KEY}').\n\
          \n\
-         %% The read-only marker planted under a class key by `with_snapshot/2`.\n\
-         -define(BT_CLASS_VARS_RO(ClassTag), {{'{RO_TAG}', ClassTag}}).\n\
-         \n\
          %% The `class_var_abi` value compiled modules declare in `__beamtalk_meta/0`.\n\
          -define(BT_CLASS_VAR_ABI, {ABI_VERSION}).\n\
          \n\
@@ -164,9 +159,6 @@ mod tests {
             hrl.contains("-define(BT_CLASS_VARS_KEY(ClassTag), {'$bt_class_vars', ClassTag}).")
         );
         assert!(hrl.contains("-define(BT_CLASS_VARS_HOME, '$bt_class_vars_home')."));
-        assert!(
-            hrl.contains("-define(BT_CLASS_VARS_RO(ClassTag), {'$bt_class_vars_ro', ClassTag}).")
-        );
         assert!(hrl.contains("-define(BT_CLASS_VAR_ABI, 3)."));
     }
 }

@@ -212,7 +212,6 @@ registry() ->
     beamtalk_class_registry:ensure_pending_errors_table(),
     beamtalk_class_registry:ensure_loaded_classes_table(),
     beamtalk_class_registry:ensure_backing_module_index_table(),
-    beamtalk_class_registry:ensure_class_state_table(),
     beamtalk_class_registry:ensure_static_call_keys_table(),
     fun() ->
         case Started andalso whereis(pg) of

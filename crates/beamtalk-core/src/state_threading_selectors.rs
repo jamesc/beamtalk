@@ -1199,7 +1199,6 @@ mod tests {
                 | WellKnownSelector::ClearField
                 | WellKnownSelector::Perform
                 | WellKnownSelector::PerformWithArgs
-                | WellKnownSelector::PerformLocallyWithArgs
                 // Neither carries a block-literal argument —
                 // `withTimeout:`'s argument is a duration, `at:`'s an index/key.
                 | WellKnownSelector::WithTimeout
@@ -1248,7 +1247,6 @@ mod tests {
             WellKnownSelector::ClearField,
             WellKnownSelector::Perform,
             WellKnownSelector::PerformWithArgs,
-            WellKnownSelector::PerformLocallyWithArgs,
             WellKnownSelector::WithTimeout,
             WellKnownSelector::At,
         ];
