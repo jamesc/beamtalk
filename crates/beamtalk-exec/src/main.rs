@@ -226,9 +226,14 @@ struct Port {
     children: ChildMap,
     /// How long a reaper waits for the output pipes before sending `exit`.
     drain: Duration,
-    /// Told about every child process group (Unix; absent in unit tests).
+    /// Told about every child process group (Unix). Started on the first
+    /// `spawn`, so a port that never spawns costs no second process.
     #[cfg(unix)]
-    watchdog: Option<Arc<watchdog::Watchdog>>,
+    watchdog: Arc<std::sync::OnceLock<Option<watchdog::Watchdog>>>,
+    /// The binary to start the watchdog from (`None`: no watchdog, as in
+    /// unit tests).
+    #[cfg(unix)]
+    watchdog_exe: Option<std::path::PathBuf>,
 }
 
 impl Port {
@@ -238,8 +243,23 @@ impl Port {
             children: Arc::new(Mutex::new(HashMap::new())),
             drain: DRAIN_GRACE,
             #[cfg(unix)]
-            watchdog: None,
+            watchdog: Arc::default(),
+            #[cfg(unix)]
+            watchdog_exe: None,
         }
+    }
+
+    /// The watchdog, started now if this is the first `spawn`.
+    #[cfg(unix)]
+    fn watchdog_for_spawn(&self) -> Option<&watchdog::Watchdog> {
+        self.watchdog
+            .get_or_init(|| {
+                let exe = self.watchdog_exe.as_ref()?;
+                watchdog::Watchdog::start(exe)
+                    .inspect_err(|e| warn!("watchdog not started: {e}"))
+                    .ok()
+            })
+            .as_ref()
     }
 
     /// Remove `child_id` if it is still the incarnation behind `gate`, and
@@ -261,7 +281,7 @@ impl Port {
     #[cfg_attr(windows, allow(clippy::unused_self))]
     fn forget(&self, entry: &ChildEntry) {
         #[cfg(unix)]
-        if let Some(watchdog) = &self.watchdog {
+        if let Some(watchdog) = self.watchdog.get().and_then(Option::as_ref) {
             watchdog.unregister(entry.pgid);
         }
         #[cfg(windows)]
@@ -269,12 +289,23 @@ impl Port {
     }
 }
 
+#[cfg(unix)]
+impl ChildEntry {
+    /// The process group to signal, or `None` once the child has exited and
+    /// its group has emptied: the number may already belong to another
+    /// group, and the reaper just has not noticed yet (it polls every
+    /// [`GROUP_POLL`]).
+    fn signallable_pgid(&self) -> Option<libc::pid_t> {
+        (!self.gate.exit_sent() || watchdog::group_exists(self.pgid)).then_some(self.pgid)
+    }
+}
+
 /// Force-stop everything in `entry`'s process group or job, at once.
 fn force_kill(entry: &ChildEntry) {
     #[cfg(unix)]
-    // SAFETY: SIGKILL to a process group this port created.
-    unsafe {
-        libc::kill(-entry.pgid, libc::SIGKILL);
+    if let Some(pgid) = entry.signallable_pgid() {
+        // SAFETY: SIGKILL to a process group this port created.
+        unsafe { libc::kill(-pgid, libc::SIGKILL) };
     }
     #[cfg(windows)]
     if let Err(e) = entry.job.terminate(1) {
@@ -394,7 +425,7 @@ fn spawn_child(request: &SpawnRequest, port: &Port) -> Result<(), String> {
     };
     let stdin = child.stdin.take().map(|s| spawn_stdin_writer(child_id, s));
     #[cfg(unix)]
-    if let Some(watchdog) = &port.watchdog {
+    if let Some(watchdog) = port.watchdog_for_spawn() {
         watchdog.register(pgid);
     }
 
@@ -684,7 +715,10 @@ fn handle_kill_with(
 
     #[cfg(unix)]
     {
-        let (pgid, gate) = (entry.pgid, Arc::clone(&entry.gate));
+        let gate = Arc::clone(&entry.gate);
+        let Some(pgid) = entry.signallable_pgid() else {
+            return Ok(()); // Exited, and nothing it left behind remains.
+        };
         drop(map);
         // SIGTERM to the whole process group. The group outlives the child
         // while a grandchild holds the pipes, so this reaches it too.
@@ -804,7 +838,8 @@ fn command_name(term: &Term) -> &str {
 
 /// The `child_id` that needs a synthetic exit event after `term` failed, if any.
 ///
-/// Only a failed `spawn` qualifies, and only when no live child holds the id:
+/// Only a failed `spawn` qualifies, and only when no live child holds the id
+/// (one whose `exit` has not been sent yet):
 /// a duplicate-id spawn is rejected while the id belongs to a different,
 /// still-running child, and an exit event for it would tell the BEAM that
 /// child had died.
@@ -814,7 +849,10 @@ fn failed_spawn_child_id(term: &Term, children: &ChildMap) -> Option<u32> {
         return None;
     }
     let child_id = command_child_id(term)?;
-    let live = children.lock().is_ok_and(|m| m.contains_key(&child_id));
+    // An entry whose `exit` was already sent is no longer the BEAM's child.
+    let live = children
+        .lock()
+        .is_ok_and(|m| m.get(&child_id).is_some_and(|e| !e.gate.exit_sent()));
     (!live).then_some(child_id)
 }
 
@@ -877,7 +915,11 @@ fn kill_all_children_within(children: &ChildMap, grace: Duration, wait: fn(Durat
     let pgids = || -> Vec<libc::pid_t> {
         children
             .lock()
-            .map(|m| m.values().map(|e| e.pgid).collect())
+            .map(|m| {
+                m.values()
+                    .filter_map(ChildEntry::signallable_pgid)
+                    .collect()
+            })
             .unwrap_or_default()
     };
     let initial = pgids();
@@ -1031,11 +1073,9 @@ fn main() {
 
     #[cfg(unix)]
     {
-        port.watchdog = std::env::current_exe()
-            .and_then(|exe| watchdog::Watchdog::start(&exe))
-            .inspect_err(|e| warn!("watchdog not started: {e}"))
-            .ok()
-            .map(Arc::new);
+        port.watchdog_exe = std::env::current_exe()
+            .inspect_err(|e| warn!("no watchdog, cannot find own binary: {e}"))
+            .ok();
         spawn_signal_thread(Arc::clone(&port.children));
     }
 
@@ -1697,8 +1737,22 @@ mod tests {
             },
         );
         let spawn = |id: i32| spawn_term(id, "x", &[]);
+        // An entry whose `exit` was sent (a grandchild still holds its
+        // group) no longer counts as live: a failed spawn of its id gets
+        // `exit -1` like any other.
+        port.children.lock().unwrap().insert(
+            9,
+            ChildEntry {
+                stdin: None,
+                gate: Arc::new(EventGate {
+                    exit_sent: Mutex::new(true),
+                }),
+                pgid: 1,
+            },
+        );
         assert_eq!(failed_spawn_child_id(&spawn(7), &port.children), None);
         assert_eq!(failed_spawn_child_id(&spawn(8), &port.children), Some(8));
+        assert_eq!(failed_spawn_child_id(&spawn(9), &port.children), Some(9));
         assert_eq!(
             failed_spawn_child_id(&command("kill", 8, vec![]), &port.children),
             None

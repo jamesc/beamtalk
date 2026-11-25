@@ -9,8 +9,10 @@
 //! process group and nothing kills it when the port dies abnormally (BT-5195).
 //! A SIGTERM handler covers a polite stop and `PR_SET_PDEATHSIG` covers the
 //! direct child on Linux, but neither covers SIGKILL of the port on macOS,
-//! nor grandchildren anywhere. So at startup the port re-executes itself as
-//! `beamtalk-exec --watchdog`, keeping the write end of the watchdog's stdin.
+//! nor grandchildren anywhere. So the port re-executes itself as
+//! `beamtalk-exec --watchdog` (on its first `spawn`, so a port that never
+//! spawns costs no extra process), keeping the write end of the watchdog's
+//! stdin.
 //! The port writes `+<pgid>` when it starts a child's group and `-<pgid>` when
 //! the group is done. When the port dies, however it dies, the OS closes that
 //! pipe; the watchdog reads EOF, SIGTERMs every group still registered, waits
