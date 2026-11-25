@@ -138,7 +138,9 @@ fn number_fallback_entry_point(family: OperatorFamily) -> &'static str {
 /// ADR 0116: the one call that sends the right operand `right` of `left op
 /// right` its reflected selector, through the family's runtime entry point:
 /// `beamtalk_message_dispatch:<entry>(Right, '<selector>', [Left], '<op>')`.
-fn reflected_hook_call(
+/// Shared by the inlined path ([`CoreErlangGenerator::number_comparison_arm`])
+/// and the primitive bodies (`primitives::generate_numeric_comparison_bif`).
+pub(in crate::core_erlang) fn reflected_hook_call(
     reflected: beamtalk_core::semantic_analysis::number_coercion::ReflectedOperator,
     op: &str,
     right: Document<'static>,

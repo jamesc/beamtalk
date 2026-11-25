@@ -1050,8 +1050,12 @@ Binary operators follow standard math precedence (highest to lowest):
 | `-` | `minusFromNumber:` |
 | `*` | `timesFromNumber:` |
 | `/` | `divFromNumber:` |
+| `<` | `lessThanFromNumber:` |
+| `<=` | `lessOrEqualFromNumber:` |
+| `>` | `greaterThanFromNumber:` |
+| `>=` | `greaterOrEqualFromNumber:` |
 
-A value type opts in per operator by declaring the method it wants to support, alongside its ordinary receiver-dispatch operators:
+The four comparison selectors follow the same convention with their own guidance (see [Comparison](#comparison) below). A value type opts in per operator by declaring the method it wants to support, alongside its ordinary receiver-dispatch operators:
 
 ```beamtalk
 Value subclass: Vector
@@ -1095,7 +1099,7 @@ A type author who commits to number-on-the-left arithmetic at all typically impl
 // => ERROR: '+' cannot combine a number with String — the right operand must be a number, or a value whose class implements 'plusFromNumber:'
 ```
 
-This is receiver-dispatch's mirror image, not a new arithmetic mechanism: no `generality`/coercion tower, no `perform:`-based reflective retry — each reflected method is an ordinary, fully-typed method, so static typing (covariant-return refinement) and compile-time DNU checking work on it exactly as they do on `+`/`-`/`*`/`/` themselves. A type that never implements number-on-the-left arithmetic pays no cost for it: a statically-typed call site (`total + delta`, both operands' types known at compile time) compiles to the identical bare arithmetic instruction whether or not this mechanism exists. Comparison operators (`< > <= >=`) are **not** covered by this convention — `5 < aVector` is unaffected. See [ADR 0116](ADR/0116-number-on-the-left-arithmetic-coercion.md) for the full double-dispatch design, the rejected alternatives (a Smalltalk-style `generality` tower, `perform:`-based retry), and the zero-cost measurement for the statically-typed case.
+This is receiver-dispatch's mirror image, not a new arithmetic mechanism: no `generality`/coercion tower, no `perform:`-based reflective retry — each reflected method is an ordinary, fully-typed method, so static typing (covariant-return refinement) and compile-time DNU checking work on it exactly as they do on `+`/`-`/`*`/`/` themselves. A type that never implements number-on-the-left arithmetic pays no cost for it: a statically-typed call site (`total + delta`, both operands' types known at compile time) compiles to the identical bare arithmetic instruction whether or not this mechanism exists. The comparison operators (`< > <= >=`) take the same convention, with their hooks above; see [Comparison](#comparison). See [ADR 0116](ADR/0116-number-on-the-left-arithmetic-coercion.md) for the full double-dispatch design, the rejected alternatives (a Smalltalk-style `generality` tower, `perform:`-based retry), and the zero-cost measurement for the statically-typed case.
 
 #### Comparison
 - `<` - Less than: `3 < 5` → `true`
@@ -1115,7 +1119,46 @@ This holds however the receiver is typed: an untyped local or parameter, an `:: 
 
 `==`, `=:=`, `/=` and `=/=` are unaffected: Erlang equality never term-orders, so a wrong-kind value answers `false` (`true` for the inequalities), not a wrong ordering.
 
-The **argument** is not checked at run time: a number, character, string or symbol receiver compared with an argument of a different kind falls back to the BEAM's term order and does not raise, so `5 < nil` answers `true` and `#a < 5` answers `false`. The compiler warns when it can see the mismatch (the argument's static type is known and is not the receiver's kind, e.g. `5 < nil`, `$a < 1`, `$x < nil`, `#a < 5`); an untyped or generic argument stays silent. Comparison operators have no number-on-the-left coercion (see above).
+**A number on the left orders only against a number** (ADR 0116 addendum, BT-5176). When the receiver of `<`, `<=`, `>` or `>=` is a number (an `Integer`, a `Float`, or a `Character`, which is a codepoint) and the argument is not, the argument is sent a reflected hook, with the number as its parameter, the way `5 + aVector` sends `plusFromNumber:`:
+
+| Expression | Sent to the right operand | The hook answers |
+|---|---|---|
+| `n < x`  | `x lessThanFromNumber: n`       | `n < x`  |
+| `n <= x` | `x lessOrEqualFromNumber: n`    | `n <= x` |
+| `n > x`  | `x greaterThanFromNumber: n`    | `n > x`  |
+| `n >= x` | `x greaterOrEqualFromNumber: n` | `n >= x` |
+
+This covers every send: an inlined `5 < x`, `perform:`, and the methods built on the four operators (`max:`, `min:`, `between:and:`). An argument whose class has no hook raises `does_not_understand` for the hook, with a hint naming the operator typed, instead of answering by the BEAM's term order (`3 <= nil` used to be `true`, `3 max: nil` used to be `nil`):
+
+```beamtalk
+3 <= nil
+// => ERROR: UndefinedObject does not understand 'lessOrEqualFromNumber:'
+// => ERROR: '<=' cannot order a number against UndefinedObject — the right operand must be a number, or a value whose class implements 'lessOrEqualFromNumber:'
+
+500 < aMoney     // => true    (aMoney lessThanFromNumber: 500)
+3 == nil         // => false   (equality stays total)
+nil < 3          // => ERROR: UndefinedObject does not understand '<'
+```
+
+`nil < 3` and `3 < nil` now fail the same way, so one `on: RuntimeError do:` handler covers both (and `3 + nil`). A value type that should compare with numbers implements the hooks:
+
+```beamtalk
+Value subclass: Money
+  field: cents :: Integer = 0
+
+  < other :: Money -> Boolean => self.cents < other cents   // aMoney < bMoney
+
+  lessThanFromNumber:       n :: Number -> Boolean => n <  self.cents
+  lessOrEqualFromNumber:    n :: Number -> Boolean => n <= self.cents
+  greaterThanFromNumber:    n :: Number -> Boolean => n >  self.cents
+  greaterOrEqualFromNumber: n :: Number -> Boolean => n >= self.cents
+```
+
+- **Write the body against the type's own state, never by flipping the operator on `self`.** `lessThanFromNumber: n => self > n` looks equivalent and is a trap: when the class takes `>` from `uses: Comparable`, that `>` is `other < self`, which is `n < self`, which sends `lessThanFromNumber:` again and never terminates.
+- **Implement all four or none.** `max:` needs `greaterThanFromNumber:`, `min:` needs `lessThanFromNumber:`, and `between:and:` needs the two inclusive ones. A type for which ordering against a number has no meaning implements none, and the hinted `does_not_understand` is the right error. (Unlike the arithmetic hooks, which are independent, the four orderings stand or fall together.)
+- **`n` arrives unconverted**: an `Integer` or a `Float` (a `Character` on the left arrives as its codepoint). The BEAM has no NaN or infinite float, so the number side never brings an unordered value; a type that has one answers `false` from each hook.
+
+Only an argument the compiler *proves* is a number (a number or character literal, `self` in `Integer`/`Float`/`Character`) skips the test; a declared argument (`n :: Integer`) is tested, since a declaration is not enforced at run time. A `String` or `Symbol` receiver compared with an argument of a different kind still falls back to the BEAM's term order (`#a < 5` answers `false`, BT-5213), as do default `sort` and `Dictionary`/`Set` order. The compiler warns when it can see a mismatch (the argument's static type is known and is not the receiver's kind, e.g. `5 < nil`, `$a < 1`, `#a < 5`); an untyped or generic argument stays silent.
 
 ##### Arithmetic and comparison on fields: annotate numeric state
 

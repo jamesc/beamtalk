@@ -188,8 +188,9 @@ pub(crate) fn is_runtime_dispatched_primitive(class_name: &str, selector: &str) 
 
 /// Generates a comparison BIF call for the standard Erlang comparison operators.
 ///
-/// Used by Integer, Float, String, and Character to avoid duplicating the
-/// same 7-operator match block (ADR 0002: Erlang operators).
+/// Used by `String` and reflection (`Symbol`) for all seven operators, and
+/// by Integer, Float and Character for the equality operators through
+/// [`generate_numeric_comparison_bif`] (ADR 0002: Erlang operators).
 pub(crate) fn generate_comparison_bif(
     selector: &str,
     params: &[String],
@@ -204,6 +205,59 @@ pub(crate) fn generate_comparison_bif(
         ">=" => binary_bif(">=", params),
         _ => None,
     }
+}
+
+/// The numeric-ordering variant of [`generate_comparison_bif`] (ADR 0116
+/// § Addendum → Primitive path, BT-5211), for the `@primitive` bodies of
+/// `Integer`, `Float` and `Character`. A dynamic send (`perform:`, a send the
+/// compiler cannot inline) reaches these bodies, so they give `< <= > >=` the
+/// same right-operand test as the inlined path
+/// (`CoreErlangGenerator::number_comparison_arm`): the bare BIF when the
+/// argument is a number, else its reflected hook through
+/// `send_number_comparison/4`, which raises a hinted `does_not_understand`
+/// when the argument has none.
+///
+/// ```erlang
+/// case call 'erlang':'is_number'(Other) of
+///   <'true'> when 'true' -> call 'erlang':'<'(Self, Other)
+///   <'false'> when 'true' ->
+///     call 'beamtalk_message_dispatch':'send_number_comparison'(
+///         Other, 'lessThanFromNumber:', [Self], '<')
+///   <CmpNoMatch> when 'true' -> call 'erlang':'error'({'case_clause', CmpNoMatch})
+/// end
+/// ```
+///
+/// Every other selector (the equality BIFs) lowers as
+/// [`generate_comparison_bif`] does. `String` and `Symbol` keep that variant
+/// for ordering too (BT-5213).
+pub(crate) fn generate_numeric_comparison_bif(
+    selector: &str,
+    params: &[String],
+) -> Option<Document<'static>> {
+    use beamtalk_cerl_doc::form;
+    use beamtalk_core::semantic_analysis::number_coercion::{OperatorFamily, reflected_operator};
+    let bif = generate_comparison_bif(selector, params)?;
+    let Some(reflected) =
+        reflected_operator(selector).filter(|r| r.family == OperatorFamily::Ordering)
+    else {
+        return Some(bif);
+    };
+    let p0 = params.first()?;
+    let hook = super::operators::reflected_hook_call(
+        reflected,
+        selector,
+        leaf::var(p0.clone()),
+        leaf::var("Self"),
+    );
+    Some(form::case_of(
+        form::call("erlang", "is_number", [leaf::var(p0.clone())]),
+        [
+            form::clause([leaf::atom("true")], None, bif, form::Layout::Flat),
+            form::clause([leaf::atom("false")], None, hook, form::Layout::Flat),
+            super::CoreErlangGenerator::case_clause_fallback_clause("CmpNoMatch".to_string()),
+        ],
+        form::Layout::Flat,
+    ))
 }
 
 /// Returns a binary BIF call: `call 'erlang':'op'(Self, Param0)`
@@ -406,6 +460,65 @@ mod tests {
         assert!(output.contains("'does_not_understand'"));
         assert!(output.contains("beamtalk_error':'with_selector'"));
         assert!(output.contains("beamtalk_error':'raise'"));
+    }
+
+    /// BT-5211 (ADR 0116 § Addendum → Primitive path): the `@primitive`
+    /// `< > <= >=` bodies of `Integer`, `Float` and `Character` test their
+    /// argument and send a non-number its reflected hook, as the inlined path
+    /// does; their equality bodies stay the bare BIF.
+    #[test]
+    fn numeric_ordering_primitives_test_the_argument() {
+        for class in ["Integer", "Float", "Character"] {
+            for (sel, erl, hook) in [
+                ("<", "<", "lessThanFromNumber:"),
+                (">", ">", "greaterThanFromNumber:"),
+                ("<=", "=<", "lessOrEqualFromNumber:"),
+                (">=", ">=", "greaterOrEqualFromNumber:"),
+            ] {
+                let result =
+                    doc_to_string(generate_primitive_bif(class, sel, &["Other".to_string()]));
+                assert_eq!(
+                    result,
+                    Some(format!(
+                        "case call 'erlang':'is_number'(Other) of \
+                         <'true'> when 'true' -> call 'erlang':'{erl}'(Self, Other) \
+                         <'false'> when 'true' -> \
+                         call 'beamtalk_message_dispatch':'send_number_comparison'\
+                         (Other, '{hook}', [Self], '{sel}') \
+                         <CmpNoMatch> when 'true' -> \
+                         call 'erlang':'error'({{'case_clause', CmpNoMatch}}) end"
+                    )),
+                    "{class} {sel}"
+                );
+            }
+            for sel in ["=:=", "/=", "=/="] {
+                let result =
+                    doc_to_string(generate_primitive_bif(class, sel, &["Other".to_string()]));
+                assert_eq!(
+                    result,
+                    Some(format!("call 'erlang':'{sel}'(Self, Other)")),
+                    "{class} {sel}"
+                );
+            }
+        }
+    }
+
+    /// BT-5211: `String` keeps the bare ordering BIF (its wrong-kind
+    /// argument is BT-5213); only the numeric classes are guarded.
+    #[test]
+    fn string_ordering_primitives_stay_bare() {
+        for (sel, erl) in [("<", "<"), (">", ">"), ("<=", "=<"), (">=", ">=")] {
+            let result = doc_to_string(generate_primitive_bif(
+                "String",
+                sel,
+                &["Other".to_string()],
+            ));
+            assert_eq!(
+                result,
+                Some(format!("call 'erlang':'{erl}'(Self, Other)")),
+                "String {sel}"
+            );
+        }
     }
 
     #[test]
@@ -959,13 +1072,6 @@ mod tests {
                 "lowercase",
                 &[],
                 "call 'beamtalk_character':'to_lowercase'(Self)",
-            ),
-            (
-                "test_character_comparison",
-                "Character",
-                "<",
-                &["Other"],
-                "call 'erlang':'<'(Self, Other)",
             ),
             // Pid primitive tests
             (
@@ -1693,34 +1799,6 @@ mod tests {
                 "=/=",
                 &["Other"],
                 "call 'erlang':'=/='(Self, Other)",
-            ),
-            (
-                "test_integer_lt",
-                "Integer",
-                "<",
-                &["Other"],
-                "call 'erlang':'<'(Self, Other)",
-            ),
-            (
-                "test_integer_gt",
-                "Integer",
-                ">",
-                &["Other"],
-                "call 'erlang':'>'(Self, Other)",
-            ),
-            (
-                "test_integer_le",
-                "Integer",
-                "<=",
-                &["Other"],
-                "call 'erlang':'=<'(Self, Other)",
-            ),
-            (
-                "test_integer_ge",
-                "Integer",
-                ">=",
-                &["Other"],
-                "call 'erlang':'>='(Self, Other)",
             ),
             // Integer conversions — asFloat and printString
             (
