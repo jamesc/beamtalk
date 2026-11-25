@@ -74,6 +74,7 @@ defmodule BtAttachWeb.Live.ClassModals do
   use BtAttachWeb, :html
 
   alias BtAttach.Facade
+  alias BtAttachWeb.Live.Dock
   alias BtAttachWeb.Live.FacadeError
   alias BtAttachWeb.Live.MethodEditor
   alias BtAttachWeb.Live.RequestContext
@@ -93,6 +94,13 @@ defmodule BtAttachWeb.Live.ClassModals do
 
   @doc false
   def __class_modals_events__, do: @class_modals_events
+
+  # BT-5189: the `Dock.eval_async/6` pending key of the (single) Rename
+  # modal's in-flight rename — its submit stays disabled while it is set.
+  @rename_key :rename
+
+  @doc false
+  def rename_key, do: @rename_key
 
   # Bare PascalCase class-name identifier (BT-2645) — the shape the New Class
   # modal and the Rename modal's class-rename path both enforce. Defined here
@@ -294,33 +302,50 @@ defmodule BtAttachWeb.Live.ClassModals do
   end
 
   defp remove_method_eval(socket, tab, receiver, selector, expr, pid) do
-    BtAttachWeb.Live.Dock.eval_async(socket, pid, expr, fn socket, result ->
-      case result do
-        {:ok, _term, _output, _warnings} ->
-          # `close_tab/2` wipes `save_result`/`save_error` whenever the closed
-          # tab was the active one — via `clear_active/1` if it was the last
-          # open tab, or via `sync_active/2` when focus moves to the next
-          # remaining tab — so the success message must be assigned AFTER
-          # closing the tab, not before, or closing the active tab would
-          # silently swallow it.
-          socket
-          |> MethodEditor.close_tab(tab.id)
-          |> assign(
-            save_result: "Removed #{selector} from #{receiver}",
-            save_error: nil,
-            flush_result: nil,
-            flush_error: nil
-          )
-          |> WorkspaceLive.assign_changes()
+    Dock.eval_async(
+      socket,
+      pid,
+      expr,
+      fn socket, result ->
+        case result do
+          {:ok, _term, _output, _warnings} ->
+            # `close_tab/2` wipes `save_result`/`save_error` whenever the closed
+            # tab was the active one — via `clear_active/1` if it was the last
+            # open tab, or via `sync_active/2` when focus moves to the next
+            # remaining tab — so the success message must be assigned AFTER
+            # closing the tab, not before, or closing the active tab would
+            # silently swallow it.
+            socket
+            |> MethodEditor.close_tab(tab.id)
+            |> assign(
+              save_result: "Removed #{selector} from #{receiver}",
+              save_error: nil,
+              flush_result: nil,
+              flush_error: nil
+            )
+            |> WorkspaceLive.assign_changes()
 
-        {:error, _, _, _} = err ->
-          WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
+          {:error, _, _, _} = err ->
+            WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
 
-        {:error, _} = err ->
-          WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
-      end
-    end)
+          {:error, _} = err ->
+            WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
+        end
+      end,
+      &remove_failed(&1, "Remove #{selector} from #{receiver}", &2),
+      key: remove_key(tab)
+    )
   end
+
+  # BT-5189: the pending key of a Remove Method/Remove Class on `tab` — its
+  # editor button stays disabled while the removal is queued or running.
+  @doc false
+  def remove_key(%{id: id}), do: {:remove, id}
+
+  # The removal never ran (refused, dropped from the queue) or its task died:
+  # say so in the method editor's status line, where its success would land.
+  defp remove_failed(socket, what, message),
+    do: WorkspaceLive.status_error(socket, "#{what} did not complete: #{message}")
 
   # ── Remove Class (ADR 0113 Phase 4, BT-3210) ────────────────────────────────
 
@@ -359,33 +384,40 @@ defmodule BtAttachWeb.Live.ClassModals do
   end
 
   defp remove_class_eval(socket, tab, class, expr, pid) do
-    BtAttachWeb.Live.Dock.eval_async(socket, pid, expr, fn socket, result ->
-      case result do
-        {:ok, _term, _output, _warnings} ->
-          # `close_tab/2` wipes `save_result`/`save_error` whenever the closed
-          # tab was the active one — mirrors `remove_method_eval/6`'s success
-          # path, so the confirmation message must be assigned AFTER closing
-          # the tab. The message names the still-open second step (ADR 0113's
-          # two-gesture flow) so the owner isn't surprised the file survives
-          # this click.
-          socket
-          |> MethodEditor.close_tab(tab.id)
-          |> assign(
-            save_result:
-              "Removed #{class} from memory — not yet flushed to disk. Delete its file from the Changes pane to finish.",
-            save_error: nil,
-            flush_result: nil,
-            flush_error: nil
-          )
-          |> WorkspaceLive.assign_changes()
+    Dock.eval_async(
+      socket,
+      pid,
+      expr,
+      fn socket, result ->
+        case result do
+          {:ok, _term, _output, _warnings} ->
+            # `close_tab/2` wipes `save_result`/`save_error` whenever the closed
+            # tab was the active one — mirrors `remove_method_eval/6`'s success
+            # path, so the confirmation message must be assigned AFTER closing
+            # the tab. The message names the still-open second step (ADR 0113's
+            # two-gesture flow) so the owner isn't surprised the file survives
+            # this click.
+            socket
+            |> MethodEditor.close_tab(tab.id)
+            |> assign(
+              save_result:
+                "Removed #{class} from memory — not yet flushed to disk. Delete its file from the Changes pane to finish.",
+              save_error: nil,
+              flush_result: nil,
+              flush_error: nil
+            )
+            |> WorkspaceLive.assign_changes()
 
-        {:error, _, _, _} = err ->
-          WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
+          {:error, _, _, _} = err ->
+            WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
 
-        {:error, _} = err ->
-          WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
-      end
-    end)
+          {:error, _} = err ->
+            WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
+        end
+      end,
+      &remove_failed(&1, "Remove #{class}", &2),
+      key: remove_key(tab)
+    )
   end
 
   # ── Rename modal (ADR 0114 Phase 5, BT-3277) ────────────────────────────────
@@ -418,6 +450,17 @@ defmodule BtAttachWeb.Live.ClassModals do
   # now, at open time, rather than re-read from the active tab on submit — so
   # switching tabs while the modal is open can't retarget the rename mid-flight.
   defp open_rename(socket) do
+    # BT-5189: while a submitted rename is still queued or running, re-show its
+    # modal (in its pending state) rather than retargeting it — the pending
+    # rename's failure re-opens the modal against the target it captured.
+    if Dock.eval_pending?(socket, @rename_key) do
+      assign(socket, rename_open: true)
+    else
+      open_rename_for_active_tab(socket)
+    end
+  end
+
+  defp open_rename_for_active_tab(socket) do
     case MethodEditor.active_tab(socket.assigns) do
       %{kind: :def, class: class} when is_binary(class) and class != "" ->
         assign(socket,
@@ -463,6 +506,18 @@ defmodule BtAttachWeb.Live.ClassModals do
   defp submit_rename(socket, new_name) do
     new_name = String.trim(new_name)
 
+    # BT-5189: a second submit while the first rename is queued or running is
+    # ignored (the submit control is disabled meanwhile; this guards a crafted
+    # or raced event) — it would otherwise queue a second rename that fails
+    # and re-opens the modal with an error over the successful one.
+    if Dock.eval_pending?(socket, @rename_key) do
+      socket
+    else
+      dispatch_rename(socket, new_name)
+    end
+  end
+
+  defp dispatch_rename(socket, new_name) do
     case socket.assigns.rename_kind do
       :class ->
         rename_class(socket, socket.assigns.rename_class, new_name)
@@ -538,48 +593,90 @@ defmodule BtAttachWeb.Live.ClassModals do
   end
 
   defp rename_class_eval(socket, old_name, new_name, expr, pid) do
-    BtAttachWeb.Live.Dock.eval_async(socket, pid, expr, fn socket, result ->
-      case result do
-        {:ok, _term, _output, _warnings} ->
-          # The class's identity changed, so every tab keyed on the old name
-          # (its own `:def` tab plus any open `:method` tabs) is stale — close
-          # them all, mirroring `remove_class_eval/4`'s tab-closing success
-          # path, then refresh the class tree (a new name to browse) and the
-          # Changes pane (the new `rename-class` entry). `open_definition/2`
-          # re-syncs the active-tab editor assigns (clearing `save_result`,
-          # same note as `dispatch_new_class/5` above), so the success status is
-          # assigned AFTER it opens the renamed class's definition tab.
-          socket
-          |> close_tabs_for_class(old_name)
-          |> SystemBrowser.assign_browser_classes()
-          |> WorkspaceLive.assign_changes()
-          |> MethodEditor.open_definition(new_name)
-          |> reselect_renamed_class(old_name, new_name)
-          |> assign(
-            rename_open: false,
-            rename_error: nil,
-            save_result:
-              "Renamed #{old_name} to #{new_name} — not yet flushed to disk. Apply the rename from the Changes pane to finish.",
-            save_error: nil,
-            flush_result: nil,
-            flush_error: nil
-          )
+    # BT-5189: the tab the user was on when they submitted. The success fold
+    # only moves focus to the renamed class's definition when the user is
+    # still there (or on a tab the rename closes) — never after they moved on.
+    submitted_on = active_tab_id(socket)
 
-        {:error, _, _, _} = err ->
-          assign(socket,
-            rename_open: true,
-            rename_new_name: new_name,
-            rename_error: FacadeError.render_eval_error(err)
-          )
+    Dock.eval_async(
+      socket,
+      pid,
+      expr,
+      fn socket, result ->
+        case result do
+          {:ok, _term, _output, _warnings} ->
+            follow? = rename_follow?(socket, submitted_on, old_name)
 
-        {:error, _} = err ->
-          assign(socket,
-            rename_open: true,
-            rename_new_name: new_name,
-            rename_error: FacadeError.render_eval_error(err)
-          )
-      end
-    end)
+            # The class's identity changed, so every tab keyed on the old name
+            # (its own `:def` tab plus any open `:method` tabs) is stale — close
+            # them all, mirroring `remove_class_eval/4`'s tab-closing success
+            # path, then refresh the class tree (a new name to browse) and the
+            # Changes pane (the new `rename-class` entry). `open_definition/2`
+            # re-syncs the active-tab editor assigns (clearing `save_result`,
+            # same note as `dispatch_new_class/5` above), so the success status is
+            # assigned AFTER it opens the renamed class's definition tab.
+            socket
+            |> close_tabs_for_class(old_name)
+            |> SystemBrowser.assign_browser_classes()
+            |> WorkspaceLive.assign_changes()
+            |> then(&if(follow?, do: MethodEditor.open_definition(&1, new_name), else: &1))
+            |> reselect_renamed_class(old_name, new_name)
+            |> assign(
+              rename_open: false,
+              rename_error: nil,
+              save_result:
+                "Renamed #{old_name} to #{new_name} — not yet flushed to disk. Apply the rename from the Changes pane to finish.",
+              save_error: nil,
+              flush_result: nil,
+              flush_error: nil
+            )
+
+          {:error, _, _, _} = err ->
+            assign(socket,
+              rename_open: true,
+              rename_new_name: new_name,
+              rename_error: FacadeError.render_eval_error(err)
+            )
+
+          {:error, _} = err ->
+            assign(socket,
+              rename_open: true,
+              rename_new_name: new_name,
+              rename_error: FacadeError.render_eval_error(err)
+            )
+        end
+      end,
+      &rename_failed(&1, new_name, &2),
+      key: @rename_key
+    )
+  end
+
+  # The rename never ran (refused, dropped from the queue) or its task died:
+  # re-open the modal with the reason, as a failed rename does.
+  defp rename_failed(socket, new_name, message) do
+    assign(socket,
+      rename_open: true,
+      rename_new_name: new_name,
+      rename_error: "The rename did not complete: #{message}"
+    )
+  end
+
+  defp active_tab_id(socket) do
+    case MethodEditor.active_tab(socket.assigns) do
+      %{id: id} -> id
+      _ -> nil
+    end
+  end
+
+  # Follow a finished class rename to the renamed class's definition only when
+  # the user is still on the tab they submitted from, or on a tab the rename
+  # is about to close (keyed on the old name), or on no tab at all.
+  defp rename_follow?(socket, submitted_on, old_name) do
+    case MethodEditor.active_tab(socket.assigns) do
+      nil -> true
+      %{id: ^submitted_on} -> true
+      tab -> Map.get(tab, :class) == old_name and tab.kind in [:def, :method]
+    end
   end
 
   # Only follow the rename into `selected_class` when the System Browser
@@ -646,69 +743,74 @@ defmodule BtAttachWeb.Live.ClassModals do
             rename_error: "not attached to workspace"
           )
         else
-          rename_method_eval(socket, class, receiver, old_selector, new_name, expr, pid)
+          rename_method_eval(socket, class, side, receiver, old_selector, new_name, expr, pid)
         end
     end
   end
 
-  defp rename_method_eval(socket, class, receiver, old_selector, new_selector, expr, pid) do
-    BtAttachWeb.Live.Dock.eval_async(socket, pid, expr, fn socket, result ->
-      case result do
-        {:ok, _term, _output, _warnings} ->
-          # The selector changed, so the active method tab (keyed on the old
-          # selector) is stale — close it, mirroring `remove_method_eval/6`'s
-          # tab-closing success path.
-          socket
-          |> close_active_tab_if(
-            &match?(%{kind: :method, class: ^class, selector: ^old_selector}, &1)
-          )
-          |> assign(
-            rename_open: false,
-            rename_error: nil,
-            save_result:
-              "Renamed #{receiver} #{old_selector} to #{new_selector} — not yet flushed to disk. Apply the rename from the Changes pane to finish.",
-            save_error: nil,
-            flush_result: nil,
-            flush_error: nil
-          )
-          |> WorkspaceLive.assign_changes()
+  defp rename_method_eval(socket, class, side, receiver, old_selector, new_selector, expr, pid) do
+    Dock.eval_async(
+      socket,
+      pid,
+      expr,
+      fn socket, result ->
+        case result do
+          {:ok, _term, _output, _warnings} ->
+            # The selector changed, so every tab keyed on the old selector is
+            # stale — close it, mirroring `remove_method_eval/6`'s tab-closing
+            # success path. BT-5189: matched by the method's identity, not by
+            # "whichever tab is active when the result lands" — the user may
+            # have moved to another tab while the rename was queued.
+            socket
+            |> close_tabs_matching(
+              &match?(%{kind: :method, class: ^class, side: ^side, selector: ^old_selector}, &1)
+            )
+            |> assign(
+              rename_open: false,
+              rename_error: nil,
+              save_result:
+                "Renamed #{receiver} #{old_selector} to #{new_selector} — not yet flushed to disk. Apply the rename from the Changes pane to finish.",
+              save_error: nil,
+              flush_result: nil,
+              flush_error: nil
+            )
+            |> WorkspaceLive.assign_changes()
 
-        {:error, _, _, _} = err ->
-          assign(socket,
-            rename_open: true,
-            rename_new_name: new_selector,
-            rename_error: FacadeError.render_eval_error(err)
-          )
+          {:error, _, _, _} = err ->
+            assign(socket,
+              rename_open: true,
+              rename_new_name: new_selector,
+              rename_error: FacadeError.render_eval_error(err)
+            )
 
-        {:error, _} = err ->
-          assign(socket,
-            rename_open: true,
-            rename_new_name: new_selector,
-            rename_error: FacadeError.render_eval_error(err)
-          )
-      end
-    end)
+          {:error, _} = err ->
+            assign(socket,
+              rename_open: true,
+              rename_new_name: new_selector,
+              rename_error: FacadeError.render_eval_error(err)
+            )
+        end
+      end,
+      &rename_failed(&1, new_selector, &2),
+      key: @rename_key
+    )
   end
 
   # Close every open tab (def or method) belonging to `class` — used after a
   # successful class rename, since every one of them is keyed on the
   # now-stale old name. Iterates `close_tab/2` (rather than a bulk filter)
   # so each close runs its normal active-tab-reassignment bookkeeping.
-  defp close_tabs_for_class(socket, class) do
-    socket.assigns.tabs
-    |> Enum.filter(&(&1.kind in [:def, :method] and Map.get(&1, :class) == class))
-    |> Enum.reduce(socket, fn tab, acc -> MethodEditor.close_tab(acc, tab.id) end)
-  end
+  defp close_tabs_for_class(socket, class),
+    do:
+      close_tabs_matching(socket, &(&1.kind in [:def, :method] and Map.get(&1, :class) == class))
 
-  # Close the active tab only when `pred` matches it — used after a
-  # successful method rename so a rename triggered from a *different* tab
-  # (not reachable today, since `open_rename/1` only ever targets the active
-  # tab, but kept explicit rather than assumed) never closes the wrong one.
-  defp close_active_tab_if(socket, pred) do
-    case MethodEditor.active_tab(socket.assigns) do
-      %{} = tab -> if pred.(tab), do: MethodEditor.close_tab(socket, tab.id), else: socket
-      _ -> socket
-    end
+  # Close every open tab `pred` matches — used after a successful method
+  # rename to close the tab(s) keyed on the old selector wherever they are,
+  # whichever tab is active when the (possibly queued) result lands.
+  defp close_tabs_matching(socket, pred) do
+    socket.assigns.tabs
+    |> Enum.filter(pred)
+    |> Enum.reduce(socket, fn tab, acc -> MethodEditor.close_tab(acc, tab.id) end)
   end
 
   # ── New Class modal (BT-2293, BT-2645) ──────────────────────────────────────
