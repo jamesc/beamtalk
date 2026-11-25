@@ -51,7 +51,7 @@ To pick one, decide whether the protected region can synchronously run a Beamtal
 
 `needs-conversion` was an audit finding, not a marker: convert the site instead.
 
-The "other process" and "no home entry" reasoning rests on one fact: `beamtalk_class_vars:install/2` is called only from `beamtalk_class_dispatch.erl` (`invoke_class_method/7`, `invoke_class_extension/7`), so the home entry exists only inside a class-method invocation in a class process. Everywhere else `snapshot/0` answers `none` and `protect/1` is a pass-through.
+The "other process" and "no home entry" reasoning rests on one fact: `beamtalk_class_vars:install/2` is called only from `beamtalk_class_dispatch.erl` (`invoke_class_method/7`), so the home entry exists only inside a class-method invocation in a class process. Everywhere else `snapshot/0` answers `none` and `protect/1` is a pass-through.
 
 ## Converted sites
 
