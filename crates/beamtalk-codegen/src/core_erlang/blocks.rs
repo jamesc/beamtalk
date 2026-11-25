@@ -165,17 +165,11 @@ impl CoreErlangGenerator {
     /// read from the outer scope (i.e. `local_writes ∩ captured_reads`).
     /// Field writes (`self.x := ...`) in an actor closure go through the
     /// actor-state cell (ADR 0137); self-sends in one are ordinary messages.
-    ///
-    /// ADR 0130 §5: a block literal that reads a class variable binds its
-    /// creation-time capture around the `fun` ([`Self::with_class_var_capture`]).
     pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
-        self.with_actor_closure(block.span, |this| {
-            this.with_class_var_capture(block, |this| this.generate_block_fun(block))
-        })
+        self.with_actor_closure(block.span, |this| this.generate_block_fun(block))
     }
 
-    /// [`Self::generate_block`] without the class-variable capture binding: the
-    /// `fun` itself, selecting Tier 1 or Tier 2.
+    /// The `fun` of [`Self::generate_block`], selecting Tier 1 or Tier 2.
     fn generate_block_fun(&mut self, block: &Block) -> Result<Document<'static>> {
         use crate::core_erlang::block_analysis::analyze_block;
         let analysis = analyze_block(block);
@@ -339,15 +333,11 @@ impl CoreErlangGenerator {
         // through that map like one.
         let analysis = super::block_analysis::analyze_block(block);
         if self.tier2_merged_for_analysis(&analysis) {
-            return self.with_class_var_capture(block, |this| {
-                this.with_actor_closure(block.span, |this| {
-                    this.generate_block_merged_fun(block, captured_vars)
-                })
+            return self.with_actor_closure(block.span, |this| {
+                this.generate_block_merged_fun(block, captured_vars)
             });
         }
-        self.with_class_var_capture(block, |this| {
-            this.generate_block_stateful_fun(block, captured_vars)
-        })
+        self.generate_block_stateful_fun(block, captured_vars)
     }
 
     /// One `let` unpacking a captured local from the Tier 2 `StateAcc`
