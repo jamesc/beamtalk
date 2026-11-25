@@ -29,7 +29,7 @@ validated it.
 | `readiness` | Two-stage probe: HTTP up, then `/readiness` |
 | `monitor` | Post-attach periodic `/readiness` re-poll |
 | `reap` | PID-file orphan sweep, hardened against PID reuse |
-| `cli_ops` | Create/stop workspaces via the installed `beamtalk` CLI |
+| `cli_ops` | Create workspaces via the installed `beamtalk` CLI |
 
 ## What this crate does not do
 

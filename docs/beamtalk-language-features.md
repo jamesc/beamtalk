@@ -1087,7 +1087,7 @@ A type author who commits to number-on-the-left arithmetic at all typically impl
 ```beamtalk
 5 + "not a vector"
 // => ERROR: String does not understand 'plusFromNumber:'
-// => ERROR: String has no 'plusFromNumber:' — implement it to support 'number + String' arithmetic
+// => ERROR: '+' cannot combine a number with String — the right operand must be a number, or a value whose class implements 'plusFromNumber:'
 ```
 
 This is receiver-dispatch's mirror image, not a new arithmetic mechanism: no `generality`/coercion tower, no `perform:`-based reflective retry — each reflected method is an ordinary, fully-typed method, so static typing (covariant-return refinement) and compile-time DNU checking work on it exactly as they do on `+`/`-`/`*`/`/` themselves. A type that never implements number-on-the-left arithmetic pays no cost for it: a statically-typed call site (`total + delta`, both operands' types known at compile time) compiles to the identical bare arithmetic instruction whether or not this mechanism exists. Comparison operators (`< > <= >=`) are **not** covered by this convention — `5 < aVector` is unaffected. See [ADR 0116](ADR/0116-number-on-the-left-arithmetic-coercion.md) for the full double-dispatch design, the rejected alternatives (a Smalltalk-style `generality` tower, `perform:`-based retry), and the zero-cost measurement for the statically-typed case.
@@ -7755,7 +7755,12 @@ When a netsplit heals and the same global name was registered on both sides,
 Beamtalk's own resolver keeps the *older* registrant (by start time) and
 stops the other with a `#globalNameConflict` reason — never OTP's default
 `exit(Pid, kill)`, so the losing actor's `terminate` still runs and its
-`ActorStopped` announcement carries the reason.
+`ActorStopped` announcement carries the reason. A supervised `scope: #global`
+child that loses stays down rather than restart-looping: its start is ignored
+while the name is held on another node (with a logged warning). Under
+`one_for_one` its siblings are unaffected. Nothing watches the name: the child
+stays down until a later `restartChild:` finds it free (`Result ok: nil` while
+the name is still held).
 
 ### The wire — what crosses a node boundary, and what doesn't
 

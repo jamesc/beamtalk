@@ -385,8 +385,9 @@ async fn member_level_change_republishes_other_open_files() {
     let backend: &Backend = service.inner();
     real_did_open(backend, a_uri.clone(), a_src).await;
     real_did_open(backend, b_uri.clone(), b_src).await;
-    // sleep: let the feed task forward the opens' own publishes before draining.
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // sleep: let the feed task forward the opens' own publishes, and the
+    // coalesced cross-file pass the opens request (BT-5188), before draining.
+    tokio::time::sleep(Duration::from_millis(500)).await;
     while feed.try_recv().is_ok() {}
 
     // Body-only edit: the interface is unchanged, so b.bt is not re-analysed.
@@ -587,8 +588,9 @@ async fn open_two(
 ) {
     real_did_open(backend, a_uri.clone(), a_src).await;
     real_did_open(backend, b_uri.clone(), b_src).await;
-    // sleep: let the feed task forward the opens' own publishes before draining.
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // sleep: let the feed task forward the opens' own publishes, and the
+    // coalesced cross-file pass the opens request (BT-5188), before draining.
+    tokio::time::sleep(Duration::from_millis(500)).await;
     while feed.try_recv().is_ok() {}
 }
 

@@ -8,6 +8,7 @@
 
 import oniguruma from "vscode-oniguruma";
 import vsctm from "vscode-textmate";
+import { LIMITS } from "./protocol.js";
 
 /**
  * Scope prefix -> highlight category. Order matters: the first prefix that
@@ -49,10 +50,16 @@ function categoryOf(scopes) {
 }
 
 /**
- * @param {{ wasm: ArrayBuffer | Uint8Array, grammar: object }} options
- * @returns {Promise<{ tokenizeLines: (lines: string[], continuous: boolean) => Array<Array<[number, number, string]>> }>}
+ * @typedef {Array<Array<[number, number, string]>>} BlockTokens
+ * @param {{ wasm: ArrayBuffer | Uint8Array, grammar: object, now?: () => number }} options
+ *   `now` is the clock for the request budget (tests inject one).
+ * @returns {Promise<{
+ *   tokenizeLines: (lines: string[], continuous: boolean) => BlockTokens,
+ *   tokenizeBlocks: (blocks: Array<{ lines: string[], continuous: boolean }>) =>
+ *     { blocks: BlockTokens[], incomplete: number[] },
+ * }>}
  */
-export async function createTokenizer({ wasm, grammar }) {
+export async function createTokenizer({ wasm, grammar, now = Date.now }) {
   await oniguruma.loadWASM(wasm);
   const registry = new vsctm.Registry({
     onigLib: Promise.resolve({
@@ -70,12 +77,42 @@ export async function createTokenizer({ wasm, grammar }) {
    * `continuous` carries tokenizer state across lines (a whole file or code
    * block); otherwise each line starts fresh (diff lines, which interleave
    * old and new text).
+   *
+   * Bounded (BT-5194), since the text is whatever page is open and one
+   * service worker tokenizes for every tab: a line longer than
+   * `LIMITS.maxLineLength`, and every line once `deadline` has passed, gets
+   * no tokens; each line gets `LIMITS.lineTimeLimitMs`, after which the rest
+   * of it is left uncoloured and the next line starts from a fresh state
+   * (the stopped line's state is mid-line).
    */
   function tokenizeLines(lines, continuous) {
+    return tokenizeWithin(lines, continuous, now() + LIMITS.requestBudgetMs).tokens;
+  }
+
+  /**
+   * {@link tokenizeLines} against a given `deadline`; `cut` says whether the
+   * deadline left any line untokenized (worth retrying later, unlike a line
+   * that is too long or out of its own time, which would be cut again).
+   */
+  function tokenizeWithin(lines, continuous, deadline) {
     let state = vsctm.INITIAL;
-    return lines.map((line) => {
-      const result = loaded.tokenizeLine(line, continuous ? state : vsctm.INITIAL);
-      state = result.ruleStack;
+    let cut = false;
+    const tokens = lines.map((line) => {
+      if (line.length > LIMITS.maxLineLength) {
+        state = vsctm.INITIAL;
+        return [];
+      }
+      if (now() > deadline) {
+        cut = true;
+        state = vsctm.INITIAL;
+        return [];
+      }
+      const result = loaded.tokenizeLine(
+        line,
+        continuous ? state : vsctm.INITIAL,
+        LIMITS.lineTimeLimitMs
+      );
+      state = result.stoppedEarly ? vsctm.INITIAL : result.ruleStack;
       /** @type {Array<[number, number, string]>} */
       const out = [];
       for (const token of result.tokens) {
@@ -89,7 +126,24 @@ export async function createTokenizer({ wasm, grammar }) {
       }
       return out;
     });
+    return { tokens, cut };
   }
 
-  return { tokenizeLines };
+  /**
+   * Tokenizes a whole request's blocks within one `LIMITS.requestBudgetMs`.
+   * `incomplete` lists the blocks the budget cut short, which the content
+   * script does not cache, so a later scan asks for them again.
+   */
+  function tokenizeBlocks(blocks) {
+    const deadline = now() + LIMITS.requestBudgetMs;
+    const incomplete = [];
+    const tokens = blocks.map((b, i) => {
+      const result = tokenizeWithin(b.lines, b.continuous, deadline);
+      if (result.cut) incomplete.push(i);
+      return result.tokens;
+    });
+    return { blocks: tokens, incomplete };
+  }
+
+  return { tokenizeLines, tokenizeBlocks };
 }

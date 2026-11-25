@@ -14,7 +14,48 @@ fn interface_after(first: &str, second: &str) -> (Option<FileInterface>, Option<
     service.update_file(file.clone(), first.to_string());
     let before = service.project_index().file_interface(&file);
     service.update_file(file.clone(), second.to_string());
-    (before, service.project_index().file_interface(&file))
+    let after = service.project_index().file_interface(&file);
+    // BT-5188: the by-reference comparison agrees with cloning both sides.
+    assert_eq!(
+        service
+            .project_index()
+            .file_interface_matches(&file, before.as_ref()),
+        before.clone().unwrap_or_default() == after.clone().unwrap_or_default(),
+        "file_interface_matches disagrees with file_interface equality"
+    );
+    (before, after)
+}
+
+/// BT-5188: an unindexed file matches the `None` baseline; an indexed one
+/// that exports nothing does too.
+#[test]
+fn unindexed_and_empty_files_match_no_baseline() {
+    let mut service = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("a.bt");
+    assert!(service.project_index().file_interface_matches(&file, None));
+    service.update_file(file.clone(), "1 + 2\n".to_string());
+    assert!(service.project_index().file_interface_matches(&file, None));
+    service.update_file(file.clone(), "Object subclass: Foo\n".to_string());
+    assert!(!service.project_index().file_interface_matches(&file, None));
+}
+
+/// BT-5188: a parse error is reported, so callers can ignore the interface
+/// change error recovery causes.
+#[test]
+fn has_parse_errors_reflects_the_indexed_text() {
+    let mut service = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("a.bt");
+    assert!(!service.has_parse_errors(&file));
+    service.update_file(
+        file.clone(),
+        "Object subclass: Foo\n  go => (1 +\n".to_string(),
+    );
+    assert!(service.has_parse_errors(&file));
+    service.update_file(
+        file.clone(),
+        "Object subclass: Foo\n  go => 1\n".to_string(),
+    );
+    assert!(!service.has_parse_errors(&file));
 }
 
 #[test]

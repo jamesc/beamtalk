@@ -20,6 +20,11 @@
 //! reviewed-but-unverified until built on a machine with the Tauri
 //! toolchain (`cargo tauri dev`).
 
+// `APP_COMMANDS` is read by `build.rs` (which `include!`s the file) and this
+// module's tests; the binary itself registers the commands by name in
+// `generate_handler!` below.
+#[cfg_attr(not(test), allow(dead_code))]
+mod app_commands;
 mod commands;
 mod dto;
 mod launcher;

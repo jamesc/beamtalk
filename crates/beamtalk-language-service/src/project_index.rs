@@ -139,6 +139,39 @@ pub struct FileInterface {
     protocols: Vec<ProtocolInfo>,
 }
 
+/// A file's interface borrowed from the index (see
+/// [`ProjectIndex::file_interface_matches`]).
+struct InterfaceView<'a> {
+    classes: Vec<&'a beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    aliases: Vec<(&'a EcoString, DeclaredType, bool, &'a Option<EcoString>)>,
+    protocols: Vec<&'a ProtocolInfo>,
+}
+
+/// `ProtocolInfo` equality ignoring where the protocol is declared: moving a
+/// declaration does not change what other files see. Destructured
+/// exhaustively so a new field must be considered here.
+fn protocol_eq_ignoring_span(a: &ProtocolInfo, b: &ProtocolInfo) -> bool {
+    let ProtocolInfo {
+        name,
+        type_params,
+        type_param_bounds,
+        extending,
+        methods,
+        class_methods,
+        provided,
+        package,
+        span: _,
+    } = a;
+    *name == b.name
+        && *type_params == b.type_params
+        && *type_param_bounds == b.type_param_bounds
+        && *extending == b.extending
+        && *methods == b.methods
+        && *class_methods == b.class_methods
+        && *provided == b.provided
+        && *package == b.package
+}
+
 /// Cross-file project index holding a merged class hierarchy.
 ///
 /// **DDD Context:** Language Service — Aggregate Root
@@ -842,17 +875,60 @@ impl ProjectIndex {
     /// an edit to a method body, or merely moving a declaration, does not.
     #[must_use]
     pub fn file_interface(&self, file: &Utf8PathBuf) -> Option<FileInterface> {
-        let classes = match (self.file_classes.get(file), self.file_hierarchies.get(file)) {
-            (Some(names), Some(hierarchy)) => {
-                let mut infos: Vec<_> = names
-                    .iter()
-                    .filter_map(|n| hierarchy.get_class(n).cloned())
-                    .collect();
-                infos.sort_by(|a, b| a.name.cmp(&b.name));
-                infos
-            }
-            _ => Vec::new(),
+        let view = self.interface_view(file)?;
+        Some(FileInterface {
+            classes: view.classes.into_iter().cloned().collect(),
+            aliases: view
+                .aliases
+                .into_iter()
+                .map(|(name, ty, internal, package)| (name.clone(), ty, internal, package.clone()))
+                .collect(),
+            protocols: view
+                .protocols
+                .into_iter()
+                .map(|p| ProtocolInfo {
+                    span: beamtalk_core::span::Span::default(),
+                    ..p.clone()
+                })
+                .collect(),
+        })
+    }
+
+    /// Whether `file`'s current interface equals `baseline`, as
+    /// [`Self::file_interface`] would compare (a file that is not indexed,
+    /// or `None`, counts as exporting nothing) — but by reference, without
+    /// cloning the file's `ClassInfo`s (BT-5188: it runs under the service
+    /// lock after edits).
+    #[must_use]
+    pub fn file_interface_matches(
+        &self,
+        file: &Utf8PathBuf,
+        baseline: Option<&FileInterface>,
+    ) -> bool {
+        let empty = FileInterface::default();
+        let base = baseline.unwrap_or(&empty);
+        let Some(view) = self.interface_view(file) else {
+            return *base == empty;
         };
+        view.classes.len() == base.classes.len()
+            && view.classes.iter().zip(&base.classes).all(|(a, b)| *a == b)
+            && view.aliases.len() == base.aliases.len()
+            && view.aliases.iter().zip(&base.aliases).all(
+                |((name, ty, internal, package), (bn, bt, bi, bp))| {
+                    *name == bn && ty == bt && internal == bi && *package == bp
+                },
+            )
+            && view.protocols.len() == base.protocols.len()
+            && view
+                .protocols
+                .iter()
+                .zip(&base.protocols)
+                .all(|(a, b)| protocol_eq_ignoring_span(a, b))
+    }
+
+    /// The borrowed parts of `file`'s interface, sorted by name; shared by
+    /// [`Self::file_interface`] and [`Self::file_interface_matches`].
+    fn interface_view(&self, file: &Utf8PathBuf) -> Option<InterfaceView<'_>> {
         let aliases_indexed = self.file_aliases.get(file);
         let protocols_indexed = self.file_protocols.get(file);
         if !self.file_classes.contains_key(file)
@@ -861,30 +937,31 @@ impl ProjectIndex {
         {
             return None;
         }
+        let mut classes: Vec<&beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
+            match (self.file_classes.get(file), self.file_hierarchies.get(file)) {
+                (Some(names), Some(hierarchy)) => names
+                    .iter()
+                    .filter_map(|n| hierarchy.get_class(n))
+                    .collect(),
+                _ => Vec::new(),
+            };
+        classes.sort_by(|a, b| a.name.cmp(&b.name));
         let mut aliases: Vec<_> = aliases_indexed
             .into_iter()
             .flatten()
             .map(|i| {
                 (
-                    i.name.clone(),
+                    &i.name,
                     DeclaredType::from(&i.annotation),
                     i.is_internal,
-                    i.package.clone(),
+                    &i.package,
                 )
             })
             .collect();
-        aliases.sort_by(|a, b| a.0.cmp(&b.0));
-        let mut protocols: Vec<ProtocolInfo> = protocols_indexed
-            .into_iter()
-            .flatten()
-            .cloned()
-            .map(|mut p| {
-                p.span = beamtalk_core::span::Span::default();
-                p
-            })
-            .collect();
+        aliases.sort_by(|a, b| a.0.cmp(b.0));
+        let mut protocols: Vec<&ProtocolInfo> = protocols_indexed.into_iter().flatten().collect();
         protocols.sort_by(|a, b| a.name.cmp(&b.name));
-        Some(FileInterface {
+        Some(InterfaceView {
             classes,
             aliases,
             protocols,
