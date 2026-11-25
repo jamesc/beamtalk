@@ -1910,7 +1910,7 @@ their reductions and words with ns inside the spread. 11h (`5 < b`) is the
 expected cost of the change and has its own bound: it was a bare BIF at the
 noise floor and is now ~7.7 ns, because its new `case` has an arm that makes a
 call (the hook), which gives the site a stack frame even when `b` is a number
-and the hook never runs (§ The failing arm, accepted by the owner). It stays
+and the hook never runs (§ The failing arm; owner decision 1 in § Decisions on the open questions of ADR 0116). It stays
 cheaper than `5 + b` (8.9–9.5 ns). 11l was already a `StateAcc` loop; its
 condition now brackets the comparison with a BT-4279 fast path
 (`is_number(Count)` skips the store) and it measured faster.

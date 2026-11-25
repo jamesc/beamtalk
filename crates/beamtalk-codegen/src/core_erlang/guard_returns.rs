@@ -346,7 +346,8 @@ impl Rewriter {
     /// declaration holds; a non-number right operand broke it and is sent a
     /// reflected hook that may answer anything (ADR 0116 § Addendum,
     /// BT-5176). With an untyped right operand a hook answer is ordinary
-    /// code, not a broken declaration, so it is not counted here.
+    /// code, not a broken declaration, so it is not counted here, whether
+    /// the receiver is a literal or a declared parameter.
     fn is_declared_boolean(&self, expr: &Expression) -> bool {
         if let Expression::MessageSend {
             receiver,
@@ -358,9 +359,15 @@ impl Rewriter {
             && is_ordering_comparison(op)
         {
             let declared = |e: &Expression| matches!(e, Expression::Identifier(id) if self.declared_params.contains(&id.name));
-            return declared(receiver)
-                || (proven_comparison_kind(receiver, None) == Some(ProvenKind::Number)
-                    && arguments.first().is_some_and(declared));
+            // The right operand must be proven numeric or itself declared:
+            // an untyped one makes a hook answer ordinary code (ADR 0116
+            // § Addendum, BT-5176), not a broken declaration.
+            let right_ok = arguments.first().is_some_and(|right| {
+                declared(right) || proven_comparison_kind(right, None) == Some(ProvenKind::Number)
+            });
+            return right_ok
+                && (declared(receiver)
+                    || proven_comparison_kind(receiver, None) == Some(ProvenKind::Number));
         }
         self.short_circuit_declared_operands(expr).is_some()
     }
@@ -1275,6 +1282,17 @@ mod tests {
             None
         );
         let (_, helpers) = rewritten_with_conditions(&untyped("    0 < x ifTrue: [^1]\n    2"))
+            .expect("an effect-free guard is rewritten");
+        assert_eq!(helpers, 1);
+        // A declared receiver with an untyped right operand is not lenient
+        // either: `x < y` sends a non-number `y` its hook in ordinary code.
+        let mixed =
+            |body: &str| format!("Object subclass: C\n  m: x :: Integer with: y =>\n{body}\n");
+        assert_eq!(
+            rewritten(&mixed("    x < y ifTrue: [self foo. ^1]\n    2")),
+            None
+        );
+        let (_, helpers) = rewritten_with_conditions(&mixed("    x < y ifTrue: [^1]\n    2"))
             .expect("an effect-free guard is rewritten");
         assert_eq!(helpers, 1);
         // A two-branch guard on it keeps its frame, as on a declared one.
