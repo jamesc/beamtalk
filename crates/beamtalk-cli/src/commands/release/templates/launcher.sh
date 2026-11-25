@@ -207,9 +207,10 @@ export_cookie() {
         echo "error: could not write the cookie file" >&2
         exit 1
     fi
-    # No probe when `$ERL` already is an installation's own launcher (a plain
-    # file next to `../releases`), only for a shim or a symlink.
-    if [ "$USING_HOST_ERTS" = "true" ] && { [ -L "$ERL" ] || [ ! -d "$(dirname "$ERL")/../releases" ]; }; then
+    # Always probed with a host ERTS (one extra boot): telling a real install
+    # from a shim is `cookie_env::installed_erl_on_path`'s rule, not repeated
+    # here. The default bundled ERTS never needs it.
+    if [ "$USING_HOST_ERTS" = "true" ]; then
         erl_root=$("$ERL" -noshell -noinput -boot no_dot_erlang \
             -eval 'io:format("erl-root:~ts~n", [code:root_dir()]), halt().' 2>/dev/null |
             sed -n 's/^erl-root://p' | head -n1) || erl_root=""
