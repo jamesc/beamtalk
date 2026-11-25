@@ -274,6 +274,21 @@ version_skew_fields_test_() ->
         )
     ].
 
+%% A failed version read for a peer that is no longer connected is logged,
+%% not announced: it would arrive after that peer's NodeDown.
+version_read_for_unconnected_peer_not_announced_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun() ->
+        Self = self(),
+        Handler = fun(Event) -> Self ! {got_version_skew, Event} end,
+        {ok, Sub} = beamtalk_announcements:subscribe('NodeVersionSkew', Self, Handler, false),
+        try
+            ok = beamtalk_node_monitor:check_version_skew_on_connect('ghost@invalid'),
+            ?assertNoMessage({got_version_skew, _}, 500)
+        after
+            beamtalk_announcements:unsubscribe(Sub)
+        end
+    end}.
+
 %%====================================================================
 %% terminate/2 — both branches
 %%====================================================================

@@ -442,11 +442,13 @@ check_peer_reload(PeerNode, ClassName, PeerEntry) ->
 -doc """
 Connect-time version comparison (ADR 0126 Amendment (BT-5193) D3): read
 `PeerNode`'s `beamtalk_version:dist_versions/0` and announce one
-`NodeVersionSkew` when it differs from this node's. Any `erpc` failure —
-including `undef` from a peer too old to export the function — is logged
-and announced with `nil` remote fields, never dropped. Fault-isolated like
-the shape check: it must never crash the spawned connect process before
-the shape check runs.
+`NodeVersionSkew` when it differs from this node's. An `erpc` failure is
+logged and, while the peer is still connected, announced with `nil` remote
+fields: that covers `undef` from a peer too old to export the function, and
+also a peer too slow to answer within the timeout. A peer that has already
+disconnected is only logged — its `NodeDown` has been (or is being)
+announced, and a version event after it would describe a node that is gone.
+Fault-isolated like the shape check.
 """.
 -spec check_version_skew_on_connect(node()) -> ok.
 check_version_skew_on_connect(PeerNode) ->
@@ -467,9 +469,10 @@ check_version_skew_on_connect(PeerNode) ->
                     }),
                     unknown
             end,
-        case version_skew_fields(PeerNode, beamtalk_version:dist_versions(), Remote) of
-            none -> ok;
-            Fields -> announce('NodeVersionSkew', Fields)
+        Fields = version_skew_fields(PeerNode, beamtalk_version:dist_versions(), Remote),
+        case Fields =/= none andalso (Remote =/= unknown orelse lists:member(PeerNode, nodes())) of
+            true -> announce('NodeVersionSkew', Fields);
+            false -> ok
         end
     catch
         Class:Reason:Stacktrace ->
