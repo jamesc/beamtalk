@@ -34,7 +34,8 @@ WebSocket `run-entry` op and these launcher verbs — never a second one.
 
 %% How long the `rpc` client waits for the target node's run-entry. Keep it
 %% below the outer wall-clock limit in examples/cluster/scripts/e2e.sh
-%% (CLUSTER_E2E_TIMEOUT, default 150 s) so the structured timeout error wins.
+%% (CLUSTER_E2E_TIMEOUT, default 150 s) so the `{badrpc, timeout}` failure
+%% is reported before the outer limit kills the client.
 -define(RPC_CALL_TIMEOUT_MS, 120000).
 
 -export([

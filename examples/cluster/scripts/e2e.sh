@@ -21,10 +21,14 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 pkg="$(cd "$here/.." && pwd)"
 read -r -a bt <<<"${BEAMTALK:-beamtalk}"
 # Ordering: the release launcher's `rpc` client gives up after 120 s
-# (?RPC_CALL_TIMEOUT_MS in beamtalk_release_launcher.erl) and reports a
-# structured timeout; this outer wall-clock limit is a backstop that must stay
-# above it, hence the default of 150 s.
+# (?RPC_CALL_TIMEOUT_MS in beamtalk_release_launcher.erl) and reports
+# `rpc failed: timeout`; this outer wall-clock limit is a backstop that must
+# stay above it, hence the default of 150 s and the floor below.
 TIMEOUT_SECS="${CLUSTER_E2E_TIMEOUT:-150}"
+if [ "$TIMEOUT_SECS" -le 120 ]; then
+  echo "e2e: CLUSTER_E2E_TIMEOUT ($TIMEOUT_SECS) must exceed the rpc client's 120 s cap" >&2
+  exit 2
+fi
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/beamtalk-cluster-e2e.XXXXXX")"
 rel="$work/release"
@@ -130,7 +134,7 @@ expect "PASS a Value that crossed the wire equals a locally built one"
 expect "PASS NodeDown announced for worker2"
 expect "PASS the failed call surfaced as node_down"
 expect "PASS all six jobs finished despite the node loss"
-# The full count: a scenario that skips checks must not pass.
+# The full count (32 checks + the INFO line; see demo.bt `summarise`): a scenario that skips checks must not pass.
 expect "RESULT 33 ok, 0 failed"
 
 # The node that died mid-run must really be gone, and the survivor still up.

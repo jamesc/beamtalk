@@ -7683,8 +7683,9 @@ worker disconnect                               // => true
 ```
 
 > **`disconnect` does not keep the node away.** The next send to an actor on
-> that node (or `connect`/`ping`) reconnects it automatically (ADR 0126 §9, item 4),
-> and `NodeUp` fires again. Use it to drop a connection, not to fence a node
+> that node (or `connect`/`ping`) reconnects it automatically (ADR 0126 §9, item 4;
+> not when the node runs with `-kernel dist_auto_connect never`), and `NodeUp`
+> fires again. Use it to drop a connection, not to fence a node
 > off.
 
 `connect` (and `ping`, which auto-connects) apply a security policy (see
