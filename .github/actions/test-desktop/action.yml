@@ -20,6 +20,14 @@ runs:
     - name: Install Just
       uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
+    # `just test-desktop` also runs the picker frontend's node tests
+    # (BT-5194), which rely on node expanding a --test glob (Node 21+); pin the
+    # repo's version rather than whatever each runner image ships.
+    - name: Install Node.js
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+      with:
+        node-version-file: .tool-versions
+
     - name: Cache Rust dependencies (desktop/src-tauri)
       uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
