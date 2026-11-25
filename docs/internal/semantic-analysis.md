@@ -389,10 +389,10 @@ Fix: Extract the mutation into a method:
 ```
 
 Only the `addTo{Field}:` method extraction is offered: this diagnostic is
-shared by the Actor, ValueType, and ClassVar producers of the "field
+shared by the Actor and ValueType producers of the "field
 assignment in an unsupported block" error, and the inline
 `items do: [:item | self.sum := ...]` rewrite is only valid for the Actor
-case — in ValueType and ClassVar context it reproduces the same error
+case — in ValueType context it reproduces the same error
 (BT-3491).
 
 ### Local Mutation in Closure

@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-10-30); accepted 2026-10-29. Epic BT-4297.
 
+> **Amended by [ADR 0153](0153-remove-class-variables.md) (2026-11-25), the rule that decides where a class method runs.** A class has no state, so "the class or any ancestor declares class variables" is no longer a condition. A class method runs in the caller unless its selector is process-bound. `performLocally:withArguments:` is removed; `perform:withArguments:` has its behaviour.
+
 > **Superseded in part by [ADR 0152](0152-remove-cross-file-extension-methods.md) (2026-11-24), the BT-4307 resolution.** The resolution that an ancestor's class-side extension counts as that ancestor's method, with the owner memo declining when one answers first, no longer applies: class-side extensions are removed, so the owner memo has no extension verdict. A runtime class-method fun installed through the class still counts as the class's method.
 
 > **Implemented note (2026-10-30).** What shipped differs from the text below in these ways:

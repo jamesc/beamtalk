@@ -1,7 +1,9 @@
 # ADR 0019: Singleton Access via Class Variables
 
 ## Status
-Implemented (2026-02-15)
+Superseded by [ADR 0153](0153-remove-class-variables.md) (2026-11-25); was Implemented (2026-02-15)
+
+> **Superseded by [ADR 0153](0153-remove-class-variables.md) (2026-11-25).** Singleton access through class variables is gone with class variables. A singleton with state is a named Actor whose `class current` asks the runtime at call time (ADR 0153 §2); the workspace singletons themselves are replaced by ADR 0129's class-side facades.
 
 ## Context
 
