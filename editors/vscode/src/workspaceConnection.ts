@@ -7,6 +7,7 @@ import * as vscode from "vscode";
 import { workspacesBaseDir } from "./beamtalkRoot";
 import { state } from "./extensionState";
 import { InspectorPanel } from "./inspectorPanel";
+import { applyLogLevel } from "./logLevelSync";
 import { findProjectRoot } from "./projectRoot";
 import { setReplRunning } from "./repl";
 import { type LogEntry, WorkspaceClient } from "./workspaceClient";
@@ -143,9 +144,9 @@ async function connectWorkspaceAsync(workspaceId: string, attempt: number): Prom
     if (connectionState === "connected") {
       const config = vscode.workspace.getConfiguration("beamtalk");
       const level = config.get<string>("logs.level", "warning");
-      newClient.subscribeLogs(level).catch((err) => {
+      applyLogLevel(newClient, level).catch((err) => {
         state.outputChannel?.warn(
-          `Failed to subscribe to logs: ${err instanceof Error ? err.message : String(err)}`
+          `Failed to apply log level ${level}: ${err instanceof Error ? err.message : String(err)}`
         );
       });
     }

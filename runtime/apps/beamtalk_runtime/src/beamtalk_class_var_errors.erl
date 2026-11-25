@@ -80,7 +80,7 @@ variable cannot be read or written from this process.
 raise_unreachable(Class, undefined, _Mode) ->
     %% Name-less variant (`capture/2`, mirror reads without a variable name): a
     %% class-level condition, so the block-oriented hint of the named variant
-    %% does not fit supervisor-init or `performLocally:` callers.
+    %% does not fit supervisor-init or `local_call/3` callers.
     Error0 = beamtalk_error:new(class_state_unreachable, Class),
     Error1 = beamtalk_error:with_message(
         Error0,
@@ -160,7 +160,7 @@ raise_read_only(Class, Name) ->
     Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
             "This code runs against a read-only snapshot of ~ts's class variables "
-            "(supervisor definition, a class `initialize:` hook, or `performLocally:`). "
+            "(a supervisor definition or a class `initialize:` hook). "
             "Assign the variable from one of ~ts's own class methods, sent as a normal "
             "class-side message.",
             [Class, Class]

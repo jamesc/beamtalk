@@ -1408,7 +1408,26 @@ fn collect_beam_stems(ebin_dir: &std::path::Path, out: &mut std::collections::Ha
     }
 }
 
+/// The compiled `native/test/` helper ebin of the package at `project_root`
+/// (`_build/dev/native_test/ebin`, BT-5186), when the package still has a
+/// `native/test/` directory and the ebin exists — the one rule for which
+/// helper modules a package's tests may call and be typed against. A package
+/// that dropped `native/test/` gets `None`, so stale helper beams are never
+/// treated as known modules (specs already extracted from them stay in the
+/// shared type cache until it is cleaned). The LSP and `lint` do not consult
+/// this yet, so they flag a test's helper calls as unresolved (BT-5251).
+#[must_use]
+pub fn project_test_helper_ebin_dir(project_root: &Utf8Path) -> Option<Utf8PathBuf> {
+    let helpers = BuildLayout::new(project_root).native_test_ebin_dir();
+    (project_root.join("native").join("test").is_dir() && helpers.is_dir()).then_some(helpers)
+}
+
 /// Collect the ebin directories for a project's native and path dependencies.
+///
+/// Not the package's `native/test/` helpers: those are added only for its
+/// tests, via [`project_test_helper_ebin_dir`]. (Their extracted specs do land
+/// in the shared project type cache, which [`load_type_cache_registry`] reads
+/// whole, as they did when the helpers lived in the native ebin.)
 ///
 /// Scans the standard `_build/` layout for a project rooted at `project_root`:
 /// - `_build/deps/*/ebin/` — Beamtalk path-dependency ebin dirs
@@ -1622,8 +1641,10 @@ pub fn collect_installed_erlang_modules() -> KnownErlangModules {
     }
 }
 
-/// Whether `dir` is the package's own compiled `native/` ebin
-/// (`_build/dev/native/ebin`), as opposed to a path/git dependency
+/// Whether `dir` is the package's own compiled native output — its `native/`
+/// ebin (`_build/dev/native/ebin`) or, under `beamtalk test`, its
+/// `native/test/` helper ebin (`_build/dev/native_test/ebin`, BT-5186) — as
+/// opposed to a path/git dependency
 /// (`_build/deps/*/ebin`) or a hex/rebar3 dependency
 /// (`_build/dev/native/default/lib/*/ebin`). Only the former may prove
 /// result-coercion-free FFI calls (BT-4507).
@@ -1774,8 +1795,25 @@ pub fn extend_with_ebin_type_specs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use std::fs;
     use tempfile::TempDir;
+
+    /// BT-5186: helper beams count only while the package has `native/test/`.
+    #[test]
+    fn test_helper_ebin_is_only_known_while_native_test_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let helpers = BuildLayout::new(&root).native_test_ebin_dir();
+        std::fs::create_dir_all(&helpers).unwrap();
+        assert_eq!(project_test_helper_ebin_dir(&root), None, "no native/test/");
+        std::fs::create_dir_all(root.join("native/test")).unwrap();
+        assert_eq!(project_test_helper_ebin_dir(&root), Some(helpers.clone()));
+        assert!(
+            !collect_project_dependency_ebin_dirs(&root).contains(&helpers),
+            "build, lint and the LSP do not scan the test helper ebin"
+        );
+    }
 
     // -----------------------------------------------------------------------
     // Runtime discovery (moved from beamtalk-cli's repl_startup)

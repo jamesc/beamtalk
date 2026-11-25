@@ -1008,7 +1008,7 @@ handle_info(check_idle, #state{enabled = true, max_idle_seconds = Max} = State) 
 
 **Operation Handlers (Domain Services):**
 - `OpsEval` (`beamtalk_repl_ops_eval`): `eval`, `show-codegen`, `stdin`
-- `OpsSession` (`beamtalk_repl_ops_session`): `bindings`, `clear`, `clone`, `close`, `sessions`
+- `OpsSession` (`beamtalk_repl_ops_session`): `close`, `health`, `sessions`, `shutdown`
 - `OpsLoad` (`beamtalk_repl_ops_load`): `load-file`, `load-source`, `reload`
 - `OpsActors` (`beamtalk_repl_ops_actors`): `actors`, `inspect`, `kill`
 - `OpsDev` (`beamtalk_repl_ops_dev`): `test`, `test-all`, `describe`, `health`, `shutdown`

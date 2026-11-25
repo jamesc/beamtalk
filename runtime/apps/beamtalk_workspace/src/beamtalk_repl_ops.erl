@@ -41,7 +41,7 @@ leak compiler/runtime internals.
 
 | Tag | Shape | Produced by |
 |-----|-------|-------------|
-| result | `{ok, Value, Output, Warnings}` | `eval`, `unload`, `clone`, tracing read ops |
+| result | `{ok, Value, Output, Warnings}` | `eval`, `unload`, tracing read ops |
 | trace | `{trace, Steps, Output, Warnings}` | `eval` (trace mode) |
 | script_exit | `{script_exit, Code, Output, Warnings}` | `eval` (connected `Program exit:`) |
 | actors | `{actors, [ActorMeta]}` | `actors` |

@@ -144,7 +144,6 @@ ops() ->
         ),
         %% --- Sessions ---
         e(<<"sessions">>, beamtalk_repl_ops_session, [], [], always),
-        e(<<"clone">>, beamtalk_repl_ops_session, [], [], always),
         e(<<"close">>, beamtalk_repl_ops_session, [], [], always),
         e(<<"health">>, beamtalk_repl_ops_session, [], [], always),
         e(<<"shutdown">>, beamtalk_repl_ops_session, [<<"cookie">>], [], always),

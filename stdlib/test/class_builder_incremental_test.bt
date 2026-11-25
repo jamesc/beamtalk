@@ -8,7 +8,10 @@
 // `classMethods:`) populate, so a class can be assembled one piece at a time
 // before `register` (the "browser" use case). In a `classBuilder … register`
 // cascade the compiler lowers each `add*:body:` block exactly as it lowers the
-// corresponding bulk-setter map value — class methods become class-method funs.
+// corresponding bulk-setter map value: class methods become class-method funs
+// (`fun(ClassSelf, …)`). The class-variable setters (`classVars:`,
+// `addClassState:default:`) were removed with class variables (ADR 0153);
+// testClassBuilderClassVarSettersAreGone pins that.
 //
 // register returns the canonical, dispatchable class object since BT-2258, so
 // the cascade result is used directly.
@@ -46,6 +49,21 @@ TestCase subclass: ClassBuilderIncrementalTest
       register
     instance := self.cls new
     self assert: (instance double: 21) equals: 42
+
+  // ADR 0153 (BT-5155): the class-variable setters are gone; sending one to
+  // a builder raises the ordinary does-not-understand. Sent with `perform:`
+  // so the removed selectors are not a compile-time warning.
+  testClassBuilderClassVarSettersAreGone =>
+    builder := Object classBuilder
+    self should: [
+      builder perform: #classVars: withArguments: #(#{#total => 0})
+    ] raise: #does_not_understand
+    self should: [
+      builder perform: #addClassState:default: withArguments: #(#total, 0)
+    ] raise: #does_not_understand
+    self deny: (builder respondsTo: #classVars:)
+    self deny: (builder respondsTo: #addClassState:default:)
+    builder stop
 
   // AC: a plain (no-arg) incrementally-added class method returns its value.
   testIncrementalPlainClassMethod =>

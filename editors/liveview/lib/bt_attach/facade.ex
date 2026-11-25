@@ -33,10 +33,11 @@ defmodule BtAttach.Facade do
   # The authorized op vocabulary and its capability class (ADR 0091 Decision 3/4).
   # `eval`/`load_source`/`save`/`flush`/`reload` inject or run code (execute);
   # the read ops trigger no user code; `kill`/`rotate_cookie` are admin.
-  # `actors`, `info`, `kill`, `load_source`, `rotate_cookie`, `sessions` and
-  # `subscribe_actors` are declared here (the ADR 0091 RBAC vocabulary) but have
-  # no `invoke/3` clause yet: they are kept as reserved vocabulary and answer
-  # `{:error, {:unsupported_op, op}}` once authorized.
+  # `info`, `load_source`, `rotate_cookie` and `subscribe_actors` are declared
+  # here (the ADR 0091 RBAC vocabulary) but have no `invoke/3` clause yet: they
+  # are kept as reserved vocabulary and answer `{:error, {:unsupported_op, op}}`
+  # once authorized. `kill`, `actors` and `sessions` dispatch the wire
+  # operations of the same names (BT-5199).
   @ops %{
     eval: :execute,
     # BT-5081: stop the eval running in the caller's own session (the dock's
@@ -292,6 +293,13 @@ defmodule BtAttach.Facade do
   defp invoke(:inspect, %{term: term}, _ctx), do: client().inspect_value(term)
   defp invoke(:bindings, %{session_pid: pid}, _ctx), do: client().list_bindings(pid)
   defp invoke(:changes, _params, _ctx), do: client().change_history()
+
+  # BT-5199: the Inspector's "Kill actor" action and the actor/session lists,
+  # each the wire operation of the same name through `beamtalk_repl_ops`.
+  # `kill` is `:admin` (Owner-only); `actors`/`sessions` are Observer reads.
+  defp invoke(:kill, %{term: term}, _ctx), do: client().kill_actor(term)
+  defp invoke(:actors, _params, _ctx), do: client().actors()
+  defp invoke(:sessions, _params, _ctx), do: client().sessions()
 
   # ADR 0105 Phase 1 (BT-2779): current live snapshot of reload-induced
   # findings — the workspace/cockpit UI's initial-load / manual-refresh

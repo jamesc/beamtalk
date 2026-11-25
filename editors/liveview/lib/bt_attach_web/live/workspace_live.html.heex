@@ -2290,6 +2290,22 @@
                     >
                       reductions <b>{Inspector.stat_reductions(@inspect_stats)}</b>
                     </span>
+                    <%!-- Owner-only "Kill actor" (BT-5199): the `kill` facade
+                         op is `:admin`, so the button is hidden from an
+                         Observer (a crafted event is still refused). Shown for
+                         a live actor head only; `data-confirm` asks first. --%>
+                    <button
+                      :if={@role == :owner && Inspector.killable?(assigns)}
+                      id="inspector-kill"
+                      type="button"
+                      class="btn kill"
+                      phx-click="kill_actor"
+                      data-confirm={
+                        "Kill actor #{@inspect_target.label}? The process exits at once and its state is lost."
+                      }
+                    >
+                      Kill actor
+                    </button>
                   </div>
                 </div>
               <% end %>
@@ -2336,6 +2352,21 @@
                     </tbody>
                   </table>
                 <% else %>
+                  <p
+                    :if={@inspect_target == nil && @kill_notice}
+                    id="inspector-kill-notice"
+                    class="empty"
+                  >
+                    {@kill_notice}
+                  </p>
+                  <%!-- BT-5199: the actor list read right after a kill, so the
+                       killed actor is visibly gone. --%>
+                  <div :if={@inspect_target == nil && @actor_list} id="inspector-actor-list">
+                    <div class="poke-label">Running actors ({length(@actor_list)})</div>
+                    <ul class="mono">
+                      <li :for={actor <- @actor_list}>{Inspector.actor_row_label(actor)}</li>
+                    </ul>
+                  </div>
                   <p :if={@inspect_target == nil && @inspect_error == nil} class="empty">
                     Spawn an object (<code>Counter spawn</code>), bind it, then Inspect it to
                     follow its live references.

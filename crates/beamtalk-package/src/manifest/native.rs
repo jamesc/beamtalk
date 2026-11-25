@@ -103,6 +103,7 @@ pub struct NativeOverride {
 /// dependencies for native Erlang code, and an optional `overrides`
 /// sub-table of rebar3 overrides.
 #[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub(super) struct NativeSection {
     /// The `[native.dependencies]` table — dependency name to a hex version
     /// constraint string or a git source table.

@@ -21,6 +21,10 @@
 //! * An LSP capability is enabled in `crates/beamtalk-lsp/src/server/`
 //!   but is not referenced in the parity doc.
 //!
+//! Every op in the REPL op table must also have a sender: a client in this
+//! repo that builds a request for it, or a row in the doc's "Op Senders Not
+//! Found by the Scanner" table (BT-5199, see `senders.rs`).
+//!
 //! Two user-documentation tables are checked the same way (BT-5088):
 //!
 //! * The MCP tool table in `docs/beamtalk-tooling.md` lists exactly the
@@ -37,6 +41,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+
+mod senders;
 
 /// Path fragments (relative to repo root) that the checker reads.
 const PARITY_DOC: &str = "docs/development/surface-parity.md";
@@ -95,6 +101,14 @@ fn run() -> Result<(), Vec<String>> {
     let code = CodeInventory::scan(&repo_root).map_err(|e| vec![e])?;
     let mut errors = Vec::new();
     check_drift(&doc, &code, &mut errors);
+    let op_senders = senders::scan(&repo_root).map_err(|e| vec![e])?;
+    senders::check(
+        &code.repl_ops,
+        &op_senders,
+        &doc.external_senders,
+        PARITY_DOC,
+        &mut errors,
+    );
     check_user_docs(&repo_root, &code, &mut errors);
     if errors.is_empty() {
         Ok(())
@@ -134,6 +148,8 @@ struct ParityDoc {
     mcp_tools: BTreeSet<String>,
     /// LSP capabilities referenced anywhere in the doc (e.g. `textDocument/hover`).
     lsp_caps: BTreeSet<String>,
+    /// Ops listed in the "Op Senders Not Found by the Scanner" table.
+    external_senders: BTreeSet<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -298,6 +314,11 @@ impl ParityDoc {
                     }
                 }
             }
+            Section::ExternalSenders => {
+                if let Some(op) = cells.first().and_then(|c| parse_code_or_skip(c)) {
+                    self.external_senders.insert(op);
+                }
+            }
             Section::Other => {}
         }
     }
@@ -310,6 +331,7 @@ enum Section {
     McpOnly,
     LspOnly,
     MetaCommandRef,
+    ExternalSenders,
     Other,
 }
 
@@ -322,6 +344,8 @@ impl Section {
             Section::McpOnly
         } else if lower.starts_with("lsp-only") {
             Section::LspOnly
+        } else if lower.starts_with("op senders") {
+            Section::ExternalSenders
         } else if lower.contains("meta-command reference") {
             Section::MetaCommandRef
         } else if lower.contains("operations") {

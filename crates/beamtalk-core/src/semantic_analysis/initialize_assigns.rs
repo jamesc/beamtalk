@@ -122,7 +122,6 @@ pub fn has_dynamic_field_writer(methods: &[MethodDefinition]) -> bool {
                 WellKnownSelector::FieldAtPut
                     | WellKnownSelector::Perform
                     | WellKnownSelector::PerformWithArgs
-                    | WellKnownSelector::PerformLocallyWithArgs
             )
         )
     }

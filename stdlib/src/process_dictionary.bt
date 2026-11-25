@@ -4,8 +4,8 @@
 /// ProcessDictionary — the calling process's own dictionary.
 ///
 /// Every operation acts on **the process that calls it**, never on the class
-/// process and never on another process. Class methods of a class without
-/// class variables run in the caller (ADR 0142), so `ProcessDictionary at:`
+/// process and never on another process. Its class methods run in the
+/// caller (ADR 0142), so `ProcessDictionary at:`
 /// reads the dictionary of whoever sent the message; a value written in one
 /// process is invisible to every other process.
 ///

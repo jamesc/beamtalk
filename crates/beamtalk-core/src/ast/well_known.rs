@@ -132,8 +132,6 @@ pub enum WellKnownSelector {
     Perform,
     /// `perform:withArguments:` — send the named selector with an argument list.
     PerformWithArgs,
-    /// `performLocally:withArguments:` — execute a class method in the caller's process.
-    PerformLocallyWithArgs,
 
     // --- Actor timeout ---
     /// `withTimeout:` — an `Actor` (or subclass) send wrapped with an
@@ -191,7 +189,6 @@ impl WellKnownSelector {
             Self::ClearField => "clearField:",
             Self::Perform => "perform:",
             Self::PerformWithArgs => "perform:withArguments:",
-            Self::PerformLocallyWithArgs => "performLocally:withArguments:",
             Self::WithTimeout => "withTimeout:",
             Self::At => "at:",
         }
@@ -237,7 +234,6 @@ impl WellKnownSelector {
             "clearField:" => Some(Self::ClearField),
             "perform:" => Some(Self::Perform),
             "perform:withArguments:" => Some(Self::PerformWithArgs),
-            "performLocally:withArguments:" => Some(Self::PerformLocallyWithArgs),
             "withTimeout:" => Some(Self::WithTimeout),
             "at:" => Some(Self::At),
             _ => None,
@@ -301,8 +297,7 @@ impl WellKnownSelector {
             | Self::OnDo
             | Self::ValueValue
             | Self::FieldAtPut
-            | Self::PerformWithArgs
-            | Self::PerformLocallyWithArgs => 2,
+            | Self::PerformWithArgs => 2,
             Self::ValueValueValue => 3,
         }
     }
@@ -439,7 +434,6 @@ mod tests {
         WellKnownSelector::ClearField,
         WellKnownSelector::Perform,
         WellKnownSelector::PerformWithArgs,
-        WellKnownSelector::PerformLocallyWithArgs,
         WellKnownSelector::WithTimeout,
         WellKnownSelector::At,
     ];
@@ -800,14 +794,13 @@ mod tests {
             Some(WellKnownSelector::PerformWithArgs)
         );
 
+        // ADR 0153 (BT-5155): `performLocally:withArguments:` was removed;
+        // it is an ordinary selector now.
         let sel = MessageSelector::Keyword(vec![
             KeywordPart::new("performLocally:", span),
             KeywordPart::new("withArguments:", span),
         ]);
-        assert_eq!(
-            WellKnownSelector::from_selector(&sel),
-            Some(WellKnownSelector::PerformLocallyWithArgs)
-        );
+        assert_eq!(WellKnownSelector::from_selector(&sel), None);
 
         // Flattened single-part forms must NOT classify (parser would not produce these).
         let sel = MessageSelector::Keyword(vec![KeywordPart::new("perform:withArguments:", span)]);

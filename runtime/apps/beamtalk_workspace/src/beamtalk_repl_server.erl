@@ -26,7 +26,7 @@ Op handlers are delegated to domain-specific modules:
 - beamtalk_repl_ops_eval: eval, clear, bindings
 - beamtalk_repl_ops_load: load-source, load-project, unload
 - beamtalk_repl_ops_actors: actors, inspect, kill, interrupt
-- beamtalk_repl_ops_session: sessions, clone, close, health, shutdown
+- beamtalk_repl_ops_session: sessions, close, health, shutdown
 - beamtalk_repl_ops_dev: complete, describe, show-codegen
 - beamtalk_repl_ops_perf: enable-tracing, get-traces, actor-stats, export-traces (ADR 0069)
 

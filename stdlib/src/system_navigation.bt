@@ -927,8 +927,7 @@ sealed typed Object subclass: SystemNavigation
   /// Return a collection of methods that READ the named field.
   ///
   /// Each result is a Dictionary with three keys:
-  /// - `#class` — the class whose method reads the slot (the class object for
-  ///   an instance-side hit, the metaclass object for a class-side hit)
+  /// - `#class` — the class whose method reads the slot
   /// - `#selector` — the selector of the method that reads the slot
   /// - `#line` — the 1-based line number within the method source where the
   ///   read appears
@@ -940,18 +939,16 @@ sealed typed Object subclass: SystemNavigation
   /// variable `x` is not an field and is ignored. A method that
   /// reads `aSym` multiple times produces one record per occurrence.
   ///
-  /// Scope: walks `aClass` and every class in `aClass allSubclasses` (a
-  /// subclass inherits the slot, so methods it defines can touch it), and on
-  /// each of those walks both the instance side (`cls`) and the class side
-  /// (`cls class`, the metaclass) so class-side methods that touch a class-side
-  /// field (`classState:`) are covered too.
+  /// Scope: walks the instance-side methods of `aClass` and of every class in
+  /// `aClass allSubclasses` (a subclass inherits the slot, so methods it
+  /// defines can touch it). A class has no class-side fields (class variables
+  /// were removed, ADR 0153), so class-side methods are not walked.
   ///
   /// `aSym` must be a Symbol naming the slot; passing anything else raises a
-  /// typed error. The slot must be declared on `aClass` — if `aSym` is neither
-  /// in `aClass allFieldNames` (instance-side slots, inherited included) nor
-  /// found by the source scan (which catches class-side slots, not reflectable
-  /// today), a typed error is raised so a typo surfaces rather than silently
-  /// returning `[]`. A declared-but-untouched instance slot returns `[]`.
+  /// typed error. The slot must be declared on `aClass` — if `aSym` is not in
+  /// `aClass allFieldNames` (inherited included), a typed error is raised so a
+  /// typo surfaces rather than silently returning `[]`. A declared-but-untouched
+  /// slot returns `[]`.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -969,8 +966,7 @@ sealed typed Object subclass: SystemNavigation
   /// variable.
   ///
   /// Each result is a Dictionary with three keys:
-  /// - `#class` — the class whose method writes the slot (the class object for
-  ///   an instance-side hit, the metaclass object for a class-side hit)
+  /// - `#class` — the class whose method writes the slot
   /// - `#selector` — the selector of the method that writes the slot
   /// - `#line` — the 1-based line number within the method source where the
   ///   write appears
@@ -980,10 +976,10 @@ sealed typed Object subclass: SystemNavigation
   /// appears in BOTH result sets (write on the LHS, read on the RHS). A method
   /// that writes `aSym` multiple times produces one record per occurrence.
   ///
-  /// Scope and validation are identical to `fieldReadersOf:in:`: walks
-  /// `aClass` plus `aClass allSubclasses` on both the instance and class sides,
-  /// requires `aSym` to be a declared Symbol slot, and returns `[]` for a
-  /// declared-but-never-written slot.
+  /// Scope and validation are identical to `fieldReadersOf:in:`: walks the
+  /// instance side of `aClass` plus `aClass allSubclasses`, requires `aSym` to
+  /// be a declared Symbol slot, and returns `[]` for a declared-but-never-written
+  /// slot.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -1001,11 +997,10 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// `wantReaders` selects which access kind to collect (reads when `true`,
   /// writes when `false`). Validates the arguments, builds the scope (`aClass`
-  /// + `aClass allSubclasses`), walks each scope on both the instance and class
-  /// sides, then applies slot validation: `aSym` must be a declared slot of
-  /// `aClass` — instance-side (`allFieldNames`) or class-side
-  /// (`allClassVarNames`, BT-2238), inherited included. An undeclared name
-  /// raises a typed error (typo guard); a real-but-untouched slot returns `[]`.
+  /// + `aClass allSubclasses`), walks the instance side of each scope, then
+  /// applies slot validation: `aSym` must be a declared field of `aClass`
+  /// (`allFieldNames`, inherited included). An undeclared name raises a typed
+  /// error (typo guard); a real-but-untouched slot returns `[]`.
   class collectFieldAccessesOf: aSym :: Symbol in: aClass :: Behaviour readers: wantReaders :: Boolean -> List(Dictionary) =>
     selector := wantReaders ifTrue: [
       "fieldReadersOf:in:"
@@ -1016,39 +1011,9 @@ sealed typed Object subclass: SystemNavigation
       ]
     self requireClassName: aClass selector: selector
     scopes := aClass allSubclasses addFirst: aClass
-    // Collect instance-side and class-side hits separately. Validation is
-    // declaration-based against `aClass` itself: an instance slot must be in
-    // `aClass allFieldNames`, a class-side slot in `aClass allClassVarNames`
-    // (both inherited-included) — a slot declared only on a *subclass* must NOT
-    // satisfy a query against `aClass`. (BT-2238 made class-side slots
-    // reflectable; earlier this leaned on a class-side scan hit.)
-    instanceHits := scopes
-      inject: List new
-      into: [:acc :cls |
-        self
-          collectFieldAccessesFor: aSym
-          in: cls
-          readers: wantReaders
-          into: acc
-      ]
-    classHits := scopes
-      inject: List new
-      into: [:acc :cls |
-        self
-          collectFieldAccessesFor: aSym
-          in: cls class
-          readers: wantReaders
-          into: acc
-      ]
-    // Validation: accept an instance slot of `aClass` (declared or inherited,
-    // via `allFieldNames`) or a class-side slot (declared or inherited, via
-    // `allClassVarNames`, BT-2238). Otherwise it is a typo (or a subclass-only
-    // slot that `aClass` does not declare) and we raise. Declaration-based on
-    // both sides — no longer dependent on a class-side scan hit, so an
-    // untouched-but-declared class-side slot returns `[]` instead of raising.
-    ((aClass allFieldNames includes: aSym) or: [
-      aClass allClassVarNames includes: aSym
-    ])
+    // Validation is declaration-based against `aClass` itself: a slot
+    // declared only on a *subclass* must NOT satisfy a query against `aClass`.
+    (aClass allFieldNames includes: aSym)
       ifFalse: [
         self
           error: "SystemNavigation "
@@ -1058,7 +1023,15 @@ sealed typed Object subclass: SystemNavigation
             ++ " is not a field declared on "
             ++ aClass name asString
       ]
-    instanceHits ++ classHits
+    scopes
+      inject: List new
+      into: [:acc :cls |
+        self
+          collectFieldAccessesFor: aSym
+          in: cls
+          readers: wantReaders
+          into: acc
+      ]
 
   /// Append field access records found in any method of `aScope`
   /// (a class or metaclass) to `result`. Returns the (possibly extended) list.

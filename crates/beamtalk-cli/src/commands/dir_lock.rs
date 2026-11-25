@@ -17,11 +17,20 @@ use fs2::FileExt;
 use miette::{Context, IntoDiagnostic, Result};
 use tracing::{debug, warn};
 
+/// A held directory lock (registry cache, native build, workspace). Dropping
+/// it releases the lock; the kernel also releases it if the process dies.
+/// Holds nothing when locking is turned off with [`NO_BUILD_LOCK_ENV`].
+#[derive(Debug)]
+#[must_use = "the lock is released as soon as the guard is dropped"]
+pub(crate) struct DirLock {
+    _file: Option<std::fs::File>,
+}
+
 /// Acquire an exclusive advisory lock (`fs2`) on `<dir>/.lock`, creating
 /// `dir` if needed. `what` names the directory in messages (e.g.
 /// `"registry cache"`).
 ///
-/// Returns the locked file; the lock releases when it drops. Hold it only
+/// Returns the lock guard; the lock releases when it drops. Hold it only
 /// for the sequence that needs it — it blocks every other beamtalk process
 /// trying to take the same lock.
 ///
@@ -29,7 +38,7 @@ use tracing::{debug, warn};
 ///
 /// Returns an error if `dir` cannot be created, or the lock file cannot be
 /// opened or locked.
-pub(crate) fn lock_dir(dir: &Utf8Path, what: &str) -> Result<std::fs::File> {
+pub(crate) fn lock_dir(dir: &Utf8Path, what: &str) -> Result<DirLock> {
     std::fs::create_dir_all(dir)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create {what} directory '{dir}'"))?;
@@ -39,40 +48,37 @@ pub(crate) fn lock_dir(dir: &Utf8Path, what: &str) -> Result<std::fs::File> {
 
 /// Open (creating if needed) `lock_path` and take an exclusive advisory lock
 /// (`fs2`) on it, logging a "waiting" warning when another beamtalk process
-/// holds it. The parent directory must already exist.
+/// holds it.
 ///
-/// Returns the locked file; the lock releases when it drops. `what` names the
+/// Shares the project build lock's acquisition path (BT-5186): honours
+/// [`NO_BUILD_LOCK_ENV`], reports a filesystem without advisory locks as such
+/// instead of waiting on it, and retries if `clean --all` unlinked the file.
+///
+/// Returns the lock guard; the lock releases when it drops. `what` names the
 /// lock in messages (e.g. `"workspace"`).
 ///
 /// # Errors
 ///
 /// Returns an error if the lock file cannot be opened or locked.
-pub(crate) fn lock_file(lock_path: &std::path::Path, what: &str) -> Result<std::fs::File> {
-    let lockfile = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(lock_path)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to open {what} lock file '{}'", lock_path.display()))?;
-
+pub(crate) fn lock_file(lock_path: &std::path::Path, what: &str) -> Result<DirLock> {
+    if locking_disabled() {
+        debug!(
+            "not taking the {what} lock ({NO_BUILD_LOCK_ENV} is on): {}",
+            lock_path.display()
+        );
+        return Ok(DirLock { _file: None });
+    }
     // A blocking `lock_exclusive()` gives no indication *why* the process
     // appears to hang if another beamtalk process is stuck holding the lock
     // (e.g. a `git clone` against an unreachable host, or a workspace still
-    // starting up, which can take over two minutes). Try non-blocking first
-    // so the common uncontended case pays no extra cost; only log when
-    // there's actually something to wait for.
-    if let Err(e) = lockfile.try_lock_exclusive() {
-        let shown = lock_path.display();
-        debug!(error = %e, "{what} lock contended, waiting: {shown}");
-        warn!("Waiting for {what} lock '{shown}' held by another beamtalk process...");
-        lockfile
-            .lock_exclusive()
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to acquire {what} lock '{}'", lock_path.display()))?;
-    }
-
-    Ok(lockfile)
+    // starting up, which can take over two minutes), so say so once.
+    let file = open_and_lock(lock_path, what, || {
+        warn!(
+            "Waiting for {what} lock '{}' held by another beamtalk process...",
+            lock_path.display()
+        );
+    })?;
+    Ok(DirLock { _file: Some(file) })
 }
 
 // ---------------------------------------------------------------------------
@@ -102,8 +108,8 @@ pub(crate) struct ProjectBuildLock {
 
 impl ProjectBuildLock {
     /// Release the OS lock now and forget this thread's hold, instead of at
-    /// drop. Used by `clean --all`, which must delete the lock file's
-    /// directory (Windows cannot delete an open file).
+    /// drop. Used by `clean --all` once it has removed `_build/` (and, on
+    /// Unix, the lock file itself) while holding the lock.
     pub(crate) fn release(mut self) {
         self.release_in_place();
     }
@@ -124,12 +130,14 @@ impl Drop for ProjectBuildLock {
     }
 }
 
-/// Environment variable that turns the project build lock off (BT-5133), for
-/// filesystems without advisory-lock support (some NFS/FUSE mounts). With it
-/// set, concurrent beamtalk processes in one project are not serialised.
+/// Environment variable that turns every beamtalk file lock off (BT-5133,
+/// BT-5186) — the project build lock and each [`lock_file`] / [`lock_dir`]
+/// lock (registry cache, native build, workspace) — for filesystems without
+/// advisory-lock support (some NFS/FUSE mounts). With it set, concurrent
+/// beamtalk processes are not serialised.
 pub(crate) const NO_BUILD_LOCK_ENV: &str = "BEAMTALK_NO_BUILD_LOCK";
 
-fn build_lock_disabled() -> bool {
+fn locking_disabled() -> bool {
     std::env::var_os(NO_BUILD_LOCK_ENV).is_some_and(|v| !v.is_empty() && v != "0")
 }
 
@@ -167,7 +175,7 @@ pub(crate) fn project_build_lock_path(project_root: &Utf8Path) -> camino::Utf8Pa
 ///
 /// Returns an error if `_build/` cannot be created or the lock cannot be taken.
 pub(crate) fn lock_project_build(project_root: &Utf8Path) -> Result<ProjectBuildLock> {
-    if build_lock_disabled() {
+    if locking_disabled() {
         debug!("not taking the project build lock ({NO_BUILD_LOCK_ENV} is on)");
         return Ok(ProjectBuildLock {
             file: None,
@@ -216,7 +224,10 @@ fn open_and_lock(
     what: &str,
     announce: impl FnOnce(),
 ) -> Result<std::fs::File> {
+    const MAX_REPLACED: u32 = 16;
     let mut announce = Some(announce);
+    let mut directory_vanished = 0;
+    let mut replaced = 0;
     loop {
         // `clean --all` may have removed `_build/` itself since the last pass.
         if let Some(parent) = lock_path.parent() {
@@ -224,32 +235,35 @@ fn open_and_lock(
                 .into_diagnostic()
                 .wrap_err_with(|| format!("Failed to create {what} lock directory"))?;
         }
-        let file = std::fs::OpenOptions::new()
+        let file = match std::fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(false)
             .open(lock_path)
-            .into_diagnostic()
-            .wrap_err_with(|| {
-                format!("Failed to open {what} lock file '{}'", lock_path.display())
-            })?;
+        {
+            Ok(file) => file,
+            // `clean --all` removed the (empty) directory between the
+            // `create_dir_all` above and this open: recreate it and retry.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && directory_vanished < 8 => {
+                directory_vanished += 1;
+                continue;
+            }
+            Err(e) => {
+                return Err(e).into_diagnostic().wrap_err_with(|| {
+                    format!("Failed to open {what} lock file '{}'", lock_path.display())
+                });
+            }
+        };
         if let Err(e) = file.try_lock_exclusive() {
             // Only `WouldBlock` is contention. Anything else (e.g. an NFS mount
             // without lock support) would never clear by waiting, so report it
             // as what it is rather than printing "waiting…" and then failing.
             if !is_contention(&e) {
-                // The opt-out only covers the project build lock.
-                let hint = if what == "build" {
-                    format!(
-                        "\nSet {NO_BUILD_LOCK_ENV}=1 to build without the project lock \
-                         (concurrent beamtalk processes are then not serialised)."
-                    )
-                } else {
-                    String::new()
-                };
                 return Err(miette::miette!(
                     "Failed to take the {what} lock '{}': {e}\n\
-                     The filesystem may not support advisory file locks.{hint}",
+                     The filesystem may not support advisory file locks.\n\
+                     Set {NO_BUILD_LOCK_ENV}=1 to run without beamtalk's file locks \
+                     (concurrent beamtalk processes are then not serialised).",
                     lock_path.display()
                 ));
             }
@@ -261,11 +275,24 @@ fn open_and_lock(
                 format!("Failed to acquire {what} lock '{}'", lock_path.display())
             })?;
         }
-        // `clean --all` unlinks the lock file. A waiter that was blocked on the
-        // old inode now holds a lock nobody else will ever contend, so it must
-        // retry on the file the path names now. (Windows cannot delete an open
-        // file, so the path cannot change under a holder there.)
+        // `clean --all` unlinks the lock file while it holds the lock (Unix
+        // only). A waiter that was blocked on the old inode now holds a lock
+        // nobody else will ever contend, so it must retry on the file the path
+        // names now. (On Windows `clean --all` keeps the lock file, so the path
+        // cannot change under a holder there.)
+        // Bounded: on a filesystem whose path and descriptor stats never
+        // agree (some FUSE/overlay mounts), the check cannot succeed, and the
+        // lock we hold is then the best there is.
+        replaced += 1;
         if still_names_locked_file(lock_path, &file) {
+            return Ok(file);
+        }
+        if replaced > MAX_REPLACED {
+            warn!(
+                "{what} lock '{}' kept changing under us; proceeding with a lock that \
+                 may not exclude other beamtalk processes",
+                lock_path.display()
+            );
             return Ok(file);
         }
     }
@@ -413,6 +440,55 @@ mod tests {
             .join()
             .unwrap()
             .expect("waiter retries after _build/ is removed");
+    }
+
+    /// BT-5186: `BEAMTALK_NO_BUILD_LOCK` turns off every `dir_lock` lock, not
+    /// only the project build lock. Runs in a child copy of this test binary so
+    /// setting the variable cannot leak into tests running in parallel.
+    #[test]
+    fn opt_out_env_turns_off_directory_and_file_locks() {
+        const CHILD: &str = "BEAMTALK_TEST_DIR_LOCK_CHILD";
+        if let Some(dir) = std::env::var_os(CHILD) {
+            let dir = camino::Utf8PathBuf::from_path_buf(PathBuf::from(dir)).unwrap();
+            // Another holder has the lock, as a concurrent native build would.
+            std::fs::create_dir_all(&dir).unwrap();
+            let held = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(false)
+                .open(dir.join(".lock"))
+                .unwrap();
+            held.lock_exclusive().unwrap();
+            let (tx, rx) = mpsc::channel();
+            std::thread::spawn(move || {
+                let dir_lock = lock_dir(&dir, "native build").map(drop);
+                let file_lock = lock_file(dir.join("ws.lock").as_std_path(), "workspace").map(drop);
+                tx.send((dir_lock, file_lock)).unwrap();
+            });
+            let (dir_lock, file_lock) = rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("lock_dir must not wait with the opt-out set");
+            dir_lock.unwrap();
+            file_lock.unwrap();
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "commands::dir_lock::tests::opt_out_env_turns_off_directory_and_file_locks",
+                "--exact",
+                "--nocapture",
+            ])
+            .env(CHILD, dir.path().join("native"))
+            .env(NO_BUILD_LOCK_ENV, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "child test failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     /// A lock file left behind by a crashed process holds nothing: the OS

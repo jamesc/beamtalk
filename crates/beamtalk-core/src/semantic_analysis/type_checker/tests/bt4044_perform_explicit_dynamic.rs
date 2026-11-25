@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! BT-4044: the reflective sends (`perform:`, `perform:withArguments:`,
-//! `perform:withArguments:timeout:`, `performLocally:withArguments:`)
+//! `perform:withArguments:timeout:`)
 //! declare `-> Dynamic` explicitly, so a reflective send in a `typed`
 //! class method is silent — the result of a reflective send really is
 //! unknown, so "inferred as Dynamic (unannotated return)" has nothing
@@ -84,14 +84,12 @@ fn perform_siblings_in_typed_method_are_silent() {
         "typed Object subclass: PerformSiblings\n\
          \x20 unary: x :: Object -> Object => x perform: #name\n\
          \x20 withTimeout: x :: Object -> Object =>\n\
-         \x20\x20\x20 x perform: #name withArguments: #() timeout: 5000\n\
-         \x20 locally: x :: Object -> Object =>\n\
-         \x20\x20\x20 x performLocally: #name withArguments: #()\n",
+         \x20\x20\x20 x perform: #name withArguments: #() timeout: 5000\n",
     );
     let dynamic = dynamic_diags(&diags);
     assert!(
         dynamic.is_empty(),
-        "perform: / perform:withArguments:timeout: / performLocally: should all \
+        "perform: / perform:withArguments:timeout: should both \
          be silent, got: {dynamic:?} (all: {diags:?})"
     );
 }
