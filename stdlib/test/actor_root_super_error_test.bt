@@ -10,11 +10,9 @@
 TestCase subclass: ActorRootSuperErrorTest
   field: a
 
-  setUp =>
-    self.a := Bt4592Actor spawn
+  setUp => self.a := Bt4592Actor spawn
 
-  tearDown =>
-    self.a isNil ifFalse: [self.a stop]
+  tearDown => self.a isNil ifFalse: [self.a stop]
 
   testRootSuperErrorFromObject =>
     self assert: ([self.a rootSuper] on: Error do: [:e | e message]) equals: "x"
