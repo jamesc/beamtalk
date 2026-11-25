@@ -82,6 +82,11 @@ and words are the same in all six runs.
 
 ## After-run 2 in full
 
+The "Beamtalk compiles to" column of rows 11f–11l was rewritten after the
+run to the right-tested lowering, matching `compiles_to/1` in
+`harness/vs_bench.erl` as updated in the same change; the numbers are as
+measured.
+
 # vs-elixir bench
 # otp 28, erts 16.4, elixir 1.20.1, schedulers 4
 # load average: 13:19:35 up  1:25,  0 user,  load average: 2.14, 5.39, 4.90
@@ -95,13 +100,13 @@ and words are the same in all six runs.
 | 0 | loop overhead (subtracted) | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | - | - | - | 0.00 | 0.00 | letrec loop, last threaded as a loop argument |
 | 11d | a > 0 ifTrue: [1] ifFalse: [2] / if | 8.82 | 0.00 | 0.00 | 1.53 | 0.00 | 0.00 | 5.8 | - | - | 0.00 | 0.00 | send(Bool, 'ifTrue:ifFalse:', [fun, fun]) -> True:dispatch/3 |
 | 11e | a < 10, a :: Integer / a < 10 | 7.69 | 0.00 | 0.00 | 0.87 | 0.00 | 0.00 | 8.8 | - | - | 0.00 | 0.00 | is_number guard (declared Integer, BT-4823), erlang:'<' |
-| 11f | [a > i] whileTrue:, a :: Integer / recursion | 259 | 19.0 | 7.00 | 12.2 | 7.00 | 0.00 | 21.2 | 2.7 | - | 12.0 | 7.00 | letrec loop; is_number guard on the typed limit (BT-4823), erlang:'>' |
-| 11g | a max: 3, a :: Integer / max(a, 3) | 17.0 | 4.00 | 0.00 | 0.80 | 0.00 | 0.00 | 21.2 | - | - | 4.00 | 0.00 | Number>>max: (self guarded: Number is not a proven class), erlang:'>' |
-| 11h | 5 < b, b untyped / 5 < b | 7.75 | 0.00 | 0.00 | 1.03 | 0.00 | 0.00 | 7.5 | - | - | 0.00 | 0.00 | bare erlang:'<'(5, B): the proven number receiver gets no guard, so a non-number B is compared in Erlang term order (ADR 0116 addendum, the failing arm) |
-| 11i | a < b, both untyped / a < b | 7.97 | 0.00 | 0.00 | 1.22 | 0.00 | 0.00 | 6.5 | - | - | 0.00 | 0.00 | is_number/is_binary guard on A, erlang:'<'(A, B); else send(A, '<', [B]); B is never tested |
-| 11j | a < b, a :: Integer, b untyped / a < b | 7.70 | 0.00 | 0.00 | 1.35 | 0.00 | 0.00 | 5.7 | - | - | 0.00 | 0.00 | as 11e, with B untyped: is_number guard on the declared-Integer A, erlang:'<'(A, B); B is never tested |
+| 11f | [a > i] whileTrue:, a :: Integer / recursion | 259 | 19.0 | 7.00 | 12.2 | 7.00 | 0.00 | 21.2 | 2.7 | - | 12.0 | 7.00 | letrec loop; is_number guard on the typed limit (BT-4823), its number arm an is_number(I) test (ADR 0116 addendum, BT-5210), erlang:'>'; else send_number_comparison/4 |
+| 11g | a max: 3, a :: Integer / max(a, 3) | 17.0 | 4.00 | 0.00 | 0.80 | 0.00 | 0.00 | 21.2 | - | - | 4.00 | 0.00 | Number>>max: (self guarded: Number is not a proven class; the declared other is tested, BT-5210), erlang:'>' |
+| 11h | 5 < b, b untyped / 5 < b | 7.75 | 0.00 | 0.00 | 1.03 | 0.00 | 0.00 | 7.5 | - | - | 0.00 | 0.00 | case is_number(B): erlang:'<'(5, B); else send_number_comparison(B, 'lessThanFromNumber:', [5], '<') (ADR 0116 addendum, BT-5210; the call arm gives the site a frame) |
+| 11i | a < b, both untyped / a < b | 7.97 | 0.00 | 0.00 | 1.22 | 0.00 | 0.00 | 6.5 | - | - | 0.00 | 0.00 | is_number(A) -> is_number(B) ? erlang:'<'(A, B) : send_number_comparison/4; else is_binary(A) ? erlang:'<'(A, B) : send(A, '<', [B]) (BT-5210) |
+| 11j | a < b, a :: Integer, b untyped / a < b | 7.70 | 0.00 | 0.00 | 1.35 | 0.00 | 0.00 | 5.7 | - | - | 0.00 | 0.00 | as 11e, with B untyped: is_number guard on the declared-Integer A, its true arm is_number(B) ? erlang:'<'(A, B) : send_number_comparison/4 (BT-5210) |
 | 11k | 5 + b, b untyped / 5 + b | 9.38 | 0.00 | 0.00 | 0.68 | 0.00 | 0.00 | 13.8 | - | - | 0.00 | 0.00 | erlang:'+'(5, B) in a try; on badarith an is_number(B) test then send_number_coercion/4 (the arithmetic reference the comparison addendum matches) |
-| 11l | actor method [0 < self.n] whileTrue: writing a field / GenServer.call | 3667 | 102 | 187 | 2210 | 45.1 | 80.0 | 1.7 | 2.3 | 2.3 | 57.3 | 107 | as 7a; in the actor the loop is a StateAcc letrec (whole state map threaded, one maps:put per iteration), condition bare erlang:'<'(0, maps:get(count, StateAcc)); the StateAcc shape, not the hybrid one (BT-4121) |
+| 11l | actor method [0 < self.n] whileTrue: writing a field / GenServer.call | 3667 | 102 | 187 | 2210 | 45.1 | 80.0 | 1.7 | 2.3 | 2.3 | 57.3 | 107 | as 7a; in the actor the loop is a StateAcc letrec (whole state map threaded, one maps:put per iteration); the condition 0 < self.count is a guarded operator (BT-5210): a BT-4279 fast path is_number(Count) -> erlang:'<', else store, send_number_comparison/4, take |
 
 ## Elixir alternates (net ns / red / words)
 
