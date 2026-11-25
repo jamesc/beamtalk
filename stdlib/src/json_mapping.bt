@@ -49,7 +49,6 @@ Value subclass: JsonMapping
   /// The recorded entries, in declaration order. Each entry is a Dictionary
   /// with `#field` (Symbol), `#key` (String) and `#using` (Block or nil).
   field: entries :: List = #()
-
   /// Whether keys whose (converted) value is nil are left out. Default false:
   /// nil is emitted as `null`. Set it with `omittingNil`.
   field: omitNil :: Boolean = false
@@ -66,10 +65,12 @@ Value subclass: JsonMapping
   /// parent's (`class jsonMapping => super jsonMapping |> mapField: #extra`),
   /// or answering `super jsonMapping` to keep the extra fields off on purpose.
   class forClass: aClass -> JsonMapping =>
-    (Erlang beamtalk_json_mapping) cached: aClass name build: [
-      self checkInheritedMappingOf: aClass
-      aClass jsonMapping validate
-    ]
+    (Erlang beamtalk_json_mapping)
+      cached: aClass name
+      build: [
+        self checkInheritedMappingOf: aClass
+        aClass jsonMapping validate
+      ]
 
   /// Raise a `user_error` if `aClass` inherits `class jsonMapping` and
   /// declares fields its defining ancestor does not have.
@@ -78,16 +79,19 @@ Value subclass: JsonMapping
       c class includesSelector: #jsonMapping
     ] ifNone: [aClass]
     (definer =:= aClass) ifTrue: [^nil]
-    extra := aClass allFieldNames reject: [:f | definer allFieldNames includes: f]
+    extra := aClass allFieldNames reject: [:f |
+      definer allFieldNames includes: f
+    ]
     extra isEmpty ifTrue: [^nil]
-    self error: "JsonMapping: "
-      ++ aClass name asString
-      ++ " inherits class jsonMapping from "
-      ++ definer name asString
-      ++ " but adds fields "
-      ++ extra printString
-      ++ " that it does not map. Override class jsonMapping, e.g. super jsonMapping |> mapField: "
-      ++ extra first printString
+    self
+      error: "JsonMapping: "
+        ++ aClass name asString
+        ++ " inherits class jsonMapping from "
+        ++ definer name asString
+        ++ " but adds fields "
+        ++ extra printString
+        ++ " that it does not map. Override class jsonMapping, e.g. super jsonMapping |> mapField: "
+        ++ extra first printString
 
   /// A copy of this mapping that leaves out keys whose (converted) value is
   /// nil, instead of emitting `null`.
@@ -103,18 +107,22 @@ Value subclass: JsonMapping
   /// and a Block or nil `#using`, or for a repeated wire key. `encode:` calls
   /// it, so an entry list built with `withEntries:` cannot skip it.
   validate -> JsonMapping =>
-    self.entries inject: Set new into: [:seen :entry |
-      (self isWellFormedEntry: entry) ifFalse: [
-        self error: "JsonMapping: malformed entry "
-          ++ entry printString
-          ++ " (expected #field Symbol, #key String, #using Block or nil)"
+    self.entries
+      inject: Set new
+      into: [:seen :entry |
+        (self isWellFormedEntry: entry)
+          ifFalse: [
+            self
+              error: "JsonMapping: malformed entry "
+                ++ entry printString
+                ++ " (expected #field Symbol, #key String, #using Block or nil)"
+          ]
+        key := entry at: #key
+        (seen includes: key) ifTrue: [
+          self error: "JsonMapping: duplicate wire key " ++ key printString
+        ]
+        seen add: key
       ]
-      key := entry at: #key
-      (seen includes: key) ifTrue: [
-        self error: "JsonMapping: duplicate wire key " ++ key printString
-      ]
-      seen add: key
-    ]
     self
 
   /// Whether `entry` is a Dictionary with a Symbol `#field`, a String `#key`
@@ -123,8 +131,11 @@ Value subclass: JsonMapping
     (entry isKindOf: Dictionary) ifFalse: [^false]
     using := entry at: #using ifAbsent: [nil]
     ((entry at: #field ifAbsent: [nil]) isKindOf: Symbol)
-      and: [((entry at: #key ifAbsent: [nil]) isKindOf: String)
-      and: [using isNil or: [using isKindOf: Block]]]
+      and: [
+        ((entry at: #key ifAbsent: [
+          nil
+        ]) isKindOf: String) and: [using isNil or: [using isKindOf: Block]]
+      ]
 
   /// Map `fieldName` to a wire key of the same name.
   ///
@@ -180,7 +191,7 @@ Value subclass: JsonMapping
   /// nil value leaves its key out.
   encode: anObject :: Object -> Dictionary =>
     self validate
-    secrets := (Erlang beamtalk_json_mapping) secretSlots: anObject.
+    secrets := (Erlang beamtalk_json_mapping) secretSlots: anObject
     self.entries
       inject: (Dictionary new)
       into: [:acc :entry |
@@ -198,22 +209,24 @@ Value subclass: JsonMapping
         converter := entry at: #using
         value := converter isNil
           ifTrue: [
-            (secrets includes: name)
-              ifTrue: [(Erlang beamtalk_json_mapping) redacted]
-              ifFalse: [raw]
+            (secrets includes: name) ifTrue: [
+              (Erlang beamtalk_json_mapping) redacted
+            ] ifFalse: [raw]
           ]
           ifFalse: [
-            [converter value: raw] on: Error do: [:e |
-              self
-                error: "JsonMapping: converter for field "
-                  ++ name printString
-                  ++ " (key "
-                  ++ key printString
-                  ++ ") raised: "
-                  ++ e message
-            ]
+            [converter value: raw]
+              on: Error
+              do: [:e |
+                self
+                  error: "JsonMapping: converter for field "
+                    ++ name printString
+                    ++ " (key "
+                    ++ key printString
+                    ++ ") raised: "
+                    ++ e message
+              ]
           ]
-        (value isNil and: [self.omitNil])
-          ifTrue: [acc]
-          ifFalse: [acc at: key put: value]
+        (value isNil and: [
+          self.omitNil
+        ]) ifTrue: [acc] ifFalse: [acc at: key put: value]
       ]

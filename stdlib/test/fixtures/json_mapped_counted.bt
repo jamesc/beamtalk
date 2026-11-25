@@ -10,6 +10,8 @@ Value subclass: JsonMappedCounted
   field: n = 1
 
   class jsonMapping -> JsonMapping =>
-    builds :: Dynamic := ProcessDictionary at: #jsonMappedCountedBuilds ifAbsent: [0]
+    builds :: Dynamic := ProcessDictionary at: #jsonMappedCountedBuilds ifAbsent: [
+      0
+    ]
     ProcessDictionary at: #jsonMappedCountedBuilds put: builds + 1
     JsonMapping new |> mapField: #n

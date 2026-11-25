@@ -8,6 +8,6 @@ Actor subclass: JsonMappedLinkActor
   uses: JsonMappable
   state: other = nil
 
-  link: anActor => self.other := anActor
-
   class jsonMapping -> JsonMapping => JsonMapping new |> mapField: #other
+
+  link: anActor => self.other := anActor
