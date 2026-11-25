@@ -702,9 +702,8 @@ check_declared_reflective(Class, Name) ->
 -doc """
 The declared-set rule with an explicit caller, against kinds already read.
 `in_process` is `check_declared/3`; `reflective` is
-`check_declared_reflective/2`'s strict known-empty form. The class gen_server's
-`read_class_var/4` passes its caller through here so the reflective read and
-write share one rule.
+`check_declared_reflective/2`'s strict known-empty form. `read_in/4` passes
+its caller through here so the reflective read and write share one rule.
 """.
 -spec check_declared(
     atom(), atom(), unknown | #{atom() => eager | late}, in_process | reflective
