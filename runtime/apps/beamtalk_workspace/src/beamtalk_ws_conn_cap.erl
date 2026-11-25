@@ -25,8 +25,9 @@ WebSockets at all. This module counts them itself, in two budgets:
 
 The handler takes a pre-auth slot in `websocket_init/1` and gives back
 whatever it holds in `terminate/3` (both run in the process that owns the
-socket). Counts are atomic counters (`ets:update_counter/4`), so two sockets
-racing for the last slot cannot both lose (or both win). Rows are keyed by
+socket). A count is reserved by an atomic compare-and-set on its counter
+(`ets:select_replace/2`), so two sockets racing for the last slot cannot both
+lose (or both win), and a refusal never overshoots the limit. Rows are keyed by
 pid; a handler killed without running `terminate/3` would leak its row, so a
 full budget first prunes rows whose pid is dead. A handler killed from
 outside in the instant between reserving its count and inserting its row
@@ -203,14 +204,15 @@ reserve(Class, Limit) ->
             end
     end.
 
+%% Compare-and-set: the counter only moves while it is below the limit, so a
+%% refused caller never holds a transient +1 that could make a concurrent
+%% caller see "full".
 try_reserve(Class, Limit) ->
     Key = {count, Class},
-    case ets:update_counter(?TABLE, Key, 1, {Key, 0}) of
-        N when N =< Limit ->
-            ok;
-        _ ->
-            _ = ets:update_counter(?TABLE, Key, -1),
-            full
+    Spec = [{{Key, '$1'}, [{'<', '$1', Limit}], [{{{const, Key}, {'+', '$1', 1}}}]}],
+    case ets:select_replace(?TABLE, Spec) of
+        1 -> ok;
+        0 -> full
     end.
 
 %% Remove `Pid`'s row and give its count back. `ets:take/2` is atomic, so a

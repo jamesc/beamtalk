@@ -184,11 +184,12 @@ websocket_init(State) ->
     %% must run here, not in `init/2`: `init/2` runs in cowboy's short-lived
     %% request process, while this and `terminate/3` run in the process that
     %% owns the socket. Over the cap: close with 1013 (try again later).
+    %% Monitor the cap table's owner first, so an owner restart between the
+    %% two calls still reaches this handler (BT-5185).
+    OwnerMon = beamtalk_ws_conn_cap:monitor_owner(),
     case beamtalk_ws_conn_cap:acquire() of
         ok ->
-            websocket_init_accepted(State#ws_state{
-                cap_owner_mon = beamtalk_ws_conn_cap:monitor_owner()
-            });
+            websocket_init_accepted(State#ws_state{cap_owner_mon = OwnerMon});
         {error, at_capacity} ->
             ?LOG_WARNING("WebSocket refused: unauthenticated connection budget full", #{
                 peer => State#ws_state.peer,
