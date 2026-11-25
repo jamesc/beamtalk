@@ -488,3 +488,12 @@ fn blank_line_before_a_gap_comment_is_kept() {
 fn comment_in_an_empty_block_has_no_stray_spaces() {
     assert_formats_to("x := [:a | // c\n]\n", "x := [:a |  // c\n]\n");
 }
+
+#[test]
+fn comment_before_a_block_parameter_is_kept() {
+    assert_formats_to(
+        "x := [:a // c\n  :b | a]\n",
+        "x := [:a  // c\n  :b |\n  a\n]\n",
+    );
+    assert_formats_to("x := [ // c\n  :a | a]\n", "x := [  // c\n  :a |\n  a\n]\n");
+}

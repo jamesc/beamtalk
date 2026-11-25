@@ -533,23 +533,6 @@ fn join_docs(docs: Vec<Document<'static>>, sep: &'static str) -> Document<'stati
     concat(result)
 }
 
-/// Same as `join_docs` but returns a Vec for use with `docs.extend()`.
-fn join_docs_vec(docs: Vec<Document<'static>>, sep: &'static str) -> Vec<Document<'static>> {
-    if docs.is_empty() {
-        return Vec::new();
-    }
-    let mut result: Vec<Document<'static>> = Vec::with_capacity(docs.len() * 2 - 1);
-    let mut first = true;
-    for doc in docs {
-        if !first {
-            result.push(Document::Str(sep));
-        }
-        result.push(doc);
-        first = false;
-    }
-    result
-}
-
 // --- Tests ---
 //
 // All test code lives in `tests/`, split by feature: the per-feature files

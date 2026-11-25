@@ -9,9 +9,9 @@ use super::{
     CascadeMessage, CommentAttachment, CommentKind, Document, Expression, ExpressionStatement,
     GapComments, GapSlot, Identifier, Literal, LiteralCommentSlots, LiteralComments, MapPair,
     MapPatternKey, MatchArm, MessageSelector, Pattern, PipelineSends, Span, StringSegment,
-    TypeAnnotation, binary_binding_power, break_, concat, docvec, group, join_docs, join_docs_vec,
-    leaf, line, nest, nil, unparse_comment, unparse_comment_attachment_leading,
-    unparse_expect_categories, unparse_keyword_part, unparse_type_annotation,
+    TypeAnnotation, binary_binding_power, break_, concat, docvec, group, join_docs, leaf, line,
+    nest, nil, unparse_comment, unparse_comment_attachment_leading, unparse_expect_categories,
+    unparse_keyword_part, unparse_type_annotation,
 };
 use crate::source_analysis::{TokenKind, lex_with_eof, parse_integer};
 
@@ -1051,17 +1051,25 @@ fn unparse_block(block: &Block) -> Document<'static> {
     // (BT-5183). Either forces the block onto several lines.
     let bar_gap = gap_comments(block.span.start(), GapSlot::BeforeBlockBar);
     let close_gap = gap_comments(block.span.end(), GapSlot::BeforeBlockClose);
+    let param_gaps: Vec<Option<GapComments>> = block
+        .parameters
+        .iter()
+        .map(|param| gap_comments(param.span.start(), GapSlot::BeforeBlockParam))
+        .collect();
 
     // Build the parameter prefix: `:x :y | ` (if any)
     let params_doc: Document<'static> = if block.parameters.is_empty() {
         nil()
     } else {
-        let params: Vec<Document<'static>> = block
-            .parameters
-            .iter()
-            .map(unparse_block_parameter)
-            .collect();
-        let mut p = join_docs_vec(params, " ");
+        let mut p: Vec<Document<'static>> = Vec::new();
+        for (i, (param, gap)) in block.parameters.iter().zip(&param_gaps).enumerate() {
+            match gap {
+                Some(gap) => p.push(nest(2, gap_break(gap))),
+                None if i > 0 => p.push(Document::Str(" ")),
+                None => {}
+            }
+            p.push(unparse_block_parameter(param));
+        }
         match &bar_gap {
             Some(gap) => {
                 p.push(nest(2, gap_break(gap)));
@@ -1072,7 +1080,7 @@ fn unparse_block(block: &Block) -> Document<'static> {
         concat(p)
     };
 
-    if bar_gap.is_some() || close_gap.is_some() {
+    if bar_gap.is_some() || close_gap.is_some() || param_gaps.iter().any(Option::is_some) {
         return unparse_block_broken(
             params_doc,
             !block.parameters.is_empty(),

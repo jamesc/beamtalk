@@ -1696,10 +1696,15 @@ impl Parser {
         // because union `|` would otherwise swallow the block's `|` separator.
         // Callers that need a union type on a block parameter can wrap the
         // type in grouping parentheses, e.g. `:x :: (Integer | String)`.
-        while self.match_token(&TokenKind::Colon) {
+        while self.check(&TokenKind::Colon) {
+            // Comments before this parameter: after the `[` or the previous
+            // parameter (BT-5183).
+            let gap = self.gap_before_current();
+            self.advance();
             if let TokenKind::Identifier(name) = self.current_kind() {
                 let span = self.current_token().span();
                 let name = name.clone();
+                self.record_gap(span.start(), GapSlot::BeforeBlockParam, gap);
                 self.advance();
 
                 // Optional `:: Type` annotation.

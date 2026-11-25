@@ -108,6 +108,8 @@ const FIDELITY_FRAGMENTS: &[&str] = &[
     "x foo; + // c\n  2",
     "{a, b} := // c\n  foo",
     "x foo: // c\n  1",
+    "x := [:a // c\n  :b | a]",
+    "x := [ // c\n  :a | a]",
     "y := x // c\n  match: [1 -> 2]",
     "x match: [1 -> 2 // d\n ; _ -> 3 // e\n  // f\n]",
 ];

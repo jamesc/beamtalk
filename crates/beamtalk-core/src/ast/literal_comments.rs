@@ -89,6 +89,9 @@ pub enum GapSlot {
     AfterOpenParen,
     /// Just before a `)`: anchored at the parenthesised expression's end.
     BeforeCloseParen,
+    /// Before a block parameter's `:`, after the `[` or the previous
+    /// parameter: anchored at the parameter name's start.
+    BeforeBlockParam,
     /// Between a block's last parameter and its `|`: anchored at the block's
     /// start.
     BeforeBlockBar,
