@@ -170,6 +170,7 @@ mod class_module_index_and_categorization;
 mod compile_method;
 mod compile_roundtrip_proptest;
 mod completion_and_native_types;
+mod deep_input_stack_safety;
 mod diagnostics_class_hierarchy;
 mod dispatch_and_hierarchy_meta;
 mod expression_assignment;
