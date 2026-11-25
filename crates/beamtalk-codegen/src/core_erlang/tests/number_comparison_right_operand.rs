@@ -84,6 +84,28 @@ fn self_in_a_numeric_class_is_a_proven_operand() {
 }
 
 #[test]
+fn class_side_self_is_not_a_proven_number() {
+    // In a class method `self` is the class object, never a number: it is
+    // neither a proven receiver nor a proven right operand.
+    let code = codegen(
+        "Object subclass: Integer\n\
+         \x20 class below: x => self < x\n\
+         \x20 class above => 3 < self\n",
+    );
+    // A class-side `self` receiver is a class self-send, never the BIF.
+    let below = method(&code, "class_below:");
+    assert!(
+        !below.contains("call 'erlang':'<'"),
+        "a class-side `self` receiver must not reach the bare BIF:\n{below}"
+    );
+    let above = method(&code, "class_above");
+    assert!(
+        above.contains(RIGHT_TEST) && above.contains(HOOK),
+        "a class-side `self` right operand is tested:\n{above}"
+    );
+}
+
+#[test]
 fn a_declared_right_operand_is_tested_not_trusted() {
     let code = codegen(
         "Object subclass: P\n\

@@ -128,7 +128,7 @@ use ecow::EcoString;
 use crate::core_erlang::field_types::{ComparisonKinds, trusted_param_types};
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::operators::{
-    comparison_is_bare, is_ordering_comparison, proven_comparison_kind,
+    ProvenKind, comparison_is_bare, is_ordering_comparison, proven_comparison_kind,
 };
 use beamtalk_cerl_doc::{Document, docvec, leaf};
 
@@ -359,7 +359,7 @@ impl Rewriter {
         {
             let declared = |e: &Expression| matches!(e, Expression::Identifier(id) if self.declared_params.contains(&id.name));
             return declared(receiver)
-                || (proven_comparison_kind(receiver, None).is_some()
+                || (proven_comparison_kind(receiver, None) == Some(ProvenKind::Number)
                     && arguments.first().is_some_and(declared));
         }
         self.short_circuit_declared_operands(expr).is_some()

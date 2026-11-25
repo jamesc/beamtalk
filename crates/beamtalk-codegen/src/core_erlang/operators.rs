@@ -478,12 +478,19 @@ impl CoreErlangGenerator {
         left: &Expression,
         right: &Expression,
     ) -> bool {
-        comparison_is_bare(left, right, Some(self.class_name().as_str()))
+        comparison_is_bare(left, right, self.self_instance_class().as_deref())
     }
 
     /// [`is_proven_numeric`] in the class being compiled.
     pub(in crate::core_erlang) fn is_proven_numeric(&self, expr: &Expression) -> bool {
-        is_proven_numeric(expr, Some(self.class_name().as_str()))
+        is_proven_numeric(expr, self.self_instance_class().as_deref())
+    }
+
+    /// The class whose instance `self` is, for proving `self`'s kind: the
+    /// class being compiled in an instance method, `None` in a class method
+    /// (where `self` is the class object, never a number or string).
+    fn self_instance_class(&self) -> Option<String> {
+        (!self.in_class_method()).then(|| self.class_name())
     }
 
     /// Whether `expr` is statically known to evaluate to a number, so
@@ -527,7 +534,10 @@ impl CoreErlangGenerator {
         use beamtalk_core::ast::Literal;
         match expr {
             Expression::Literal(Literal::Integer(_) | Literal::Float(_), _) => true,
-            _ if expr.is_self() => matches!(self.class_name().as_str(), "Integer" | "Float"),
+            _ if expr.is_self() => matches!(
+                self.self_instance_class().as_deref(),
+                Some("Integer" | "Float")
+            ),
             Expression::Identifier(id) => self.param_is_numeric(&id.name),
             // `self.<field>` stays bare only when the field is known numeric
             // (see doc above); every other field is guarded.
@@ -566,7 +576,7 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> ComparisonReceiver {
-        if let Some(kind) = proven_comparison_kind(expr, Some(self.class_name().as_str())) {
+        if let Some(kind) = proven_comparison_kind(expr, self.self_instance_class().as_deref()) {
             return ComparisonReceiver::Proven(kind);
         }
         match expr {
