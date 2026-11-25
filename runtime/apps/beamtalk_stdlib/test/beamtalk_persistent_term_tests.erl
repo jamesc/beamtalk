@@ -194,7 +194,7 @@ getOrPut_second_racer_waits_and_answers_first_value_test() ->
         end),
         %% Proceed once B is queued behind A on the key's lock, or (the bug)
         %% has run its own block.
-        BState = await_queued_or_ran({beamtalk_persistent_term, Key}, B, 500),
+        BState = await_queued_or_ran(beamtalk_persistent_term:lock_key(Key), B, 500),
         A ! go,
         ResultA = receive_result(A),
         ResultB = receive_result(B),
@@ -262,7 +262,7 @@ getOrPut_builder_death_lets_waiter_build_test() ->
         B = spawn_link(fun() ->
             Parent ! {result, self(), beamtalk_persistent_term:getOrPut(Key, fun() -> b end)}
         end),
-        queued = await_queued_or_ran({beamtalk_persistent_term, Key}, B, 500),
+        queued = await_queued_or_ran(beamtalk_persistent_term:lock_key(Key), B, 500),
         A ! die,
         receive
             {'DOWN', MRef, process, A, _} -> ok
@@ -289,3 +289,68 @@ receive_result(Pid) ->
         {result, Pid, V} -> V
     after 5000 -> {timeout, Pid}
     end.
+
+%% Keys equal under `==` but not `=:=` (`1`, `1.0`) are distinct keys with
+%% distinct locks: a miss on one while the other is building builds its own.
+getOrPut_numerically_equal_keys_do_not_share_a_lock_test() ->
+    Ref = make_ref(),
+    IntKey = {pt_test, Ref, 1},
+    FloatKey = {pt_test, Ref, 1.0},
+    Parent = self(),
+    try
+        A = spawn_link(fun() ->
+            V = beamtalk_persistent_term:getOrPut(IntKey, fun() ->
+                Parent ! {a_building, self()},
+                receive
+                    go -> int
+                end
+            end),
+            Parent ! {result, self(), V}
+        end),
+        receive
+            {a_building, A} -> ok
+        after 5000 -> error(a_never_built)
+        end,
+        ?assertEqual(float, beamtalk_persistent_term:getOrPut(FloatKey, fun() -> float end)),
+        A ! go,
+        ?assertEqual(int, receive_result(A))
+    after
+        beamtalk_persistent_term:erase(IntKey),
+        beamtalk_persistent_term:erase(FloatKey)
+    end.
+
+%% A build that waits on another process which itself asks for the same key
+%% is a cycle the lock cannot see. The waiter's wait is bounded, so it raises
+%% a `runtime_error` instead of hanging both processes.
+getOrPut_wait_is_bounded_test() ->
+    with_key(fun(Key) ->
+        Old = application:get_env(beamtalk_runtime, fifo_lock_timeout_ms),
+        application:set_env(beamtalk_runtime, fifo_lock_timeout_ms, #{persistent_term => 200}),
+        try
+            Result = beamtalk_persistent_term:getOrPut(Key, fun() ->
+                Parent = self(),
+                Child = spawn_link(fun() ->
+                    Outcome =
+                        try beamtalk_persistent_term:getOrPut(Key, fun() -> child end) of
+                            V -> {value, V}
+                        catch
+                            error:E -> {raised, E}
+                        end,
+                    Parent ! {child, self(), Outcome}
+                end),
+                receive
+                    {child, Child, Outcome} -> Outcome
+                after 5000 -> child_hung
+                end
+            end),
+            %% The child gave up and raised; the parent then stored that outcome.
+            {raised, Raised} = Result,
+            ?assertBtError(runtime_error, erlang:error(Raised)),
+            ?assertEqual(Result, beamtalk_persistent_term:getOrElse(Key, fun() -> missing end))
+        after
+            case Old of
+                {ok, V} -> application:set_env(beamtalk_runtime, fifo_lock_timeout_ms, V);
+                undefined -> application:unset_env(beamtalk_runtime, fifo_lock_timeout_ms)
+            end
+        end
+    end).

@@ -34,6 +34,12 @@ nested inside a larger value is not detected.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -export([getOrPut/2, getOrElse/2, includesKey/1, erase/1]).
+-export([lock_key/1]).
+
+%% Default bound on waiting behind another process's build of the same key.
+%% Override with the `beamtalk_runtime` env
+%% `{fifo_lock_timeout_ms, #{persistent_term => Ms}}` (tests shrink it).
+-define(BUILD_WAIT_MS, 60000).
 
 -doc """
 Answer the value stored under `Key`. On a miss, take the node-local lock for
@@ -46,7 +52,10 @@ then answers the stored value without running its own block, so the block
 runs once and there is no replacing `put` (no global GC). Hits take no lock.
 A raising block stores nothing and releases the lock; if the building process
 dies, the next waiter builds. A block that calls `getOrPut/2` on its own key
-raises a structured `runtime_error` (it would wait for itself).
+raises a structured `runtime_error` (it would wait for itself). A wait is
+bounded (60 s by default): a build that needs another process which itself
+waits on the same key (a cycle the lock cannot see) raises a `runtime_error`
+in the waiter instead of hanging both.
 
 A raising block stores nothing. The pid/actor/class check runs only on a miss.
 """.
@@ -93,25 +102,36 @@ erase(Key) ->
 -spec pt_key(term()) -> {beamtalk_persistent_term, term()}.
 pt_key(Key) -> {?MODULE, Key}.
 
+-doc """
+The `beamtalk_fifo_lock` key that serialises misses on `Key` (exported for
+tests). The key is encoded with `term_to_binary/1` because the lock table
+orders keys with `==`: `1` and `1.0` are distinct `persistent_term` keys and
+must not share one lock.
+""".
+-spec lock_key(term()) -> {beamtalk_persistent_term, binary()}.
+lock_key(Key) -> {?MODULE, term_to_binary(Key)}.
+
 %% The miss path of `getOrPut/2`, run under the per-key lock so the check,
 %% the block and the store are one step for every other caller of this key.
 -spec build_locked(term(), fun(() -> term()), reference()) -> term().
 build_locked(Key, Block, Miss) ->
-    LockKey = pt_key(Key),
+    PtKey = pt_key(Key),
+    LockKey = lock_key(Key),
+    Timeout = beamtalk_fifo_lock:configured_timeout(persistent_term, ?BUILD_WAIT_MS),
     try
         beamtalk_fifo_lock:with_lock_or_raise(
-            LockKey, infinity, {'PersistentTerm', 'at:ifAbsentPut:'}, fun() ->
+            LockKey, Timeout, {'PersistentTerm', 'at:ifAbsentPut:'}, fun() ->
                 %% Read again under the lock: the holder before us may have stored.
-                case persistent_term:get(LockKey, Miss) of
+                case persistent_term:get(PtKey, Miss) of
                     Miss ->
                         Value = Block(),
                         ok = refuse_process_identity(Key, Value),
                         %% The block itself may have stored (a raw
                         %% `persistent_term:put/2`); keep that value rather
                         %% than replace it, since a replace is a global GC.
-                        case persistent_term:get(LockKey, Miss) of
+                        case persistent_term:get(PtKey, Miss) of
                             Miss ->
-                                persistent_term:put(LockKey, Value),
+                                persistent_term:put(PtKey, Value),
                                 Value;
                             Stored ->
                                 Stored

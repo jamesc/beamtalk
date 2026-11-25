@@ -33,18 +33,13 @@ cached(ClassName, Build) when is_atom(ClassName), is_function(Build, 0) ->
 
 -doc """
 The state slots an actor's class (and its ancestors) declare in
-`class secretState`, read from the compiled `'__beamtalk_secrets'/0` metadata
-the actor's status redaction uses. Any other object has none.
+`class secretState`, via `beamtalk_actor_redaction:secret_slots/1` (the same
+metadata the actor's status redaction reads; it fails closed). Any other
+object has none.
 """.
 -spec secretSlots(term()) -> [atom()].
 secretSlots(#beamtalk_object{class_mod = Module}) when is_atom(Module) ->
-    case erlang:function_exported(Module, '__beamtalk_secrets', 0) of
-        true ->
-            {Slots, _Selectors} = Module:'__beamtalk_secrets'(),
-            Slots;
-        false ->
-            []
-    end;
+    beamtalk_actor_redaction:secret_slots(Module);
 secretSlots(_Other) ->
     [].
 

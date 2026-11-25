@@ -20,10 +20,12 @@
 ///   explicit opt-out: it receives the real value and its answer is emitted.
 /// - **Validation.** Every entry list is checked before use, however it was
 ///   built (`mapField:`, `withEntries:`, `JsonMapping new: #{...}`): each entry
-///   needs a Symbol `#field`, a String `#key` and a Block or nil `#using`, and
+///   needs a Symbol `#field`, a String (or Symbol) `#key` and a Block or nil
+///   `#using`, and
 ///   no wire key may repeat. A violation raises a `user_error`.
-/// - **Converter errors** are re-raised as a `user_error` naming the field and
-///   the wire key, with the original message.
+/// - **Converter errors** are re-signalled as the same exception (class and
+///   kind kept, so handlers still match) with a message naming the field and
+///   the wire key, followed by the original message.
 /// - **Recursion.** `encode:` is shallow: a converter's answer is put in the
 ///   Dictionary as is. `Json generate:` then encodes it, converting any
 ///   nested `asJson` object, and raises if an object reappears inside its own
@@ -93,6 +95,16 @@ Value subclass: JsonMapping
         ++ " that it does not map. Override class jsonMapping, e.g. super jsonMapping |> mapField: "
         ++ extra first printString
 
+  /// A mapping with the given entry list (kept for callers of the keyword
+  /// constructor from before `omitNil` existed). The entries are validated
+  /// when the mapping is used.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (JsonMapping entries: #()) entries size   // => 0
+  /// ```
+  class entries: aList :: List -> JsonMapping => self new withEntries: aList
+
   /// A copy of this mapping that leaves out keys whose (converted) value is
   /// nil, instead of emitting `null`.
   ///
@@ -125,16 +137,21 @@ Value subclass: JsonMapping
       ]
     self
 
-  /// Whether `entry` is a Dictionary with a Symbol `#field`, a String `#key`
-  /// and a Block or nil `#using`.
+  /// Whether `key` can be a wire key: a String, or a Symbol (which
+  /// `Json generate:` writes as its name).
+  isWireKey: key :: Object -> Boolean =>
+    (key isKindOf: String) or: [key isKindOf: Symbol]
+
+  /// Whether `entry` is a Dictionary with a Symbol `#field`, a String (or
+  /// Symbol) `#key` and a Block or nil `#using`.
   isWellFormedEntry: entry :: Object -> Boolean =>
     (entry isKindOf: Dictionary) ifFalse: [^false]
     using := entry at: #using ifAbsent: [nil]
     ((entry at: #field ifAbsent: [nil]) isKindOf: Symbol)
       and: [
-        ((entry at: #key ifAbsent: [
+        (self isWireKey: (entry at: #key ifAbsent: [
           nil
-        ]) isKindOf: String) and: [using isNil or: [using isKindOf: Block]]
+        ])) and: [using isNil or: [using isKindOf: Block]]
       ]
 
   /// Map `fieldName` to a wire key of the same name.
@@ -174,13 +191,8 @@ Value subclass: JsonMapping
   /// (JsonMapping new mapField: #at to: "created_at" using: [:v | v printString]) entries size   // => 1
   /// ```
   mapField: fieldName :: Symbol to: key :: String using: converter :: Block | Nil -> JsonMapping =>
-    (self.entries anySatisfy: [:e |
-      (e at: #key) =:= key
-    ]) ifTrue: [
-      self error: "JsonMapping: duplicate wire key " ++ key printString
-    ]
     entry := #{#field => fieldName, #key => key, #using => converter}
-    self withEntries: (self.entries add: entry)
+    (self withEntries: (self.entries add: entry)) validate
 
   /// Apply the mapping to `anObject` and answer a Dictionary of wire key to
   /// (converted) field value. Fields that are not mapped are omitted. A mapped
@@ -217,13 +229,16 @@ Value subclass: JsonMapping
             [converter value: raw]
               on: Error
               do: [:e |
-                self
-                  error: "JsonMapping: converter for field "
+                // Re-signal the same exception (same class and kind) with
+                // the field and key prepended, so handlers still match.
+                cause :: Dynamic := e message
+                e
+                  signal: "JsonMapping: converter for field "
                     ++ name printString
                     ++ " (key "
                     ++ key printString
                     ++ ") raised: "
-                    ++ e message
+                    ++ (cause isNil ifTrue: [e printString] ifFalse: [cause])
               ]
           ]
         (value isNil and: [

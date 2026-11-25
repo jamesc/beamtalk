@@ -5,6 +5,10 @@
 
 TestCase subclass: JsonMappingTest
 
+  // testMappingIsBuiltOncePerClass counts rebuilds of the per-class cache,
+  // which any class load on the node flushes: run alone.
+  class serial -> Boolean => true
+
   testEncodeRenamesAndOmitsUnmapped =>
     e := JsonMappedRunningEntry
       issueId: "a"
@@ -225,3 +229,30 @@ TestCase subclass: JsonMappingTest
     self should: [Json generate: a] raise: #type_error
     a stop
     b stop
+
+  testConverterErrorKeepsItsKind =>
+    rawKind := [1 / 0] on: Error do: [:e | e kind]
+    m := JsonMapping new
+      |> mapField: #seq
+         to: "n"
+         using: [:v | v / 0]
+    kind := [
+      m encode: (JsonMappedEvent eventType: #x seq: 1)
+    ] on: Error do: [:e | e kind]
+    self assert: kind equals: rawKind
+
+  testSymbolWireKeyStillEncodes =>
+    m := JsonMapping new withEntries: #(#{
+      #field => #seq,
+      #key => #n,
+      #using => nil
+    })
+    self assert: (Json generate: (m encode: (JsonMappedEvent eventType: #x seq: 3))) equals: (Json generate: #{
+      "n" => 3
+    })
+
+  testEntriesConstructorStillWorks =>
+    m := JsonMapping entries: #(#{#field => #seq, #key => "n", #using => nil})
+    self assert: (m encode: (JsonMappedEvent eventType: #x seq: 3)) equals: #{
+      "n" => 3
+    }

@@ -29,8 +29,10 @@
 ///   it and answers the stored value without running its own block, so every
 ///   caller answers the one stored value and nothing is replaced. Hits take
 ///   no lock. The block should still be pure: a block that hangs holds up
-///   every other caller of that key (if its process dies, the next waiter
-///   builds), and a block that asks for its own key raises a `runtime_error`.
+///   every other caller of that key for up to 60 s, after which each waiter
+///   raises a `runtime_error` (if the builder's process dies, the next waiter
+///   builds). A block that asks for its own key, directly or through another
+///   process that waits on it, raises a `runtime_error`.
 /// - **A raising block stores nothing.** The exception reaches the caller and
 ///   the next call runs the block again. A stored `nil` counts as present.
 /// - **Do not store a pid, port, actor, class, `Ets` handle or block.** A
