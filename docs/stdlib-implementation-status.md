@@ -1018,6 +1018,7 @@ The following stdlib `.bt` classes exist but have not yet received a full method
 | `Parallel` | `Object` | `parallel.bt` | Block-based fan-out/join combinators (`all:`, `all:timeout:`, `any:`) — spawns one linked+monitored process per block, blocks the caller, returns plain `Result` values; no awaitable future/promise ever escapes into user code (BT-2974, ADR 0104) |
 | `Pid` | `Object` | `pid.bt` | BEAM process identifier |
 | `Port` | `Object` | `port.bt` | BEAM port wrapper |
+| `PersistentTerm` | `Object` | `persistent_term.bt` | Sealed class-side facade over `persistent_term` for build-once computed constants: `at:ifAbsentPut:`, `at:ifAbsent:`, `includesKey:`, `erase:` (answers a Boolean, forces a global GC); no `at:put:`; refuses a top-level pid/actor/class value (ADR 0153, BT-5146) |
 | `ProcessDictionary` | `Object` | `process_dictionary.bt` | Blessed wrapper for the calling process's dictionary: `at:`, `at:ifAbsent:`, `at:put:`, `erase:`, `keys`; missing keys answer `nil` (BT-4320) |
 | `ProcessNavigation` | `Value` | `process_navigation.bt` | Live supervision-tree introspection queries (ADR 0092) |
 | `Program` | `Object` | `program.bt` | The running program/invocation (ADR 0099 §2) |
