@@ -229,12 +229,7 @@ impl Parser {
                         if let Expression::Literal(lit, _) = expr {
                             // `parse_literal` already rejects non-finite floats, so
                             // negating `f` here cannot produce `inf`/`NaN`.
-                            let neg_lit = match lit {
-                                Literal::Integer(n) => Literal::Integer(-n),
-                                Literal::Float(f) => Literal::Float(-f),
-                                other => other,
-                            };
-                            Pattern::Literal(neg_lit, span)
+                            Pattern::Literal(lit.negated(), span)
                         } else {
                             Pattern::Wildcard(span)
                         }
@@ -541,12 +536,7 @@ impl Parser {
                         if let Expression::Literal(lit, _) = expr {
                             // `parse_literal` already rejects non-finite floats, so
                             // negating `f` here cannot produce `inf`/`NaN`.
-                            let neg_lit = match lit {
-                                Literal::Integer(n) => Literal::Integer(-n),
-                                Literal::Float(f) => Literal::Float(-f),
-                                other => other,
-                            };
-                            Pattern::Literal(neg_lit, span)
+                            Pattern::Literal(lit.negated(), span)
                         } else {
                             Pattern::Wildcard(span)
                         }

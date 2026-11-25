@@ -4969,9 +4969,10 @@ fn test_new1_verdict_agrees_across_files_with_sibling_parent() {
 }
 
 /// BT-4644: a superclass-index stub ancestor (`add_external_superclasses`)
-/// has unknown class variables, so `chain_has_class_variables` answers `true`
-/// and neither codegen nor analysis treats the subclass's explicit `new:` as
-/// in-caller. Both must agree through the self-sufficient `generate_module`
+/// is a cross-file parent with an unknown surface, so neither codegen nor
+/// analysis treats the subclass's explicit `new:` as in-caller (ADR 0153
+/// removed the class-variable half of that doubt; the constructor chain rule
+/// still fails closed). Both must agree through the self-sufficient `generate_module`
 /// path with a sibling superclass known only from `class_superclass_index`.
 #[test]
 fn test_stub_ancestor_new1_is_process_bound_and_verdicts_agree() {
@@ -5002,9 +5003,8 @@ fn test_stub_ancestor_new1_is_process_bound_and_verdicts_agree() {
     let (built, _) = ClassHierarchy::build(&module);
     let mut hierarchy = built.expect("hierarchy builds");
     let _ = hierarchy.add_external_superclasses(&index);
-    assert!(hierarchy.chain_has_class_variables("Sibling"));
-    assert!(hierarchy.chain_has_class_variables("Kid"));
-    assert!(!hierarchy.runs_class_method_in_caller("Sibling", "foo"));
+    // An ordinary class method of the stub runs in the caller (ADR 0153).
+    assert!(hierarchy.runs_class_method_in_caller("Sibling", "foo"));
     assert_eq!(
         hierarchy.runs_class_method_in_caller("Kid", "new:"),
         !published_bound,

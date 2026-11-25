@@ -143,6 +143,8 @@ main([]) ->
         "shape_skew_match_cart",
         "shape_skew_local_only_cart",
         "shape_skew_reload_cart",
+        %% BT-5232 - a class reloaded on the peer, to check both tallies.
+        "shape_skew_peer_reload_cart",
         %% BT-4567 - beamtalk_actor_redaction_tests: a compiled actor declaring
         %% `class secretState` / `class secretSelectors`, for the compiled
         %% format_status/1 against sys:get_status and a real crash report.

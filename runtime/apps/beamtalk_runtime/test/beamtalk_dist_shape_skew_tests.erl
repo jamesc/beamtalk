@@ -49,6 +49,13 @@ and consumed itself before any fixture is registered:
   version, and a class registered on only one side, announce nothing.
 - `reload_reannounces_skew/1` — matching versions on connect (no skew),
   then a local version swap + `ClassLoaded` re-announces.
+- `peer_reload_updates_both_tallies/2` (BT-5232) — a reload on the *peer*
+  announces `NodeShapeSkew` and moves `skew_count` on both nodes, and a
+  reload back to a matching shape brings both counts to 0.
+
+The suite also covers `NodeVersionSkew` (BT-5232, ADR 0126 Amendment D3):
+the peer's `beamtalk_version:dist_versions/0` is faked with `meck` on the
+peer, so the local connect-time check sees a mismatch or a failed read.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -56,7 +63,14 @@ and consumed itself before any fixture is registered:
 
 -export([
     load_fixture/2,
-    install_shape_version_stub/3
+    load_fixture_settled/2,
+    install_shape_version_stub/3,
+    reload_with_shape_version/3,
+    reload_to_real_module/2,
+    forward_events/2,
+    connect_checks_running/0,
+    fake_dist_versions/1,
+    unfake_dist_versions/0
 ]).
 
 %%====================================================================
@@ -138,6 +152,10 @@ shape_skew_test_() ->
     {timeout, 120,
         {setup, fun setup/0, fun cleanup/1, fun({Peer, PeerNode}) ->
             [
+                %% First: it asserts exact skew_count values, and the later
+                %% scenarios leave other fixture classes skewed for good.
+                {"a reload on the peer updates skew_count and announces on both nodes",
+                    {timeout, 60, fun() -> peer_reload_updates_both_tallies(Peer, PeerNode) end}},
                 {
                     "connecting two nodes with a class at different shapeVersions "
                     "announces exactly one NodeShapeSkew for it",
@@ -149,7 +167,23 @@ shape_skew_test_() ->
                     {timeout, 60, fun() -> no_skew_for_matching_or_non_shared(Peer, PeerNode) end}
                 },
                 {"reloading a class on one side while connected re-announces skew",
-                    {timeout, 60, fun() -> reload_reannounces_skew(Peer, PeerNode) end}}
+                    {timeout, 60, fun() -> reload_reannounces_skew(Peer, PeerNode) end}},
+                {"matching versions announce no NodeVersionSkew",
+                    {timeout, 60, fun() -> versions_match_no_announcement(PeerNode) end}},
+                {"a wire-version mismatch announces exactly one NodeVersionSkew",
+                    {timeout, 60, fun() ->
+                        version_mismatch_announced_once(Peer, PeerNode, #{
+                            wireVersion => 999, beamtalkVersion => local_beamtalk_version()
+                        })
+                    end}},
+                {"a Beamtalk-version mismatch announces exactly one NodeVersionSkew",
+                    {timeout, 60, fun() ->
+                        version_mismatch_announced_once(Peer, PeerNode, #{
+                            wireVersion => local_wire_version(), beamtalkVersion => <<"0.0.1-old">>
+                        })
+                    end}},
+                {"a peer whose version read fails is announced with nil remote fields",
+                    {timeout, 60, fun() -> version_read_failure_announced_nil(Peer, PeerNode) end}}
             ]
         end}}.
 
@@ -159,7 +193,7 @@ shape_skew_test_() ->
 
 skew_announced_once_on_connect(Peer, PeerNode) ->
     force_disconnect(PeerNode),
-    ok = peer_call(Peer, load_fixture, [shape_skew_cart, 'ShapeSkewCart']),
+    ok = peer_call(Peer, load_fixture_settled, [shape_skew_cart, 'ShapeSkewCart']),
     %% Only the peer's copy is skewed to version 2 — the local side stays
     %% at the real module's implicit version 1.
     ok = peer_call(Peer, install_shape_version_stub, [
@@ -187,7 +221,7 @@ skew_announced_once_on_connect(Peer, PeerNode) ->
 no_skew_for_matching_or_non_shared(Peer, PeerNode) ->
     %% Registered identically (the very same compiled module) on both sides.
     force_disconnect(PeerNode),
-    ok = peer_call(Peer, load_fixture, [shape_skew_match_cart, 'ShapeSkewMatchCart']),
+    ok = peer_call(Peer, load_fixture_settled, [shape_skew_match_cart, 'ShapeSkewMatchCart']),
     ok = load_fixture_settled(shape_skew_match_cart, 'ShapeSkewMatchCart'),
     %% Registered locally only — deliberately never touches the peer.
     ok = load_fixture_settled(shape_skew_local_only_cart, 'ShapeSkewLocalOnlyCart'),
@@ -206,7 +240,7 @@ no_skew_for_matching_or_non_shared(Peer, PeerNode) ->
 
 reload_reannounces_skew(Peer, PeerNode) ->
     force_disconnect(PeerNode),
-    ok = peer_call(Peer, load_fixture, [shape_skew_reload_cart, 'ShapeSkewReloadCart']),
+    ok = peer_call(Peer, load_fixture_settled, [shape_skew_reload_cart, 'ShapeSkewReloadCart']),
     ok = load_fixture_settled(shape_skew_reload_cart, 'ShapeSkewReloadCart'),
     Sub = subscribe_self('NodeShapeSkew'),
     try
@@ -227,6 +261,236 @@ reload_reannounces_skew(Peer, PeerNode) ->
     end.
 
 %%====================================================================
+%% BT-5232: a reload on the peer updates both nodes
+%%====================================================================
+
+peer_reload_updates_both_tallies(Peer, PeerNode) ->
+    Class = 'ShapeSkewPeerReloadCart',
+    force_disconnect(PeerNode),
+    ok = peer_call(Peer, load_fixture_settled, [shape_skew_peer_reload_cart, Class]),
+    ok = load_fixture_settled(shape_skew_peer_reload_cart, Class),
+    reconnect(PeerNode),
+    %% Let both nodes' connect-time checks finish first: one that read the
+    %% class before the reload could otherwise clear the count after it.
+    await_connect_checks_done(Peer),
+    await_skew_counts(PeerNode, 0),
+    Sub = subscribe_self('NodeShapeSkew'),
+    Forwarder = peer_call(Peer, forward_events, ['NodeShapeSkew', self()]),
+    try
+        %% The peer reloads to version 2. Before BT-5232 only the peer
+        %% re-checked, so this node never announced and kept a 0 count.
+        ok = peer_call(Peer, reload_with_shape_version, [
+            Class, shape_skew_peer_reload_cart_v2_stub, 2
+        ]),
+        Local = expect_skew_event(PeerNode, Class),
+        ?assertEqual(1, maps:get(localVersion, Local)),
+        ?assertEqual(2, maps:get(remoteVersion, Local)),
+        SelfValue = beamtalk_node:from_atom(node()),
+        ?awaitMessage(
+            {peer_got, 'NodeShapeSkew', #{node := SelfValue, className := Class}}, 10000
+        ),
+        await_skew_counts(PeerNode, 1),
+        %% The peer reloads back to the real module (version 1): both
+        %% counts go to 0.
+        ok = peer_call(Peer, reload_to_real_module, [Class, shape_skew_peer_reload_cart]),
+        await_skew_counts(PeerNode, 0)
+    after
+        Forwarder ! stop,
+        beamtalk_announcements:unsubscribe(Sub)
+    end.
+
+-doc """
+Wait until no connect-time check process is running on this node or the
+peer. The monitor spawns them while handling `nodeup`, so a `sys:get_state/1`
+on each monitor first makes sure they have been spawned; afterwards a second
+one flushes the casts they sent.
+""".
+await_connect_checks_done(Peer) ->
+    _ = sys:get_state(beamtalk_node_monitor),
+    _ = peer:call(Peer, sys, get_state, [beamtalk_node_monitor]),
+    beamtalk_test_wait:until(
+        fun() ->
+            not connect_checks_running() andalso
+                not peer_call(Peer, connect_checks_running, [])
+        end,
+        10000
+    ),
+    _ = sys:get_state(beamtalk_node_monitor),
+    _ = peer:call(Peer, sys, get_state, [beamtalk_node_monitor]),
+    ok.
+
+-doc "Whether a monitor connect-time check is running on this node.".
+-spec connect_checks_running() -> boolean().
+connect_checks_running() ->
+    Checks = [check_version_skew_on_connect, check_shape_skew_on_connect],
+    lists:any(
+        fun(Pid) ->
+            case erlang:process_info(Pid, current_stacktrace) of
+                {current_stacktrace, Frames} ->
+                    lists:any(
+                        fun({M, F, _, _}) ->
+                            M =:= beamtalk_node_monitor andalso lists:member(F, Checks)
+                        end,
+                        Frames
+                    );
+                undefined ->
+                    false
+            end
+        end,
+        erlang:processes()
+    ).
+
+-doc "Wait until both this node's count for `PeerNode` and the peer's count for this node are `N`.".
+await_skew_counts(PeerNode, N) ->
+    beamtalk_test_wait:until(
+        fun() ->
+            beamtalk_node_monitor:skew_count(PeerNode) =:= N andalso
+                erpc:call(PeerNode, beamtalk_node_monitor, skew_count, [node()]) =:= N
+        end,
+        10000
+    ).
+
+-doc """
+Repoint `ClassName` at a stub reporting `ShapeVersion` and announce
+`ClassLoaded`, as a real reload does. Runs on the peer via `peer_call/3`.
+""".
+-spec reload_with_shape_version(atom(), atom(), pos_integer()) -> ok.
+reload_with_shape_version(ClassName, StubBasename, ShapeVersion) ->
+    ok = install_shape_version_stub(ClassName, StubBasename, ShapeVersion),
+    beamtalk_announcements:system_announce('ClassLoaded', #{className => ClassName}).
+
+-doc """
+Point `ClassName` back at its real compiled fixture module (`Basename`)
+and announce `ClassLoaded`. Runs on the peer via `peer_call/3`.
+""".
+-spec reload_to_real_module(atom(), atom()) -> ok.
+reload_to_real_module(ClassName, Basename) ->
+    RealMod = list_to_atom("bt@" ++ atom_to_list(Basename)),
+    {ok, _StubMod, Selectors} = beamtalk_class_metadata:lookup_methods(ClassName),
+    {ok, Superclass} = beamtalk_class_metadata:lookup_superclass(ClassName),
+    {ok, IsAbstract} = beamtalk_class_metadata:lookup_is_abstract(ClassName),
+    ok = beamtalk_class_metadata:merge_identity(
+        ClassName, RealMod, Selectors, Superclass, IsAbstract
+    ),
+    beamtalk_announcements:system_announce('ClassLoaded', #{className => ClassName}).
+
+-doc """
+Start a process on the calling node that forwards every `EventClass`
+announcement to `Collector` as `{peer_got, EventClass, Event}`, and return
+its pid; send it `stop` to end it (and its subscription).
+""".
+-spec forward_events(atom(), pid()) -> pid().
+forward_events(EventClass, Collector) ->
+    Parent = self(),
+    Pid = spawn(fun() ->
+        Handler = fun(Event) -> Collector ! {peer_got, EventClass, Event} end,
+        {ok, _Ref} = beamtalk_announcements:subscribe(EventClass, self(), Handler, false),
+        Parent ! {forwarding, self()},
+        receive
+            stop -> ok
+        end
+    end),
+    receive
+        {forwarding, Pid} -> Pid
+    after 10000 -> error(forwarder_not_started)
+    end.
+
+%%====================================================================
+%% BT-5232: NodeVersionSkew at connect (ADR 0126 Amendment D3)
+%%====================================================================
+
+versions_match_no_announcement(PeerNode) ->
+    force_disconnect(PeerNode),
+    Sub = subscribe_self('NodeVersionSkew'),
+    try
+        reconnect(PeerNode),
+        expect_no_version_skew_event(PeerNode, 2000)
+    after
+        beamtalk_announcements:unsubscribe(Sub)
+    end.
+
+version_mismatch_announced_once(Peer, PeerNode, FakeVersions) ->
+    force_disconnect(PeerNode),
+    ok = peer_call(Peer, fake_dist_versions, [{reply, FakeVersions}]),
+    Sub = subscribe_self('NodeVersionSkew'),
+    try
+        reconnect(PeerNode),
+        Event = expect_version_skew_event(PeerNode),
+        ?assertEqual(local_wire_version(), maps:get(localWireVersion, Event)),
+        ?assertEqual(maps:get(wireVersion, FakeVersions), maps:get(remoteWireVersion, Event)),
+        ?assertEqual(
+            {beamtalk_string, local_beamtalk_version()}, maps:get(localBeamtalkVersion, Event)
+        ),
+        ?assertEqual(
+            {beamtalk_string, maps:get(beamtalkVersion, FakeVersions)},
+            maps:get(remoteBeamtalkVersion, Event)
+        ),
+        expect_no_version_skew_event(PeerNode, 1000),
+        %% Announced, never refused.
+        ?assert(lists:member(PeerNode, nodes()))
+    after
+        beamtalk_announcements:unsubscribe(Sub),
+        ok = peer_call(Peer, unfake_dist_versions, [])
+    end.
+
+version_read_failure_announced_nil(Peer, PeerNode) ->
+    force_disconnect(PeerNode),
+    %% `undef` is what a peer too old to export dist_versions/0 raises.
+    ok = peer_call(Peer, fake_dist_versions, [{raise, undef}]),
+    Sub = subscribe_self('NodeVersionSkew'),
+    try
+        reconnect(PeerNode),
+        Event = expect_version_skew_event(PeerNode),
+        ?assertEqual(nil, maps:get(remoteWireVersion, Event)),
+        ?assertEqual(nil, maps:get(remoteBeamtalkVersion, Event)),
+        ?assertEqual(local_wire_version(), maps:get(localWireVersion, Event)),
+        expect_no_version_skew_event(PeerNode, 1000),
+        ?assert(lists:member(PeerNode, nodes()))
+    after
+        beamtalk_announcements:unsubscribe(Sub),
+        ok = peer_call(Peer, unfake_dist_versions, [])
+    end.
+
+-doc """
+Replace `beamtalk_version:dist_versions/0` on the calling node (the peer, via
+`peer_call/3`): `{reply, Map}` answers `Map`, `{raise, Reason}` raises
+`error:Reason`.
+""".
+-spec fake_dist_versions({reply, map()} | {raise, term()}) -> ok.
+fake_dist_versions(Fake) ->
+    ok = meck:new(beamtalk_version, [passthrough, no_link]),
+    Fun =
+        case Fake of
+            {reply, Map} -> fun() -> Map end;
+            {raise, Reason} -> fun() -> erlang:error(Reason) end
+        end,
+    ok = meck:expect(beamtalk_version, dist_versions, Fun).
+
+-spec unfake_dist_versions() -> ok.
+unfake_dist_versions() ->
+    meck:unload(beamtalk_version).
+
+local_wire_version() ->
+    maps:get(wireVersion, beamtalk_version:dist_versions()).
+
+local_beamtalk_version() ->
+    maps:get(beamtalkVersion, beamtalk_version:dist_versions()).
+
+expect_version_skew_event(PeerNode) ->
+    PeerValue = beamtalk_node:from_atom(PeerNode),
+    ?awaitMessage({got, 'NodeVersionSkew', #{node := PeerValue} = Event}, 10000),
+    Event.
+
+expect_no_version_skew_event(PeerNode, TimeoutMs) ->
+    PeerValue = beamtalk_node:from_atom(PeerNode),
+    receive
+        {got, 'NodeVersionSkew', #{node := PeerValue} = Event} ->
+            erlang:error({unexpected_version_skew_event, Event})
+    after TimeoutMs ->
+        ok
+    end.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
@@ -240,7 +504,9 @@ trigger besides `nodeup`). That chain (dispatch process -> monitor mailbox ->
 spawned check) is asynchronous, so under CPU load it could land *after* the
 scenario's reconnect, see the peer, and announce a duplicate `NodeShapeSkew`
 inside the "exactly once" window. Production announces once per trigger; the
-race was the test's. Loading while disconnected makes that re-check a no-op
+race was the test's. BT-5232: the same holds on the peer, whose reload check now
+also reports to this node, so the peer loads its fixtures this way too
+(via `peer_call/3`). Loading while disconnected makes that re-check a no-op
 (`nodes()` is empty), and draining the chain before reconnecting keeps it so.
 """.
 -spec load_fixture_settled(atom(), atom()) -> ok.

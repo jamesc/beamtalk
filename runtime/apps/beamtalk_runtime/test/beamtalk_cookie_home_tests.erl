@@ -1,0 +1,100 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+-module(beamtalk_cookie_home_tests).
+
+%%% **DDD Context:** Runtime Context
+
+-moduledoc """
+EUnit coverage for `beamtalk_cookie_home:restore/0` (BT-5185): the private
+boot home is undone and removed, the home variables come back as they were.
+""".
+
+-include_lib("eunit/include/eunit.hrl").
+
+%% `with_tmp_home/1` points HOME at a fresh directory, standing in for the
+%% private cookie home the launcher made, and restores the real HOME after.
+restore_puts_home_back_and_removes_the_cookie_home_test() ->
+    OrigDrive = os:getenv("HOMEDRIVE"),
+    beamtalk_test_fs:with_tmp_home(fun(Tmp) ->
+        Private = cookie_home_in(Tmp),
+        Cookie = filename:join(Private, ".erlang.cookie"),
+        ok = file:write_file(Cookie, <<"secret">>),
+        true = os:putenv("BEAMTALK_COOKIE_HOME", Private),
+        true = os:putenv("BEAMTALK_ORIG_HOME", "set:/original/home"),
+        true = os:putenv("BEAMTALK_ORIG_HOMEDRIVE", "unset"),
+        true = os:putenv("HOMEDRIVE", "Z:"),
+        try
+            ?assertEqual(restored, beamtalk_cookie_home:restore()),
+            ?assertEqual("/original/home", os:getenv("HOME")),
+            ?assertEqual(false, os:getenv("HOMEDRIVE")),
+            ?assertEqual(false, os:getenv("BEAMTALK_COOKIE_HOME")),
+            ?assertEqual(false, os:getenv("BEAMTALK_ORIG_HOME")),
+            ?assertEqual(false, os:getenv("BEAMTALK_ORIG_HOMEDRIVE")),
+            ?assertNot(filelib:is_file(Cookie)),
+            ?assertNot(filelib:is_dir(Private)),
+            ?assert(beamtalk_cookie_home:booted_with_cookie()),
+            %% Idempotent: nothing left to do.
+            ?assertEqual(none, beamtalk_cookie_home:restore()),
+            ?assertEqual("/original/home", os:getenv("HOME"))
+        after
+            case OrigDrive of
+                false -> os:unsetenv("HOMEDRIVE");
+                Drive -> os:putenv("HOMEDRIVE", Drive)
+            end,
+            [
+                os:unsetenv(V)
+             || V <- ["BEAMTALK_COOKIE_HOME", "BEAMTALK_ORIG_HOME", "BEAMTALK_ORIG_HOMEDRIVE"]
+            ],
+            _ = persistent_term:erase({beamtalk_cookie_home, booted_with_cookie})
+        end
+    end).
+
+%% Only the cookie file and an empty directory are removed: anything else in
+%% the directory named by the variable survives.
+restore_never_removes_other_files_test() ->
+    Parent = beamtalk_test_fs:tmp_dir("cookie_home"),
+    Dir = cookie_home_in(Parent),
+    Other = filename:join(Dir, "keep.txt"),
+    ok = file:write_file(Other, <<"x">>),
+    true = os:putenv("BEAMTALK_COOKIE_HOME", Dir),
+    try
+        ?assertEqual(restored, beamtalk_cookie_home:restore()),
+        ?assert(filelib:is_file(Other)),
+        %% No cookie file was there, so no configured cookie (a stale
+        %% variable alone does not satisfy the release console check).
+        ?assertNot(beamtalk_cookie_home:booted_with_cookie())
+    after
+        os:unsetenv("BEAMTALK_COOKIE_HOME"),
+        _ = persistent_term:erase({beamtalk_cookie_home, booted_with_cookie}),
+        beamtalk_test_fs:rm_rf(Parent)
+    end.
+
+%% A stale or hand-set variable naming a directory we did not create (say the
+%% real home) still has its home variables put back, but nothing in it is
+%% deleted: not even an `.erlang.cookie`.
+restore_never_deletes_outside_a_cookie_home_test() ->
+    Dir = beamtalk_test_fs:tmp_dir("real_home"),
+    Cookie = filename:join(Dir, ".erlang.cookie"),
+    ok = file:write_file(Cookie, <<"the user's own cookie">>),
+    true = os:putenv("BEAMTALK_COOKIE_HOME", Dir),
+    try
+        ?assertEqual(restored, beamtalk_cookie_home:restore()),
+        ?assertEqual(false, os:getenv("BEAMTALK_COOKIE_HOME")),
+        ?assertEqual({ok, <<"the user's own cookie">>}, file:read_file(Cookie)),
+        ?assertNot(beamtalk_cookie_home:booted_with_cookie())
+    after
+        os:unsetenv("BEAMTALK_COOKIE_HOME"),
+        _ = persistent_term:erase({beamtalk_cookie_home, booted_with_cookie}),
+        beamtalk_test_fs:rm_rf(Dir)
+    end.
+
+no_private_home_is_none_test() ->
+    true = os:unsetenv("BEAMTALK_COOKIE_HOME"),
+    ?assertEqual(none, beamtalk_cookie_home:restore()).
+
+%% A directory named like the ones the CLI and launchers create.
+cookie_home_in(Parent) ->
+    Dir = filename:join(Parent, beamtalk_cookie_home:cookie_dir_prefix() ++ "test"),
+    ok = file:make_dir(Dir),
+    Dir.

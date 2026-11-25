@@ -1,0 +1,112 @@
+[
+  {
+    "line": "Object subclass: Foo",
+    "header": true,
+    "why": "a plain class header"
+  },
+  {
+    "line": "Actor subclass: Counter",
+    "header": true,
+    "why": "any superclass name"
+  },
+  {
+    "line": "sealed Object subclass: Foo",
+    "header": true,
+    "why": "a class modifier"
+  },
+  {
+    "line": "abstract typed Object subclass: Foo",
+    "header": true,
+    "why": "several class modifiers"
+  },
+  {
+    "line": "internal sealed Value subclass: Point",
+    "header": true,
+    "why": "internal is a class modifier (ADR 0071)"
+  },
+  {
+    "line": "json@Parser subclass: MyParser",
+    "header": true,
+    "why": "a package-qualified superclass (ADR 0070)"
+  },
+  {
+    "line": "Collection(E) subclass: Bag(E)",
+    "header": true,
+    "why": "superclass type arguments"
+  },
+  {
+    "line": "Mapping(K, Seq(V)) subclass: Multi(K, V)",
+    "header": true,
+    "why": "nested superclass type arguments"
+  },
+  {
+    "line": "Object  subclass:Foo",
+    "header": true,
+    "why": "blanks between the parts are free"
+  },
+  {
+    "line": "Protocol define: Greeter",
+    "header": true,
+    "why": "a protocol header"
+  },
+  {
+    "line": "Protocol  define: Greeter",
+    "header": true,
+    "why": "blanks before define:"
+  },
+  {
+    "line": "  Object subclass: Foo",
+    "header": false,
+    "why": "only a header at column 1 counts"
+  },
+  {
+    "line": "Object subclass Foo",
+    "header": false,
+    "why": "subclass needs its colon"
+  },
+  {
+    "line": "Object foo: Bar",
+    "header": false,
+    "why": "any other keyword is a send"
+  },
+  {
+    "line": "Protocol defines: Greeter",
+    "header": false,
+    "why": "only define: starts a protocol"
+  },
+  {
+    "line": "sealed Protocol define: Greeter",
+    "header": false,
+    "why": "a protocol takes no class modifier"
+  },
+  {
+    "line": "x := Object subclass: Foo",
+    "header": false,
+    "why": "an assignment is not a definition"
+  },
+  {
+    "line": "// Object subclass: Foo",
+    "header": false,
+    "why": "a comment is not a definition"
+  },
+  {
+    "line": "\"Object subclass: Foo\"",
+    "header": false,
+    "why": "a string is not a definition"
+  },
+  {
+    "line": "Object(E subclass: Foo",
+    "header": false,
+    "why": "type arguments must close on the line"
+  },
+  {
+    "line": "type Pair = Tuple",
+    "header": false,
+    "why": "a type alias does not stop a string"
+  },
+  {
+    "line": "",
+    "header": false,
+    "why": "an empty line"
+  }
+]

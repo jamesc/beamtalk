@@ -1426,6 +1426,36 @@ meta_fast_path_reflection_test_() ->
                 purge_meta_module(MetaMod)
             end
         end),
+        %% BT-5154 (ADR 0153): the compiler no longer emits `class_fields`;
+        %% a meta map without the key reads as no class variables.
+        ?_test(begin
+            MetaMod = load_meta_module(bt_meta_fixture_no_class_fields, #{
+                superclass => nil,
+                fields => [alpha],
+                method_info => #{},
+                class_method_info => #{}
+            }),
+            ClassName = 'BTMetaFixtureNoClassFields',
+            ClassInfo = #{
+                name => ClassName,
+                module => MetaMod,
+                superclass => none,
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+            ClassObj = #beamtalk_object{
+                class = 'BTMetaFixtureNoClassFields class', class_mod = MetaMod, pid = Pid
+            },
+            try
+                ?assertEqual([], beamtalk_behaviour_intrinsics:classClassVarNames(ClassObj)),
+                ?assertEqual([], beamtalk_behaviour_intrinsics:classAllClassVarNames(ClassObj)),
+                ?assertEqual(#{}, beamtalk_class_metadata:class_var_kinds_or_unknown(ClassName))
+            after
+                beamtalk_test_proc:stop(Pid),
+                purge_meta_module(MetaMod)
+            end
+        end),
         %% classIncludesSelector/2 on a metaclass-tagged object backed by a meta module
         %% uses the class_method_info fast path (maps:is_key over class_method_info).
         ?_test(begin
