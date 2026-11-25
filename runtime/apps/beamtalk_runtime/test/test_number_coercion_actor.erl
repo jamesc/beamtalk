@@ -5,8 +5,8 @@
 -behaviour(gen_server).
 
 -moduledoc """
-Test actor for beamtalk_message_dispatch:send_number_coercion/4 tests
-(ADR 0116).
+Test actor for beamtalk_message_dispatch:send_number_coercion/4 and
+send_number_comparison/4 tests (ADR 0116).
 
 Exposes a present `plusFromNumber:`-style reflected method whose own body
 DNUs on an unrelated selector (simulating a bug inside the method, not a
@@ -14,7 +14,9 @@ missing hook) and a present `divFromNumber:` that raises a non-DNU error —
 used to confirm send_number_coercion/4's class+selector match doesn't
 over-catch either case. A selector with no corresponding method at all (e.g.
 `timesFromNumber:`) is left undefined so ordinary dispatch produces a
-genuine "hook missing" does_not_understand.
+genuine "hook missing" does_not_understand. The comparison hooks mirror
+this: `lessThanFromNumber:` DNUs inside, `greaterThanFromNumber:` raises a
+non-DNU error, and `lessOrEqualFromNumber:` is absent.
 """.
 -include("beamtalk.hrl").
 
@@ -34,7 +36,9 @@ genuine "hook missing" does_not_understand.
 %% Method implementations
 -export([
     'handle_plusFromNumber:'/2,
-    'handle_divFromNumber:'/2
+    'handle_divFromNumber:'/2,
+    'handle_lessThanFromNumber:'/2,
+    'handle_greaterThanFromNumber:'/2
 ]).
 
 start_link() ->
@@ -46,7 +50,9 @@ init(_Args) ->
         '__class_mod__' => 'test_number_coercion_actor',
         '__methods__' => #{
             'plusFromNumber:' => fun ?MODULE:'handle_plusFromNumber:'/2,
-            'divFromNumber:' => fun ?MODULE:'handle_divFromNumber:'/2
+            'divFromNumber:' => fun ?MODULE:'handle_divFromNumber:'/2,
+            'lessThanFromNumber:' => fun ?MODULE:'handle_lessThanFromNumber:'/2,
+            'greaterThanFromNumber:' => fun ?MODULE:'handle_greaterThanFromNumber:'/2
         }
     }).
 
@@ -67,4 +73,16 @@ terminate(Reason, State) -> test_actor_host:terminate(Reason, State).
 %% unrelated exception kind passes through send_number_coercion/4 unchanged.
 'handle_divFromNumber:'([_N], _State) ->
     Error = beamtalk_error:new(instantiation_error, 'CoercionActor', 'divFromNumber:'),
+    error(Error).
+
+%% Comparison counterpart of 'handle_plusFromNumber:': present, but its body
+%% DNUs on an unrelated selector.
+'handle_lessThanFromNumber:'([_N], _State) ->
+    Error = beamtalk_error:new(does_not_understand, 'CoercionActor', unrelatedSelector),
+    error(Error).
+
+%% Comparison counterpart of 'handle_divFromNumber:': present, raises a
+%% non-DNU error.
+'handle_greaterThanFromNumber:'([_N], _State) ->
+    Error = beamtalk_error:new(instantiation_error, 'CoercionActor', 'greaterThanFromNumber:'),
     error(Error).

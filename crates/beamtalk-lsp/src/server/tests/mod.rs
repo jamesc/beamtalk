@@ -36,6 +36,7 @@
 //!   capability set
 //! - [`panic_resilience`] — a panic in one request leaves the server usable (BT-5078)
 //! - [`panic_resilience`] — a panic in one request leaves the server usable (BT-5078)
+//! - [`stale_state_recovery`] — preload panics, failed watched batches, the create watcher (BT-5188)
 //! - [`index_freshness`] — watched files, cross-file republish, open/close races (BT-5078)
 //! - [`type_hierarchy`] — goto-implementation and
 //!   `prepare_type_hierarchy/supertypes/subtypes`
@@ -201,6 +202,7 @@ mod preload_files;
 mod preload_racing;
 mod references;
 mod rename;
+mod stale_state_recovery;
 mod stdlib_ffi_registry;
 mod symbol_unification;
 mod type_hierarchy;

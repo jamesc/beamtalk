@@ -87,8 +87,10 @@ pub(in crate::server) async fn flush_event_listener(
     client: Client,
     workspace_roots: Vec<PathBuf>,
     open_paths: OpenPathsHandle,
-    mut flush_rx: tokio::sync::mpsc::UnboundedReceiver<FlushEvent>,
+    flush_rx: super::listeners::SharedReceiver<FlushEvent>,
 ) {
+    // Held for this run; a panic releases it for the restarted run (BT-5188).
+    let mut flush_rx = flush_rx.lock().await;
     while let Some(event) = flush_rx.recv().await {
         for FlushedFile {
             path: raw_path,

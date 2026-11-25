@@ -15,7 +15,8 @@ The Beamtalk REPL uses a JSON-based message protocol over WebSocket for communic
 1. **TCP connect** to `127.0.0.1:{port}`
 2. **WebSocket upgrade** to `ws://127.0.0.1:{port}/ws`
 3. **Read auth-required** — server sends `{"op":"auth-required"}` (no session yet)
-4. **Send auth** — client sends `{"type":"auth","cookie":"<cookie>",...}` as first message (fields below)
+   - **Optional: identity check (BT-5188)** — a client that knows the workspace's port-file nonce (the second line of `~/.beamtalk/workspaces/<id>/port`) sends `{"type":"identify","challenge":"<16-256 bytes, fresh random hex>"}` first. The server replies `{"type":"identity","proof":"<hex>"}`, where `proof` is the lowercase hex SHA-256 of `beamtalk-workspace-identity\n<nonce>\n<challenge>`, and the connection stays unauthenticated. The client sends its cookie only if the proof matches. This way a process that took over a dead workspace's port never receives the cookie. The MCP server does this whenever it connects to a workspace by id or through auto-discovery, and its liveness probe ends the check without authenticating. The proof vector is pinned in `ws_auth_handshake_wire_corpus.json` for both the Erlang and the Rust implementation.
+4. **Send auth** — client sends `{"type":"auth","cookie":"<cookie>",...}` as first message (or right after the identity check; fields below)
 5. **Read auth response** — server replies `{"type":"auth_ok"}` on success, or `{"type":"auth_error","message":"..."}` + connection close on failure. A stale toolchain is rejected here (see Version lock).
 6. **Read session-started** — after auth_ok, server sends `{"op":"session-started","session":"<id>"}`
 7. **Version check** — client sends `{"op":"describe"}`, waits for the reply echoing its request `id` (actor-snapshot pushes may arrive first — correlate on `id`, do not trust the first frame), and refuses a version mismatch. Skipped only by `workspace stop`, which compiles nothing.
