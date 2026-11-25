@@ -10,7 +10,7 @@ use super::super::actor_state_access::{Helper, actor_state_call, actor_state_hel
 use super::super::exception_forms::{CatchVars, wrap_and_reraise_doc};
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
-    AccParam, BindOp, CallSiteLine, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary,
+    AccParam, BindOp, CallSiteLine, CarrierSlot, CatchClause, CatchStep, CellBoundary,
     EnsureCatchVars, EnsureForeignNlr, EnsureNlrRelay, FastPath, FoldAccShape, ForeignCleanupBody,
     FrameId, KeyedFoldCall, LOOP_FN_STEM, LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars,
     RebindLowering, RethrowSlot, ThreadedStmt, ThreadingMode, TokenId, TryRegion, ValueRef,
@@ -267,18 +267,11 @@ pub(in crate::core_erlang) fn render(
             ]),
             ThreadedStmt::OnDoCatch {
                 vars,
-                entry,
                 cell,
                 try_region,
                 clauses,
                 ..
-            } => docs.push(render_on_do_catch(
-                vars,
-                *entry,
-                cell.as_ref(),
-                try_region,
-                clauses,
-            )),
+            } => docs.push(render_on_do_catch(vars, cell.as_ref(), try_region, clauses)),
             ThreadedStmt::EnsureCatch {
                 vars,
                 token,
@@ -632,8 +625,8 @@ fn thrown_nlr_pattern(fields: impl IntoIterator<Item = Document<'static>>) -> Do
     ])
 }
 
-/// Full-fidelity rendering of [`ThreadedStmt::OnDoCatch`], both halves of the
-/// catch boundary as one unit: the entry snapshot `let`, then the
+/// Full-fidelity rendering of [`ThreadedStmt::OnDoCatch`], the catch
+/// boundary as one unit: the cell entry (if any), then the
 /// [`TryRegion`] (`try <body> of R -> R`), then the catch clause
 /// (`catch <Type, Error, Stack> -> case {Type, Error} of ...`), complete down
 /// to the closing `end end`: the exception-class filter's handler arm, its
@@ -641,12 +634,10 @@ fn thrown_nlr_pattern(fields: impl IntoIterator<Item = Document<'static>>) -> Do
 /// ([`CatchStep::FilterHandler`], [`CatchStep::FilterMiss`]).
 ///
 /// Clause order is the node's: both `$bt_nlr` pass-through arms re-raise
-/// untouched; the non-NLR arm runs its steps in order, the class-variable
-/// restore first (ADR 0130 §4), so every exception that is not a `^` discards
-/// the protected region's writes before the filter runs.
+/// untouched; the non-NLR arm runs its steps in order (the cell restore first,
+/// when there is one) before the filter runs.
 fn render_on_do_catch(
     vars: &OnDoCatchVars,
-    entry: Option<CatchEntry>,
     cell: Option<&CellBoundary>,
     try_region: &TryRegion,
     clauses: &[CatchClause],
@@ -658,18 +649,11 @@ fn render_on_do_catch(
             vars.stack_var.clone(),
         )
     };
-    let entry_doc = match entry {
-        Some(CatchEntry::ClassVarSnapshot) => {
-            CoreErlangGenerator::class_var_snapshot_let_doc(&vars.snapshot_var)
-        }
-        None => Document::Nil,
-    };
     let cell_entry_doc = match cell {
         Some(boundary) => CoreErlangGenerator::cell_boundary_entry_doc(boundary),
         None => Document::Nil,
     };
     let mut docs: Vec<Document<'static>> = vec![docvec![
-        entry_doc,
         cell_entry_doc,
         // `try_of_catch` cannot build this: the region body carries its own
         // trailing space, the result is the bare `of R ->` spelling (not
@@ -1012,9 +996,6 @@ fn render_ensure_relay_clause(
 
 fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static> {
     match step {
-        CatchStep::ClassVarRestore { snapshot } => {
-            CoreErlangGenerator::class_var_restore_doc(snapshot)
-        }
         CatchStep::CellRestore(boundary) => {
             CoreErlangGenerator::cell_boundary_restore_doc(boundary)
         }

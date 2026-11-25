@@ -3,7 +3,7 @@
 
 // BT-2267 / ADR 0084 Phase 2: callable class methods via the programmatic
 // ClassBuilder cascade, exercised from a typed TestCase. The compiler lowers
-// each `classMethods:` block to a class-method fun (ClassSelf, ClassVars, ...)
+// each `classMethods:` block to a class-method fun (ClassSelf, ...)
 // installed as a runtime class-method fun (BT-2266); the name resolver treats
 // these blocks as class-method bodies so `self`/`super` resolve and the
 // receiver `self` parameter does not warn about shadowing.
@@ -21,22 +21,6 @@ TestCase subclass: ClassBuilderClassMethodTest
     self.cls isNil ifFalse: [self.cls removeFromSystem]
     self.midCls isNil ifFalse: [self.midCls removeFromSystem]
     self.parentCls isNil ifFalse: [self.parentCls removeFromSystem]
-
-  // Class-variable mutation persists across calls (the BT-873 "dropped state"
-  // regression); classVars: seeds the initial value.
-  testClassVarThreadsAcrossCalls =>
-    Object classBuilder name: #BT2267BTally;
-      superclass: Object;
-      classVars: #{#total => 0};
-      classMethods: #{#bump => [:self |
-          self.total := self.total + 1
-          self.total
-        ]};
-      register
-    self.cls := (Erlang beamtalk_interface) findClass: #BT2267BTally
-    self assert: self.cls bump equals: 1
-    self assert: self.cls bump equals: 2
-    self assert: self.cls bump equals: 3
 
   // Plain-value and keyword class methods.
   testPlainAndKeywordClassMethods =>
@@ -75,39 +59,37 @@ TestCase subclass: ClassBuilderClassMethodTest
     self assert: self.cls greeting equals: "base"
 
   // ADR 0130 §3: a builder `super` send runs the superclass method with the
-  // LIVE receiver (`ClassSelf` of the subclass), so a class-variable access in
-  // that method uses the receiver's key rather than the static builder
-  // class's. Called on a subclass of the builder class, it must not raise
-  // class_state_unreachable.
-  testSuperFromSubclassReceiverUsesReceiverClassVars =>
+  // LIVE receiver (`ClassSelf` of the subclass), so a self-send in that method
+  // reaches the receiver's own class method rather than the static builder
+  // class's.
+  testSuperFromSubclassReceiverUsesLiveReceiver =>
     Object classBuilder name: #BT3709SuperVarBase;
       superclass: Object;
-      classVars: #{#n => 10};
-      classMethods: #{#bump => [:self |
-          self.n := self.n + 1
-          self.n
-        ]};
+      classMethods: #{
+        #who => [:self | self tag],
+        #tag => [:self | 1]
+      };
       register
     self.parentCls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarBase
     Object classBuilder name: #BT3709SuperVarMid;
       superclass: #BT3709SuperVarBase;
-      classMethods: #{#bump => [:self | super bump]};
+      classMethods: #{#who => [:self | super who]};
       register
     self.midCls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarMid
     Object classBuilder name: #BT3709SuperVarLeaf;
       superclass: #BT3709SuperVarMid;
-      classVars: #{#n => 100};
+      classMethods: #{#tag => [:self | 3]};
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarLeaf
-    self assert: self.cls bump equals: 101
-    self assert: self.cls bump equals: 102
+    self assert: self.cls who equals: 3
+    self assert: self.midCls who equals: 1
 
   // BT-2276: a computed (non-block-literal) classMethods: fun whose arity does
   // not match the class-method calling convention `fun(ClassSelf, ...)`
   // is rejected at register time with a structured #arity_mismatch error, instead
   // of installing successfully and crashing with an opaque error:undef when the
   // class method is first called. Here `blk` is arity 2 but unary `#size` needs
-  // arity 1 (ClassSelf; class variables are not passed, ADR 0130).
+  // arity 1 (ClassSelf).
   testWrongArityComputedFunRejected =>
     blk := [:_self :_extra | "x" size]
     self

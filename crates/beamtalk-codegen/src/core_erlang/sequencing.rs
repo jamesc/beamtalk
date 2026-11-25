@@ -517,8 +517,7 @@ impl CoreErlangGenerator {
     /// map literal evaluates its last operand first). `None` when at most one
     /// operand may: it has nothing to race with.
     ///
-    /// A field read is stable outside an actor closure (a class variable read is
-    /// stable against another read, but not against a send, BT-4591): it reads a `State` or
+    /// A field read is stable outside an actor closure: it reads a `State` or
     /// `Self` version, and a sibling that writes the field is a prelude
     /// producer `subexpr_needs_prelude` already sequences. Exempting it keeps
     /// `self.a + self.b` free of temps (the BT-4279 fast path needs an empty
@@ -531,44 +530,31 @@ impl CoreErlangGenerator {
             return None;
         }
         let stable_field_reads = !self.in_cell_closure();
-        // `runs`: may run code or observe code a sibling runs. `class_var`: a
-        // class variable read (`self.n` in a class method), a live
-        // process-dictionary lookup that a sibling *send* may write (ADR 0130)
-        // but that two reads cannot disturb: it races only alongside an operand
-        // that runs code, so `self.a + self.b` stays free of temps (BT-4279).
-        // A block literal whose creation-time capture reads that live state
-        // (BT-4722) is the same kind of operand.
+        // `runs`: may run code or observe code a sibling runs. `live`: a block
+        // literal whose creation-time capture reads live state (BT-4722): two
+        // such captures cannot disturb each other, so it races only alongside
+        // an operand that runs code.
         let mut runs: Vec<usize> = Vec::new();
-        let mut class_var: Vec<usize> = Vec::new();
+        let mut live: Vec<usize> = Vec::new();
         for (i, e) in exprs.iter().enumerate() {
             let inner = e.unwrap_parens();
             if Self::is_trivial_subexpr(inner) {
                 if let Expression::Block(block) = inner
                     && self.block_capture_reads_live_state(block)
                 {
-                    class_var.push(i);
+                    live.push(i);
                 }
                 continue;
             }
             match inner {
-                Expression::FieldAccess {
-                    receiver, field, ..
-                } if stable_field_reads => {
-                    if self.is_class_var_field_read(receiver, field) {
-                        class_var.push(i);
-                    }
-                }
+                Expression::FieldAccess { .. } if stable_field_reads => {}
                 _ => runs.push(i),
             }
         }
-        if runs.is_empty() || runs.len() + class_var.len() < 2 {
+        if runs.is_empty() || runs.len() + live.len() < 2 {
             return None;
         }
-        runs.last()
-            .into_iter()
-            .chain(class_var.last())
-            .max()
-            .copied()
+        runs.last().into_iter().chain(live.last()).max().copied()
     }
 
     /// BT-4722: the hoisting point [`Self::sequence_children`] extends to when
@@ -588,18 +574,15 @@ impl CoreErlangGenerator {
     }
 
     /// BT-4722: whether creating `block` here reads live mutable state: a
-    /// block in a class method that reads a class variable binds
-    /// `beamtalk_class_vars:capture` (a process-dictionary read), and a block
-    /// nested in an actor closure binds `beamtalk_actor_state:capture` (a live
-    /// cell read) when it touches the actor state or carries it out through a
-    /// `^`. A sibling operand that runs code and writes that state must run
-    /// before the capture, so the block is sequenced like a read, never
-    /// treated as a constant.
+    /// block nested in an actor closure binds `beamtalk_actor_state:capture`
+    /// (a live cell read) when it touches the actor state or carries it out
+    /// through a `^`. A sibling operand that runs code and writes that state
+    /// must run before the capture, so the block is sequenced like a read,
+    /// never treated as a constant.
     fn block_capture_reads_live_state(&self, block: &Block) -> bool {
-        (self.in_class_method() && self.block_reads_class_var(block))
-            || (self.in_cell_closure()
-                && (self.block_touches_actor_state(block)
-                    || beamtalk_core::semantic_analysis::facts::block_has_nlr(block)))
+        self.in_cell_closure()
+            && (self.block_touches_actor_state(block)
+                || beamtalk_core::semantic_analysis::facts::block_has_nlr(block))
     }
 
     /// Threads `exprs` via [`Self::thread_subexprs`] and returns
