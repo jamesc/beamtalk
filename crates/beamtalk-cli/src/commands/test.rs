@@ -1793,7 +1793,7 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
                 &pipeline.package_ebin_dirs,
             )?;
             drop(project_lock);
-            if !pipeline.package_ebin_dirs.contains(&helper_ebin) {
+            if helper_ebin.is_dir() && !pipeline.package_ebin_dirs.contains(&helper_ebin) {
                 pipeline.package_ebin_dirs.push(helper_ebin);
             }
 

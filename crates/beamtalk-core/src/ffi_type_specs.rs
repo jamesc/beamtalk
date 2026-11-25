@@ -1413,7 +1413,9 @@ fn collect_beam_stems(ebin_dir: &std::path::Path, out: &mut std::collections::Ha
 /// `native/test/` directory and the ebin exists — the one rule for which
 /// helper modules a package's tests may call and be typed against. A package
 /// that dropped `native/test/` gets `None`, so stale helper beams are never
-/// treated as known.
+/// treated as known modules (specs already extracted from them stay in the
+/// shared type cache until it is cleaned). The LSP and `lint` do not consult
+/// this yet, so they flag a test's helper calls as unresolved (BT-5251).
 #[must_use]
 pub fn project_test_helper_ebin_dir(project_root: &Utf8Path) -> Option<Utf8PathBuf> {
     let helpers = BuildLayout::new(project_root).native_test_ebin_dir();
