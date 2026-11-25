@@ -1145,6 +1145,34 @@ impl TypeChecker {
             binary_operand_check_ran,
             env,
         );
+        // ADR 0116: a number-on-the-left send answered by the argument's
+        // reflected hook is typed from the hook's declared return type.
+        if let (
+            MessageSelector::Binary(op),
+            Some(InferredType::Known {
+                class_name: arg_ty, ..
+            }),
+        ) = (selector, arg_types.first())
+            && let Some(hook) = Self::reflected_hook(hierarchy, class_name, op, arg_ty)
+            && let Some(ret_ty) = hook.return_type.as_ref()
+        {
+            let hook_ctx = SendCtx {
+                receiver_ty: &arg_types[0],
+                ..*ctx
+            };
+            return ControlFlow::Break(self.declared_return_type(
+                &hook_ctx,
+                &KnownRecv {
+                    class_name: arg_ty,
+                    type_args: &[],
+                    resolve_class: arg_ty,
+                    via_object: false,
+                },
+                hook,
+                ret_ty,
+                &[InferredType::known(class_name.clone())],
+            ));
+        }
         self.known_receiver_return_type(
             ctx,
             &KnownRecv {
