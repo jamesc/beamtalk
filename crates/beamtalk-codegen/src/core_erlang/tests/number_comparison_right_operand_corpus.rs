@@ -8,11 +8,12 @@
 //!
 //! * **Receivers:** a number, float or character literal, a `String` literal;
 //!   a parameter declared `Integer`, `Character`, `Integer | String` or
-//!   `String`, an untyped one; `self` in `Integer`, `Float` and `Character`.
+//!   `String`, an untyped one; `self` in `Integer`, `Float`, `Character` and
+//!   `String` (BT-5213).
 //! * **Right operands:** a proven numeric one (an integer, float or character
-//!   literal), an untyped parameter and a parameter declared `Integer` (tested,
-//!   not trusted), each run with numbers and with non-numbers (`nil`, a symbol,
-//!   a string, a list, a boolean).
+//!   literal), a `String` literal (BT-5213), an untyped parameter and a
+//!   parameter declared `Integer` (tested, not trusted), each run with numbers
+//!   and with non-numbers (`nil`, a symbol, a string, a list, a boolean).
 //! * **Positions:** a plain expression, a loop condition, an `ifTrue:ifFalse:`
 //!   receiver, a guard-return shape (`c ifTrue: [^a]. b`, BT-4452), and in an
 //!   actor the cell bracket around a send and a field-writing loop condition
@@ -25,8 +26,11 @@
 //! hook that ran outside a bracket (or saw a stale cell) disagrees with the
 //! reference. The reference is the addendum's rule: a number on the left and a
 //! number on the right compare numerically; a number on the left and anything
-//! else send the hook; a `String` on the left term-orders; any other receiver
-//! dispatches the operator.
+//! else send the hook; a proven `String` on the left (a literal, `self` in
+//! `String`) compares against a `String` and raises the frame-free
+//! `beamtalk_ordering_type_error` for anything else (BT-5213); a raw binary on
+//! the left (a declared or untyped receiver's `is_binary` arm) term-orders;
+//! any other receiver dispatches the operator.
 
 use super::value_type_fold_family_corpus::{core_module_name, run_erlang_probes};
 
@@ -127,6 +131,9 @@ enum Outcome {
     Hook(&'static str, String),
     /// The operator was dispatched to the receiver.
     Send(&'static str),
+    /// A proven `String` receiver raised the wrong-kind `type_error` term
+    /// for the operator (BT-5213).
+    TypeError(&'static str),
 }
 
 /// The addendum's rule (and BT-3924 / BT-4823 for the receiver).
@@ -136,7 +143,12 @@ fn reference(left: V, op: Op, right: V, receiver: Recv) -> Outcome {
         (Some(l), Some(r)) => Outcome::Bif(op.holds(l.partial_cmp(&r).expect("no NaN"))),
         (Some(_), None) => Outcome::Hook(op.hook(), left.erl()),
         (None, _) => match left {
-            V::Str(_) | V::Tagged(_) if receiver.string_arm_accepts() => {
+            // Only a proven `String` receiver holds a tagged String.
+            V::Tagged(l) => match right {
+                V::Tagged(r) => Outcome::Bif(op.holds(l.cmp(r))),
+                _ => Outcome::TypeError(op.src()),
+            },
+            V::Str(_) if receiver.string_arm_accepts() => {
                 let ord = match (left, right) {
                     (V::Str(l), V::Str(r)) => l.cmp(r),
                     _ => left.rank().cmp(&right.rank()),
@@ -154,13 +166,14 @@ impl Outcome {
             Outcome::Bif(b) => *b,
             Outcome::Hook(..) => true,
             Outcome::Send(_) => false,
+            Outcome::TypeError(_) => unreachable!("a raise answers nothing"),
         }
     }
 
     /// The trace entry the stubs record, `cell` the actor's stored `n`.
     fn trace(&self, cell: &str) -> Option<String> {
         match self {
-            Outcome::Bif(_) => None,
+            Outcome::Bif(_) | Outcome::TypeError(_) => None,
             Outcome::Hook(sel, left) => Some(format!("{{hook,'{sel}',{left},{cell}}}")),
             Outcome::Send(op) => Some(format!("{{send,'{op}',{cell}}}")),
         }
@@ -213,6 +226,7 @@ enum Host {
     Integer,
     Float,
     Character,
+    String,
 }
 
 impl Host {
@@ -222,6 +236,7 @@ impl Host {
             Host::Integer => "Object subclass: Integer\n",
             Host::Float => "Object subclass: Float\n",
             Host::Character => "Object subclass: Character\n",
+            Host::String => "Object subclass: String\n",
         }
     }
 
@@ -232,6 +247,7 @@ impl Host {
             Host::Integer => Some(V::Int(7)),
             Host::Float => Some(V::Float(2.5)),
             Host::Character => Some(V::Int(109)),
+            Host::String => Some(V::Tagged("q")),
         }
     }
 }
@@ -333,6 +349,14 @@ const RECEIVERS: &[Recv] = &[
         values: &[V::Int(109)],
         arms: (Arm::Number, true),
     },
+    Recv {
+        name: "self-string",
+        src: "self",
+        param: None,
+        host: Host::String,
+        values: &[V::Tagged("q")],
+        arms: (Arm::None, true),
+    },
 ];
 
 /// A right-operand kind: its source, the parameter that carries it and the
@@ -374,6 +398,12 @@ const RIGHTS: &[Right] = &[
         src: "$a",
         param: None,
         values: &[V::Int(97)],
+    },
+    Right {
+        name: "string-literal",
+        src: "\"a\"",
+        param: None,
+        values: &[V::Tagged("a")],
     },
     Right {
         name: "untyped",
@@ -425,6 +455,10 @@ impl Position {
 
     /// The probe's printed `{Result, Trace}` for one comparison `outcome`.
     fn expected(self, outcome: &Outcome) -> String {
+        // A raise ends the method wherever the comparison stands.
+        if let Outcome::TypeError(op) = outcome {
+            return format!("{{{{type_error,'{op}'}},[]}}");
+        }
         let answer = outcome.answer();
         let traces = |cells: &[&str]| -> String {
             cells
@@ -533,6 +567,7 @@ fn methods() -> Vec<Method> {
                         Host::Integer => "integer",
                         Host::Float => "float",
                         Host::Character => "character",
+                        Host::String => "string",
                     }
                 };
                 let mut probes = Vec::new();
@@ -613,6 +648,7 @@ const STUBS: [(&str, &str); 3] = [
          -export([observe/1]).\n\
          observe(F) -> R = (catch F()), {norm(R), lists:reverse(case get(bt_trace) of undefined -> []; T -> T end)}.\n\
          norm({reply, R, St}) when is_map(St) -> {R, maps:get(n, St)};\n\
+         norm({'EXIT', {{beamtalk_ordering_type_error, _, Op, _}, _}}) -> {type_error, Op};\n\
          norm(R) -> R.\n",
     ),
 ];
@@ -624,6 +660,7 @@ fn module_source(host: &str, methods: &[Method]) -> String {
         "integer" => Host::Integer.header().to_string(),
         "float" => Host::Float.header().to_string(),
         "character" => Host::Character.header().to_string(),
+        "string" => Host::String.header().to_string(),
         other => unreachable!("host {other}"),
     };
     let bodies: Vec<&str> = methods
@@ -636,7 +673,7 @@ fn module_source(host: &str, methods: &[Method]) -> String {
 
 /// The modules, named as the probes call them.
 fn compile_hosts(methods: &[Method]) -> Vec<String> {
-    ["value", "integer", "float", "character", "actor"]
+    ["value", "integer", "float", "character", "string", "actor"]
         .iter()
         .map(|host| {
             let name = format!("bt@cmp_{host}");
@@ -671,7 +708,8 @@ fn the_corpus_covers_every_receiver_right_operand_and_position() {
             "no probe in {position}"
         );
     }
-    // Both sides of the rule are exercised: hooks, bare BIFs and dispatches.
+    // Every side of the rule is exercised: hooks, bare BIFs, dispatches and
+    // wrong-kind raises.
     let expected: Vec<&String> = methods
         .iter()
         .flat_map(|m| &m.probes)
@@ -679,6 +717,7 @@ fn the_corpus_covers_every_receiver_right_operand_and_position() {
         .collect();
     assert!(expected.iter().any(|e| e.contains("{hook,")));
     assert!(expected.iter().any(|e| e.contains("{send,")));
+    assert!(expected.iter().any(|e| e.contains("{type_error,")));
     assert!(expected.iter().any(|e| e.ends_with(",[]}")));
 }
 

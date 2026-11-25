@@ -53,6 +53,8 @@ dispatch(testClassMap, [], _Instance) ->
     });
 dispatch(testBadKey, [], _Instance) ->
     error({badkey, my_key});
+dispatch(testOrderingTypeError, [], _Instance) ->
+    error({?BT_ORDERING_TYPE_ERROR_TAG, {beamtalk_string, <<"a">>}, '<', 5});
 dispatch(testBadMap, [], _Instance) ->
     error({badmap, 42});
 dispatch(testBadMatch, [], _Instance) ->
