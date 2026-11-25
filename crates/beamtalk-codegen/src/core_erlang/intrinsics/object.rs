@@ -11,8 +11,8 @@
 
 use super::{
     ClassHierarchy, CodeGenContext, CoreErlangGenerator, Document, ErrorSignalReceiver, Expression,
-    MessageSelector, PERFORM_WITH_ARGS_TIMEOUT, Result, WellKnownSelector, class_var_fn, docvec,
-    leaf, nil_test_case, not_nil_apply, primitives, validate_if_not_nil_block,
+    MessageSelector, PERFORM_WITH_ARGS_TIMEOUT, Result, WellKnownSelector, docvec, leaf,
+    nil_test_case, not_nil_apply, primitives, validate_if_not_nil_block,
 };
 use crate::core_erlang::dispatch_codegen::{runtime_send_args, runtime_send_doc};
 use crate::core_erlang::errors::{BeamtalkErrorChain, ErrorBinding};
@@ -154,20 +154,6 @@ impl CoreErlangGenerator {
                 self.sequenced_runtime_send(
                     &[receiver, &arguments[0], &arguments[1]],
                     "Perf",
-                    |operands| operands,
-                )
-                .map(Some)
-            }
-            // Execute a class method in the caller's process,
-            // bypassing the class object's gen_server.
-            Some(WellKnownSelector::PerformLocallyWithArgs) => {
-                debug_assert_eq!(arguments.len(), 2);
-                // Hoist open-scope receiver + args (e.g. class method self-sends).
-                self.sequenced_runtime_call(
-                    "beamtalk_object_class",
-                    "local_call",
-                    &[receiver, &arguments[0], &arguments[1]],
-                    "PerfLoc",
                     |operands| operands,
                 )
                 .map(Some)
@@ -1268,28 +1254,14 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         debug_assert_eq!(arguments.len(), 1);
-        // Class-method `self fieldAt: k` reads the class
-        // variable in place, like `self.x` (BT-4421):
-        // `beamtalk_class_vars:field_at(ClassSelf, Name)`,
-        // which applies the `Cls fieldAt:` read rule
-        // (declared `late`, declared set) at run time, the
-        // name being dynamic. A `class_send` would re-enter
-        // the class's own gen_server (`dispatch_error`).
+        // ADR 0153 decision 7 (BT-5155): a class has no fields, so a
+        // class-method `self` reflection send is not an intrinsic: it
+        // compiles as the ordinary class-side send it is and raises
+        // `does_not_understand` at run time, exactly as the same send
+        // from outside the class does (`beamtalk_object_class:
+        // class_field_reflection_dnu/2`).
         if self.is_class_side_self_reflection(receiver) {
-            let name_var = self.fresh_var("Name");
-            let name_code = self.expression_doc(&arguments[0])?;
-            let doc = docvec![
-                "let ",
-                leaf::var(name_var.clone()),
-                " = ",
-                name_code,
-                " in ",
-                self.class_var_read_helper_call_doc(
-                    class_var_fn::FIELD_AT,
-                    vec![leaf::var(name_var)],
-                ),
-            ];
-            return Ok(Some(doc));
+            return Ok(None);
         }
         // Fast-path for `self` receiver in actor context.
         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
@@ -1409,35 +1381,14 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         debug_assert_eq!(arguments.len(), 2);
-        // Class-method `self fieldAt: k put: v` writes the
-        // class variable in place, like `self.x := v`
-        // (BT-4421): `beamtalk_class_vars:field_at_put`,
-        // `put/3` after the `Cls fieldAt:put:` declared-set
-        // check. Not a state-threaded write
-        // (`is_self_field_at_put` excludes class methods,
-        // ADR 0130); its order against sibling operands is
-        // pinned by `is_class_side_effect`.
+        // ADR 0153 decision 7 (BT-5155): a class has no fields, so a
+        // class-method `self` reflection send is not an intrinsic: it
+        // compiles as the ordinary class-side send it is and raises
+        // `does_not_understand` at run time, exactly as the same send
+        // from outside the class does (`beamtalk_object_class:
+        // class_field_reflection_dnu/2`).
         if self.is_class_side_self_reflection(receiver) {
-            let name_var = self.fresh_var("Name");
-            let value_var = self.fresh_var("Value");
-            let name_code = self.expression_doc(&arguments[0])?;
-            let value_code = self.expression_doc(&arguments[1])?;
-            let doc = docvec![
-                "let ",
-                leaf::var(name_var.clone()),
-                " = ",
-                name_code,
-                " in let ",
-                leaf::var(value_var.clone()),
-                " = ",
-                value_code,
-                " in ",
-                Self::class_var_helper_call_doc(
-                    class_var_fn::FIELD_AT_PUT,
-                    vec![leaf::var(name_var), leaf::var(value_var)],
-                ),
-            ];
-            return Ok(Some(doc));
+            return Ok(None);
         }
         // Fast-path for `self` receiver in actor context.
         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
@@ -1555,22 +1506,14 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         debug_assert_eq!(arguments.len(), 1);
-        // Class-method `self hasField: #x` is a presence test
-        // on the class variables, in place (ADR 0130 §2):
-        // `beamtalk_class_vars:has(ClassSelf, Name)`, which
-        // never raises on the name.
+        // ADR 0153 decision 7 (BT-5155): a class has no fields, so a
+        // class-method `self` reflection send is not an intrinsic: it
+        // compiles as the ordinary class-side send it is and raises
+        // `does_not_understand` at run time, exactly as the same send
+        // from outside the class does (`beamtalk_object_class:
+        // class_field_reflection_dnu/2`).
         if self.is_class_side_self_reflection(receiver) {
-            let name_var = self.fresh_var("Name");
-            let name_code = self.expression_doc(&arguments[0])?;
-            let doc = docvec![
-                "let ",
-                leaf::var(name_var.clone()),
-                " = ",
-                name_code,
-                " in ",
-                self.class_var_read_helper_call_doc(class_var_fn::HAS, vec![leaf::var(name_var)]),
-            ];
-            return Ok(Some(doc));
+            return Ok(None);
         }
         // Fast-path for `self` receiver in actor instance
         // context. Avoids sync_send(self()) → deadlock.
@@ -1627,24 +1570,14 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         debug_assert_eq!(arguments.len(), 1);
-        // Class-side `self clearField: #x` removes the class
-        // variable in place at any nesting depth (ADR 0130
-        // §2): `beamtalk_class_vars:clear(ClassSelf, Name)`,
-        // which answers `self`. Routing it through
-        // `class_send` instead would deadlock on the class's
-        // own process.
+        // ADR 0153 decision 7 (BT-5155): a class has no fields, so a
+        // class-method `self` reflection send is not an intrinsic: it
+        // compiles as the ordinary class-side send it is and raises
+        // `does_not_understand` at run time, exactly as the same send
+        // from outside the class does (`beamtalk_object_class:
+        // class_field_reflection_dnu/2`).
         if self.is_class_side_self_reflection(receiver) {
-            let name_var = self.fresh_var("Name");
-            let name_code = self.expression_doc(&arguments[0])?;
-            let doc = docvec![
-                "let ",
-                leaf::var(name_var.clone()),
-                " = ",
-                name_code,
-                " in ",
-                Self::class_var_helper_call_doc(class_var_fn::CLEAR, vec![leaf::var(name_var)]),
-            ];
-            return Ok(Some(doc));
+            return Ok(None);
         }
         // Fast-path for `self` receiver in actor instance
         // context. Avoids sync_send(self()) → deadlock.

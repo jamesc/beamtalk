@@ -372,7 +372,7 @@ fn lexical_edge_cases_are_decided_by_the_real_grammar() {
 /// assignment (the `ClassBuilder` example in the language guide).
 #[test]
 fn nested_period_in_a_cascade_is_one_statement() {
-    let src = "account := Object classBuilder\n  name: #Account;\n  superclass: Object;\n  classVars: #{ #opened => 0 };\n  fields: #{ #balance => 0 };\n  methods: #{ #balance => [:inst | inst fieldAt: #balance] };\n  classMethods: #{ #open => [:self | self.opened := self.opened + 1. self.opened] };\n  register";
+    let src = "account := Object classBuilder\n  name: #Account;\n  superclass: Object;\n  fields: #{ #balance => 0 };\n  methods: #{ #balance => [:inst | inst fieldAt: #balance] };\n  classMethods: #{ #open => [:self | n := self new. n balance] };\n  register";
     let response = handle_request(&Term::from(compile_expression_request(src)));
     if response_status(&response).as_deref() == Some("ok") {
         let Term::Map(map) = &response else {

@@ -192,7 +192,9 @@ in_caller_test_() ->
         end},
         {"a class-variable reflection selector keeps the class process", fun() ->
             with_class('Bt4300Reflect', none, #{}, fun(Pid) ->
-                ?assertEqual(false, send(Pid, 'hasField:', [count])),
+                %% ADR 0153 decision 7 (BT-5155): the class process answers
+                %% it with does_not_understand.
+                ?assertBtError(does_not_understand, send(Pid, 'hasField:', [count])),
                 ?assertEqual(
                     decline,
                     beamtalk_class_derived_cache:fetch(

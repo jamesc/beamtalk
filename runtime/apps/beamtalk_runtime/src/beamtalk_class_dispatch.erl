@@ -637,20 +637,11 @@ send takes (BT-4252). This is what lets a Beamtalk-bodied protocol method
 that sends to its receiver (`Class>>printString => self name asString`)
 answer when it runs in the class process.
 
-The class-variable reflection sends (`hasField:`, `clearField:`,
+The instance-field reflection sends (`hasField:`, `clearField:`,
 `fieldAt:`, `fieldAt:put:` with a Symbol name: the one decision,
-`beamtalk_object_class:class_var_reflection_op/2`, that the class process
-itself answers ahead of its method lookup) answer in place
-(`class_var_reflection_in_place/1`, BT-4423): the class method running here
-holds this class's variables in the process dictionary, so the
-`beamtalk_class_vars` helpers that a compiled `self fieldAt:` calls answer
-them, exactly as the class process would. This is how a cascade on `self`
-(`self fieldAt: #x put: 1; yourself`) and the class's own name
-(`Counter fieldAt: #x` inside a `Counter` class method) answer: both are
-ordinary sends whose receiver is this class. The receiver is always the
-class whose process this is, never the running method's `ClassSelf`, so an
-inherited method sending to its defining class by name from a subclass's
-process reaches the defining class's own process instead.
+`beamtalk_object_class:class_var_reflection_op/2`) raise the structured
+`does_not_understand` the class process itself answers with (ADR 0153
+decision 7, BT-5155): a class has no fields.
 
 A selector the class itself understands would run one of its own class
 methods re-entrantly, which has no safe route, so it still raises the
@@ -662,11 +653,17 @@ effect.
 -spec class_send_from_own_process(selector(), list()) -> term() | no_return().
 class_send_from_own_process(Selector, Args) ->
     case beamtalk_object_class:class_var_reflection_op(Selector, Args) of
-        none -> class_send_from_own_process_lookup(Selector, Args);
-        Op -> class_var_reflection_in_place(Op)
+        none ->
+            class_send_from_own_process_lookup(Selector, Args);
+        _Op ->
+            %% ADR 0153 decision 7 (BT-5155): the same answer the class
+            %% gen_server gives (`dispatch_class_method/5`).
+            beamtalk_error:raise(
+                beamtalk_object_class:class_field_reflection_dnu(own_class_name(), Selector)
+            )
     end.
 
-%% A send `class_var_reflection_in_place/1` does not answer: the same decision
+%% Any other send: the same decision
 %% the external send makes before skipping the class process
 %% (`class_chain_only_send/3`), so the two cannot disagree.
 -spec class_send_from_own_process_lookup(selector(), list()) -> term() | no_return().
@@ -684,21 +681,13 @@ class_send_from_own_process_lookup(Selector, Args) ->
             handle_class_self_call(Selector)
     end.
 
-%% A class-variable reflection send to this class from inside its own process
-%% (`class_send_from_own_process/2`, BT-4423): the same `beamtalk_class_vars`
-%% helper a compiled class-side `self hasField:` / `clearField:` / `fieldAt:` /
-%% `fieldAt:put:` calls, on this class's object (`class_object_from_pid/1`
-%% reads the name and module from this process's dictionary, no call).
--spec class_var_reflection_in_place(
-    {has | clear | get, atom()} | {put, atom(), term()}
-) -> term().
-class_var_reflection_in_place(Op) ->
-    ClassSelf = beamtalk_class_registry:class_object_from_pid(self()),
-    case Op of
-        {has, Name} -> beamtalk_class_vars:has(ClassSelf, Name);
-        {clear, Name} -> beamtalk_class_vars:clear(ClassSelf, Name);
-        {get, Name} -> beamtalk_class_vars:field_at(ClassSelf, Name);
-        {put, Name, Value} -> beamtalk_class_vars:field_at_put(ClassSelf, Name, Value)
+%% The name of the class whose process this is, from its process dictionary
+%% (`'the class'` if unset), for an error raised in that process.
+-spec own_class_name() -> atom().
+own_class_name() ->
+    case get(beamtalk_class_name) of
+        undefined -> 'the class';
+        ClassName -> ClassName
     end.
 
 -doc """
@@ -717,11 +706,7 @@ handle_class_self_call(Selector) ->
 %% for none).
 -spec handle_class_self_call(selector(), binary()) -> no_return().
 handle_class_self_call(Selector, Note) ->
-    ClassName =
-        case get(beamtalk_class_name) of
-            undefined -> 'the class';
-            CN -> CN
-        end,
+    ClassName = own_class_name(),
     Error0 = beamtalk_error:new(dispatch_error, ClassName, Selector),
     %% Built with atom_to_binary rather than io_lib:format on purpose. A badarg
     %% escaping from *inside* error construction is especially nasty here: the
@@ -1005,9 +990,10 @@ Reads the same metadata the class process's own lookup
 `class_methods` map, runtime-installed ADR 0084 funs included, on every init,
 reload and `put_class_method`) and the inherited chain. It is general: no
 selector is special-cased here. The class process also answers the
-class-variable reflection sends (`hasField:`/`clearField:`) from its own state
-ahead of that lookup, so `beamtalk_object_class:is_class_var_reflection_send/2`
-keeps those on the gen_server path.
+instance-field reflection sends (`hasField:`/`clearField:`/`fieldAt:`/
+`fieldAt:put:`, with `does_not_understand` since ADR 0153) ahead of that
+lookup, so `beamtalk_object_class:is_class_var_reflection_send/2` keeps those
+on the gen_server path.
 
 A class with no metadata row yet (still registering), a pid with no registered
 class, or a dead class process takes the gen_server path too, so registration
@@ -2105,6 +2091,20 @@ in Phase 2+, this must be revisited.
 -spec try_class_chain_fallthrough(#beamtalk_object{}, atom(), list()) ->
     {ok, term()} | not_found.
 try_class_chain_fallthrough(ClassSelf, Selector, Args) ->
+    case beamtalk_object_class:is_class_var_reflection_selector(Selector) of
+        true ->
+            %% ADR 0153 decision 7 (BT-5155): a class object has no fields, so
+            %% the instance-field reflection selectors are not part of its
+            %% protocol, although `Object` (an ancestor of `Class`) defines
+            %% them for instances. Not found here means does-not-understand on
+            %% every route, matching `dispatch_class_method/5`.
+            not_found;
+        false ->
+            class_chain_lookup(ClassSelf, Selector, Args)
+    end.
+
+-spec class_chain_lookup(#beamtalk_object{}, atom(), list()) -> {ok, term()} | not_found.
+class_chain_lookup(ClassSelf, Selector, Args) ->
     %% Class objects have no mutable instance state; use an empty map.
     %% The Class methods receive ClassSelf (with its metaclass tag) as self.
     case beamtalk_dispatch:lookup(Selector, Args, ClassSelf, #{}, 'Class') of

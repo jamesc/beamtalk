@@ -56,29 +56,14 @@ pub(in crate::core_erlang) mod class_var_fn {
 
     pub const GET: ClassVarFn = ClassVarFn("get");
     pub const GET_LATE: ClassVarFn = ClassVarFn("get_late");
-    pub const HAS: ClassVarFn = ClassVarFn("has");
     pub const PUT: ClassVarFn = ClassVarFn("put");
-    pub const CLEAR: ClassVarFn = ClassVarFn("clear");
-    pub const FIELD_AT: ClassVarFn = ClassVarFn("field_at");
-    pub const FIELD_AT_PUT: ClassVarFn = ClassVarFn("field_at_put");
     pub const CAPTURE: ClassVarFn = ClassVarFn("capture");
     pub const SNAPSHOT: ClassVarFn = ClassVarFn("snapshot");
     pub const RESTORE: ClassVarFn = ClassVarFn("restore");
 
     /// Every function above, for the export contract.
     #[cfg(test)]
-    pub const ALL: &[ClassVarFn] = &[
-        GET,
-        GET_LATE,
-        HAS,
-        PUT,
-        CLEAR,
-        FIELD_AT,
-        FIELD_AT_PUT,
-        CAPTURE,
-        SNAPSHOT,
-        RESTORE,
-    ];
+    pub const ALL: &[ClassVarFn] = &[GET, GET_LATE, PUT, CAPTURE, SNAPSHOT, RESTORE];
 }
 
 /// The one emitter of a `call 'beamtalk_class_vars':'<function>'(<receiver>,
@@ -266,27 +251,12 @@ impl CoreErlangGenerator {
             && self.class_var_names().contains(field.name.as_str())
     }
 
-    /// THE predicate for "a reflective class-variable send lowers in place":
-    /// in a class method, a `self` receiver. `self hasField:` lowers to
-    /// `beamtalk_class_vars:has`, `self fieldAt:` to `field_at`,
-    /// `self fieldAt:put:` to `field_at_put` and `self clearField:` to `clear`
-    /// (BT-4421), never a `class_send` back into the class's own `gen_server`.
-    /// The reflection intrinsics call it; the capture walker
-    /// ([`Self::block_reads_class_var`]) applies the same rule to the reads.
-    ///
-    /// A cascade message to `self` and a send to the class's own name stay
-    /// ordinary sends here (BT-4423): the runtime answers them in place when
-    /// they reach the class from inside its own process
-    /// (`beamtalk_class_dispatch:class_send_from_own_process/2`), and by
-    /// message from anywhere else, so they never read a capture and the
-    /// walker rightly does not count them. A class name always means that
-    /// class, never the running method's `ClassSelf`, so lowering it here
-    /// against `ClassSelf`'s key would be wrong in an inherited method.
-    ///
-    /// No method is special-cased (BT-4301): a method of an open stateless
-    /// class may run for a subclass receiver that declares class variables,
-    /// so its `hasField:` is not a constant. In the caller, with no
-    /// class-variable home, `has/2` answers `false` for a stateless chain.
+    /// In a class method, a `self` receiver: the shape of a class-side
+    /// `self hasField:` / `fieldAt:` / `fieldAt:put:` / `clearField:` send.
+    /// Since ADR 0153 decision 7 (BT-5155) the reflection intrinsics decline
+    /// these (`Ok(None)`), so they compile as ordinary class-side self-sends
+    /// and raise `does_not_understand` at run time, as the same send from
+    /// outside the class does.
     pub(super) fn is_class_side_self_reflection(&self, receiver: &Expression) -> bool {
         self.in_class_method() && Self::is_self_receiver(receiver)
     }
