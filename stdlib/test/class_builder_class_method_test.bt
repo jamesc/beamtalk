@@ -65,10 +65,7 @@ TestCase subclass: ClassBuilderClassMethodTest
   testSuperFromSubclassReceiverUsesLiveReceiver =>
     Object classBuilder name: #BT3709SuperVarBase;
       superclass: Object;
-      classMethods: #{
-        #who => [:self | self tag],
-        #tag => [:self | 1]
-      };
+      classMethods: #{#who => [:self | self tag], #tag => [:self | 1]};
       register
     self.parentCls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarBase
     Object classBuilder name: #BT3709SuperVarMid;
