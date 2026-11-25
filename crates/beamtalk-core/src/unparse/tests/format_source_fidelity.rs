@@ -424,6 +424,11 @@ fn comment_around_a_binary_cascade_message_is_kept() {
 #[test]
 fn comment_after_destructure_or_state_default_is_kept() {
     assert_formats_to("{a, b} := // c\n  foo\n", "{a, b} :=  // c\n  foo\n");
+    assert_formats_to("#[a, b] := // c\n  foo\n", "#[a, b] :=  // c\n  foo\n");
+    assert_formats_to(
+        "#{#k => v} := // c\n  foo\n",
+        "#{#k => v} :=  // c\n  foo\n",
+    );
     assert_formats_to(
         "Object subclass: Foo\n  state: x = // c\n    1\n",
         "Object subclass: Foo\n  state: x =  // c\n    1\n",
