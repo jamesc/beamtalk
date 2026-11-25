@@ -494,16 +494,15 @@ fn test_native_facade_cross_module_alias_reference_emits_user_type() {
 }
 
 #[test]
-fn test_native_facade_builder_state_has_no_class_state_entry() {
-    // ADR 0153 Phase 3e (BT-5255): class variables are gone, so the
-    // BuilderState carries no `'classState'` entry at all.
+fn test_native_facade_class_variables_in_builder_state() {
+    // ADR 0056: classState: should appear in BuilderState
     let module = make_native_actor_with_class_methods();
     let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
     let code = result.unwrap();
-    assert_lacks(
-        "BuilderState must not carry a 'classState' entry",
+    assert_has(
+        "BuilderState should include class variables",
         &code,
-        &["'classState'"],
+        &["'classState' => ~{'current' =>"],
     );
 }
 

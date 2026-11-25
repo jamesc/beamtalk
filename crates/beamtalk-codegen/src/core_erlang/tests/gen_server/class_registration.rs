@@ -346,26 +346,37 @@ fn test_late_state_omitted_from_init_state_literal() {
 }
 
 #[test]
-fn test_builder_state_has_no_class_state_entry() {
-    // ADR 0153 Phase 3e (BT-5255): the registration `_BuilderState` no
-    // longer carries the always-empty `'classState'` entry, whether or not
-    // the class declares `classState:` slots.
-    for src in [
-        concat!(
-            "typed Actor subclass: CodexClient\n",
-            "  late classState: current :: CodexClient\n",
-            "  classState: total :: Integer = 0\n\n",
-            "  class launch => self.current\n",
-        ),
-        "Actor subclass: Empty\n  noop => nil\n",
-    ] {
-        let code = codegen_named(src, "codex_client");
-        assert_lacks(
-            "_BuilderState must not carry a 'classState' entry",
-            &code,
-            &["'classState'"],
-        );
-    }
+fn test_late_classstate_omitted_from_classstate_map() {
+    // BT-3548 (ADR 0124 §2/B2): a defaultless `late classState:` slot is
+    // likewise omitted from the class-side `'classState'` map in
+    // `_BuilderState` — the class-side counterpart of the instance-side
+    // omission above.
+    let src = concat!(
+        "typed Actor subclass: CodexClient\n",
+        "  late classState: current :: CodexClient\n",
+        "  classState: total :: Integer = 0\n\n",
+        "  class launch => self.current\n",
+    );
+    let code = codegen_named(src, "codex_client");
+
+    let class_state = code
+        .split("'classState' => ~{")
+        .nth(1)
+        .expect("_BuilderState must emit a 'classState' map literal")
+        .split("}~")
+        .next()
+        .expect("classState map literal must close with }~");
+
+    assert_lacks(
+        "Unassigned `late classState:` slot 'current' must be absent from the classState map entirely. Got classState body",
+        class_state,
+        &["'current'"],
+    );
+    assert_has(
+        "Eager class var 'total' must still get its default in the classState map. Got classState body",
+        class_state,
+        &["'total' => 0"],
+    );
 }
 
 #[test]
