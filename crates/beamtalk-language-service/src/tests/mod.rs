@@ -25,3 +25,4 @@ mod rename;
 mod shape_keys;
 mod simple_service_and_call_hierarchy;
 mod type_hierarchy;
+mod unterminated_literal_recovery;

@@ -318,7 +318,7 @@ pub(crate) fn validate_immutable_mutation(
     }
 
     let type_name = match receiver {
-        Expression::Literal(Literal::Integer(_), _) => "Integer literal",
+        Expression::Literal(Literal::Integer(_) | Literal::BigInteger(_), _) => "Integer literal",
         Expression::Literal(Literal::Float(_), _) => "Float literal",
         Expression::Literal(Literal::String(_), _) => "String literal",
         Expression::Literal(Literal::Symbol(_), _) => "Symbol literal",
@@ -524,7 +524,7 @@ impl MethodValidator for IntegerArgumentValidator {
                 continue;
             };
             match arg {
-                Expression::Literal(Literal::Integer(_), _) => {}
+                Expression::Literal(Literal::Integer(_) | Literal::BigInteger(_), _) => {}
                 Expression::Literal(lit, lit_span) => {
                     let type_name = literal_type_name(lit);
                     diags.push(
@@ -546,7 +546,7 @@ impl MethodValidator for IntegerArgumentValidator {
 
 fn literal_type_name(lit: &Literal) -> &'static str {
     match lit {
-        Literal::Integer(_) => "an integer",
+        Literal::Integer(_) | Literal::BigInteger(_) => "an integer",
         Literal::Float(_) => "a float",
         Literal::String(_) => "a string",
         Literal::Symbol(_) => "a symbol",
@@ -658,7 +658,7 @@ impl MethodValidator for TypeAwareIntegerArgValidator {
 
         let first_arg = &arguments[0];
         match first_arg {
-            Expression::Literal(Literal::Integer(_), _) => vec![],
+            Expression::Literal(Literal::Integer(_) | Literal::BigInteger(_), _) => vec![],
             Expression::Literal(lit, lit_span) => {
                 let type_name = literal_type_name(lit);
                 let selector_name = selector.name();

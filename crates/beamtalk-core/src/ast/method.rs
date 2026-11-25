@@ -71,7 +71,9 @@ impl ConstantValue {
             Literal::String(value) => Some(Self::String(value.clone())),
             Literal::Symbol(value) => Some(Self::Symbol(value.clone())),
             Literal::Character(value) => Some(Self::Character(*value)),
-            Literal::List(_) => None,
+            // A bignum literal has no single-leaf constant row; its sends
+            // are not folded (an optimisation only, never a behaviour change).
+            Literal::BigInteger(_) | Literal::List(_) => None,
         }
     }
 
