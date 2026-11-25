@@ -747,8 +747,8 @@ missing:
    `draw_programs_with_field_writing_conditions` the same corpus with a field
    write first in every loop condition, BT-4002), no class
    state, counted loops, folds, `on:do:` or late-bound sends — and run the generated programs through debug codegen (verifier
-   on), `erlc`, and execution against an oracle (the direct-write, sealed and
-   late-bound spellings of one program must agree). Extend the existing generators
+   on), `erlc`, and execution against an oracle (equivalent
+   spellings of one program must agree). Extend the existing generators
    (`arb_program` in `test_helpers.rs`, the corpus families) with the new shape
    rather than writing a second generator. Cite the run in the PR.
    A differential run against `main` only shows the PR changed nothing; it
