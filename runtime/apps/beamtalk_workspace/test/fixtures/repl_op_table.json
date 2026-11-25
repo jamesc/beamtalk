@@ -19,7 +19,6 @@
   {"capability":"workspace","handler":"beamtalk_repl_ops_load","op":"save-native-source","optional":[],"params":["module","source"]},
   {"capability":"workspace","handler":"beamtalk_repl_ops_load","op":"save-section","optional":["old_name","before_selector","before_side"],"params":["class","new_name"]},
   {"capability":"always","handler":"beamtalk_repl_ops_session","op":"sessions","optional":[],"params":[]},
-  {"capability":"always","handler":"beamtalk_repl_ops_session","op":"clone","optional":[],"params":[]},
   {"capability":"always","handler":"beamtalk_repl_ops_session","op":"close","optional":[],"params":[]},
   {"capability":"always","handler":"beamtalk_repl_ops_session","op":"health","optional":[],"params":[]},
   {"capability":"always","handler":"beamtalk_repl_ops_session","op":"shutdown","optional":[],"params":["cookie"]},

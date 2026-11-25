@@ -43,9 +43,8 @@ the error value itself rather than an assertion.
 """.
 -spec raised_error(fun(() -> term())) -> #beamtalk_error{} | no_error.
 raised_error(Fun) ->
-    %% bt-catcher-audit: converted - Fun runs under protect/1, which restores class variables
     try
-        _ = beamtalk_class_vars:protect(Fun),
+        _ = Fun(),
         no_error
     catch
         error:#{error := #beamtalk_error{} = Err} -> Err

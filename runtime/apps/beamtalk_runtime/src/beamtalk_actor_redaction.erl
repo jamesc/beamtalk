@@ -126,7 +126,6 @@ message and log are all replaced.
 """.
 -spec format_status(module(), map()) -> map().
 format_status(Module, Status) ->
-    %% bt-catcher-audit: not-applicable-no-block - '__beamtalk_secrets'/0 is a generated constant getter
     try Module:'__beamtalk_secrets'() of
         {[], []} ->
             Status;
@@ -234,7 +233,6 @@ actor_module(Info) ->
 
 -spec redact_crash_info(module(), list()) -> list().
 redact_crash_info(Module, Info) ->
-    %% bt-catcher-audit: not-applicable-no-block - '__beamtalk_secrets'/0 is a generated constant getter
     try
         case Module:'__beamtalk_secrets'() of
             {[], []} ->

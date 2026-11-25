@@ -839,3 +839,56 @@ describe("WorkspaceClient reconnect, timeout and close handling", () => {
     await assertion;
   });
 });
+
+// ─── Session and log lifecycle ops (BT-5199) ─────────────────────────────────
+
+describe("session and log lifecycle ops (BT-5199)", () => {
+  it("dispose ends the log subscription and the session before closing the socket", () => {
+    const { client, ws } = makeConnectedClient();
+    const before = ws.sent.length;
+    client.dispose();
+    expect(ws.sent.slice(before).map((m) => m.op)).toEqual(["unsubscribe-logs", "close"]);
+    // The close frame carries no session: it ends this client's own session.
+    expect(ws.sent[ws.sent.length - 1].session).toBeUndefined();
+  });
+
+  it("dispose sends nothing when the client never connected", () => {
+    const { client, ws } = makeClient();
+    ws.receive({ op: "auth-required" });
+    const before = ws.sent.length;
+    client.dispose();
+    expect(ws.sent.length).toBe(before);
+  });
+
+  it("unsubscribeLogs sends unsubscribe-logs", async () => {
+    const { client, ws } = makeConnectedClient();
+    const p = client.unsubscribeLogs();
+    expect(ws.sent[ws.sent.length - 1].op).toBe("unsubscribe-logs");
+    respondTo(ws, { value: "ok" });
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it("closeSession names the session to close", async () => {
+    const { client, ws } = makeConnectedClient();
+    const p = client.closeSession("sess-repl");
+    const req = ws.sent[ws.sent.length - 1];
+    expect(req.op).toBe("close");
+    expect(req.session).toBe("sess-repl");
+    respondTo(ws, { value: "ok" });
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it("killActor sends kill with the actor pid and surfaces a refusal", async () => {
+    const { client, ws } = makeConnectedClient();
+    const p = client.killActor("<0.42.0>");
+    const req = ws.sent[ws.sent.length - 1];
+    expect(req.op).toBe("kill");
+    expect(req.actor).toBe("<0.42.0>");
+    ws.receive({
+      id: req.id,
+      status: ["done", "error"],
+      error: "Cannot kill a system actor: <0.42.0> (TranscriptStream)",
+    });
+    await expect(p).rejects.toThrow(/system actor/);
+  });
+});

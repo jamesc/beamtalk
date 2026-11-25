@@ -641,7 +641,6 @@ Run `Fun`; on any exception other than a `^` non-local-return throw
 -spec protect(fun(() -> T)) -> T when T :: term().
 protect(Fun) ->
     Snap = erlang:get(?CELL),
-    %% bt-catcher-audit: not-applicable-reraises - this is the actor-state protect/1 itself: it restores the cell then re-raises every clause
     try
         Fun()
     catch

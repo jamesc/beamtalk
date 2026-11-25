@@ -717,8 +717,6 @@ handle_call(disable, _From, State) ->
     {reply, ok, drop_sweep(State)};
 handle_call({dispatch_flag, Fun}, _From, State) ->
     %% A raise in `Fun` goes back to the caller, not into this process.
-    %% bt-catcher-audit: not-applicable-no-block - Fun is beamtalk_telemetry's
-    %% flag refresh, never a Beamtalk block
     Reply =
         try Fun() of
             Result -> {ok, Result}
