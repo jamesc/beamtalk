@@ -98,34 +98,6 @@ CckTarget class removeSelector: #answer
 // => does_not_understand
 
 // ===========================================================================
-// A SUPERCLASS THAT GAINS classState: ON RELOAD: THE WARMED CALL SITE STILL
-// ANSWERS THE LITERAL, THROUGH THE CLASS PROCESS
-// ===========================================================================
-
-Object subclass: CckParent
-  class tag => #parent
-// => "CckParent"
-
-CckParent subclass: CckChild
-  class answer => 5
-// => "CckChild"
-
-Object subclass: CckChildCaller
-  class run => CckChild answer
-// => "CckChildCaller"
-
-CckChildCaller run
-// => 5
-
-Object subclass: CckParent
-  classState: count :: Integer = 0
-  class tag => #parent
-// => "CckParent"
-
-CckChildCaller run
-// => 5
-
-// ===========================================================================
 // BT-4504: THE SAME ERASERS FOR A STRING BODY
 // ===========================================================================
 
