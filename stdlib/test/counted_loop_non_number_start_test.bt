@@ -70,13 +70,13 @@ TestCase subclass: CountedLoopNonNumberStartTest
 
   // The start is checked before the limit, as the pure send fails on its
   // receiver first.
-  writingToDoNilStartNilLimit =>
+  writingToDo: start limit: limit =>
     s := 0
-    nil to: nil do: [:i | s := s + i]
+    start to: limit do: [:i | s := s + i]
     s
 
   testToDoNilStartAndNilLimitRaisesDnu =>
-    e := self errorOf: [self writingToDoNilStartNilLimit]
+    e := self errorOf: [self writingToDo: nil limit: nil]
     self assert: e kind equals: #does_not_understand
 
   testWritingToDoIntegerStartStillRuns =>
