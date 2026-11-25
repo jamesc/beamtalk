@@ -20,13 +20,10 @@
 //   - argument type validation (Symbol slot name; class object scope)
 //   - slot validation: a declared slot returns `[]` (no error) while an
 //     undeclared slot name raises (typo guard) — decided by `allFieldNames`
-//     (instance-side) and `allClassVarNames` (class-side, BT-2238), not the
-//     port. This is why class-side validation is now unit-testable: a declared
-//     class-side `classState:` slot validates by declaration, without needing a
-//     port-driven scan hit to attest its existence.
+//     (instance-side), not the port.
 //
 // Fixtures reused (auto-loaded): `Circle` (instance `state: radius`),
-// `InheritedParent` (instance `field: x`, class-side `classState: counter`),
+// `InheritedParent` (instance `field: x`),
 // and `InheritedChild` (subclass of InheritedParent).
 
 TestCase subclass: SystemNavigationFieldsTest
@@ -135,33 +132,12 @@ TestCase subclass: SystemNavigationFieldsTest
 
   // --- class-side scope primitives (BT-2208) ---
   //
-  // The walker also scans `cls class` (the metaclass) so class-side instance
-  // variables (`classState:`) are covered. Behavioural assertions live in the
+  // The walker also scans `cls class` (the metaclass). Behavioural assertions live in the
   // E2E suite; here we only confirm the metaclass scope responds to the
   // iteration primitives the walker relies on.
   testMetaclassScopePrimitivesPresent =>
     self assert: ((InheritedParent class) respondsTo: #'>>')
-    self assert: ((InheritedParent class) methods includes: #counter)
-    cm := (InheritedParent class) >> #counter
+    self assert: ((InheritedParent class) methods includes: #parentTag)
+    cm := (InheritedParent class) >> #parentTag
     self deny: cm isNil
     self deny: cm source isEmpty
-
-  // --- class-side slot validation (BT-2238, declaration-based) ---
-  //
-  // Class-side slots are now reflectable via `allClassVarNames`, so a declared
-  // `classState:` slot validates by declaration — no port-driven class-side
-  // scan hit required. `InheritedParent` declares `classState: counter`.
-  testClassSideSlotIsReflectable =>
-    self assert: (Behaviour includesSelector: #allClassVarNames)
-    self assert: (InheritedParent allClassVarNames includes: #counter)
-
-  // A declared class-side slot returns a List (empty under BUnit, port off)
-  // WITHOUT raising. Before BT-2238 this raised a false typo error because the
-  // port-disabled scan found no class-side hit to attest the slot's existence.
-  testReadersDeclaredClassSlotDoesNotRaise =>
-    result := self.nav fieldReadersOf: #counter in: InheritedParent
-    self assert: result isEmpty
-
-  testWritersDeclaredClassSlotDoesNotRaise =>
-    result := self.nav fieldWritersOf: #counter in: InheritedParent
-    self assert: result isEmpty

@@ -4,10 +4,8 @@
 // BT-3550 (ADR 0124 §9/B5b): `Behaviour>>fieldKinds` / `allFieldKinds` —
 // reflects B5a's `field_kinds` meta (BT-3547) as a `Dictionary(Symbol,
 // Symbol)` of `#eager` | `#late`. Instance side only: `classVarNames` /
-// `allClassVarNames` already own class-side (`classState:`) reflection, so
-// folding class-side kinds into this same dictionary would be ambiguous
-// whenever an instance slot and a class var share a name (ADR 0124 §9's
-// B10 documentation pass records the split).
+// `allClassVarNames` own class-side reflection, which is a separate
+// concern from instance slot kinds.
 //
 // Fixtures: `LateFieldKindsBase` (`late state: proc`, eager `state:
 // nextId`) and `LateFieldKindsSub` (subclass adding its own eager `extra`,

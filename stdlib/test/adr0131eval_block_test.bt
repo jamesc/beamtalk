@@ -105,12 +105,6 @@ TestCase subclass: Adr0131EvalBlockTest
   testAndArm =>
     self assert: #[Adr0131EvalBlockClass andArm, (Adr0131EvalBlockValue new) andArm, (Adr0131EvalBlockActor spawn) andArm] equals: #[#[true, 1], #[true, 1], #[true, 1]]
 
-  testFieldMix =>
-    self assert: #[Adr0131EvalBlockClass fieldMix, (Adr0131EvalBlockActor spawn) fieldMix] equals: #[#[1, 1], #[1, 1]]
-
-  testFieldInDo =>
-    self assert: #[Adr0131EvalBlockClass fieldInDo, (Adr0131EvalBlockActor spawn) fieldInDo] equals: #[#[3, 2], #[3, 2]]
-
   testArgStA =>
     self assert: #[Adr0131EvalBlockClass argStA, (Adr0131EvalBlockValue new) argStA, (Adr0131EvalBlockActor spawn) argStA] equals: #[1, 1, 1]
 
@@ -206,9 +200,6 @@ TestCase subclass: Adr0131EvalBlockTest
 
   testArgCondInBlock =>
     self assert: #[Adr0131EvalBlockClass argCondInBlock, (Adr0131EvalBlockValue new) argCondInBlock, (Adr0131EvalBlockActor spawn) argCondInBlock] equals: #[1, 1, 1]
-
-  testArgFieldMix =>
-    self assert: #[Adr0131EvalBlockClass argFieldMix, (Adr0131EvalBlockActor spawn) argFieldMix] equals: #[#[1, 1], #[1, 1]]
 
   testArgFoldLoopInBlock =>
     self assert: #[Adr0131EvalBlockClass argFoldLoopInBlock, (Adr0131EvalBlockValue new) argFoldLoopInBlock, (Adr0131EvalBlockActor spawn) argFoldLoopInBlock] equals: #[#[12, 3], #[12, 3], #[12, 3]]

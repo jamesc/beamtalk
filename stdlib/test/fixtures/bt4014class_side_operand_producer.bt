@@ -10,7 +10,6 @@
 // See stdlib/test/bt4014class_side_operand_producer_test.bt.
 
 Object subclass: Bt4014ClassSideOperandProducer
-  classState: f = 0
 
   class take: v => v
 
@@ -81,8 +80,3 @@ Object subclass: Bt4014ClassSideOperandProducer
     n := 3
     self take: (self take: ([n > 0] whileTrue: [n := n - 1]))
     n
-
-  class classVarWrite =>
-    n := 3
-    self.f := self take: (n := n + 4)
-    #[self.f, n]

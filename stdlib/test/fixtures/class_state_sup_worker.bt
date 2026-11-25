@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3407: Worker actor for classState visibility test — see
+// BT-3407: Worker actor for the supervisor configuration visibility test — see
 // stdlib/test/fixtures/class_state_sup_app.bt for the Supervisor and full
 // context.
 

@@ -127,56 +127,6 @@ TestCase subclass: Bt4003ResidualsTest
     self assert: Bt4003ResidualsActor spawn andArgInCollect equals: #(#(false, true), 4)
     self assert: Bt4003ResidualsActor spawn deeperOperandInCollect equals: #(#(5, 10), 4)
 
-  // BT-4287 review: the same fold as an operand in every other kind of frame
-  // (plain and producer exception bodies and handlers, `match:` arms, lookup
-  // and `ifNone:` handlers, applied and stored blocks, a `whileTrue:`
-  // condition), in a fold body and at the method root.
-  testStateFoldAsAnOperandInEveryFrameKind =>
-    self assert: Bt4003ResidualsActor spawn oProtectedInDo equals: 4
-    self assert: Bt4003ResidualsClass oProtectedInDo equals: 4
-    self assert: Bt4003ResidualsActor spawn oHandlerInDo equals: 4
-    self assert: Bt4003ResidualsClass oHandlerInDo equals: 4
-    self assert: Bt4003ResidualsActor spawn oEnsureBodyInDo equals: 4
-    self assert: Bt4003ResidualsClass oEnsureBodyInDo equals: 4
-    self assert: Bt4003ResidualsActor spawn oEnsureCleanupInDo equals: 4
-    self assert: Bt4003ResidualsClass oEnsureCleanupInDo equals: 4
-    self assert: Bt4003ResidualsActor spawn oMatchArmInDo equals: 2
-    self assert: Bt4003ResidualsClass oMatchArmInDo equals: 2
-    self assert: Bt4003ResidualsActor spawn oIfAbsentInDo equals: 4
-    self assert: Bt4003ResidualsClass oIfAbsentInDo equals: 4
-    self assert: Bt4003ResidualsActor spawn oIfNoneHandler equals: 2
-    self assert: Bt4003ResidualsClass oIfNoneHandler equals: 2
-    self assert: Bt4003ResidualsActor spawn oValueArgBlockInDo equals: 4
-    self assert: Bt4003ResidualsClass oValueArgBlockInDo equals: 4
-    self assert: Bt4003ResidualsActor spawn oWhileConditionInDo equals: 4
-    self assert: Bt4003ResidualsClass oWhileConditionInDo equals: 4
-    self assert: Bt4003ResidualsActor spawn oRootProtected equals: 2
-    self assert: Bt4003ResidualsClass oRootProtected equals: 2
-    self assert: Bt4003ResidualsActor spawn oRootEnsureBody equals: 2
-    self assert: Bt4003ResidualsClass oRootEnsureBody equals: 2
-    self assert: Bt4003ResidualsActor spawn oRootMatchArm equals: 2
-    self assert: Bt4003ResidualsClass oRootMatchArm equals: 2
-    self assert: Bt4003ResidualsActor spawn oRootIfAbsent equals: 2
-    self assert: Bt4003ResidualsClass oRootIfAbsent equals: 2
-    self assert: Bt4003ResidualsActor spawn oProducerArmInDo equals: #(2, 4)
-    self assert: Bt4003ResidualsClass oProducerArmInDo equals: #(2, 4)
-    self assert: Bt4003ResidualsActor spawn oProducerProtectedInDo equals: #(2, 4)
-    self assert: Bt4003ResidualsClass oProducerProtectedInDo equals: #(2, 4)
-    self assert: Bt4003ResidualsActor spawn oStoredClosureInDo equals: 4
-
-  testClassStateFoldAsAnOperandInAFoldBody =>
-    self assert: Bt4003ResidualsClass injectOperandInDo equals: 4
-    self assert: Bt4003ResidualsClass doReceiverInDo equals: 4
-    self assert: Bt4003ResidualsClass injectArgInCollect equals: #(#(3, 7), 4)
-    self assert: Bt4003ResidualsClass injectArgInInject equals: #(10, 4)
-    self assert: Bt4003ResidualsClass fieldCollectReceiverInDo equals: 4
-    self assert: Bt4003ResidualsClass fieldCollectReceiverInCollect equals: #(#(3, 4), 4)
-    self assert: Bt4003ResidualsClass doElementInTimes equals: 4
-    self assert: Bt4003ResidualsClass injectOperandInArmInDo equals: 4
-    self assert: Bt4003ResidualsClass detectArgInSelect equals: #(#(1, 2, 3), 6)
-    self assert: Bt4003ResidualsClass countedLoopReceiverInDo equals: 4
-    self assert: Bt4003ResidualsClass injectInCascadeInDo equals: 4
-
   testReturnInATupleAccDo =>
     self assert: self vTupleAccDoReturn equals: #(3, 2)
     self assert: Bt4003ResidualsClass tupleAccDoReturn equals: 3
@@ -186,68 +136,6 @@ TestCase subclass: Bt4003ResidualsTest
     b := Bt4003ResidualsActor spawn
     self assert: b tupleAccDoReturnBump equals: #(3, 2)
     self assert: b n equals: 2
-
-  // BT-4310: the fold (3, then 7; `n` advances by 2 each time) at an operand
-  // the sequencing rule leaves to another lowering, at the method root.
-  testStateFoldAtAnUnsequencedOperandAtTheRoot =>
-    self assert: Bt4310UnsequencedActor spawn condRoot equals: #(1, 2)
-    self assert: Bt4310UnsequencedClass condRoot equals: #(1, 2)
-    self assert: Bt4310UnsequencedActor spawn condLeftRoot equals: #(1, 2)
-    self assert: Bt4310UnsequencedClass condLeftRoot equals: #(1, 2)
-    self assert: Bt4310UnsequencedActor spawn andRoot equals: #(true, 2)
-    self assert: Bt4310UnsequencedClass andRoot equals: #(true, 2)
-    self assert: Bt4310UnsequencedActor spawn orRoot equals: #(false, 2)
-    self assert: Bt4310UnsequencedClass orRoot equals: #(false, 2)
-    self assert: Bt4310UnsequencedActor spawn ifNilRoot equals: #(4, 2)
-    self assert: Bt4310UnsequencedClass ifNilRoot equals: #(4, 2)
-    self assert: Bt4310UnsequencedActor spawn keyRoot equals: #(30, 2)
-    self assert: Bt4310UnsequencedClass keyRoot equals: #(30, 2)
-    self assert: Bt4310UnsequencedActor spawn superRoot equals: 302
-    self assert: ([
-      Bt4310UnsequencedActor spawn errorRoot
-    ] on: Error do: [:e | e message]) equals: "3"
-    self assert: ([
-      Bt4310UnsequencedClass errorRoot
-    ] on: Error do: [:e | e message]) equals: "3"
-    self assert: Bt4310UnsequencedActor spawn blockArgRoot equals: #(4, 2)
-    self assert: Bt4310UnsequencedClass blockArgRoot equals: #(4, 2)
-    self assert: Bt4310UnsequencedActor spawn selfBlockRoot equals: #(4, 2)
-    self assert: Bt4310UnsequencedClass selfBlockRoot equals: #(4, 2)
-    self assert: Bt4310UnsequencedActor spawn cascadeRoot equals: #(3, 2)
-    self assert: Bt4310UnsequencedClass cascadeRoot equals: #(3, 2)
-    self assert: (Bt4310UnsequencedActor spawn castRoot: ClosureCellRecorder spawn) equals: #(3, 2)
-    self assert: (Bt4310UnsequencedClass castRoot: ClosureCellRecorder spawn) equals: #(3, 2)
-
-  // BT-4310: the same operands in a `collect:` or `do:` body.
-  testStateFoldAtAnUnsequencedOperandInAFoldBody =>
-    self assert: Bt4310UnsequencedActor spawn condInCollect equals: #(#(0, 1), 4)
-    self assert: Bt4310UnsequencedClass condInCollect equals: #(#(0, 1), 4)
-    self assert: Bt4310UnsequencedActor spawn andInCollect equals: #(#(false, true), 4)
-    self assert: Bt4310UnsequencedActor spawn ifNilInCollect equals: #(#(4, 8), 4)
-    self assert: Bt4310UnsequencedClass ifNilInCollect equals: #(#(4, 8), 4)
-    self assert: Bt4310UnsequencedActor spawn keyInCollect equals: #(#(30, 70), 4)
-    self assert: Bt4310UnsequencedClass keyInCollect equals: #(#(30, 70), 4)
-    self assert: Bt4310UnsequencedActor spawn superInCollect equals: #(#(30, 70), 4)
-    self assert: Bt4310UnsequencedActor spawn blockArgInCollect equals: #(#(4, 8), 4)
-    self assert: Bt4310UnsequencedClass blockArgInCollect equals: #(#(4, 8), 4)
-    self assert: Bt4310UnsequencedActor spawn selfBlockInCollect equals: #(#(4, 8), 4)
-    self assert: Bt4310UnsequencedActor spawn cascadeInCollect equals: #(#(3, 7), 4)
-    self assert: Bt4310UnsequencedClass cascadeInCollect equals: #(#(3, 7), 4)
-    self assert: (Bt4310UnsequencedActor spawn castInDo: ClosureCellRecorder spawn) equals: #(7, 4)
-
-  // BT-4310: in the other frame kinds, and in real closures (which run
-  // against the actor-state cell and answered right before too).
-  testStateFoldAtAnUnsequencedOperandInEveryFrameKind =>
-    self assert: Bt4310UnsequencedActor spawn condInMatchArm equals: #(1, 2)
-    self assert: Bt4310UnsequencedClass condInMatchArm equals: #(1, 2)
-    self assert: Bt4310UnsequencedActor spawn condInMatchArmInDo equals: #(1, 2)
-    self assert: Bt4310UnsequencedActor spawn andInArm equals: #(true, 2)
-    self assert: Bt4310UnsequencedActor spawn keyInEvaluatedBlock equals: #(30, 2)
-    self assert: Bt4310UnsequencedActor spawn ifNilInTimesRepeat equals: #(10, 4)
-    self assert: Bt4310UnsequencedClass ifNilInTimesRepeat equals: #(10, 4)
-    self assert: Bt4310UnsequencedActor spawn condInProtectedBody equals: #(1, 2)
-    self assert: Bt4310UnsequencedActor spawn superInStoredClosure equals: #(30, 2)
-    self assert: Bt4310UnsequencedActor spawn blockArgInLookupHandler equals: #(4, 2)
 
   // BT-4310: the fold in the method's last statement (the reply) and in a `^`
   // value; `n` read back by a later message.

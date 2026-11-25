@@ -48,35 +48,6 @@ TestCase subclass: GuardedStaticCallTest
   testCalleeGetsTheRealClass =>
     self assert: GscClassSelf me equals: GscClassSelf
     self assert: GscClassSelf viaSibling equals: GscClassSelf
-    // Raising the class-variable input turns the guard off: the same static
-    // send now takes the `class_send` fallback through the class process.
-    Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: true
-    guardOff := (Erlang beamtalk_class_shadow_flags) direct_call_ok: #'GscClassSelf class' with: #GscClassSelf
-    viaFallback := GscClassSelf me
-    Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: false
-    self deny: guardOff
-    self assert: viaFallback equals: GscClassSelf
-
-  // BT-4442: the compiled call site reads the per-class key the runtime
-  // writes (`beamtalk_class_shadow_flags:static_calls_key/1`). With the
-  // class's guard off, the miss path declines to the fallback, so a static
-  // send answers a value planted in the runtime-spelled key only if the call
-  // site reads that very key.
-  testCallSiteReadsTheRuntimesPerClassKey =>
-    self assert: GscClassSelf me equals: GscClassSelf
-    mapKey := Erlang beamtalk_class_shadow_flags static_calls_key: #'GscClassSelf class'
-    warmed := Erlang persistent_term get: mapKey with: nil
-    self deny: warmed isNil
-    planted := Erlang maps map: [:k :v | #planted] with: warmed
-    Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: true
-    viaKey := [
-      Erlang persistent_term put: mapKey with: planted
-      GscClassSelf me
-    ] ensure: [
-      Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: false
-    ]
-    self assert: viaKey equals: #planted
-    self assert: GscClassSelf me equals: GscClassSelf
 
   // BT-4756: a class literal reads its reference from the class's static call
   // map under `{class_ref, Tag}`. The compiler and the runtime each spell that
@@ -110,8 +81,8 @@ TestCase subclass: GuardedStaticCallTest
   // call target is the class reference passed as `ClassSelf`. Each
   // test below warms that key with a static send first, then changes what the
   // dynamic path answers and checks the static send answers the same. (The
-  // reload cases, a dropped method and a superclass that gains `classState:`
-  // on reload, need a workspace: see
+  // reload cases, a dropped method and a superclass that changes on reload,
+  // need a workspace: see
   // tests/repl-protocol/cases/guarded_static_call_key.btscript.)
 
   // The class held as a Dynamic value: sends to it compile to `class_send`.
@@ -134,21 +105,6 @@ TestCase subclass: GuardedStaticCallTest
     // Removing it brings the compiled method back, through the static send too.
     self assert: GscWarmPatched answer equals: #compiled
     self assert: (self lookUp: #GscWarmPatched) answer equals: #compiled
-
-  // (d) Once a superclass publishes class variables (the fact a reload that
-  // adds `classState:` publishes), a warmed static send takes the class
-  // process, as the dynamic send does.
-  testSuperclassClassVariablesAfterWarmUpTakeTheClassProcess =>
-    me := Erlang erlang self
-    self assert: GscWarmChild whoRuns equals: me
-    Erlang beamtalk_class_metadata put_class_variables: #GscWarmParent with: true
-    literal := GscWarmChild whoRuns
-    dynamic := (self lookUp: #GscWarmChild) whoRuns
-    Erlang beamtalk_class_metadata put_class_variables: #GscWarmParent with: false
-    self deny: literal =:= me
-    self deny: dynamic =:= me
-    self assert: literal equals: dynamic
-    self assert: GscWarmChild whoRuns equals: me
 
   // (e) After the class process is killed and the class monitor restarts it,
   // the callee's `ClassSelf` holds the new pid. A class object taken before the

@@ -5,8 +5,7 @@
 // `Result tryDo:`. The catch boundary lives in the runtime
 // (`beamtalk_result:tryDo/1` for Tier 1 blocks, `tryDo/2` for Tier 2
 // blocks that write an outer local) and codegen only picks the arity, so the
-// two arities must agree on everything observable: the Result, the
-// class-variable state (`protect/1` restores it on a raise in both) and, for
+// two arities must agree on everything observable: the Result and, for
 // Tier 2, the local-state rule (a write is kept on success and discarded on a
 // raise). The bodies are in fixtures/result_try_do_tier2fixture.bt; the EUnit
 // twin for the native alone is runtime/apps/beamtalk_stdlib/test/
@@ -17,9 +16,9 @@ TestCase subclass: ResultTryDoTier2Test
   testSuccessResultsAgreeAcrossArities =>
     self assert: ResultTryDoTier2Fixture tier2Ok equals: ResultTryDoTier2Fixture tier1Ok
 
-  testSuccessKeepsClassStateInBothArities =>
-    self assert: ResultTryDoTier2Fixture tier1Ok equals: #[true, 7, 11]
-    self assert: ResultTryDoTier2Fixture tier2Ok equals: #[true, 7, 11]
+  testSuccessAnswersTheValueInBothArities =>
+    self assert: ResultTryDoTier2Fixture tier1Ok equals: #[true, 7]
+    self assert: ResultTryDoTier2Fixture tier2Ok equals: #[true, 7]
 
   testSuccessKeepsTheLocalWrite =>
     self assert: ResultTryDoTier2Fixture tier2OkLocal equals: 1
@@ -27,12 +26,8 @@ TestCase subclass: ResultTryDoTier2Test
   testRaiseResultsAgreeAcrossArities =>
     self assert: ResultTryDoTier2Fixture tier2Raise equals: ResultTryDoTier2Fixture tier1Raise
 
-  testRaiseRestoresClassStateInBothArities =>
-    self assert: (ResultTryDoTier2Fixture tier1Raise) last equals: 1
-    self assert: (ResultTryDoTier2Fixture tier2Raise) last equals: 1
-
   testRaiseAnswersAnErrorResultWithTheOriginalException =>
-    self assert: ResultTryDoTier2Fixture tier2Raise equals: #[true, Error, "boom", 1]
+    self assert: ResultTryDoTier2Fixture tier2Raise equals: #[true, Error, "boom"]
 
   testRaiseDiscardsTheLocalWrite =>
     self assert: ResultTryDoTier2Fixture tier2RaiseLocal equals: 0

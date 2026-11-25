@@ -5,8 +5,6 @@
 //
 // Fixtures:
 //   stdlib/test/fixtures/late_field_read_actor.bt          (instance `late state:`)
-//   stdlib/test/fixtures/late_class_var_read_actor.bt      (class-side, never assigned)
-//   stdlib/test/fixtures/late_class_var_assigned_actor.bt  (class-side, assign then read)
 
 TestCase subclass: LateFieldReadTest
 
@@ -82,27 +80,3 @@ TestCase subclass: LateFieldReadTest
     a := LateFieldReadActor spawn
     result := a pumpAndSetProc: 5
     self assert: result equals: 4
-
-  // === Class-side `late classState:` ===
-  testClassReadBeforeAssignRaisesUninitializedStateError =>
-    self should: [
-      LateClassVarReadActor getCurrent
-    ] raise: #uninitialized_state_error
-
-  testClassEagerVarUnaffectedByLateSibling =>
-    self assert: LateClassVarReadActor getTotal equals: 0
-
-  testClassReadAfterAssignAnswersTheValue =>
-    LateClassVarAssignedActor setCurrent: 7
-    self assert: LateClassVarAssignedActor getCurrent equals: 7
-
-  testClassNilForgedViaPerformReadsBackAsAssigned =>
-    // BT-4061, class-side counterpart: forge `nil` past the typed
-    // `setCurrent:` parameter via dynamic `perform:` (which skips static
-    // argument checking), then the class-method read answers it and
-    // `hasField:` agrees the variable is assigned. Sets what it needs, so
-    // it cannot interfere with the assign-then-read test above whatever
-    // order the two run in.
-    LateClassVarAssignedActor perform: #setCurrent: withArguments: #(nil)
-    self assert: (LateClassVarAssignedActor hasField: #current)
-    self assert: LateClassVarAssignedActor getCurrent equals: nil
