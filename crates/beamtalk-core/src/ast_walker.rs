@@ -433,15 +433,26 @@ pub fn expression_depth_with(
     expr: &Expression,
     known: &mut dyn FnMut(&Expression) -> Option<usize>,
 ) -> usize {
+    tree_depth_with(expr, for_each_child, known)
+}
+
+/// The depth of the tree under `root` whose children `children` lists,
+/// measured with an explicit stack; `known` may answer a subtree's depth
+/// instead (see [`expression_depth_with`]).
+fn tree_depth_with<'a, T>(
+    root: &'a T,
+    children: fn(&'a T, &mut dyn FnMut(&'a T)),
+    known: &mut dyn FnMut(&T) -> Option<usize>,
+) -> usize {
     let mut max = 0;
-    let mut stack = vec![(expr, 1usize)];
+    let mut stack = vec![(root, 1usize)];
     while let Some((node, depth)) = stack.pop() {
         if let Some(below) = known(node) {
             max = max.max(depth - 1 + below);
             continue;
         }
         max = max.max(depth);
-        for_each_child(node, &mut |child| stack.push((child, depth + 1)));
+        children(node, &mut |child| stack.push((child, depth + 1)));
     }
     max
 }
@@ -511,17 +522,7 @@ pub fn type_annotation_depth_with(
     ty: &TypeAnnotation,
     known: &mut dyn FnMut(&TypeAnnotation) -> Option<usize>,
 ) -> usize {
-    let mut max = 0;
-    let mut stack = vec![(ty, 1usize)];
-    while let Some((node, depth)) = stack.pop() {
-        if let Some(below) = known(node) {
-            max = max.max(depth - 1 + below);
-            continue;
-        }
-        max = max.max(depth);
-        for_each_type_child(node, &mut |child| stack.push((child, depth + 1)));
-    }
-    max
+    tree_depth_with(ty, for_each_type_child, known)
 }
 
 /// Drops `ty` without recursion — the [`dismantle_expression`] of type

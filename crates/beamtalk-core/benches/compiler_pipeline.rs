@@ -161,9 +161,12 @@ fn bench_parse(c: &mut Criterion) {
     group.finish();
 }
 
-/// Synthetic deeply nested inputs, each within the parser's nesting and
-/// depth limits: every nesting level's result is held to a tree-depth bound,
-/// which must not walk a subtree again once per level around it (BT-5237).
+/// Synthetic deeply nested inputs: every nesting level's result is held to a
+/// tree-depth bound, which must not walk a subtree again once per level
+/// around it (BT-5237). The inputs sit close to the parser's limits (60 of
+/// `MAX_NESTING_DEPTH`'s 64 levels; chains about 480 deep of
+/// `MAX_EXPRESSION_DEPTH`'s 512), so if a limit is lowered,
+/// `assert_no_parse_errors` fails here first: lower the level count with it.
 fn deep_nesting_inputs() -> Vec<(&'static str, String)> {
     let nest = |open: &str, middle: &str, close: &str, levels: usize| {
         open.repeat(levels) + middle + &close.repeat(levels)

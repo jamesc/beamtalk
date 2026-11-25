@@ -473,7 +473,8 @@ fn depth_bound_visits(source: &str) -> (usize, usize) {
     let token_count = tokens.len();
     let mut parser = Parser::new(tokens);
     let _module = parser.parse_module();
-    (parser.depth_walk_visits, token_count)
+    let visits = parser.expression_depths.visits() + parser.type_depths.visits();
+    (visits, token_count)
 }
 
 /// Asserts that the depth bounds over `source` visit each node a constant
@@ -534,17 +535,21 @@ fn depth_bound_does_not_rewalk_spliced_unions() {
 
 #[test]
 fn depth_bound_does_not_rewalk_the_repository_sources() {
-    // Every `.bt` file in the repository. Under test the parser also holds
-    // each level's ledger depth equal to a full walk of its tree
+    // Every `.bt` file in the repository. Debug builds also hold each
+    // level's ledger depth equal to a full walk of its tree
     // (`Parser::bound_expression_depth`), so this checks both that the
     // ledger recognises the real code's subtrees and that it answers their
-    // true depths.
+    // true depths. Symlinks, build output and hidden directories are skipped.
     fn bt_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
         for entry in std::fs::read_dir(dir).expect("read source directory") {
-            let path = entry.expect("directory entry").path();
-            if path.is_dir() {
+            let entry = entry.expect("directory entry");
+            let file_type = entry.file_type().expect("file type");
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if file_type.is_dir() && !name.starts_with('.') && name != "_build" {
                 bt_files(&path, out);
-            } else if path.extension().is_some_and(|ext| ext == "bt") {
+            } else if file_type.is_file() && path.extension().is_some_and(|ext| ext == "bt") {
                 out.push(path);
             }
         }

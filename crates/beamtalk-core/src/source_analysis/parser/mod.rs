@@ -1162,10 +1162,6 @@ pub(super) struct Parser {
     /// [`Self::expression_depths`] for type annotations
     /// ([`Self::bound_type_depth`]).
     type_depths: DepthLedger<TypeAnnotation>,
-    /// How many nodes the depth bounds have visited, so tests can hold the
-    /// bounds to one visit per node (BT-5237).
-    #[cfg(test)]
-    depth_walk_visits: usize,
     /// Current recursion depth of the type-annotation lookahead skippers,
     /// which take `&self` (see `skip_type_operand`).
     pub(super) lookahead_depth: std::cell::Cell<usize>,
@@ -1276,8 +1272,6 @@ impl Parser {
             nesting_depth: 0,
             expression_depths: DepthLedger::default(),
             type_depths: DepthLedger::default(),
-            #[cfg(test)]
-            depth_walk_visits: 0,
             lookahead_depth: std::cell::Cell::new(0),
             unattached_doc_comment_indices,
             attached_doc_comment_positions: None,
@@ -1964,21 +1958,15 @@ impl Parser {
     /// level around it. Each node is visited by the bound of the level that
     /// built it (and looked up once more as the root of a measured subtree),
     /// rather than once per level around it: O(n) visits over a parse, not
-    /// O(n × depth) (BT-5237). Under test, the result is also checked
-    /// against a full walk.
+    /// O(n × depth) (BT-5237). Debug builds also check the result against a
+    /// full walk.
     fn bound_expression_depth(&mut self, expr: Expression, mark: usize) -> Expression {
-        let frame = self.expression_depths.frame(mark);
-        #[cfg(test)]
-        let visits = &mut self.depth_walk_visits;
-        let depth = crate::ast_walker::expression_depth_with(&expr, &mut |node| {
-            #[cfg(test)]
-            {
-                *visits += 1;
-            }
-            frame.depth_of(node.span(), std::mem::discriminant(node))
-        });
-        #[cfg(test)]
-        assert_eq!(
+        let depth = self.expression_depths.frame(mark).measure(
+            &expr,
+            Expression::span,
+            crate::ast_walker::expression_depth_with,
+        );
+        debug_assert_eq!(
             depth,
             crate::ast_walker::expression_depth(&expr),
             "recorded subtree depths disagree with a full walk of the expression at {:?}",
@@ -2029,17 +2017,13 @@ impl Parser {
     /// grouped union, `(A | B) | C`, is spliced into the union around it,
     /// so the enclosing level finds the members rather than this union.
     fn bound_type_depth(&mut self, ty: TypeAnnotation, mark: usize) -> TypeAnnotation {
-        let frame = self.type_depths.frame(mark);
-        #[cfg(test)]
-        let visits = &mut self.depth_walk_visits;
+        let mut frame = self.type_depths.frame(mark);
         let mut measure = |node: &TypeAnnotation| {
-            let depth = crate::ast_walker::type_annotation_depth_with(node, &mut |node| {
-                #[cfg(test)]
-                {
-                    *visits += 1;
-                }
-                frame.depth_of(node.span(), std::mem::discriminant(node))
-            });
+            let depth = frame.measure(
+                node,
+                TypeAnnotation::span,
+                crate::ast_walker::type_annotation_depth_with,
+            );
             (node.span(), std::mem::discriminant(node), depth)
         };
         let (members, depth) = if let TypeAnnotation::Union { types, .. } = &ty {
@@ -2053,8 +2037,7 @@ impl Parser {
         } else {
             (Vec::new(), measure(&ty).2)
         };
-        #[cfg(test)]
-        assert_eq!(
+        debug_assert_eq!(
             depth,
             crate::ast_walker::type_annotation_depth(&ty),
             "recorded subtree depths disagree with a full walk of the type annotation at {:?}",

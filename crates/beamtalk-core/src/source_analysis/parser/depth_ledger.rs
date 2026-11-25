@@ -20,14 +20,19 @@
 //! and a grouped union is spliced into the union around it, so a union's
 //! members are recorded alongside it ([`DepthLedger::close_with`]).
 //!
-//! The parser's own unit tests hold every recorded depth equal to a full
-//! walk (`Parser::bound_expression_depth`) over every `.bt` file in the
-//! repository and generated input; `nesting_guard_tests` hold the visits to
-//! a small multiple of the token count.
+//! Debug builds assert every measured depth equal to a full walk
+//! (`Parser::bound_expression_depth`), so every debug test — over every
+//! `.bt` file in the repository and generated input — checks the ledger;
+//! `nesting_guard_tests` hold the visits to a small multiple of the token
+//! count.
 
 use std::mem::Discriminant;
 
 use crate::source_analysis::Span;
+
+/// A depth walk that asks a callback for each node's known subtree depth:
+/// [`crate::ast_walker::expression_depth_with`] or its type counterpart.
+type DepthWalk<T> = fn(&T, &mut dyn FnMut(&T) -> Option<usize>) -> usize;
 
 /// One measured tree: its span, its root's kind, and its depth.
 struct Known<T> {
@@ -41,12 +46,18 @@ struct Known<T> {
 /// stack: each open level owns the entries from its [`Self::open`] mark up.
 pub(super) struct DepthLedger<T> {
     entries: Vec<Known<T>>,
+    /// How many nodes [`Frame::measure`] has visited, so tests can hold the
+    /// bound to one visit per node.
+    #[cfg(test)]
+    visits: usize,
 }
 
 impl<T> Default for DepthLedger<T> {
     fn default() -> Self {
         Self {
             entries: Vec::new(),
+            #[cfg(test)]
+            visits: 0,
         }
     }
 }
@@ -58,11 +69,21 @@ impl<T> DepthLedger<T> {
         self.entries.len()
     }
 
-    /// The entries of the level opened at `mark`, sorted for [`Frame::depth_of`].
+    /// The entries of the level opened at `mark`, sorted for [`Frame::measure`].
     pub(super) fn frame(&mut self, mark: usize) -> Frame<'_, T> {
         let entries = &mut self.entries[mark..];
         entries.sort_unstable_by_key(|known| (known.start, known.end));
-        Frame { entries }
+        Frame {
+            entries,
+            #[cfg(test)]
+            visits: &mut self.visits,
+        }
+    }
+
+    /// How many nodes the bound has visited (see [`Self::visits`]).
+    #[cfg(test)]
+    pub(super) fn visits(&self) -> usize {
+        self.visits
     }
 
     /// Closes the level opened at `mark`, recording the depth of the tree it
@@ -111,11 +132,31 @@ impl<T> DepthLedger<T> {
 /// The measured trees of one level, sorted by span.
 pub(super) struct Frame<'a, T> {
     entries: &'a [Known<T>],
+    #[cfg(test)]
+    visits: &'a mut usize,
 }
 
 impl<T> Frame<'_, T> {
+    /// The depth of `tree` by `walk`, taking the recorded depth of each
+    /// measured subtree it reaches (found by `span_of` and node kind)
+    /// instead of walking it.
+    pub(super) fn measure(
+        &mut self,
+        tree: &T,
+        span_of: fn(&T) -> Span,
+        walk: DepthWalk<T>,
+    ) -> usize {
+        walk(tree, &mut |node| {
+            #[cfg(test)]
+            {
+                *self.visits += 1;
+            }
+            self.depth_of(span_of(node), std::mem::discriminant(node))
+        })
+    }
+
     /// The depth of the measured tree with this span and root kind, if any.
-    pub(super) fn depth_of(&self, span: Span, kind: Discriminant<T>) -> Option<usize> {
+    fn depth_of(&self, span: Span, kind: Discriminant<T>) -> Option<usize> {
         let key = (span.start(), span.end());
         let from = self
             .entries
