@@ -69,7 +69,7 @@ TestCase subclass: CountedLoopNilLimitTest
     self assert: writing selector equals: pure selector
     self assert: writing message equals: pure message
 
-  // BT-5175: a Float step works on both paths, with the completes.
+  // BT-5175: a Float step works on both paths, and the loop completes.
   pureFloatStep =>
     1
       to: 3

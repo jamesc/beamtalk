@@ -353,7 +353,7 @@ sealed typed Number subclass: Integer
   /// A step of 0 (or 0.0) raises, and a step or limit that is not a number raises a
   /// `TypeError`. A literal block that writes an outer local is inlined
   /// by the compiler as a counted loop; that path raises the same error (BT-5098).
-  to: end :: Integer by: step :: Integer do: block :: Block(Integer, Object) -> Nil =>
+  to: end :: Integer by: step :: Number do: block :: Block(Integer, Object) -> Nil =>
     (step isKindOf: Number) ifFalse: [
       ^TypeError signal: "Interval step must be a number"
     ]
