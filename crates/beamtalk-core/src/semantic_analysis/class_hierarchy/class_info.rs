@@ -582,29 +582,6 @@ impl ClassInfo {
         PROCESS_BOUND_CLASS_SELECTORS.contains(&selector)
     }
 
-    /// Whether `selector` is an instance-field reflection selector
-    /// (`hasField:`, `clearField:`, `fieldAt:`, `fieldAt:put:`). A class has
-    /// no fields (ADR 0153 decision 7, BT-5155): the runtime's `Class`
-    /// protocol refuses these for a class object that defines no class
-    /// method of that name (`beamtalk_object_class:is_class_var_reflection_selector/1`,
-    /// read by `try_class_chain_fallthrough/3`), and a class method of that
-    /// name answers like any other. Both sides are pinned to
-    /// `runtime/apps/beamtalk_runtime/test/fixtures/class_var_reflection_selectors_conformance.json`;
-    /// the type checker is to model the refusal (BT-5241).
-    #[must_use]
-    pub fn is_class_var_reflection_selector(selector: &str) -> bool {
-        use crate::ast::WellKnownSelector;
-        matches!(
-            WellKnownSelector::from_name(selector),
-            Some(
-                WellKnownSelector::HasField
-                    | WellKnownSelector::ClearField
-                    | WellKnownSelector::FieldAt
-                    | WellKnownSelector::FieldAtPut
-            )
-        )
-    }
-
     /// The process-bound class-side selectors (ADR 0142 §1 rule 3), in a fixed
     /// order: see [`PROCESS_BOUND_CLASS_SELECTORS`]. Codegen emits them into
     /// every class's `__beamtalk_meta/0`.

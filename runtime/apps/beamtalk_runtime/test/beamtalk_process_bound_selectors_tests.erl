@@ -154,7 +154,6 @@ execution_mode_has_one_input() ->
         superclass => none,
         module => beamtalk_class_dispatch_test_helper,
         class_methods => Methods,
-        class_state => #{count => 0},
         meta => #{process_bound_class_selectors => Generated}
     }),
     try
