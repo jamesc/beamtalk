@@ -110,7 +110,7 @@ Choosing:
 - Stateless helpers / FFI namespace → `Object` with class methods
 - A long-running service → `Supervisor`, started with `beamtalk run` (see `[application]` in `beamtalk.toml`)
 
-Class variables shared by all instances are declared with `classState:`.
+A class holds no state of its own (there is no `classState:`). Use an Actor (or `AtomicCounter`, `Ets`) for shared mutable state, a class method for a constant, and `PersistentTerm` for a value that is expensive to build.
 
 ## Development Workflow
 

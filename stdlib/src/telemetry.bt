@@ -103,12 +103,8 @@ sealed typed Object subclass: Telemetry native: beamtalk_telemetry
   /// itself (say, a send to an actor from a handler on actor dispatch events)
   /// skips it rather than recursing.
   ///
-  /// Class variables follow ADR 0130: run away from its home class, the block
-  /// reads a snapshot and a write raises `class_state_unreachable`; run at
-  /// home (an event emitted by its own class's class method), its writes are
-  /// live and are discarded if the handler raises. The block belongs to the
-  /// code that created it: after redefining that class, attach the handler
-  /// again.
+  /// The block belongs to the code that created it: after redefining the
+  /// class that created it, attach the handler again.
   ///
   /// ## Examples
   /// ```beamtalk

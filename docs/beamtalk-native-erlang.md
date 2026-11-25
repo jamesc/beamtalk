@@ -348,7 +348,7 @@ terminate(_Reason, #{conn := Conn}) ->
 
 **Use `{ok, Result}` reply wrapping.** Replies must be `{ok, Value}` or `{error, Reason}`. The `DirectValue` fallback exists for legacy modules but new native actors must use wrapped replies to avoid ambiguity with error tuples.
 
-**No `state:` declarations.** Native actors cannot declare `state:` fields — all instance state lives in the gen_server. `classState:` is permitted for class-level state (e.g., a singleton reference).
+**No `state:` declarations.** Native actors cannot declare `state:` fields — all instance state lives in the gen_server. A class has no state of its own either (ADR 0153): keep a singleton reference in a named Actor, not in the class.
 
 ```beamtalk
 // This is a compile error:
@@ -453,11 +453,11 @@ request(Method, Url, Headers, TimeoutMs) ->
 
 ### Where a class-side send runs
 
-A class-side send from Erlang follows the same rule as one from Beamtalk (ADR 0142). It runs **in the caller**, the native code's own process, when neither the class nor any ancestor declares class variables, nothing shadows the class method (no runtime-installed method), and the selector is not process-bound (`new`, `new:`, `spawn`, `spawnWith:`, `startLink`, ...). There is no class-process hop and no timeout: a 30 s HTTP request takes 30 s.
+A class-side send from Erlang follows the same rule as one from Beamtalk (ADR 0142). It runs **in the caller**, the native code's own process, when nothing shadows the class method (no runtime-installed method) and the selector is not process-bound (`new`, `new:`, `spawn`, `spawnWith:`, `startLink`, ...). There is no class-process hop and no timeout: a 30 s HTTP request takes 30 s.
 
 Otherwise the class method runs **in the class's process** and the caller waits for the answer. `send/3` waits up to the default class-method call timeout, 60 seconds. For a method that may take longer, use `send/4`: its `Timeout` (milliseconds or `infinity`) replaces the default. Running out of it raises a structured `timeout` error (`#beamtalk_error{kind = timeout}`). `send/4`'s `Timeout` also bounds the wait for an actor instance's answer. It does not limit a send that runs in the caller, or a send to a value: there is no other process to wait for.
 
-Which path a send takes can change at run time: redefining the class with class variables moves its class methods into the class process. If a long call must not time out, pass a `send/4` timeout either way.
+If a long call must not time out, pass a `send/4` timeout either way.
 
 ### Values at the boundary
 

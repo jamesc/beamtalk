@@ -1,7 +1,9 @@
 # ADR 0130: Class Variables Live in the Class Process During an Invocation
 
 ## Status
-Implemented (2026-10-06); accepted 2026-10-02.
+Superseded by [ADR 0153](0153-remove-class-variables.md) (2026-11-25); was Implemented (2026-10-06); accepted 2026-10-02.
+
+> **Superseded by [ADR 0153](0153-remove-class-variables.md) (2026-11-25).** Class variables are removed; the class process no longer holds state for an invocation, `classState:` is a compile error, and the runtime machinery behind class variables (`beamtalk_class_vars` and its calling convention) is deleted in the ADR 0153 Phase 3 issues.
 
 > **Superseded in part by [ADR 0152](0152-remove-cross-file-extension-methods.md) (2026-11-24), class-side extension fun shape.** The class-side extension fun shape this ADR amends (`fun(Args, ClassSelf) -> Result`) and `invoke_class_extension/7` no longer apply once that ADR's runtime phase removes class-side extensions. Class-method and ClassBuilder fun arity, and the rest of this ADR, are unchanged.
 

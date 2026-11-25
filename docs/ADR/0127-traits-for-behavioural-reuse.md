@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-09-28) — accepted 2026-09-23; v1 (Phases 0–6) shipped under Epic BT-3586. Of the post-v1 items, browse grouping (BT-3654) and LSP hover provenance (BT-3655) are done; protocol composition, `aliasing:`, class-side provisions and protocol-wide rename remain in BT-3595 (Backlog).
 
+> **Amended by [ADR 0153](0153-remove-class-variables.md) (2026-11-25), trait bodies and `classState:`.** The rule that a trait body may not declare `classState:` is moot: `classState:` is a compile error everywhere.
+
 > **Superseded in part by [ADR 0152](0152-remove-cross-file-extension-methods.md) (2026-11-24), foreign extensions.** §3a's "foreign extensions count as inherited" and the extension-conflict row of §12 no longer apply: there are no foreign extensions to inherit or conflict with, and the folded same-file `>>` is part of the class body. The rest of this ADR, including the live `P >> sel` patch of §11, is unchanged.
 
 Closes the question ADR 0005 left open as Q9 ("Mixins/traits: deferred to a
