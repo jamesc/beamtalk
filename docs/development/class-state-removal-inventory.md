@@ -677,7 +677,9 @@ A string element is `{beamtalk_string, <<...>>}`, which is a literal too. Beamta
 
 ### `lint-class-var-catchers`, and the `protect/1` call-site list
 
-just lint-class-var-catchers (deleted by BT-5159; on BT-5159's base it reported 86 sites, 9 of them `converted`, matching this list) on this commit: *"self-test: 4 fixture(s) behave as expected"* and *"Class-variable catcher audit: 89 catching site(s) carry a bt-catcher-audit marker."*
+`lint-class-var-catchers` (since deleted by BT-5159) on this commit: *"self-test: 4 fixture(s) behave as expected"* and *"Class-variable catcher audit: 89 catching site(s) carry a bt-catcher-audit marker."*
+
+On BT-5159's base, after earlier removals, the lint reported 86 marked sites, 9 of them `converted`. Those 9 are the `protect/1` sites below except telemetry (which carries no marker; grep finds it), the two proxy sites, and `protect/1` itself.
 
 Call sites of the class-variable API, from `grep -rnE 'beamtalk_class_vars:(snapshot|restore|with_snapshot|protect)\(' runtime/apps/*/src` (comments excluded):
 
