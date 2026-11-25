@@ -45,11 +45,11 @@ A leaf module: it calls only OTP.
     path_inside/2,
     relative_parts/2,
     temp_path/1,
-    write_temp/2,
+    write_temp/2, write_temp/3,
     ensure_private_dir/1,
     staging_dir/1,
     is_staging_dir_name/1,
-    atomic_write/3,
+    atomic_write/3, atomic_write/4,
     sweep_stale_temps/1, sweep_stale_temps/2,
     sweep_stale_temps_in/1, sweep_stale_temps_in/2,
     sweep_stale_staging_dirs/1
@@ -188,7 +188,7 @@ comparable_parts(Path, _OsType) ->
 A fresh temp path next to `Path`: `<Path>.bt-staging.<unique>.tmp`. Unique per
 call, so concurrent writers to the same `Path` never share a temp file, and
 unpredictable (random suffix), so another local user cannot pre-create the
-name. `write_temp/2` also creates it exclusively with mode 0600.
+name. `write_temp/2` also creates it exclusively.
 """.
 -spec temp_path(string()) -> string().
 temp_path(Path) ->
@@ -223,9 +223,25 @@ temp file is deleted.
 """.
 -spec write_temp(string(), iodata()) -> {ok, string()} | {error, {write, term()}}.
 write_temp(Path, Data) ->
+    write_temp(Path, Data, #{}).
+
+-doc """
+`write_temp/2` with options. `#{private => true}` makes the temp file 0600
+(workspace state such as the port file and `metadata.json`); otherwise the
+temp file takes the mode of an existing `Path`, or the default umask for a new
+one, so staging a user's source file never changes its permissions.
+""".
+-spec write_temp(string(), iodata(), #{private => boolean()}) ->
+    {ok, string()} | {error, {write, term()}}.
+write_temp(Path, Data, Opts) ->
     Tmp = temp_path(Path),
-    case write_synced(Tmp, Data) of
+    Private = maps:get(private, Opts, false),
+    case write_synced(Tmp, Data, Private) of
         ok ->
+            case Private of
+                true -> ok;
+                false -> keep_mode(Path, Tmp)
+            end,
             {ok, Tmp};
         {error, Reason} ->
             _ = file:delete(Tmp),
@@ -237,14 +253,14 @@ write_temp(Path, Data) ->
 %% power loss the new name can point at a file whose data never reached disk,
 %% i.e. an empty `metadata.json` or source body. Syncing the temp file first
 %% closes that. The directory entry itself is not synced; see the moduledoc.
--spec write_synced(string(), iodata()) -> ok | {error, term()}.
-write_synced(Tmp, Data) ->
+-spec write_synced(string(), iodata(), boolean()) -> ok | {error, term()}.
+write_synced(Tmp, Data, Private) ->
     %% `exclusive`: never open (or follow a symlink at) a name someone else
     %% pre-created. The mode is tightened to 0600 before any data is written.
     case file:open(Tmp, [write, binary, raw, exclusive]) of
         {ok, Fd} ->
             Result =
-                case file:change_mode(Tmp, 8#600) of
+                case private_mode(Tmp, Private) of
                     ok ->
                         case file:write(Fd, Data) of
                             ok -> file:sync(Fd);
@@ -278,10 +294,17 @@ Errors are tagged with the step that failed: `{write, Reason}`,
 -spec atomic_write(string(), iodata(), binary() | undefined) ->
     ok | {error, {write | recheck | rename, term()}}.
 atomic_write(Path, Data, ExpectedCurrent) ->
-    case write_temp(Path, Data) of
+    atomic_write(Path, Data, ExpectedCurrent, #{}).
+
+-doc "`atomic_write/3` with `write_temp/3` options (`private => true` for state files).".
+-spec atomic_write(string(), iodata(), binary() | undefined, #{private => boolean()}) ->
+    ok | {error, {write | recheck | rename, term()}}.
+atomic_write(Path, Data, ExpectedCurrent, Opts) ->
+    case write_temp(Path, Data, Opts) of
         {ok, Tmp} ->
             case recheck_unchanged(Path, ExpectedCurrent) of
                 ok ->
+                    %% A rewrite keeps the target's mode, even a private one.
                     keep_mode(Path, Tmp),
                     case file:rename(Tmp, Path) of
                         ok ->
@@ -297,6 +320,10 @@ atomic_write(Path, Data, ExpectedCurrent) ->
         {error, _} = WriteErr ->
             WriteErr
     end.
+
+-spec private_mode(string(), boolean()) -> ok | {error, term()}.
+private_mode(Tmp, true) -> file:change_mode(Tmp, 8#600);
+private_mode(_Tmp, false) -> ok.
 
 %% Rewriting an existing file keeps its mode (a 0600 `metadata.json` stays
 %% 0600, a file the user made group-readable stays so); a new file keeps the

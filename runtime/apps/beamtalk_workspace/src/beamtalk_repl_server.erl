@@ -224,7 +224,7 @@ write_port_file_to_home(WorkspaceId, Port, Nonce) ->
                     %% reads a partially-written port file (file:write_file/2 is
                     %% open→write→close, not atomic on its own).
                     %% `write_temp/2`: exclusive create, random name, mode 0600.
-                    case beamtalk_workspace_file:write_temp(PortFilePath, Content) of
+                    case beamtalk_workspace_file:write_temp(PortFilePath, Content, #{private => true}) of
                         {ok, TmpPath} ->
                             case file:rename(TmpPath, PortFilePath) of
                                 ok ->

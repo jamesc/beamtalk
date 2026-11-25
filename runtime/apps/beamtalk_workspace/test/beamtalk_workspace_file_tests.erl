@@ -191,7 +191,7 @@ write_temp_uses_a_fresh_name_per_call_test() ->
 write_temp_is_private_and_exclusive_test() ->
     with_dir(fun(Dir) ->
         Path = filename:join(Dir, "target.bt"),
-        {ok, T} = beamtalk_workspace_file:write_temp(Path, <<"x">>),
+        {ok, T} = beamtalk_workspace_file:write_temp(Path, <<"x">>, #{private => true}),
         {ok, #file_info{mode = Mode}} = file:read_file_info(T),
         ?assertEqual(8#600, Mode band 8#777),
         %% Unpredictable: a random suffix beyond the counter.
@@ -207,9 +207,13 @@ atomic_write_keeps_existing_mode_test() ->
         {ok, #file_info{mode = Mode}} = file:read_file_info(Path),
         ?assertEqual(8#640, Mode band 8#777),
         New = filename:join(Dir, "fresh.bt"),
-        ok = beamtalk_workspace_file:atomic_write(New, <<"n">>, undefined),
+        ok = beamtalk_workspace_file:atomic_write(New, <<"n">>, undefined, #{private => true}),
         {ok, #file_info{mode = M2}} = file:read_file_info(New),
-        ?assertEqual(8#600, M2 band 8#777)
+        ?assertEqual(8#600, M2 band 8#777),
+        %% A staged (flush-style) temp for an existing file takes its mode.
+        {ok, T} = beamtalk_workspace_file:write_temp(Path, <<"s">>),
+        {ok, #file_info{mode = M3}} = file:read_file_info(T),
+        ?assertEqual(8#640, M3 band 8#777)
     end).
 
 ensure_private_dir_is_0700_test() ->
