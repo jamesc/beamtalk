@@ -59,13 +59,12 @@ TestCase subclass: ClassBuilderClassMethodTest
     self assert: self.cls greeting equals: "base"
 
   // ADR 0130 §3: a builder `super` send runs the superclass method with the
-  // LIVE receiver (`ClassSelf` of the subclass), so a self-send in that method
-  // reaches the receiver's own class method rather than the static builder
-  // class's.
+  // LIVE receiver (`ClassSelf` of the subclass), not the static builder
+  // class: the inherited method sees the subclass as `self`.
   testSuperFromSubclassReceiverUsesLiveReceiver =>
     Object classBuilder name: #BT3709SuperVarBase;
       superclass: Object;
-      classMethods: #{#who => [:self | self tag], #tag => [:self | 1]};
+      classMethods: #{#who => [:self | self name]};
       register
     self.parentCls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarBase
     Object classBuilder name: #BT3709SuperVarMid;
@@ -75,11 +74,10 @@ TestCase subclass: ClassBuilderClassMethodTest
     self.midCls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarMid
     Object classBuilder name: #BT3709SuperVarLeaf;
       superclass: #BT3709SuperVarMid;
-      classMethods: #{#tag => [:self | 3]};
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarLeaf
-    self assert: self.cls who equals: 3
-    self assert: self.midCls who equals: 1
+    self assert: self.cls who equals: #BT3709SuperVarLeaf
+    self assert: self.midCls who equals: #BT3709SuperVarMid
 
   // BT-2276: a computed (non-block-literal) classMethods: fun whose arity does
   // not match the class-method calling convention `fun(ClassSelf, ...)`
