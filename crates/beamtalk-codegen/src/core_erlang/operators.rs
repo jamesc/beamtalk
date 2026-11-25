@@ -389,8 +389,10 @@ impl CoreErlangGenerator {
                 erlang_op,
                 left_code,
                 right_code,
-                right_is_statically_numeric,
-                right_tested,
+                RightOperand {
+                    statically_numeric: right_is_statically_numeric,
+                    tested: right_tested,
+                },
             );
             // BT-4279: when the guard's true arm is the bare BIF (it runs no
             // user code) and the operands needed no prelude, the bracket
@@ -639,9 +641,12 @@ impl CoreErlangGenerator {
         erlang_op: &'static str,
         left_code: Document<'static>,
         right_code: Document<'static>,
-        right_is_statically_numeric: bool,
-        right_tested: bool,
+        right: RightOperand,
     ) -> GuardedOpParts {
+        let RightOperand {
+            statically_numeric: right_is_statically_numeric,
+            tested: right_tested,
+        } = right;
         let left_var = self.fresh_temp_var("BinLeft");
         let right_var = self.fresh_temp_var("BinRight");
         let bindings = docvec![
@@ -867,6 +872,16 @@ impl CoreErlangGenerator {
             form::Layout::Flat,
         )
     }
+}
+
+/// What [`CoreErlangGenerator::guarded_op_doc`] knows of the right operand.
+#[derive(Clone, Copy)]
+struct RightOperand {
+    /// Arithmetic: numeric by literal or declaration (ADR 0116, no coercion).
+    statically_numeric: bool,
+    /// Ordering comparison: not proven numeric, so tested (ADR 0116
+    /// § Addendum, BT-5176).
+    tested: bool,
 }
 
 /// The pieces of a guarded operator ([`CoreErlangGenerator::guarded_op_doc`]):

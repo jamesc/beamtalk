@@ -28,7 +28,6 @@
 //! else send the hook; a `String` on the left term-orders; any other receiver
 //! dispatches the operator.
 
-use super::codegen;
 use super::value_type_fold_family_corpus::{core_module_name, run_erlang_probes};
 
 /// A value at run time, as the probes pass it and the reference reads it.
@@ -79,14 +78,6 @@ impl V {
         }
     }
 }
-
-const NON_NUMBERS: [V; 5] = [
-    V::Atom("nil"),
-    V::Atom("sym"),
-    V::Str("str"),
-    V::List,
-    V::Atom("true"),
-];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Op {

@@ -18,36 +18,52 @@
 TestCase subclass: NumberComparisonArgTest
 
   // ── Receivers, one helper per operator ───────────────────────────────────
-
   litLt: x => 5 < x
+
   litLe: x => 5 <= x
+
   litGt: x => 5 > x
+
   litGe: x => 5 >= x
 
   intLt: n :: Integer with: x => n < x
+
   intLe: n :: Integer with: x => n <= x
+
   intGt: n :: Integer with: x => n > x
+
   intGe: n :: Integer with: x => n >= x
 
   lt: a with: x => a < x
+
   le: a with: x => a <= x
+
   gt: a with: x => a > x
+
   ge: a with: x => a >= x
 
   floatLt: x => 1.5 < x
+
   floatLe: x => 1.5 <= x
+
   floatGt: x => 1.5 > x
+
   floatGe: x => 1.5 >= x
 
   typedFloatLt: f :: Float with: x => f < x
+
   typedFloatGe: f :: Float with: x => f >= x
 
   charLt: x => $m < x
+
   charLe: x => $m <= x
+
   charGt: x => $m > x
+
   charGe: x => $m >= x
 
   typedCharGt: c :: Character with: x => c > x
+
   typedCharLe: c :: Character with: x => c <= x
 
   /// Right operands with no reflected comparison hook: `nil`, a symbol, a
@@ -68,66 +84,106 @@ TestCase subclass: NumberComparisonArgTest
   /// Every wrong right operand, through the four one-argument helpers
   /// `lt`/`le`/`gt`/`ge`.
   assertWrongsRaise: lt le: le gt: gt ge: ge =>
-    self wrongs do: [:w |
-      self assertBlock: [lt value: w] raisesHook: #lessThanFromNumber: for: "<"
-      self assertBlock: [le value: w] raisesHook: #lessOrEqualFromNumber: for: "<="
-      self assertBlock: [gt value: w] raisesHook: #greaterThanFromNumber: for: ">"
-      self assertBlock: [ge value: w] raisesHook: #greaterOrEqualFromNumber: for: ">="
-    ]
+    self wrongs
+      do: [:w |
+        self
+          assertBlock: [lt value: w]
+          raisesHook: #lessThanFromNumber:
+          for: "<"
+        self
+          assertBlock: [le value: w]
+          raisesHook: #lessOrEqualFromNumber:
+          for: "<="
+        self
+          assertBlock: [gt value: w]
+          raisesHook: #greaterThanFromNumber:
+          for: ">"
+        self
+          assertBlock: [ge value: w]
+          raisesHook: #greaterOrEqualFromNumber:
+          for: ">="
+      ]
 
   // ── A missing hook raises, for every inlined receiver ────────────────────
-
   testLiteralReceiver =>
-    self assertWrongsRaise: [:w | self litLt: w]
+    self
+      assertWrongsRaise: [:w | self litLt: w]
       le: [:w | self litLe: w]
       gt: [:w | self litGt: w]
       ge: [:w | self litGe: w]
 
   testTypedParameterReceiver =>
-    self assertWrongsRaise: [:w | self intLt: 5 with: w]
+    self
+      assertWrongsRaise: [:w | self intLt: 5 with: w]
       le: [:w | self intLe: 5 with: w]
       gt: [:w | self intGt: 5 with: w]
       ge: [:w | self intGe: 5 with: w]
 
   testUntypedReceiver =>
-    self assertWrongsRaise: [:w | self lt: 5 with: w]
+    self
+      assertWrongsRaise: [:w | self lt: 5 with: w]
       le: [:w | self le: 5 with: w]
       gt: [:w | self gt: 5 with: w]
       ge: [:w | self ge: 5 with: w]
 
   testFloatReceiver =>
-    self assertWrongsRaise: [:w | self floatLt: w]
+    self
+      assertWrongsRaise: [:w | self floatLt: w]
       le: [:w | self floatLe: w]
       gt: [:w | self floatGt: w]
       ge: [:w | self floatGe: w]
-    self assertWrongsRaise: [:w | self lt: 1.5 with: w]
+    self
+      assertWrongsRaise: [:w | self lt: 1.5 with: w]
       le: [:w | self le: 1.5 with: w]
       gt: [:w | self gt: 1.5 with: w]
       ge: [:w | self typedFloatGe: 1.5 with: w]
-    self assertBlock: [self typedFloatLt: 1.5 with: nil] raisesHook: #lessThanFromNumber: for: "<"
+    self
+      assertBlock: [self typedFloatLt: 1.5 with: nil]
+      raisesHook: #lessThanFromNumber:
+      for: "<"
 
   testCharacterReceiver =>
-    self assertWrongsRaise: [:w | self charLt: w]
+    self
+      assertWrongsRaise: [:w | self charLt: w]
       le: [:w | self charLe: w]
       gt: [:w | self charGt: w]
       ge: [:w | self charGe: w]
-    self assertBlock: [self typedCharGt: $a with: nil] raisesHook: #greaterThanFromNumber: for: ">"
-    self assertBlock: [self typedCharLe: $a with: #sym] raisesHook: #lessOrEqualFromNumber: for: "<="
+    self
+      assertBlock: [self typedCharGt: $a with: nil]
+      raisesHook: #greaterThanFromNumber:
+      for: ">"
+    self
+      assertBlock: [self typedCharLe: $a with: #sym]
+      raisesHook: #lessOrEqualFromNumber:
+      for: "<="
 
   /// `self` in `Integer`: `Number>>max:`, `min:` and `between:and:` (whose
   /// `self` is a number at run time) and `Integer>>to:do:`'s comparisons all
   /// take the rule.
   testNumberMethodsRaise =>
-    self wrongs do: [:w |
-      @expect type
-      self assertBlock: [3 max: w] raisesHook: #greaterThanFromNumber: for: ">"
-      @expect type
-      self assertBlock: [3 min: w] raisesHook: #lessThanFromNumber: for: "<"
-      @expect type
-      self assertBlock: [3 between: w and: 5] raisesHook: #greaterOrEqualFromNumber: for: ">="
-      @expect type
-      self assertBlock: [3 between: 1 and: w] raisesHook: #lessOrEqualFromNumber: for: "<="
-    ]
+    self wrongs
+      do: [:w |
+        @expect type
+        self
+          assertBlock: [3 max: w]
+          raisesHook: #greaterThanFromNumber:
+          for: ">"
+        @expect type
+        self
+          assertBlock: [3 min: w]
+          raisesHook: #lessThanFromNumber:
+          for: "<"
+        @expect type
+        self
+          assertBlock: [3 between: w and: 5]
+          raisesHook: #greaterOrEqualFromNumber:
+          for: ">="
+        @expect type
+        self
+          assertBlock: [3 between: 1 and: w]
+          raisesHook: #lessOrEqualFromNumber:
+          for: "<="
+      ]
 
   /// The `3 <= nil` the addendum opens with.
   testLessOrEqualNilRaises =>
@@ -140,7 +196,6 @@ TestCase subclass: NumberComparisonArgTest
     self should: [3 max: nil] raise: #does_not_understand
 
   // ── A present hook answers ───────────────────────────────────────────────
-
   money: cents => (Money new) withCents: cents
 
   testHooksAnswerForEveryOperator =>
@@ -197,7 +252,6 @@ TestCase subclass: NumberComparisonArgTest
     self assert: e2 kind equals: #user_error
 
   // ── Unchanged behaviour ──────────────────────────────────────────────────
-
   testNumbersStillCompare =>
     self assert: (3 < 4.0)
     self assert: (self lt: 3 with: 4.0)

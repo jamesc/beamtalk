@@ -353,6 +353,7 @@ pub(super) fn run_erlang_probes(
     setup: &str,
     calls: &[(String, String)],
 ) -> Option<std::collections::HashMap<String, String>> {
+    use std::fmt::Write as _;
     use std::process::Command;
     if !super::erlang_available() {
         return None;
@@ -395,20 +396,22 @@ pub(super) fn run_erlang_probes(
     // limit, and one huge function body is slow to compile.
     let mut functions = String::new();
     for (i, (name, expr)) in calls.iter().enumerate() {
-        functions.push_str(&format!(
-            "p{i}() ->\n    {setup},\n    Parent = self(),\n    \
+        let _ = write!(
+            functions,
+            "p{}() ->\n    {setup},\n    Parent = self(),\n    \
              Pid = spawn(fun() -> Parent ! {{self(), (catch ({expr}))}} end),\n    \
              R = receive {{Pid, V}} -> V after 5000 -> exit(Pid, kill), timeout end,\n    \
-             io:format(\"~s ~w~n\", [\"{name}\", R]).\n"
-        ));
+             io:format(\"~s ~w~n\", [\"{name}\", R]).\n",
+            i + 1
+        );
     }
     let runner = format!(
         "-module(oracle_runner).\n\
          -compile([export_all, nowarn_export_all, nowarn_unused_vars]).\n\
          run() -> lists:foreach(fun(I) -> \
          apply(?MODULE, list_to_atom(\"p\" ++ integer_to_list(I)), []) end, \
-         lists:seq(0, {})), halt().\n{functions}",
-        calls.len() as i64 - 1
+         lists:seq(1, {})), halt().\n{functions}",
+        calls.len()
     );
     let runner_path = dir.path().join("oracle_runner.erl");
     std::fs::write(&runner_path, runner).expect("write oracle runner");
