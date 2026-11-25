@@ -66,6 +66,7 @@
             #{name => 'NodeDown', module => 'bt@stdlib@node_down', parent => 'Announcement', package => 'stdlib', kind => object, type_params => []},
             #{name => 'NodeShapeSkew', module => 'bt@stdlib@node_shape_skew', parent => 'Announcement', package => 'stdlib', kind => object, type_params => []},
             #{name => 'NodeUp', module => 'bt@stdlib@node_up', parent => 'Announcement', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'NodeVersionSkew', module => 'bt@stdlib@node_version_skew', parent => 'Announcement', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Number', module => 'bt@stdlib@number', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'OS', module => 'bt@stdlib@os', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Object', module => 'bt@stdlib@object', parent => 'ProtoObject', package => 'stdlib', kind => object, type_params => []},

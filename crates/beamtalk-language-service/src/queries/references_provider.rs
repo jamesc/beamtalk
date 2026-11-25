@@ -432,12 +432,9 @@ pub fn find_selector_references<'a>(
             }
         }
 
-        // Standalone method definitions
-        for smd in &module.method_definitions {
-            if smd.method.selector.name() == selector_name {
-                results.push(Location::new(file_path.clone(), smd.method.span));
-            }
-        }
+        // A standalone `Foo >> sel` left in `method_definitions` is a rejected
+        // cross-file extension (ADR 0152), not a declaration of `sel`
+        // (BT-5184).
 
         // Message sends and cascades in every expression root.
         for_each_root_expr(module, |expr| {
@@ -539,11 +536,7 @@ pub fn find_selector_declarations<'a>(
             collect_method_def_refs(&class.methods, selector_name, file_path, &mut results);
             collect_method_def_refs(&class.class_methods, selector_name, file_path, &mut results);
         }
-        for smd in &module.method_definitions {
-            if smd.method.selector.name() == selector_name {
-                results.push(Location::new(file_path.clone(), smd.method.span));
-            }
-        }
+        // Not `module.method_definitions`: see `find_selector_references`.
     }
     results
 }
@@ -1084,15 +1077,22 @@ mod tests {
     }
 
     #[test]
-    fn find_selector_declarations_includes_class_side_and_standalone() {
+    fn find_selector_declarations_includes_class_side_and_folded_extension() {
         let file = Utf8PathBuf::from("test.bt");
-        // Instance-side def + class-side def + standalone def of the same
-        // selector. All three must be in the declaration set.
-        let module =
-            parse_source("Object subclass: Foo\n  bar => 1\n  class bar => 2\n\nFoo >> bar => 3");
+        // Instance-side def + class-side def + same-file `>>` def of the same
+        // selector (folded into Foo, as the index does). All three are
+        // declarations; the cross-file `Integer >> bar` (an ADR 0152 error,
+        // left in `method_definitions`) is not (BT-5184).
+        let mut module = parse_source(
+            "Object subclass: Foo\n  bar => 1\n  class bar => 2\n\nFoo >> bar => 3\nInteger >> bar => 4",
+        );
+        let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
+        assert_eq!(module.method_definitions.len(), 1);
 
         let decls = find_selector_declarations("bar", [(&file, &module)]);
         assert_eq!(decls.len(), 3, "expected 3 declarations, got {decls:?}");
+        let refs = find_selector_references("bar", [(&file, &module)]);
+        assert_eq!(refs.len(), 3, "expected 3 references, got {refs:?}");
     }
 
     #[test]

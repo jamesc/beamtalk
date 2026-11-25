@@ -322,17 +322,16 @@ impl SpawnedFront {
             return;
         }
         if let Ok(pid) = i32::try_from(self.child.id()) {
-            sigterm(pid);
-            let deadline = std::time::Instant::now() + grace;
-            loop {
-                match self.child.try_wait() {
-                    Ok(Some(_)) => return,
-                    Ok(None) if std::time::Instant::now() < deadline => {
-                        std::thread::sleep(Duration::from_millis(25));
-                    }
-                    _ => break,
-                }
-            }
+            let child = &mut self.child;
+            // Exited or not, the forced kill below is right: it is a no-op
+            // on a child `try_wait` has reaped.
+            let _ = beamtalk_process::escalate::terminate_and_wait(
+                grace,
+                Duration::from_millis(25),
+                std::thread::sleep,
+                || sigterm(pid),
+                || matches!(child.try_wait(), Ok(Some(_))),
+            );
         }
         // `Child::kill` is a no-op on an already-reaped child, so this
         // fallback cannot reach a recycled PID either.
@@ -456,62 +455,41 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
 
     detach(&mut cmd);
 
-    // Created before `cmd.spawn()` (not after) so there is no
-    // JobHandle-creation-fails-after-spawn case to unwind: if this errors,
-    // nothing has been spawned yet and the `?` below can propagate directly.
-    #[cfg(windows)]
-    let job = crate::winjob::JobHandle::new()?;
-
-    // `mut` is only needed on the `#[cfg(windows)]` path below, which kills
-    // `child` itself if job-object assignment fails; the non-Windows arm
-    // never mutates it.
-    #[cfg_attr(not(windows), allow(unused_mut))]
-    let mut child = cmd.spawn()?;
-
+    // Windows: `detach` set `CREATE_SUSPENDED`, so `spawn_in_job` assigns the
+    // child to its job before it runs, so `cmd.exe` cannot launch `erl.exe`
+    // outside the job (BT-3880), and only then resumes it. A failure kills and
+    // reaps the child first: no job would ever reap it, and `crate::reap`'s
+    // PID-file sweep can't catch it either (a PID file is only written after
+    // `spawn_front` returns `Ok`).
     #[cfg(windows)]
     {
-        // `child` is still suspended here (`detach` passed
-        // `CREATE_SUSPENDED`), so assigning it now covers every descendant
-        // it will ever create — there is no window in which `cmd.exe` could
-        // already have launched `erl.exe` outside the job (BT-3880; see
-        // `crate::winjob`'s doc). Only once it is inside the job is it
-        // released to run. Both steps are checked and surface a failure
-        // rather than silently returning a front this job object does not
-        // actually protect (or one that would sit suspended forever).
-        // `cmd.spawn()` above already succeeded, so a failure past this
-        // point must kill `child` itself before propagating — otherwise the
-        // job object we failed to attach never exists to reap it, and
-        // `crate::reap`'s PID-file sweep can't catch it either (a PID file
-        // is only written after `spawn_front` returns `Ok`), leaving a live,
-        // untracked `cmd.exe`/`erl.exe` tree behind.
-        if let Err(e) = job
-            .assign(&child)
-            .and_then(|()| crate::winjob::resume_initial_thread(&child))
-        {
-            kill_orphaned_child(&mut child);
-            // Best-effort (low
-            // severity): `build_launch_command` above already created this
-            // attempt's RELEASE_TMP directory. At this point in the boot
-            // sequence the release has likely not written secrets into it
-            // yet, but there's no reason to leave even an empty stray
-            // directory behind — same cleanup `remove_record` does on the
-            // success path, just inlined here since this failure never
-            // reaches a saved `FrontRecord` for `remove_record` to key off.
-            let _ =
-                std::fs::remove_dir_all(release_tmp_dir(&config.workspace_id, &config.instance_id));
-            return Err(e.into());
+        match crate::winjob::spawn_in_job(&mut cmd) {
+            Ok((child, job)) => Ok(SpawnedFront {
+                child,
+                instance_id: config.instance_id.clone(),
+                port_file,
+                job,
+            }),
+            Err(e) => {
+                // Best-effort (low severity): `build_launch_command` above
+                // already created this attempt's RELEASE_TMP directory. The
+                // release has likely not written secrets into it yet, but
+                // there's no reason to leave even an empty stray directory
+                // behind — same cleanup `remove_record` does on the success
+                // path, inlined since this failure never reaches a saved
+                // `FrontRecord` for `remove_record` to key off.
+                let _ = std::fs::remove_dir_all(release_tmp_dir(
+                    &config.workspace_id,
+                    &config.instance_id,
+                ));
+                Err(e.into())
+            }
         }
-        Ok(SpawnedFront {
-            child,
-            instance_id: config.instance_id.clone(),
-            port_file,
-            job,
-        })
     }
     #[cfg(not(windows))]
     {
         Ok(SpawnedFront {
-            child,
+            child: cmd.spawn()?,
             instance_id: config.instance_id.clone(),
             port_file,
         })
@@ -588,21 +566,6 @@ fn rotate_if_at_least(path: &Path, max_bytes: u64) {
         rotated.push(".1");
         let _ = std::fs::rename(path, PathBuf::from(rotated));
     }
-}
-
-/// Kill and reap `child` after it was successfully spawned but
-/// [`crate::winjob::JobHandle::assign`] then failed to attach it to the
-/// job created before `spawn`, or [`crate::winjob::resume_initial_thread`]
-/// failed to release it afterwards — see the call site in [`spawn_front`].
-/// `TerminateProcess` (what `Child::kill` is on Windows) works on a
-/// still-suspended process too, so both cases are handled the same way.
-/// Best-effort: swallows its own errors rather than shadowing the setup
-/// failure that's already being propagated, since there's no better recovery
-/// available for a failure to kill a process we're already trying to kill.
-#[cfg(windows)]
-fn kill_orphaned_child(child: &mut std::process::Child) {
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 /// Build the OS process invocation for `config`, platform-specific per this
@@ -944,8 +907,8 @@ fn detach(cmd: &mut Command) {
     // `CREATE_SUSPENDED` is not about detaching: it makes the child start
     // frozen so `spawn_front` can assign it to its job object before it
     // executes anything (and so before `cmd.exe` can launch `erl.exe`
-    // outside that job — BT-3880). `spawn_front` resumes it via
-    // `crate::winjob::resume_initial_thread` straight after the assignment.
+    // outside that job — BT-3880). `crate::winjob::spawn_in_job` resumes it
+    // straight after the assignment.
     // It lives here only because `creation_flags` replaces rather than
     // ORs, so every flag the front needs must be set in one call.
     cmd.creation_flags(
@@ -2232,7 +2195,8 @@ mod tests {
                 let Some(handle) = ProcessHandle::open(pid) else {
                     continue;
                 };
-                match front.job.contains_process(handle.raw()) {
+                // SAFETY: `handle` is open until it drops, after this call.
+                match unsafe { front.job.contains_process(handle.raw()) } {
                     Ok(true) => {
                         found = Some((pid, handle));
                         return true;

@@ -68,9 +68,10 @@ pub mod sname;
 pub mod spawn;
 /// Windows Job Object wrapper tying a spawned front's process tree to this
 /// handle's lifetime — see the module doc comment for why
-/// `Child::kill()` alone is not enough on Windows.
+/// `Child::kill()` alone is not enough on Windows. Shared with
+/// `beamtalk-exec` through `beamtalk-process` (BT-5195).
 #[cfg(windows)]
-pub mod winjob;
+pub use beamtalk_process::winjob;
 
 #[cfg(test)]
 mod test_support;
