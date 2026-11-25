@@ -613,9 +613,10 @@ a time is kept (BT-4937). Every case that cannot compare ages — an
 `unreachable` read (the remote read failed, which says nothing about age),
 neither side timed — and equal start times take one deterministic tie-break
 (`lower_node_pid/2`): keep the pid on the lower-named node (on one node, the
-lower pid). The loser is always stopped gracefully, never killed (BT-5231:
-this no longer falls back to `global:random_exit_name/3`, whose
-`exit(Pid, kill)` skips `terminate/2`).
+lower pid). The loser is always stopped through
+`stop_global_conflict_loser/1`, which runs its `terminate/2` (BT-5231: this no
+longer falls back to `global:random_exit_name/3`, whose `exit(Pid, kill)`
+skips `terminate/2`).
 
 OTP runs this once per conflicting name, on one node, in `global`'s resolver
 process (not inside `global_name_server`); only the name exchange for that
@@ -661,10 +662,12 @@ entirely. Runs the (synchronous, blocking) `gen_server:stop/3` in a
 throwaway process rather than inline: `resolve_global_conflict/3` runs in
 `global`'s resolver process while the name exchange for that node pair waits
 on it, and blocking it for the loser's full `terminate/2` would hold up that
-exchange (`global:sync/0`) until it returns. Best-effort: a `Loser` that is not a
-`gen_server` (or has already died) falls back to a plain
-`exit(Pid, {shutdown, global_name_conflict})` — never `kill` (BT-5231) — and
-any other failure is swallowed — the resolver's decision (which pid
+exchange (`global:sync/0`) until it returns. Best-effort: only when that
+graceful stop fails (a `Loser` that is not a `gen_server`, has already died,
+or did not finish `terminate/2` within the timeout) does this throwaway
+process fall back to `exit(Pid, kill)`, so a loser never keeps running beside
+the winner; `resolve_global_conflict/3` itself never kills (BT-5231). Any
+other failure is swallowed — the resolver's decision (which pid
 wins the name) is already final by the time this runs; a failure to tidily
 stop the loser must never surface back into `global`.
 """.
@@ -676,7 +679,7 @@ stop_global_conflict_loser(Loser) ->
         catch
             _:_ ->
                 try
-                    exit(Loser, {shutdown, global_name_conflict})
+                    exit(Loser, kill)
                 catch
                     _:_ -> ok
                 end

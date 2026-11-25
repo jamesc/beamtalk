@@ -7764,8 +7764,9 @@ stops the other with a `#globalNameConflict` reason — never OTP's default
 `exit(Pid, kill)`, so the losing actor's `terminate` still runs and its
 `ActorStopped` announcement carries the reason. A supervised `scope: #global`
 child that loses stays down rather than restart-looping: its start is ignored
-while the name is held on another node (with a logged warning), its siblings
-are unaffected, and a later `restartChild:` retries (`Result ok: nil` while
+while the name is held on another node (with a logged warning). Under
+`one_for_one` its siblings are unaffected. Nothing watches the name: the child
+stays down until a later `restartChild:` finds it free (`Result ok: nil` while
 the name is still held).
 
 ### The wire — what crosses a node boundary, and what doesn't

@@ -2167,8 +2167,11 @@ was stopped with `{shutdown, global_name_conflict}` (announced as the loser's
 `ActorStopped`, reason `#globalNameConflict`). Answering an error would
 restart-loop a `#permanent` child until the supervisor reached its restart
 intensity and died with its siblings. With `ignore`, OTP keeps the child
-spec with no pid, on the initial start and on restarts alike, and a later
-`restartChild:` retries; while the name is still held it answers `Ok(nil)`.
+spec with no pid, on the initial start and on restarts alike. Nothing
+watches the name: the child stays down until a later `restartChild:` finds
+it free; while the name is still held, `restartChild:` answers `Ok(nil)`.
+Under `one_for_all` / `rest_for_one` the loser's exit still restarts its
+siblings as the strategy says.
 If the holder is gone by the time the start looks (`global:whereis_name/1`
 answers `undefined`), the start is tried once more and otherwise keeps its
 error. A holder on the **same** node stays an error (a programming mistake).
@@ -2220,7 +2223,11 @@ start_global_actor_child(Name, ChildModule, Args, Retries) ->
                     ?LOG_WARNING(
                         "Supervised #global child ~p (~p) not started: the name is held on ~p",
                         [Name, ChildModule, node(Holder)],
-                        #{child => Name, holder_node => node(Holder)}
+                        #{
+                            domain => [beamtalk, runtime],
+                            child => Name,
+                            holder_node => node(Holder)
+                        }
                     ),
                     ignore;
                 undefined when Retries > 0 ->
