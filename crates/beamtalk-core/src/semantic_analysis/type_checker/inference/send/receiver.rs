@@ -1150,7 +1150,9 @@ impl TypeChecker {
         if let (
             MessageSelector::Binary(op),
             Some(InferredType::Known {
-                class_name: arg_ty, ..
+                class_name: arg_ty,
+                type_args: arg_type_args,
+                ..
             }),
         ) = (selector, arg_types.first())
             && !super::super::super::is_type_var_placeholder(arg_ty, hierarchy)
@@ -1159,7 +1161,7 @@ impl TypeChecker {
             // A hook with no declared return type is not the numeric
             // operator's result either: answer Dynamic, never `Integer>>+`.
             let Some(ret_ty) = hook.return_type.as_ref() else {
-                return ControlFlow::Break(InferredType::Dynamic(DynamicReason::DynamicReceiver));
+                return ControlFlow::Break(InferredType::Dynamic(DynamicReason::UnannotatedReturn));
             };
             let hook_ctx = SendCtx {
                 receiver_ty: &arg_types[0],
@@ -1169,7 +1171,7 @@ impl TypeChecker {
                 &hook_ctx,
                 &KnownRecv {
                     class_name: arg_ty,
-                    type_args: &[],
+                    type_args: arg_type_args,
                     resolve_class: arg_ty,
                     via_object: false,
                 },

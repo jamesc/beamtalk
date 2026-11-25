@@ -116,19 +116,21 @@ fn run_type(src: &str) -> (Option<InferredType>, Vec<Diagnostic>) {
 }
 
 #[test]
-fn hook_without_return_annotation_is_not_typed_as_the_number_result() {
+fn hook_without_return_annotation_is_dynamic_not_the_number_result() {
     let src = "typed Value subclass: Money\n  plusFromNumber: n :: Number => self\n\n\
                typed Value subclass: Probe\n  run: m :: Money =>\n    5 + m\n";
     let (ty, diags) = run_type(src);
-    assert!(diags.is_empty(), "{diags:?}");
     assert!(
-        !matches!(
-            ty.as_ref()
-                .and_then(InferredType::as_known)
-                .map(ecow::EcoString::as_str),
-            Some("Integer")
-        ),
-        "{ty:?}"
+        // A Dynamic result is not recorded as a method return type.
+        ty.is_none() || matches!(ty, Some(InferredType::Dynamic(_))),
+        "must not be Integer: {ty:?}"
+    );
+    // The only diagnostic is the typed-class unannotated-return lint.
+    assert!(
+        diags
+            .iter()
+            .all(|d| d.message.contains("unannotated return")),
+        "{diags:?}"
     );
 }
 
@@ -152,4 +154,29 @@ fn numeric_argument_does_not_take_the_hook_path() {
     let src = "typed Value subclass: Probe\n  run: m :: Float =>\n    5 + m\n";
     let (_, diags) = run_type(src);
     assert!(diags.is_empty(), "{diags:?}");
+}
+
+#[test]
+fn generic_hook_class_substitutes_the_argument_type_args() {
+    let src = "typed Value subclass: Box(T)\n  plusFromNumber: n :: Number -> Box(T) => self\n\n\
+               typed Value subclass: Probe\n  run: b :: Box(Integer) =>\n    5 + b\n";
+    let (ty, diags) = run_type(src);
+    assert!(diags.is_empty(), "{diags:?}");
+    let Some(InferredType::Known {
+        class_name,
+        type_args,
+        ..
+    }) = ty
+    else {
+        panic!("expected Known, got {ty:?}");
+    };
+    assert_eq!(class_name.as_str(), "Box");
+    assert_eq!(
+        type_args
+            .first()
+            .and_then(InferredType::as_known)
+            .map(ecow::EcoString::as_str),
+        Some("Integer"),
+        "{type_args:?}"
+    );
 }
