@@ -28,7 +28,7 @@ socket_opts => [{ip, BindAddr}, {port, Port}]
 
 ### MCP server
 
-The MCP server's file-based tools (`lint`, `diagnostic_summary`, `load_file`, `load_project`, `test` on a file, `export_traces`) are confined to the project root; symlinks and `..` components are resolved before the check. `--allow-outside-project` removes the confinement. Every MCP tool declares `readOnlyHint`, and every non-read-only tool a `destructiveHint`.
+The MCP server's file-based tools (`lint`, `diagnostic_summary`, `load_file`, `load_project`, `test` on a file, `export_traces`) are confined to the project root; symlinks and `..` components are resolved before the check. The server refuses to start confined to the filesystem root, the user's home directory (`HOME` on Unix, the profile folder on Windows) or any directory containing it, such as `/home`. `--allow-outside-project` removes the confinement. Every MCP tool declares `readOnlyHint`, and every non-read-only tool a `destructiveHint`.
 
 ### LiveView IDE front
 
