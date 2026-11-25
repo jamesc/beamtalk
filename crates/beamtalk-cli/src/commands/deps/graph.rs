@@ -288,7 +288,8 @@ fn locked_subtree(
         if !seen.insert(name.clone()) {
             continue;
         }
-        let Ok(manifest) = manifest::parse_manifest_full(&dir.join("beamtalk.toml")) else {
+        let Ok(manifest) = manifest::parse_dependency_manifest_full(&dir.join("beamtalk.toml"))
+        else {
             debug!(dep = %name, %dir, "No readable manifest in checkout; not following its dependencies");
             continue;
         };
@@ -458,6 +459,24 @@ fn check_source_conflict(
     Ok(false)
 }
 
+/// Fail with the cycle path if `dep_name` is already on the discovery stack,
+/// i.e. a package being discovered depends on itself, directly or transitively.
+fn check_not_circular(ctx: &DiscoveryContext<'_>, dep_name: &str) -> Result<()> {
+    let Some(cycle_start) = ctx.discovery_stack.iter().position(|n| n == dep_name) else {
+        return Ok(());
+    };
+    let cycle_path: Vec<&str> = ctx.discovery_stack[cycle_start..]
+        .iter()
+        .map(String::as_str)
+        .chain(std::iter::once(dep_name))
+        .collect();
+    miette::bail!(
+        "Circular dependency detected: {}\n  \
+         A package cannot depend on itself, directly or transitively.",
+        cycle_path.join(" -> ")
+    );
+}
+
 /// Recursively discover dependencies by walking manifests.
 ///
 /// Builds the `graph` map of all packages found in the transitive closure.
@@ -470,6 +489,10 @@ fn discover_deps(
     parent_manifest: &ParsedManifest,
 ) -> Result<()> {
     for (dep_name, spec) in &parent_manifest.dependencies {
+        // Before any source handling: the git/registry diamond skip below
+        // would otherwise `continue` past a cycle back to a package already in
+        // the graph, leaving only the topological sort's vaguer error (BT-5186).
+        check_not_circular(ctx, dep_name)?;
         match &spec.source {
             DependencySource::Path { path } => {
                 let relative_utf8 = Utf8Path::from_path(path).ok_or_else(|| {
@@ -670,9 +693,11 @@ pub(crate) fn validate_checkout_version(
     reference: &GitReference,
 ) -> Result<()> {
     let manifest_path = checkout_path.join("beamtalk.toml");
-    let manifest = manifest::parse_manifest(&manifest_path).wrap_err_with(|| {
-        format!("Failed to read the manifest of registry dependency '{dep_name}'")
-    })?;
+    let manifest = manifest::parse_dependency_manifest_full(&manifest_path)
+        .wrap_err_with(|| {
+            format!("Failed to read the manifest of registry dependency '{dep_name}'")
+        })?
+        .package;
 
     if manifest.version != requested {
         let tag = match reference {
@@ -696,7 +721,8 @@ pub(crate) fn validate_checkout_version(
 
 /// Discover a single dependency from its root directory.
 ///
-/// Validates the manifest, checks for cycles and version conflicts,
+/// Validates the manifest and checks version conflicts (the caller,
+/// [`discover_deps`], has already ruled out a cycle),
 /// then recurses into the dependency's own dependencies.
 fn discover_single_dep(
     ctx: &mut DiscoveryContext<'_>,
@@ -731,25 +757,6 @@ fn discover_single_dep(
              Expected: '{dep_name}' (from [dependencies] key)\n  \
              Found: '{}' (in {dep_manifest_path})",
             dep_manifest.package.name
-        );
-    }
-
-    // Check for circular dependencies
-    if ctx.discovery_stack.contains(&dep_name.to_string()) {
-        let cycle_start = ctx
-            .discovery_stack
-            .iter()
-            .position(|n| n == dep_name)
-            .unwrap();
-        let cycle_path: Vec<&str> = ctx.discovery_stack[cycle_start..]
-            .iter()
-            .map(String::as_str)
-            .chain(std::iter::once(dep_name))
-            .collect();
-        miette::bail!(
-            "Circular dependency detected: {}\n  \
-             A package cannot depend on itself, directly or transitively.",
-            cycle_path.join(" -> ")
         );
     }
 
@@ -1551,6 +1558,79 @@ dep_pkg = {{ path = "{dep_str}" }}"#
             .output()
             .unwrap();
         String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// Commit `beamtalk.toml` for `pkg_name` into the (already `git init`ed)
+    /// repo at `path`, tag it `v1.0.0`, and return its `file://` URL.
+    fn commit_tagged_manifest(path: &std::path::Path, pkg_name: &str, deps: &str) -> String {
+        write_manifest(path, pkg_name, "0.1.0", deps);
+        run_git_cmd(path, &["add", "."]);
+        run_git_cmd(path, &["commit", "-m", "initial"]);
+        run_git_cmd(path, &["tag", "-m", "v1.0.0", "v1.0.0"]);
+        let mut path_str = to_forward_slash(&path.display().to_string());
+        if !path_str.starts_with('/') {
+            path_str.insert(0, '/');
+        }
+        format!("file://{path_str}")
+    }
+
+    fn init_repo(dir: &TempDir) {
+        for args in [
+            &["init"][..],
+            &["config", "user.email", "test@test.com"],
+            &["config", "user.name", "Test"],
+            &["config", "commit.gpgsign", "false"],
+        ] {
+            run_git_cmd(dir.path(), args);
+        }
+    }
+
+    /// BT-5186: a cycle through git dependencies (`app -> pkg_a -> pkg_b ->
+    /// pkg_a`) names its path; the diamond skip must not hide it.
+    #[test]
+    fn test_git_dependency_cycle_names_the_cycle_path() {
+        let a_dir = TempDir::new().unwrap();
+        let b_dir = TempDir::new().unwrap();
+        init_repo(&a_dir);
+        init_repo(&b_dir);
+        let a_url = {
+            let mut p = to_forward_slash(&a_dir.path().display().to_string());
+            if !p.starts_with('/') {
+                p.insert(0, '/');
+            }
+            format!("file://{p}")
+        };
+        let b_url = commit_tagged_manifest(
+            b_dir.path(),
+            "pkg_b",
+            &format!("[dependencies]\npkg_a = {{ git = \"{a_url}\", tag = \"v1.0.0\" }}"),
+        );
+        assert_eq!(
+            commit_tagged_manifest(
+                a_dir.path(),
+                "pkg_a",
+                &format!("[dependencies]\npkg_b = {{ git = \"{b_url}\", tag = \"v1.0.0\" }}"),
+            ),
+            a_url
+        );
+
+        let root_dir = TempDir::new().unwrap();
+        let root = root_dir.path().join("root");
+        fs::create_dir_all(&root).unwrap();
+        write_manifest(
+            &root,
+            "my_app",
+            "0.1.0",
+            &format!("[dependencies]\npkg_a = {{ git = \"{a_url}\", tag = \"v1.0.0\" }}"),
+        );
+        let root_path = Utf8PathBuf::from_path_buf(root).unwrap();
+        let err = resolve_dependency_graph(&root_path, &beamtalk_core::CompilerOptions::default())
+            .unwrap_err();
+        let err = format!("{err:?}");
+        assert!(
+            err.contains("Circular dependency detected: pkg_a -> pkg_b -> pkg_a"),
+            "the error must name the cycle path: {err}"
+        );
     }
 
     #[test]

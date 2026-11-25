@@ -1166,7 +1166,9 @@ fn compute_native_type_registry(
                 Vec::new()
             }
         };
-        let auto_extract = super::build::extract_type_specs(&layout, true, false);
+        // Includes the package's compiled `native/test/` helpers (BT-5186).
+        let auto_extract =
+            beamtalk_package::native_type_specs::extract_project_test_type_specs(&layout);
 
         let pkg_registry = super::build::resolve_package_type_registry(
             pkg_root,
@@ -1196,6 +1198,13 @@ fn collect_known_erlang_modules_for(
         known.extend_modules(
             beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(pkg_root),
         );
+        // The package's compiled `native/test/` helpers, which live outside
+        // the build's native ebin (BT-5186).
+        if let Some(helpers) = beamtalk_core::ffi_type_specs::project_test_helper_ebin_dir(pkg_root)
+            && let Ok(modules) = collect_beam_module_names(&helpers)
+        {
+            known.extend_modules(modules.into_iter().collect());
+        }
     }
     known
 }
@@ -1770,14 +1779,23 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
 
         // Compile native/test/*.erl test helpers via erlc.
         // These are Erlang modules only needed during test runs (e.g. test
-        // servers, mocks). They go into the same native ebin directory.
+        // servers, mocks). They go into their own ebin, which `build`'s
+        // native-beam pruning never touches, so a concurrent `beamtalk build`
+        // cannot delete them while the tests run (BT-5186).
         let native_test_dir = pkg_root.join("native").join("test");
         if native_test_dir.exists() && native_test_dir.is_dir() {
-            // `build()` has released the project lock; writing `_build/` here
-            // unlocked let a concurrent build's native-beam pruning delete
-            // these helpers (BT-5133). Re-take it for the write.
-            let _project_lock = super::dir_lock::lock_project_build(pkg_root)?;
-            compile_native_test_erlang(pkg_root, &native_test_dir, &pipeline.package_ebin_dirs)?;
+            // `build()` has released the project lock; re-take it while
+            // writing `_build/` so two `beamtalk test` runs do not interleave.
+            let project_lock = super::dir_lock::lock_project_build(pkg_root)?;
+            let helper_ebin = compile_native_test_erlang(
+                pkg_root,
+                &native_test_dir,
+                &pipeline.package_ebin_dirs,
+            )?;
+            drop(project_lock);
+            if helper_ebin.is_dir() && !pipeline.package_ebin_dirs.contains(&helper_ebin) {
+                pipeline.package_ebin_dirs.push(helper_ebin);
+            }
 
             // Discover native EUnit test modules (_test or _tests suffix)
             // from source files to avoid picking up stale .beam artifacts.
@@ -1798,6 +1816,16 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
                     }
                 }
             }
+        } else {
+            // `native/test/` is gone: so are its helpers (they are already not
+            // known modules, `project_test_helper_ebin_dir`).
+            let helper_ebin = pkg_layout.native_test_ebin_dir();
+            if helper_ebin.is_dir() {
+                let _project_lock = super::dir_lock::lock_project_build(pkg_root)?;
+                fs::remove_dir_all(&helper_ebin)
+                    .into_diagnostic()
+                    .wrap_err_with(|| format!("Failed to remove stale '{helper_ebin}'"))?;
+            }
         }
     }
 
@@ -1807,26 +1835,36 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
 /// Compile native Erlang test helpers from `native/test/` via erlc.
 ///
 /// These modules (test servers, mocks, etc.) are only needed during test runs.
-/// Output goes to `_build/dev/native/ebin/` alongside the regular native modules.
+/// Output goes to `_build/dev/native_test/ebin/`
+/// ([`BuildLayout::native_test_ebin_dir`]), apart from the regular native
+/// modules, whose stale-beam pruning in `beamtalk build` would delete them
+/// (BT-5186). Beams of helpers whose source is gone are removed. Returns the
+/// helper ebin directory.
 fn compile_native_test_erlang(
     pkg_root: &Utf8Path,
     native_test_dir: &Utf8Path,
     ebin_dirs: &[Utf8PathBuf],
-) -> Result<()> {
+) -> Result<Utf8PathBuf> {
     use std::fs;
 
     // Sorted by the lister, for deterministic compilation order across platforms.
     let erl_files = beamtalk_cli::path_util::erl_files_in(native_test_dir)?;
 
+    let test_layout = BuildLayout::new(pkg_root);
+    let ebin_dir = test_layout.native_test_ebin_dir();
+    let keep: HashSet<String> = erl_files
+        .iter()
+        .filter_map(|f| f.file_stem().map(str::to_owned))
+        .collect();
+    beamtalk_cli::path_util::remove_beams_not_in(&ebin_dir, &keep)?;
+
     if erl_files.is_empty() {
-        return Ok(());
+        return Ok(ebin_dir);
     }
 
-    let test_layout = BuildLayout::new(pkg_root);
-    let ebin_dir = test_layout.native_ebin_dir();
     fs::create_dir_all(&ebin_dir)
         .into_diagnostic()
-        .wrap_err("Failed to create native ebin dir for test helpers")?;
+        .wrap_err("Failed to create the native test helper ebin dir")?;
 
     debug!(
         count = erl_files.len(),
@@ -1843,7 +1881,7 @@ fn compile_native_test_erlang(
         .source_files(&erl_files)
         .run("Native test Erlang compilation")?;
 
-    Ok(())
+    Ok(ebin_dir)
 }
 
 /// Format one failing-test detail line.
@@ -1997,6 +2035,60 @@ fn report_results(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BT-5186: `native/test/` helpers are compiled where `beamtalk build`'s
+    /// native-beam pruning never looks, so a build running alongside the tests
+    /// cannot delete them; a helper whose source is gone is removed.
+    #[test]
+    #[ignore = "requires erlc"]
+    fn native_test_helpers_survive_a_concurrent_build_prune() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("native/test")).unwrap();
+        fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"helpers\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/main.bt"), "main := [42].").unwrap();
+        fs::write(
+            root.join("native/app_native.erl"),
+            "-module(app_native).\n-export([f/0]).\nf() -> ok.\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("native/test/my_helper.erl"),
+            "-module(my_helper).\n-export([g/0]).\ng() -> ok.\n",
+        )
+        .unwrap();
+        let options = beamtalk_core::CompilerOptions::default();
+        super::super::build::build(root.as_str(), &options, false).unwrap();
+
+        let helper_ebin =
+            compile_native_test_erlang(&root, &root.join("native/test"), &[]).unwrap();
+        assert!(helper_ebin.join("my_helper.beam").exists());
+
+        // What a concurrent `beamtalk build` does to the native ebin.
+        super::super::build::build(root.as_str(), &options, false).unwrap();
+        assert!(
+            helper_ebin.join("my_helper.beam").exists(),
+            "a build pruned the test helper out from under the test run"
+        );
+        assert!(
+            BuildLayout::new(&root)
+                .native_ebin_dir()
+                .join("app_native.beam")
+                .exists()
+        );
+
+        fs::remove_file(root.join("native/test/my_helper.erl")).unwrap();
+        compile_native_test_erlang(&root, &root.join("native/test"), &[]).unwrap();
+        assert!(
+            !helper_ebin.join("my_helper.beam").exists(),
+            "a removed helper's beam is pruned"
+        );
+    }
 
     /// Pins the summary line's display format. See [`summary_line`] for the
     /// format's history and why it's still worth pinning.
