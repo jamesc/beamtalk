@@ -178,6 +178,10 @@ struct EventGate {
     /// Set by the reaper as soon as `wait()` returns: the child's PID is
     /// free, so its group number can be recycled once the group empties.
     reaped: AtomicBool,
+    /// Set once the watchdog has been told to drop this child's group, so
+    /// it is told exactly once (Unix).
+    #[cfg_attr(windows, allow(dead_code))]
+    forgotten: AtomicBool,
 }
 
 impl EventGate {
@@ -296,14 +300,18 @@ impl Port {
     #[cfg_attr(windows, allow(clippy::unused_self))]
     fn forget(&self, entry: &ChildEntry) {
         #[cfg(unix)]
-        self.forget_pgid(entry.pgid);
+        self.forget_pgid(entry.pgid, &entry.gate);
         #[cfg(windows)]
         let _ = entry;
     }
 
-    /// Tell the watchdog that `pgid` must no longer be signalled.
+    /// Tell the watchdog, once per child, that `pgid` must no longer be
+    /// signalled.
     #[cfg(unix)]
-    fn forget_pgid(&self, pgid: libc::pid_t) {
+    fn forget_pgid(&self, pgid: libc::pid_t, gate: &EventGate) {
+        if gate.forgotten.swap(true, Ordering::AcqRel) {
+            return;
+        }
         if let Some(watchdog) = self.watchdog.get().and_then(Option::as_ref) {
             watchdog.unregister(pgid);
         }
@@ -432,6 +440,10 @@ fn spawn_child(request: &SpawnRequest, port: &Port) -> Result<(), String> {
         beamtalk_process::winjob::spawn_in_job(&mut cmd)
             .map_err(|e| format!("spawn failed: {e}"))?
     };
+    // Unix: the watchdog runs before the first child does, so no child is
+    // ever started without one to clean up after a dead port.
+    #[cfg(unix)]
+    let watchdog = port.watchdog_for_spawn();
     #[cfg(not(windows))]
     let mut child = cmd.spawn().map_err(|e| format!("spawn failed: {e}"))?;
 
@@ -446,7 +458,7 @@ fn spawn_child(request: &SpawnRequest, port: &Port) -> Result<(), String> {
     };
     let stdin = child.stdin.take().map(|s| spawn_stdin_writer(child_id, s));
     #[cfg(unix)]
-    if let Some(watchdog) = port.watchdog_for_spawn() {
+    if let Some(watchdog) = watchdog {
         watchdog.register(pgid);
     }
 
@@ -516,16 +528,11 @@ fn reap(
     // empties, so the watchdog is told the moment it does, even during
     // the drain (a `setsid` grandchild can hold the pipes for a while).
     #[cfg(unix)]
-    let mut group_gone = {
-        let port = port.clone();
-        let mut forgotten = false;
-        move || {
-            if !forgotten && !watchdog::group_exists(pgid) {
-                forgotten = true;
-                port.forget_pgid(pgid);
-            }
-            forgotten
+    let group_gone = || {
+        if !gate.forgotten.load(Ordering::Acquire) && !watchdog::group_exists(pgid) {
+            port.forget_pgid(pgid, gate);
         }
+        gate.forgotten.load(Ordering::Acquire)
     };
     // Let the readers deliver the rest of the output for as long as it
     // keeps flowing, then report the exit whether or not a grandchild
@@ -817,10 +824,17 @@ fn handle_kill_with(
                 || {}, // SIGTERM already sent above.
                 || !still_registered(&children, child_id, &gate),
             );
-            // Re-check so a reused child_id (a new child) is never signalled.
-            if outcome == Outcome::GraceExpired && still_registered(&children, child_id, &gate) {
-                // SAFETY: SIGKILL to a process group this port created.
-                unsafe { libc::kill(-pgid, libc::SIGKILL) };
+            if outcome == Outcome::GraceExpired {
+                // Re-check under the lock: never signal a reused child_id (a
+                // new child), nor a group that has emptied since.
+                if let Ok(map) = children.lock()
+                    && let Some(entry) = map.get(&child_id)
+                    && Arc::ptr_eq(&entry.gate, &gate)
+                    && let Some(pgid) = entry.signallable_pgid()
+                {
+                    // SAFETY: SIGKILL to a process group this port created.
+                    unsafe { libc::kill(-pgid, libc::SIGKILL) };
+                }
             }
         });
     }
@@ -1846,6 +1860,7 @@ mod tests {
                 gate: Arc::new(EventGate {
                     exit_sent: Mutex::new(true),
                     reaped: AtomicBool::new(true),
+                    forgotten: AtomicBool::new(false),
                 }),
                 pgid: 1,
             },

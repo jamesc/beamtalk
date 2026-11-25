@@ -245,8 +245,9 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             S3 = maybe_reply_eof(stderr, S2),
             {noreply, S3};
         {error, _ChildId, write_stdin, Reason} ->
-            %% Input was dropped (the child is not reading it): every later
-            %% writeLine: fails, since the stream the child sees is broken.
+            %% A line was not delivered (the child is not reading its input,
+            %% or closed it): every later writeLine: fails, since the stream
+            %% the child sees is broken.
             ?LOG_WARNING("Subprocess stdin write dropped", #{
                 reason => Reason, domain => [beamtalk, stdlib]
             }),
@@ -427,10 +428,10 @@ unwrap_text_entry(Value) ->
 handle_writeLine({beamtalk_string, Bin}, State) when is_binary(Bin) ->
     handle_writeLine(Bin, State);
 handle_writeLine(_Data, #{stdin_dropped := Reason} = State) ->
-    %% BT-5195: an earlier line was dropped because the child stopped reading
-    %% its input, so the stream the child sees is already broken.
+    %% BT-5195: an earlier line could not be delivered (the child is not
+    %% reading its input, or closed it), so the stream it sees is broken.
     Err = beamtalk_error:new(runtime_error, 'Subprocess', 'writeLine:', <<
-        "input was dropped: ", Reason/binary
+        "stdin write failed: ", Reason/binary
     >>),
     {reply, {error, Err}, State};
 handle_writeLine(Data, State) ->
