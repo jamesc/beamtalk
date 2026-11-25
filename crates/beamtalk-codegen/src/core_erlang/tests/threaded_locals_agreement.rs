@@ -203,7 +203,12 @@ fn threaded_locals_of_agrees_with_the_core_recognizer_over_the_program_corpus() 
 
 /// The same class with its `run` method moved to the class side.
 fn class_side(source: &str) -> String {
-    source.replacen("\n  run", "\n  class run", 1)
+    let moved = source.replacen("\n  run", "\n  class run", 1);
+    assert_ne!(
+        moved, source,
+        "no `run` method header to move to the class side:\n{source}"
+    );
+    moved
 }
 
 /// Hand-written shapes for the constructs `arb_program` does not generate: the ones
