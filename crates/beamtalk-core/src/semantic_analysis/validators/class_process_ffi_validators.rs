@@ -17,10 +17,6 @@
 //! Actor that owns the resource. Suppress with
 //! `@expect class_method_process_resource`.
 //!
-//! Until BT-5158 the runtime still sends a class method to the class process
-//! when it cannot resolve the class's chain facts, so the lint can fire on a
-//! method that, in that window, runs in the class process.
-//!
 //! **Fire condition**:
 //!
 //! 1. the method is class-side: in `class.class_methods`, or a standalone

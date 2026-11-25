@@ -61,10 +61,8 @@ tag fully (once per block-literal creation or region, not a hot path).
 - **Key presence is the "at home" test.** A read with no key and no marker
   raises `class_state_unreachable`; the 3-arity forms fall back to the
   creation-time capture (`capture/2`), raising only when the capture is `none`.
-  The exception is a class whose chain declares no class variables
-  (`beamtalk_class_metadata:chain_has_class_variables/1`): its class methods
-  run in the caller with no home (ADR 0142 §3), and its state reads as the
-  empty map.
+  (ADR 0153 Phase 3a removed the per-chain class-variable fact that let a
+  stateless chain read as the empty map; this module is deleted in Phase 3.)
 - `has/2` is key presence in the map and never raises on the name (as
   `hasField:` is today: reads raise, `hasField:` does not); `clear/2` removes
   the key (as `clearField:` is today). `get/2` on a name absent from the map
@@ -412,9 +410,6 @@ clear(ClassSelf, Name) ->
         ?BT_CLASS_VARS_RO(_) ->
             beamtalk_class_var_errors:raise_read_only(tag_to_name(Tag), Name);
         undefined ->
-            %% ADR 0142 §3 (BT-4300): a class whose chain declares no class
-            %% variables has an empty state (`no_home_map/2`); removing a name
-            %% from it changes nothing, as in the class process.
             _ = no_home_map(Tag, Name, write),
             ClassSelf
     end.
@@ -565,24 +560,17 @@ current_map(Tag, Name) ->
         undefined -> no_home_map(Tag, Name)
     end.
 
-%% No home and no capture. ADR 0142 §3 (BT-4300): a class whose chain declares
-%% no class variables runs its class methods in the caller, which installs no
-%% home; its class state is empty wherever it is read, so the read answers as
-%% it would in the class process against the empty map (`hasField:` false, an
-%% undeclared name per the declared-set rule). Any other class has state only
-%% its class process holds: unreachable. Off the hot path (a read that found a
-%% home never gets here).
--spec no_home_map(atom(), atom()) -> map().
+%% No home and no capture: the class state is held only by the class process,
+%% so it is unreachable. Off the hot path (a read that found a home never gets
+%% here). ADR 0153 Phase 3a removed the per-chain class-variable fact that
+%% used to let a stateless chain read the empty map here.
+-spec no_home_map(atom(), atom()) -> no_return().
 no_home_map(Tag, Name) ->
     no_home_map(Tag, Name, read).
 
--spec no_home_map(atom(), atom(), read | write) -> map().
+-spec no_home_map(atom(), atom(), read | write) -> no_return().
 no_home_map(Tag, Name, Access) ->
-    Class = tag_to_name(Tag),
-    case beamtalk_class_metadata:chain_has_class_variables(Class) of
-        false -> #{};
-        true -> beamtalk_class_var_errors:raise_unreachable(Class, Name, Access)
-    end.
+    beamtalk_class_var_errors:raise_unreachable(tag_to_name(Tag), Name, Access).
 
 -spec map_or_captured(atom(), atom(), map() | none) -> map().
 map_or_captured(Tag, Name, Captured) ->

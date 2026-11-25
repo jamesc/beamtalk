@@ -820,7 +820,7 @@ init({ClassName, ClassInfo}) ->
         maps:get(class_method_info, Meta, undefined),
         maps:get(class_methods, ClassInfo, #{})
     ),
-    publish_init_identity(ClassName, Module, Superclass, IsAbstract, ClassMethods, Meta, ClassInfo),
+    publish_init_identity(ClassName, Module, Superclass, IsAbstract, ClassMethods, Meta),
     FieldDefaults = cache_self_dispatch_state(ClassInfo, InstanceMethods),
     register_class_indexes(ClassName, Meta),
     %% is_constructible may be set by the compiler via ClassBuilder.
@@ -897,9 +897,9 @@ init_is_internal(Meta, ClassInfo) ->
 %% Write the class's identity and the meta-derived facts to the process dictionary
 %% and the unified metadata row (init/1's first publication step).
 -spec publish_init_identity(
-    class_name(), atom(), class_name() | none, boolean(), map(), map(), map()
+    class_name(), atom(), class_name() | none, boolean(), map(), map()
 ) -> ok.
-publish_init_identity(ClassName, Module, Superclass, IsAbstract, ClassMethods, Meta, ClassInfo) ->
+publish_init_identity(ClassName, Module, Superclass, IsAbstract, ClassMethods, Meta) ->
     %% Store class metadata in process dictionary so class_send can
     %% bypass gen_server for self-calls (new/spawn from within class methods).
     put(beamtalk_class_name, ClassName),
@@ -917,9 +917,7 @@ publish_init_identity(ClassName, Module, Superclass, IsAbstract, ClassMethods, M
     beamtalk_class_publish:sync_direct_constructors(ClassName, Meta),
     beamtalk_class_publish:sync_constant_class_methods(ClassName, Meta),
     beamtalk_class_publish:sync_caller_safe_primitives(ClassName, Meta),
-    beamtalk_class_publish:sync_class_process_facts(
-        ClassName, Meta, maps:get(class_state, ClassInfo, #{})
-    ),
+    beamtalk_class_publish:sync_process_bound_selectors(ClassName, Meta),
     %% Clear any runtime class-method funs left behind by a crash of the
     %% previous incarnation of this class process — a crash keeps the class's
     %% metadata (an untrappable kill skips terminate/2, and terminate/2 keeps
@@ -1271,10 +1269,7 @@ call_rename_class(
             beamtalk_class_metadata:put_defines_user_class_new0(
                 NewName, maps:get(defines_new0, Facts)
             ),
-            %% BT-4299: the class-variable fact and process-bound list move too.
-            beamtalk_class_metadata:put_class_variables(
-                NewName, maps:get(has_class_variables, Facts)
-            ),
+            %% BT-4299: the process-bound list moves too.
             beamtalk_class_metadata:put_process_bound_selectors(
                 NewName, maps:get(process_bound_selectors, Facts)
             ),
@@ -1321,8 +1316,6 @@ renamed_class_facts(OldName) ->
                 unknown -> undefined;
                 DefinesNew0 -> DefinesNew0
             end,
-        has_class_variables =>
-            beamtalk_class_metadata:lookup_has_class_variables(OldName) =/= false,
         process_bound_selectors =>
             case beamtalk_class_metadata:lookup_process_bound_selectors(OldName) of
                 {ok, ProcessBound} -> ProcessBound;
@@ -2175,9 +2168,9 @@ apply_class_info(State, ClassInfo) ->
     %% derived direct-call flag is erased (under its per-tag lock); the next
     %% send re-derives it. The erase does not keep the in-caller fast path off
     %% during the writes below: a concurrent send re-derives from the raw
-    %% flags at once. The raw inputs that bar it are raised before the writes
-    %% (`class_vars` just below, `runtime_fun` by `seed_runtime_class_methods/2`
-    %% before its funs are visible); the class-method owner memo (BT-4300) is
+    %% flags at once. The raw input that bars it is raised before the writes
+    %% (`runtime_fun`, by `seed_runtime_class_methods/2` before its funs are
+    %% visible); the class-method owner memo (BT-4300) is
     %% kept consistent by the derived-fact cache's generation counter.
     beamtalk_class_shadow_flags:invalidate(State#class_state.name),
     %% NewModule/NewIsAbstract/NewSuperclass are written to the process
@@ -2189,15 +2182,10 @@ apply_class_info(State, ClassInfo) ->
     %% erlang:function_exported/3 returns false during on_load, so read_meta/1 returns #{}).
     %% Falls back to read_meta for explicit hot-reload calls made outside on_load.
     Meta = class_meta(NewModule, ClassInfo),
-    %% BT-4299: a reload can add or drop `classState:` declarations. Published
-    %% before every other write below (BT-4300): raising `class_vars` is what
-    %% bars the in-caller fast path (ADR 0142 §1 rule 1) for a class that gains
-    %% class variables, so it must land before the reloaded methods' metadata.
-    beamtalk_class_publish:sync_class_process_facts(
-        State#class_state.name,
-        Meta,
-        maps:get(class_state, ClassInfo, State#class_state.class_state)
-    ),
+    %% ADR 0153 §5: the generated process-bound selector list, the one input
+    %% to where a class method runs, published before the reloaded methods'
+    %% metadata.
+    beamtalk_class_publish:sync_process_bound_selectors(State#class_state.name, Meta),
     NewIsAbstract = maps:get(
         is_abstract,
         Meta,

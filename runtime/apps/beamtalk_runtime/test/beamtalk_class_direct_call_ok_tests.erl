@@ -6,12 +6,12 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-ADR 0142 Phase 1a (BT-4299): `beamtalk_class_shadow_flags:direct_call_ok/2`
-gains a "no class variables" input, read from class metadata, and its derived
-flag is erased on every class-metadata write for the class: reload, a change to
-class variables, a class-side `removeSelector:` and `put_class_method`. One
-test per trigger. No dispatch behaviour changes: the open class-side
-self-send guard (`shadow_free/2`) still holds for a class with class variables.
+ADR 0142 Phase 1a (BT-4299), ADR 0153 Phase 3a (BT-5158):
+`beamtalk_class_shadow_flags:direct_call_ok/2` holds exactly while the class
+is ready and not shadowed by an ADR 0084 runtime fun. Class variables, and the
+class's superclass chain, are no input. Its derived flag is erased on every
+class-metadata write for the class: reload, a class-side `removeSelector:`
+and `put_class_method`. One test per trigger.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -44,93 +44,44 @@ install(Name) ->
 
 direct_call_ok_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
-        {"the class_vars raw input makes direct_call_ok false but keeps shadow_free", fun() ->
-            Name = 'Bt4299Raw',
+        {"class-variable defaults and metadata are no input (ADR 0153)", fun() ->
+            Stateful = beamtalk_test_class:start('Bt5158Stateful', class_info(#{count => 0}, #{})),
+            Late = beamtalk_test_class:start(
+                'Bt5158Late', class_info(#{}, #{class_field_kinds => #{cache => late}})
+            ),
+            try
+                ?assert(ok('Bt5158Stateful')),
+                ?assert(ok('Bt5158Late')),
+                Tag = tag('Bt5158Stateful'),
+                ?assert(beamtalk_class_shadow_flags:shadow_free(Tag, 'Bt5158Stateful')),
+                ?assert(
+                    beamtalk_class_dispatch:class_self_direct_ok(Tag, Tag, 'Bt5158Stateful', foo)
+                )
+            after
+                beamtalk_test_proc:stop(Stateful),
+                beamtalk_test_proc:stop(Late)
+            end
+        end},
+        {"an unresolvable superclass chain is no input (BT-5154 window closed)", fun() ->
+            %% Before ADR 0153 the derived flag failed closed on a chain whose
+            %% facts were unpublished; now only readiness and shadows count.
+            Name = 'Bt5158NoChain',
             Tag = tag(Name),
-            %% BT-4301: the derived flag fails closed on a class with no
-            %% published facts, so give it a stateless row under `Object`.
             beamtalk_class_metadata:new(),
-            ok = beamtalk_class_metadata:insert(Name, undefined, [], 'Object', false),
-            ok = beamtalk_class_metadata:put_class_variables(Name, false),
+            ok = beamtalk_class_metadata:insert(Name, undefined, [], 'Bt5158Missing', false),
             _ = persistent_term:erase(Tag),
             try
                 ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
                 ?assertEqual(true, beamtalk_class_shadow_flags:direct_flag_value(Tag)),
-                ok = beamtalk_class_shadow_flags:set_class_vars(Name, true),
-                %% The raise erased the derived flag before returning.
+                %% A shadow still bars it, and erases the derived flag first.
+                ok = beamtalk_class_shadow_flags:set(runtime_fun, Name),
                 ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
                 ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
-                ?assertEqual(class_vars, beamtalk_class_shadow_flags:direct_flag_value(Tag)),
-                ?assert(beamtalk_class_shadow_flags:shadow_free(Tag, Name)),
-                %% A shadow still wins over the class-variable value.
-                ok = beamtalk_class_shadow_flags:set(runtime_fun, Name),
-                ?assertNot(beamtalk_class_shadow_flags:shadow_free(Tag, Name)),
-                ok = beamtalk_class_shadow_flags:clear(runtime_fun, Name),
-                ok = beamtalk_class_shadow_flags:set_class_vars(Name, false),
-                ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
-                ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name))
+                ?assertNot(beamtalk_class_shadow_flags:shadow_free(Tag, Name))
             after
                 beamtalk_class_shadow_flags:clear(runtime_fun, Name),
-                beamtalk_class_shadow_flags:set_class_vars(Name, false),
+                beamtalk_class_metadata:delete(Name),
                 persistent_term:erase(Tag)
-            end
-        end},
-        {"a class's own class-side self-send guard is unchanged by class variables", fun() ->
-            Pid = beamtalk_test_class:start('Bt4299SelfSend', class_info(#{count => 0}, #{})),
-            try
-                Tag = tag('Bt4299SelfSend'),
-                ?assert(
-                    beamtalk_class_dispatch:class_self_direct_ok(Tag, Tag, 'Bt4299SelfSend', foo)
-                ),
-                ?assertNot(ok('Bt4299SelfSend'))
-            after
-                beamtalk_test_proc:stop(Pid)
-            end
-        end},
-        {"init publishes the class-variable fact from classState", fun() ->
-            Stateless = beamtalk_test_class:start('Bt4299Stateless', class_info(#{}, #{})),
-            Stateful = beamtalk_test_class:start('Bt4299Stateful', class_info(#{count => 0}, #{})),
-            try
-                ?assertEqual(
-                    false, beamtalk_class_metadata:lookup_has_class_variables('Bt4299Stateless')
-                ),
-                ?assertEqual(
-                    true, beamtalk_class_metadata:lookup_has_class_variables('Bt4299Stateful')
-                ),
-                ?assert(ok('Bt4299Stateless')),
-                ?assertNot(ok('Bt4299Stateful'))
-            after
-                beamtalk_test_proc:stop(Stateless),
-                beamtalk_test_proc:stop(Stateful)
-            end
-        end},
-        {"meta without class-variable keys (ADR 0153 codegen) means no class variables", fun() ->
-            %% BT-5154: the compiler no longer emits `class_fields` or
-            %% `class_field_kinds`; with no `classState` defaults either,
-            %% the class has no class variables and may be direct-called.
-            Name = 'Bt5154NoClassVarKeys',
-            Meta = #{process_bound_class_selectors => [new]},
-            Pid = beamtalk_test_class:start(Name, class_info(#{}, Meta)),
-            try
-                ?assertEqual(false, beamtalk_class_metadata:lookup_has_class_variables(Name)),
-                ?assert(ok(Name))
-            after
-                beamtalk_test_proc:stop(Pid)
-            end
-        end},
-        {"compiled class_field_kinds is the class-variable fact when present", fun() ->
-            %% A declared `late` class variable has no default, so the
-            %% `classState` defaults are empty; the meta still says it exists.
-            Pid = beamtalk_test_class:start(
-                'Bt4299Late', class_info(#{}, #{class_field_kinds => #{cache => late}})
-            ),
-            try
-                ?assertEqual(
-                    true, beamtalk_class_metadata:lookup_has_class_variables('Bt4299Late')
-                ),
-                ?assertNot(ok('Bt4299Late'))
-            after
-                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"trigger: reload erases the derived flag", fun() ->
@@ -139,41 +90,6 @@ direct_call_ok_test_() ->
             try
                 install(Name),
                 {ok, _} = beamtalk_object_class:update_class(Name, #{module => ?HELPER, meta => #{}}),
-                ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(tag(Name))),
-                ?assert(ok(Name))
-            after
-                beamtalk_test_proc:stop(Pid)
-            end
-        end},
-        {"trigger: a class-variable change on reload erases the flag and flips the answer", fun() ->
-                Name = 'Bt4299ClassVarChange',
-                Pid = beamtalk_test_class:start(Name, class_info(#{}, #{class_field_kinds => #{}})),
-                try
-                    install(Name),
-                    ?assert(ok(Name)),
-                    {ok, _} = beamtalk_object_class:update_class(Name, #{
-                        module => ?HELPER, meta => #{class_field_kinds => #{count => eager}}
-                    }),
-                    ?assertEqual(true, beamtalk_class_metadata:lookup_has_class_variables(Name)),
-                    ?assertNot(ok(Name)),
-                    {ok, _} = beamtalk_object_class:update_class(Name, #{
-                        module => ?HELPER, meta => #{class_field_kinds => #{}}
-                    }),
-                    ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(tag(Name))),
-                    ?assert(ok(Name))
-                after
-                    beamtalk_test_proc:stop(Pid)
-                end
-            end},
-        {"trigger: put_class_variables erases the flag before publishing the fact", fun() ->
-            Name = 'Bt4299PutClassVars',
-            Pid = beamtalk_test_class:start(Name, class_info(#{}, #{})),
-            try
-                install(Name),
-                ok = beamtalk_class_metadata:put_class_variables(Name, true),
-                ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(tag(Name))),
-                ?assertNot(ok(Name)),
-                ok = beamtalk_class_metadata:put_class_variables(Name, false),
                 ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(tag(Name))),
                 ?assert(ok(Name))
             after
@@ -213,12 +129,11 @@ direct_call_ok_test_() ->
                 beamtalk_test_proc:stop(Pid)
             end
         end},
-        {"row removal drops the class-variable input and the derived flag", fun() ->
+        {"row removal drops the derived flag", fun() ->
             Name = 'Bt4299Delete',
-            Pid = beamtalk_test_class:start(Name, class_info(#{count => 0}, #{})),
+            Pid = beamtalk_test_class:start(Name, class_info(#{}, #{})),
             install(Name),
             beamtalk_test_proc:stop(Pid),
-            ?assertNot(beamtalk_class_shadow_flags:is_set(class_vars, Name)),
             ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(tag(Name)))
         end}
     ]}.
