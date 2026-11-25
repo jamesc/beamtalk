@@ -1,0 +1,63 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5190: an inlined (writing-block) `timesRepeat:` checks its receiver, as
+// `to:do:` / `to:by:do:` do (BT-5215). Only Integer defines `timesRepeat:`, so
+// a nil or Float receiver raises `does_not_understand` as the pure
+// (read-only block) send does, instead of a `type_error` (nil) or running
+// (Float), and a user class with its own `timesRepeat:` is refused.
+
+TestCase subclass: CountedLoopTimesRepeatReceiverTest
+
+  pureRepeat: n => n timesRepeat: [1]
+
+  writingRepeat: n =>
+    s := 0
+    n timesRepeat: [s := s + 1]
+    s
+
+  errorOf: aBlock => aBlock on: Exception do: [:e | e]
+
+  assertSameError: pureBlock as: writingBlock =>
+    pure := self errorOf: pureBlock
+    writing := self errorOf: writingBlock
+    self assert: pure kind equals: #does_not_understand
+    self assert: writing kind equals: pure kind
+    self assert: writing class equals: pure class
+    self assert: writing selector equals: pure selector
+    self assert: writing message equals: pure message
+
+  testWritingNilReceiverRaisesDnu =>
+    self should: [self writingRepeat: nil] raise: #does_not_understand
+
+  testNilReceiverPathsAgree =>
+    self assertSameError: [self pureRepeat: nil] as: [self writingRepeat: nil]
+
+  testWritingFloatReceiverRaisesDnu =>
+    self should: [self writingRepeat: 3.5] raise: #does_not_understand
+
+  testFloatReceiverPathsAgree =>
+    self assertSameError: [self pureRepeat: 3.5] as: [self writingRepeat: 3.5]
+
+  testWritingStringReceiverPathsAgree =>
+    self assertSameError: [
+      self pureRepeat: "abc"
+    ] as: [self writingRepeat: "abc"]
+
+  testErrorNamesTheSelector =>
+    e := self errorOf: [self writingRepeat: nil]
+    self assert: e selector equals: #timesRepeat:
+
+  testPureReachesUserMethod =>
+    self assert: (self pureRepeat: Bt5190CustomTimesRepeat new) equals: #custom
+
+  testWritingOnUserMethodRefuses =>
+    self should: [
+      self writingRepeat: Bt5190CustomTimesRepeat new
+    ] raise: #stateful_block_dispatch
+
+  testWritingIntegerReceiverStillRuns =>
+    self assert: (self writingRepeat: 4) equals: 4
+
+  testWritingZeroReceiverRunsNever =>
+    self assert: (self writingRepeat: 0) equals: 0

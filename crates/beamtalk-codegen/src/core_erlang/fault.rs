@@ -187,6 +187,20 @@ mod registry {
         /// BT-5117: a `select:`/`reject:` accumulator conses the included item
         /// onto the result list twice (`FoldResultListConsMismatch`).
         FilterConsTwice,
+        /// BT-5190: a `select:`/`reject:` accumulator conses in neither arm
+        /// (`FoldResultListUndeclared`).
+        FilterConsNothing,
+        /// BT-5190: a `select:`/`reject:` accumulator conses in both arms
+        /// (`FoldResultListUndeclared`).
+        FilterConsBothArms,
+        /// BT-5190: a `select:`/`reject:` accumulator conses on the arm taken
+        /// when the block answers the other boolean
+        /// (`FoldResultListUndeclared`).
+        FilterArmsSwapped,
+        /// BT-5190: a `select:`/`reject:` accumulator conses the predicate's
+        /// answer instead of the lambda's element
+        /// (`FoldResultListWrongItem`).
+        FilterConsWrongItem,
         /// BT-3857: the producer's last `MapPut` rebind is rewritten into a
         /// `MapHeld` over the version that rebind would have produced, read
         /// through it. That version is never produced (a held rebind steps

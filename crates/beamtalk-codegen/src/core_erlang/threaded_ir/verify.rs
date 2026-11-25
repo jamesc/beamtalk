@@ -174,6 +174,15 @@ pub(in crate::core_erlang) enum VerifyError {
         at: Span,
     },
 
+    /// BT-5190: one leaf arm of a `select:`/`reject:` accumulator conses
+    /// `found` onto the result list where the lambda's element `expected`
+    /// belongs (the predicate's answer, or another local).
+    FoldResultListWrongItem {
+        expected: String,
+        found: String,
+        at: Span,
+    },
+
     /// BT-5117: a result-list fold's accumulator is hand-built text (or its
     /// result-list slot is), so the cons count cannot be read off it.
     FoldResultListOpaque { at: Span },
@@ -1416,10 +1425,15 @@ pub(in crate::core_erlang) fn verify_keyed_fold_call(call: &KeyedFoldCall) -> Ve
 
 /// BT-5097, [`VerifyError::FoldResultListUndeclared`] over one fold lambda
 /// body: when its kind has a result list (`expected`), the last statement
-/// must be the accumulator that declares exactly it.
+/// must be the accumulator that declares exactly it. BT-5190: the declaration
+/// is what the accumulator's own shape builds (`FoldAccValue::inferred_result_list`),
+/// so a `select:` that skips or keeps on the wrong boolean, conses in neither
+/// or both arms, or an arm-swapped `reject:`, disagrees with `expected`; `item`
+/// is the lambda's element a filter must cons ([`VerifyError::FoldResultListWrongItem`]).
 pub(in crate::core_erlang) fn verify_fold_result_list_declared(
     body: &[ThreadedStmt],
     expected: Option<FoldResultList>,
+    item: Option<&str>,
     at: Span,
 ) -> Vec<VerifyError> {
     let Some(expected) = expected else {
@@ -1461,8 +1475,18 @@ pub(in crate::core_erlang) fn verify_fold_result_list_declared(
                 slot_conses,
                 stray_slots,
                 slot_base,
+                slot_item,
                 ..
             } => {
+                if let (Some(want), Some(got)) = (item, slot_item.as_deref())
+                    && want != got
+                {
+                    errors.push(VerifyError::FoldResultListWrongItem {
+                        expected: want.to_string(),
+                        found: got.to_string(),
+                        at,
+                    });
+                }
                 if let Some(found) = slot_base.filter(|b| *b != ACC_LIST) {
                     errors.push(VerifyError::FoldResultListWrongBase {
                         slot: expected.slot,
@@ -1471,7 +1495,7 @@ pub(in crate::core_erlang) fn verify_fold_result_list_declared(
                     });
                 }
                 let count_ok = match expected.cons {
-                    ConsPerCall::AtMostOne => slot_conses <= 1,
+                    ConsPerCall::Filter { .. } => slot_conses <= 1,
                     ConsPerCall::ExactlyOne => slot_conses == 1,
                 };
                 if !count_ok || !stray_slots.is_empty() {
