@@ -1477,19 +1477,6 @@ fn release_launcher_tls_distribution_opt_in_test() {
         String::from_utf8_lossy(&rpc.stderr)
     );
 
-    // A loopback client (no opt-in) cannot reach the TLS node.
-    let plain = launcher_command(&output_dir, name)
-        .arg("ping")
-        .env("ERL_EPMD_PORT", &epmd_port)
-        .env("RELEASE_NODE", &node)
-        .env("RELEASE_COOKIE", &cookie)
-        .output()
-        .expect("spawn bin/<name> ping");
-    assert!(
-        !plain.status.success(),
-        "a plain loopback ping must not reach the TLS node"
-    );
-
     #[cfg(unix)]
     {
         use std::io::Write;
@@ -1529,6 +1516,42 @@ fn release_launcher_tls_distribution_opt_in_test() {
             "remote_console must reach the TLS node: stdout={text} stderr={}",
             String::from_utf8_lossy(&out.stderr)
         );
+    }
+
+    // A loopback client (no opt-in) cannot reach the TLS node. It shares the
+    // node's epmd here, so it does dial the TLS listener with a plain
+    // handshake; that is done last, and a TLS `ping` must then still reach
+    // the node (macOS CI showed the listener can refuse a connection made
+    // straight after such a bad client).
+    let plain = launcher_command(&output_dir, name)
+        .arg("ping")
+        .env("ERL_EPMD_PORT", &epmd_port)
+        .env("RELEASE_NODE", &node)
+        .env("RELEASE_COOKIE", &cookie)
+        .output()
+        .expect("spawn bin/<name> ping");
+    assert!(
+        !plain.status.success(),
+        "a plain loopback ping must not reach the TLS node"
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let ping = launcher_command(&output_dir, name)
+            .arg("ping")
+            .envs(env.iter().copied())
+            .env("RELEASE_NODE", &node)
+            .env("RELEASE_COOKIE", &cookie)
+            .output()
+            .expect("spawn bin/<name> ping");
+        if ping.status.success() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the TLS node stopped answering after a plain client: {}",
+            String::from_utf8_lossy(&ping.stderr)
+        );
+        std::thread::sleep(std::time::Duration::from_millis(300)); // sleep: let the TLS listener recover from the plain client
     }
 
     stop_and_wait_for_exit_with_env(&mut foreground, &output_dir, name, &node, &cookie, &env);
