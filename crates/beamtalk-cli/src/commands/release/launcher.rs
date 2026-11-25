@@ -592,4 +592,55 @@ mod tests {
             "{sh}"
         );
     }
+
+    /// BT-5134: a cookie starting with `-`/`+` is rejected, and a symlinked
+    /// `bin/<name>` still finds its release root.
+    #[test]
+    #[cfg(unix)]
+    fn launcher_sh_rejects_dash_cookie_and_follows_symlinked_bin() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = TempDir::new().unwrap();
+        let base = Utf8PathBuf::from_path_buf(temp.path().join("rel")).unwrap();
+        write_launcher_scripts(&base, "orders", "1.0.0", "14.0", false).unwrap();
+        std::fs::create_dir_all(base.join("lib/dep/ebin").as_std_path()).unwrap();
+        let fake = temp.path().join("fakebin");
+        std::fs::create_dir_all(&fake).unwrap();
+        let erl = fake.join("erl");
+        std::fs::write(&erl, "#!/bin/sh\nfor a; do echo \"ARG[$a]\"; done\n").unwrap();
+        std::fs::set_permissions(&erl, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!("{}:{}", fake.display(), std::env::var("PATH").unwrap());
+
+        for bad in ["-sname", "+x"] {
+            let out = std::process::Command::new("sh")
+                .arg(base.join("bin/orders").as_std_path())
+                .arg("ping")
+                .env("PATH", &path)
+                .env("RELEASE_COOKIE", bad)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(2), "{bad}");
+            assert!(String::from_utf8_lossy(&out.stderr).contains("must not start with"));
+        }
+
+        let links = temp.path().join("links");
+        std::fs::create_dir_all(&links).unwrap();
+        let link = links.join("orders");
+        std::os::unix::fs::symlink(base.join("bin/orders").as_std_path(), &link).unwrap();
+        let out = std::process::Command::new("sh")
+            .arg(&link)
+            .arg("ping")
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "{stdout}{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            stdout.contains("/rel/"),
+            "root must resolve through the symlink: {stdout}"
+        );
+    }
 }

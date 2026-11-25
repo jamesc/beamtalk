@@ -30,6 +30,9 @@ cat > "$T/bin/gh" <<'GH'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE_LOG"
 case "$1 $2" in
+  "api repos/o/r/git/ref/tags/edge")
+    # FAKE_REF_ERR: the existence check fails with this message.
+    if [[ -n "${FAKE_REF_ERR:-}" ]]; then echo "gh: ${FAKE_REF_ERR}" >&2; exit 1; fi ;;
   "api -X")
     # FAKE_PATCH_ERR: PATCH of the tag ref fails with this message.
     if [[ "$*" == *"-X PATCH"* && -n "${FAKE_PATCH_ERR:-}" ]]; then
@@ -86,9 +89,13 @@ check "failed upload: no tag move, delete or edit" \
   '! grep -qE "^(api|release delete|release edit)" "$T/log"'
 
 # Tag move (BT-5101): only a missing ref falls through to create.
-FAKE_RELEASE_EXISTS=1 FAKE_PATCH_ERR="Reference does not exist (HTTP 422)" run
+FAKE_RELEASE_EXISTS=1 FAKE_REF_ERR="Not Found (HTTP 404)" run
 check "missing ref: succeeds" '[ "$RC" -eq 0 ]'
 check "missing ref: tag created with POST" 'grep -q "^api -X POST repos/o/r/git/refs .*refs/tags/edge" "$T/log"'
+check "missing ref: no PATCH" '! grep -q "^api -X PATCH" "$T/log"'
+FAKE_RELEASE_EXISTS=1 FAKE_REF_ERR="Resource not accessible by integration (HTTP 403)" run
+check "ref check failure: script fails" '[ "$RC" -ne 0 ]'
+check "ref check failure: no POST fall-through" '! grep -q "^api -X POST" "$T/log"'
 FAKE_RELEASE_EXISTS=1 FAKE_PATCH_ERR="Resource not accessible by integration (HTTP 403)" run
 check "other PATCH failure: script fails" '[ "$RC" -ne 0 ]'
 check "other PATCH failure: no POST fall-through" '! grep -q "^api -X POST" "$T/log"'

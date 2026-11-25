@@ -90,6 +90,12 @@ if not "!CK_CHECK!"=="!RELEASE_COOKIE!" (
     echo error: RELEASE_COOKIE must not contain whitespace, quotes or backslashes 1>&2
     exit /b 2
 )
+if "!RELEASE_COOKIE:~0,1!"=="-" goto :cookie_dash
+if "!RELEASE_COOKIE:~0,1!"=="+" goto :cookie_dash
+goto :cookie_ok
+:cookie_dash
+echo error: RELEASE_COOKIE must not start with '-' or '+' 1>&2
+exit /b 2
 :cookie_ok
 
 set "VERB=%~1"
@@ -173,7 +179,7 @@ echo   This release's BEAM files were produced by OTP %BUILT_MAJOR% and will not
 echo   an older VM. 1>&2
 echo. 1>&2
 echo   Required: Erlang/OTP %REQ_MIN%-%REQ_MAX% (built on %BUILT_MAJOR%) 1>&2
-echo   Found:    Erlang/OTP %HOST_MAJOR% (%ERL%) 1>&2
+echo   Found:    Erlang/OTP %HOST_MAJOR% ^(!ERL!^) 1>&2
 echo. 1>&2
 echo   Either install a supported Erlang/OTP version, or rebuild the release on this host. 1>&2
 exit /b 1
@@ -181,7 +187,10 @@ exit /b 1
 :lib_pa_args
 set "PA_ARGS="
 for /d %%D in ("%ROOT%\lib\*") do (
-    if exist "%%D\ebin" set "PA_ARGS=!PA_ARGS! -pa "%%D\ebin""
+    rem BT-5134: copy the loop variable first; a close-paren in it, as in
+    rem Program Files x86, would otherwise end this block when expanded unquoted.
+    set "LIB_DIR=%%D"
+    if exist "!LIB_DIR!\ebin" set "PA_ARGS=!PA_ARGS! -pa "!LIB_DIR!\ebin""
 )
 exit /b 0
 
@@ -221,7 +230,9 @@ rem exactly this. A host ERTS already has its own default boot file.
 :minimal_boot_args
 set "BOOT_ARGS="
 if /I "%INCLUDE_ERTS%"=="true" if exist "%ROOT%\erts-%ERTS_VSN%\bin\start_clean.boot" (
-    set "BOOT_ARGS=-boot "%ROOT%\erts-%ERTS_VSN%\bin\start_clean""
+    rem BT-5134: delayed expansion; the root sits outside the quotes here and
+    rem a close-paren in it would end this block.
+    set "BOOT_ARGS=-boot "!ROOT!\erts-%ERTS_VSN%\bin\start_clean""
 )
 exit /b 0
 

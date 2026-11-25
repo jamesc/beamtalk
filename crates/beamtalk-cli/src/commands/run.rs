@@ -147,14 +147,17 @@ fn ensure_runtime_built(
 ) -> Result<()> {
     if layout == repl_startup::RuntimeLayout::Dev && !paths.runtime_ebin.exists() {
         info!("Building Beamtalk runtime...");
-        let status = Command::new("rebar3")
+        let status = crate::commands::build::native::rebar3_tool_command()?
             .arg("compile")
             .current_dir(runtime_dir)
             .status()
             .map_err(|e| miette!("Failed to build runtime: {e}"))?;
 
         if !status.success() {
-            return Err(miette!("Failed to build Beamtalk runtime"));
+            return Err(miette!(
+                "Failed to build Beamtalk runtime{}",
+                crate::commands::build::native::rebar3_restricted_env_hint()
+            ));
         }
     }
     Ok(())
