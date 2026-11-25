@@ -61,7 +61,7 @@ mod watchdog;
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -97,6 +97,9 @@ const STDIN_QUEUE_BYTES: usize = 8 << 20;
 /// How often a reaper checks whether an exited child's process group is empty.
 #[cfg(unix)]
 const GROUP_POLL: Duration = Duration::from_millis(100);
+/// How often a draining reaper runs its per-tick check (Unix: has the
+/// reaped child's group emptied?).
+const DRAIN_TICK: Duration = Duration::from_millis(100);
 
 // ────────────────────────────────────────────────────────────────
 // Domain-specific ETF helpers (not shared via beamtalk-etf)
@@ -172,6 +175,9 @@ fn error_event(child_id: u32, command: &str, reason: &str) -> Term {
 #[derive(Default)]
 struct EventGate {
     exit_sent: Mutex<bool>,
+    /// Set by the reaper as soon as `wait()` returns: the child's PID is
+    /// free, so its group number can be recycled once the group empties.
+    reaped: AtomicBool,
 }
 
 impl EventGate {
@@ -192,6 +198,15 @@ impl EventGate {
             *exit_sent = true;
             send_event(writer, &exit_event(child_id, code));
         }
+    }
+
+    fn mark_reaped(&self) {
+        self.reaped.store(true, Ordering::Release);
+    }
+
+    #[cfg_attr(windows, allow(dead_code))]
+    fn reaped(&self) -> bool {
+        self.reaped.load(Ordering::Acquire)
     }
 
     fn exit_sent(&self) -> bool {
@@ -281,22 +296,28 @@ impl Port {
     #[cfg_attr(windows, allow(clippy::unused_self))]
     fn forget(&self, entry: &ChildEntry) {
         #[cfg(unix)]
-        if let Some(watchdog) = self.watchdog.get().and_then(Option::as_ref) {
-            watchdog.unregister(entry.pgid);
-        }
+        self.forget_pgid(entry.pgid);
         #[cfg(windows)]
         let _ = entry;
+    }
+
+    /// Tell the watchdog that `pgid` must no longer be signalled.
+    #[cfg(unix)]
+    fn forget_pgid(&self, pgid: libc::pid_t) {
+        if let Some(watchdog) = self.watchdog.get().and_then(Option::as_ref) {
+            watchdog.unregister(pgid);
+        }
     }
 }
 
 #[cfg(unix)]
 impl ChildEntry {
-    /// The process group to signal, or `None` once the child has exited and
-    /// its group has emptied: the number may already belong to another
+    /// The process group to signal, or `None` once the child has been reaped
+    /// and its group has emptied: the number may already belong to another
     /// group, and the reaper just has not noticed yet (it polls every
     /// [`GROUP_POLL`]).
     fn signallable_pgid(&self) -> Option<libc::pid_t> {
-        (!self.gate.exit_sent() || watchdog::group_exists(self.pgid)).then_some(self.pgid)
+        (!self.gate.reaped() || watchdog::group_exists(self.pgid)).then_some(self.pgid)
     }
 }
 
@@ -457,36 +478,86 @@ fn spawn_child(request: &SpawnRequest, port: &Port) -> Result<(), String> {
 
     let port = port.clone();
     thread::spawn(move || {
-        let exit_code = match child.wait() {
-            Ok(status) => beamtalk_process::exit_code::shell_exit_code(status),
-            Err(e) => {
-                error!("wait() failed for child {child_id}: {e}");
-                -1
-            }
-        };
-        // Let the readers deliver the rest of the output for as long as it
-        // keeps flowing, then report the exit whether or not a grandchild
-        // still holds the pipes.
-        let mut open_pipes = 2;
-        drain_readers(&reader_rx, &mut open_pipes, port.drain, DRAIN_MAX);
-        gate.send_exit(&port.writer, child_id, exit_code);
-        // Keep the entry, so whatever the child left behind stays killable
-        // (and dies with the port), for as long as there is anything left.
-        #[cfg(unix)]
-        {
-            // Nothing reads reader events any more; let the readers' sends
-            // fail rather than pile up while a chatty grandchild lives.
-            drop(reader_rx);
-            while watchdog::group_exists(pgid) {
-                thread::sleep(GROUP_POLL);
-            }
-        }
-        #[cfg(not(unix))]
-        drain_readers(&reader_rx, &mut open_pipes, Duration::MAX, Duration::MAX);
-        port.remove_child(child_id, &gate);
+        reap(
+            child,
+            child_id,
+            &port,
+            &gate,
+            reader_rx,
+            #[cfg(unix)]
+            pgid,
+        );
     });
 
     Ok(())
+}
+
+/// The reaper thread: wait for the child, report its exit once its output is
+/// drained, and keep its entry until nothing it left behind remains.
+/// (`reader_rx` is taken by value so Unix can drop it once drained.)
+#[cfg_attr(windows, allow(clippy::needless_pass_by_value))]
+fn reap(
+    mut child: std::process::Child,
+    child_id: u32,
+    port: &Port,
+    gate: &Arc<EventGate>,
+    reader_rx: Receiver<ReaderEvent>,
+    #[cfg(unix)] pgid: libc::pid_t,
+) {
+    let exit_code = match child.wait() {
+        Ok(status) => beamtalk_process::exit_code::shell_exit_code(status),
+        Err(e) => {
+            error!("wait() failed for child {child_id}: {e}");
+            -1
+        }
+    };
+    gate.mark_reaped();
+    // Unix: from now on the group number can be recycled once the group
+    // empties, so the watchdog is told the moment it does, even during
+    // the drain (a `setsid` grandchild can hold the pipes for a while).
+    #[cfg(unix)]
+    let mut group_gone = {
+        let port = port.clone();
+        let mut forgotten = false;
+        move || {
+            if !forgotten && !watchdog::group_exists(pgid) {
+                forgotten = true;
+                port.forget_pgid(pgid);
+            }
+            forgotten
+        }
+    };
+    // Let the readers deliver the rest of the output for as long as it
+    // keeps flowing, then report the exit whether or not a grandchild
+    // still holds the pipes.
+    let mut open_pipes = 2;
+    #[cfg(unix)]
+    drain_readers(&reader_rx, &mut open_pipes, port.drain, DRAIN_MAX, || {
+        group_gone();
+    });
+    #[cfg(not(unix))]
+    drain_readers(&reader_rx, &mut open_pipes, port.drain, DRAIN_MAX, || {});
+    gate.send_exit(&port.writer, child_id, exit_code);
+    // Keep the entry, so whatever the child left behind stays killable
+    // (and dies with the port), for as long as there is anything left.
+    #[cfg(unix)]
+    {
+        // Nothing reads reader events any more; let the readers' sends
+        // fail rather than pile up while a chatty grandchild lives.
+        drop(reader_rx);
+        while !group_gone() {
+            thread::sleep(GROUP_POLL);
+        }
+    }
+    #[cfg(not(unix))]
+    drain_readers(
+        &reader_rx,
+        &mut open_pipes,
+        Duration::MAX,
+        Duration::MAX,
+        || {},
+    );
+    port.remove_child(child_id, gate);
 }
 
 /// What a reader thread tells the reaper.
@@ -501,12 +572,14 @@ enum ReaderEvent {
 /// once no output has been forwarded for `idle`.
 ///
 /// A reader that panicked drops its sender instead of sending `Eof`, which
-/// ends the wait once no sender is left.
+/// ends the wait once no sender is left. `tick` runs at least every
+/// [`DRAIN_TICK`] while waiting.
 fn drain_readers(
     events: &Receiver<ReaderEvent>,
     open_pipes: &mut usize,
     idle: Duration,
     max: Duration,
+    mut tick: impl FnMut(),
 ) {
     let start = Instant::now();
     let mut quiet_since = start;
@@ -518,7 +591,8 @@ fn drain_readers(
         if left.is_zero() {
             return;
         }
-        match events.recv_timeout(left) {
+        tick();
+        match events.recv_timeout(left.min(DRAIN_TICK)) {
             Ok(ReaderEvent::Progress) => quiet_since = Instant::now(),
             Ok(ReaderEvent::Eof) => *open_pipes -= 1,
             Err(RecvTimeoutError::Timeout) => {}
@@ -1724,6 +1798,31 @@ mod tests {
         });
     }
 
+    /// Once the child is reaped and its group has emptied, the group number
+    /// is never signalled again, even before `exit` is sent (the drain).
+    #[test]
+    #[cfg(unix)]
+    #[serial]
+    fn a_reaped_childs_empty_group_is_not_signalled() {
+        use std::os::unix::process::CommandExt;
+        let mut child = Command::new("true").process_group(0).spawn().unwrap();
+        let pgid = libc::pid_t::try_from(child.id()).unwrap();
+        child.wait().unwrap();
+        let entry = ChildEntry {
+            stdin: None,
+            gate: Arc::default(),
+            pgid,
+        };
+        assert_eq!(
+            entry.signallable_pgid(),
+            Some(pgid),
+            "not reaped yet: still ours"
+        );
+        entry.gate.mark_reaped();
+        assert!(!entry.gate.exit_sent());
+        assert_eq!(entry.signallable_pgid(), None, "reaped and empty");
+    }
+
     #[test]
     #[cfg(unix)]
     fn failed_spawn_of_live_child_id_emits_no_exit_event() {
@@ -1746,6 +1845,7 @@ mod tests {
                 stdin: None,
                 gate: Arc::new(EventGate {
                     exit_sent: Mutex::new(true),
+                    reaped: AtomicBool::new(true),
                 }),
                 pgid: 1,
             },
