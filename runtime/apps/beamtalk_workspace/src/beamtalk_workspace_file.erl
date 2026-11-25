@@ -327,11 +327,11 @@ atomic_write(Path, Data, ExpectedCurrent, Opts) ->
     end.
 
 %% Windows (BT-5258): there are no POSIX mode bits, so `change_mode/2` only
-%% toggles the read-only attribute and does NOT make the file private. What
-%% protects it there is the owner-only default ACL inherited from the parent
-%% directory (the per-user profile / temp location the workspace state lives
-%% under); this module adds no ACL of its own. Exclusive create and atomic
-%% rename behave the same on Windows. Explicit ACL hardening is not done.
+%% toggles the read-only attribute and does NOT make the file private. This
+%% module adds no ACL of its own: privacy there ASSUMES the parent directory
+%% inherits an owner-only ACL, as the per-user profile location does. A
+%% workspace under a shared path (a drive root, a shared folder) is not
+%% protected. Exclusive create and atomic rename behave the same on Windows.
 -spec private_mode(string(), boolean()) -> ok | {error, term()}.
 private_mode(Tmp, true) -> file:change_mode(Tmp, 8#600);
 private_mode(_Tmp, false) -> ok.
