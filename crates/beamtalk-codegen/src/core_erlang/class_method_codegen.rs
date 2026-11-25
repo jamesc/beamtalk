@@ -428,8 +428,8 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// The body of a class-side method, shared by compiled class methods, `ClassBuilder`
-    /// funs and class-side extension funs (ADR 0130 §3): the bare result, with a
+    /// The body of a class-side method, shared by compiled class methods and `ClassBuilder`
+    /// funs (ADR 0130 §3): the bare result, with a
     /// real `NlrCatch` prepended when `needs_nlr` (the token is minted by
     /// [`Self::with_nlr_scope`] before the body lowers, production's real mint
     /// order) and the whole sequence verified and rendered once. Class variables

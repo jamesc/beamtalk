@@ -458,7 +458,7 @@ impl CoreErlangGenerator {
     /// Beamtalk method of the class being compiled or of a compiled actor
     /// superclass. Anything else may reach `dispatch/4`'s default arm — an
     /// inherited `Object`/`ProtoObject`/`Actor` method (compiled without
-    /// actor `State`), a native method, an ADR 0066 extension fun, or
+    /// actor `State`), a native method, or
     /// `does_not_understand` — and is bracketed.
     fn self_send_target_is_compiled(&self, selector: &MessageSelector) -> bool {
         let Some(hierarchy) = &self.class_hierarchy else {

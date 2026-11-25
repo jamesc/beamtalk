@@ -354,22 +354,15 @@ impl CoreErlangGenerator {
         if needs_spec_synthesis {
             docs.push(Document::Str("\n"));
             // Determine which module's class_supervisionPolicy to call.
-            // We check within the current file's AST (both inline class methods and
-            // standalone method definitions); cross-file inherited overrides are not
+            // We check within the current file's AST (same-file `>>` methods are
+            // folded into the class); cross-file inherited overrides are not
             // resolved here (a Phase 1 limitation — see the doc comment on
             // generate_supervision_spec_synthesis).
             let has_local_policy_override = module.classes.first().is_some_and(|c| {
                 let class_name = &c.name.name;
-                let has_inline = self
-                    .semantic_facts
+                self.semantic_facts
                     .class_facts(class_name)
-                    .is_some_and(|cf| cf.has_class_method("supervisionPolicy"));
-                let has_standalone = module.method_definitions.iter().any(|md| {
-                    md.is_class_method
-                        && &md.class_name.name == class_name
-                        && md.method.selector.name() == "supervisionPolicy"
-                });
-                has_inline || has_standalone
+                    .is_some_and(|cf| cf.has_class_method("supervisionPolicy"))
             });
             docs.push(self.generate_supervision_spec_synthesis(has_local_policy_override));
         }
@@ -656,18 +649,11 @@ impl CoreErlangGenerator {
             return false;
         };
         let class_name = &class.name.name;
-        // Skip if supervisionSpec is defined as an inline class method
-        let has_inline = self
+        // Skip if supervisionSpec is defined as a class method
+        !self
             .semantic_facts
             .class_facts(class_name)
-            .is_some_and(|cf| cf.has_class_method("supervisionSpec"));
-        // Skip if supervisionSpec is defined as a standalone class-side method
-        let has_standalone = module.method_definitions.iter().any(|md| {
-            md.is_class_method
-                && &md.class_name.name == class_name
-                && md.method.selector.name() == "supervisionSpec"
-        });
-        !has_inline && !has_standalone
+            .is_some_and(|cf| cf.has_class_method("supervisionSpec"))
     }
 
     /// Generates the synthesized `class_supervisionSpec/1` function.

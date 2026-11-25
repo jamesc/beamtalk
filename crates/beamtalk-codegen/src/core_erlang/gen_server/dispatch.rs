@@ -232,15 +232,15 @@ impl CoreErlangGenerator {
     ///
     /// This function enables the `respondsTo:` reflection method to check
     /// if an actor class implements a particular message selector. It
-    /// returns `true` if the method exists — locally, via a foreign
-    /// extension, via superclass delegation, or unconditionally for a
-    /// catch-all-DNU class — `false` otherwise.
+    /// returns `true` if the method exists — locally, via superclass
+    /// delegation, or unconditionally for a catch-all-DNU class — `false`
+    /// otherwise.
     ///
     /// ADR 0006: renders through the same [`DispatchSpec`]-driven
     /// emitter as `value_type_codegen::generate_primitive_has_method`, so an
     /// actor's `respondsTo:` answers consistently with a value type's given
     /// the identical situation. Only class-based modules get the full
-    /// extension/superclass/DNU-aware form (`spec` built from the class's
+    /// superclass/DNU-aware form (`spec` built from the class's
     /// own `ClassDefinition`); a script/workspace module (no class
     /// definition — top-level `name := [block]` methods) keeps the simple
     /// selector-membership form, since it has no class hierarchy or DNU
@@ -260,13 +260,10 @@ impl CoreErlangGenerator {
     /// 'has_method'/1 = fun (Selector) ->
     ///     case call 'lists':'member'(Selector, ['increment', 'decrement']) of
     ///         <'true'> when 'true' -> 'true'
-    ///         <'false'> when 'true' ->
-    ///             case call 'beamtalk_extensions':'has'('Counter', Selector) of
-    ///                 <'true'> when 'true' -> 'true'
-    ///                 <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Object')
-    ///             end
+    ///         <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Object')
     ///     end
     /// ```
+    #[allow(clippy::unused_self)] // method on impl for API consistency with its siblings
     pub(in crate::core_erlang) fn generate_has_method(&self, module: &Module) -> Document<'static> {
         let own_methods: Vec<String> = collect_primary_method_names_and_arities(module)
             .into_iter()
@@ -274,19 +271,16 @@ impl CoreErlangGenerator {
             .collect();
 
         let Some(class) = module.classes.first() else {
-            // Script/workspace module: no class hierarchy, extensions, or DNU
-            // handler to consult — keep the plain membership-check form.
+            // Script/workspace module: no class hierarchy or DNU handler to
+            // consult — keep the plain membership-check form.
             return Self::generate_has_method_script(&own_methods);
         };
-
-        let class_name = self.class_name();
 
         if dispatch_spec::class_has_catch_all_dnu(class) {
             return dispatch_spec::generate_has_method_from_spec(
                 &[],
                 &DispatchSpec {
                     reflection: &[],
-                    class_name: &class_name,
                     superclass: None,
                     dnu: true,
                     auto_slots: None,
@@ -312,7 +306,6 @@ impl CoreErlangGenerator {
                 // `respondsTo:`, …) are inherited from Object via superclass
                 // delegation below, not listed locally.
                 reflection: &[],
-                class_name: &class_name,
                 superclass,
                 dnu: false,
                 auto_slots: auto_methods.as_ref(),
@@ -322,7 +315,7 @@ impl CoreErlangGenerator {
     }
 
     /// The `has_method/1` shape for script/workspace modules —
-    /// a plain selector-membership check, no extension/superclass/DNU
+    /// a plain selector-membership check, no superclass/DNU
     /// awareness. Kept only for expression-based modules, which have no
     /// class definition to build a [`DispatchSpec`] from.
     fn generate_has_method_script(methods: &[String]) -> Document<'static> {
@@ -604,7 +597,7 @@ impl CoreErlangGenerator {
         // fieldAt:, fieldAt:put:) are now inherited from Object via hierarchy
         // walking, no longer generated per-class.
 
-        // Default case: extension check, hierarchy walk, then DNU fallback
+        // Default case: hierarchy walk, then DNU fallback
         let default_body = self.generate_dispatch_default_case();
         let indent_spaces = case_clause_indent * INDENT;
         #[allow(clippy::cast_sign_loss)] // indent_spaces is always non-negative
@@ -733,143 +726,27 @@ impl CoreErlangGenerator {
     ///    verdict — an inherited compiled `State`-threading actor method is
     ///    invoked directly (`invoke_resolved/6`), the run-time twin of the
     ///    static `CompiledSelfSend` rule (ADR 0137 amended §1), so it skips
-    ///    the extension lookups, `super/5` and `call_foreign/3`. Only
-    ///    `{'compiled', ...}` is taken here; a `{'value', ...}` verdict
-    ///    (BT-4260, for value-type `dispatch/3` arms) is slow for an actor;
-    /// 1. otherwise extension registry (`beamtalk_extensions:lookup`)
-    /// 2. class hierarchy walk (`beamtalk_dispatch:super`)
-    /// 3. `doesNotUnderstand:args:` handler
-    /// 4. `#beamtalk_error{}` fallback
+    ///    `super/5` and `call_foreign/3`. Only `{'compiled', ...}` is taken
+    ///    here; a `{'value', ...}` verdict (BT-4260, for value-type
+    ///    `dispatch/3` arms) is slow for an actor;
+    /// 1. otherwise the class hierarchy walk (`beamtalk_dispatch:super`)
+    /// 2. `doesNotUnderstand:args:` handler
+    /// 3. `#beamtalk_error{}` fallback
     ///
     /// Every route binds `InheritedOutcome`, so the reply / DNU / raise
     /// handling is emitted once and both routes share its error shapes.
     fn generate_dispatch_default_case(&self) -> Document<'static> {
         let class_name = self.class_name();
-        let ext_lookup = self.generate_extension_lookup(&class_name);
-        let ext_case = Self::generate_extension_case(&class_name);
+        let hierarchy_walk = Self::generate_hierarchy_walk(&class_name);
         let outcome_case = self.generate_inherited_outcome_case(&class_name);
 
         dispatch_spec::inherited_default_arm(
             &class_name,
             dispatch_spec::DefaultArmFlavour::Actor {
-                extension_route: docvec![
-                    "%% BT-229/ADR 0005: Check extension registry before hierarchy walk",
-                    line(),
-                    ext_lookup,
-                    line(),
-                    "in",
-                    line(),
-                    ext_case,
-                ],
+                slow_route: hierarchy_walk,
                 outcome: outcome_case,
             },
         )
-    }
-
-    /// Generates the `try call beamtalk_extensions:lookup(...)` expression.
-    #[allow(clippy::unused_self)] // method on impl for API consistency
-    fn generate_extension_lookup(&self, class_name: &str) -> Document<'static> {
-        docvec![
-            "let ExtLookup = try call 'beamtalk_extensions':'lookup'(",
-            leaf::atom(class_name.to_string()),
-            ", OtherSelector)",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "of ExtLookupResult -> ExtLookupResult",
-                    line(),
-                    "catch <_EType, _EReason, _EStack> -> 'not_found'",
-                ]
-            ),
-        ]
-    }
-
-    /// Generates the `case ExtLookup of` with extension hit and hierarchy
-    /// fallback arms. Its value is the `InheritedOutcome`: the extension's
-    /// final `{'reply', _, _}` / `{'error', _, State}`, or `super/5`'s result.
-    fn generate_extension_case(class_name: &str) -> Document<'static> {
-        let hierarchy_walk = Self::generate_hierarchy_walk(class_name);
-
-        docvec![
-            "case ExtLookup of",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "<{'ok', ExtFun, _ExtOwner}> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            "%% BT-1512/BT-2250: Invoke via the runtime helper, which",
-                            line(),
-                            "%% accepts both the 3-arity actor shape",
-                            line(),
-                            "%% (fun(Args, Self, State) -> {Result, NewState}) and the",
-                            line(),
-                            "%% 2-arity value shape (fun(Args, Self) -> Result), so a",
-                            line(),
-                            "%% foreign extension whose codegen-time arity could not be",
-                            line(),
-                            "%% resolved still dispatches correctly. Returns {reply, _, _}.",
-                            line(),
-                            "%% BT-3199: Selector/ClassName are threaded through so a",
-                            line(),
-                            "%% crashing extension body is caught and converted to a",
-                            line(),
-                            "%% structured error naming what was sent, instead of",
-                            line(),
-                            "%% re-raising a bare Erlang exception.",
-                            line(),
-                            "%% BT-3920: that structured error comes back as the",
-                            line(),
-                            "%% lookup-shaped 2-tuple {error, E}; lift it to the dispatch/4",
-                            line(),
-                            "%% own {error, E, State} contract (state rolled back, as for a",
-                            line(),
-                            "%% crashing method body) so handle_call replies with it",
-                            line(),
-                            "%% instead of crashing the actor on an unmatched result.",
-                            line(),
-                            "%% ADR 0137 §2: the extension fun is Erlang that does not bracket",
-                            line(),
-                            "%% what it calls, so it runs through call_foreign/3.",
-                            line(),
-                            "case ",
-                            Self::call_foreign_doc(
-                                "invoke_extension",
-                                6,
-                                docvec![
-                                    "ExtFun, OtherSelector, ",
-                                    leaf::atom(class_name.to_string()),
-                                    ", Args, Self, State"
-                                ],
-                            ),
-                            " of",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    "<{'reply', ExtResult, ExtState}> when 'true' ->",
-                                    nest(INDENT, docvec![line(), "{'reply', ExtResult, ExtState}"]),
-                                    line(),
-                                    "<{'error', ExtError}> when 'true' ->",
-                                    nest(INDENT, docvec![line(), "{'error', ExtError, State}"]),
-                                ]
-                            ),
-                            line(),
-                            "end",
-                        ]
-                    ),
-                    line(),
-                    "<'not_found'> when 'true' ->",
-                    nest(INDENT, docvec![line(), hierarchy_walk,]),
-                ]
-            ),
-            line(),
-            "end",
-        ]
     }
 
     /// `call 'beamtalk_actor_state':'call_foreign'(State, <fun beamtalk_dispatch:name/arity>, [args])`:
@@ -923,7 +800,7 @@ impl CoreErlangGenerator {
     /// (`beamtalk_error:is_does_not_understand/1` answers `true` only for
     /// that record); everything else propagates via the idempotent
     /// `beamtalk_exception_handler:reraise/1` instead of being discarded.
-    /// An extension's own `{error, E, State}` passes through unchanged.
+    /// A method's own `{error, E, State}` passes through unchanged.
     fn generate_inherited_outcome_case(&self, class_name: &str) -> Document<'static> {
         let dnu_fallback = self.generate_dnu_fallback(class_name);
 
@@ -971,10 +848,10 @@ impl CoreErlangGenerator {
                         ]
                     ),
                     line(),
-                    "<{'error', ExtError, ExtErrorState}> when 'true' ->",
+                    "<{'error', MethodError, MethodErrorState}> when 'true' ->",
                     nest(
                         INDENT,
-                        docvec![line(), "{'error', ExtError, ExtErrorState}"]
+                        docvec![line(), "{'error', MethodError, MethodErrorState}"]
                     ),
                 ]
             ),
@@ -1105,21 +982,17 @@ mod tests {
     #[test]
     fn generate_has_method_actor_class() {
         // Covers the standard class-based branch in generate_has_method:
-        // an Actor subclass gets the full extension/superclass-aware form,
-        // which delegates to beamtalk_extensions:has and
-        // beamtalk_dispatch:responds_to for superclass checking.
+        // an Actor subclass gets the full superclass-aware form, which
+        // delegates to beamtalk_dispatch:responds_to for superclass checking
+        // and consults nothing but the class's own selectors (ADR 0152).
         let class = make_actor_class("Counter");
         let module = Module::with_classes(vec![class], s());
         let generator = CoreErlangGenerator::new("counter");
         let output = generator.generate_has_method(&module).to_pretty_string();
         assert!(output.contains("'has_method'/1"), "got: {output}");
         assert!(
-            output.contains("'Counter'"),
-            "class-based has_method should reference class name, got: {output}"
-        );
-        assert!(
-            output.contains("'beamtalk_extensions':'has'"),
-            "class-based has_method should delegate to beamtalk_extensions:has, got: {output}"
+            !output.contains("beamtalk_extensions"),
+            "has_method must not probe an extension registry, got: {output}"
         );
         assert!(
             output.contains("'beamtalk_dispatch':'responds_to'"),

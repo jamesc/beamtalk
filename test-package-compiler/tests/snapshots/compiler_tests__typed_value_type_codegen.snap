@@ -118,15 +118,8 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
             case call 'beamtalk_dispatch':'inherited_target'('TypedPoint', Selector) of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
-                <{'ext', InhExtOwner}> when 'true' ->
-                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@value')
                 <_InhSlow> when 'true' ->
-                    case call 'beamtalk_extensions':'lookup'('TypedPoint', Selector) of
-                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                            apply ExtFun(Args, Self)
-                        <'not_found'> when 'true' ->
-                            call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)
-                    end
+                    call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)
             end
     end
 
@@ -149,21 +142,13 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
 'has_method'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'getX', 'getY', 'distanceTo:', 'printString', 'x', 'y', 'withX:', 'withY:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('TypedPoint', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'bt@stdlib@value':'has_method'(Selector)
-            end
+        <'false'> when 'true' -> call 'bt@stdlib@value':'has_method'(Selector)
     end
 
 'has_method_local'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'getX', 'getY', 'distanceTo:', 'printString', 'x', 'y', 'withX:', 'withY:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('TypedPoint', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> 'false'
-            end
+        <'false'> when 'true' -> 'false'
     end
 
 

@@ -26,7 +26,7 @@
 //!
 //! Every method-body entry point that repeated this ritual — actor instance
 //! methods, value-type instance methods, class-side methods, sealed-method
-//! functions, and the two extension-fun shapes (now one function
+//! functions, and the former extension-fun shapes (one function
 //! parameterised by [`MethodBoundary`]) — now goes through `MethodFrame`,
 //! each converted and verified independently (byte-identical codegen corpus
 //! output) so a regression is bisectable to a single call site.

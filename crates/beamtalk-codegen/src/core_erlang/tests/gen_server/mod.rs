@@ -10,8 +10,6 @@
 //! - [`class_kind_and_value_accessors`] — actor/value class-kind
 //!   classification and value-subclass auto-accessor/writeback metadata
 //! - [`type_aliases`] — type-alias emission for class fields
-//! - [`extensions`] — same-module and cross-module (foreign) class
-//!   extension codegen
 //! - [`state_threading_loops`] — state threading through loop constructs
 //! - [`class_var_access`] — ADR 0130 class-variable access lowering (inlined
 //!   reads/writes, helper calls, the no-`ClassVars` class-method convention)

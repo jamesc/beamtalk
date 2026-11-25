@@ -28,7 +28,7 @@
 //!
 //! which compiles to a `case` and needs no frame. [`rewrite_guard_returns`]
 //! performs that rewrite on codegen's own clone of the module, so every
-//! method kind (Actor, Value, Object, class-side, standalone extension)
+//! method kind (Actor, Value, Object, class-side)
 //! reaches the existing inlined-conditional lowering — and with it
 //! `ThreadedIr` and its `verify()` for state threading — rather than a
 //! second, per-method-kind early-return lowering.
@@ -218,13 +218,10 @@ impl GuardRewrite {
 /// its only block NLRs (see the module doc).
 pub(in crate::core_erlang) fn rewrite_guard_returns(module: &mut Module) -> GuardRewrite {
     let mut rewrite = GuardRewrite::default();
-    // The driver folds a same-file `X >> m` into X before this runs (BT-4721),
-    // so in practice only foreign extensions remain in `method_definitions`.
-    // A same-file one that somehow stayed unfolded would never be lowered, so
-    // nothing would consume its recorded guards: leave it unrewritten and
-    // unrecorded (BT-4497), keeping the checks fail-closed.
-    let declared = beamtalk_core::compilation::declared_class_names(module);
-    for method in methods_mut(module, &declared) {
+    // The driver folds a same-file `X >> m` into X before this runs (BT-4721)
+    // and rejects any other standalone method (ADR 0152), so the methods of
+    // the module's classes are all there is to rewrite.
+    for method in methods_mut(module) {
         let mut rw = Rewriter::of(method);
         if let Some(body) = rewritten_body(&method.body, &mut rw) {
             let original = std::mem::replace(&mut method.body, body);
@@ -251,41 +248,20 @@ pub(in crate::core_erlang) fn rewrite_guard_returns(module: &mut Module) -> Guar
 /// Whether `module` has a method [`rewrite_guard_returns`] would change, so
 /// a caller can skip cloning the module when it has none.
 pub(in crate::core_erlang) fn has_guard_returns(module: &Module) -> bool {
-    let declared = beamtalk_core::compilation::declared_class_names(module);
     module
         .classes
         .iter()
         .flat_map(|class| class.methods.iter().chain(class.class_methods.iter()))
-        .chain(
-            module
-                .method_definitions
-                .iter()
-                .filter(|m| !declared.contains(&m.class_name.name))
-                .map(|m| &m.method),
-        )
         .any(|method| rewritten_body(&method.body, &mut Rewriter::of(method)).is_some())
 }
 
-fn methods_mut<'a>(
-    module: &'a mut Module,
-    declared: &'a HashSet<EcoString>,
-) -> impl Iterator<Item = &'a mut MethodDefinition> {
-    module
-        .classes
-        .iter_mut()
-        .flat_map(|class| {
-            class
-                .methods
-                .iter_mut()
-                .chain(class.class_methods.iter_mut())
-        })
-        .chain(
-            module
-                .method_definitions
-                .iter_mut()
-                .filter(|m| !declared.contains(&m.class_name.name))
-                .map(|m| &mut m.method),
-        )
+fn methods_mut(module: &mut Module) -> impl Iterator<Item = &mut MethodDefinition> {
+    module.classes.iter_mut().flat_map(|class| {
+        class
+            .methods
+            .iter_mut()
+            .chain(class.class_methods.iter_mut())
+    })
 }
 
 /// One method's rewrite: what it records, and what it needs to know about

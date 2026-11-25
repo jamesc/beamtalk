@@ -94,21 +94,13 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
 'has_method'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['doWork', 'compute:', 'ping:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('NativeWorker', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
-            end
+        <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
     end
 
 'has_method_local'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['doWork', 'compute:', 'ping:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('NativeWorker', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> 'false'
-            end
+        <'false'> when 'true' -> 'false'
     end
 
 

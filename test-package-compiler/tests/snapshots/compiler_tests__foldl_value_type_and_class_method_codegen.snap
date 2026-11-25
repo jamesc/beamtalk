@@ -71,50 +71,73 @@ let _temp@18 = _coll@17 in let _temp@19 = case call 'erlang':'is_list'(_temp@18)
             let <DispArg0> = call 'erlang':'hd'(Args) in
             call 'foldl_value_type_and_class_method':'totalInject:'(Self, DispArg0)
         <_Other> when 'true' ->
+            case Selector of
+                <'class'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'clearField:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'delegate'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'displayString'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'equals:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'error:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'fieldAt:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'fieldAt:put:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'fieldNames'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'hasField:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'hash'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'ifNil:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'ifNil:ifNotNil:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'ifNotNil:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'ifNotNil:ifNil:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'inspect'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'isKindOf:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'isNil'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'notImplemented'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'notNil'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'perform:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'perform:withArguments:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'printString'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'respondsTo:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'show:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'showCr:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'subclassResponsibility'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'then:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'yourself'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <_> when 'true' ->
             %% BT-4260: a memoised verdict picks the direct inherited call.
-            case case Selector of
-                <'class'> when 'true' -> 'slow'
-                <'clearField:'> when 'true' -> 'slow'
-                <'delegate'> when 'true' -> 'slow'
-                <'displayString'> when 'true' -> 'slow'
-                <'equals:'> when 'true' -> 'slow'
-                <'error:'> when 'true' -> 'slow'
-                <'fieldAt:'> when 'true' -> 'slow'
-                <'fieldAt:put:'> when 'true' -> 'slow'
-                <'fieldNames'> when 'true' -> 'slow'
-                <'hasField:'> when 'true' -> 'slow'
-                <'hash'> when 'true' -> 'slow'
-                <'ifNil:'> when 'true' -> 'slow'
-                <'ifNil:ifNotNil:'> when 'true' -> 'slow'
-                <'ifNotNil:'> when 'true' -> 'slow'
-                <'ifNotNil:ifNil:'> when 'true' -> 'slow'
-                <'inspect'> when 'true' -> 'slow'
-                <'isKindOf:'> when 'true' -> 'slow'
-                <'isNil'> when 'true' -> 'slow'
-                <'notImplemented'> when 'true' -> 'slow'
-                <'notNil'> when 'true' -> 'slow'
-                <'perform:'> when 'true' -> 'slow'
-                <'perform:withArguments:'> when 'true' -> 'slow'
-                <'printString'> when 'true' -> 'slow'
-                <'respondsTo:'> when 'true' -> 'slow'
-                <'show:'> when 'true' -> 'slow'
-                <'showCr:'> when 'true' -> 'slow'
-                <'subclassResponsibility'> when 'true' -> 'slow'
-                <'then:'> when 'true' -> 'slow'
-                <'yourself'> when 'true' -> 'slow'
-                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('FoldValueCtr', Selector)
-            end of
+            case call 'beamtalk_dispatch':'inherited_target'('FoldValueCtr', Selector) of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
-                <{'ext', InhExtOwner}> when 'true' ->
-                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@object')
                 <_InhSlow> when 'true' ->
-                    case call 'beamtalk_extensions':'lookup'('FoldValueCtr', Selector) of
-                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                            apply ExtFun(Args, Self)
-                        <'not_found'> when 'true' ->
-                            call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
-                    end
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+            end
             end
     end
 
@@ -137,21 +160,13 @@ let _temp@18 = _coll@17 in let _temp@19 = case call 'erlang':'is_list'(_temp@18)
 'has_method'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'sumDo:', 'totalInject:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('FoldValueCtr', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'bt@stdlib@object':'has_method'(Selector)
-            end
+        <'false'> when 'true' -> call 'bt@stdlib@object':'has_method'(Selector)
     end
 
 'has_method_local'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'sumDo:', 'totalInject:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('FoldValueCtr', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> 'false'
-            end
+        <'false'> when 'true' -> 'false'
     end
 
 

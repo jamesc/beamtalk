@@ -904,8 +904,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-4503: a value-type function body (a method's or a value-type
-    /// extension fun's) inside its NLR boundary when `token` is set (a block
+    /// BT-4503: a value-type function body (a method's) inside its NLR boundary when `token` is set (a block
     /// of it holds a `^`), else the body as is. The boundary lowers through
     /// `ThreadedIr` as a [`ThreadedStmt::NlrCatch`] of
     /// [`NlrBoundary::ValueType`] closing the body, verified in the
