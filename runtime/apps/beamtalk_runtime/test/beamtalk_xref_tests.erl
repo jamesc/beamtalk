@@ -1743,24 +1743,21 @@ bt3218_protocol_fixture_setup() ->
         superclass => none,
         module => bt3218_xref_test_nonexistent_module,
         instance_methods => #{'bt3218ProtoMethod' => #{arity => 0}},
-        class_methods => #{},
-        class_state => #{}
+        class_methods => #{}
     },
     {ok, RootPid} = beamtalk_object_class:start_link('Bt3218ProtoRoot', RootInfo),
     ConformsInfo = #{
         superclass => 'Bt3218ProtoRoot',
         module => bt3218_xref_test_nonexistent_module,
         instance_methods => #{},
-        class_methods => #{},
-        class_state => #{}
+        class_methods => #{}
     },
     {ok, ConformsPid} = beamtalk_object_class:start_link('Bt3218ProtoInherits', ConformsInfo),
     NonConformsInfo = #{
         superclass => none,
         module => bt3218_xref_test_nonexistent_module,
         instance_methods => #{},
-        class_methods => #{},
-        class_state => #{}
+        class_methods => #{}
     },
     {ok, NonConformsPid} = beamtalk_object_class:start_link(
         'Bt3218ProtoNonConforming', NonConformsInfo

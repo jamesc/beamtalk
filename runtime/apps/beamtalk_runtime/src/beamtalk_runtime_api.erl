@@ -49,7 +49,6 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
 -export([
     class_name/1,
     module_name/1,
-    set_class_var/3,
     class_methods/1,
     local_class_methods/1,
     local_instance_methods/1,
@@ -264,10 +263,6 @@ ran, because the ETS rows it reads survive that kind of death. See
 -spec module_name(pid()) -> module().
 module_name(Pid) ->
     beamtalk_object_class:module_name_safe(Pid).
-
--spec set_class_var(atom(), atom(), term()) -> term().
-set_class_var(ClassName, VarName, Value) ->
-    beamtalk_object_class:set_class_var(ClassName, VarName, Value).
 
 -spec class_methods(pid()) -> [atom()].
 class_methods(Pid) ->

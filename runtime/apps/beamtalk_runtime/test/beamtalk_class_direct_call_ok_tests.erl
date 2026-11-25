@@ -24,12 +24,11 @@ setup() ->
     ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
     ok.
 
-class_info(ClassVars, Meta) ->
+class_info(Meta) ->
     #{
         superclass => none,
         module => ?HELPER,
         class_methods => #{testSelf => #{arity => 0}},
-        class_state => ClassVars,
         meta => Meta
     }.
 
@@ -44,10 +43,10 @@ install(Name) ->
 
 direct_call_ok_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
-        {"class-variable defaults and metadata are no input (ADR 0153)", fun() ->
-            Stateful = beamtalk_test_class:start('Bt5158Stateful', class_info(#{count => 0}, #{})),
+        {"class-variable metadata is no input (ADR 0153)", fun() ->
+            Stateful = beamtalk_test_class:start('Bt5158Stateful', class_info(#{})),
             Late = beamtalk_test_class:start(
-                'Bt5158Late', class_info(#{}, #{class_field_kinds => #{cache => late}})
+                'Bt5158Late', class_info(#{class_field_kinds => #{cache => late}})
             ),
             try
                 ?assert(ok('Bt5158Stateful')),
@@ -86,7 +85,7 @@ direct_call_ok_test_() ->
         end},
         {"trigger: reload erases the derived flag", fun() ->
             Name = 'Bt4299Reload',
-            Pid = beamtalk_test_class:start(Name, class_info(#{}, #{})),
+            Pid = beamtalk_test_class:start(Name, class_info(#{})),
             try
                 install(Name),
                 {ok, _} = beamtalk_object_class:update_class(Name, #{module => ?HELPER, meta => #{}}),
@@ -98,7 +97,7 @@ direct_call_ok_test_() ->
         end},
         {"trigger: put_class_method erases the derived flag", fun() ->
             Name = 'Bt4299PutClassMethod',
-            Pid = beamtalk_test_class:start(Name, class_info(#{}, #{})),
+            Pid = beamtalk_test_class:start(Name, class_info(#{})),
             try
                 install(Name),
                 ok = beamtalk_object_class:put_class_method(Pid, bt4299_patched, fun(_) -> ok end),
@@ -110,7 +109,7 @@ direct_call_ok_test_() ->
         end},
         {"trigger: class-side removeSelector: erases the derived flag", fun() ->
             Name = 'Bt4299RemoveSelector',
-            Pid = beamtalk_test_class:start(Name, class_info(#{}, #{})),
+            Pid = beamtalk_test_class:start(Name, class_info(#{})),
             MetaObj = #beamtalk_object{class = 'Metaclass', class_mod = ?HELPER, pid = Pid},
             InstObj = #beamtalk_object{class = tag(Name), class_mod = ?HELPER, pid = Pid},
             try
@@ -131,7 +130,7 @@ direct_call_ok_test_() ->
         end},
         {"row removal drops the derived flag", fun() ->
             Name = 'Bt4299Delete',
-            Pid = beamtalk_test_class:start(Name, class_info(#{}, #{})),
+            Pid = beamtalk_test_class:start(Name, class_info(#{})),
             install(Name),
             beamtalk_test_proc:stop(Pid),
             ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(tag(Name)))

@@ -9020,7 +9020,6 @@ anything                    // any diagnostic suppressed (discouraged — use a 
 | `type_annotation` | Missing or redundant type annotation warnings in typed classes |
 | `inheritance` | Sealed-class/sealed-method constraint errors |
 | `class_method_process_resource` | A class-side method that runs in the caller's process (ADR 0142) directly creates a resource tied to the caller (`ets:new`, `open_port`, `link`, `monitor`, timers, …) or acts on the caller (`self()`, the process dictionary, `process_flag`) (BT-4302) |
-| `class_var_reflection_shadowing` | A class-side method named `fieldAt:`, `fieldAt:put:`, `hasField:` or `clearField:`, which the class process answers itself for a Symbol argument (BT-4422, BT-4426) |
 | `cascade_drops_update` | A non-final cascade message on a value receiver that answers an updated copy, which the cascade discards (`p withX: 5; withY: 10`, ADR 0145 § 3, BT-4512) |
 | `discarded_update` | A non-final statement-level send on a value receiver that answers an updated copy, which is thrown away (`p withX: 5.` alone, ADR 0145 § 3, BT-4522) |
 | `ffi_nested_string` | A `String` nested in a collection argument (`List(String)`, `Dictionary` keys/values, `Tuple`) to a stock Erlang call reaches it tagged; an Erlang comparison against raw binaries misses (BT-4243, see [Strings at the FFI boundary](beamtalk-native-erlang.md#strings-at-the-ffi-boundary)) |

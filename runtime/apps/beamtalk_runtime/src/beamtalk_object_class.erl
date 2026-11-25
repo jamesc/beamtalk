@@ -55,14 +55,11 @@ and join the `beamtalk_classes` pg group for enumeration.
     class_send/3,
     class_send/4,
     local_call/3,
-    set_class_var/3,
     update_class/2,
     local_class_methods/1,
     local_instance_methods/1,
     dispatch_caller_pid/0,
-    class_var_reflection_op/2,
-    is_class_var_reflection_send/2,
-    is_class_var_reflection_selector/1,
+    is_field_reflection_selector/1,
     %% ADR 0114: in-place identity move for a dynamic
     %% (ClassBuilder) class's `renameTo:` — see rename/2's doc.
     rename/2
@@ -120,7 +117,6 @@ and join the `beamtalk_classes` pg group for enumeration.
     %% map when no compiled module exists. Compiled classes leave this empty and
     %% bake defaults into their generated `new/0`.
     field_defaults = #{} :: #{atom() => term()},
-    class_state = #{} :: map(),
     method_source = #{} :: #{selector() => binary()},
     %% Class-side method source. Symmetric companion to
     %% method_source, used by SystemNavigation source-text scanners to walk
@@ -310,17 +306,6 @@ update_class(ClassName, ClassInfo) ->
             end;
         {error, _} = Refused ->
             Refused
-    end.
-
--doc "Set a class variable on a class by name.".
--spec set_class_var(class_name(), atom(), term()) -> term().
-set_class_var(ClassName, Name, Value) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            Error0 = beamtalk_error:new(class_not_found, ClassName),
-            error(Error0);
-        Pid ->
-            gen_server:call(Pid, {set_class_var, Name, Value})
     end.
 
 -doc "Create a new instance of this class.".
@@ -689,7 +674,7 @@ Install or replace a class-side method with a runtime fun (ADR 0084).
 
 Class-side mirror of `put_method/4`. The fun follows the compiled class-method
 calling convention exactly (ADR 0130 §3): `fun(ClassSelf, A1..An) -> Result`,
-arity `n + 1`; class variables are accessed through `beamtalk_class_vars`. The fun is stored in
+arity `n + 1`. The fun is stored in
 the class gen_server `class_methods` map (the source of truth) and mirrored into
 the metadata retrieval store so subclasses can dispatch it without a gen_server
 hop. A runtime fun shadows any compiled method of the same selector.
@@ -845,7 +830,6 @@ init({ClassName, ClassInfo}) ->
         class_methods = ClassMethods,
         fields = maps:get(fields, Meta, maps:get(fields, ClassInfo, [])),
         field_defaults = FieldDefaults,
-        class_state = maps:get(class_state, ClassInfo, #{}),
         method_source = maps:get(method_source, ClassInfo, #{}),
         class_method_source = maps:get(class_method_source, ClassInfo, #{}),
         method_signatures = maps:get(method_signatures, ClassInfo, #{}),
@@ -988,16 +972,16 @@ register_class_indexes(ClassName, Meta) ->
             ok
     end.
 
-%% Publish the freshly built state to the readers outside this process: the live
-%% classVars snapshot, the reflection rows, the xref index, the protocol registry
+%% Publish the freshly built state to the readers outside this process: the
+%% (empty) classVars snapshot row, the reflection rows, the xref index, the protocol registry
 %% and the system bus. The order is the init/1 contract.
 -spec publish_init_state(#class_state{}, map(), map()) -> ok.
 publish_init_state(#class_state{name = ClassName} = State, ClassInfo, Meta) ->
-    %% Seed the live classVars snapshot with the declared defaults
-    %% before this init/1 returns, so a `static_init`/`dynamic_init`/direct
-    %% class-method-call reader never observes a gap between the class
-    %% process existing and its snapshot existing.
-    beamtalk_class_registry:record_class_state_snapshot(self(), State#class_state.class_state),
+    %% ADR 0153 (BT-5160): a class has no class variables, so its classVars
+    %% snapshot row is always empty. The row is still written before init/1
+    %% returns, so `beamtalk_class_vars:with_snapshot/2` sees a live class
+    %% until BT-5162 removes the snapshot rows together with it.
+    beamtalk_class_registry:record_class_state_snapshot(self(), #{}),
     ok = beamtalk_class_publish:publish_reflection(reflection_view(State)),
     %% ADR 0087 Phase 2: Forward the per-method cross-reference index
     %% to beamtalk_xref synchronously, before init returns. Running inside init/1
@@ -1214,14 +1198,7 @@ handle_call(
 handle_call({initialize, _Args}, _From, #class_state{} = State) ->
     {reply, {ok, nil}, State};
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
-    {reply, Module, State};
-handle_call({get_class_var, Name}, _From, State) ->
-    call_get_class_var(Name, State);
-handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = ClassVars} = State) ->
-    NewClassVars = ClassVars#{Name => Value},
-    %% Keep the live snapshot in sync with this mutation.
-    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
-    {reply, Value, State#class_state{class_state = NewClassVars}}.
+    {reply, Module, State}.
 
 %% ADR 0114: see rename/2's doc.
 -spec call_rename_class(class_name(), #class_state{}) -> {reply, term(), #class_state{}}.
@@ -1513,8 +1490,7 @@ call_new(
         name = ClassName,
         module = Module,
         is_constructible = IsConstructible0,
-        class_methods = ClassMethods,
-        class_state = ClassVars
+        class_methods = ClassMethods
     } = State
 ) ->
     %% When Args is non-empty and the class (or any ancestor) has a user-defined
@@ -1553,19 +1529,14 @@ call_new(
         case ShadowedOrChain orelse InheritedNew of
             true ->
                 beamtalk_class_dispatch:handle_class_method_call(
-                    Selector, Args, ClassName, Module, ClassMethods, ClassVars
+                    Selector, Args, ClassName, Module, ClassMethods
                 );
             false ->
                 skip
         end,
     case DispatchResult of
-        {reply, Result, NewClassVars} ->
-            %% Keep the live snapshot in sync with this mutation (BT-4758:
-            %% only when the map changed).
-            beamtalk_class_registry:record_class_state_snapshot_if_changed(
-                self(), ClassVars, NewClassVars
-            ),
-            {reply, Result, State#class_state{class_state = NewClassVars}};
+        {reply, Result} ->
+            {reply, Result, State};
         {error, not_found} when not InheritedNew orelse ShadowedOrChain ->
             Err = beamtalk_error:new(does_not_understand, ClassName, Selector),
             {reply, {error, Err}, State};
@@ -1584,27 +1555,6 @@ call_new(
                 {error, Error, IsConstructible} ->
                     {reply, {error, Error}, State#class_state{is_constructible = IsConstructible}}
             end
-    end.
-
--spec call_get_class_var(atom(), #class_state{}) -> {reply, term(), #class_state{}}.
-call_get_class_var(Name, #class_state{name = ClassName, class_state = ClassVars} = State) ->
-    %% ADR 0124 §1/§4i/B4: the read rule (declared-`late`, declared-set) is
-    %% `read_class_var/4`.
-    %%
-    %% Replies `{error, Error}` rather than raising here: this
-    %% `handle_call` clause runs directly in the class gen_server's own
-    %% process, outside the `dispatch_class_method`/`apply_class_method_in_context`
-    %% machinery that normally catches a `#beamtalk_error{}` raise from a
-    %% class-method body and converts it to a safe reply before it can
-    %% reach `handle_call`'s caller (`invoke_class_method`, this module) —
-    %% an uncaught `beamtalk_error:raise/1` here would crash this class's
-    %% gen_server (and so the whole class) instead of just answering the
-    %% caller with a catchable error, so it is never called directly.
-    %% `get_class_var_declared_late_unassigned_errors_without_crashing_test_`
-    %% (`beamtalk_object_class_tests.erl`) pins that the process survives.
-    case read_class_var(ClassName, ClassVars, Name, in_process) of
-        {ok, Value} -> {reply, Value, State};
-        {error, _} = Err -> {reply, Err, State}
     end.
 
 %% ADR 0032 Phase 1: Passes instance_methods (local only) instead of flattened table.
@@ -1641,8 +1591,7 @@ terminate(Reason, #class_state{name = ClassName}) ->
     %% It is keyed by this pid and only read through a live class pid
     %% (`beamtalk_class_vars`), so a row for a dead/reloaded pid could never
     %% be read again — pure accumulation for the life of the node across
-    %% hot-reload, a core dev workflow. A restart starts from fresh class
-    %% variables anyway.
+    %% hot-reload, a core dev workflow.
     _ =
         (try
             beamtalk_class_registry:forget_class_state_snapshot(self())
@@ -1659,20 +1608,6 @@ code_change(OldVsn, State, Extra) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
-
--doc """
-Read class variable `Name` from the class-state map `ClassVars` of `ClassName`:
-`{ok, Value}`, or `{error, Error}` (built, not raised, so the class gen_server
-can reply with it instead of crashing). The rule itself is
-`beamtalk_class_vars:read_in/4`, shared with the in-process `self fieldAt: #x`
-of a class method (BT-4421), so the gen_server's `get_class_var` and the
-inside read cannot drift apart. (The outside `Cls fieldAt: #x` is a
-`does_not_understand` since ADR 0153, BT-5155.)
-""".
--spec read_class_var(class_name(), map(), atom(), in_process | reflective) ->
-    {ok, term()} | {error, #beamtalk_error{}}.
-read_class_var(ClassName, ClassVars, Name, Caller) ->
-    beamtalk_class_vars:read_in(ClassName, ClassVars, Name, Caller).
 
 -doc """
 Run a class-method (or metaclass-method) call against this class gen_server's
@@ -1703,42 +1638,19 @@ dispatch_class_method(Selector, Args, From, State, Restore) ->
     dispatch_class_method_lookup(Selector, Args, From, State, Restore).
 
 -doc """
-The instance-field reflection sends (`hasField: #x` / `clearField: #x` /
-`fieldAt: #x` / `fieldAt: #x put: v`), or `none` for every other send. Once
-class-variable reflection (ADR 0124, BT-4148). Since ADR 0153 decision 7
-(BT-5155) a class has no fields: these selectors are not part of the class
-object's protocol (`is_class_var_reflection_selector/1`, read by
-`beamtalk_class_dispatch:try_class_chain_fallthrough/3` and
-`beamtalk_primitive:class_responds_to/2`). The names are kept until ADR 0153
-Phase 3 removes this machinery.
+Is `Selector` an instance-field reflection selector (`hasField:`,
+`clearField:`, `fieldAt:`, `fieldAt:put:`)? A class has no fields (ADR 0153
+decision 7), so a class object does not understand these unless it defines a
+class method of that name: the `Class` protocol fallthrough
+(`beamtalk_class_dispatch:try_class_chain_fallthrough/3`) and `respondsTo:`
+(`beamtalk_primitive:class_responds_to/2`) refuse them.
 """.
--spec class_var_reflection_op(atom(), list()) ->
-    {has | clear | get, atom()} | {put, atom(), term()} | none.
-class_var_reflection_op('hasField:', [Name]) when is_atom(Name) -> {has, Name};
-class_var_reflection_op('clearField:', [Name]) when is_atom(Name) -> {clear, Name};
-class_var_reflection_op('fieldAt:', [Name]) when is_atom(Name) -> {get, Name};
-class_var_reflection_op('fieldAt:put:', [Name, Value]) when is_atom(Name) -> {put, Name, Value};
-class_var_reflection_op(_Selector, _Args) -> none.
-
--doc """
-Is this an instance-field reflection send (`class_var_reflection_op/2`)?
-""".
--spec is_class_var_reflection_send(atom(), list()) -> boolean().
-is_class_var_reflection_send(Selector, Args) ->
-    class_var_reflection_op(Selector, Args) =/= none.
-
--doc """
-Is `Selector` an instance-field reflection selector, whatever its argument
-(`is_class_var_reflection_send/2` with a Symbol argument)? A class object
-does not understand these unless it defines a class method of that name
-(ADR 0153 decision 7): the `Class` protocol fallthrough and `respondsTo:`
-refuse them.
-""".
--spec is_class_var_reflection_selector(atom()) -> boolean().
-is_class_var_reflection_selector(Selector) ->
-    %% Any atom stands in for the Symbol name; `put`'s value is unconstrained.
-    Args = lists:duplicate(beamtalk_class_builder:selector_arity(Selector), Selector),
-    class_var_reflection_op(Selector, Args) =/= none.
+-spec is_field_reflection_selector(atom()) -> boolean().
+is_field_reflection_selector('hasField:') -> true;
+is_field_reflection_selector('clearField:') -> true;
+is_field_reflection_selector('fieldAt:') -> true;
+is_field_reflection_selector('fieldAt:put:') -> true;
+is_field_reflection_selector(_Selector) -> false.
 
 -spec dispatch_class_method_lookup(
     atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
@@ -1748,22 +1660,16 @@ dispatch_class_method_lookup(Selector, Args, From, State, Restore) ->
         class_methods = ClassMethods,
         instance_methods = InstanceMethods,
         name = ClassName,
-        module = Module,
-        class_state = ClassVars
+        module = Module
     } = State,
     PrevCaller = put(beamtalk_dispatch_caller_pid, caller_pid(From)),
     try
         beamtalk_class_dispatch:handle_class_method_call(
-            Selector, Args, ClassName, Module, ClassMethods, ClassVars
+            Selector, Args, ClassName, Module, ClassMethods
         )
     of
-        {reply, Result, NewClassVars} ->
-            %% Keep the live snapshot in sync with this mutation (BT-4758:
-            %% only when the map changed).
-            beamtalk_class_registry:record_class_state_snapshot_if_changed(
-                self(), ClassVars, NewClassVars
-            ),
-            {reply, Result, State#class_state{class_state = NewClassVars}};
+        {reply, Result} ->
+            {reply, Result, State};
         test_spawn ->
             beamtalk_test_case:spawn_test_execution(
                 Selector, Args, ClassName, Module, InstanceMethods, From

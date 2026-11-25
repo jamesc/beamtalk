@@ -1011,10 +1011,8 @@ or hand-written Erlang class, or no live class), else the class's own declared
 kinds, which may be `#{}` (the set is KNOWN empty). One read answers both
 questions, so a hot reload between two reads cannot make them disagree. Kept
 here, in the metadata leaf, so that `beamtalk_class_vars` (the class-variable
-access leaf, `undeclared_class_variable`) and `beamtalk_object_class` (the
-declared-`late` branch and undeclared check of `get_class_var`) share one
-implementation without the access leaf calling up into the class gen_server or
-the reflection intrinsics.
+access leaf, `undeclared_class_variable`; deleted by ADR 0153 Phase 3) does not
+call up into the class gen_server or the reflection intrinsics.
 """.
 -spec class_var_kinds_or_unknown(class_name()) -> unknown | #{atom() => eager | late}.
 class_var_kinds_or_unknown(Name) ->
