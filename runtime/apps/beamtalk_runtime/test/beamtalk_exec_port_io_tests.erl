@@ -188,6 +188,14 @@ receive_stdout(Port, ChildId, Timeout, Acc) ->
                     receive_stdout(Port, ChildId, Timeout, <<Acc/binary, Data/binary>>);
                 {exit, ChildId, _Code} ->
                     Acc;
+                %% write_stdin is answered with stdin_queued (BT-5248). Naming it
+                %% here also puts the atom in this module's atom table, which
+                %% `binary_to_term(_, [safe])` needs when no other module that
+                %% mentions it has been loaded (BT-5262).
+                {stdin_queued, ChildId} ->
+                    receive_stdout(Port, ChildId, Timeout, Acc);
+                {stdin_queued, OtherId} ->
+                    error({stdin_queued_for_wrong_child, ChildId, OtherId});
                 _ ->
                     receive_stdout(Port, ChildId, Timeout, Acc)
             end;
@@ -204,6 +212,10 @@ receive_exit(Port, ChildId, Timeout) ->
             case binary_to_term(Bin, [safe]) of
                 {exit, ChildId, Code} ->
                     Code;
+                {stdin_queued, ChildId} ->
+                    receive_exit(Port, ChildId, Timeout);
+                {stdin_queued, OtherId} ->
+                    error({stdin_queued_for_wrong_child, ChildId, OtherId});
                 _ ->
                     receive_exit(Port, ChildId, Timeout)
             end;
