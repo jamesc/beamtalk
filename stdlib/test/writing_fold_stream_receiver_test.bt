@@ -87,7 +87,9 @@ TestCase subclass: WritingFoldStreamReceiverTest
   testInjectOnFiniteStreamFolds =>
     self assert: (self writingInject: (Stream on: #(1, 2, 3))) equals: 6
     self assert: (self writingInjectCount: (Stream on: #(1, 2, 3))) equals: 3
-    self assert: ((Stream on: #(1, 2, 3)) inject: 0 into: [:acc :e | acc + e]) equals: 6
+    self assert: ((Stream on: #(1, 2, 3)) inject: 0 into: [:acc :e |
+      acc + e
+    ]) equals: 6
 
   // `do:` on a Stream is eager too and was never guarded.
   testDoOnFiniteStreamFolds =>
