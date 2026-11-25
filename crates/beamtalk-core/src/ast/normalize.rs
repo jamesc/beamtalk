@@ -1006,7 +1006,7 @@ fn for_each_root(module: &Module, f: &mut dyn FnMut(PeelScope, &Expression)) {
         f(PeelScope::Module, &stmt.expression);
     }
     for class in &module.classes {
-        for decl in class.state.iter().chain(&class.class_variables) {
+        for decl in &class.state {
             if let Some(default) = &decl.default_value {
                 f(PeelScope::Module, default);
             }
@@ -1040,7 +1040,7 @@ fn for_each_root_mut(module: &mut Module, f: &mut dyn FnMut(PeelScope, &mut Expr
         f(PeelScope::Module, &mut stmt.expression);
     }
     for class in &mut module.classes {
-        for decl in class.state.iter_mut().chain(&mut class.class_variables) {
+        for decl in &mut class.state {
             if let Some(default) = &mut decl.default_value {
                 f(PeelScope::Module, default);
             }
@@ -1205,7 +1205,6 @@ mod tests {
     fn reaches_blocks_initialisers_match_arms_and_every_method_kind() {
         let source = "Object subclass: A
   state: s = (1) + (2)
-  classState: c = (3) max: (4)
   foo => [:b | (b) + 1] value: 2
   bar => 3 match: [n -> (n) + 1]
   class baz => (self) foo
@@ -1359,7 +1358,7 @@ Protocol define: P
     #[test]
     fn roots_agree_between_shared_and_mutable_walks() {
         let mut module = parse_bt(
-            "Object subclass: A\n  state: s = 1\n  classState: c = 2\n  foo => 3\n  class bar => 4\nA >> baz => 5\nProtocol define: P\n  pro => 6\n7",
+            "Object subclass: A\n  state: s = 1\n  foo => 3\n  class bar => 4\nA >> baz => 5\nProtocol define: P\n  pro => 6\n7",
         );
         let mut shared = Vec::new();
         for_each_root(&module, &mut |scope, e| shared.push((scope, e.clone())));
@@ -1367,14 +1366,14 @@ Protocol define: P
         for_each_root_mut(&mut module, &mut |scope, e| {
             mutable.push((scope, e.clone()));
         });
-        assert_eq!(shared.len(), 7);
+        assert_eq!(shared.len(), 6);
         assert_eq!(shared, mutable);
         let module_level = shared
             .iter()
             .filter(|(scope, _)| *scope == PeelScope::Module)
             .count();
-        // `s = 1`, `c = 2` and `7`; the four method bodies are scoped to their method.
-        assert_eq!(module_level, 3);
+        // `s = 1` and `7`; the four method bodies are scoped to their method.
+        assert_eq!(module_level, 2);
     }
 
     /// A class source and a protocol source (another file) in which the

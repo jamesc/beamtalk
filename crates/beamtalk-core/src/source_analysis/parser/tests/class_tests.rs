@@ -1963,19 +1963,41 @@ fn parse_late_state_declaration() {
 }
 
 #[test]
-fn parse_late_classvar_declaration() {
-    let module = parse_ok(
-        "typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream
+fn late_class_state_is_rejected_with_the_adr_0153_error() {
+    let errors = parse_err(
+        "Actor subclass: TranscriptStream
   late classState: current :: TranscriptStream
 
-  class current => self.current",
+  class current => 1",
     );
-    assert_eq!(module.classes.len(), 1);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0]
+            .message
+            .starts_with("`classState:` was removed (ADR 0153)"),
+        "{}",
+        errors[0].message
+    );
+    let hint = errors[0].hint.as_deref().unwrap_or_default();
+    assert!(hint.contains("PersistentTerm") && hint.contains("AtomicCounter"));
+}
+
+#[test]
+fn class_state_is_rejected_and_the_parser_recovers() {
+    let source = "Actor subclass: Counter
+  classState: count = 0
+  state: x = 0
+  increment => 1";
+    let (module, diagnostics) = parse(lex_with_eof(source));
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].message.contains("`classState:` was removed"));
     let class = &module.classes[0];
-    assert_eq!(class.class_variables.len(), 1);
-    let var = &class.class_variables[0];
-    assert_eq!(var.name.name, "current");
-    assert_eq!(var.slot_kind, crate::ast::SlotKind::Late);
+    assert_eq!(class.state.len(), 1);
+    assert_eq!(class.methods.len(), 1);
 }
 
 #[test]
@@ -2178,21 +2200,6 @@ fn legacy_colon_classvar_annotation_produces_error_and_parses_type() {
         1,
         "method after legacy-typed classState should not be dropped"
     );
-    // The classState declaration itself must be recovered with its type and default value
-    assert_eq!(
-        class.class_variables.len(),
-        1,
-        "Expected exactly one classState variable to be parsed"
-    );
-    let cv = &class.class_variables[0];
-    assert!(
-        cv.type_annotation.is_some(),
-        "Legacy `classState:` should still have a parsed type_annotation after recovery"
-    );
-    assert!(
-        cv.default_value.is_some(),
-        "Legacy `classState:` default value (`= 0`) should still be present after recovery"
-    );
 }
 
 #[test]
@@ -2200,7 +2207,6 @@ fn double_colon_type_annotation_no_diagnostic() {
     // Valid `::` syntax must not produce any diagnostics, and types must be in the AST.
     let source = "Actor subclass: BankAccount
   state: balance :: Integer = 0
-  classState: rate :: Integer = 5
   deposit: amount :: Integer => nil";
     let tokens = lex_with_eof(source);
     let (module, diagnostics) = parse(tokens);
@@ -2218,15 +2224,6 @@ fn double_colon_type_annotation_no_diagnostic() {
     assert!(
         class.state[0].type_annotation.is_some(),
         "Expected state variable to have a type annotation from `::`"
-    );
-    // `classState: rate :: Integer = 5`
-    assert!(
-        !class.class_variables.is_empty(),
-        "Expected at least one classState variable"
-    );
-    assert!(
-        class.class_variables[0].type_annotation.is_some(),
-        "Expected classState variable to have a type annotation from `::`"
     );
     // `deposit: amount :: Integer => nil`
     assert!(!class.methods.is_empty(), "Expected at least one method");
@@ -2249,7 +2246,6 @@ fn double_colon_type_annotation_no_diagnostic() {
 fn equals_default_value_initializer_all_declaration_forms() {
     let source = "Actor subclass: Account
   state: balance = 0
-  classState: rate = 5
   deposit: amount => nil
 
 Value subclass: Label
@@ -2273,17 +2269,6 @@ Value subclass: Label
     assert!(
         account.state[0].default_value.is_some(),
         "Expected `state: balance = 0` to carry a default value"
-    );
-
-    // `classState: rate = 5`
-    assert_eq!(
-        account.class_variables.len(),
-        1,
-        "Expected exactly one classState variable"
-    );
-    assert!(
-        account.class_variables[0].default_value.is_some(),
-        "Expected `classState: rate = 5` to carry a default value"
     );
 
     let label = &module.classes[1];

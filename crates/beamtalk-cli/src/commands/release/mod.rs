@@ -129,7 +129,11 @@ pub fn build_release(
 
     let tarball = release_tarball_path(&release_dir, &release_name, &release_vsn);
     // A run killed by a signal (or power loss) leaves the previous output
-    // parked; put it back before anything else looks at the paths (BT-5134).
+    // parked; put it back before anything else looks at the paths (BT-5134),
+    // but never beside a protected `--output` (BT-5187).
+    if output.is_some() {
+        ensure_unprotected_output(&release_dir, &layout)?;
+    }
     recover_interrupted_release(&release_dir, &tarball)?;
     ensure_clean_release_dir(&release_dir, output.is_some(), force_output, &layout)?;
     ensure_clean_tarball(&tarball, output.is_some(), force_output)?;
@@ -162,10 +166,8 @@ pub fn build_release(
         no_include_erts,
         upgrade_from.as_deref(),
     );
-    if assembled.is_ok() {
-        swap.commit();
-    }
-    assembled
+    assembled?;
+    swap.commit()
 }
 
 /// Assemble the release into the (now absent or empty) `release_dir`.
@@ -624,6 +626,20 @@ const RELEASE_MARKER: &str = ".beamtalk-release";
 /// replacement is assembled.
 const PREVIOUS_SUFFIX: &str = ".beamtalk-previous";
 
+/// Suffix of the swap journal [`ReleaseSwap`] keeps beside the release
+/// directory while a previous output is parked (BT-5187). It names the
+/// parked tarball and the swap's state: `pending` from before anything is
+/// parked until the new release is complete, then `committed` (written
+/// atomically) *before* the parked copies are discarded. A `committed`
+/// journal means the new release is complete, so a parked copy found beside
+/// it is garbage to finish discarding — never a release to restore over the
+/// new one.
+const JOURNAL_SUFFIX: &str = ".beamtalk-swap";
+
+/// First line of every swap journal; anything else at the journal path is
+/// not ours and stops recovery without touching anything.
+const JOURNAL_HEADER: &str = "beamtalk-release-swap v1";
+
 fn write_release_marker(release_dir: &Utf8Path) -> Result<()> {
     let marker = release_dir.join(RELEASE_MARKER);
     std::fs::write(
@@ -650,13 +666,14 @@ fn is_previous_release_output(dir: &Utf8Path) -> bool {
 }
 
 /// Project subdirectories holding hand-written sources; an `--output` naming
-/// (or containing) one would delete them.
+/// one, containing one, or inside one would delete or clobber them.
 const SOURCE_DIRS: &[&str] = &["src", "test", "native", "priv", "deps", ".git"];
 
 /// Directories no `--output` may ever name, even with `--force-output`: a
 /// filesystem root, the home directory, the current directory, the project
 /// root and every ancestor of any of them, and the project's source
-/// directories.
+/// directories together with everything inside them. A path that cannot be
+/// resolved counts as protected.
 fn is_protected_output(release_dir: &Utf8Path, project_root: &Utf8Path) -> bool {
     is_protected_output_with(
         release_dir,
@@ -672,23 +689,111 @@ fn is_protected_output_with(
     cwd: Option<&std::path::Path>,
     home: Option<&std::path::Path>,
 ) -> bool {
-    let Ok(target) = std::fs::canonicalize(release_dir.as_std_path()) else {
-        return false;
+    let Some(target) = canonicalize_lenient(release_dir.as_std_path()) else {
+        return true; // unresolvable: refuse rather than guess
     };
     if target.parent().is_none() {
         return true; // a filesystem root
     }
+    let source_dirs: Vec<_> = SOURCE_DIRS
+        .iter()
+        .filter_map(|d| canonicalize_lenient(project_root.join(d).as_std_path()))
+        .collect();
+    if source_dirs.iter().any(|dir| target.starts_with(dir)) {
+        return true; // a source directory or something inside one
+    }
     let mut roots = vec![project_root.as_std_path().to_path_buf()];
     roots.extend(cwd.map(std::path::Path::to_path_buf));
     roots.extend(home.map(std::path::Path::to_path_buf));
-    roots.extend(
-        SOURCE_DIRS
-            .iter()
-            .map(|d| project_root.join(d).into_std_path_buf()),
-    );
     roots
         .iter()
-        .any(|root| std::fs::canonicalize(root).is_ok_and(|root| root.starts_with(&target)))
+        .filter_map(|root| canonicalize_lenient(root))
+        .chain(source_dirs.iter().cloned())
+        .any(|root| root.starts_with(&target))
+}
+
+/// `canonicalize`, extended to paths that do not exist yet: the longest
+/// existing prefix is canonicalized and the missing tail applied to it one
+/// component at a time, re-resolving every component that exists (a `..` can
+/// lead back into existing directories and their symlinks). `None` when no
+/// prefix resolves.
+fn canonicalize_lenient(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    use std::path::Component;
+    let components: Vec<Component<'_>> = path.components().collect();
+    for split in (1..=components.len()).rev() {
+        let prefix: std::path::PathBuf = components[..split].iter().collect();
+        let Ok(mut resolved) = std::fs::canonicalize(&prefix) else {
+            continue;
+        };
+        for component in &components[split..] {
+            match component {
+                Component::Normal(name) => {
+                    resolved.push(name);
+                    // A `..` can lead the tail back into existing directories,
+                    // whose symlinks must be resolved too.
+                    if let Ok(real) = std::fs::canonicalize(&resolved) {
+                        resolved = real;
+                    }
+                }
+                Component::ParentDir => {
+                    resolved.pop();
+                }
+                Component::CurDir => {}
+                Component::Prefix(_) | Component::RootDir => return None,
+            }
+        }
+        return Some(resolved);
+    }
+    None
+}
+
+/// Top-level entries a release directory holds: `bin/`, `lib/`,
+/// `releases/`, `erts-*/` (and the marker, though a marked directory never
+/// needs `--force-output`).
+fn is_release_entry_name(name: &str) -> bool {
+    matches!(name, "bin" | "lib" | "releases" | RELEASE_MARKER) || name.starts_with("erts-")
+}
+
+/// Whether `dir` looks like a release some tool assembled, though it lacks
+/// the marker: it has a `releases/` directory and nothing at the top level
+/// but release entries ([`is_release_entry_name`]). The one non-empty,
+/// unmarked directory `--force-output` may replace.
+fn is_release_shaped(dir: &Utf8Path) -> bool {
+    if !dir.join("releases").is_dir() {
+        return false;
+    }
+    std::fs::read_dir(dir.as_std_path()).is_ok_and(|entries| {
+        entries
+            .into_iter()
+            .all(|e| e.is_ok_and(|e| e.file_name().to_str().is_some_and(is_release_entry_name)))
+    })
+}
+
+fn is_empty_dir(dir: &Utf8Path) -> bool {
+    std::fs::read_dir(dir.as_std_path()).is_ok_and(|mut d| d.next().is_none())
+}
+
+/// Refuse a user-supplied `--output` that [`is_protected_output`] — checked
+/// even when the path does not exist yet (a release written inside a source
+/// directory would be replaced, i.e. deleted, by the next run), and before
+/// interrupted-run recovery touches anything beside it.
+fn ensure_unprotected_output(release_dir: &Utf8Path, layout: &BuildLayout) -> Result<()> {
+    if canonicalize_lenient(release_dir.as_std_path()).is_none() {
+        miette::bail!(
+            "'--output {release_dir}' cannot be resolved to a location on disk — refusing to \
+             use it."
+        );
+    }
+    if is_protected_output(release_dir, layout.project_root()) {
+        miette::bail!(
+            "'--output {release_dir}' is the current directory, the home directory, a filesystem \
+             root, the project root or an ancestor of any of them, or one of the project's \
+             source directories or a path inside one — refusing to use it, even with \
+             --force-output.\n\n\
+             \x20 Pass an --output path that is a new or dedicated directory."
+        );
+    }
+    Ok(())
 }
 
 /// Validate that `release_dir` may be replaced by a new release build.
@@ -702,10 +807,17 @@ fn is_protected_output_with(
 ///
 /// A user-supplied `--output <dir>` can name *any* path on disk, so:
 ///
-/// * the current directory, the project root and their ancestors are always
-///   refused, even with `force_output`;
-/// * otherwise it is replaced only if it carries the [`RELEASE_MARKER`] (or
-///   an older release's provenance manifest), or `force_output` is set.
+/// * a filesystem root, the home directory, the current directory, the
+///   project root and the ancestors of any of them, and the project's source
+///   directories and everything inside them, are always refused, even with
+///   `force_output` (see [`is_protected_output`]);
+/// * an absent or empty directory is accepted;
+/// * an existing one is replaced only if it carries the [`RELEASE_MARKER`]
+///   (or an older release's provenance manifest);
+/// * `force_output` adds exactly one more case: an unmarked directory that is
+///   release-shaped ([`is_release_shaped`] — a `releases/` directory and
+///   nothing but release entries at the top level). Any other directory
+///   (`~/Documents`, `/usr/local`, …) is refused, forced or not.
 ///
 /// This only validates; [`set_aside_previous_release`] does the replacing.
 fn ensure_clean_release_dir(
@@ -714,51 +826,58 @@ fn ensure_clean_release_dir(
     force_output: bool,
     layout: &BuildLayout,
 ) -> Result<()> {
+    if user_supplied_output {
+        ensure_unprotected_output(release_dir, layout)?;
+        if release_dir.symlink_metadata().is_err()
+            || (release_dir.is_dir() && is_empty_dir(release_dir))
+            || is_previous_release_output(release_dir)
+        {
+            return Ok(());
+        }
+        if force_output && is_release_shaped(release_dir) {
+            return Ok(());
+        }
+        if force_output {
+            miette::bail!(
+                "'--output {release_dir}' already exists, was not written by `beamtalk release` \
+                 (no '{RELEASE_MARKER}' marker file) and does not look like a release (a \
+                 'releases/' directory and only bin/, lib/, releases/, erts-*/ at the top) — \
+                 refusing to delete it, even with --force-output.\n\n\
+                 \x20 Pass a different --output path, or remove '{release_dir}' yourself."
+            );
+        }
+        miette::bail!(
+            "'--output {release_dir}' already exists and was not written by \
+             `beamtalk release` (no '{RELEASE_MARKER}' marker file) — refusing to delete it.\n\n\
+             \x20 Pass a different --output path or remove '{release_dir}' yourself. \
+             \x20 --force-output replaces it only if it is an unmarked release directory."
+        );
+    }
     if !release_dir.exists() {
         return Ok(());
     }
+    // Safety net 1: the internally-computed path must be under
+    // `_build/`. `release_dir` is already absolutized by the caller, so
+    // `build_root()` is compared the same way.
+    let build_root = assembly::absolutize(&layout.build_root())?;
+    assert!(
+        release_dir.starts_with(&build_root),
+        "computed release dir {release_dir} escapes build root {build_root}"
+    );
 
-    if user_supplied_output {
-        if is_protected_output(release_dir, layout.project_root()) {
-            miette::bail!(
-                "'--output {release_dir}' is the current directory, the home directory, a filesystem \
-                 root, the project root, one of the project's source directories or an ancestor \
-                 of any of them — refusing to replace it, even with --force-output.\n\n\
-                 \x20 Pass an --output path that is a new or dedicated directory."
-            );
-        }
-        if !force_output && !is_previous_release_output(release_dir) {
-            miette::bail!(
-                "'--output {release_dir}' already exists and was not written by \
-                 `beamtalk release` (no '{RELEASE_MARKER}' marker file) — refusing to delete it.\n\n\
-                 \x20 Pass a different --output path, remove '{release_dir}' yourself, or pass \
-                 \x20 --force-output to replace it anyway."
-            );
-        }
-    } else {
-        // Safety net 1: the internally-computed path must be under
-        // `_build/`. `release_dir` is already absolutized by the caller, so
-        // `build_root()` is compared the same way.
-        let build_root = assembly::absolutize(&layout.build_root())?;
-        assert!(
-            release_dir.starts_with(&build_root),
-            "computed release dir {release_dir} escapes build root {build_root}"
+    // Safety net 2: `starts_with` is purely lexical, so it cannot see
+    // a symlinked `_build` (or `_build/release`) — removing a *sub-path*
+    // of one would traverse the link and delete the contents of its
+    // target, outside the project. Refuse outright rather than offering
+    // a force flag: a symlinked `_build` is something to fix, not
+    // delete through.
+    if beamtalk_cli::path_util::has_symlink_in_chain(release_dir, &build_root)? {
+        miette::bail!(
+            "Refusing to clean: '{release_dir}' (or a directory between it and \
+             '{build_root}') is a symlink.\n\n\
+             \x20 Remove the symlink manually, or pass an explicit --output pointing \
+             \x20 outside '{build_root}'."
         );
-
-        // Safety net 2: `starts_with` is purely lexical, so it cannot see
-        // a symlinked `_build` (or `_build/release`) — removing a *sub-path*
-        // of one would traverse the link and delete the contents of its
-        // target, outside the project. Refuse outright rather than offering
-        // a force flag: a symlinked `_build` is something to fix, not
-        // delete through.
-        if beamtalk_cli::path_util::has_symlink_in_chain(release_dir, &build_root)? {
-            miette::bail!(
-                "Refusing to clean: '{release_dir}' (or a directory between it and \
-                 '{build_root}') is a symlink.\n\n\
-                 \x20 Remove the symlink manually, or pass an explicit --output pointing \
-                 \x20 outside '{build_root}'."
-            );
-        }
     }
     Ok(())
 }
@@ -780,6 +899,182 @@ fn release_tarball_path(release_dir: &Utf8Path, name: &str, vsn: &str) -> Utf8Pa
 /// `<path>.beamtalk-previous`, where a previous output is parked.
 fn parked_path(path: &Utf8Path) -> Utf8PathBuf {
     Utf8PathBuf::from(format!("{path}{PREVIOUS_SUFFIX}"))
+}
+
+/// `<release_dir>.beamtalk-swap`, the [`JOURNAL_SUFFIX`] journal.
+fn journal_path(release_dir: &Utf8Path) -> Utf8PathBuf {
+    Utf8PathBuf::from(format!("{release_dir}{JOURNAL_SUFFIX}"))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SwapState {
+    /// The previous output is (being) parked; the new release is not complete.
+    Pending,
+    /// The new release is complete; the parked copies are garbage.
+    Committed,
+}
+
+/// The contents of a swap journal.
+#[derive(Debug, Clone)]
+struct SwapJournal {
+    state: SwapState,
+    /// The tarball path of the run that wrote the journal, which differs from
+    /// the current run's after a version bump.
+    tarball: Utf8PathBuf,
+    /// Whether the release directory / tarball existed when the run began (so
+    /// was, or was about to be, parked). One that did not was created by the
+    /// run, and a `pending` recovery removes it rather than leaving a new
+    /// output beside a restored old one.
+    had_dir: bool,
+    had_tarball: bool,
+}
+
+/// Atomically (write a temporary file, flush, rename) set the journal of the
+/// swap of `release_dir`.
+fn write_journal(release_dir: &Utf8Path, journal: &SwapJournal) -> Result<()> {
+    let path = journal_path(release_dir);
+    let tmp = Utf8PathBuf::from(format!("{path}.tmp"));
+    let state_word = match journal.state {
+        SwapState::Pending => "pending",
+        SwapState::Committed => "committed",
+    };
+    let yes_no = |b: bool| if b { "yes" } else { "no" };
+    let content = format!(
+        "{JOURNAL_HEADER}\n{state_word}\n{}\nprevious-dir: {}\nprevious-tarball: {}\n",
+        journal.tarball,
+        yes_no(journal.had_dir),
+        yes_no(journal.had_tarball)
+    );
+    let write = || -> std::io::Result<()> {
+        let mut file = std::fs::File::create(tmp.as_std_path())?;
+        std::io::Write::write_all(&mut file, content.as_bytes())?;
+        file.sync_all()?;
+        std::fs::rename(tmp.as_std_path(), path.as_std_path())
+    };
+    if let Err(e) = write() {
+        let _ = std::fs::remove_file(tmp.as_std_path());
+        return Err(e)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to write the release swap journal '{path}'"));
+    }
+    sync_parent_dir(&path);
+    Ok(())
+}
+
+/// Best-effort flush of `path`'s directory entry (Unix only: a directory
+/// cannot be opened for flushing on Windows).
+fn sync_parent_dir(path: &Utf8Path) {
+    #[cfg(unix)]
+    if let Some(dir) = path
+        .parent()
+        .and_then(|parent| std::fs::File::open(parent.as_std_path()).ok())
+    {
+        let _ = dir.sync_all();
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+/// Flush the new release — every file under `release_dir`, the tarball, and
+/// their directory entries — so a `committed` journal can never outlive, on
+/// power loss, the release it vouches for.
+fn sync_new_release(release_dir: &Utf8Path, tarball: &Utf8Path) -> Result<()> {
+    fn sync_tree(dir: &std::path::Path) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                sync_tree(&entry.path())?;
+            } else if file_type.is_file() {
+                std::fs::File::open(entry.path())?.sync_all()?;
+            }
+        }
+        #[cfg(unix)]
+        std::fs::File::open(dir)?.sync_all()?;
+        Ok(())
+    }
+    if release_dir.is_dir() {
+        sync_tree(release_dir.as_std_path())
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to flush the new release '{release_dir}' to disk"))?;
+    }
+    if tarball.is_file() {
+        std::fs::File::open(tarball.as_std_path())
+            .and_then(|f| f.sync_all())
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to flush '{tarball}' to disk"))?;
+    }
+    sync_parent_dir(release_dir);
+    sync_parent_dir(tarball);
+    Ok(())
+}
+
+/// Read the journal of the swap of `release_dir`, if there is one. A journal
+/// that is not one of ours, or names a tarball anywhere but beside
+/// `release_dir`, is an error: recovery then touches nothing.
+fn read_journal(release_dir: &Utf8Path) -> Result<Option<SwapJournal>> {
+    let path = journal_path(release_dir);
+    if path.symlink_metadata().is_err() {
+        return Ok(None);
+    }
+    let unrecognised = || {
+        miette::miette!(
+            "'{path}' is not a `beamtalk release` swap journal, so the state of an \
+             interrupted run cannot be recovered automatically. Check '{release_dir}' and any \
+             '*{PREVIOUS_SUFFIX}' beside it, keep the release you want, remove the rest and \
+             '{path}', then re-run."
+        )
+    };
+    let text = if path.symlink_metadata().is_ok_and(|m| m.is_file()) {
+        std::fs::read_to_string(path.as_std_path()).map_err(|_| unrecognised())?
+    } else {
+        return Err(unrecognised());
+    };
+    let mut lines = text.lines();
+    if lines.next() != Some(JOURNAL_HEADER) {
+        return Err(unrecognised());
+    }
+    let state = match lines.next() {
+        Some("pending") => SwapState::Pending,
+        Some("committed") => SwapState::Committed,
+        _ => return Err(unrecognised()),
+    };
+    let tarball = Utf8PathBuf::from(lines.next().ok_or_else(unrecognised)?);
+    let beside = tarball.parent() == Some(tarball_out_dir(release_dir).as_path())
+        && tarball.file_name().is_some_and(|n| n.ends_with(".tar.gz"));
+    let mut flag = |key: &str| match lines.next().and_then(|l| l.strip_prefix(key)) {
+        Some("yes") => Some(true),
+        Some("no") => Some(false),
+        _ => None,
+    };
+    let (Some(had_dir), Some(had_tarball)) = (flag("previous-dir: "), flag("previous-tarball: "))
+    else {
+        return Err(unrecognised());
+    };
+    if !beside || lines.next().is_some() {
+        return Err(unrecognised());
+    }
+    Ok(Some(SwapJournal {
+        state,
+        tarball,
+        had_dir,
+        had_tarball,
+    }))
+}
+
+/// Remove `path`, a directory tree or a single file. A symlink is removed,
+/// never followed (on Windows a directory link or junction needs
+/// `remove_dir`, a file link `remove_file`).
+fn remove_output_path(path: &Utf8Path) -> std::io::Result<()> {
+    let meta = path.symlink_metadata()?;
+    if meta.file_type().is_symlink() {
+        std::fs::remove_file(path.as_std_path())
+            .or_else(|_| std::fs::remove_dir(path.as_std_path()))
+    } else if meta.is_dir() {
+        std::fs::remove_dir_all(path.as_std_path())
+    } else {
+        std::fs::remove_file(path.as_std_path())
+    }
 }
 
 /// What `--upgrade-from` names, relative to the output being replaced.
@@ -841,9 +1136,21 @@ fn is_previous_release_tarball(path: &Utf8Path) -> bool {
     })
 }
 
+/// Whether the file at `path` is a readable gzip'd tar archive (of any origin).
+fn is_gzip_tar(path: &Utf8Path) -> bool {
+    let Ok(file) = std::fs::File::open(path.as_std_path()) else {
+        return false;
+    };
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
+    archive
+        .entries()
+        .is_ok_and(|mut entries| entries.next().is_some_and(|e| e.is_ok()))
+}
+
 /// Validate that an existing file at the tarball path may be replaced: it
-/// must be a regular file and, for a user-supplied `--output` without
-/// `--force-output`, a tarball an earlier `beamtalk release` wrote.
+/// must be a regular file and, for a user-supplied `--output`, a tarball an
+/// earlier `beamtalk release` wrote — or, with `--force-output`, at least a
+/// gzip'd tar archive (BT-5187: never an arbitrary file).
 fn ensure_clean_tarball(
     tarball: &Utf8Path,
     user_supplied_output: bool,
@@ -857,47 +1164,105 @@ fn ensure_clean_tarball(
             "'{tarball}' already exists and is not a regular file — refusing to replace it."
         );
     }
-    if user_supplied_output && !force_output && !is_previous_release_tarball(tarball) {
-        miette::bail!(
-            "'{tarball}' already exists and was not written by `beamtalk release` — refusing \
-             to replace it.\n\n\
-             \x20 Pass a different --output path, remove it yourself, or pass --force-output."
-        );
+    if user_supplied_output && !is_previous_release_tarball(tarball) {
+        if !force_output {
+            miette::bail!(
+                "'{tarball}' already exists and was not written by `beamtalk release` — \
+                 refusing to replace it.\n\n\
+                 \x20 Pass a different --output path, remove it yourself, or pass \
+                 --force-output if it is a release tarball from another tool."
+            );
+        }
+        if !is_gzip_tar(tarball) {
+            miette::bail!(
+                "'{tarball}' already exists and is not a gzip'd tar archive — refusing to \
+                 replace it, even with --force-output."
+            );
+        }
     }
     Ok(())
 }
 
-/// Undo an interrupted run: `ReleaseSwap::begin` parks the previous output at
-/// `<path>.beamtalk-previous`, and only `commit`/`Drop` clear it, so a parked
-/// copy found at startup means the last run died (signal, power loss) before
-/// either ran. Remove whatever partial output sits at `path` and restore.
+/// Undo or finish an interrupted run (BT-5134, BT-5187).
+///
+/// `ReleaseSwap::begin` writes a `pending` journal, then parks the previous
+/// output at `<path>.beamtalk-previous`; `ReleaseSwap::commit` flips the
+/// journal to `committed` and only then discards the parked copies. So at
+/// startup:
+///
+/// * a `committed` journal means the last run finished its new release and
+///   died (or failed) while discarding the old one: the outputs are complete
+///   and left alone, and the parked leftovers are removed;
+/// * a `pending` journal, or a parked copy with no journal (left by a build
+///   from before the journal existed), means the last run died before its
+///   new release was complete: whatever partial output of ours sits at the
+///   path (a marked or empty directory, or a tarball carrying this command's
+///   provenance manifest) is removed and the parked copy restored. Anything
+///   else at the path is left alone and the run refused.
+///
+/// The journal names the tarball of the run that wrote it, so a version bump
+/// in between still finds that run's parked tarball.
 fn recover_interrupted_release(release_dir: &Utf8Path, tarball: &Utf8Path) -> Result<()> {
-    for path in [release_dir, tarball] {
+    let journal = read_journal(release_dir)?;
+    let tarball = journal.as_ref().map_or(tarball, |j| j.tarball.as_path());
+    match &journal {
+        Some(j) if j.state == SwapState::Committed => {
+            finish_interrupted_commit(release_dir, tarball)?;
+        }
+        Some(j) => restore_parked_release(release_dir, tarball, Some((j.had_dir, j.had_tarball)))?,
+        None => restore_parked_release(release_dir, tarball, None)?,
+    }
+    if journal.is_some() {
+        let path = journal_path(release_dir);
+        remove_output_path(&path)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to remove the release swap journal '{path}'"))?;
+    }
+    Ok(())
+}
+
+/// Put back the previous output parked by a run that never committed.
+/// `had` is the journal's (directory, tarball) existed-at-begin flags, when
+/// there is a journal: an output that did not exist was created by the
+/// interrupted run, so it is removed (if it is ours) rather than left beside
+/// a restored previous output.
+fn restore_parked_release(
+    release_dir: &Utf8Path,
+    tarball: &Utf8Path,
+    had: Option<(bool, bool)>,
+) -> Result<()> {
+    // Only discard what a build of ours could have left: a marked (or still
+    // empty) directory, or a tarball this command wrote.
+    let is_ours = |path: &Utf8Path, meta: &std::fs::Metadata| {
+        if path == release_dir {
+            meta.is_dir() && (path.join(RELEASE_MARKER).is_file() || is_empty_dir(path))
+        } else {
+            meta.is_file() && is_previous_release_tarball(path)
+        }
+    };
+    let had = had.map(|(d, t)| [d, t]);
+    for (i, path) in [release_dir, tarball].into_iter().enumerate() {
         let parked = parked_path(path);
         if parked.symlink_metadata().is_err() {
+            if had.is_some_and(|h| !h[i])
+                && let Ok(meta) = path.symlink_metadata()
+                && is_ours(path, &meta)
+            {
+                eprintln!("Removing the partial output of an interrupted run: '{path}'");
+                remove_output_path(path)
+                    .into_diagnostic()
+                    .wrap_err_with(|| format!("Failed to remove the partial output '{path}'"))?;
+            }
             continue;
         }
         if let Ok(meta) = path.symlink_metadata() {
-            // Only discard what a build of ours could have left: a marked (or
-            // still empty) directory, or a tarball file.
-            let ours = if meta.is_dir() {
-                path.join(RELEASE_MARKER).is_file()
-                    || std::fs::read_dir(path.as_std_path()).is_ok_and(|mut d| d.next().is_none())
-            } else {
-                meta.is_file()
-            };
-            if !ours {
+            if !is_ours(path, &meta) {
                 miette::bail!(
                     "'{parked}' is left over from an interrupted `beamtalk release`, but \
                      '{path}' now holds something else. Move one of them, then re-run."
                 );
             }
-            let removed = if meta.is_dir() {
-                std::fs::remove_dir_all(path.as_std_path())
-            } else {
-                std::fs::remove_file(path.as_std_path())
-            };
-            removed
+            remove_output_path(path)
                 .into_diagnostic()
                 .wrap_err_with(|| format!("Failed to remove the partial output '{path}'"))?;
         }
@@ -909,14 +1274,37 @@ fn recover_interrupted_release(release_dir: &Utf8Path, tarball: &Utf8Path) -> Re
     Ok(())
 }
 
+/// The last run committed but did not finish discarding the previous
+/// output: discard what is left, never touching the committed outputs.
+fn finish_interrupted_commit(release_dir: &Utf8Path, tarball: &Utf8Path) -> Result<()> {
+    for path in [release_dir, tarball] {
+        let parked = parked_path(path);
+        if parked.symlink_metadata().is_err() {
+            continue;
+        }
+        eprintln!("Removing the previous release left by an interrupted run: '{parked}'");
+        remove_output_path(&parked)
+            .into_diagnostic()
+            .wrap_err_with(|| {
+                format!(
+                    "Failed to remove '{parked}', the previous release a completed `beamtalk \
+                     release` replaced. Remove it yourself, then re-run."
+                )
+            })?;
+    }
+    Ok(())
+}
+
 /// Transactional replacement of a previous release's output: its directory
 /// and its tarball (which lives *beside* the directory, so it is not covered
 /// by parking the directory alone).
 ///
-/// [`ReleaseSwap::begin`] parks both in `<path>.beamtalk-previous` siblings.
-/// [`ReleaseSwap::commit`] discards them. Dropping the guard uncommitted —
-/// an `Err` return or a panic unwinding through the assembly — discards the
-/// partial new output and puts the previous one back.
+/// [`ReleaseSwap::begin`] writes a `pending` journal ([`JOURNAL_SUFFIX`]) and
+/// parks both in `<path>.beamtalk-previous` siblings. [`ReleaseSwap::commit`]
+/// marks the journal `committed`, then discards them (see
+/// [`recover_interrupted_release`] for a run killed at any point). Dropping
+/// the guard uncommitted — an `Err` return or a panic unwinding through the
+/// assembly — discards the partial new output and puts the previous one back.
 struct ReleaseSwap {
     release_dir: Utf8PathBuf,
     parked_dir: Option<Utf8PathBuf>,
@@ -936,7 +1324,16 @@ impl ReleaseSwap {
     fn begin(release_dir: &Utf8Path, tarball: Utf8PathBuf) -> Result<Self> {
         let dir_exists = release_dir.exists();
         let tar_exists = tarball.exists();
-        // Refuse before moving anything if an interrupted run left either behind.
+        // Refuse before moving anything if an interrupted run left anything
+        // behind. (Recovery has already run, so normally there is none;
+        // concurrent runs on one output are not detected — BT-5230.)
+        let journal = journal_path(release_dir);
+        if journal.symlink_metadata().is_ok() {
+            miette::bail!(
+                "'{journal}' is left over from an interrupted `beamtalk release` (or another run is \
+                 writing this output); re-run once no other run is active and it is recovered."
+            );
+        }
         for (exists, path) in [(dir_exists, release_dir), (tar_exists, tarball.as_path())] {
             let parked = parked_path(path);
             if exists && parked.exists() {
@@ -955,6 +1352,17 @@ impl ReleaseSwap {
             owns_tarball: !tar_exists,
             committed: false,
         };
+        if dir_exists || tar_exists {
+            write_journal(
+                release_dir,
+                &SwapJournal {
+                    state: SwapState::Pending,
+                    tarball: swap.tarball.clone(),
+                    had_dir: dir_exists,
+                    had_tarball: tar_exists,
+                },
+            )?;
+        }
         // From here a failed step returns early and `Drop` restores what was parked.
         if dir_exists {
             let parked = parked_path(release_dir);
@@ -977,22 +1385,55 @@ impl ReleaseSwap {
         Ok(swap)
     }
 
-    /// The new release is complete: discard the parked previous output.
-    fn commit(mut self) {
+    /// The new release is complete: mark the journal `committed`, then
+    /// discard the parked previous output. If the journal cannot be updated,
+    /// the swap is rolled back (the previous release restored) and the error
+    /// returned.
+    fn commit(self) -> Result<()> {
+        self.commit_with(remove_output_path)
+    }
+
+    /// [`Self::commit`] with an injectable remover (tests use it to simulate a
+    /// failed removal, or a kill — a panic — at each step). Every removal
+    /// after the journal is committed is best-effort: what is left behind is
+    /// finished by the next run's [`recover_interrupted_release`].
+    fn commit_with(mut self, remove: impl Fn(&Utf8Path) -> std::io::Result<()>) -> Result<()> {
+        // Nothing was parked, so there is no journal and nothing to discard.
+        if self.parked_dir.is_none() && self.parked_tarball.is_none() {
+            self.committed = true;
+            return Ok(());
+        }
+        // On failure `self` drops uncommitted, restoring the previous output.
+        sync_new_release(&self.release_dir, &self.tarball)?;
+        write_journal(
+            &self.release_dir,
+            &SwapJournal {
+                state: SwapState::Committed,
+                tarball: self.tarball.clone(),
+                had_dir: self.parked_dir.is_some(),
+                had_tarball: self.parked_tarball.is_some(),
+            },
+        )?;
+        // From here on the new release is the release: nothing rolls back.
         self.committed = true;
+        let mut all_removed = true;
         for parked in [self.parked_dir.take(), self.parked_tarball.take()]
             .into_iter()
             .flatten()
         {
-            let result = if parked.is_dir() {
-                std::fs::remove_dir_all(parked.as_std_path())
-            } else {
-                std::fs::remove_file(parked.as_std_path())
-            };
-            if let Err(e) = result {
-                eprintln!("warning: could not remove the previous release at '{parked}': {e}");
+            if let Err(e) = remove(&parked) {
+                all_removed = false;
+                eprintln!(
+                    "warning: could not remove the previous release at '{parked}': {e} — the \
+                     next `beamtalk release` will remove it"
+                );
             }
         }
+        let journal = journal_path(&self.release_dir);
+        if all_removed && let Err(e) = remove(&journal) {
+            eprintln!("warning: could not remove '{journal}': {e}");
+        }
+        Ok(())
     }
 
     fn rollback(&mut self) {
@@ -1002,16 +1443,24 @@ impl ReleaseSwap {
         if self.owns_tarball {
             let _ = std::fs::remove_file(self.tarball.as_std_path());
         }
+        let mut restored = true;
         for (parked, original) in [
             (self.parked_dir.take(), &self.release_dir),
             (self.parked_tarball.take(), &self.tarball),
         ] {
             let Some(parked) = parked else { continue };
             if let Err(e) = std::fs::rename(parked.as_std_path(), original.as_std_path()) {
+                restored = false;
                 eprintln!(
-                    "error: could not restore the previous release; it is at '{parked}': {e}"
+                    "error: could not restore the previous release; it is at '{parked}' and \
+                     the next `beamtalk release` will restore it: {e}"
                 );
             }
+        }
+        // A failed restore keeps the `pending` journal for the next run. (No
+        // other run's journal can be here: `begin` refuses while one exists.)
+        if restored {
+            let _ = std::fs::remove_file(journal_path(&self.release_dir).as_std_path());
         }
     }
 }
@@ -1206,19 +1655,94 @@ mod tests {
         assert!(target.join("important.txt").is_file());
     }
 
+    /// BT-5187: `--force-output` no longer accepts an arbitrary directory
+    /// (`--output ~/Documents`, `/usr/local`): only an unmarked one that is
+    /// release-shaped.
     #[test]
-    fn ensure_clean_release_dir_force_output_accepts_a_non_release_dir() {
+    fn ensure_clean_release_dir_force_output_refuses_a_non_release_dir() {
         let temp = TempDir::new().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let layout = BuildLayout::new(&root);
-        let target = root.join("dist");
-        fs::create_dir_all(target.as_std_path()).unwrap();
-        fs::write(target.join("important.txt").as_std_path(), "keep me").unwrap();
+        let layout = BuildLayout::new(root.join("proj"));
 
-        ensure_clean_release_dir(&target, true, true, &layout).unwrap();
-        assert!(
-            target.join("important.txt").is_file(),
-            "validation does not delete"
+        let documents = root.join("Documents");
+        fs::create_dir_all(documents.as_std_path()).unwrap();
+        fs::write(documents.join("important.txt").as_std_path(), "keep me").unwrap();
+        let usr_local = root.join("usr_local");
+        for sub in ["bin", "lib", "share", "releases"] {
+            fs::create_dir_all(usr_local.join(sub).as_std_path()).unwrap();
+        }
+        for target in [&documents, &usr_local] {
+            let err = ensure_clean_release_dir(target, true, true, &layout).unwrap_err();
+            assert!(
+                err.to_string().contains("even with --force-output"),
+                "{err}"
+            );
+        }
+        assert!(documents.join("important.txt").is_file());
+    }
+
+    /// BT-5187: `--force-output` accepts an unmarked, release-shaped directory
+    /// (a `releases/` directory and only release entries); without the flag
+    /// it is refused. An empty directory needs no flag.
+    #[test]
+    fn ensure_clean_release_dir_force_output_accepts_only_release_shaped_dirs() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(root.join("proj"));
+
+        let shaped = root.join("shaped");
+        for sub in ["bin", "lib/app-1/ebin", "releases/1.0.0", "erts-14.0/bin"] {
+            fs::create_dir_all(shaped.join(sub).as_std_path()).unwrap();
+        }
+        ensure_clean_release_dir(&shaped, true, true, &layout).unwrap();
+        assert!(ensure_clean_release_dir(&shaped, true, false, &layout).is_err());
+
+        let empty = root.join("empty");
+        fs::create_dir_all(empty.as_std_path()).unwrap();
+        ensure_clean_release_dir(&empty, true, false, &layout).unwrap();
+    }
+
+    /// BT-5187: an `--output` inside a source directory is refused, forced
+    /// or not, existing (even marked) or not.
+    #[test]
+    fn ensure_clean_release_dir_refuses_output_inside_a_source_dir() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let project = root.join("proj");
+        fs::create_dir_all(project.join("src").as_std_path()).unwrap();
+        let layout = BuildLayout::new(&project);
+
+        let marked = project.join("src/generated");
+        fs::create_dir_all(marked.as_std_path()).unwrap();
+        write_release_marker(&marked).unwrap();
+        let missing = project.join("src/out/rel");
+        let missing_src = project.join("test/rel");
+        for target in [&marked, &missing, &missing_src] {
+            for force in [false, true] {
+                let err = ensure_clean_release_dir(target, true, force, &layout).unwrap_err();
+                assert!(err.to_string().contains("source directories"), "{err}");
+            }
+        }
+    }
+
+    /// `canonicalize_lenient` resolves a missing tail under an existing
+    /// prefix, including a `..` inside that tail (`--output build/../dist`
+    /// with no `build/`).
+    #[test]
+    fn canonicalize_lenient_handles_missing_paths() {
+        let temp = TempDir::new().unwrap();
+        let base = std::fs::canonicalize(temp.path()).unwrap();
+        assert_eq!(
+            canonicalize_lenient(&temp.path().join("a/b")),
+            Some(base.join("a/b"))
+        );
+        assert_eq!(
+            canonicalize_lenient(&temp.path().join("a/../b")),
+            Some(base.join("b"))
+        );
+        assert_eq!(
+            canonicalize_lenient(&temp.path().join("a/../../src/x")),
+            base.parent().map(|p| p.join("src/x"))
         );
     }
 
@@ -1330,7 +1854,7 @@ mod tests {
         fs::create_dir_all(target.as_std_path()).unwrap();
         write(&target.join("new.txt"), "new");
         write(&tarball, "new tarball");
-        swap.commit();
+        swap.commit().unwrap();
         assert!(target.join("new.txt").is_file());
         assert!(!target.join("old.txt").exists());
         assert_eq!(
@@ -1338,6 +1862,7 @@ mod tests {
             "new tarball"
         );
         assert!(!parked_path(&target).exists() && !parked_path(&tarball).exists());
+        assert!(!journal_path(&target).exists());
     }
 
     /// BT-5107: a panic part-way through assembly must not skip the restore.
@@ -1511,11 +2036,48 @@ mod tests {
         write(&tarball, "not a tarball");
         let err = ensure_clean_tarball(&tarball, true, false).unwrap_err();
         assert!(err.to_string().contains("not written by"), "{err}");
-        ensure_clean_tarball(&tarball, true, true).unwrap();
+        // BT-5187: --force-output never replaces an arbitrary file …
+        let err = ensure_clean_tarball(&tarball, true, true).unwrap_err();
+        assert!(err.to_string().contains("not a gzip'd tar"), "{err}");
         ensure_clean_tarball(&tarball, false, false).unwrap(); // default location
+        // … only a tar.gz, e.g. one another tool built.
+        let mut builder = tar::Builder::new(flate2::write::GzEncoder::new(
+            fs::File::create(tarball.as_std_path()).unwrap(),
+            flate2::Compression::fast(),
+        ));
+        let mut header = tar::Header::new_gnu();
+        header.set_size(1);
+        header.set_mode(0o644);
+        builder
+            .append_data(&mut header, "bin/x", &b"x"[..])
+            .unwrap();
+        builder.into_inner().unwrap().finish().unwrap();
+        assert!(ensure_clean_tarball(&tarball, true, false).is_err());
+        ensure_clean_tarball(&tarball, true, true).unwrap();
         let dir = root.join("adir.tar.gz");
         fs::create_dir_all(dir.as_std_path()).unwrap();
         assert!(ensure_clean_tarball(&dir, false, true).is_err());
+    }
+
+    /// Write a minimal tarball carrying `releases/1.0.0/beamtalk-provenance.json`
+    /// (so [`is_previous_release_tarball`] recognises it), with `tag` as its
+    /// provenance content.
+    fn write_release_tarball(tarball: &Utf8Path, tag: &str) {
+        let mut builder = tar::Builder::new(flate2::write::GzEncoder::new(
+            fs::File::create(tarball.as_std_path()).unwrap(),
+            flate2::Compression::fast(),
+        ));
+        let mut header = tar::Header::new_gnu();
+        header.set_size(tag.len() as u64);
+        header.set_mode(0o644);
+        builder
+            .append_data(
+                &mut header,
+                "releases/1.0.0/beamtalk-provenance.json",
+                tag.as_bytes(),
+            )
+            .unwrap();
+        builder.into_inner().unwrap().finish().unwrap();
     }
 
     #[test]
@@ -1523,21 +2085,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         let tarball = root.join("dist-1.0.0.tar.gz");
-        let mut builder = tar::Builder::new(flate2::write::GzEncoder::new(
-            fs::File::create(tarball.as_std_path()).unwrap(),
-            flate2::Compression::fast(),
-        ));
-        let mut header = tar::Header::new_gnu();
-        header.set_size(2);
-        header.set_mode(0o644);
-        builder
-            .append_data(
-                &mut header,
-                "releases/1.0.0/beamtalk-provenance.json",
-                &b"{}"[..],
-            )
-            .unwrap();
-        builder.into_inner().unwrap().finish().unwrap();
+        write_release_tarball(&tarball, "{}");
         ensure_clean_tarball(&tarball, true, false).unwrap();
     }
 
@@ -1568,7 +2116,7 @@ mod tests {
         fs::create_dir_all(target.as_std_path()).unwrap();
         write_release_marker(&target).unwrap();
         write(&target.join("partial.txt"), "new");
-        write(&tarball, "partial");
+        write_release_tarball(&tarball, "new");
         recover_interrupted_release(&target, &tarball).unwrap();
         assert!(target.join("old.txt").is_file() && !target.join("partial.txt").exists());
         assert_eq!(
@@ -1592,6 +2140,322 @@ mod tests {
         assert!(parked_path(&target).is_dir());
     }
 
+    /// BT-5187: with no commit record, recovery removes a file at the
+    /// tarball path only if it is a tarball `beamtalk release` wrote.
+    #[test]
+    fn recover_interrupted_release_keeps_a_foreign_file_at_the_tarball_path() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let target = root.join("dist");
+        let tarball = root.join("dist-1.0.0.tar.gz");
+        write(&parked_path(&tarball), "old tarball");
+        write(&tarball, "someone else's file");
+        let err = recover_interrupted_release(&target, &tarball).unwrap_err();
+        assert!(err.to_string().contains("holds something else"), "{err}");
+        assert_eq!(
+            fs::read_to_string(tarball.as_std_path()).unwrap(),
+            "someone else's file"
+        );
+        assert!(parked_path(&tarball).is_file());
+
+        // A directory at the tarball path is not ours either.
+        fs::remove_file(tarball.as_std_path()).unwrap();
+        fs::create_dir_all(tarball.as_std_path()).unwrap();
+        assert!(recover_interrupted_release(&target, &tarball).is_err());
+        assert!(tarball.is_dir());
+    }
+
+    /// Previous release (`old`) parked by `begin`, and a complete new release
+    /// (`new`) assembled in its place; returns the swap, the release dir and
+    /// the tarball path.
+    fn swap_with_new_release(root: &Utf8Path) -> (ReleaseSwap, Utf8PathBuf, Utf8PathBuf) {
+        let target = root.join("dist");
+        let tarball = root.join("dist-1.0.0.tar.gz");
+        fs::create_dir_all(target.as_std_path()).unwrap();
+        write_release_marker(&target).unwrap();
+        write(&target.join("old.txt"), "old");
+        write_release_tarball(&tarball, "old");
+        let swap = ReleaseSwap::begin(&target, tarball.clone()).unwrap();
+        fs::create_dir_all(target.as_std_path()).unwrap();
+        write_release_marker(&target).unwrap();
+        write(&target.join("new.txt"), "new");
+        write_release_tarball(&tarball, "new");
+        (swap, target, tarball)
+    }
+
+    fn assert_new_release_kept(target: &Utf8Path, tarball: &Utf8Path) {
+        assert!(target.join("new.txt").is_file(), "new release dir deleted");
+        assert!(!target.join("old.txt").exists(), "old release restored");
+        let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(
+            fs::File::open(tarball.as_std_path()).unwrap(),
+        ));
+        let mut entry = archive.entries().unwrap().next().unwrap().unwrap();
+        let mut content = String::new();
+        std::io::Read::read_to_string(&mut entry, &mut content).unwrap();
+        assert_eq!(content, "new", "new tarball replaced");
+    }
+
+    /// BT-5187: a run killed at any step of `commit` (simulated by a panic
+    /// from the remover, which runs after the commit record is written)
+    /// leaves the complete new release in place: the next run's recovery
+    /// finishes discarding the old one instead of restoring it.
+    #[test]
+    fn commit_killed_at_each_step_keeps_the_new_release() {
+        // Remover calls, in order: parked dir, parked tarball, commit record.
+        for kill_at in 0..3 {
+            let temp = TempDir::new().unwrap();
+            let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+            let (swap, target, tarball) = swap_with_new_release(&root);
+            let calls = std::cell::Cell::new(0);
+            let killed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                swap.commit_with(|path| {
+                    assert!(calls.get() != kill_at, "killed");
+                    calls.set(calls.get() + 1);
+                    remove_output_path(path)
+                })
+            }));
+            assert!(killed.is_err(), "step {kill_at}");
+            assert_eq!(
+                read_journal(&target).unwrap().unwrap().state,
+                SwapState::Committed,
+                "step {kill_at}"
+            );
+            assert_new_release_kept(&target, &tarball);
+
+            recover_interrupted_release(&target, &tarball).unwrap();
+            assert_new_release_kept(&target, &tarball);
+            assert!(!parked_path(&target).exists(), "step {kill_at}");
+            assert!(!parked_path(&tarball).exists(), "step {kill_at}");
+            assert!(!journal_path(&target).exists(), "step {kill_at}");
+            // And the next build proceeds normally.
+            drop(ReleaseSwap::begin(&target, tarball.clone()).unwrap());
+            assert_new_release_kept(&target, &tarball);
+        }
+    }
+
+    /// BT-5187: a kill before `commit` (no record yet) still restores the
+    /// previous release — the new one never finished.
+    #[test]
+    fn kill_before_commit_restores_the_previous_release() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (swap, target, tarball) = swap_with_new_release(&root);
+        std::mem::forget(swap); // a kill: no `Drop`, no rollback
+        recover_interrupted_release(&target, &tarball).unwrap();
+        assert!(target.join("old.txt").is_file() && !target.join("new.txt").exists());
+        assert!(!parked_path(&target).exists() && !parked_path(&tarball).exists());
+    }
+
+    /// BT-5187: a failed (or partial) removal of the parked copy — a Windows
+    /// lock, permissions — leaves the record, so the next run discards the
+    /// leftover instead of restoring it over the new release.
+    #[test]
+    fn commit_with_failed_parked_removal_keeps_the_new_release() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (swap, target, tarball) = swap_with_new_release(&root);
+        let parked_dir = parked_path(&target);
+        swap.commit_with(|path| {
+            if path == parked_dir {
+                // Half-deleted, then the removal fails.
+                fs::remove_file(path.join("old.txt").as_std_path()).unwrap();
+                return Err(std::io::Error::other("locked"));
+            }
+            remove_output_path(path)
+        })
+        .unwrap();
+        assert!(parked_dir.is_dir(), "the failed removal left it");
+        assert_eq!(
+            read_journal(&target).unwrap().unwrap().state,
+            SwapState::Committed
+        );
+        assert_new_release_kept(&target, &tarball);
+
+        recover_interrupted_release(&target, &tarball).unwrap();
+        assert_new_release_kept(&target, &tarball);
+        assert!(!parked_dir.exists() && !journal_path(&target).exists());
+    }
+
+    /// BT-5187: if the journal cannot be marked `committed` (its temporary
+    /// file cannot be written), nothing is discarded: the swap rolls back,
+    /// the previous release is restored and no journal is left claiming a
+    /// commit.
+    #[test]
+    fn commit_that_cannot_update_the_journal_rolls_back() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (swap, target, tarball) = swap_with_new_release(&root);
+        let journal_tmp = format!("{}.tmp", journal_path(&target));
+        fs::create_dir_all(&journal_tmp).unwrap();
+        assert!(swap.commit().is_err());
+        assert!(target.join("old.txt").is_file() && !target.join("new.txt").exists());
+        assert!(!parked_path(&target).exists() && !parked_path(&tarball).exists());
+        assert!(!journal_path(&target).exists());
+        recover_interrupted_release(&target, &tarball).unwrap();
+        assert!(target.join("old.txt").is_file());
+    }
+
+    /// BT-5187 (review): the journal names the tarball of the run that wrote
+    /// it, so recovery after a version bump still finds that run's parked
+    /// tarball — whether it is restored (`pending`) or discarded
+    /// (`committed`).
+    #[test]
+    fn recovery_after_a_version_bump_uses_the_journaled_tarball() {
+        // Killed before commit: the 1.0.0 tarball is restored.
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (swap, target, tarball) = swap_with_new_release(&root);
+        std::mem::forget(swap);
+        let bumped = root.join("dist-1.0.1.tar.gz");
+        recover_interrupted_release(&target, &bumped).unwrap();
+        assert!(target.join("old.txt").is_file());
+        assert!(tarball.is_file() && !parked_path(&tarball).exists());
+        assert!(!journal_path(&target).exists());
+
+        // Killed during commit: the parked 1.0.0 tarball is discarded.
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (swap, target, tarball) = swap_with_new_release(&root);
+        let killed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            swap.commit_with(|_| panic!("killed"))
+        }));
+        assert!(killed.is_err());
+        recover_interrupted_release(&target, &root.join("dist-1.0.1.tar.gz")).unwrap();
+        assert_new_release_kept(&target, &tarball);
+        assert!(!parked_path(&target).exists() && !parked_path(&tarball).exists());
+        assert!(!journal_path(&target).exists());
+    }
+
+    /// BT-5187 (review): a run that parked the previous directory but found
+    /// no previous tarball, killed after moving its new tarball into place,
+    /// does not leave that new tarball beside the restored old directory.
+    #[test]
+    fn pending_recovery_removes_outputs_the_run_created() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let target = root.join("dist");
+        let tarball = root.join("dist-1.0.0.tar.gz");
+        fs::create_dir_all(target.as_std_path()).unwrap();
+        write_release_marker(&target).unwrap();
+        write(&target.join("old.txt"), "old");
+        let swap = ReleaseSwap::begin(&target, tarball.clone()).unwrap();
+        fs::create_dir_all(target.as_std_path()).unwrap();
+        write_release_marker(&target).unwrap();
+        write_release_tarball(&tarball, "new");
+        std::mem::forget(swap);
+        recover_interrupted_release(&target, &tarball).unwrap();
+        assert!(target.join("old.txt").is_file());
+        assert!(
+            !tarball.exists(),
+            "the new tarball must not outlive the rollback"
+        );
+
+        // A live tarball the run had not yet parked (killed between the two
+        // parks) is the previous one, and stays.
+        let tarball2 = root.join("dist-2.0.0.tar.gz");
+        write_release_tarball(&tarball2, "old");
+        write_journal(
+            &target,
+            &SwapJournal {
+                state: SwapState::Pending,
+                tarball: tarball2.clone(),
+                had_dir: true,
+                had_tarball: true,
+            },
+        )
+        .unwrap();
+        recover_interrupted_release(&target, &tarball2).unwrap();
+        assert!(tarball2.is_file() && target.join("old.txt").is_file());
+    }
+
+    /// A parked directory symlink is removed, never followed.
+    #[test]
+    #[cfg(unix)]
+    fn remove_output_path_removes_a_directory_link_not_its_target() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        fs::create_dir_all(root.join("real").as_std_path()).unwrap();
+        write(&root.join("real/keep.txt"), "keep");
+        std::os::unix::fs::symlink("real", root.join("link").as_std_path()).unwrap();
+        remove_output_path(&root.join("link")).unwrap();
+        assert!(root.join("link").symlink_metadata().is_err());
+        assert!(root.join("real/keep.txt").is_file());
+    }
+
+    /// BT-5187 (review): a `..` after a missing component that leads back
+    /// through a symlink into a source directory is still caught.
+    #[test]
+    #[cfg(unix)]
+    fn is_protected_output_resolves_symlinks_after_a_missing_dotdot() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let project = root.join("proj");
+        fs::create_dir_all(project.join("src").as_std_path()).unwrap();
+        std::os::unix::fs::symlink("src", project.join("srclink").as_std_path()).unwrap();
+        let sneaky = project.join("nope/../srclink/rel");
+        assert!(is_protected_output_with(&sneaky, &project, None, None));
+        assert!(!is_protected_output_with(
+            &project.join("nope/../dist"),
+            &project,
+            None,
+            None
+        ));
+    }
+
+    /// A journal that is not ours (wrong header, or a tarball path anywhere
+    /// but beside the release) stops recovery before anything is touched.
+    #[test]
+    fn recover_interrupted_release_refuses_an_unrecognised_journal() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let (swap, target, tarball) = swap_with_new_release(&root);
+        std::mem::forget(swap);
+        for bad in [
+            "something else\n".to_string(),
+            format!(
+                "{JOURNAL_HEADER}\ncommitted\n/elsewhere/x.tar.gz\nprevious-dir: yes\n\
+                 previous-tarball: yes\n"
+            ),
+            format!(
+                "{JOURNAL_HEADER}\nmaybe\n{tarball}\nprevious-dir: yes\nprevious-tarball: yes\n"
+            ),
+            format!("{JOURNAL_HEADER}\ncommitted\n{tarball}\n"),
+        ] {
+            write(&journal_path(&target), &bad);
+            let err = recover_interrupted_release(&target, &tarball).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("not a `beamtalk release` swap journal")
+            );
+            assert!(target.join("new.txt").is_file() && parked_path(&target).is_dir());
+            assert!(parked_path(&tarball).is_file());
+        }
+    }
+
+    /// A journal still present at `begin` (recovery normally consumed it)
+    /// refuses the run without moving anything.
+    #[test]
+    fn release_swap_refuses_while_a_journal_exists() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let target = root.join("dist");
+        let tarball = root.join("dist-1.0.0.tar.gz");
+        fs::create_dir_all(target.as_std_path()).unwrap();
+        write_journal(
+            &target,
+            &SwapJournal {
+                state: SwapState::Pending,
+                tarball: tarball.clone(),
+                had_dir: true,
+                had_tarball: false,
+            },
+        )
+        .unwrap();
+        let err = ReleaseSwap::begin(&target, tarball).err().unwrap();
+        assert!(err.to_string().contains("interrupted"), "{err}");
+        assert!(target.is_dir());
+    }
+
     #[test]
     fn is_protected_output_refuses_home_root_and_source_dirs() {
         let temp = TempDir::new().unwrap();
@@ -1609,6 +2473,11 @@ mod tests {
         assert!(check(&home), "home directory");
         assert!(check(&home.join("work")), "ancestor of the project");
         assert!(check(&project.join("src")), "source directory");
+        assert!(check(&project.join("src/generated")), "inside a source dir");
+        assert!(
+            check(&project.join("priv/missing/x")),
+            "inside a missing one"
+        );
         assert!(
             check(Utf8Path::new(std::path::MAIN_SEPARATOR_STR)),
             "filesystem root"

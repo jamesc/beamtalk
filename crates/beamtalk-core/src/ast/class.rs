@@ -170,8 +170,6 @@ pub struct ClassDefinition {
     pub methods: Vec<MethodDefinition>,
     /// Class-side method definitions (defined with `class` prefix).
     pub class_methods: Vec<MethodDefinition>,
-    /// Class variable declarations (defined with `classState:`).
-    pub class_variables: Vec<StateDeclaration>,
     /// Non-doc comments (`//` and `/* */`) appearing before this class.
     pub comments: CommentAttachment,
     /// Doc comment attached to this class (`///` lines).
@@ -230,10 +228,7 @@ impl ClassDefinition {
     ///
     /// [`Module::state_default_exprs`]: crate::ast::Module::state_default_exprs
     pub fn state_default_exprs(&self) -> impl Iterator<Item = &Expression> {
-        self.state
-            .iter()
-            .chain(&self.class_variables)
-            .filter_map(|d| d.default_value.as_ref())
+        self.state.iter().filter_map(|d| d.default_value.as_ref())
     }
 
     /// Creates a new class definition.
@@ -259,7 +254,6 @@ impl ClassDefinition {
             state,
             methods,
             class_methods: Vec::new(),
-            class_variables: Vec::new(),
             type_params: Vec::new(),
             superclass_type_args: Vec::new(),
             uses: Vec::new(),
@@ -331,7 +325,6 @@ impl ClassDefinition {
             state,
             methods,
             class_methods: Vec::new(),
-            class_variables: Vec::new(),
             type_params: Vec::new(),
             superclass_type_args: Vec::new(),
             uses: Vec::new(),

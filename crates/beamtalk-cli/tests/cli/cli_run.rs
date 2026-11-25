@@ -604,7 +604,7 @@ fn run_shows_class_process_frames_bt_4829() {
     write_run_fixture(
         project.path(),
         "Counter",
-        "Object subclass: Counter\n  classState: n = 0\n\n  class run =>\n    x := 1 / 0.\n    x\n",
+        "Object subclass: Counter\n\n  class run =>\n    x := 1 / 0.\n    x\n",
     );
 
     for extra in [&[][..], &["--raw-mfa"][..]] {

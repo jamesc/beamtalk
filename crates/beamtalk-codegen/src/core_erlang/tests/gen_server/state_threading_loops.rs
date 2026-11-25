@@ -76,7 +76,7 @@ fn test_class_method_self_send_as_local_var_assignment_rhs_in_while_loop_compile
     // list. `self.runs` not accumulating across
     // iterations is the same pre-existing, tracked `Letrec` limitation as
     // always (this test only pins that it compiles and runs without crashing).
-    let src = "Value subclass: DriverAssign\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aList =>\n    i := 1\n    result := 0\n    [i <= aList size] whileTrue: [\n      x := self bump\n      result := result + x\n      i := i + 1\n    ]\n    result";
+    let src = "Value subclass: DriverAssign\n  class bump => 1\n  class countedRun: aList =>\n    i := 1\n    result := 0\n    [i <= aList size] whileTrue: [\n      x := self bump\n      result := result + x\n      i := i + 1\n    ]\n    result";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(&module, CodegenOptions::new("bt@driverassign"));
@@ -164,7 +164,7 @@ fn test_class_method_self_send_after_loop_still_compiles() {
     // the guard now (correctly) rejects. See
     // `test_bare_class_method_self_send_in_times_repeat_body_skips_loop_threading`
     // for that case.
-    let src = "Value subclass: Driver8\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aBlock over: aList =>\n    i := 1\n    count := 0\n    [i <= aList size] whileTrue: [\n      count := count + 1\n      aBlock value: (aList at: i)\n      i := i + 1\n    ]\n    self bump\n    nil";
+    let src = "Value subclass: Driver8\n  class bump => 1\n  class countedRun: aBlock over: aList =>\n    i := 1\n    count := 0\n    [i <= aList size] whileTrue: [\n      count := count + 1\n      aBlock value: (aList at: i)\n      i := i + 1\n    ]\n    self bump\n    nil";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(&module, CodegenOptions::new("bt@driver8"));
