@@ -40,6 +40,7 @@ pub(crate) mod method_validators;
 pub mod module_validator;
 pub mod name_resolver;
 mod namespace_collision;
+pub mod number_coercion;
 pub(crate) mod pattern_bindings;
 pub mod primitive_validator;
 pub mod protocol_registry;

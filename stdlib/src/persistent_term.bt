@@ -23,10 +23,16 @@
 ///   value) makes the VM scan every process heap: a global GC, 0.1-0.3 ms,
 ///   and OTP has no batch erase. Do not call `erase:` on a hot path. For a
 ///   value that changes, use an Actor or `Ets`.
-/// - **The block must be pure and deterministic.** Two processes that miss at
-///   the same moment both run it. The helper reads again before storing and
-///   keeps the first value, but a small window remains. A block that spawns
-///   an actor or opens a resource would do so twice.
+/// - **One build per key; the first value wins.** A miss takes a node-local
+///   lock for its key, reads again, and only then runs the block and stores
+///   the result. A process that misses while another is building waits for
+///   it and answers the stored value without running its own block, so every
+///   caller answers the one stored value and nothing is replaced. Hits take
+///   no lock. The block should still be pure: a block that hangs holds up
+///   every other caller of that key for up to 60 s, after which each waiter
+///   raises a `runtime_error` (if the builder's process dies, the next waiter
+///   builds). A block that asks for its own key, directly or through another
+///   process that waits on it, raises a `runtime_error`.
 /// - **A raising block stores nothing.** The exception reaches the caller and
 ///   the next call runs the block again. A stored `nil` counts as present.
 /// - **Do not store a pid, port, actor, class, `Ets` handle or block.** A
@@ -35,8 +41,11 @@
 ///   store a registered name and look the process up. A process identity
 ///   nested inside a larger value is not detected. A stored block fails once
 ///   its module's code has been reloaded twice and purged.
-/// - **Keys are node-global.** Use a package-prefixed Symbol, such as
-///   `#mypkg_tables`. Internally the key is stored under
+/// - **Keys are node-global, and namespacing is by convention.** Any code on
+///   the node that uses the same key shares the value: whichever package
+///   builds first wins and the other silently gets its value. Nothing
+///   enforces a namespace, so prefix every key with your package name, as a
+///   Symbol such as `#mypkg_tables`. Internally the key is stored under
 ///   `{beamtalk_persistent_term, Key}`, so it cannot collide with the
 ///   runtime's own `persistent_term` keys.
 /// - **Nothing is cleared on reload.** A value stays until `erase:` or until
@@ -60,8 +69,9 @@ sealed typed Object subclass: PersistentTerm
   /// Answer the value stored under `key`. On a miss, evaluate `block`, store
   /// the result and answer it. The block is not run on a hit.
   ///
-  /// If the block raises, nothing is stored. If another process stored first,
-  /// that first value is kept and answered. A miss whose value is a pid, an
+  /// If the block raises, nothing is stored. A process that misses while
+  /// another is building waits and answers that first value without running
+  /// its own block. A miss whose value is a pid, an
   /// actor or a class raises a `type_error`.
   ///
   /// The answer is typed by *this* block. Keys are untyped and node-global, so

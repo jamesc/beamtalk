@@ -766,8 +766,8 @@ impl CoreErlangGenerator {
             let selector = MessageSelector::Binary(op.into());
             return self.classify_self_send(&selector);
         }
-        let arithmetic = matches!(op, "+" | "-" | "*" | "/");
-        let comparison = matches!(op, "<" | ">" | "<=" | ">=");
+        let arithmetic = super::operators::is_arithmetic_operator(op);
+        let comparison = super::operators::is_ordering_comparison(op);
         let Some(right) = arguments.first() else {
             return UserCodeCall::Yes;
         };

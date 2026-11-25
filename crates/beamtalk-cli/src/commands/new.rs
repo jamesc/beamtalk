@@ -173,7 +173,7 @@ version = "0.1.0"
 /// Falls back to the raw template if formatting fails (it should not for our
 /// templates, which are always syntactically valid).
 fn canonical_bt(content: &str) -> String {
-    format_source(content).unwrap_or_else(|| content.to_string())
+    format_source(content).unwrap_or_else(|_| content.to_string())
 }
 
 fn write_library_sources(path: &Utf8Path, name: &str) -> Result<()> {
@@ -835,7 +835,7 @@ mod tests {
         for file in bt_files {
             let content = fs::read_to_string(&file).unwrap();
             let formatted = beamtalk_core::unparse::format_source(&content)
-                .unwrap_or_else(|| panic!("{} should parse without errors", file.display()));
+                .unwrap_or_else(|e| panic!("{} should format: {e}", file.display()));
             assert_eq!(
                 content,
                 formatted,
