@@ -50,8 +50,10 @@ else
     USING_HOST_ERTS=true
 fi
 
-# Pin epmd to loopback (ADR 0125 §1.6: distribution is always loopback-bound)
-# for every verb below that can start distribution or epmd itself — epmd is
+# Pin epmd to loopback (ADR 0125 §1.6: distribution is loopback-bound unless
+# the operator opts in with RELEASE_DISTRIBUTION=tls, below, which points it
+# at RELEASE_DIST_INTERFACE instead) for every verb below that can start
+# distribution or epmd itself — epmd is
 # a shared, per-host daemon that keeps whichever bind address the *first*
 # thing to start it gave it, so this must be set before any `-sname` erl
 # invocation, not just `foreground`'s. Mirrors `startup_command.rs`'s
@@ -64,6 +66,23 @@ export ERL_EPMD_ADDRESS
 # does not reach them. Each passes `-kernel inet_dist_use_interface
 # '{127,0,0,1}'` (the same value as `vm.args`) so no node this launcher
 # starts listens for distribution off loopback.
+
+# ADR 0126 amendment D2 (BT-5233): the only way off loopback. Unset, the
+# release is pinned to this host three ways (`-sname X@localhost`, the epmd
+# pin above and `inet_dist_use_interface {127,0,0,1}`). `tls` opts in to
+# clustering across hosts over TLS distribution with peer verification:
+# `select_distribution` checks RELEASE_HOST, RELEASE_DIST_INTERFACE and
+# RELEASE_SSL_DIST_OPTFILE before any distributed node starts, and every verb
+# then uses `-name`, `-proto_dist inet_tls` and that option file. Plain TCP
+# off-host is not offered.
+case "${RELEASE_DISTRIBUTION:-}" in
+    '') DIST_MODE=loopback ;;
+    tls) DIST_MODE=tls ;;
+    *)
+        echo "error: RELEASE_DISTRIBUTION '$RELEASE_DISTRIBUTION' is not supported: unset it to stay on this host, or set it to 'tls' to cluster across hosts over TLS with peer verification (plain TCP off-host is not offered)" >&2
+        exit 2
+        ;;
+esac
 
 # Reject a malformed RELEASE_NODE before it ever reaches `erl` — an invalid
 # `-sname` (e.g. containing '/', '@', '.', or whitespace) otherwise crashes
@@ -152,8 +171,9 @@ lib_pa_args() {
 }
 
 # A short, collision-resistant node name for the throwaway client nodes
-# (`stop`/`ping`/`rpc`) — `-hidden` and loopback-bound, so it never appears
-# in the foreground node's regular node list.
+# (`stop`/`ping`/`rpc`) — `-hidden` and bound like the node itself (loopback,
+# or RELEASE_DIST_INTERFACE under TLS), so it never appears in the foreground
+# node's regular node list.
 client_sname() {
     printf '%s_%s_%s' "$RELEASE_NAME" "$1" "$$"
 }
@@ -270,6 +290,61 @@ node_sname() {
     printf '%s' "${RELEASE_NODE:-$RELEASE_NAME}@localhost"
 }
 
+# RELEASE_DISTRIBUTION=tls (BT-5233): run `tls_preflight_main/0` in a VM with
+# no distribution. It refuses (exit 2, each problem and its fix on stderr)
+# unless RELEASE_HOST and RELEASE_DIST_INTERFACE are set and valid and the
+# RELEASE_SSL_DIST_OPTFILE file sets `{verify, verify_peer}` on both sides and
+# `{fail_if_no_peer_cert, true}` on the server side; otherwise it prints the
+# values below, one `tls-<key>=<value>` line each. The rules live in Erlang (`beamtalk_dist_tls`,
+# `beamtalk_dist_address`), shared with `launcher.cmd` and with
+# `Node`'s own TLS check, so this script parses nothing itself. epmd then
+# follows the interface. Must run in the main shell so the variables stick.
+TLS_PROTO=""
+TLS_INTERFACE=""
+TLS_HOST=""
+TLS_OPTFILE=""
+select_distribution() {
+    [ "$DIST_MODE" = "tls" ] || return 0
+    eval "set -- -noshell $(minimal_boot_args) $(lib_pa_args) \
+        -eval \"beamtalk_release_launcher:tls_preflight_main().\""
+    preflight=$("$ERL" "$@") || exit $?
+    TLS_PROTO=$(printf '%s\n' "$preflight" | sed -n 's/^tls-proto=//p')
+    TLS_INTERFACE=$(printf '%s\n' "$preflight" | sed -n 's/^tls-interface=//p')
+    TLS_HOST=$(printf '%s\n' "$preflight" | sed -n 's/^tls-host=//p')
+    TLS_OPTFILE=$(printf '%s\n' "$preflight" | sed -n 's/^tls-optfile=//p')
+    ERL_EPMD_ADDRESS=$(printf '%s\n' "$preflight" | sed -n 's/^tls-epmd=//p')
+    export ERL_EPMD_ADDRESS
+    if [ -z "$TLS_PROTO" ] || [ -z "$TLS_INTERFACE" ] || [ -z "$TLS_HOST" ] ||
+        [ -z "$TLS_OPTFILE" ] || [ -z "$ERL_EPMD_ADDRESS" ]; then
+        echo "error: the RELEASE_DISTRIBUTION=tls check printed no settings" >&2
+        exit 1
+    fi
+}
+
+# The distribution flags of a client node named `$1@RELEASE_HOST` under
+# RELEASE_DISTRIBUTION=tls, single-quoted for `eval`: the same protocol,
+# option file and interface as the node it talks to (BT-5233).
+tls_client_args() {
+    printf -- '-name '
+    sq "$1@$TLS_HOST"
+    printf -- '-proto_dist '
+    sq "$TLS_PROTO"
+    printf -- '-ssl_dist_optfile '
+    sq "$TLS_OPTFILE"
+    printf -- '-kernel inet_dist_use_interface '
+    sq "$TLS_INTERFACE"
+}
+
+# This instance's full node name in either mode: `node_sname` on loopback,
+# `<instance>@RELEASE_HOST` under RELEASE_DISTRIBUTION=tls.
+this_node() {
+    if [ "$DIST_MODE" = "tls" ]; then
+        printf '%s' "${RELEASE_NODE:-$RELEASE_NAME}@$TLS_HOST"
+    else
+        node_sname
+    fi
+}
+
 usage() {
     echo "usage: $0 {foreground|stop|ping|remote_console|eval|rpc|version} [args...]" >&2
     echo "  eval/rpc take ONE argument, \"ClassName selector [args...]\", split on whitespace;" >&2
@@ -294,20 +369,35 @@ case "$VERB" in
         # `Console` output (ADR 0099) is unaffected: it still goes to
         # stdout/stderr normally, this only turns off the interactive
         # `1> ` prompt reading from stdin.
+        select_distribution
         export_cookie
+        if [ "$DIST_MODE" = "tls" ]; then
+            # `-kernel` flags are first-wins, so this interface, ahead of
+            # `-args_file`, replaces `vm.args`'s loopback one.
+            exec "$ERL" -noshell -noinput -boot "$CONFIG_DIR/start" -boot_var RELEASE_DIR "$ROOT" \
+                -name "$(this_node)" -proto_dist "$TLS_PROTO" -ssl_dist_optfile "$TLS_OPTFILE" \
+                -kernel inet_dist_use_interface "$TLS_INTERFACE" \
+                -config "$CONFIG_DIR/sys" -args_file "$CONFIG_DIR/vm.args"
+        fi
         exec "$ERL" -noshell -noinput -boot "$CONFIG_DIR/start" -boot_var RELEASE_DIR "$ROOT" \
             -sname "$(node_sname)" \
             -config "$CONFIG_DIR/sys" -args_file "$CONFIG_DIR/vm.args"
         ;;
     stop)
         check_otp_window
+        select_distribution
         SNAME=$(client_sname stop)
         # This instance's own name — see `node_sname`'s comment (respects
         # `RELEASE_NODE`, so `stop` targets whichever instance was started
         # with the same value).
-        NODE=$(node_sname)
+        NODE=$(this_node)
         export_cookie
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' $(minimal_boot_args) $(lib_pa_args) \
+        if [ "$DIST_MODE" = "tls" ]; then
+            DIST_ARGS="-hidden $(tls_client_args "$SNAME")"
+        else
+            DIST_ARGS="-hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}'"
+        fi
+        eval "set -- -noshell $DIST_ARGS $(minimal_boot_args) $(lib_pa_args) \
             -eval \"__RESTORE_HOME_EVAL__.\" \
             -eval \"beamtalk_release_launcher:stop_client_main().\" \
             -extra \"\$NODE\""
@@ -315,13 +405,19 @@ case "$VERB" in
         ;;
     ping)
         check_otp_window
+        select_distribution
         SNAME=$(client_sname ping)
         # This instance's own name — see `node_sname`'s comment (respects
         # `RELEASE_NODE`, so `ping` targets whichever instance was started
         # with the same value).
-        NODE=$(node_sname)
+        NODE=$(this_node)
         export_cookie
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' $(minimal_boot_args) $(lib_pa_args) \
+        if [ "$DIST_MODE" = "tls" ]; then
+            DIST_ARGS="-hidden $(tls_client_args "$SNAME")"
+        else
+            DIST_ARGS="-hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}'"
+        fi
+        eval "set -- -noshell $DIST_ARGS $(minimal_boot_args) $(lib_pa_args) \
             -eval \"__RESTORE_HOME_EVAL__.\" \
             -eval \"beamtalk_release_launcher:ping_client_main().\" \
             -extra \"\$NODE\""
@@ -329,17 +425,25 @@ case "$VERB" in
         ;;
     remote_console)
         check_otp_window
+        select_distribution
         SNAME=$(client_sname rc)
         # This instance's own name — see `node_sname`'s comment (respects
         # `RELEASE_NODE`, so `remote_console` attaches to whichever instance
         # was started with the same value).
-        NODE=$(node_sname)
-        # ADR 0091: same-host attach only — plain loopback distribution, no
-        # further authentication beyond the cookie handshake (ADR 0058).
+        NODE=$(this_node)
+        # ADR 0091: same-host attach over plain loopback distribution, no
+        # further authentication beyond the cookie handshake (ADR 0058) —
+        # or, under RELEASE_DISTRIBUTION=tls, over the node's own TLS
+        # distribution with its option file (BT-5233).
         export_cookie
         # Put `HOME` back first (BT-5185), then start the same remote shell
         # `-remsh` does (OTP 26+).
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' $(minimal_boot_args) $(lib_pa_args) \
+        if [ "$DIST_MODE" = "tls" ]; then
+            DIST_ARGS="-hidden $(tls_client_args "$SNAME")"
+        else
+            DIST_ARGS="-hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}'"
+        fi
+        eval "set -- -noshell $DIST_ARGS $(minimal_boot_args) $(lib_pa_args) \
             -eval \"__RESTORE_HOME_EVAL__, shell:start_interactive({'\$NODE', {shell, start, []}}).\""
         exec "$ERL" "$@"
         ;;
@@ -380,13 +484,19 @@ case "$VERB" in
         CLASS="$1"
         SELECTOR="$2"
         shift 2
+        select_distribution
         SNAME=$(client_sname rpc)
         # This instance's own name — see `node_sname`'s comment (respects
         # `RELEASE_NODE`, so `rpc` targets whichever instance was started
         # with the same value).
-        NODE=$(node_sname)
+        NODE=$(this_node)
         export_cookie
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' $(minimal_boot_args) $(lib_pa_args) \
+        if [ "$DIST_MODE" = "tls" ]; then
+            DIST_ARGS="-hidden $(tls_client_args "$SNAME")"
+        else
+            DIST_ARGS="-hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}'"
+        fi
+        eval "set -- -noshell $DIST_ARGS $(minimal_boot_args) $(lib_pa_args) \
             -eval \"__RESTORE_HOME_EVAL__.\" \
             -eval \"beamtalk_release_launcher:rpc_client_main().\" \
             -extra \"\$NODE\" \"\$CLASS\" \"\$SELECTOR\" \"\$@\""

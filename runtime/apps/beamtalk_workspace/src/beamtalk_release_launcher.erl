@@ -27,6 +27,11 @@ WebSocket `run-entry` op and these launcher verbs — never a second one.
   resolves the target via `net_adm:ping/1`/`rpc:call/5` and reports through
   its own exit code, never touching the target node's supervision tree except
   through `init:stop/0` (`stop`) or one `run-entry` (`rpc`).
+* `tls_preflight_main/0` runs before any distributed node when the operator
+  opts in to cross-host clustering with `RELEASE_DISTRIBUTION=tls` (ADR 0126
+  amendment D2, BT-5233): it refuses to go on unless the TLS option file makes
+  both sides verify their peer, and prints the distribution flags the launcher
+  then passes to every node it starts.
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -37,7 +42,9 @@ WebSocket `run-entry` op and these launcher verbs — never a second one.
     rpc_entry/3,
     rpc_client_main/0,
     ping_client_main/0,
-    stop_client_main/0
+    stop_client_main/0,
+    tls_preflight_main/0,
+    tls_preflight/1
 ]).
 
 %%% ============================================================================
@@ -298,4 +305,173 @@ stop_client_main() ->
             end;
         _ ->
             erlang:halt(2)
+    end.
+
+%%% ============================================================================
+%%% RELEASE_DISTRIBUTION=tls — check the opt-in before any node starts
+%%% ============================================================================
+
+-doc """
+The `RELEASE_DISTRIBUTION=tls` check `bin/<name>` runs (in a VM with no
+distribution) before it starts any distributed node (ADR 0126 amendment D2,
+BT-5233). On success it prints one `tls-<key>=<value>` line per value the
+launcher needs and halts with 0; otherwise it prints each problem with its fix
+to stderr and halts with 2, so the launcher refuses to start. See
+`tls_preflight/1` for what it checks.
+""".
+-spec tls_preflight_main() -> no_return().
+tls_preflight_main() ->
+    case tls_preflight(fun os:getenv/1) of
+        {ok, #{proto := Proto, interface := Ip, host := Host, optfile := OptFile} = Result} ->
+            [io:format(standard_error, "note: ~ts~n", [Note]) || Note <- maps:get(notes, Result)],
+            io:format(
+                "tls-proto=~ts~ntls-interface=~w~ntls-epmd=~ts~ntls-host=~ts~ntls-optfile=~ts~n",
+                [Proto, Ip, inet:ntoa(Ip), Host, OptFile]
+            ),
+            erlang:halt(0);
+        {error, Problems} ->
+            io:format(
+                standard_error,
+                "error: RELEASE_DISTRIBUTION=tls is set, but this node cannot start with it:~n",
+                []
+            ),
+            [io:format(standard_error, "  - ~ts~n", [P]) || P <- Problems],
+            erlang:halt(2)
+    end.
+
+-doc """
+Check a `RELEASE_DISTRIBUTION=tls` opt-in, reading the environment with
+`GetEnv` (`os:getenv/1`'s contract):
+
+* `RELEASE_HOST` names this host as the other nodes reach it (a DNS name its
+  certificate names, or an IP address); it becomes the host part of `-name`.
+* `RELEASE_DIST_INTERFACE` is one IP address of this host to listen on, parsed
+  by the shared rule (`beamtalk_dist_address:parse/1`). There is no default,
+  so the node listens on every interface (`0.0.0.0`) only if the operator
+  names it. An IPv6 address selects `inet6_tls`.
+* `RELEASE_SSL_DIST_OPTFILE` is the `-ssl_dist_optfile` file, and it must set
+  `{verify, verify_peer}` on both sides and `{fail_if_no_peer_cert, true}` on
+  the server side (`beamtalk_dist_tls:check_optfile/1`).
+
+Returns every problem at once, each with its fix.
+""".
+-spec tls_preflight(fun((string()) -> string() | false)) ->
+    {ok, #{
+        proto := string(),
+        interface := inet:ip_address(),
+        host := string(),
+        optfile := string(),
+        notes := [string()]
+    }}
+    | {error, [unicode:chardata(), ...]}.
+tls_preflight(GetEnv) ->
+    Host = tls_host(read_env("RELEASE_HOST", GetEnv)),
+    Interface = tls_interface(read_env("RELEASE_DIST_INTERFACE", GetEnv)),
+    OptFile = tls_optfile(read_env("RELEASE_SSL_DIST_OPTFILE", GetEnv)),
+    case [Problem || {error, Problem} <- [Host, Interface, OptFile]] of
+        [] ->
+            {ok, H} = Host,
+            {ok, {Ip, Notes}} = Interface,
+            {ok, F} = OptFile,
+            Proto =
+                case tuple_size(Ip) of
+                    4 -> "inet_tls";
+                    8 -> "inet6_tls"
+                end,
+            {ok, #{proto => Proto, interface => Ip, host => H, optfile => F, notes => Notes}};
+        Problems ->
+            {error, Problems}
+    end.
+
+read_env(Name, GetEnv) ->
+    case GetEnv(Name) of
+        false -> "";
+        Value -> string:trim(Value)
+    end.
+
+tls_host("") ->
+    {error,
+        "RELEASE_HOST is not set: set it to this host's name as the other nodes reach it "
+        "(the DNS name its certificate names), e.g. RELEASE_HOST=node1.example.com"};
+tls_host(Host) ->
+    case beamtalk_dist_address:parse(Host) of
+        {ok, _} ->
+            {ok, Host};
+        error ->
+            case valid_host_name(Host) of
+                true ->
+                    {ok, Host};
+                false ->
+                    {error,
+                        io_lib:format(
+                            "RELEASE_HOST '~ts' is not a host name or IP address "
+                            "(letters, digits, '-' and '.' only)",
+                            [Host]
+                        )}
+            end
+    end.
+
+valid_host_name(Host) ->
+    length(Host) =< 253 andalso
+        lists:all(
+            fun(Label) ->
+                Label =/= "" andalso length(Label) =< 63 andalso
+                    hd(Label) =/= $- andalso lists:last(Label) =/= $- andalso
+                    lists:all(fun host_char/1, Label)
+            end,
+            string:split(Host, ".", all)
+        ).
+
+host_char(C) ->
+    (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z) orelse
+        (C >= $0 andalso C =< $9) orelse C =:= $-.
+
+tls_interface("") ->
+    {error,
+        "RELEASE_DIST_INTERFACE is not set: set it to the IP address of this host "
+        "the other nodes connect to, e.g. RELEASE_DIST_INTERFACE=10.0.0.5 "
+        "(name 0.0.0.0 to listen on every interface)"};
+tls_interface(Value) ->
+    case beamtalk_dist_address:parse(Value) of
+        {ok, Ip} ->
+            Notes =
+                case beamtalk_dist_address:loopback_dist(Value) of
+                    true ->
+                        [
+                            io_lib:format(
+                                "RELEASE_DIST_INTERFACE ~ts is a loopback address: "
+                                "other hosts cannot reach this node",
+                                [Value]
+                            )
+                        ];
+                    false ->
+                        []
+                end,
+            {ok, {Ip, Notes}};
+        error ->
+            {error,
+                io_lib:format(
+                    "RELEASE_DIST_INTERFACE '~ts' is not one IP address "
+                    "(a host name or a list is not accepted), e.g. 10.0.0.5 or fd00::5",
+                    [Value]
+                )}
+    end.
+
+tls_optfile("") ->
+    {error,
+        "RELEASE_SSL_DIST_OPTFILE is not set: set it to the TLS distribution option file "
+        "that names this node's certificate, key and CA, and makes both sides verify their "
+        "peer (see docs/development/deploying.md, \"Clustering across hosts\")"};
+tls_optfile(Path0) ->
+    Path = filename:absname(Path0),
+    case lists:member($", Path) of
+        true ->
+            {error, io_lib:format("RELEASE_SSL_DIST_OPTFILE '~ts' must not contain '\"'", [Path])};
+        false ->
+            case beamtalk_dist_tls:check_optfile(Path) of
+                ok ->
+                    {ok, Path};
+                {error, Reason} ->
+                    {error, beamtalk_dist_tls:format_error(Reason)}
+            end
     end.

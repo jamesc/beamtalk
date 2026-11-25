@@ -276,6 +276,59 @@ mod tests {
         );
     }
 
+    /// BT-5233 (ADR 0126 amendment D2): under `RELEASE_DISTRIBUTION=tls`
+    /// every verb that starts a distributed node runs the Erlang-side check
+    /// first, then uses `-name`, `-proto_dist`, the option file and the
+    /// checked interface, in both launchers.
+    #[test]
+    fn write_launcher_scripts_follow_the_tls_opt_in() {
+        let (root, _temp) = write_scripts(true);
+        let sh = std::fs::read_to_string(root.join("bin/orders").as_std_path()).unwrap();
+        let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
+        for (name, script) in [("launcher.sh", &sh), ("launcher.cmd", &cmd)] {
+            assert!(
+                script.contains("RELEASE_DISTRIBUTION")
+                    && script.contains("beamtalk_release_launcher:tls_preflight_main()"),
+                "{name} must check the TLS opt-in: {script}"
+            );
+            assert!(
+                script.contains("plain TCP off-host is not offered"),
+                "{name}: {script}"
+            );
+        }
+        // foreground + stop/ping/remote_console/rpc
+        assert_eq!(
+            sh.matches("\n        select_distribution\n").count(),
+            5,
+            "launcher.sh: every distributed verb runs the check: {sh}"
+        );
+        assert_eq!(
+            cmd.matches("call :select_distribution\r\nif errorlevel 1 exit /b !errorlevel!")
+                .count(),
+            5,
+            "launcher.cmd: every distributed verb runs the check: {cmd}"
+        );
+        assert_eq!(
+            cmd.matches(
+                "-hidden -name \"%SNAME%@!TLS_HOST!\" -proto_dist !TLS_PROTO! \
+                 -ssl_dist_optfile \"!TLS_OPTFILE!\" -kernel inet_dist_use_interface \"!TLS_INTERFACE!\""
+            )
+            .count(),
+            4,
+            "launcher.cmd client verbs must follow the TLS opt-in: {cmd}"
+        );
+        assert!(
+            cmd.contains(
+                "-name \"%THIS_NODE%\" -proto_dist !TLS_PROTO! -ssl_dist_optfile \"!TLS_OPTFILE!\""
+            ),
+            "launcher.cmd foreground must follow the TLS opt-in: {cmd}"
+        );
+        assert!(
+            cmd.contains("set \"ERL_EPMD_ADDRESS=!TLS_EPMD!\""),
+            "launcher.cmd: epmd follows the interface: {cmd}"
+        );
+    }
+
     #[test]
     fn write_launcher_scripts_lists_every_verb() {
         let (root, _temp) = write_scripts(true);
@@ -683,6 +736,167 @@ mod tests {
             stdout.contains("/rel/"),
             "root must resolve through the symlink: {stdout}"
         );
+    }
+
+    /// A fake `erl` for the TLS opt-in tests: prints each argument and the
+    /// `ERL_EPMD_ADDRESS` it was started with, and answers the
+    /// `tls_preflight_main` check with `$FAKE_PREFLIGHT` (exit
+    /// `$FAKE_PREFLIGHT_RC`).
+    #[cfg(unix)]
+    fn fake_tls_erl(dir: &std::path::Path) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let fake = dir.join("fakebin");
+        std::fs::create_dir_all(&fake).unwrap();
+        let erl = fake.join("erl");
+        std::fs::write(
+            &erl,
+            "#!/bin/sh\n\
+             case \"$*\" in *tls_preflight_main*)\n\
+               printf '%s' \"$FAKE_PREFLIGHT\"; echo 'refused: details' >&2; exit \"${FAKE_PREFLIGHT_RC:-0}\" ;;\n\
+             esac\n\
+             for a; do echo \"ARG[$a]\"; done\necho \"EPMD=$ERL_EPMD_ADDRESS\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&erl, std::fs::Permissions::from_mode(0o755)).unwrap();
+        format!("{}:{}", fake.display(), std::env::var("PATH").unwrap())
+    }
+
+    /// BT-5233: with `RELEASE_DISTRIBUTION=tls`, the command lines `launcher.sh`
+    /// generates for the node and every client verb carry `-name
+    /// <instance>@RELEASE_HOST`, `-proto_dist`, the option file and the
+    /// checked interface, never the loopback `-sname`, and epmd follows the
+    /// interface. The values come from the Erlang-side check, faked here.
+    #[cfg(unix)]
+    #[test]
+    fn launcher_sh_tls_opt_in_command_lines() {
+        let temp = TempDir::new().unwrap();
+        let base = Utf8PathBuf::from_path_buf(temp.path().join("rel")).unwrap();
+        write_launcher_scripts(&base, "orders", "1.0.0", "14.0", false).unwrap();
+        std::fs::create_dir_all(base.join("lib/dep/ebin").as_std_path()).unwrap();
+        let path = fake_tls_erl(temp.path());
+        let preflight = "tls-proto=inet_tls\ntls-interface={10,0,0,5}\ntls-epmd=10.0.0.5\n\
+                         tls-host=node1.example.com\ntls-optfile=/etc/my app/ssl_dist.conf\n";
+        let run = |verb: &str| {
+            let out = std::process::Command::new("sh")
+                .arg(base.join("bin/orders").as_std_path())
+                .args([verb, "Smoke run"])
+                .env("PATH", &path)
+                .env("RELEASE_DISTRIBUTION", "tls")
+                .env("RELEASE_NODE", "web1")
+                .env("FAKE_PREFLIGHT", preflight)
+                .env_remove("RELEASE_COOKIE")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+            assert!(
+                out.status.success(),
+                "{verb}: {stdout}{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            stdout
+        };
+        for verb in ["foreground", "stop", "ping", "remote_console", "rpc"] {
+            let out = run(verb);
+            let args: Vec<&str> = out
+                .lines()
+                .filter_map(|l| l.strip_prefix("ARG[")?.strip_suffix(']'))
+                .collect();
+            let after = |flag: &str| {
+                args.iter()
+                    .position(|a| *a == flag)
+                    .and_then(|i| args.get(i + 1).copied())
+                    .unwrap_or_else(|| panic!("{verb}: no {flag} in {args:?}"))
+            };
+            assert!(!args.contains(&"-sname"), "{verb}: {args:?}");
+            assert_eq!(after("-proto_dist"), "inet_tls", "{verb}");
+            assert_eq!(
+                after("-ssl_dist_optfile"),
+                "/etc/my app/ssl_dist.conf",
+                "{verb}"
+            );
+            assert_eq!(after("inet_dist_use_interface"), "{10,0,0,5}", "{verb}");
+            assert!(out.contains("EPMD=10.0.0.5\n"), "{verb}: {out}");
+            let name = after("-name");
+            if verb == "foreground" {
+                assert_eq!(name, "web1@node1.example.com");
+                // Ahead of `-args_file`: `-kernel` flags are first-wins.
+                let iface = args.iter().position(|a| *a == "{10,0,0,5}").unwrap();
+                let args_file = args.iter().position(|a| *a == "-args_file").unwrap();
+                assert!(iface < args_file, "{args:?}");
+            } else {
+                assert!(args.contains(&"-hidden"), "{verb}: {args:?}");
+                assert!(
+                    name.starts_with("orders_") && name.ends_with("@node1.example.com"),
+                    "{verb}: {name}"
+                );
+            }
+            if verb == "remote_console" {
+                assert!(
+                    args.iter()
+                        .any(|a| a.contains("{'web1@node1.example.com', {shell, start, []}}")),
+                    "{args:?}"
+                );
+            } else if verb != "foreground" {
+                assert!(args.contains(&"web1@node1.example.com"), "{verb}: {args:?}");
+            }
+        }
+    }
+
+    /// BT-5233: when the Erlang-side check refuses the opt-in, `launcher.sh`
+    /// stops with its exit code before starting any node, and passes its
+    /// explanation through; an unknown `RELEASE_DISTRIBUTION` is refused up
+    /// front; and with no opt-in the check never runs.
+    #[cfg(unix)]
+    #[test]
+    fn launcher_sh_refuses_a_rejected_tls_opt_in() {
+        let temp = TempDir::new().unwrap();
+        let base = Utf8PathBuf::from_path_buf(temp.path().join("rel")).unwrap();
+        write_launcher_scripts(&base, "orders", "1.0.0", "14.0", false).unwrap();
+        let path = fake_tls_erl(temp.path());
+        for verb in ["foreground", "stop", "ping", "remote_console", "rpc"] {
+            let out = std::process::Command::new("sh")
+                .arg(base.join("bin/orders").as_std_path())
+                .args([verb, "Smoke run"])
+                .env("PATH", &path)
+                .env("RELEASE_DISTRIBUTION", "tls")
+                .env("FAKE_PREFLIGHT", "")
+                .env("FAKE_PREFLIGHT_RC", "2")
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(2), "{verb}");
+            assert!(
+                !String::from_utf8_lossy(&out.stdout).contains("ARG["),
+                "{verb}: no node may start"
+            );
+            assert!(String::from_utf8_lossy(&out.stderr).contains("refused: details"));
+        }
+
+        let out = std::process::Command::new("sh")
+            .arg(base.join("bin/orders").as_std_path())
+            .arg("ping")
+            .env("PATH", &path)
+            .env("RELEASE_DISTRIBUTION", "tcp")
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("plain TCP off-host is not offered"));
+        assert!(!String::from_utf8_lossy(&out.stdout).contains("ARG["));
+
+        // No opt-in: loopback, as before, and the check never runs.
+        let out = std::process::Command::new("sh")
+            .arg(base.join("bin/orders").as_std_path())
+            .arg("ping")
+            .env("PATH", &path)
+            .env_remove("RELEASE_DISTRIBUTION")
+            .env("FAKE_PREFLIGHT_RC", "2")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "{stdout}");
+        assert!(stdout.contains("ARG[-sname]"), "{stdout}");
+        assert!(stdout.contains("ARG[{127,0,0,1}]"), "{stdout}");
+        assert!(stdout.contains("EPMD=127.0.0.1\n"), "{stdout}");
+        assert!(!stdout.contains("ARG[-proto_dist]"), "{stdout}");
     }
 
     /// BT-5187: a symlink cycle in `$0` ends with an error instead of

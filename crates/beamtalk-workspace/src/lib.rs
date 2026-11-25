@@ -388,7 +388,8 @@ pub fn loopback_interface_for(proto_dist: &[&str]) -> &'static str {
 /// (`127.0.0.0/8`, `::1`, `localhost`) and unparseable values all pin, so a
 /// typo fails closed rather than opening every interface. Pinned to
 /// `tests/conformance/loopback_dist_conformance.json`, which the Elixir front's
-/// `BtAttach.Workspace.loopback_dist?/1` reads too.
+/// `BtAttach.Workspace.loopback_dist?/1` and the release launcher's Erlang
+/// `beamtalk_dist_address:loopback_dist/1` (BT-5233) read too.
 #[must_use]
 pub fn loopback_dist_for(epmd_address: Option<&str>) -> bool {
     !epmd_address.unwrap_or("").split(',').any(|entry| {
