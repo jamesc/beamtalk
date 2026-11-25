@@ -161,6 +161,15 @@ tls_preflight_test_() ->
                 ?_assertMatch(
                     ["RELEASE_HOST '10.1' is not" ++ _], Problems(#{"RELEASE_HOST" => "10.1"})
                 ),
+                %% `-name` needs a fully qualified host: OTP refuses to connect
+                %% to `x@node1` ("Hostname node1 is illegal").
+                ?_assertMatch(
+                    ["RELEASE_HOST 'node1' is not" ++ _], Problems(#{"RELEASE_HOST" => "node1"})
+                ),
+                ?_assertMatch(
+                    ["RELEASE_HOST 'localhost' is not" ++ _],
+                    Problems(#{"RELEASE_HOST" => "localhost"})
+                ),
                 ?_assertMatch(
                     ["RELEASE_HOST '010.0.0.1' is not" ++ _],
                     Problems(#{"RELEASE_HOST" => "010.0.0.1"})

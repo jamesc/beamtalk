@@ -562,7 +562,8 @@ tls_host(Host) ->
                     {error,
                         io_lib:format(
                             "RELEASE_HOST '~ts' is not a host name or IP address "
-                            "(letters, digits, '-' and '.' only)",
+                            "(a fully qualified name with at least one '.', or an IP address; "
+                            "letters, digits, '-' and '.' only)",
                             [Host]
                         )}
             end
@@ -573,7 +574,10 @@ tls_host(Host) ->
 %% so it is refused rather than passed to `-name` as a host name.
 valid_host_name(Host) ->
     Labels = string:split(Host, ".", all),
-    element(1, inet:parse_ipv4_address(Host)) =:= error andalso
+    %% `-name` needs a fully qualified host: OTP refuses to connect to a node
+    %% whose host has no dot ("Hostname node1 is illegal").
+    length(Labels) >= 2 andalso
+        element(1, inet:parse_ipv4_address(Host)) =:= error andalso
         length(Host) =< 253 andalso
         lists:all(
             fun(Label) ->

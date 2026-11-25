@@ -144,7 +144,7 @@ distribution off the host is not offered.
 | Variable | Meaning |
 |---|---|
 | `RELEASE_DISTRIBUTION=tls` | The opt-in. Any other value is refused. |
-| `RELEASE_HOST` | This host's name as the other nodes reach it, and the name its certificate carries. The node becomes `-name <RELEASE_NODE or release name>@<RELEASE_HOST>`. |
+| `RELEASE_HOST` | This host's name as the other nodes reach it, and the name its certificate carries: a fully qualified name (with a `.`) or an IP address, since Erlang long names refuse a bare `node1` or `localhost`. The node becomes `-name <RELEASE_NODE or release name>@<RELEASE_HOST>`. |
 | `RELEASE_DIST_INTERFACE` | The IP address to listen on, for distribution and epmd. There is no default; `0.0.0.0` listens on every interface only if you name it. An IPv6 address selects `inet6_tls`. |
 | `RELEASE_SSL_DIST_OPTFILE` | The `-ssl_dist_optfile` file: this node's certificate, key and CA. |
 
