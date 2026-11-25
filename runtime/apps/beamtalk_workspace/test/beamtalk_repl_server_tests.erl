@@ -2314,27 +2314,26 @@ http_ws_no_upgrade_test(Port) ->
     %% Without Upgrade: websocket header, cowboy should not return 101
     ?assert(binary:match(Response, <<"HTTP/1.1 101">>) =:= nomatch).
 
-%% BT-5127: ranch drops a socket from its count once it upgrades, so the
-%% handler counts WebSockets itself. With a cap of 3, three live sockets are
-%% accepted, the fourth is closed with 1013, and closing one frees a slot.
+%% BT-5127 / BT-5185: ranch drops a socket from its count once it upgrades,
+%% so the handler counts WebSockets itself. Unauthenticated sockets have their
+%% own budget: with 3 slots, a 4th unauthenticated socket is accepted and the
+%% oldest is closed with 1013, so idle sockets cannot lock a client out.
 ws_connection_cap_test(Port) ->
-    Prev = application:get_env(beamtalk_workspace, ws_max_connections),
-    application:set_env(beamtalk_workspace, ws_max_connections, 3),
+    Prev = application:get_env(beamtalk_workspace, ws_max_preauth_connections),
+    application:set_env(beamtalk_workspace, ws_max_preauth_connections, 3),
     try
-        Socks = [ws_connect_unauthenticated(Port) || _ <- [1, 2, 3]],
-        ?assertEqual(3, beamtalk_ws_conn_cap:count()),
-        %% The 4th upgrades, then is closed straight away: a close frame
-        %% (0x88) with code 1013, not the `auth-required` text frame (0x81).
-        ?assertMatch(<<16#88, _, 1013:16, _/binary>>, ws_first_frame(Port)),
-        [S | Rest] = Socks,
-        gen_tcp:close(S),
-        ok = beamtalk_test_wait:until(fun() -> beamtalk_ws_conn_cap:count() =:= 2 end),
+        [Oldest | Rest] = [ws_connect_unauthenticated(Port) || _ <- [1, 2, 3]],
+        ?assertEqual(3, beamtalk_ws_conn_cap:count(pre_auth)),
+        %% The 4th gets the `auth-required` text frame (0x81)...
         ?assertMatch(<<16#81, _/binary>>, ws_first_frame(Port)),
-        [gen_tcp:close(R) || R <- Rest]
+        %% ...and the oldest is sent a close frame (0x88) with code 1013.
+        ?assertMatch({ok, <<16#88, _, 1013:16, _/binary>>}, gen_tcp:recv(Oldest, 0, 5000)),
+        ok = beamtalk_test_wait:until(fun() -> beamtalk_ws_conn_cap:count(pre_auth) =< 3 end),
+        [gen_tcp:close(S) || S <- [Oldest | Rest]]
     after
         case Prev of
-            {ok, V} -> application:set_env(beamtalk_workspace, ws_max_connections, V);
-            undefined -> application:unset_env(beamtalk_workspace, ws_max_connections)
+            {ok, V} -> application:set_env(beamtalk_workspace, ws_max_preauth_connections, V);
+            undefined -> application:unset_env(beamtalk_workspace, ws_max_preauth_connections)
         end
     end.
 
