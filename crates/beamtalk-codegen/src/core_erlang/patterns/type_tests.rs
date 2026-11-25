@@ -16,15 +16,28 @@ use super::match_lowering::MatchThreading;
 use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Identifier, MatchArm};
 
-/// The head and size of the `String` representation, the
-/// `{'beamtalk_string', Bytes}` 2-tuple ([`Guard::StringTag`], BT-4173):
-/// shared by the `case` renderer ([`CoreErlangGenerator::wrap_string_test`])
-/// and the expression renderer ([`guard_boolean_test`]).
+/// The head of the `String` representation, the `{'beamtalk_string', Bytes}`
+/// tuple ([`Guard::StringTag`], BT-4173): shared by the `case` renderer
+/// ([`CoreErlangGenerator::wrap_string_test`]) and the expression renderer
+/// ([`guard_boolean_test`]). Its size is the shared fixture's
+/// ([`string_tag_size`]).
 const STRING_TAG: &str = "beamtalk_string";
-const STRING_TAG_SIZE: i64 = 2;
+
+/// The size of the [`STRING_TAG`] tuple, read from the shared routing
+/// fixture's reserved tuple tags, which must list it.
+fn string_tag_size() -> i64 {
+    routing::reserved_tuple_tags()
+        .iter()
+        .find(|reserved| reserved.tag == STRING_TAG)
+        .map_or_else(
+            || unreachable!("the routing fixture reserves the {STRING_TAG} tag"),
+            |reserved| i64::from(reserved.size),
+        )
+}
 
 /// The atoms that are not `Symbol`s ([`Guard::Symbol`]): `nil`, `true` and
 /// `false` belong to `UndefinedObject` and `Boolean`. Shared by the `case`
@@ -45,7 +58,6 @@ pub(in crate::core_erlang) fn guard_boolean_test(
     guard: Guard,
     var: &str,
 ) -> Option<Document<'static>> {
-    use beamtalk_cerl_doc::form;
     let subject = || leaf::var(var.to_string());
     match guard {
         Guard::Bif(bif) => Some(form::call("erlang", bif, [subject()])),
@@ -55,7 +67,7 @@ pub(in crate::core_erlang) fn guard_boolean_test(
             [
                 subject(),
                 leaf::atom(STRING_TAG),
-                leaf::int_lit(STRING_TAG_SIZE),
+                leaf::int_lit(string_tag_size()),
             ],
         )),
         Guard::Symbol => Some(NON_SYMBOL_ATOMS.iter().fold(
@@ -477,7 +489,7 @@ impl CoreErlangGenerator {
             "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
             v.clone(),
             "), ",
-            leaf::int_lit(STRING_TAG_SIZE),
+            leaf::int_lit(string_tag_size()),
             ") of ",
             "<'true'> when 'true' -> ",
             "case call 'erlang':'element'(1, ",
@@ -565,16 +577,10 @@ impl CoreErlangGenerator {
         rest: &Document<'static>,
     ) -> Document<'static> {
         let v = leaf::var(match_var.to_string());
-        let tests = std::iter::once(docvec!["call 'erlang':'is_atom'(", v.clone(), ")"]).chain(
-            NON_SYMBOL_ATOMS.iter().map(|excluded| {
-                docvec![
-                    "call 'erlang':'=/='(",
-                    v.clone(),
-                    ", ",
-                    leaf::atom(*excluded),
-                    ")"
-                ]
-            }),
+        let tests = std::iter::once(form::call("erlang", "is_atom", [v.clone()])).chain(
+            NON_SYMBOL_ATOMS
+                .iter()
+                .map(|excluded| form::call("erlang", "=/=", [v.clone(), leaf::atom(*excluded)])),
         );
         tests
             .collect::<Vec<_>>()

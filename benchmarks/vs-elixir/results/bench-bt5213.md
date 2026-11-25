@@ -40,6 +40,8 @@ the inlined test), `a < b` with two untyped Strings (dispatch to the
 
 ## After, run 2 (full output)
 
+The "Beamtalk compiles to" column of rows 11m–11o was corrected after the run: the harness text still described the discarded helper-call version.
+
 ## Results (median of rounds, net of each side's loop baseline)
 
 | Row | Operation | BT ns | BT red | BT words | EX ns | EX red | EX words | ns x | red x | words x | +red | +words | Beamtalk compiles to |
@@ -50,9 +52,9 @@ the inlined test), `a < b` with two untyped Strings (dispatch to the
 | 11h | 5 < b, b untyped / 5 < b | 7.99 | 0.00 | 0.00 | 0.63 | 0.00 | 0.00 | 12.8 | - | - | 0.00 | 0.00 | case is_number(B): erlang:'<'(5, B); else send_number_comparison(B, 'lessThanFromNumber:', [5], '<') (ADR 0116 addendum, BT-5210; the call arm gives the site a frame) |
 | 11i | a < b, both untyped / a < b | 8.20 | 0.00 | 0.00 | 1.10 | 0.00 | 0.00 | 7.5 | - | - | 0.00 | 0.00 | is_number(A) -> is_number(B) ? erlang:'<'(A, B) : send_number_comparison/4; else is_binary(A) ? erlang:'<'(A, B) : send(A, '<', [B]) (BT-5210) |
 | 11k | 5 + b, b untyped / 5 + b | 9.20 | 0.00 | 0.00 | 0.65 | 0.00 | 0.00 | 14.2 | - | - | 0.00 | 0.00 | erlang:'+'(5, B) in a try; on badarith an is_number(B) test then send_number_coercion/4 (the arithmetic reference the comparison addendum matches) |
-| 11m | "m" < b, b untyped / "m" < b | 15.3 | 0.00 | 0.00 | 11.4 | 0.00 | 0.00 | 1.3 | - | - | 0.00 | 0.00 | case is_record(B, beamtalk_string, 2): erlang:'<'("m", B); else ordering_type_error/3 (BT-5213; the call arm gives the site a frame) |
-| 11n | a < b, both untyped Strings / a < b | 97.9 | 12.0 | 2.00 | 1.03 | 0.00 | 0.00 | 94.8 | - | - | 12.0 | 2.00 | is_number(A) / is_binary(A) both false for a tagged String: send(A, '<', [B]) -> String>>< body: is_record(B, beamtalk_string, 2) ? erlang:'<' : ordering_type_error/3 (BT-5213) |
-| 11o | #m < b, b untyped / :m < b | 96.6 | 9.01 | 2.00 | 3.42 | 0.00 | 0.00 | 28.3 | - | - | 9.01 | 2.00 | send(A, '<', [B]) -> Symbol>>< body: is_atom(B) and not nil/true/false ? erlang:'<' : ordering_type_error/3 (BT-5213) |
+| 11m | "m" < b, b untyped / "m" < b | 15.3 | 0.00 | 0.00 | 11.4 | 0.00 | 0.00 | 1.3 | - | - | 0.00 | 0.00 | case is_record(B, beamtalk_string, 2): erlang:'<'("m", B); else erlang:error({beamtalk_ordering_type_error, "m", '<', B}) (BT-5213; frame-free) |
+| 11n | a < b, both untyped Strings / a < b | 97.9 | 12.0 | 2.00 | 1.03 | 0.00 | 0.00 | 94.8 | - | - | 12.0 | 2.00 | is_number(A) / is_binary(A) both false for a tagged String: send(A, '<', [B]) -> String>>< body: is_record(B, beamtalk_string, 2) ? erlang:'<' : erlang:error({beamtalk_ordering_type_error, ...}) (BT-5213) |
+| 11o | #m < b, b untyped / :m < b | 96.6 | 9.01 | 2.00 | 3.42 | 0.00 | 0.00 | 28.3 | - | - | 9.01 | 2.00 | send(A, '<', [B]) -> Symbol>>< body: is_atom(B) and not nil/true/false ? erlang:'<' : erlang:error({beamtalk_ordering_type_error, ...}) (BT-5213) |
 
 ## Elixir alternates (net ns / red / words)
 

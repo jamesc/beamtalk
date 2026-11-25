@@ -233,8 +233,8 @@
 %% `erlang:error({?BT_ORDERING_TYPE_ERROR_TAG, Left, Op, Right})`. Codegen
 %% raises it frame-free on both send paths (`operators::ORDERING_TYPE_ERROR_TAG`
 %% in beamtalk-codegen); `beamtalk_exception_handler:wrap_raw/2` turns it into
-%% the structured `type_error`. `string_symbol_comparison_test.bt` checks the
-%% two names agree end to end (the error's kind and hint).
+%% the structured `type_error`. The beamtalk-codegen test
+%% `the_ordering_type_error_tag_matches_the_runtime_header` reads this line.
 -define(BT_ORDERING_TYPE_ERROR_TAG, beamtalk_ordering_type_error).
 
 %% @doc Is `T` an in-flight `^` non-local return signal?

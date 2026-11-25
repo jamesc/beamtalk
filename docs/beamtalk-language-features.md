@@ -1168,13 +1168,15 @@ Only an argument the compiler *proves* is a number (a number or character litera
 "apple" < "banana"   // => true
 #apple < #banana     // => true
 "a" < 5
+// => ERROR: String>><: cannot order a String against Integer
 // => ERROR: '<' cannot order a String against Integer — the argument must be a String
 #a <= nil
+// => ERROR: Symbol>><=: cannot order a Symbol against UndefinedObject
 // => ERROR: '<=' cannot order a Symbol against UndefinedObject — the argument must be a Symbol
 #a < "a"             // => ERROR: TypeError (convert first: #a asString < "a")
 ```
 
-This covers every send, inlined or dynamic (`perform:`). Only a `String` argument the compiler proves (a `String` literal, `self` in `String`) skips the test. Default `sort` and `Dictionary`/`Set` order still use the BEAM's term order, so a mixed list sorts without raising. The compiler warns when it can see a mismatch (the argument's static type is known and is not the receiver's kind, e.g. `5 < nil`, `#a < 5`); an untyped or generic argument stays silent. The warning is stricter than the run-time rule for `Character`: `$a < 1` is warned about, but at run time it orders the codepoint numerically.
+This covers every send, inlined or dynamic (`perform:`). A `Character` argument is named `Integer` in the error, since a `Character` is a codepoint integer at run time. Only a `String` argument the compiler proves (a `String` literal, `self` in `String`) skips the test. Default `sort` and `Dictionary`/`Set` order still use the BEAM's term order, so a mixed list sorts without raising. The compiler warns when it can see a mismatch (the argument's static type is known and is not the receiver's kind, e.g. `5 < nil`, `#a < 5`); an untyped or generic argument stays silent. The warning is stricter than the run-time rule for `Character`: `$a < 1` is warned about, but at run time it orders the codepoint numerically.
 
 ##### Arithmetic and comparison on fields: annotate numeric state
 

@@ -645,9 +645,9 @@ compiles_to("11h") -> "case is_number(B): erlang:'<'(5, B); else send_number_com
 compiles_to("11i") -> "is_number(A) -> is_number(B) ? erlang:'<'(A, B) : send_number_comparison/4; else is_binary(A) ? erlang:'<'(A, B) : send(A, '<', [B]) (BT-5210)";
 compiles_to("11j") -> "as 11e, with B untyped: is_number guard on the declared-Integer A, its true arm is_number(B) ? erlang:'<'(A, B) : send_number_comparison/4 (BT-5210)";
 compiles_to("11k") -> "erlang:'+'(5, B) in a try; on badarith an is_number(B) test then send_number_coercion/4 (the arithmetic reference the comparison addendum matches)";
-compiles_to("11m") -> "case is_record(B, beamtalk_string, 2): erlang:'<'(\"m\", B); else ordering_type_error/3 (BT-5213; the call arm gives the site a frame)";
-compiles_to("11n") -> "is_number(A) / is_binary(A) both false for a tagged String: send(A, '<', [B]) -> String>>< body: is_record(B, beamtalk_string, 2) ? erlang:'<' : ordering_type_error/3 (BT-5213)";
-compiles_to("11o") -> "send(A, '<', [B]) -> Symbol>>< body: is_atom(B) and not nil/true/false ? erlang:'<' : ordering_type_error/3 (BT-5213)";
+compiles_to("11m") -> "case is_record(B, beamtalk_string, 2): erlang:'<'(\"m\", B); else erlang:error({beamtalk_ordering_type_error, \"m\", '<', B}) (BT-5213; frame-free)";
+compiles_to("11n") -> "is_number(A) / is_binary(A) both false for a tagged String: send(A, '<', [B]) -> String>>< body: is_record(B, beamtalk_string, 2) ? erlang:'<' : erlang:error({beamtalk_ordering_type_error, ...}) (BT-5213)";
+compiles_to("11o") -> "send(A, '<', [B]) -> Symbol>>< body: is_atom(B) and not nil/true/false ? erlang:'<' : erlang:error({beamtalk_ordering_type_error, ...}) (BT-5213)";
 compiles_to("11l") -> "as 7a; in the actor the loop is a StateAcc letrec (whole state map threaded, one maps:put per iteration); the condition 0 < self.count is a guarded operator (BT-5210): a BT-4279 fast path is_number(Count) -> erlang:'<', else store, send_number_comparison/4, take";
 compiles_to("12a") -> "typed receiver (BT-4127): is_map + tag guard, erlang:whereis + class-object tuple with the pinned module; untyped: beamtalk_primitive:class_of_object derived-cache hit";
 compiles_to("12b") -> "class ref built per call (whereis_class + module_name_safe) + send(P, 'isKindOf:') -> direct objectIsKindOf/2 call (no FFI proxy, BT-4410): one memoised {is_kind_of, C, B} lookup (BT-4221)";

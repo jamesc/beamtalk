@@ -419,7 +419,7 @@ wrap_raw({?BT_ORDERING_TYPE_ERROR_TAG, Left, Op, Right} = Reason, _Context) ->
     %% raises the raw term (a frame-free `erlang:error/1` arm); the receiver
     %% and operator it carries locate the error.
     LeftClass = beamtalk_primitive:class_of(Left),
-    RightClass = beamtalk_primitive:class_of(Right),
+    RightClass = ordering_operand_class(Right),
     Core = beamtalk_error:chars_to_binary(
         io_lib:format("cannot order a ~ts against ~ts", [LeftClass, RightClass])
     ),
@@ -554,6 +554,14 @@ wrap_classified(Kind, Class, Selector, Message, Hint, Details) ->
 -spec breadcrumb(map()) -> {atom() | undefined, atom() | undefined}.
 breadcrumb(Context) ->
     {maps:get(selector, Context, undefined), maps:get(class, Context, undefined)}.
+
+%% The class an ordering type_error names for its wrong-kind operand
+%% (BT-5213). An unresolved future is named as such: `class_of/1` would await
+%% it, blocking the error path and naming the resolved value's class, which a
+%% comparison never compared against.
+-spec ordering_operand_class(term()) -> atom().
+ordering_operand_class({beamtalk_future, _}) -> 'Future';
+ordering_operand_class(Value) -> beamtalk_primitive:class_of(Value).
 
 %% Prefix a core error message with its location (class/selector) when known.
 -spec located(atom() | undefined, atom() | undefined, binary()) -> binary().

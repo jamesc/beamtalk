@@ -211,9 +211,9 @@ impl From<ProvenKind> for OrderingKind {
 /// The head of the raw error term [`ordering_type_error_raise`] raises. The
 /// runtime names it `?BT_ORDERING_TYPE_ERROR_TAG` (`beamtalk.hrl`), and
 /// `beamtalk_exception_handler:wrap_raw/2` turns the term into the
-/// structured `type_error`; `stdlib/test/string_symbol_comparison_test.bt`
-/// asserts that error's kind and hint, so the two names cannot drift apart
-/// unnoticed.
+/// structured `type_error`.
+/// `the_ordering_type_error_tag_matches_the_runtime_header` checks the two
+/// names agree.
 pub(in crate::core_erlang) const ORDERING_TYPE_ERROR_TAG: &str = "beamtalk_ordering_type_error";
 
 /// BT-5213: the one expression that raises the `type_error` of a `String`

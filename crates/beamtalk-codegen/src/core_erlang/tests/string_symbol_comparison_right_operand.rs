@@ -252,3 +252,20 @@ fn boolean_guard_tests_agree_with_the_case_renderers() {
         }
     }
 }
+
+/// The raw error tag crosses the Rust/Erlang boundary: codegen raises
+/// `{ORDERING_TYPE_ERROR_TAG, …}` and the runtime matches
+/// `?BT_ORDERING_TYPE_ERROR_TAG` in `wrap_raw/2`. The header must define the
+/// macro as exactly this atom.
+#[test]
+fn the_ordering_type_error_tag_matches_the_runtime_header() {
+    use crate::core_erlang::operators::ORDERING_TYPE_ERROR_TAG;
+    let header = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../runtime/apps/beamtalk_runtime/include/beamtalk.hrl");
+    let text = std::fs::read_to_string(&header).expect("read beamtalk.hrl");
+    let expected = format!("-define(BT_ORDERING_TYPE_ERROR_TAG, {ORDERING_TYPE_ERROR_TAG}).");
+    assert!(
+        text.lines().any(|line| line.trim() == expected),
+        "beamtalk.hrl must contain `{expected}`"
+    );
+}

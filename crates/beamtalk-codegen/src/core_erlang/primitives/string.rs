@@ -343,7 +343,7 @@ mod tests {
                     &["Other"],
                     "call 'erlang':'=:='(Self, Other)",
                 ),
-                ("test_lt", "<", &["Other"], "call 'erlang':'<'(Self, Other)"),
+                // `<` is pinned by `string_and_symbol_ordering_primitives_test_the_argument` (BT-5213).
                 // Transform group
                 (
                     "test_concat",

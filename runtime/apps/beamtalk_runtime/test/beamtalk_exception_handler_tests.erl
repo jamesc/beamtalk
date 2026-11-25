@@ -863,6 +863,13 @@ wrap_raw_ordering_type_error_symbol_test() ->
         Inner#beamtalk_error.hint
     ).
 
+%% A future on the right is named, not awaited: the error path never blocks.
+wrap_raw_ordering_type_error_future_not_awaited_test() ->
+    Future = {beamtalk_future, self()},
+    Inner = classify({?BT_ORDERING_TYPE_ERROR_TAG, abc, '<', Future}),
+    ?assertEqual(type_error, Inner#beamtalk_error.kind),
+    ?assertMatch(#{got := 'Future'}, Inner#beamtalk_error.details).
+
 wrap_raw_badarg_no_context_is_argument_error_test() ->
     Inner = classify(badarg),
     ?assertEqual(argument_error, Inner#beamtalk_error.kind),
