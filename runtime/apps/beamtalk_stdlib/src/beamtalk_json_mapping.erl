@@ -49,5 +49,5 @@ secretSlots(_Other) ->
     [].
 
 -doc "The value a redacted secret slot is emitted as (`\"[redacted]\"`).".
--spec redacted() -> binary().
-redacted() -> beamtalk_actor_redaction:redacted().
+-spec redacted() -> beamtalk_string:t().
+redacted() -> beamtalk_primitive:string_from_binary(beamtalk_actor_redaction:redacted()).

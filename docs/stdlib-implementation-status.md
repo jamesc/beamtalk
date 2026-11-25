@@ -1007,8 +1007,8 @@ The following stdlib `.bt` classes exist but have not yet received a full method
 | `InspectorField` | `Value` | `inspector_field.bt` | Immutable record for one drillable inspected field (ADR 0095 §2) |
 | `Interval` | `Collection` | `interval.bt` | Arithmetic sequence (1 to: 10) |
 | `Json` | `Object` | `json.bt` | JSON parse/stringify |
-| `JsonMappable` | Protocol | `json_mappable.bt` | Derive `asJson` from a declarative `JsonMapping`: implement class-side `jsonMapping -> JsonMapping` and `asJson` is provided; a hand-written `asJson` wins (BT-2819) |
-| `JsonMapping` | `Value` | `json_mapping.bt` | Declarative field-to-wire-key schema: `mapField:`, `mapField:to:`, `mapField:to:using:` (converter block), `encode:` → Dictionary; unmapped fields omitted; chain with `\|>` not cascades (BT-2819) |
+| `JsonMappable` | Protocol | `json_mappable.bt` | Derive `asJson` from a declarative `JsonMapping`: implement class-side `jsonMapping -> JsonMapping` and `asJson` is provided; a hand-written `asJson` wins (BT-2819); mapping built once per class, subclass adding fields must override `jsonMapping` (BT-5191) |
+| `JsonMapping` | `Value` | `json_mapping.bt` | Declarative field-to-wire-key schema: `mapField:`, `mapField:to:`, `mapField:to:using:` (converter block), `encode:` → Dictionary; unmapped fields omitted; chain with `\|>` not cascades (BT-2819); `omittingNil`, `forClass:` (cached), `validate`, secret actor slots redacted (BT-5191) |
 | `Logger` | `Object` | `logger.bt` | OTP logger wrapper |
 | `Metaclass` | `Behaviour` | `metaclass.bt` | Metaclass mirror |
 | `Node` | `Value` | `node.bt` | BEAM node identity value: `current`, `named:`, `connected`, `connect`/`disconnect`/`ping` (ADR 0126 §2) |

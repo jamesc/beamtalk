@@ -65,7 +65,7 @@ Value subclass: JsonMapping
   /// otherwise be left off the wire silently. Override it, extending the
   /// parent's (`class jsonMapping => super jsonMapping |> mapField: #extra`),
   /// or answering `super jsonMapping` to keep the extra fields off on purpose.
-  class forClass: aClass :: Object -> JsonMapping =>
+  class forClass: aClass -> JsonMapping =>
     (Erlang beamtalk_json_mapping) cached: aClass name build: [
       self checkInheritedMappingOf: aClass
       aClass jsonMapping validate
@@ -73,7 +73,7 @@ Value subclass: JsonMapping
 
   /// Raise a `user_error` if `aClass` inherits `class jsonMapping` and
   /// declares fields its defining ancestor does not have.
-  class checkInheritedMappingOf: aClass :: Object -> Nil =>
+  class checkInheritedMappingOf: aClass -> Nil =>
     definer := (aClass allSuperclasses addFirst: aClass) detect: [:c |
       c class includesSelector: #jsonMapping
     ] ifNone: [aClass]

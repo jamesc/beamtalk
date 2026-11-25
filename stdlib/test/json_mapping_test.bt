@@ -118,28 +118,29 @@ TestCase subclass: JsonMappingTest
     ProcessDictionary at: #jsonMappedCountedBuilds put: 0
     (1 to: 20) do: [:i | (JsonMappedCounted n: i) asJson]
     self assert: (JsonMappedCounted n: 7) asJson equals: #{"n" => 7}
-    self assert: (ProcessDictionary at: #jsonMappedCountedBuilds) <= 1
+    builds :: Dynamic := ProcessDictionary at: #jsonMappedCountedBuilds
+    self assert: builds <= 1
 
   testForClassAnswersValidatedMapping =>
     self assert: (JsonMapping forClass: JsonMappedEvent) equals: JsonMappedEvent jsonMapping
 
   testSubclassAddingFieldsMustOverrideMapping =>
     self
-      should: [(JsonMappedEventChild eventType: #a seq: 1 extra: "x") asJson]
+      should: [(JsonMappedEventChild new: #{#eventType => #a, #seq => 1, #extra => "x"}) asJson]
       raise: #user_error
-    msg := [(JsonMappedEventChild eventType: #a seq: 1 extra: "x") asJson] on: Error do: [:e | e message]
+    msg := [(JsonMappedEventChild new: #{#eventType => #a, #seq => 1, #extra => "x"}) asJson] on: Error do: [:e | e message]
     self assert: (msg includesSubstring: "JsonMappedEventChild")
     self assert: (msg includesSubstring: "extra")
 
   testSubclassExtendingParentMapping =>
-    self assert: (JsonMappedEventExtended eventType: #a seq: 1 extra: "x") asJson equals: #{
+    self assert: (JsonMappedEventExtended new: #{#eventType => #a, #seq => 1, #extra => "x"}) asJson equals: #{
       "event_type" => "a",
       "seq" => 1,
       "extra" => "x"
     }
 
   testSubclassWithoutNewFieldsInheritsMapping =>
-    self assert: (JsonMappedEventAlias eventType: #a seq: 2) asJson equals: #{
+    self assert: (JsonMappedEventAlias new: #{#eventType => #a, #seq => 2}) asJson equals: #{
       "event_type" => "a",
       "seq" => 2
     }
