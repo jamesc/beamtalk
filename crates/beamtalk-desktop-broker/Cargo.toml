@@ -26,6 +26,9 @@ test = []
 
 [dependencies]
 beamtalk-workspace.workspace = true
+# why: BT-5195 — the shared Job Object (`winjob`) and terminate-then-kill
+# escalation, also used by beamtalk-exec.
+beamtalk-process.workspace = true
 # why: BT-5033 — the broker refuses a workspace whose protocol version differs
 # from `handshake::PROTOCOL_VERSION`, the same constant the REPL, MCP and LSP
 # lock on (and that a test pins to the runtime's `?PROTOCOL_VERSION`), rather

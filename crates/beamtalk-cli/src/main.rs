@@ -824,6 +824,7 @@ mod tests {
             "beamtalk-exec",
             "beamtalk-lsp",
             "beamtalk-mcp",
+            "beamtalk-process",
         ];
         let directive = verbose_filter_directive(1);
         for name in deps.keys().filter(|k| k.starts_with("beamtalk-")) {

@@ -14,9 +14,9 @@ dispatches through the 'Class' instance method chain.
 
 ## What This Tests
 
-1. **Dispatch fallthrough**: `Counter testClassProtocol` reaches
-   the `Class` instance-method chain (in this suite, a `testClassProtocol`
-   extension registered on `Class`) via `try_class_chain_fallthrough/3`.
+1. **Dispatch fallthrough**: `Counter yourself` reaches the `Class`
+   instance-method chain (`Object>>yourself`, which `Counter` does not
+   define class-side) via `try_class_chain_fallthrough/3`.
 
 2. **Metaclass tag preservation**: The `self` argument received by
    the Class method has the 'Counter class' tag, not 'Counter'.
@@ -30,9 +30,9 @@ dispatches through the 'Class' instance method chain.
 
 ## Phase 0 Outcome
 
-The testClassProtocol probe is a test-registered extension on `Class`
-(removed in teardown) to keep production code clean. The dispatch mechanism
-(try_class_chain_fallthrough) remains in beamtalk_class_dispatch.
+The probe is the stdlib's own `Object>>yourself`, so no test-only method is
+installed. The dispatch mechanism (try_class_chain_fallthrough) remains in
+beamtalk_class_dispatch.
 """.
 
 -include_lib("eunit/include/eunit.hrl").

@@ -507,7 +507,7 @@ deliver_to_subscriber_test_() ->
 %% sync path the runtime dispatches `Receiver perform: Selector with: Event` via
 %% `beamtalk_message_dispatch:send/3`. We exercise it against a real Beamtalk
 %% value (an Integer) so the dispatch goes through the genuine runtime path; the
-%% full runtime app is started so value dispatch (the extensions table) is live.
+%% full runtime app is started so value dispatch is live.
 when_send_to_dispatches_message_test_() ->
     {foreach, fun setup_with_dispatch/0, fun cleanup/1, [
         ?_test(begin

@@ -1154,7 +1154,7 @@ mod tests {
     fn class_info_fields_are_classified_against_the_surface_hash() {
         use beamtalk_core::ast::{ConstantValue, SlotKind};
         use beamtalk_core::semantic_analysis::class_hierarchy::{
-            AutoConstructors, ClassHierarchy, ClassInfo, ClassVarInfo, DeclaredType, MethodInfo,
+            AutoConstructors, ClassHierarchy, ClassInfo, DeclaredType, MethodInfo,
             SuperclassTypeArg,
         };
         use beamtalk_core::source_analysis::{lex_with_eof, parse};
@@ -1201,7 +1201,6 @@ mod tests {
             has_dynamic_field_writer: _,
             methods: _,
             class_methods: _,
-            class_variables: _,
             type_params: _,
             type_param_bounds: _,
             superclass_type_args: _,
@@ -1260,14 +1259,6 @@ mod tests {
             }),
             ("class_methods", Signature, |c| {
                 c.class_methods[0].selector = "renamed".into();
-            }),
-            ("class_variables", Signature, |c| {
-                c.class_variables.push(ClassVarInfo {
-                    name: "extra".into(),
-                    ty: None,
-                    has_default: false,
-                    kind: SlotKind::Eager,
-                });
             }),
             ("type_params", Signature, |c| c.type_params.push("T".into())),
             ("type_param_bounds", Signature, |c| {

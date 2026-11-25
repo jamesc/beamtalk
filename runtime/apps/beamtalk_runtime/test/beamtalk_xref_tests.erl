@@ -1106,14 +1106,14 @@ build_method_entry_sourceless_test_() ->
             %% A sourceless (`unindexed_runtime_fun`) entry carries empty sends
             %% and references, regardless of whether the compiler app is loaded.
             Entry = beamtalk_xref:build_method_entry(
-                false, 'doubled', <<>>, unindexed_runtime_fun, extension
+                false, 'doubled', <<>>, unindexed_runtime_fun, put_method
             ),
             ?assertEqual(false, maps:get(class_side, Entry)),
             ?assertEqual('doubled', maps:get(selector, Entry)),
             ?assertEqual([], maps:get(sends, Entry)),
             ?assertEqual([], maps:get(references, Entry)),
             ?assertEqual(unindexed_runtime_fun, maps:get(source_status, Entry)),
-            ?assertEqual(extension, maps:get(provenance, Entry))
+            ?assertEqual(put_method, maps:get(provenance, Entry))
         end)
     ].
 
