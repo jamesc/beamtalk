@@ -25,19 +25,26 @@
 //! - `{stderr, ChildId, Data}`
 //! - `{exit, ChildId, ExitCode}` — the last event for a child. A failed
 //!   `spawn` gets `{exit, ChildId, -1}` (unless the id belongs to a live child).
-//! - `{error, ChildId, Reason}` — a command naming `ChildId` failed (malformed
-//!   `args`/`env`, unknown child, full stdin queue, …). `Reason` is a binary.
+//! - `{error, ChildId, Command, Reason}` — the `Command` (`spawn`,
+//!   `write_stdin`, …) naming `ChildId` failed: malformed `args`/`env`,
+//!   unknown child, full stdin queue, …. `Reason` is a binary.
 //!
 //! # Lifecycle (BT-5195)
 //!
 //! - **Exit.** `exit` is sent once the child has exited and its stdout and
-//!   stderr have reached EOF, or after [`DRAIN_GRACE`] if a grandchild still
-//!   holds them. Output arriving later is dropped, so `exit` stays last. The
-//!   child's entry (and so its process group or Job Object) stays registered,
-//!   and killable, until both pipes close.
-//! - **Stdin.** Writes go to a per-child writer thread through a queue of
-//!   [`STDIN_QUEUE_DEPTH`] writes; when it is full the write fails with an
-//!   `error` event. The command thread never blocks on a child.
+//!   stderr have reached EOF. If they have not, because a grandchild holds
+//!   them, it is sent once no output has arrived for [`DRAIN_GRACE`] (and at
+//!   most [`DRAIN_MAX`] after the exit). Output arriving later is dropped, so
+//!   `exit` stays last.
+//! - **What stays registered.** On Unix the child's entry, and so its process
+//!   group, stays registered (killable by `kill`, and killed when the port
+//!   stops) until the group is empty, so a background grandchild dies with the
+//!   port. A process that leaves the group (`setsid`) is not tracked, even
+//!   while it holds the pipes. On Windows the entry, and so the kill-on-close
+//!   Job Object, lives until the pipes close.
+//! - **Stdin.** Writes go to a per-child writer thread through a queue holding
+//!   at most [`STDIN_QUEUE_BYTES`]; a write that would overflow it fails with
+//!   an `error` event. The command thread never blocks on a child.
 //! - **Port death.** Unix children run in their own session. They are killed
 //!   when the BEAM closes the port (stdin EOF), on SIGTERM/SIGHUP, and, when
 //!   the port dies any other way, by the [`watchdog`] process and (Linux,
@@ -45,13 +52,17 @@
 //!   Job Object, assigned before they run.
 
 mod cat;
+#[cfg(test)]
+#[path = "../tests/support/mod.rs"]
+mod test_support;
 #[cfg(unix)]
 mod watchdog;
 
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -75,11 +86,17 @@ const KILL_GRACE: Duration = Duration::from_secs(2);
 /// Poll interval while waiting for a child to be reaped.
 #[cfg_attr(windows, allow(dead_code))]
 const KILL_POLL: Duration = Duration::from_millis(50);
-/// How long after a child exits its output readers get to reach EOF before
-/// `exit` is sent anyway (a grandchild may hold the pipes open for ever).
+/// After a child exits, `exit` waits for its output pipes to reach EOF, but
+/// gives up once no output has arrived for this long: a grandchild may hold
+/// the pipes open for ever.
 const DRAIN_GRACE: Duration = Duration::from_secs(2);
-/// Pending `write_stdin` commands per child before writes are refused.
-const STDIN_QUEUE_DEPTH: usize = 64;
+/// The longest `exit` waits for the output pipes, however busy they are.
+const DRAIN_MAX: Duration = Duration::from_secs(30);
+/// Bytes a child's stdin queue may hold before writes are refused.
+const STDIN_QUEUE_BYTES: usize = 8 << 20;
+/// How often a reaper checks whether an exited child's process group is empty.
+#[cfg(unix)]
+const GROUP_POLL: Duration = Duration::from_millis(100);
 
 // ────────────────────────────────────────────────────────────────
 // Domain-specific ETF helpers (not shared via beamtalk-etf)
@@ -134,12 +151,13 @@ fn exit_event(child_id: u32, code: i32) -> Term {
     tuple3(atom("exit"), child_id_term(child_id), int_term(code))
 }
 
-fn error_event(child_id: u32, reason: &str) -> Term {
-    tuple3(
+fn error_event(child_id: u32, command: &str, reason: &str) -> Term {
+    Term::from(eetf::Tuple::from(vec![
         atom("error"),
         child_id_term(child_id),
+        atom(command),
         binary_term(reason.as_bytes()),
-    )
+    ]))
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -184,11 +202,11 @@ impl EventGate {
 /// Per-child management state stored in the shared map.
 ///
 /// The `Child` handle is given to a reaper thread at spawn time. The entry
-/// lives until the child has exited *and* both output pipes have closed, so a
-/// grandchild holding the pipes can still be killed through it.
+/// outlives the child while anything it left behind remains (see the module
+/// doc, "What stays registered"), so that can still be killed through it.
 struct ChildEntry {
     /// Queue to the child's stdin writer thread; `None` after `close_stdin`.
-    stdin: Option<SyncSender<Vec<u8>>>,
+    stdin: Option<StdinQueue>,
     /// This incarnation's event gate.
     gate: Arc<EventGate>,
     /// Process group ID (Unix only). After `setsid()`, pgid == child PID.
@@ -396,16 +414,16 @@ fn spawn_child(request: &SpawnRequest, port: &Port) -> Result<(), String> {
         );
     }
 
-    let (done_tx, done_rx) = mpsc::channel();
+    let (reader_tx, reader_rx) = mpsc::channel();
     spawn_reader_thread(
         child_id,
         stdout,
         port,
         &gate,
         Stream::Stdout,
-        done_tx.clone(),
+        reader_tx.clone(),
     );
-    spawn_reader_thread(child_id, stderr, port, &gate, Stream::Stderr, done_tx);
+    spawn_reader_thread(child_id, stderr, port, &gate, Stream::Stderr, reader_tx);
 
     let port = port.clone();
     thread::spawn(move || {
@@ -416,58 +434,117 @@ fn spawn_child(request: &SpawnRequest, port: &Port) -> Result<(), String> {
                 -1
             }
         };
-        // Give the readers a bounded time to deliver the last of the output,
-        // then report the exit whether or not a grandchild holds the pipes.
+        // Let the readers deliver the rest of the output for as long as it
+        // keeps flowing, then report the exit whether or not a grandchild
+        // still holds the pipes.
         let mut open_pipes = 2;
-        drain_readers(&done_rx, &mut open_pipes, Some(port.drain));
+        drain_readers(&reader_rx, &mut open_pipes, port.drain, DRAIN_MAX);
         gate.send_exit(&port.writer, child_id, exit_code);
-        // Keep the entry, so the group stays killable, until the pipes close.
-        drain_readers(&done_rx, &mut open_pipes, None);
+        // Keep the entry, so whatever the child left behind stays killable
+        // (and dies with the port), for as long as there is anything left.
+        #[cfg(unix)]
+        while watchdog::group_exists(pgid) {
+            thread::sleep(GROUP_POLL);
+        }
+        #[cfg(not(unix))]
+        drain_readers(&reader_rx, &mut open_pipes, Duration::MAX, Duration::MAX);
         port.remove_child(child_id, &gate);
     });
 
     Ok(())
 }
 
-/// Wait for reader threads to finish, up to `limit` (`None`: no limit).
+/// What a reader thread tells the reaper.
+enum ReaderEvent {
+    /// A chunk of output was forwarded.
+    Progress,
+    /// The pipe reached EOF (or failed); the reader is done.
+    Eof,
+}
+
+/// Wait for the reader threads to reach EOF, for at most `max`, and giving up
+/// once no output has been forwarded for `idle`.
 ///
-/// Each reader sends once when its pipe reaches EOF; a reader that panicked
-/// drops its sender instead, which ends the wait once no sender is left.
-fn drain_readers(done: &Receiver<()>, open_pipes: &mut usize, limit: Option<Duration>) {
-    let deadline = limit.map(|d| Instant::now() + d);
+/// A reader that panicked drops its sender instead of sending `Eof`, which
+/// ends the wait once no sender is left.
+fn drain_readers(
+    events: &Receiver<ReaderEvent>,
+    open_pipes: &mut usize,
+    idle: Duration,
+    max: Duration,
+) {
+    let start = Instant::now();
+    let mut quiet_since = start;
     while *open_pipes > 0 {
-        let received = match deadline {
-            Some(deadline) => done.recv_timeout(deadline.saturating_duration_since(Instant::now())),
-            None => done.recv().map_err(|_| RecvTimeoutError::Disconnected),
-        };
-        match received {
-            Ok(()) => *open_pipes -= 1,
-            Err(RecvTimeoutError::Timeout) => return,
-            Err(RecvTimeoutError::Disconnected) => {
-                *open_pipes = 0;
-            }
+        let now = Instant::now();
+        let left = idle
+            .saturating_sub(now - quiet_since)
+            .min(max.saturating_sub(now - start));
+        if left.is_zero() {
+            return;
+        }
+        match events.recv_timeout(left) {
+            Ok(ReaderEvent::Progress) => quiet_since = Instant::now(),
+            Ok(ReaderEvent::Eof) => *open_pipes -= 1,
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => *open_pipes = 0,
         }
     }
 }
 
-/// Start the thread that owns `stdin` and feeds it from a bounded queue.
+/// A child's stdin queue: writes in, a writer thread out, bounded by the
+/// number of bytes waiting.
+struct StdinQueue {
+    tx: mpsc::Sender<Vec<u8>>,
+    /// Bytes accepted but not yet written to the pipe.
+    pending: Arc<AtomicUsize>,
+}
+
+impl StdinQueue {
+    /// Queue `data` for the child without blocking.
+    ///
+    /// Refused when the bytes already waiting plus `data` would exceed
+    /// [`STDIN_QUEUE_BYTES`]. A write into an empty queue is always accepted,
+    /// whatever its size, so a single large write still goes through.
+    fn push(&self, child_id: u32, data: Vec<u8>) -> Result<(), String> {
+        let len = data.len();
+        let pending = self.pending.load(Ordering::Acquire);
+        if pending > 0 && pending.saturating_add(len) > STDIN_QUEUE_BYTES {
+            return Err(format!(
+                "stdin queue full for child {child_id}: {pending} bytes pending, \
+                 the child is not reading its input"
+            ));
+        }
+        self.pending.fetch_add(len, Ordering::AcqRel);
+        self.tx.send(data).map_err(|_| {
+            self.pending.fetch_sub(len, Ordering::AcqRel);
+            format!("stdin closed for child {child_id}: the child no longer reads its input")
+        })
+    }
+}
+
+/// Start the thread that owns `stdin` and feeds it from a [`StdinQueue`].
 ///
 /// A write that fails (the child closed its stdin or exited) ends the thread,
 /// so later `write_stdin` commands are refused rather than queued. Dropping
-/// the returned sender (`close_stdin`, or the entry going away) lets the
-/// thread finish the queued writes and then close the pipe: EOF for the child.
-fn spawn_stdin_writer(child_id: u32, stdin: impl Write + Send + 'static) -> SyncSender<Vec<u8>> {
-    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(STDIN_QUEUE_DEPTH);
+/// the queue (`close_stdin`, or the entry going away) lets the thread finish
+/// the queued writes and then close the pipe: EOF for the child.
+fn spawn_stdin_writer(child_id: u32, stdin: impl Write + Send + 'static) -> StdinQueue {
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    let pending = Arc::new(AtomicUsize::new(0));
+    let written = Arc::clone(&pending);
     thread::spawn(move || {
         let mut stdin = stdin;
         for data in rx {
-            if let Err(e) = stdin.write_all(&data).and_then(|()| stdin.flush()) {
+            let result = stdin.write_all(&data).and_then(|()| stdin.flush());
+            written.fetch_sub(data.len(), Ordering::AcqRel);
+            if let Err(e) = result {
                 debug!("stdin write failed for child {child_id}: {e}");
                 return;
             }
         }
     });
-    tx
+    StdinQueue { tx, pending }
 }
 
 #[derive(Clone, Copy)]
@@ -483,7 +560,7 @@ fn spawn_reader_thread<R: Read + Send + 'static>(
     port: &Port,
     gate: &Arc<EventGate>,
     stream: Stream,
-    done: mpsc::Sender<()>,
+    to_reaper: mpsc::Sender<ReaderEvent>,
 ) {
     let writer = Arc::clone(&port.writer);
     let gate = Arc::clone(gate);
@@ -499,6 +576,7 @@ fn spawn_reader_thread<R: Read + Send + 'static>(
                         Stream::Stderr => stderr_event(child_id, &buf[..n]),
                     };
                     gate.send(&writer, &event);
+                    let _ = to_reaper.send(ReaderEvent::Progress);
                 }
                 Err(e) => {
                     debug!("read error for child {child_id}: {e}");
@@ -506,7 +584,7 @@ fn spawn_reader_thread<R: Read + Send + 'static>(
                 }
             }
         }
-        let _ = done.send(());
+        let _ = to_reaper.send(ReaderEvent::Eof);
     });
 }
 
@@ -646,15 +724,7 @@ fn handle_write_stdin(request: &Map, port: &Port) -> Result<(), String> {
         .as_ref()
         .ok_or("stdin already closed for this child")?;
     // Never blocks: the writer thread does the (possibly blocking) I/O.
-    queue.try_send(data).map_err(|e| match e {
-        TrySendError::Full(_) => format!(
-            "stdin queue full for child {child_id}: {STDIN_QUEUE_DEPTH} writes pending, \
-             the child is not reading its input"
-        ),
-        TrySendError::Disconnected(_) => {
-            format!("stdin closed for child {child_id}: the child no longer reads its input")
-        }
-    })
+    queue.push(child_id, data)
 }
 
 fn handle_close_stdin(request: &Map, port: &Port) -> Result<(), String> {
@@ -700,6 +770,17 @@ fn command_child_id(term: &Term) -> Option<u32> {
     map_get(map, "child_id").and_then(term_to_child_id)
 }
 
+/// The command's name, or `undefined` when it has none.
+fn command_name(term: &Term) -> &str {
+    match term {
+        Term::Map(map) => match map_get(map, "command") {
+            Some(Term::Atom(a)) => a.name.as_str(),
+            _ => "undefined",
+        },
+        _ => "undefined",
+    }
+}
+
 /// The `child_id` that needs a synthetic exit event after `term` failed, if any.
 ///
 /// Only a failed `spawn` qualifies, and only when no live child holds the id:
@@ -743,7 +824,10 @@ fn run_command_loop(input: &mut impl Read, port: &Port) {
         if let Err(e) = handle_command(&term, port) {
             warn!("Command error: {e}");
             if let Some(child_id) = command_child_id(&term) {
-                send_event(&port.writer, &error_event(child_id, &e));
+                send_event(
+                    &port.writer,
+                    &error_event(child_id, command_name(&term), &e),
+                );
             }
             if let Some(child_id) = failed_spawn_child_id(&term, &port.children) {
                 send_event(&port.writer, &exit_event(child_id, -1));
@@ -765,7 +849,7 @@ fn kill_all_children(children: &ChildMap) {
 }
 
 /// Unix: SIGTERM every group, wait up to `grace` for the reapers to drain the
-/// map (each entry goes once its child has exited and its pipes have closed),
+/// map (each entry goes once its child has exited and its group is empty),
 /// then SIGKILL the survivors.
 #[cfg(unix)]
 fn kill_all_children_within(children: &ChildMap, grace: Duration, wait: fn(Duration)) {
@@ -945,6 +1029,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::*;
     use eetf::List;
     use serial_test::serial;
     #[cfg(unix)]
@@ -953,10 +1038,6 @@ mod tests {
     // NOTE: Packet framing tests are in beamtalk-etf.
 
     // ── Test harness ────────────────────────────────────────────
-
-    /// Upper bound on any wait below. A hang guard, not a timing assumption:
-    /// every wait ends as soon as its condition holds.
-    const HANG_GUARD: Duration = Duration::from_secs(30);
 
     /// A writer that keeps every byte the port writes.
     #[derive(Clone, Default)]
@@ -1011,28 +1092,12 @@ mod tests {
         (port, capture)
     }
 
-    /// `(tag, child_id, payload)` of an event tuple.
-    fn parts(event: &Term) -> (&str, &Term, &Term) {
-        let Term::Tuple(t) = event else {
-            panic!("event is not a tuple: {event:?}")
-        };
-        let Term::Atom(tag) = &t.elements[0] else {
-            panic!("event tag is not an atom: {event:?}")
-        };
-        (tag.name.as_str(), &t.elements[1], &t.elements[2])
-    }
-
-    fn is_event(event: &Term, tag: &str, child_id: i32) -> bool {
-        let (t, id, _) = parts(event);
-        t == tag && *id == int_term(child_id)
-    }
-
     /// Concatenated `stream` payloads for `child_id`.
     fn output(events: &[Term], stream: &str, child_id: i32) -> Vec<u8> {
         events
             .iter()
             .filter(|e| is_event(e, stream, child_id))
-            .flat_map(|e| term_to_bytes(parts(e).2).expect("binary payload"))
+            .flat_map(|e| term_to_bytes(payload(e)).expect("binary payload"))
             .collect()
     }
 
@@ -1041,38 +1106,7 @@ mod tests {
             .iter()
             .find(|e| is_event(e, "exit", child_id))
             .expect("exit event");
-        parts(exit).2.clone()
-    }
-
-    fn spawn_term(child_id: i32, executable: &str, args: &[&str]) -> Term {
-        let args: Vec<Term> = args.iter().map(|a| binary_term(a.as_bytes())).collect();
-        Term::from(Map::from([
-            (atom("command"), atom("spawn")),
-            (atom("child_id"), int_term(child_id)),
-            (atom("executable"), binary_term(executable.as_bytes())),
-            (atom("args"), Term::from(List::from(args))),
-            (
-                atom("env"),
-                Term::from(Map::from(HashMap::<Term, Term>::new())),
-            ),
-        ]))
-    }
-
-    fn command(name: &str, child_id: i32, extra: Vec<(Term, Term)>) -> Term {
-        let mut fields = vec![
-            (atom("command"), atom(name)),
-            (atom("child_id"), int_term(child_id)),
-        ];
-        fields.extend(extra);
-        Term::from(Map::from(fields.into_iter().collect::<HashMap<_, _>>()))
-    }
-
-    fn write_stdin_term(child_id: i32, data: &[u8]) -> Term {
-        command(
-            "write_stdin",
-            child_id,
-            vec![(atom("data"), binary_term(data))],
-        )
+        payload(exit).clone()
     }
 
     fn is_registered(port: &Port, child_id: u32) -> bool {
@@ -1098,18 +1132,6 @@ mod tests {
             .unwrap_or_else(|_| panic!("{what} blocked the command thread"))
     }
 
-    /// Whether `pid` is a running (not zombie) process.
-    #[cfg(unix)]
-    fn process_running(pid: libc::pid_t) -> bool {
-        let out = Command::new("ps")
-            .args(["-o", "stat=", "-p", &pid.to_string()])
-            .output()
-            .expect("run ps");
-        let stat = String::from_utf8_lossy(&out.stdout);
-        let stat = stat.trim();
-        !stat.is_empty() && !stat.starts_with('Z')
-    }
-
     // ── ETF event encoding ──────────────────────────────────────
 
     #[test]
@@ -1127,7 +1149,7 @@ mod tests {
     #[test]
     fn stderr_event_encodes_correctly() {
         let event = stderr_event(7, b"err");
-        let (tag, id, _) = parts(&event);
+        let (tag, id) = parts(&event);
         assert_eq!((tag, id), ("stderr", &int_term(7)));
     }
 
@@ -1142,8 +1164,13 @@ mod tests {
     #[test]
     fn error_event_encodes_correctly() {
         assert_eq!(
-            error_event(3, "bad"),
-            tuple3(atom("error"), int_term(3), binary_term(b"bad"))
+            error_event(3, "spawn", "bad"),
+            Term::from(eetf::Tuple::from(vec![
+                atom("error"),
+                int_term(3),
+                atom("spawn"),
+                binary_term(b"bad")
+            ]))
         );
     }
 
@@ -1270,7 +1297,7 @@ mod tests {
         let summary: Vec<(String, Term)> = events
             .iter()
             .map(|e| {
-                let (tag, id, _) = parts(e);
+                let (tag, id) = parts(e);
                 (tag.to_string(), id.clone())
             })
             .collect();
@@ -1285,8 +1312,15 @@ mod tests {
             ]
         );
         assert_eq!(exit_code_of(&events, 5), int_term(-1));
-        let reason = term_to_string(parts(&events[0]).2).unwrap();
+        let reason = term_to_string(payload(&events[0])).unwrap();
         assert!(reason.contains("args"), "{reason}");
+        let command_of = |e: &Term| match e {
+            Term::Tuple(t) => t.elements[2].clone(),
+            _ => unreachable!(),
+        };
+        assert_eq!(command_of(&events[0]), atom("spawn"));
+        assert_eq!(command_of(&events[3]), atom("write_stdin"));
+        assert_eq!(command_of(&events[4]), atom("bogus"));
     }
 
     /// A child spawned through the loop reports its output and exit; EOF on
@@ -1459,6 +1493,7 @@ mod tests {
         handle_command(&spawn_term(52, "/bin/sh", &["-c", "sleep 300 &"]), &port)
             .expect("first spawn");
         capture.wait_for_exit(52);
+        port.drain = DRAIN_GRACE;
         handle_command(&spawn_term(52, "/bin/sh", &["-c", "echo second"]), &port)
             .expect("reuse after exit");
         let deadline = Instant::now() + HANG_GUARD;
@@ -1489,7 +1524,7 @@ mod tests {
         let chunk = vec![b'x'; 1 << 20]; // far beyond any pipe buffer
         let writer_port = port.clone();
         let refused = must_return("write_stdin", move || {
-            (0..STDIN_QUEUE_DEPTH + 2)
+            (0..(STDIN_QUEUE_BYTES >> 20) + 3)
                 .map(|_| handle_command(&write_stdin_term(60, &chunk), &writer_port))
                 .find_map(Result::err)
         });
@@ -1707,7 +1742,7 @@ mod tests {
         let chunk = vec![b'x'; 1 << 20];
         let writer_port = port.clone();
         let refused = must_return("write_stdin", move || {
-            (0..STDIN_QUEUE_DEPTH + 2)
+            (0..(STDIN_QUEUE_BYTES >> 20) + 3)
                 .map(|_| handle_command(&write_stdin_term(3, &chunk), &writer_port))
                 .find_map(Result::err)
         });

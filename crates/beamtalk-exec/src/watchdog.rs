@@ -136,7 +136,8 @@ fn signal_groups(groups: &BTreeSet<libc::pid_t>, sig: libc::c_int) {
     }
 }
 
-fn group_exists(pgid: libc::pid_t) -> bool {
+/// Whether any process is still in process group `pgid`.
+pub(crate) fn group_exists(pgid: libc::pid_t) -> bool {
     // SAFETY: kill(2) with signal 0 only checks for existence.
     let rc = unsafe { libc::kill(-pgid, 0) };
     rc == 0 || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)

@@ -12,7 +12,7 @@ Spawns `beamtalk-exec` as an OTP port with `{packet, 4}` framing and
 ETF-encoded commands. The binary manages OS subprocesses and sends
 events back as ETF tuples: `{stdout, ChildId, Data}`,
 `{stderr, ChildId, Data}`, `{exit, ChildId, ExitCode}` and
-`{error, ChildId, Reason}`.
+`{error, ChildId, Command, Reason}`.
 
 The caller is responsible for receiving port messages and dispatching
 events. This module only handles port open/close/command mechanics.
@@ -34,22 +34,26 @@ Events (binary → BEAM) — ETF tuples on the port:
   {stdout, ChildId, Data}
   {stderr, ChildId, Data}
   {exit,   ChildId, ExitCode}
-  {error,  ChildId, Reason}
+  {error,  ChildId, Command, Reason}
 ```
 
 `exit` is the last event for a child. It is sent once the child has exited
-and its output pipes have closed, or at most 2 s after the child exits if a
-grandchild still holds them; later output is dropped. A failed `spawn` is
-answered with `{exit, ChildId, -1}`.
+and its output pipes have closed. If a grandchild still holds them, it is
+sent once they have been quiet for 2 s (at most 30 s after the exit), and
+later output is dropped. A failed `spawn` is answered with
+`{exit, ChildId, -1}`.
 
-`error` reports a command naming `ChildId` that failed: malformed `args` or
-`env` (nothing is spawned), an unknown child, or a full stdin queue (a
-child that does not read its input; the write is dropped). `Reason` is a
-binary.
+`error` reports that `Command` (`spawn`, `write_stdin`, …) for `ChildId`
+failed: malformed `args` or
+`env` (nothing is spawned), an unknown child, or a full stdin queue (8 MiB
+waiting for a child that does not read its input; the write is dropped).
+`Reason` is a binary.
 
 Children die with the port: on `close/1`, and also when the binary is
 killed (Unix: a SIGTERM handler, a watchdog process and, on Linux, a
-parent-death signal; Windows: a kill-on-close Job Object).
+parent-death signal; Windows: a kill-on-close Job Object). On Unix this
+covers everything left in the child's process group, including background
+grandchildren, but not a process that started its own session (`setsid`).
 """.
 
 -export([

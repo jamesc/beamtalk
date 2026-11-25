@@ -7,19 +7,20 @@
 //! `BEAMTALK_EXEC_TEST_BIN` overrides the binary under test, so the same tests
 //! can be pointed at an older build to show what they catch.
 
-use std::collections::HashMap;
+mod support;
+
 use std::io::{self, Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use beamtalk_etf::{self as etf, atom, binary, int_term, term_to_bytes, term_to_string};
-use eetf::{List, Map, Term};
-
-/// Upper bound on every wait. A hang guard, not a timing assumption: each
-/// wait ends as soon as its event arrives.
-const HANG_GUARD: Duration = Duration::from_secs(30);
+use beamtalk_etf::{self as etf, atom, int_term, term_to_bytes, term_to_string};
+use eetf::Term;
+use support::{
+    HANG_GUARD, command, is_event, payload, spawn_with as spawn, strs,
+    write_stdin_term as write_stdin,
+};
 
 fn exec_binary() -> String {
     std::env::var("BEAMTALK_EXEC_TEST_BIN")
@@ -109,59 +110,6 @@ impl Drop for PortProcess {
     }
 }
 
-fn parts(event: &Term) -> (&str, &Term) {
-    let Term::Tuple(t) = event else {
-        panic!("event is not a tuple: {event:?}")
-    };
-    let Term::Atom(tag) = &t.elements[0] else {
-        panic!("tag is not an atom: {event:?}")
-    };
-    (tag.name.as_str(), &t.elements[1])
-}
-
-fn payload(event: &Term) -> &Term {
-    let Term::Tuple(t) = event else {
-        panic!("event is not a tuple: {event:?}")
-    };
-    &t.elements[2]
-}
-
-fn is_event(event: &Term, tag: &str, child_id: i32) -> bool {
-    parts(event) == (tag, &int_term(child_id))
-}
-
-fn spawn(child_id: i32, executable: &str, args: Vec<Term>) -> Term {
-    Term::from(Map::from([
-        (atom("command"), atom("spawn")),
-        (atom("child_id"), int_term(child_id)),
-        (atom("executable"), binary(executable.as_bytes())),
-        (atom("args"), Term::from(List::from(args))),
-        (
-            atom("env"),
-            Term::from(Map::from(HashMap::<Term, Term>::new())),
-        ),
-    ]))
-}
-
-fn strs(args: &[&str]) -> Vec<Term> {
-    args.iter().map(|a| binary(a.as_bytes())).collect()
-}
-
-fn command(name: &str, child_id: i32) -> Term {
-    Term::from(Map::from([
-        (atom("command"), atom(name)),
-        (atom("child_id"), int_term(child_id)),
-    ]))
-}
-
-fn write_stdin(child_id: i32, data: &[u8]) -> Term {
-    Term::from(Map::from([
-        (atom("command"), atom("write_stdin")),
-        (atom("child_id"), int_term(child_id)),
-        (atom("data"), binary(data)),
-    ]))
-}
-
 /// A shell command line that prints `text` and exits.
 fn echo(text: &str) -> (&'static str, Vec<Term>) {
     if cfg!(windows) {
@@ -241,7 +189,7 @@ fn a_child_that_never_reads_does_not_stall_the_port() {
     port.send(&spawn(2, exe, args));
     assert_eq!(port.wait_for_exit(2), int_term(0));
     // ...and so does `kill`.
-    port.send(&command("kill", 1));
+    port.send(&command("kill", 1, vec![]));
     port.wait_for_exit(1);
 }
 
@@ -260,10 +208,10 @@ fn exit_arrives_while_a_grandchild_holds_the_pipes() {
         .trim()
         .parse()
         .expect("grandchild pid");
-    assert!(unix::running(grandchild));
+    assert!(support::process_running(grandchild));
     // Its group is still killable through the port.
-    port.send(&command("kill", 1));
-    unix::wait_until_gone(grandchild);
+    port.send(&command("kill", 1, vec![]));
+    support::wait_until_gone(grandchild);
 }
 
 // ── BT-5195 item 4: children die with the port ──────────────────
@@ -273,24 +221,7 @@ mod unix {
     use super::*;
     use std::os::unix::process::ExitStatusExt;
 
-    /// Whether `pid` is a running (not zombie) process.
-    pub(super) fn running(pid: i32) -> bool {
-        let out = Command::new("ps")
-            .args(["-o", "stat=", "-p", &pid.to_string()])
-            .output()
-            .expect("run ps");
-        let stat = String::from_utf8_lossy(&out.stdout);
-        let stat = stat.trim();
-        !stat.is_empty() && !stat.starts_with('Z')
-    }
-
-    pub(super) fn wait_until_gone(pid: i32) {
-        let deadline = Instant::now() + HANG_GUARD;
-        while running(pid) {
-            assert!(Instant::now() < deadline, "process {pid} still running");
-            thread::sleep(Duration::from_millis(20)); // sleep: poll for the process to die
-        }
-    }
+    use support::{process_running as running, wait_until_gone};
 
     /// Start a child that prints its own pid and its grandchild's, then
     /// waits; return both.

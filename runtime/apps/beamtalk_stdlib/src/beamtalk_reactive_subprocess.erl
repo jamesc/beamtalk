@@ -29,7 +29,8 @@ no deferred-reply slots.
   stdout_pending => binary(),             % partial line fragment
   stderr_pending => binary(),             % partial line fragment
   exit_code      => nil | non_neg_integer(),
-  port_closed    => boolean()
+  port_closed    => boolean(),
+  stdin_dropped  => binary()              % only once the exec port dropped a write
 }
 ```
 
@@ -294,9 +295,16 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             NewState = S1#{exit_code => Code, port_closed => true},
             cast_notify(NewState, 'subprocessExit:from:', [Code]),
             {noreply, NewState};
-        {error, _ChildId, Reason} ->
-            ?LOG_WARNING("ReactiveSubprocess command refused by exec port", #{
+        {error, _ChildId, write_stdin, Reason} ->
+            %% Input was dropped (the child is not reading it): every later
+            %% writeLine: fails, since the stream the child sees is broken.
+            ?LOG_WARNING("ReactiveSubprocess stdin write dropped", #{
                 reason => Reason, domain => [beamtalk, stdlib]
+            }),
+            {noreply, State#{stdin_dropped => Reason}};
+        {error, _ChildId, Command, Reason} ->
+            ?LOG_WARNING("ReactiveSubprocess command refused by exec port", #{
+                command => Command, reason => Reason, domain => [beamtalk, stdlib]
             }),
             {noreply, State};
         _Other ->
@@ -353,6 +361,13 @@ terminate(_Reason, State) ->
 %% BT-4173: lines arrive tagged from Beamtalk — unwrap to bytes.
 handle_writeLine({beamtalk_string, B}, State) when is_binary(B) ->
     handle_writeLine(B, State);
+handle_writeLine(_Data, #{stdin_dropped := Reason} = State) ->
+    %% BT-5195: an earlier line was dropped because the child stopped reading
+    %% its input, so the stream the child sees is already broken.
+    Err = beamtalk_error:new(runtime_error, 'ReactiveSubprocess', 'writeLine:', <<
+        "input was dropped: ", Reason/binary
+    >>),
+    {reply, {error, Err}, State};
 handle_writeLine(Data, State) ->
     #{port := Port, child_id := ChildId, port_closed := PortClosed} = State,
     case PortClosed of
