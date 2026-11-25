@@ -28,7 +28,12 @@ whatever it holds in `terminate/3` (both run in the process that owns the
 socket). Counts are atomic counters (`ets:update_counter/4`), so two sockets
 racing for the last slot cannot both lose (or both win). Rows are keyed by
 pid; a handler killed without running `terminate/3` would leak its row, so a
-full budget first prunes rows whose pid is dead.
+full budget first prunes rows whose pid is dead. A handler killed from
+outside in the instant between reserving its count and inserting its row
+leaves one count with no row, which pruning cannot see; the budget is then one
+slot smaller until the table's owner restarts. That needs an external
+`exit(Pid, kill)` landing between two consecutive ETS calls, and costs one
+slot, so it is accepted rather than reconciled under concurrent reservations.
 
 The table is owned by `beamtalk_repl_server` (`new/0`). If that process
 restarts, the table is recreated empty while old handlers may live on, so a
