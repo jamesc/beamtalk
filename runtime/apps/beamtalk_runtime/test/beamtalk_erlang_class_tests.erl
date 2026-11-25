@@ -73,7 +73,7 @@ dispatch_unary_with_args_raises_arity_mismatch_test() ->
 dispatch_object_protocol_responds_to_test_() ->
     {setup,
         fun() ->
-            ok = beamtalk_extensions:init(),
+            ok = beamtalk_class_shadow_flags:mark_ready(),
             ok = beamtalk_test_boot:boot_real_stdlib('Erlang')
         end,
         fun(_) -> ok end, fun() ->
@@ -82,7 +82,7 @@ dispatch_object_protocol_responds_to_test_() ->
         end}.
 
 dispatch_object_protocol_hash_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+    {setup, fun() -> beamtalk_class_shadow_flags:mark_ready() end, fun(_) -> ok end, fun() ->
         Result = beamtalk_erlang_class:dispatch('hash', [], erlang_self()),
         ?assert(is_integer(Result))
     end}.

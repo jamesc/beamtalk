@@ -9,7 +9,6 @@ Unit tests for beamtalk_dispatch module.
 Tests the method dispatch domain service including:
 - Hierarchy walking (lookup/5)
 - Super send dispatch (super/5)
-- Extension method checking
 - Error handling (structured #beamtalk_error{})
 
 ## Test Strategy
@@ -40,9 +39,6 @@ setup() ->
     %% earlier test teardowns since class processes are unlinked)
     beamtalk_test_boot:boot_real_stdlib('Integer'),
 
-    %% Initialize extensions registry
-    beamtalk_extensions:init(),
-
     ok.
 
 %% Teardown function
@@ -65,50 +61,26 @@ dispatch_test_() ->
                 fun test_inherited_target_object_owned_slow/0},
             {"BT-4995: inherited_target answers compiled for the state-free Actor intrinsics only",
                 fun test_inherited_target_actor_intrinsics/0},
-            {"BT-4995: an extension on the class or its superclass flips an Actor intrinsic verdict",
-                fun test_inherited_target_actor_intrinsic_extension_flips/0},
-            {"BT-4995: an extension on Actor itself gives the {ext, Actor} verdict for its intrinsics",
-                fun test_inherited_target_actor_intrinsic_owner_extension/0},
-            {"BT-5002: an extension on any owner gives the {ext, Owner} verdict",
-                fun test_inherited_target_owner_extension_gives_ext/0},
-            {"BT-5060: one_hop_children_missing_extension names the direct value subclasses (negative cases)",
-                fun test_one_hop_children_missing_extension/0},
-            {"BT-5002: inherited_value_ext applies by arity and falls back to the super module",
-                fun test_inherited_value_ext/0},
             {"BT-4260: inherited_target answers value for an Object method sent to a String",
                 fun test_inherited_target_value_owner/0},
-            {"BT-4260: an extension anywhere on a value chain flips the verdict",
-                fun test_inherited_target_value_extension_flips/0},
-            {"BT-4280: an extension on the class or its superclass flips the verdict",
-                fun test_inherited_target_extension_flips/0},
             {"BT-4280: an unregistered class answers slow and is not cached",
                 fun test_inherited_target_unregistered/0},
             {"lookup finds inherited method", fun test_lookup_inherited_method/0},
             {"lookup returns DNU error for missing method", fun test_lookup_missing_method/0},
             {"super skips current class", fun test_super_skips_current/0},
             {"super returns error at root", fun test_super_at_root/0},
-            {"lookup checks extensions before class methods", fun test_extension_priority/0},
             {"dispatch errors are always 2-tuples", fun test_error_tuple_shape/0},
             {"super finds inherited reflection method", fun test_super_finds_inherited/0},
             {"responds_to existing method", fun test_responds_to_existing_method/0},
             {"responds_to missing method", fun test_responds_to_missing_method/0},
             {"responds_to nonexistent class", fun test_responds_to_nonexistent_class/0},
             {"responds_to inherited method", fun test_responds_to_inherited_method/0},
-            {"extension error caught and wrapped (BT-3199)",
-                fun test_extension_error_propagation/0},
-            {"BT-3199: a `^` non-local return in flight passes through a value-type extension",
-                fun test_extension_nlr_passthrough/0},
-            {"BT-3199: a connected Program exit: passes through a value-type extension",
-                fun test_extension_script_exit_passthrough/0},
-            {"responds_to extension method", fun test_responds_to_extension_method/0},
             {"BT-283: dynamic method found after put_method",
                 fun test_dynamic_method_responds_to/0},
             {"BT-283: inherited dynamic method found via chain walk",
                 fun test_inherited_responds_to_dynamic_method/0},
             {"BT-387: out-of-order registration dispatches correctly",
                 fun test_out_of_order_registration/0},
-            {"BT-429: super finds extension on superclass",
-                fun test_super_finds_extension_on_superclass/0},
             %% Additional coverage tests
             {"lookup on non-existent class returns class_not_found",
                 fun test_lookup_nonexistent_class/0},
@@ -135,31 +107,25 @@ dispatch_test_() ->
             {"super at Object for unknown method", fun test_super_object_unknown/0},
             {"lookup with class_not_found in superclass chain",
                 fun test_lookup_missing_superclass_in_chain/0},
-            %% Extension state threading tests
-            {"arity-3 extension threads state correctly", fun test_extension_state_threading/0},
-            {"arity-2 value-type extension via runtime dispatch",
-                fun test_value_type_extension_via_runtime_dispatch/0},
             %% Additional coverage tests
-            {"extension with bad arity is caught and wrapped (BT-3199)",
-                fun test_extension_bad_arity/0},
             {"non-actor Self uses normal dispatch for displayString",
                 fun test_non_actor_self_displaystring/0},
             {"lookup zero-arity method succeeds", fun test_lookup_zero_arity_method/0},
             {"responds_to walks full hierarchy depth", fun test_responds_to_deep_chain/0},
-            {"lookup succeeds with extensions table present",
-                fun test_lookup_with_extensions_table/0},
             {"super from class with no superclass returns DNU", fun test_super_no_superclass/0},
             %% Additional dispatch-pipeline coverage
             {"continue_to_superclass when superclass is not in registry",
                 fun test_continue_to_superclass_missing_registry/0},
-            {"extension method that raises is caught and wrapped (BT-3199)",
-                fun test_extension_raises_reraised/0},
-            {"super finds and invokes extension on superclass (arity-3)",
-                fun test_super_extension_invoke/0},
             {"compiled dispatch returning 3-tuple error is normalized to 2-tuple",
                 fun test_compiled_dispatch_returns_error_tuple/0},
             {"invoke_method with module=undefined continues to superclass",
                 fun test_invoke_method_module_undefined_continues/0},
+            {"a runtime value fun that raises is caught and wrapped (BT-3199)",
+                fun test_runtime_fun_raises_wrapped/0},
+            {"BT-3199: a `^` non-local return in flight passes through a runtime value fun",
+                fun test_runtime_fun_nlr_passthrough/0},
+            {"BT-3199: a connected Program exit: passes through a runtime value fun",
+                fun test_runtime_fun_script_exit_passthrough/0},
             %% class_chain_step's per-node probe must stay O(depth)
             {"class_chain_step probes has_method_local/2 exactly once per level",
                 fun test_class_chain_step_probe_cost_is_linear_in_depth/0},
@@ -168,12 +134,8 @@ dispatch_test_() ->
                 fun test_cached_lookup_skips_walk/0},
             {"hot patch on ancestor invalidates cached owner",
                 fun test_hot_patch_invalidates_cached_owner/0},
-            {"ancestor extension install and removal re-resolve",
-                fun test_extension_install_invalidates_cached_owner/0},
             {"super-send warms the shared start-class entry",
                 fun test_super_send_warms_shared_entry/0},
-            {"extension shadowing a deeper owner flips the cached row",
-                fun test_extension_shadow_invalidates_cached_owner/0},
             {"kill past the restart budget flushes the cached owner",
                 fun test_kill_budget_exhausted_flushes_cache/0},
             {"purged owner module recomputes past the owner",
@@ -300,30 +262,6 @@ test_super_at_root() ->
     %% Should return error (no superclass or method not found)
     ?assertMatch({error, #beamtalk_error{}}, Result).
 
-%% Test that extensions are checked before class methods
-test_extension_priority() ->
-    %% Register an extension method on Counter
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_extensions:init(),
-
-    TestFun = fun(_Args, _Self, State) ->
-        %% Return {Result, NewState}
-        {extension_called, State}
-    end,
-
-    %% Registered only for the lookup, and removed even if it raises.
-    Result = beamtalk_test_extensions:with_extension('Counter', testExtension, TestFun, fun() ->
-        State = #{
-            '$beamtalk_class' => 'Counter',
-            'value' => 0
-        },
-        Self = make_ref(),
-        beamtalk_dispatch:lookup(testExtension, [], Self, State, 'Counter')
-    end),
-
-    %% Should invoke the extension
-    ?assertMatch({reply, extension_called, _}, Result).
-
 %% Test that all dispatch error returns are proper 2-tuples {error, #beamtalk_error{}}
 %% This validates the normalization in invoke_method that converts
 %% 3-tuple {error, Error, State} from dispatch/4 to 2-tuple {error, Error}
@@ -396,90 +334,6 @@ test_responds_to_inherited_method() ->
     %% 'class' is defined in Object (inherited through Actor -> Counter)
     ?assert(beamtalk_dispatch:responds_to(class, 'Counter')).
 
-%% Test extension method error propagation.
-%% A crashing extension is caught and converted to a structured
-%% #beamtalk_error{} — matching invoke_method/6's crash-safety for compiled/
-%% inherited methods reached via the same hierarchy walk — instead of
-%% re-raising the bare Erlang exception, which would leave the caller with a
-%% raw crash and, for an actor receiver, could crash the actor process
-%% itself; see beamtalk_actor_tests:instance_side_extension_crash_test/0.
-test_extension_error_propagation() ->
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_extensions:init(),
-
-    %% Register an extension that throws
-    CrashFun = fun(_Args, _Self, _State) ->
-        error(extension_test_crash)
-    end,
-
-    beamtalk_test_extensions:with_extension('Counter', crashExt, CrashFun, fun() ->
-        State = #{
-            '$beamtalk_class' => 'Counter',
-            'value' => 0
-        },
-        Self = make_ref(),
-
-        Result = beamtalk_dispatch:lookup(crashExt, [], Self, State, 'Counter'),
-        %% BT-4593: a raise from an invoked method answers the wrapped map.
-        ?assertBtErrorTuple(_, _, _, Result)
-    end).
-
-%% A `^` non-local return in flight must
-%% pass through invoke_extension/6 untouched for a value-type (arity-2)
-%% extension, which runs inline in the caller's own process — the throw is a
-%% control-flow signal aimed at a catch further up this *same* call stack,
-%% not a crash to report. Mirrors
-%% beamtalk_class_dispatch_tests:test_invoke_nlr_relay_keeps_pre_call_vars_when_no_writes/0 (the
-%% class-side sibling), using the same tagged tuple shape
-%% beamtalk_class_dispatch_test_helper:class_testNlrThrow/1 throws.
-test_extension_nlr_passthrough() ->
-    ok = beamtalk_extensions:init(),
-
-    NlrFun = fun(_Args, _Self) ->
-        throw({'$bt_nlr', bt3199_token, nlr_value, nlr_state})
-    end,
-    beamtalk_test_extensions:with_extension('Integer', bt3199NlrExt, NlrFun, fun() ->
-        State = #{'$beamtalk_class' => 'Integer'},
-        Self = 42,
-
-        ?assertThrow(
-            {'$bt_nlr', bt3199_token, nlr_value, nlr_state},
-            beamtalk_dispatch:lookup(bt3199NlrExt, [], Self, State, 'Integer')
-        )
-    end).
-
-%% A connected `Program exit: N` (ADR 0099
-%% §3) must likewise pass through untouched rather than be reported as a
-%% method failure. Mirrors
-%% beamtalk_class_dispatch_tests:test_invoke_script_exit_passthrough/0 (the
-%% class-side sibling), using the same tagged tuple shape
-%% beamtalk_class_dispatch_test_helper:class_testScriptExit/1 throws.
-test_extension_script_exit_passthrough() ->
-    ok = beamtalk_extensions:init(),
-
-    ScriptExitFun = fun(_Args, _Self) ->
-        throw({beamtalk_script_exit, 7})
-    end,
-    beamtalk_test_extensions:with_extension('Integer', bt3199ScriptExitExt, ScriptExitFun, fun() ->
-        State = #{'$beamtalk_class' => 'Integer'},
-        Self = 42,
-
-        ?assertThrow(
-            {beamtalk_script_exit, 7},
-            beamtalk_dispatch:lookup(bt3199ScriptExitExt, [], Self, State, 'Integer')
-        )
-    end).
-
-%% Test responds_to finds extension methods
-test_responds_to_extension_method() ->
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_extensions:init(),
-
-    TestFun = fun(_Args, _Self, State0) -> {ok, State0} end,
-    beamtalk_test_extensions:with_extension('Counter', extTestMethod, TestFun, fun() ->
-        ?assert(beamtalk_dispatch:responds_to(extTestMethod, 'Counter'))
-    end).
-
 %%% ============================================================================
 %%% Performance and Correctness Tests (ADR 0032 Phase 1)
 %%% ============================================================================
@@ -550,81 +404,6 @@ test_out_of_order_registration() ->
     %% Clean up
     gen_server:stop(ChildPid),
     gen_server:stop(ParentPid).
-
-%% Test that super/5 finds extension methods registered on a superclass.
-%% Register extension on Actor class, verify it's found via super from Counter.
-test_super_finds_extension_on_superclass() ->
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_extensions:init(),
-
-    %% Register an extension method on Actor (Counter's superclass)
-    TestFun = fun(_Args, _Self, State0) ->
-        %% Return {Result, NewState}
-        {super_extension_called, State0}
-    end,
-
-    beamtalk_test_extensions:with_extension('Actor', superExtTest, TestFun, fun() ->
-        State = #{
-            '$beamtalk_class' => 'Counter',
-            'value' => 0
-        },
-
-        Self = make_ref(),
-
-        %% Call super from Counter — should find the extension on Actor
-        Result = beamtalk_dispatch:super(superExtTest, [], Self, State, 'Counter'),
-
-        %% Should invoke the extension registered on Actor
-        ?assertMatch({reply, super_extension_called, _}, Result)
-    end).
-
-%%% ============================================================================
-%%% Extension method state threading tests
-%%% ============================================================================
-
-%% Test: arity-3 (actor) extension threads state correctly via runtime dispatch
-test_extension_state_threading() ->
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_extensions:init(),
-
-    %% Register an arity-3 extension that mutates state
-    TestFun = fun(_Args, _Self, State) ->
-        OldVal = maps:get('value', State, 0),
-        {OldVal + 100, maps:put('value', OldVal + 100, State)}
-    end,
-
-    beamtalk_test_extensions:with_extension('Counter', addHundred, TestFun, fun() ->
-        State = #{
-            '$beamtalk_class' => 'Counter',
-            'value' => 42
-        },
-        Self = make_ref(),
-
-        Result = beamtalk_dispatch:lookup(addHundred, [], Self, State, 'Counter'),
-        %% State should be threaded: value 42 + 100 = 142
-        ?assertMatch({reply, 142, #{'value' := 142}}, Result)
-    end).
-
-%% Test: arity-2 (value-type) extension works via runtime dispatch path
-test_value_type_extension_via_runtime_dispatch() ->
-    ok = beamtalk_extensions:init(),
-
-    %% Register an arity-2 extension (value-type style)
-    TestFun = fun(_Args, Self) ->
-        %% Self is the receiver; just return a derived value
-        {value_ext_called, Self}
-    end,
-
-    beamtalk_test_extensions:with_extension('Integer', testValExt, TestFun, fun() ->
-        State = #{
-            '$beamtalk_class' => 'Integer'
-        },
-        Self = 42,
-
-        Result = beamtalk_dispatch:lookup(testValExt, [], Self, State, 'Integer'),
-        %% Arity-2 path: original State is preserved
-        ?assertMatch({reply, {value_ext_called, 42}, _}, Result)
-    end).
 
 %%% ============================================================================
 %%% Additional Coverage Tests
@@ -988,26 +767,6 @@ test_actor_default_displaystring_bypass() ->
 %%% Additional coverage tests
 %%% ============================================================================
 
-%% Test: extension with bad arity raises {bad_extension_arity, N}
-test_extension_bad_arity() ->
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_extensions:init(),
-
-    %% Register an extension with arity 1 (neither 2 nor 3)
-    BadFun = fun(_OnlyOneArg) -> bad end,
-    beamtalk_test_extensions:with_extension('Counter', badArityExt, BadFun, fun() ->
-        State = #{
-            '$beamtalk_class' => 'Counter',
-            'value' => 0
-        },
-        Self = make_ref(),
-
-        %% Caught and wrapped like any other extension-body crash, rather
-        %% than raising the raw {bad_extension_arity, 1} tuple.
-        Result = beamtalk_dispatch:lookup(badArityExt, [], Self, State, 'Counter'),
-        ?assertBtErrorTuple(_, _, badArityExt, Result)
-    end).
-
 %% Test: is_actor_instance returns false for non-actor values.
 %% When Self is not a #beamtalk_object{}, displayString goes through normal dispatch.
 test_non_actor_self_displaystring() ->
@@ -1050,22 +809,6 @@ test_responds_to_deep_chain() ->
     %% A method that doesn't exist anywhere
     ?assertNot(beamtalk_dispatch:responds_to(totallyFakeDeepMethod, 'Counter')).
 
-%% Test: lookup succeeds when extensions ETS table is present but has no match.
-%% Exercises the check_extension -> not_found -> lookup_in_class_chain path.
-test_lookup_with_extensions_table() ->
-    ok = beamtalk_extensions:init(),
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-
-    State = #{
-        '$beamtalk_class' => 'Counter',
-        'value' => 0
-    },
-    Self = make_ref(),
-
-    %% increment is a local Counter method, should be found regardless of extensions
-    Result = beamtalk_dispatch:lookup(increment, [], Self, State, 'Counter'),
-    ?assertMatch({reply, _, _}, Result).
-
 %% continue_to_superclass path when the superclass is registered
 %% in metadata but its class process is not in the registry. The walk
 %% should surface class_not_found rather than crash.
@@ -1097,24 +840,6 @@ test_continue_to_superclass_missing_registry() ->
         gen_server:stop(Pid),
         beamtalk_test_module:unload(bt_test_nodisp_leaf)
     end.
-
-%% Extension method that raises is caught and converted to a structured
-%% #beamtalk_error{} rather than re-raised — see test_extension_error_propagation/0
-%% above for the fuller explanation; this test pins the same contract via a
-%% second, independently-registered crashing extension.
-test_extension_raises_reraised() ->
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_extensions:init(),
-
-    ThrowingFun = fun(_Args, _Self, _State) ->
-        error(extension_crash)
-    end,
-    beamtalk_test_extensions:with_extension('Counter', throwingExt, ThrowingFun, fun() ->
-        State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
-        Self = make_ref(),
-        Result = beamtalk_dispatch:lookup(throwingExt, [], Self, State, 'Counter'),
-        ?assertBtErrorTuple(_, _, _, Result)
-    end).
 
 %% invoke_method with module_name=undefined continues to superclass.
 %% Covers the 'undefined' branch in invoke_method which routes to
@@ -1181,6 +906,57 @@ test_invoke_method_module_undefined_continues() ->
         beamtalk_test_module:unload(ParentModule)
     end.
 
+%% A module-less class holding `sel` as a runtime value fun (`fun(Self)`, ADR
+%% 0038 / 0084): `lookup/5` runs it inline in the caller's process
+%% (`invoke_runtime_fun/6`).
+with_runtime_fun_class(ClassName, Fun, Body) ->
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, #{
+        module => undefined,
+        superclass => none,
+        instance_methods => #{runtimeSel => #{block => Fun, arity => 0}},
+        instance_variables => []
+    }),
+    unlink(Pid),
+    try
+        Body(#{'$beamtalk_class' => ClassName})
+    after
+        beamtalk_test_class:stop(Pid)
+    end.
+
+%% A crashing runtime fun is caught and converted to a wrapped exception map
+%% rather than escaping the lookup.
+test_runtime_fun_raises_wrapped() ->
+    with_runtime_fun_class('Bt3199RtRaise', fun(_Self) -> error(bt3199_deliberate_crash) end, fun(
+        State
+    ) ->
+        Result = beamtalk_dispatch:lookup(runtimeSel, [], 42, State, 'Bt3199RtRaise'),
+        ?assertMatch({error, #{error := #beamtalk_error{}}}, Result)
+    end).
+
+%% A `^` non-local return in flight (ADR 0041) passes through untouched: it is
+%% a control-flow signal aimed at a catch further up this same call stack, not
+%% a crash to report. Same tagged tuple shape
+%% beamtalk_class_dispatch_test_helper:class_testNlrThrow/1 throws.
+test_runtime_fun_nlr_passthrough() ->
+    NlrFun = fun(_Self) -> throw({'$bt_nlr', bt3199_token, nlr_value, nlr_state}) end,
+    with_runtime_fun_class('Bt3199RtNlr', NlrFun, fun(State) ->
+        ?assertThrow(
+            {'$bt_nlr', bt3199_token, nlr_value, nlr_state},
+            beamtalk_dispatch:lookup(runtimeSel, [], 42, State, 'Bt3199RtNlr')
+        )
+    end).
+
+%% A connected `Program exit: N` (ADR 0099 §3) likewise passes through rather
+%% than being reported as a method failure.
+test_runtime_fun_script_exit_passthrough() ->
+    ExitFun = fun(_Self) -> throw({beamtalk_script_exit, 7}) end,
+    with_runtime_fun_class('Bt3199RtExit', ExitFun, fun(State) ->
+        ?assertThrow(
+            {beamtalk_script_exit, 7},
+            beamtalk_dispatch:lookup(runtimeSel, [], 42, State, 'Bt3199RtExit')
+        )
+    end).
+
 %% compiled dispatch/4 returning a 3-tuple error is normalized to
 %% a 2-tuple {error, Error} via the 'Other/normalize' path of invoke_method.
 test_compiled_dispatch_returns_error_tuple() ->
@@ -1229,20 +1005,6 @@ test_compiled_dispatch_returns_error_tuple() ->
         gen_server:stop(Pid),
         beamtalk_test_module:unload(bt_test_dispatch_err_stub)
     end.
-
-%% super finds extension on superclass (covers super -> extension -> invoke).
-test_super_extension_invoke() ->
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_extensions:init(),
-
-    TestFun = fun(_Args, _Self, State) -> {from_super_ext, State} end,
-    %% Register on Actor (Counter's superclass).
-    beamtalk_test_extensions:with_extension('Actor', superExtMethod, TestFun, fun() ->
-        State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
-        Self = make_ref(),
-        Result = beamtalk_dispatch:super(superExtMethod, [], Self, State, 'Counter'),
-        ?assertMatch({reply, from_super_ext, _}, Result)
-    end).
 
 %% Test: super from a class with no superclass returns DNU (not crash)
 test_super_no_superclass() ->
@@ -1613,102 +1375,6 @@ test_hot_patch_invalidates_cached_owner() ->
         bt3482_teardown_chain(Chain)
     end.
 
-%% An extension installed on an ancestor changes resolution end to end:
-%% the compiled probe reports it, the owner row names the ancestor, and
-%% the extension fun is invoked. Removal restores the DNU. Uses the real
-%% Counter/Actor classes — the stub modules do not consult extensions.
-test_extension_install_invalidates_cached_owner() ->
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_extensions:init(),
-    beamtalk_class_derived_cache:invalidate(),
-    State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
-    Self = make_ref(),
-    ExtFun = fun(_Args, _S, St) -> {ext4109_result, St} end,
-    try
-        ?assertMatch(
-            {error, #beamtalk_error{kind = does_not_understand}},
-            beamtalk_dispatch:lookup(extSel4109, [], Self, State, 'Counter')
-        ),
-        ?assertEqual(
-            [],
-            ets:lookup(beamtalk_class_derived_cache, {defining_method, 'Counter', extSel4109})
-        ),
-        ok = beamtalk_extensions:register('Actor', extSel4109, ExtFun, defmethod_test),
-        ?assertMatch(
-            {reply, ext4109_result, _},
-            beamtalk_dispatch:lookup(extSel4109, [], Self, State, 'Counter')
-        ),
-        [{_, _, {owner, 'Actor', _}}] = ets:lookup(
-            beamtalk_class_derived_cache, {defining_method, 'Counter', extSel4109}
-        ),
-        ok = beamtalk_extensions:unregister('Actor', extSel4109),
-        %% The removal flushes the Actor row (without the flush this stale
-        %% row would linger; the re-lookup below would still answer DNU via
-        %% the dispatch default clause, so only the row state discriminates).
-        ?assertEqual(
-            [],
-            ets:lookup(beamtalk_class_derived_cache, {defining_method, 'Counter', extSel4109})
-        ),
-        ?assertMatch(
-            {error, #beamtalk_error{kind = does_not_understand}},
-            beamtalk_dispatch:lookup(extSel4109, [], Self, State, 'Counter')
-        )
-    after
-        (try
-            beamtalk_extensions:unregister('Actor', extSel4109)
-        catch
-            _:_ -> ok
-        end)
-    end.
-
-%% An extension installed on an ancestor shadows a cached deeper owner:
-%% `yourself` is defined only on Object, so installing the extension on
-%% Actor must flip the cached row (and the answer) to Actor, and removal
-%% must flip it back. Warms a hit first — a miss-warmed entry would
-%% recompute correctly with or without the flush.
-test_extension_shadow_invalidates_cached_owner() ->
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_extensions:init(),
-    beamtalk_class_derived_cache:invalidate(),
-    State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
-    Self = make_ref(),
-    ExtFun = fun(_Args, _S, St) -> {shadow4109_result, St} end,
-    try
-        ?assertMatch(
-            {reply, Self, _},
-            beamtalk_dispatch:lookup(yourself, [], Self, State, 'Counter')
-        ),
-        [{_, _, {owner, 'Object', _}}] = ets:lookup(
-            beamtalk_class_derived_cache, {defining_method, 'Counter', yourself}
-        ),
-        ok = beamtalk_extensions:register('Actor', yourself, ExtFun, defmethod_test),
-        ?assertEqual(
-            [],
-            ets:lookup(beamtalk_class_derived_cache, {defining_method, 'Counter', yourself})
-        ),
-        ?assertMatch(
-            {reply, shadow4109_result, _},
-            beamtalk_dispatch:lookup(yourself, [], Self, State, 'Counter')
-        ),
-        [{_, _, {owner, 'Actor', _}}] = ets:lookup(
-            beamtalk_class_derived_cache, {defining_method, 'Counter', yourself}
-        ),
-        ok = beamtalk_extensions:unregister('Actor', yourself),
-        ?assertMatch(
-            {reply, Self, _},
-            beamtalk_dispatch:lookup(yourself, [], Self, State, 'Counter')
-        ),
-        [{_, _, {owner, 'Object', _}}] = ets:lookup(
-            beamtalk_class_derived_cache, {defining_method, 'Counter', yourself}
-        )
-    after
-        (try
-            beamtalk_extensions:unregister('Actor', yourself)
-        catch
-            _:_ -> ok
-        end)
-    end.
-
 %% Killing past the restart budget gives up without a metadata write;
 %% the monitor flushes on the give-up branch. Uses the real Counter
 %% (stubs cannot restart): each kill awaits the new pid so all four
@@ -2022,158 +1688,6 @@ test_inherited_target_actor_intrinsics() ->
         re:run(Src, <<"\n  terminate: _reason :: Object -> Nil => nil\n">>)
     ).
 
-%% BT-4995: an extension on the class itself or on its superclass flips an
-%% Actor-intrinsic verdict off `compiled`, as for any inherited actor method;
-%% removing it flips it back.
-test_inherited_target_actor_intrinsic_extension_flips() ->
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
-    ok = beamtalk_extensions:init(),
-    beamtalk_class_derived_cache:invalidate(),
-    Fun = fun(_Args, _Self, St) -> {ext4995, St} end,
-    Direct = {compiled, 'Actor', 'bt@stdlib@actor'},
-    lists:foreach(
-        fun(Selector) ->
-            lists:foreach(
-                fun(Class) ->
-                    try
-                        ?assertEqual(
-                            Direct, beamtalk_dispatch:inherited_target('LoggingCounter', Selector)
-                        ),
-                        ok = beamtalk_extensions:register(Class, Selector, Fun, bt4995_test),
-                        ?assertEqual(
-                            slow, beamtalk_dispatch:inherited_target('LoggingCounter', Selector)
-                        ),
-                        ok = beamtalk_extensions:unregister(Class, Selector),
-                        ?assertEqual(
-                            Direct, beamtalk_dispatch:inherited_target('LoggingCounter', Selector)
-                        )
-                    after
-                        try
-                            beamtalk_extensions:unregister(Class, Selector)
-                        catch
-                            _:_ -> ok
-                        end
-                    end
-                end,
-                ['LoggingCounter', 'Counter']
-            )
-        end,
-        ['continueWith:', 'stopWith:', 'terminate:']
-    ).
-
-%% BT-4995 / BT-5002: an extension on `Actor` itself (the owner) gives the
-%% `{ext, Actor}` verdict, whatever depth the receiver's class is at, so the walk invokes it
-%% instead of the owner's compiled method.
-test_inherited_target_actor_intrinsic_owner_extension() ->
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
-    ok = beamtalk_extensions:init(),
-    beamtalk_class_derived_cache:invalidate(),
-    Fun = fun(_Args, _Self, St) -> {ext4995, St} end,
-    Direct = {compiled, 'Actor', 'bt@stdlib@actor'},
-    try
-        ?assertEqual(Direct, beamtalk_dispatch:inherited_target('LoggingCounter', 'terminate:')),
-        ok = beamtalk_extensions:register('Actor', 'terminate:', Fun, bt4995_test),
-        ?assertEqual(
-            {ext, 'Actor'}, beamtalk_dispatch:inherited_target('LoggingCounter', 'terminate:')
-        ),
-        ok = beamtalk_extensions:unregister('Actor', 'terminate:'),
-        ?assertEqual(Direct, beamtalk_dispatch:inherited_target('LoggingCounter', 'terminate:'))
-    after
-        try
-            beamtalk_extensions:unregister('Actor', 'terminate:')
-        catch
-            _:_ -> ok
-        end
-    end.
-
-%% BT-5002: the same holds for any owner, not just `Actor`: an extension on the
-%% owner of a compiled selector turns the `value` verdict into `{ext, Owner}`, and removing
-%% it restores the verdict (the install and removal flush the cache).
-test_inherited_target_owner_extension_gives_ext() ->
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
-    ok = beamtalk_extensions:init(),
-    beamtalk_class_derived_cache:invalidate(),
-    Fun = fun(_Args, _Self, St) -> {ext5002, St} end,
-    Verdict = {value, 'Object', 'bt@stdlib@object'},
-    try
-        ?assertEqual(Verdict, beamtalk_dispatch:inherited_target('LoggingCounter', printString)),
-        ok = beamtalk_extensions:register('Object', printString, Fun, bt5002_test),
-        ?assertEqual(
-            {ext, 'Object'}, beamtalk_dispatch:inherited_target('LoggingCounter', printString)
-        ),
-        ok = beamtalk_extensions:unregister('Object', printString),
-        ?assertEqual(Verdict, beamtalk_dispatch:inherited_target('LoggingCounter', printString))
-    after
-        try
-            beamtalk_extensions:unregister('Object', printString)
-        catch
-            _:_ -> ok
-        end
-    end.
-
-%% BT-5060: the registration warning names the direct value subclasses that skip
-%% an extension on a class that compiles the selector, and no one else.
-test_one_hop_children_missing_extension() ->
-    ok = beamtalk_extensions:init(),
-    %% The positive cases need compiled value classes: see
-    %% stdlib/test/lookup_order_matrix_test.bt (`testWarningNamesTheAffectedChildren`).
-    %% A selector the class does not compile, an unknown class and a class-side
-    %% tag have no affected subclass.
-    ?assertEqual(
-        [], beamtalk_dispatch:one_hop_children_missing_extension('Object', bt5060NoSuchSel)
-    ),
-    ?assertEqual(
-        [], beamtalk_dispatch:one_hop_children_missing_extension('NoSuchClass5060', printString)
-    ),
-    ?assertEqual(
-        [], beamtalk_dispatch:one_hop_children_missing_extension('Object class', printString)
-    ),
-    %% An actor owner is honoured by the verdict route, so it has none either.
-    ?assertEqual([], beamtalk_dispatch:one_hop_children_missing_extension('Actor', 'terminate:')).
-
-%% BT-5002: `inherited_value_ext/5` runs the owner's extension whatever its arity
-%% (a value has no state: it is dropped), and falls back to the superclass's
-%% `dispatch/3` when the extension is gone since the verdict was read.
-test_inherited_value_ext() ->
-    ok = beamtalk_extensions:init(),
-    Selector = bt5002ValueExtProbe,
-    Two = fun([A], Self) -> {two, A, Self} end,
-    Three = fun([A], Self, St) -> {{three, A, Self}, St} end,
-    try
-        ok = beamtalk_extensions:register('Object', Selector, Two, bt5002_test),
-        ?assertEqual(
-            {two, 1, self},
-            beamtalk_dispatch:inherited_value_ext('Object', Selector, [1], self, 'bt@stdlib@object')
-        ),
-        ok = beamtalk_extensions:register('Object', Selector, Three, bt5002_test),
-        ?assertEqual(
-            {three, 1, self},
-            beamtalk_dispatch:inherited_value_ext('Object', Selector, [1], self, 'bt@stdlib@object')
-        ),
-        ok = beamtalk_extensions:unregister('Object', Selector),
-        %% Gone: the super module answers (here: Object's does-not-understand).
-        ?assertError(
-            _,
-            beamtalk_dispatch:inherited_value_ext('Object', Selector, [1], self, 'bt@stdlib@object')
-        ),
-        %% BT-5060: the extension is removed between the cached `{ext, Owner}`
-        %% verdict and the call. The super module's compiled method answers, as
-        %% if the verdict had been `value`.
-        ?assertEqual(
-            {beamtalk_string, <<"Integer">>},
-            beamtalk_dispatch:inherited_value_ext('Object', printString, [], 42, 'bt@stdlib@object')
-        )
-    after
-        try
-            beamtalk_extensions:unregister('Object', Selector)
-        catch
-            _:_ -> ok
-        end
-    end.
-
 %% BT-4280: `printString` resolves to Object, an owner without the actor-State
 %% flag, so the verdict is not `compiled`. (BT-4260: it is Object's `value`
 %% verdict, which an actor's `dispatch/4` arm treats as `slow`.)
@@ -2203,68 +1717,6 @@ test_inherited_target_value_owner() ->
     ?assertEqual(Object, beamtalk_dispatch:inherited_target('Integer', 'isKindOf:')),
     ?assertEqual(slow, beamtalk_dispatch:inherited_target('String', bt4260NoSuchSelector)).
 
-%% An extension on the class itself, its superclass, or an ancestor further up
-%% (seen by that ancestor's `has_method_local/1`) makes the verdict `slow`;
-%% removing it flips it back. Both install and removal flush the derived cache.
-test_inherited_target_value_extension_flips() ->
-    ok = beamtalk_extensions:init(),
-    beamtalk_class_derived_cache:invalidate(),
-    Fun = fun(_Args, _Self) -> ext4260 end,
-    Object = {value, 'Object', 'bt@stdlib@object'},
-    Classes = ['String', 'Binary', 'Collection', 'Value'],
-    try
-        lists:foreach(
-            fun(C) ->
-                ?assertEqual(Object, beamtalk_dispatch:inherited_target('String', 'isKindOf:')),
-                ok = beamtalk_extensions:register(C, 'isKindOf:', Fun, bt4260_test),
-                ?assertEqual(slow, beamtalk_dispatch:inherited_target('String', 'isKindOf:')),
-                ok = beamtalk_extensions:unregister(C, 'isKindOf:'),
-                ?assertEqual(Object, beamtalk_dispatch:inherited_target('String', 'isKindOf:'))
-            end,
-            Classes
-        )
-    after
-        [
-            (try
-                beamtalk_extensions:unregister(C, 'isKindOf:')
-            catch
-                _:_ -> ok
-            end)
-         || C <- Classes
-        ]
-    end.
-
-%% An extension on the class itself, or on its superclass, makes the verdict
-%% `slow` (today's extension / super path); removing it flips it back. Both
-%% install and removal flush the derived cache.
-test_inherited_target_extension_flips() ->
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
-    ok = beamtalk_extensions:init(),
-    beamtalk_class_derived_cache:invalidate(),
-    Fun = fun(_Args, _Self, St) -> {ext4280, St} end,
-    Compiled = {compiled, 'Counter', 'bt@counter'},
-    try
-        ?assertEqual(Compiled, beamtalk_dispatch:inherited_target('LoggingCounter', decrement)),
-        ok = beamtalk_extensions:register('LoggingCounter', decrement, Fun, bt4280_test),
-        ?assertEqual(slow, beamtalk_dispatch:inherited_target('LoggingCounter', decrement)),
-        ok = beamtalk_extensions:unregister('LoggingCounter', decrement),
-        ?assertEqual(Compiled, beamtalk_dispatch:inherited_target('LoggingCounter', decrement)),
-        ok = beamtalk_extensions:register('Counter', decrement, Fun, bt4280_test),
-        ?assertEqual(slow, beamtalk_dispatch:inherited_target('LoggingCounter', decrement)),
-        ok = beamtalk_extensions:unregister('Counter', decrement),
-        ?assertEqual(Compiled, beamtalk_dispatch:inherited_target('LoggingCounter', decrement))
-    after
-        [
-            (try
-                beamtalk_extensions:unregister(C, decrement)
-            catch
-                _:_ -> ok
-            end)
-         || C <- ['LoggingCounter', 'Counter']
-        ]
-    end.
-
 test_inherited_target_unregistered() ->
     beamtalk_class_derived_cache:invalidate(),
     ?assertEqual(slow, beamtalk_dispatch:inherited_target('Bt4280NoSuchClass', anything)),
@@ -2272,94 +1724,3 @@ test_inherited_target_unregistered() ->
         [],
         ets:lookup(beamtalk_class_derived_cache, {inherited_target, 'Bt4280NoSuchClass', anything})
     ).
-
-%% BT-5060: a module's `register_class/0` (its on_load) files warnings under the
-%% load scope of the process that is loading it; the scope returns exactly those,
-%% deduplicated and in order. Anything filed outside such a hook, or outside a
-%% scope, is dropped.
-extension_warning_scope_test() ->
-    beamtalk_class_registry:ensure_class_warnings_table(),
-    ?assertEqual(ok, beamtalk_class_registry:record_extension_warning(<<"outside">>)),
-    {done, Warnings} = beamtalk_class_registry:with_extension_warning_scope(
-        ?MODULE, fun() -> run_register_class() end
-    ),
-    ?assertEqual([<<"first">>, <<"second">>], Warnings),
-    %% A different module's hook is not this scope's load: nothing is filed.
-    {done, []} = beamtalk_class_registry:with_extension_warning_scope(
-        'some_other_module', fun() -> run_register_class() end
-    ),
-    %% The scope is closed: a later hook files nothing.
-    {done, []} = beamtalk_class_registry:with_extension_warning_scope(
-        ?MODULE, fun() -> done end
-    ).
-
-%% A holder killed mid-load leaves its scope and warning rows behind; the next
-%% scope clears them and still collects.
-extension_warning_scope_survives_killed_holder_test() ->
-    beamtalk_class_registry:ensure_class_warnings_table(),
-    Self = self(),
-    Holder = spawn(fun() ->
-        beamtalk_class_registry:with_extension_warning_scope(?MODULE, fun() ->
-            Self ! {in_scope, self()},
-            receive
-                never -> ok
-            end
-        end)
-    end),
-    receive
-        {in_scope, Holder} -> ok
-    after 5000 -> ?assert(false)
-    end,
-    exit(Holder, kill),
-    {done, Warnings} = beamtalk_class_registry:with_extension_warning_scope(
-        ?MODULE, fun() -> run_register_class() end
-    ),
-    ?assertEqual([<<"first">>, <<"second">>], Warnings).
-
-%% Scopes of different modules do not block each other: a slow load of one
-%% module (here, one that never finishes) leaves another module's scope free.
-extension_warning_scope_does_not_block_other_modules_test() ->
-    beamtalk_class_registry:ensure_class_warnings_table(),
-    Self = self(),
-    Holder = spawn(fun() ->
-        beamtalk_class_registry:with_extension_warning_scope('slow_module_5060', fun() ->
-            Self ! {in_scope, self()},
-            receive
-                never -> ok
-            end
-        end)
-    end),
-    receive
-        {in_scope, Holder} -> ok
-    after 5000 -> ?assert(false)
-    end,
-    {done, Warnings} = beamtalk_class_registry:with_extension_warning_scope(
-        ?MODULE, fun() -> run_register_class() end
-    ),
-    exit(Holder, kill),
-    ?assertEqual([<<"first">>, <<"second">>], Warnings).
-
-run_register_class() ->
-    true = register(bt5060_scope_test, self()),
-    spawn_link(fun() -> register_class() end),
-    Result =
-        receive
-            registered -> done
-        after 5000 -> timeout
-        end,
-    true = unregister(bt5060_scope_test),
-    Result.
-
-%% Stands in for a generated module's on_load hook (the stack frame is what
-%% `record_extension_warning/1` recognises).
-register_class() ->
-    %% As `beamtalk_extensions:register/5` does on entry.
-    ok = beamtalk_class_registry:begin_registration(),
-    ok = beamtalk_class_registry:record_extension_warning(<<"first">>),
-    ok = beamtalk_class_registry:record_extension_warning(<<"second">>),
-    ok = beamtalk_class_registry:record_extension_warning(<<"first">>),
-    bt5060_scope_test ! registered,
-    ok.
-
-one_hop_parent_extensions_missing_unknown_class_test() ->
-    ?assertEqual([], beamtalk_dispatch:one_hop_parent_extensions_missing('NoSuchClass5060')).

@@ -20,10 +20,13 @@ Function naming convention follows Beamtalk's `class_` prefix scheme:
 through `beamtalk_class_vars`, never passed or returned.)
 """.
 
+-include("beamtalk.hrl").
+
 -export([
     class_testSuccess/1,
     class_testSelf/1,
     class_testClassVar/1,
+    class_testObserveHome/1,
     'class_testWith:'/2,
     'class_testSleep:'/2,
     class_testInternalUndef/1,
@@ -66,6 +69,15 @@ invoke_class_method: the write is read back as the new class-variable map.
 class_testClassVar(ClassSelf) ->
     beamtalk_class_vars:put(ClassSelf, updated, true),
     class_var_updated_value.
+
+-doc """
+Zero-argument class method that answers the home it runs under: the class
+variable map installed under the receiver's key, and the live home's key
+(ADR 0130 §1).
+""".
+-spec class_testObserveHome(term()) -> {term(), term()}.
+class_testObserveHome(#beamtalk_object{class = Tag}) ->
+    {erlang:get(beamtalk_class_vars:key_for_tag(Tag)), beamtalk_class_vars_test_support:home_key()}.
 
 -doc """
 Zero-argument class method that writes a class variable and then raises.

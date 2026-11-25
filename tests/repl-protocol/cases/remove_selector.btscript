@@ -9,7 +9,7 @@
 // (`beamtalk_repl_eval:remove_method/4`), which only runs against a live
 // workspace; BUnit executes compiled code with no workspace (same reason
 // compile_source_patch.btscript exists instead of a BUnit test for
-// compile:source:/tryCompile:source:). Extension removal, absent-selector
+// compile:source:/tryCompile:source:). Absent-selector
 // errors, and removeSelector:ifAbsent:'s block execution context do not strictly
 // need the workspace, but are kept here alongside the rest of the surface for
 // one readable end-to-end story. The stdlib-removal ChangeLog assertions
@@ -135,18 +135,18 @@ RemSelParent removeSelector: #yetAnotherAbsentSelector ifAbsent: [RemSelParent i
 // => false
 
 // ===========================================================================
-// EXTENSION REMOVAL (ADR 0066 open classes) — plain case
+// LIVE-DEFINED METHOD REMOVAL — a method added with `Foo >> sel` at the prompt
 // ===========================================================================
 
-Value subclass: RemSelExtTarget
+Value subclass: RemSelLiveTarget
   field: tag = "none"
-// => "RemSelExtTarget"
+// => "RemSelLiveTarget"
 
-RemSelExtTarget >> shout => "SHOUT"
-// => "RemSelExtTarget>>shout"
+RemSelLiveTarget >> shout => "SHOUT"
+// => "RemSelLiveTarget>>shout"
 
-ext := RemSelExtTarget new
-// => RemSelExtTarget(tag: "none")
+ext := RemSelLiveTarget new
+// => RemSelLiveTarget(tag: "none")
 
 ext shout
 // => "SHOUT"
@@ -154,24 +154,14 @@ ext shout
 ext respondsTo: #shout
 // => true
 
-RemSelExtTarget removeSelector: #shout
-// => RemSelExtTarget
+RemSelLiveTarget removeSelector: #shout
+// => RemSelLiveTarget
 
 ext respondsTo: #shout
 // => false
 
 [ext shout] on: Error do: [:e | e kind]
 // => does_not_understand
-
-// The "contested" case — a local method shadowed by a same-named extension,
-// where removal must drop only the dispatch-winning extension and re-expose
-// the local method — is covered in
-// beamtalk_workspace_revert_tests:remove_selector_contested_extension_re_exposes_local_method/1
-// instead of here: constructing a genuine foreign extension that shadows an
-// *existing* same-named local method is not reliably expressible through
-// `>>` syntax (the parser/compiler's own same-file-vs-foreign heuristic
-// takes over), so that test drives `beamtalk_extensions:register/4` directly
-// against a real project class to build the exact contested state.
 
 // ===========================================================================
 // STDLIB-CLASS REMOVAL — installs in memory, no receiver-side refusal

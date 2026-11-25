@@ -21,7 +21,7 @@ These tests focus on routing logic that works without compiled stdlib.
 
 actor_setup() ->
     beamtalk_test_boot:registry(),
-    beamtalk_extensions:init(),
+    beamtalk_class_shadow_flags:mark_ready(),
     {ok, _} = beamtalk_bootstrap:start_link(),
     %% Bootstrap only starts pg; classes are registered by the compiled stdlib.
     beamtalk_test_boot:boot_real_stdlib('Integer'),

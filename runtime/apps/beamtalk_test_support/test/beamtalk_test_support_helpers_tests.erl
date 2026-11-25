@@ -267,22 +267,6 @@ assert_no_message_test() ->
     self() ! {ghost, 1},
     ?assertError({unexpected_message, _}, ?assertNoMessage({ghost, _}, 10)).
 
-with_extension_registers_and_always_removes_test() ->
-    Fun = fun(_Args, _Self, State) -> {ext_ok, State} end,
-    ?assertEqual(
-        in_body,
-        beamtalk_test_extensions:with_extension('Integer', bt5038Ext, Fun, fun() ->
-            ?assertMatch([_], ets:lookup(beamtalk_extensions, {'Integer', bt5038Ext})),
-            in_body
-        end)
-    ),
-    ?assertEqual([], ets:lookup(beamtalk_extensions, {'Integer', bt5038Ext})),
-    ?assertError(
-        boom,
-        beamtalk_test_extensions:with_extension('Integer', bt5038Ext, Fun, fun() -> error(boom) end)
-    ),
-    ?assertEqual([], ets:lookup(beamtalk_extensions, {'Integer', bt5038Ext})).
-
 kill_and_wait_survives_linked_victim_test() ->
     Pid = spawn_link(fun() ->
         receive

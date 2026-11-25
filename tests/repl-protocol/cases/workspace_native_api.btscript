@@ -349,74 +349,6 @@ newSenderClasses := newSenders collect: [:r | r at: #class]
 newSenderClasses includes: SystemNavigation class
 // => true
 
-// BT-2196: Extension method bodies registered via `register/5` (with source)
-// are scanned by `sendersOf:` alongside class-body methods. Register an
-// extension whose body sends a uniquely-named selector, then assert
-// `sendersOf:` finds it. Cleans up both ETS tables.
-extSendersFun := [:a :s | s]
-// => _
-
-extSendersSource := "describe => self btTwoTwoOneSixSrcSenderMarker"
-// => "describe => self btTwoTwoOneSixSrcSenderMarker"
-
-Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneSixSrcSenderExt fun: extSendersFun owner: #test source: extSendersSource
-// => Result ok: nil
-
-extSenderHits := SystemNavigation sendersOf: #btTwoTwoOneSixSrcSenderMarker
-// => _
-
-(extSenderHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixSrcSenderExt
-// => true
-
-Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoOneSixSrcSenderExt)
-// => true
-
-Erlang ets delete: #beamtalk_extension_sources key: #(#Integer, #btTwoTwoOneSixSrcSenderExt)
-// => true
-
-// BT-2196: Extensions registered via the legacy `register/4` (no source)
-// stay invisible to `sendersOf:` — there is no body text to grep.
-extBareSendersFun := [:a :s | s]
-// => _
-
-Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneSixBareSenderExt fun: extBareSendersFun owner: #test
-// => Result ok: nil
-
-extBareSenderHits := SystemNavigation sendersOf: #btTwoTwoOneSixSrcSenderMarker
-// => _
-
-(extBareSenderHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixBareSenderExt
-// => false
-
-Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoOneSixBareSenderExt)
-// => true
-
-// BT-2196: A class-side extension (registered under the `#'Integer class'`
-// metaclass tag) reports the metaclass OBJECT in `#class`, matching the
-// shape BT-2195's class-side method walk emits — not the raw atom. This is
-// the parity guarantee `resolveExtensionClass:` provides: callers can
-// compare `record at: #class` against `Integer class` directly.
-extMetaFun := [:a :s | s]
-// => _
-
-extMetaSource := "describe => self btTwoTwoOneSixMetaSenderMarker"
-// => "describe => self btTwoTwoOneSixMetaSenderMarker"
-
-Erlang beamtalk_extensions register: #'Integer class' selector: #btTwoTwoOneSixMetaSenderExt fun: extMetaFun owner: #test source: extMetaSource
-// => Result ok: nil
-
-extMetaHits := SystemNavigation sendersOf: #btTwoTwoOneSixMetaSenderMarker
-// => _
-
-(extMetaHits collect: [:r | r at: #class]) includes: Integer class
-// => true
-
-Erlang ets delete: #beamtalk_extensions key: #(#'Integer class', #btTwoTwoOneSixMetaSenderExt)
-// => true
-
-Erlang ets delete: #beamtalk_extension_sources key: #(#'Integer class', #btTwoTwoOneSixMetaSenderExt)
-// => true
-
 // ===========================================================================
 // SYSTEMNAVIGATION REFERENCESTO: — find class-reference sites (BT-2203)
 // ===========================================================================
@@ -477,49 +409,6 @@ navRefs := SystemNavigation referencesTo: Regex
 // Passing a String also raises.
 [SystemNavigation referencesTo: "Integer"] on: Error do: [:e | #ok]
 // => ok
-
-// BT-2196: Extension method bodies registered via `register/5` (with source)
-// are scanned by `referencesTo:` alongside class-body methods. Register an
-// extension whose body mentions a uniquely-named class atom that does not
-// resolve to a real class — we just need the FFI scan to find the textual
-// reference in the source body. We use `Integer` (a real class) as the
-// target, with an extension on `String` whose body references it.
-extRefsFun := [:a :s | s]
-// => _
-
-extRefsSource := "asInt => Integer new"
-// => "asInt => Integer new"
-
-Erlang beamtalk_extensions register: #String selector: #btTwoTwoOneSixSrcRefExt fun: extRefsFun owner: #test source: extRefsSource
-// => Result ok: nil
-
-extRefHits := SystemNavigation referencesTo: Integer
-// => _
-
-(extRefHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixSrcRefExt
-// => true
-
-Erlang ets delete: #beamtalk_extensions key: #(#String, #btTwoTwoOneSixSrcRefExt)
-// => true
-
-Erlang ets delete: #beamtalk_extension_sources key: #(#String, #btTwoTwoOneSixSrcRefExt)
-// => true
-
-// register/4 (no source) → invisible to referencesTo: scan.
-extBareRefsFun := [:a :s | s]
-// => _
-
-Erlang beamtalk_extensions register: #String selector: #btTwoTwoOneSixBareRefExt fun: extBareRefsFun owner: #test
-// => Result ok: nil
-
-extBareRefHits := SystemNavigation referencesTo: Integer
-// => _
-
-(extBareRefHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixBareRefExt
-// => false
-
-Erlang ets delete: #beamtalk_extensions key: #(#String, #btTwoTwoOneSixBareRefExt)
-// => true
 
 // ===========================================================================
 // SYSTEMNAVIGATION ANNOUNCEMENTSSENTBY: — static emission analysis (BT-2475)
@@ -614,30 +503,6 @@ siteEvents includes: AnnounceEventB
 // A String argument also raises (the common sendersOf:-takes-a-Symbol mistake).
 [SystemNavigation announcementsSentBy: "AnnounceEmitter"] on: Error do: [:e | #ok]
 // => ok
-
-// BT-2196 parity: source-bearing extension methods that target the publisher
-// are scanned too. Register an extension on AnnounceEmitter whose body emits
-// AnnounceEventB, assert it surfaces, then clean up both ETS tables.
-extEmitFun := [:a :s | s]
-// => _
-
-extEmitSource := "emitExt => announcer announce: (AnnounceEventB new)"
-// => "emitExt => announcer announce: (AnnounceEventB new)"
-
-Erlang beamtalk_extensions register: #AnnounceEmitter selector: #emitExt fun: extEmitFun owner: #test source: extEmitSource
-// => Result ok: nil
-
-extEmitSites := SystemNavigation announcementSitesSentBy: AnnounceEmitter
-// => _
-
-(extEmitSites collect: [:r | r at: #selector]) includes: #emitExt
-// => true
-
-Erlang ets delete: #beamtalk_extensions key: #(#AnnounceEmitter, #emitExt)
-// => true
-
-Erlang ets delete: #beamtalk_extension_sources key: #(#AnnounceEmitter, #emitExt)
-// => true
 
 // ===========================================================================
 // SYSTEMNAVIGATION FIELDREADERSOF:IN: / FIELDWRITERSOF:IN: (BT-2208)
@@ -866,30 +731,6 @@ interfaceMatches := SystemNavigation methodsMatching: (Regex from: "beamtalk_int
 (interfaceMatches collect: [:r | r at: #class]) includes: SystemNavigation class
 // => true
 
-// BT-2196: Extension methods registered via `register/5` (with source)
-// also participate in `methodsMatching:`. Register an extension whose
-// body contains a unique marker, then assert the pattern surfaces it.
-extMatchFun := [:a :s | s]
-// => _
-
-extMatchSource := "xyzzy => 42 // bt-two-two-one-six-method-marker"
-// => "xyzzy => 42 // bt-two-two-one-six-method-marker"
-
-Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneSixMatchExt fun: extMatchFun owner: #test source: extMatchSource
-// => Result ok: nil
-
-extMatchHits := SystemNavigation methodsMatching: (Regex from: "bt-two-two-one-six-method-marker") unwrap
-// => _
-
-(extMatchHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixMatchExt
-// => true
-
-Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoOneSixMatchExt)
-// => true
-
-Erlang ets delete: #beamtalk_extension_sources key: #(#Integer, #btTwoTwoOneSixMatchExt)
-// => true
-
 // ===========================================================================
 // SYSTEMNAVIGATION SELECTORSMATCHING: — fuzzy selector search (BT-2204)
 // ===========================================================================
@@ -939,20 +780,6 @@ equalsHits size == (equalsHits unique) size
 // Class-side selectors participate. `actorClasses` is a class-side method on
 // SystemNavigation, so it appears in a search for "actorClass".
 (SystemNavigation selectorsMatching: "actorClass") includes: #actorClasses
-// => true
-
-// Extension methods (ADR 0066) participate. Register a uniquely-named
-// extension and verify the selector shows up; clean up the ETS entry after.
-extFun := [:a :s | s]
-// => _
-
-Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoFourExtMarker fun: extFun owner: #test
-// => Result ok: nil
-
-(SystemNavigation selectorsMatching: "btTwoTwoFourExtMarker") includes: #btTwoTwoFourExtMarker
-// => true
-
-Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoFourExtMarker)
 // => true
 
 // No-match returns an empty list.
@@ -1267,31 +1094,6 @@ seqArity2 := SystemNavigation ffiSitesFor: "lists:seq/2"
 // => _
 
 (seqArity2 collect: [:r | r at: #selector]) includes: #seqInstance
-// => true
-
-// --- extension-method FFI sites participate (ADR 0066 / BT-2196) ---
-
-// Register an extension whose body makes a lists:reverse FFI call, then assert
-// ffiSitesFor: finds it. Clean up both ETS tables afterward.
-extFfiFun := [:a :s | s]
-// => _
-
-extFfiSource := "describe: xs => (Erlang lists) reverse: xs"
-// => "describe: xs => (Erlang lists) reverse: xs"
-
-Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneOneFfiExt fun: extFfiFun owner: #test source: extFfiSource
-// => Result ok: nil
-
-extFfiHits := SystemNavigation ffiSitesFor: "lists:reverse"
-// => _
-
-(extFfiHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneOneFfiExt
-// => true
-
-Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoOneOneFfiExt)
-// => true
-
-Erlang ets delete: #beamtalk_extension_sources key: #(#Integer, #btTwoTwoOneOneFfiExt)
 // => true
 
 // --- no-match returns [] ---

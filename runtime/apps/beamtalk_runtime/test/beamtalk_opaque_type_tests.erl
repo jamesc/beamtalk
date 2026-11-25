@@ -24,7 +24,7 @@ pid_class_test() ->
     ?assertEqual('Pid', beamtalk_primitive:class_of(Pid)).
 
 pid_test_() ->
-    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+    {foreach, fun() -> beamtalk_class_shadow_flags:mark_ready() end, fun(_) -> ok end, [
         fun pid_as_string/0,
         fun pid_print_string/0,
         fun pid_print_string_matches_as_string/0,
@@ -126,7 +126,7 @@ port_class_test() ->
     gen_tcp:close(Port).
 
 port_test_() ->
-    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+    {foreach, fun() -> beamtalk_class_shadow_flags:mark_ready() end, fun(_) -> ok end, [
         fun port_as_string/0,
         fun port_print_string/0,
         fun port_strict_equality/0,
@@ -193,7 +193,7 @@ reference_class_test() ->
     ?assertEqual('Reference', beamtalk_primitive:class_of(Ref)).
 
 reference_test_() ->
-    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+    {foreach, fun() -> beamtalk_class_shadow_flags:mark_ready() end, fun(_) -> ok end, [
         fun reference_as_string/0,
         fun reference_print_string/0,
         fun reference_strict_equality/0,

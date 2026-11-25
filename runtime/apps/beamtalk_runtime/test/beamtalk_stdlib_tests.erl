@@ -26,8 +26,8 @@ stdlib_setup() ->
     %% in their real order, ahead of stdlib, so the xref-indexing regression
     %% test still sees a populated index.
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-    %% Initialize extensions ETS table
-    beamtalk_extensions:init(),
+    %% Class-side shadow flags authoritative
+    beamtalk_class_shadow_flags:mark_ready(),
     %% Protocol-only modules (e.g. Printable) register during stdlib load and
     %% their on_load `register_protocol/1` crashes on a missing ETS table.
     beamtalk_protocol_registry:init(),

@@ -28,9 +28,7 @@ Test groups:
   14. class_send_with_recovery — noproc crash recovery
   15. metaclass_send extended — not_found, dead pid
   16. try_class_chain_fallthrough — Class chain dispatch
-  17. handle_class_method_call/6 — class-side extension dispatch
-  18. class_self_send/3 & class_self_dispatch_local/3 — self-send
-      class-side extension dispatch
+  18. class_self_send/3 — self-send
   19. Class-chain sends skip the class process (BT-4073)
 """.
 
@@ -78,16 +76,6 @@ start_test_class(ClassName, Module) ->
         superclass => none,
         module => Module,
         class_methods => #{?TEST_SELECTOR => <<>>},
-        class_state => #{}
-    },
-    beamtalk_object_class:start_link(ClassName, ClassInfo).
-
-%% Start a class gen_server with a custom class_methods map.
-start_test_class(ClassName, Module, ClassMethods) ->
-    ClassInfo = #{
-        superclass => none,
-        module => Module,
-        class_methods => ClassMethods,
         class_state => #{}
     },
     beamtalk_object_class:start_link(ClassName, ClassInfo).
@@ -1078,14 +1066,8 @@ invoke_class_method_errors_test_() ->
             fun test_invoke_installs_home_during_method/0},
         {"assert_absent fires on a nested invocation with the outer map intact",
             fun test_invoke_nested_invocation_fails_loudly_outer_map_intact/0},
-        {"assert_absent fires for another class's live home (extension entry)",
-            fun test_invoke_extension_nested_other_class_home_fails_loudly/0},
-        {"invoke_class_extension/7 keeps writes after a normal return",
-            fun test_invoke_extension_writes_kept_after_return/0},
-        {"invoke_class_extension/7 discards writes after a raise",
-            fun test_invoke_extension_error_discards_writes/0},
-        {"invoke_class_extension/7 keeps writes made before a foreign ^",
-            fun test_invoke_extension_nlr_keeps_writes/0}
+        {"assert_absent fires for another class's live home",
+            fun test_invoke_nested_other_class_home_fails_loudly/0}
     ]}.
 
 %% class method that calls a non-existent function internally → {error, undef}.
@@ -1228,21 +1210,16 @@ test_invoke_ok_keeps_writes_and_uninstalls() ->
 test_invoke_installs_home_during_method() ->
     ClassName = 'BT3707HomeDuringClass',
     Key = beamtalk_class_vars:key(ClassName),
-    Fun = fun(_Args, _ClassSelf) ->
-        {erlang:get(Key), beamtalk_class_vars_test_support:home_key()}
-    end,
-    try
-        beamtalk_extensions:init(),
-        ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-        ok = beamtalk_extensions:register(ClassTag, observeHome, Fun, test),
-        Result = beamtalk_class_dispatch:handle_class_method_call(
-            observeHome, [], ClassName, beamtalk_class_dispatch_test_helper, #{}, #{count => 7}
-        ),
-        ?assertEqual({reply, {ok, {#{count => 7}, Key}}, #{count => 7}}, Result),
-        assert_home_absent(ClassName)
-    after
-        beamtalk_extensions:unregister(ClassName, observeHome, true)
-    end.
+    Result = beamtalk_class_dispatch:handle_class_method_call(
+        testObserveHome,
+        [],
+        ClassName,
+        beamtalk_class_dispatch_test_helper,
+        #{testObserveHome => <<>>},
+        #{count => 7}
+    ),
+    ?assertEqual({reply, {ok, {#{count => 7}, Key}}, #{count => 7}}, Result),
+    assert_home_absent(ClassName).
 
 %% ADR 0130 §1: `assert_absent/1` fires on a simulated nested invocation (the
 %% key is already installed in this process) before anything is overwritten:
@@ -1270,94 +1247,30 @@ test_invoke_nested_invocation_fails_loudly_outer_map_intact() ->
         beamtalk_class_vars:uninstall(Key)
     end.
 
-%% Same, for the extension entry point and a *different* class's live home:
-%% any home entry in this process counts as a nested invocation.
-test_invoke_extension_nested_other_class_home_fails_loudly() ->
+%% Same, for a *different* class's live home: any home entry in this process
+%% counts as a nested invocation.
+test_invoke_nested_other_class_home_fails_loudly() ->
     OuterKey = beamtalk_class_vars:key('BT3707OuterClass'),
     OuterMap = #{count => 5},
     ok = beamtalk_class_vars:install(OuterKey, OuterMap),
-    ClassName = 'BT3707NestedExtClass',
-    Fun = fun(_Args, _Self) -> ext_should_not_run end,
+    ClassName = 'BT3707NestedOtherClass',
     try
-        beamtalk_extensions:init(),
-        ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-        ok = beamtalk_extensions:register(ClassTag, nestedExt, Fun, test),
         ?assertBtError(
             internal_error,
             beamtalk_class_dispatch:handle_class_method_call(
-                nestedExt, [], ClassName, beamtalk_class_dispatch_test_helper, #{}, #{}
+                testClassVar,
+                [],
+                ClassName,
+                beamtalk_class_dispatch_test_helper,
+                #{testClassVar => <<>>},
+                #{}
             )
         ),
         ?assertEqual(OuterMap, erlang:get(OuterKey)),
         ?assertEqual(OuterKey, beamtalk_class_vars_test_support:home_key()),
         ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key(ClassName)))
     after
-        beamtalk_extensions:unregister(ClassName, nestedExt, true),
         beamtalk_class_vars:uninstall(OuterKey)
-    end.
-
-%% ADR 0130 §3: a class-side extension fun is `fun(Args, ClassSelf)`, writes
-%% through beamtalk_class_vars, and the entry replies with the live map.
-test_invoke_extension_writes_kept_after_return() ->
-    ClassName = 'BT3707ExtReturnClass',
-    Fun = fun(_Args, ClassSelf) ->
-        beamtalk_class_vars:put(ClassSelf, count, 99),
-        ok
-    end,
-    try
-        beamtalk_extensions:init(),
-        ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-        ok = beamtalk_extensions:register(ClassTag, returningExt, Fun, test),
-        Result = beamtalk_class_dispatch:handle_class_method_call(
-            returningExt, [], ClassName, beamtalk_class_dispatch_test_helper, #{}, #{count => 1}
-        ),
-        ?assertMatch({reply, {ok, ok}, #{count := 99}}, Result),
-        assert_home_absent(ClassName)
-    after
-        beamtalk_extensions:unregister(ClassName, returningExt, true)
-    end.
-
-%% An extension body that raises after writing replies with the pre-call map.
-test_invoke_extension_error_discards_writes() ->
-    ClassName = 'BT3707ExtRaiseClass',
-    Fun = fun(_Args, ClassSelf) ->
-        beamtalk_class_vars:put(ClassSelf, count, 99),
-        error(bt3707_deliberate_crash)
-    end,
-    try
-        beamtalk_extensions:init(),
-        ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-        ok = beamtalk_extensions:register(ClassTag, raisingExt, Fun, test),
-        Result = beamtalk_class_dispatch:handle_class_method_call(
-            raisingExt, [], ClassName, beamtalk_class_dispatch_test_helper, #{}, #{count => 1}
-        ),
-        ?assertMatch({reply, {error, _}, #{count := 1}}, Result),
-        assert_home_absent(ClassName)
-    after
-        beamtalk_extensions:unregister(ClassName, raisingExt, true)
-    end.
-
-%% A `^` unwinding through an extension body keeps the writes made before it.
-test_invoke_extension_nlr_keeps_writes() ->
-    ClassName = 'BT3707ExtNlrClass',
-    Fun = fun(_Args, ClassSelf) ->
-        beamtalk_class_vars:put(ClassSelf, count, 99),
-        throw({'$bt_nlr', bt3707_token, nlr_value, nlr_state})
-    end,
-    try
-        beamtalk_extensions:init(),
-        ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-        ok = beamtalk_extensions:register(ClassTag, nlrExt, Fun, test),
-        Result = beamtalk_class_dispatch:handle_class_method_call(
-            nlrExt, [], ClassName, beamtalk_class_dispatch_test_helper, #{}, #{count => 1}
-        ),
-        ?assertMatch(
-            {reply, {error, {'$bt_nlr', bt3707_token, nlr_value, nlr_state}}, #{count := 99}},
-            Result
-        ),
-        assert_home_absent(ClassName)
-    after
-        beamtalk_extensions:unregister(ClassName, nlrExt, true)
     end.
 
 %% The class's key and the home entry are both gone after a dispatch.
@@ -2113,295 +2026,27 @@ test_class_self_dispatch_local() ->
     end).
 
 %%% ============================================================================
-%%% 17. handle_class_method_call/6 — class-side extension dispatch
+%%% 18. class_self_send/3 — self-send
 %%%
-%%% handle_class_method_call/6 checks beamtalk_extensions before
-%%% LocalClassMethods and find_class_method_in_chain/2, so a class-side
-%%% extension (`Target class >> sel`, ADR 0066, registered under the
-%%% metaclass tag `class_object_tag(ClassName)`) is read back by every
-%%% class-side dispatch path. These first four tests drive
-%%% handle_class_method_call/6 directly against a real
-%%% beamtalk_extensions:register/4 registration; the last two go through the
-%%% actual gen_server message types (`class_method_call` /
-%%% `metaclass_method_call`) to confirm both `Target sel` and
-%%% `Target class sel` reach the extension — they share this one handler, so
-%%% one check covers both.
+%%% A `self someSelector` send from inside another class method of the SAME
+%%% class (`class_self_send/3`, called by compiled code when the selector is
+%%% not bound statically to a direct call) resolves through the class-side
+%%% chain walk and runs the found method in the caller's process.
 %%% ============================================================================
 
-class_extension_dispatch_test_() ->
-    {foreach, fun setup_class_extension/0, fun teardown_class_extension/1, [
-        {"class-side extension (2-arity value fun) is found and invoked",
-            fun test_class_extension_value_fun/0},
-        {"class-side extension writes class variables through beamtalk_class_vars and threads them across dispatches",
-            fun test_class_extension_threads_class_vars/0},
-        {"class-side extension takes priority over a same-named local class method",
-            fun test_class_extension_priority_over_local/0},
-        {"class-side extension receives a ClassSelf tagged with the metaclass atom",
-            fun test_class_extension_receives_class_self/0},
-        {"class-side extension takes priority over a same-named inherited class method",
-            fun test_class_extension_priority_over_inherited/0}
+class_self_send_test_() ->
+    {foreach, fun setup_class_self_send/0, fun teardown_pids/1, [
+        {"class_self_send/3 runs a class method of the class's own table",
+            fun test_class_self_send_found/0},
+        {"class_self_send/3 writes go to the live home",
+            fun test_class_self_send_threads_class_vars/0},
+        {"a raising self-sent class method surfaces the raised error, not a raw exit",
+            fun test_class_self_send_raise_surfaces_error/0}
     ]}.
 
-setup_class_extension() ->
+setup_class_self_send() ->
     setup_minimal(),
-    beamtalk_extensions:init(),
-    [].
-
-%% Best-effort: drop every extension key this group might have registered,
-%% regardless of which tests ran.
-teardown_class_extension(_) ->
-    lists:foreach(
-        fun({ClassName, Selector}) -> beamtalk_extensions:unregister(ClassName, Selector, true) end,
-        [
-            {'Bt3192ExtValueClass', valueExt},
-            {'Bt3192ExtActorClass', actorExt},
-            {'Bt3192ExtPriorityClass', testSuccess},
-            {'Bt3192ExtSelfClass', selfExt},
-            {'Bt3201ExtPriorityChild', shared}
-        ]
-    ),
-    ok.
-
-%% A 2-arity (value/primitive-shaped) extension fun is found ahead of the
-%% (empty) local method table and returns its plain result unchanged.
-test_class_extension_value_fun() ->
-    ClassName = 'Bt3192ExtValueClass',
-    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    Fun = fun(_Args, _Self) -> value_ext_result end,
-    ok = beamtalk_extensions:register(ClassTag, valueExt, Fun, test),
-    Result = beamtalk_class_dispatch:handle_class_method_call(
-        valueExt, [], ClassName, some_module, #{}, #{untouched => true}
-    ),
-    %% An extension that touches no class variable leaves the map unchanged.
-    ?assertMatch({reply, {ok, value_ext_result}, #{untouched := true}}, Result).
-
-%% ADR 0130 §3: a class-side extension fun is `fun(Args, ClassSelf)` whatever
-%% the target class's kind; it reads and writes class variables through
-%% beamtalk_class_vars, and the entry point threads the map across successive
-%% dispatches.
-test_class_extension_threads_class_vars() ->
-    ClassName = 'Bt3192ExtActorClass',
-    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    Fun = fun(_Args, ClassSelf) ->
-        Count = beamtalk_class_vars:get(ClassSelf, count) + 1,
-        beamtalk_class_vars:put(ClassSelf, count, Count)
-    end,
-    ok = beamtalk_extensions:register(ClassTag, actorExt, Fun, test),
-    Result1 = beamtalk_class_dispatch:handle_class_method_call(
-        actorExt, [], ClassName, some_module, #{}, #{count => 0}
-    ),
-    ?assertMatch({reply, {ok, 1}, #{count := 1}}, Result1),
-    {reply, {ok, 1}, ClassVars1} = Result1,
-    Result2 = beamtalk_class_dispatch:handle_class_method_call(
-        actorExt, [], ClassName, some_module, #{}, ClassVars1
-    ),
-    ?assertMatch({reply, {ok, 2}, #{count := 2}}, Result2).
-
-%% Extension checked before LocalClassMethods (mirroring
-%% beamtalk_dispatch:lookup/5's own extension-before-local-table order): a
-%% real, invokable local class method (class_testSuccess/1, which would
-%% return test_success_result) is shadowed by a same-named extension.
-test_class_extension_priority_over_local() ->
-    ClassName = 'Bt3192ExtPriorityClass',
-    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    Fun = fun(_Args, _Self) -> from_extension end,
-    ok = beamtalk_extensions:register(ClassTag, testSuccess, Fun, test),
-    LocalMethods = #{testSuccess => <<>>},
-    Result = beamtalk_class_dispatch:handle_class_method_call(
-        testSuccess, [], ClassName, beamtalk_class_dispatch_test_helper, LocalMethods, #{}
-    ),
-    ?assertMatch({reply, {ok, from_extension}, _}, Result).
-
-%% The receiver handed to the extension fun mirrors apply_class_method_in_context/5's
-%% ClassSelf: class = metaclass tag, class_mod = this call's module, pid = self()
-%% (the class gen_server this handler already runs inside — here, the calling
-%% test process, since this drives handle_class_method_call/6 directly).
-test_class_extension_receives_class_self() ->
-    ClassName = 'Bt3192ExtSelfClass',
-    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    CallerPid = self(),
-    Fun = fun(_Args, ClassSelf) ->
-        #beamtalk_object{class = SeenTag, class_mod = SeenMod, pid = SeenPid} = ClassSelf,
-        {SeenTag, SeenMod, SeenPid =:= CallerPid}
-    end,
-    ok = beamtalk_extensions:register(ClassTag, selfExt, Fun, test),
-    Result = beamtalk_class_dispatch:handle_class_method_call(
-        selfExt, [], ClassName, my_module, #{}, #{}
-    ),
-    ?assertMatch({reply, {ok, {ClassTag, my_module, true}}, _}, Result).
-
-%% Extension checked before find_class_method_in_chain/2 for an
-%% *external* send too — mirrors test_class_self_dispatch_extension_priority_over_inherited
-%% (section 18's self-send counterpart), but drives handle_class_method_call/6
-%% directly rather than a self-send. A real, invokable inherited class method
-%% (`shared`, defined on the parent) is shadowed once a same-named extension
-%% is registered on the child's own metaclass tag. Needs real class gen_servers
-%% (not just a LocalClassMethods map) so find_class_method_in_chain/2 can walk
-%% ChildName's superclass via beamtalk_class_metadata, populated by
-%% beamtalk_object_class:start_link/2's own init.
-test_class_extension_priority_over_inherited() ->
-    ParentName = 'Bt3201ExtPriorityParent',
-    ChildName = 'Bt3201ExtPriorityChild',
-    InheritedFun = fun(_ClassSelf) -> from_inherited end,
-    ParentInfo = #{
-        superclass => none,
-        module => bt3201_ext_priority_parent_no_module,
-        class_methods => #{shared => #{block => InheritedFun, arity => 1}},
-        class_state => #{}
-    },
-    ChildInfo = #{
-        superclass => ParentName,
-        module => bt3201_ext_priority_child_no_module,
-        class_methods => #{},
-        class_state => #{}
-    },
-    {ok, ParentPid} = beamtalk_object_class:start_link(ParentName, ParentInfo),
-    {ok, ChildPid} = beamtalk_object_class:start_link(ChildName, ChildInfo),
-    beamtalk_test_class:with_class([ChildPid, ParentPid], fun() ->
-        %% Sanity: without an extension, the inherited method wins via the chain.
-        ?assertMatch(
-            {reply, {ok, from_inherited}, _},
-            beamtalk_class_dispatch:handle_class_method_call(
-                shared, [], ChildName, bt3201_ext_priority_child_no_module, #{}, #{}
-            )
-        ),
-        ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
-        ExtFun = fun(_Args, _Self) -> from_extension end,
-        ok = beamtalk_extensions:register(ChildTag, shared, ExtFun, test),
-        try
-            ?assertMatch(
-                {reply, {ok, from_extension}, _},
-                beamtalk_class_dispatch:handle_class_method_call(
-                    shared, [], ChildName, bt3201_ext_priority_child_no_module, #{}, #{}
-                )
-            )
-        after
-            beamtalk_extensions:unregister(ChildName, shared, true)
-        end
-    end).
-
-%% End-to-end via the real gen_server message: an ordinary `Target sel` send
-%% (class_send/3 -> {class_method_call, ...}) reaches a class-side extension.
-test_class_send_class_side_extension() ->
-    ClassName = 'BT3192ClassSendExtTest',
-    ClassInfo = #{
-        superclass => none,
-        module => beamtalk_class_dispatch_test_helper,
-        class_methods => #{},
-        class_state => #{}
-    },
-    beamtalk_extensions:init(),
-    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    Fun = fun(_Args, _Self) -> bt3192_extension_result end,
-    ok = beamtalk_extensions:register(ClassTag, bt3192ExtSel, Fun, test),
-    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
-    try
-        Result = beamtalk_class_dispatch:class_send(Pid, bt3192ExtSel, []),
-        ?assertEqual(bt3192_extension_result, Result)
-        %% Extra teardown beside the class stop: kept as try/after (not with_class).
-    after
-        beamtalk_extensions:unregister(ClassName, bt3192ExtSel, true),
-        beamtalk_test_proc:stop(Pid)
-    end.
-
-%% End-to-end via the metaclass message type: `Target class sel`
-%% (metaclass_send/4 -> {metaclass_method_call, ...}) shares
-%% handle_class_method_call/6 with class_method_call, so it reaches the same
-%% class-side extension.
-test_metaclass_method_class_side_extension() ->
-    ClassName = 'BT3192MetaExtTest',
-    ClassInfo = #{
-        superclass => none,
-        module => beamtalk_class_dispatch_test_helper,
-        class_methods => #{},
-        class_state => #{}
-    },
-    beamtalk_extensions:init(),
-    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    Fun = fun(_Args, _Self) -> bt3192_meta_extension_result end,
-    ok = beamtalk_extensions:register(ClassTag, bt3192MetaExtSel, Fun, test),
-    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
-    try
-        Result = gen_server:call(Pid, {metaclass_method_call, bt3192MetaExtSel, []}),
-        ?assertMatch({ok, bt3192_meta_extension_result}, Result)
-        %% Extra teardown beside the class stop: kept as try/after (not with_class).
-    after
-        beamtalk_extensions:unregister(ClassName, bt3192MetaExtSel, true),
-        beamtalk_test_proc:stop(Pid)
-    end.
-
-%% A crashing extension body must not
-%% take down the class's own gen_server — every other class-method dispatch
-%% path (apply_class_method_fun/6, apply_compiled_class_method/7) already
-%% guarantees this via catch-and-convert; invoke_class_extension/7 must too.
-test_class_extension_crash_does_not_kill_class_process() ->
-    ClassName = 'Bt3192ExtCrashClass',
-    ClassInfo = #{
-        superclass => none,
-        module => beamtalk_class_dispatch_test_helper,
-        class_methods => #{testSuccess => <<>>},
-        class_state => #{}
-    },
-    beamtalk_extensions:init(),
-    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    Fun = fun(_Args, _Self) -> error(bt3192_deliberate_crash) end,
-    ok = beamtalk_extensions:register(ClassTag, crashExt, Fun, test),
-    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
-    try
-        %% The crash surfaces as a structured error to the caller that
-        %% triggered it...
-        ?assertBtError(_, beamtalk_class_dispatch:class_send(Pid, crashExt, [])),
-        %% ...but the class gen_server itself survives: still alive, and a
-        %% follow-up call succeeds instead of hitting {noproc, ...}
-        %% (auto-restart would also have dropped ClassVars/hot patches).
-        ?assert(is_process_alive(Pid)),
-        ?assertEqual(
-            test_success_result, beamtalk_class_dispatch:class_send(Pid, testSuccess, [])
-        )
-        %% Extra teardown beside the class stop: kept as try/after (not with_class).
-    after
-        beamtalk_extensions:unregister(ClassName, crashExt, true),
-        beamtalk_test_proc:stop(Pid)
-    end.
-
-class_send_and_metaclass_extension_e2e_test_() ->
-    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
-        {"class_send (Target sel) dispatches to a class-side extension",
-            fun test_class_send_class_side_extension/0},
-        {"metaclass_method_call (Target class sel) dispatches to the same extension",
-            fun test_metaclass_method_class_side_extension/0},
-        {"a crashing class-side extension does not kill the class gen_server",
-            fun test_class_extension_crash_does_not_kill_class_process/0}
-    ]}.
-
-%%% ============================================================================
-%%% 18. class_self_send/3 & class_self_dispatch_local/3 — self-send
-%%%     class-side extension dispatch
-%%%
-%%% External class-side sends (`Target sel` / `Target class sel`) consult
-%%% beamtalk_extensions (see section 17). A `self extensionSel` send from
-%%% inside another class method of the SAME class must reach the same
-%%% registry too, rather than falling straight to the superclass-chain walk
-%%% (`class_self_send/3`) or the local runtime-method lookup
-%%% (`class_self_dispatch_local/3`) and raising does_not_understand. These
-%%% tests drive both functions directly against a real
-%%% beamtalk_extensions:register/4 registration, mirroring section 17's
-%%% style for the external-send case.
-%%% ============================================================================
-
-class_self_dispatch_extension_test_() ->
-    {foreach, fun setup_class_self_extension/0, fun teardown_class_self_extension/1, [
-        {"class_self_send/3 finds an extension on the class's own tag",
-            fun test_class_self_dispatch_extension_found/0},
-        {"class_self_send/3 extension writes go to the live home",
-            fun test_class_self_dispatch_extension_threads_class_vars/0},
-        {"a crashing self-dispatched extension surfaces the raised error, not a raw exit",
-            fun test_class_self_dispatch_extension_crash_surfaces_error/0}
-    ]}.
-
-setup_class_self_extension() ->
-    setup_minimal(),
-    beamtalk_extensions:init(),
+    beamtalk_class_shadow_flags:mark_ready(),
     %% BT-4300: a class-side self-send builds `ClassSelf` from the receiving
     %% class's registered pid (it may run in any process), so each class this
     %% group sends to is registered.
@@ -2410,185 +2055,66 @@ setup_class_self_extension() ->
             {ok, Pid} = beamtalk_object_class:start_link(Name, #{
                 superclass => none,
                 module => beamtalk_class_dispatch_test_helper,
-                class_methods => #{},
+                class_methods => #{
+                    testSuccess => <<>>, testClassVar => <<>>, testRaise => <<>>
+                },
                 class_state => #{}
             }),
             unlink(Pid),
             Pid
         end
-     || Name <- ['Bt3198SelfExtFound', 'Bt3198SelfExtVars', 'Bt3198SelfExtCrash']
+     || Name <- ['Bt3198SelfSendFound', 'Bt3198SelfSendVars', 'Bt3198SelfSendRaise']
     ].
 
-%% Best-effort: drop every extension key this group might have registered.
-teardown_class_self_extension(Pids) ->
-    teardown_pids(Pids),
-    lists:foreach(
-        fun({ClassName, Selector}) -> beamtalk_extensions:unregister(ClassName, Selector, true) end,
-        [
-            {'Bt3198SelfExtFound', selfExt},
-            {'Bt3198SelfExtVars', selfBump},
-            {'Bt3198SelfExtCrash', crashSelfExt}
-        ]
-    ),
-    ok.
-
 %% class_self_send/3 runs in the caller (here the test process), not in the
-%% class gen_server; the extension probe reads the beamtalk_extensions ETS
-%% table, and `ClassSelf` is the registered class's real reference.
-test_class_self_dispatch_extension_found() ->
-    ClassName = 'Bt3198SelfExtFound',
-    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    Fun = fun(_Args, _Self) -> from_self_ext end,
-    ok = beamtalk_extensions:register(ClassTag, selfExt, Fun, test),
-    Result = beamtalk_class_dispatch:class_self_send(class_self(ClassName), selfExt, []),
+%% class gen_server; `ClassSelf` is the registered class's real reference.
+test_class_self_send_found() ->
+    Result = beamtalk_class_dispatch:class_self_send(
+        class_self('Bt3198SelfSendFound'), testSuccess, []
+    ),
     %% ADR 0130 §3: the bare result, no class_var_result wrapper.
-    ?assertEqual(from_self_ext, Result).
+    ?assertEqual(test_success_result, Result).
 
-%% ADR 0130 §3: a self-dispatched extension writes through beamtalk_class_vars
+%% ADR 0130 §3: a self-sent class method writes through beamtalk_class_vars
 %% into the home the enclosing invocation installed; nothing is threaded back.
-test_class_self_dispatch_extension_threads_class_vars() ->
-    ClassName = 'Bt3198SelfExtVars',
-    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    Fun = fun(_Args, ClassSelf) ->
-        Count = beamtalk_class_vars:get(ClassSelf, count) + 1,
-        beamtalk_class_vars:put(ClassSelf, count, Count)
-    end,
-    ok = beamtalk_extensions:register(ClassTag, selfBump, Fun, test),
+test_class_self_send_threads_class_vars() ->
+    ClassName = 'Bt3198SelfSendVars',
     Key = beamtalk_class_vars:key(ClassName),
     ok = beamtalk_class_vars:install(Key, #{count => 0}),
     try
         ?assertEqual(
-            1, beamtalk_class_dispatch:class_self_send(class_self(ClassName), selfBump, [])
+            class_var_updated_value,
+            beamtalk_class_dispatch:class_self_send(class_self(ClassName), testClassVar, [])
         ),
-        ?assertEqual(
-            2, beamtalk_class_dispatch:class_self_send(class_self(ClassName), selfBump, [])
-        ),
-        ?assertEqual(#{count => 2}, erlang:get(Key))
+        ?assertEqual(#{count => 0, updated => true}, erlang:get(Key))
     after
         beamtalk_class_vars:uninstall(Key)
     end.
 
-%% Mirrors test_class_extension_crash_does_not_kill_class_process (section 17)
-%% for the self-dispatch path: apply_class_extension_fun/5's catch-all still
-%% classifies the crash, but unwrap_self_dispatch_outcome/3
-%% re-raises it directly (erlang:raise/3, no beamtalk_exception_handler:reraise
-%% wrapping — same contract unwrap_self_dispatch_outcome/3 already has for
-%% compiled/runtime class methods) since self-dispatch runs in the caller's
-%% own process rather than the class gen_server's handle_call.
-test_class_self_dispatch_extension_crash_surfaces_error() ->
-    ClassName = 'Bt3198SelfExtCrash',
-    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    Fun = fun(_Args, _Self) -> error(bt3198_deliberate_crash) end,
-    ok = beamtalk_extensions:register(ClassTag, crashSelfExt, Fun, test),
+%% A raising class method: `unwrap_self_dispatch_outcome/3` re-raises it
+%% directly (erlang:raise/3, no beamtalk_exception_handler:reraise wrapping)
+%% since self-dispatch runs in the caller's own process rather than the class
+%% gen_server's handle_call.
+test_class_self_send_raise_surfaces_error() ->
     ?assertError(
-        bt3198_deliberate_crash,
-        beamtalk_class_dispatch:class_self_send(class_self(ClassName), crashSelfExt, [])
+        test_deliberate_error,
+        beamtalk_class_dispatch:class_self_send(
+            class_self('Bt3198SelfSendRaise'), testRaise, []
+        )
     ).
-
-class_self_dispatch_extension_priority_test_() ->
-    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
-        {"class_self_send/3 checks the extension before walking the class chain",
-            fun test_class_self_dispatch_extension_priority_over_inherited/0},
-        {"class_self_dispatch_local/3 checks the extension before its own runtime class method",
-            fun test_class_self_dispatch_local_extension_priority_over_runtime_fun/0}
-    ]}.
-
-%% Extension checked before the superclass-chain walk (mirroring
-%% handle_class_method_call/6's extension-before-local-table order):
-%% a real, invokable inherited class method (`shared`, defined on the parent)
-%% is shadowed once a same-named extension is registered on the child's own
-%% metaclass tag.
-test_class_self_dispatch_extension_priority_over_inherited() ->
-    ParentName = 'Bt3198SelfExtParent',
-    ChildName = 'Bt3198SelfExtChild',
-    InheritedFun = fun(_ClassSelf) -> from_inherited end,
-    ParentInfo = #{
-        superclass => none,
-        module => bt3198_self_ext_parent_no_module,
-        class_methods => #{shared => #{block => InheritedFun, arity => 1}},
-        class_state => #{}
-    },
-    ChildInfo = #{
-        superclass => ParentName,
-        module => bt3198_self_ext_child_no_module,
-        class_methods => #{},
-        class_state => #{}
-    },
-    {ok, ParentPid} = beamtalk_object_class:start_link(ParentName, ParentInfo),
-    {ok, ChildPid} = beamtalk_object_class:start_link(ChildName, ChildInfo),
-    beamtalk_test_class:with_class([ChildPid, ParentPid], fun() ->
-        %% Sanity: without an extension, the inherited method wins via the chain.
-        ?assertEqual(
-            from_inherited,
-            beamtalk_class_dispatch:class_self_send(class_self(ChildName), shared, [])
-        ),
-        ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
-        ExtFun = fun(_Args, _Self) -> from_extension end,
-        ok = beamtalk_extensions:register(ChildTag, shared, ExtFun, test),
-        try
-            ?assertEqual(
-                from_extension,
-                beamtalk_class_dispatch:class_self_send(class_self(ChildName), shared, [])
-            )
-        after
-            beamtalk_extensions:unregister(ChildName, shared, true)
-        end
-    end).
-
-%% Same priority rule for class_self_dispatch_local/4's own-runtime-method
-%% branch (ADR 0084 ClassBuilder funs): the extension shadows a
-%% real, invokable runtime class-method fun of the same selector.
-test_class_self_dispatch_local_extension_priority_over_runtime_fun() ->
-    ClassName = 'Bt3198SelfExtLocal',
-    LocalFun = fun(_ClassSelf) -> from_local_runtime_method end,
-    ClassInfo = #{
-        superclass => none,
-        module => bt3198_self_ext_local_no_module,
-        class_methods => #{shared => #{block => LocalFun, arity => 1}},
-        class_state => #{}
-    },
-    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
-    beamtalk_test_class:with_class(Pid, fun() ->
-        %% Sanity: without an extension, the local runtime method wins.
-        ?assertEqual(
-            from_local_runtime_method,
-            beamtalk_class_dispatch:class_self_dispatch_local(
-                ClassName, shared, [], class_self(ClassName)
-            )
-        ),
-        ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-        ExtFun = fun(_Args, _Self) -> from_extension end,
-        ok = beamtalk_extensions:register(ClassTag, shared, ExtFun, test),
-        try
-            ?assertEqual(
-                from_extension,
-                beamtalk_class_dispatch:class_self_dispatch_local(
-                    ClassName, shared, [], class_self(ClassName)
-                )
-            )
-        after
-            beamtalk_extensions:unregister(ClassName, shared, true)
-        end
-    end).
 
 %%% ============================================================================
 %%% 19. class_super_dispatch/4 — class-side `super` (BT-4001)
 %%%
 %%% Walks from the sending class's superclass and never consults the sending
-%%% class itself, not even its class-side extensions (an extension override
-%%% that sends `super` must not recurse into itself). At each ancestor a
-%%% class-side extension on that ancestor's tag is checked before the
-%%% ancestor's class methods.
+%%% class itself (a class method that sends `super` must not recurse into
+%%% itself).
 %%% ============================================================================
 
 class_super_dispatch_test_() ->
-    {foreach, fun setup_class_self_extension/0, fun teardown_pids/1, [
-        {"skips the sending class's own class-side extension",
-            fun test_class_super_dispatch_skips_own_extension/0},
-        {"reaches a superclass method defined only as a class-side extension",
-            fun test_class_super_dispatch_reaches_superclass_extension/0},
-        {"a superclass's extension is checked before its class methods",
-            fun test_class_super_dispatch_superclass_extension_before_method/0},
+    {foreach, fun setup_class_self_send/0, fun teardown_pids/1, [
+        {"skips the sending class's own class method",
+            fun test_class_super_dispatch_skips_own_method/0},
         {"runs the found method under the live receiver's tag",
             fun test_class_super_dispatch_passes_receiver_tag/0},
         {"raises does_not_understand when no ancestor defines the selector",
@@ -2597,6 +2123,10 @@ class_super_dispatch_test_() ->
 
 %% Parent defines `shared` (a runtime class-method fun); Child does not.
 with_super_parent_child(Prefix, Body) ->
+    with_super_parent_child(Prefix, #{}, Body).
+
+%% As above, with the child's own class methods.
+with_super_parent_child(Prefix, ChildMethods, Body) ->
     ParentName = list_to_atom(Prefix ++ "Parent"),
     ChildName = list_to_atom(Prefix ++ "Child"),
     ParentInfo = #{
@@ -2613,7 +2143,7 @@ with_super_parent_child(Prefix, Body) ->
     ChildInfo = #{
         superclass => ParentName,
         module => list_to_atom(Prefix ++ "_child_no_module"),
-        class_methods => #{},
+        class_methods => ChildMethods,
         class_state => #{}
     },
     {ok, ParentPid} = beamtalk_object_class:start_link(ParentName, ParentInfo),
@@ -2622,63 +2152,18 @@ with_super_parent_child(Prefix, Body) ->
         Body(ParentName, ChildName)
     end).
 
-test_class_super_dispatch_skips_own_extension() ->
-    with_super_parent_child("Bt4001SuperOwnExt", fun(_ParentName, ChildName) ->
+test_class_super_dispatch_skips_own_method() ->
+    ChildMethods = #{shared => #{block => fun(_ClassSelf) -> from_own_method end, arity => 1}},
+    with_super_parent_child("Bt4001SuperOwn", ChildMethods, fun(_ParentName, ChildName) ->
         ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
-        %% An extension override on the sending class, as `C class >> shared`.
-        ok = beamtalk_extensions:register(
-            ChildTag, shared, fun(_Args, _Self) -> from_own_extension end, test
-        ),
-        try
-            %% A self-send (`class_self_send/3`) would answer the child's own
-            %% extension; `super` must not.
-            ?assertEqual(
-                from_parent_method,
-                beamtalk_class_dispatch:class_super_dispatch(
-                    ChildName, shared, [], tag_self(ChildTag)
-                )
+        %% A self-send (`class_self_send/3`) would answer the child's own
+        %% method; `super` must not.
+        ?assertEqual(
+            from_parent_method,
+            beamtalk_class_dispatch:class_super_dispatch(
+                ChildName, shared, [], tag_self(ChildTag)
             )
-        after
-            beamtalk_extensions:unregister(ChildName, shared, true)
-        end
-    end).
-
-test_class_super_dispatch_reaches_superclass_extension() ->
-    with_super_parent_child("Bt4001SuperParentExt", fun(ParentName, ChildName) ->
-        ParentTag = beamtalk_class_registry:class_object_tag(ParentName),
-        ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
-        ok = beamtalk_extensions:register(
-            ParentTag, extOnly, fun([X], _Self) -> X + 200 end, test
-        ),
-        try
-            ?assertEqual(
-                201,
-                beamtalk_class_dispatch:class_super_dispatch(
-                    ChildName, extOnly, [1], tag_self(ChildTag)
-                )
-            )
-        after
-            beamtalk_extensions:unregister(ParentName, extOnly, true)
-        end
-    end).
-
-test_class_super_dispatch_superclass_extension_before_method() ->
-    with_super_parent_child("Bt4001SuperExtFirst", fun(ParentName, ChildName) ->
-        ParentTag = beamtalk_class_registry:class_object_tag(ParentName),
-        ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
-        ok = beamtalk_extensions:register(
-            ParentTag, shared, fun(_Args, _Self) -> from_parent_extension end, test
-        ),
-        try
-            ?assertEqual(
-                from_parent_extension,
-                beamtalk_class_dispatch:class_super_dispatch(
-                    ChildName, shared, [], tag_self(ChildTag)
-                )
-            )
-        after
-            beamtalk_extensions:unregister(ParentName, shared, true)
-        end
+        )
     end).
 
 test_class_super_dispatch_passes_receiver_tag() ->
@@ -2744,11 +2229,9 @@ class_self_direct_ok_test_() ->
                 )
             )
         end},
-        {"a class-side extension shadows the compiled method", fun() ->
-            Sel = bt3666_ext_shadow,
-            ok = beamtalk_extensions:register(
-                'Object class', Sel, fun(_, _) -> ok end, bt3666_test
-            ),
+        {"a runtime class-method fun shadows the compiled method", fun() ->
+            Sel = bt3666_fun_shadow,
+            ok = beamtalk_class_shadow_flags:set(runtime_fun, 'Object', self()),
             try
                 ?assertNot(
                     beamtalk_class_dispatch:class_self_direct_ok(
@@ -2756,7 +2239,7 @@ class_self_direct_ok_test_() ->
                     )
                 )
             after
-                beamtalk_extensions:unregister('Object', Sel, true)
+                ok = beamtalk_class_shadow_flags:clear_if_owner(runtime_fun, 'Object', self())
             end
         end},
         {"TestCase run selectors never take the direct call", fun() ->
@@ -2975,8 +2458,6 @@ class_chain_skip_test_() ->
             fun test_inherited_class_method_still_routes_to_class/0},
         {"a runtime-installed class-method fun shadows the Class chain",
             fun test_runtime_class_fun_shadows_class_chain/0},
-        {"a class-side extension shadows the Class chain",
-            fun test_class_extension_shadows_class_chain/0},
         {"hasField:/clearField: still answer from the class process",
             fun test_class_var_reflection_still_routes_to_class/0},
         {"BT-4148: fieldAt:/fieldAt:put: answer from the class process, which survives",
@@ -3041,24 +2522,6 @@ test_runtime_class_fun_shadows_class_chain() ->
         end),
         ?assertEqual(shadowed, beamtalk_class_dispatch:class_send(Pid, printString, []))
     after
-        stop_quietly(Pid)
-    end.
-
-test_class_extension_shadows_class_chain() ->
-    ClassName = 'BT4073Extension',
-    Pid = start_bt4073_class(ClassName, none, #{}, #{}),
-    beamtalk_extensions:init(),
-    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    try
-        ?assertMatch(
-            {beamtalk_string, _}, beamtalk_class_dispatch:class_send(Pid, printString, [])
-        ),
-        ok = beamtalk_extensions:register(
-            ClassTag, printString, fun(_Args, _Self) -> extended end, test
-        ),
-        ?assertEqual(extended, beamtalk_class_dispatch:class_send(Pid, printString, []))
-    after
-        beamtalk_extensions:unregister(ClassName, printString, true),
         stop_quietly(Pid)
     end.
 

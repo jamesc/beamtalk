@@ -32,9 +32,9 @@ Two concerns, two groups of tests:
 
 2. **Live-patch gap reproduction** (`live_patch_gap_test_/0`) — patches a
    throwaway dynamic class via `beamtalk_object_class:put_method/4`, one of
-   `beamtalk_xref:build_method_entry/5`'s three real call sites (the other
-   two are `beamtalk_extensions:register/5` and `beamtalk_class_builder.erl`'s
-   `methodSource:` install — see the corrected note below). Confirms
+   `beamtalk_xref:build_method_entry/5`'s real call sites (the other is
+   `beamtalk_class_builder.erl`'s `methodSource:` install — see the corrected
+   note below). Confirms
    `references => []` reproduces exactly as Constraint 4 describes and
    measures the blast radius on a method carrying two syntactically distinct
    reference forms (a type annotation and a constructor send) to the same
@@ -50,9 +50,9 @@ this is NOT true of the current implementation — both `>>` and
 producing a complete compiler-computed `method_xref` (references included).
 Neither surface calls `beamtalk_object_class:put_method/3,4` — a repo-wide
 grep confirms zero non-test call sites of that function today. The gap IS
-reachable, confirmed live, via `beamtalk_extensions:register/5` (ADR 0066
-source-bearing extensions) — the `.btscript` fixture above exercises that
-real surface instead. See the findings doc for the full account.
+reachable via `ClassBuilder`'s `methodSource:` install (see
+`stdlib/test/adr_0114_class_builder_live_patch_gap_test.bt`). See the findings
+doc for the full account.
 
 Findings are written up in `docs/development/adr-0114-site-discovery-spike-findings.md`.
 
