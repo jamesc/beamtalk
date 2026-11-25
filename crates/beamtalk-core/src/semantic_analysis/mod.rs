@@ -434,13 +434,6 @@ pub struct AnalysisContext<'a> {
     /// How complete the injected cross-file class knowledge is (ADR 0100
     /// Rule 2). Defaults to the conservative `ModuleOnly`.
     pub knowledge_scope: KnowledgeScope,
-    /// Project-wide standalone extension definitions (ADR 0066). `None`/empty
-    /// means only the current module's own extensions are visible.
-    pub cross_file_extensions: Option<&'a crate::compilation::extension_index::ExtensionIndex>,
-    /// Whether the current package has dependencies whose extensions are
-    /// not all visible here (ADR 0100 Rule 2; see
-    /// [`crate::CompilerOptions::dependency_extensions_unknown`]).
-    pub dependency_extensions_unknown: bool,
     /// Whether the module being analysed comes from a `stubs/` directory
     /// (ADR 0075). `declare native:` is only legal there — defaulting to
     /// `false` means any caller that doesn't know about stub files (the
@@ -468,7 +461,7 @@ impl<'a> AnalysisContext<'a> {
 
     /// Applies the subset of [`crate::CompilerOptions`] that semantic
     /// analysis cares about: `stdlib_mode`, `skip_module_expression_lint`,
-    /// `current_package`, `knowledge_scope`, `dependency_extensions_unknown`,
+    /// `current_package`, `knowledge_scope`,
     /// `known_erlang_modules`, `known_packages`.
     #[must_use]
     pub fn with_options(mut self, options: &'a crate::CompilerOptions) -> Self {
@@ -476,7 +469,6 @@ impl<'a> AnalysisContext<'a> {
         self.skip_module_expression_lint = options.skip_module_expression_lint;
         self.current_package = options.current_package.as_deref();
         self.knowledge_scope = options.knowledge_scope;
-        self.dependency_extensions_unknown = options.dependency_extensions_unknown;
         self.known_erlang_modules
             .clone_from(&options.known_erlang_modules);
         self.known_packages.clone_from(&options.known_packages);
@@ -561,20 +553,6 @@ impl<'a> AnalysisContext<'a> {
         native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
     ) -> Self {
         self.native_type_registry = native_type_registry;
-        self
-    }
-
-    /// Project-wide standalone extension definitions (ADR 0066), so a
-    /// cross-file `ClassName >> selector` extension resolves instead of
-    /// producing a false `Dnu` hint. May safely include the current file's
-    /// own entries — the current module's extensions are registered first
-    /// and duplicates are skipped.
-    #[must_use]
-    pub fn with_cross_file_extensions(
-        mut self,
-        cross_file_extensions: &'a crate::compilation::extension_index::ExtensionIndex,
-    ) -> Self {
-        self.cross_file_extensions = Some(cross_file_extensions);
         self
     }
 
@@ -769,8 +747,6 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         current_package,
         native_type_registry,
         knowledge_scope,
-        cross_file_extensions,
-        dependency_extensions_unknown,
         is_stub_file,
         known_erlang_modules,
     } = ctx;
@@ -812,7 +788,6 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         stdlib_mode,
         &trait_origins,
         knowledge_scope,
-        dependency_extensions_unknown,
         current_package,
     );
 
@@ -827,7 +802,6 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &pre_loaded_protocols,
         current_package,
     );
-    register_extension_methods(module, &mut result, cross_file_extensions);
     register_protocols_and_check_traits(
         module,
         &mut result,
@@ -1091,7 +1065,6 @@ fn build_class_hierarchy(
     stdlib_mode: bool,
     trait_origins: &trait_expansion::OriginMap,
     knowledge_scope: KnowledgeScope,
-    dependency_extensions_unknown: bool,
     current_package: Option<&str>,
 ) {
     // Phase 0: Build Class Hierarchy (ADR 0006 Phase 1a)
@@ -1108,9 +1081,6 @@ fn build_class_hierarchy(
     // Record how complete the injected cross-file knowledge is so the
     // receiver-knowledge classifier can consult it (ADR 0100 Rule 2).
     result.class_hierarchy.set_knowledge_scope(knowledge_scope);
-    result
-        .class_hierarchy
-        .set_dependency_extensions_unknown(dependency_extensions_unknown);
 
     // ADR 0071: Stamp current package on AST-derived classes
     if let Some(pkg) = current_package {
@@ -1186,39 +1156,6 @@ fn inject_pre_loaded_classes(
         // propagate_cross_file_class_kind handles all remaining classes.
         result.class_hierarchy.propagate_class_kind(module);
         result.class_hierarchy.propagate_cross_file_class_kind();
-    }
-}
-
-/// Register extension methods (this module's and project-wide) into the hierarchy.
-fn register_extension_methods(
-    module: &Module,
-    result: &mut AnalysisResult,
-    cross_file_extensions: Option<&crate::compilation::extension_index::ExtensionIndex>,
-) {
-    // ADR 0066 Phase 4: Register extension methods into the class hierarchy
-    // so the type checker sees them as part of each class's method surface.
-    // Extension methods defined via `ClassName >> selector => ...` are collected
-    // from the current module and added to the hierarchy before type checking.
-    if !module.method_definitions.is_empty() {
-        let mut ext_index = crate::compilation::extension_index::ExtensionIndex::new();
-        ext_index.add_module(module, std::path::Path::new("<current>"));
-        result.class_hierarchy.register_extensions(&ext_index);
-    }
-
-    // Register project-wide cross-file extensions (ADR 0066 / ADR 0100 Rule
-    // 2 WS1) so a same-project `ClassName >> selector` defined in another
-    // file resolves instead of producing a false `Dnu` hint. Registered
-    // *after* the current module's own extensions —
-    // `register_extensions` skips instance-side selectors the class already
-    // defines and class-side selectors an earlier pass already registered, so
-    // the current file's definitions win and an index that includes the
-    // current file's own entries is harmless.
-    if let Some(cross_file_extensions) = cross_file_extensions
-        && !cross_file_extensions.is_empty()
-    {
-        result
-            .class_hierarchy
-            .register_extensions(cross_file_extensions);
     }
 }
 

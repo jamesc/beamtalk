@@ -48,8 +48,6 @@ type MergedClassIndexes = (
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
-    beamtalk_core::compilation::extension_index::ExtensionIndex,
-    bool,
 );
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -184,8 +182,7 @@ fn test_case_class_count(
 }
 
 /// The test class `module` compiles to, if any — the pure part of
-/// [`discover_test_classes_in_hierarchy`] (no I/O, no warnings), shared with
-/// `collect_test_file_extensions`. The compiler generates one module per
+/// [`discover_test_classes_in_hierarchy`] (no I/O, no warnings). The compiler generates one module per
 /// `.bt` file from its first `TestCase` subclass, hence at most one.
 fn test_class_in_module(
     module: &beamtalk_core::ast::Module,
@@ -328,7 +325,6 @@ fn build_fixture_class_indexes(
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     FixtureProtocolDefs,
-    beamtalk_core::compilation::extension_index::ExtensionIndex,
 )> {
     let mut module_index = HashMap::new();
     let mut superclass_index = HashMap::new();
@@ -336,10 +332,6 @@ fn build_fixture_class_indexes(
     let mut protocol_infos = Vec::new();
     let mut alias_infos = Vec::new();
     let mut protocol_defs = FixtureProtocolDefs::default();
-    // Fixture extension methods (`Target >> selector`), so a test file
-    // calling one does not report does-not-understand once the dependency
-    // guard lifts (ADR 0070 WS3, BT-4608).
-    let mut extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
     let mut parsed_modules = Vec::new();
 
     for file in fixture_files {
@@ -350,9 +342,8 @@ fn build_fixture_class_indexes(
         let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
         let (mut module, _) = beamtalk_core::source_analysis::parse(tokens);
         // One compilation unit per class (BT-4721): the fixture's own
-        // extensions are part of its class, not entries in the extension index.
+        // extensions are part of its class.
         let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
-        extensions.add_module(&module, file.as_std_path());
 
         // Extract ProtocolInfo so fixture-defined protocol names are
         // recognised by the unresolved-class validator when compiling test files.
@@ -425,7 +416,6 @@ fn build_fixture_class_indexes(
         protocol_infos,
         alias_infos,
         protocol_defs,
-        extensions,
     ))
 }
 
@@ -720,14 +710,6 @@ struct TestPipeline {
     class_module_index: HashMap<String, String>,
     /// Merged class-name to superclass-name index across all packages.
     class_superclass_index: HashMap<String, String>,
-    /// Every discovered package's `src/` extensions plus its dependencies'
-    /// (ADR 0070 WS3, BT-4608), registered into each test/fixture file's
-    /// hierarchy as `build` does.
-    extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
-    /// Whether `extension_index` holds every dependency's extensions; lifts
-    /// the pre-WS3 dependency guard (`ClassHierarchyContext::
-    /// dependency_extensions_complete`).
-    dependency_extensions_complete: bool,
     /// ADR 0075 FFI type registry, merged across every discovered package's
     /// auto-extracted + stub-overridden native types (mirroring `beamtalk
     /// build`), or `extract_stdlib_type_specs()` when no package was
@@ -991,17 +973,11 @@ fn discover_packages_with_manifests(
 /// used for fixture compilation (which can reference any package's classes).
 ///
 /// Returns `(pkg_class_indexes, class_module_index, class_superclass_index,
-/// all_class_infos, all_alias_infos, all_protocol_infos, extension_index,
-/// dependency_extensions_complete)`. The protocol infos
+/// all_class_infos, all_alias_infos, all_protocol_infos)`. The protocol infos
 /// are every package's `src/` protocols plus its dependencies' exported ones,
 /// the same set `beamtalk build` pre-loads (`build_class_index`), so a test
 /// file resolves a package protocol — and `P class` (ADR 0144) — as `build`
-/// does (BT-4446). The extension index likewise holds every package's `src/`
-/// extensions plus its dependencies' (ADR 0070 WS3, BT-4608), and
-/// `dependency_extensions_complete` says whether every dependency's were
-/// loaded — `false` if any package's dependency resolution failed, or its own
-/// sources were not scanned (no `src/`), since the guard may only lift when
-/// every extension a test file could call is in the index.
+/// does (BT-4446).
 #[allow(clippy::too_many_lines)] // linear merge pipeline (per package: src + deps), as `build_class_index`
 fn build_merged_class_indexes(
     discovered_packages: &[(Utf8PathBuf, manifest::PackageManifest)],
@@ -1026,21 +1002,12 @@ fn build_merged_class_indexes(
     let mut dep_protocol_infos: Vec<
         beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo,
     > = Vec::new();
-    let mut extension_index = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
-    let mut dependency_extensions_complete = true;
     for (pkg_root, pkg) in discovered_packages {
         let mut pkg_src = None;
         let src_dir = pkg_root.join("src");
-        // The test pipeline only scans a package's `src/`. If it could not
-        // (no `src/` — sources at the package root — or the scan failed),
-        // the package's own extensions are missing from `extension_index`,
-        // and lifting the dependency guard could report a false
-        // does-not-understand on one of them; keep the guard on instead.
-        let mut own_extensions_loaded = false;
         if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
-            let has_src_dir = src_dir.is_dir();
             let source_root = src_dir.exists().then_some(src_dir);
-            if let Ok((pkg_class_map, pkg_super_map, class_infos, src_extensions, cached_asts)) =
+            if let Ok((pkg_class_map, pkg_super_map, class_infos, cached_asts)) =
                 super::build::build_class_module_index(
                     &src_files,
                     source_root.as_deref(),
@@ -1053,10 +1020,6 @@ fn build_merged_class_indexes(
                 );
                 class_module_index.extend(pkg_class_map);
                 class_superclass_index.extend(pkg_super_map);
-                // The package's own `src/` extensions, as `build` registers
-                // them for every file (ADR 0066 / ADR 0100 Rule 2 WS1).
-                extension_index.merge(&src_extensions);
-                own_extensions_loaded = has_src_dir;
                 // Flattened below, once this package's dependencies (and so
                 // their protocols) are resolved.
                 pkg_src = Some((class_infos, cached_asts));
@@ -1070,19 +1033,12 @@ fn build_merged_class_indexes(
             ));
             source_protocol_infos.extend(super::build::collect_project_protocol_infos(&src_files));
         }
-        dependency_extensions_complete &= own_extensions_loaded;
-
         // Load dependency class metadata so the type checker and validator
         // can resolve cross-package class references in test files.
         let dep_options = beamtalk_core::CompilerOptions::default();
         let mut dep_protocol_defs = Vec::new();
         match super::deps::ensure_deps_resolved(pkg_root, &dep_options) {
             Ok(resolved_deps) => {
-                dependency_extensions_complete &=
-                    beamtalk_project::dependency_extensions::merge_dependency_extensions(
-                        resolved_deps.iter().map(|dep| &dep.extensions),
-                        &mut extension_index,
-                    );
                 for dep in &resolved_deps {
                     dep_protocol_defs.extend(dep.protocol_defs.iter().cloned());
                     for (class_name, module_name) in &dep.class_module_index {
@@ -1107,7 +1063,6 @@ fn build_merged_class_indexes(
                 }
             }
             Err(e) => {
-                dependency_extensions_complete = false;
                 warn!(
                     error = %e,
                     "Failed to resolve dependencies for test pipeline; \
@@ -1149,8 +1104,6 @@ fn build_merged_class_indexes(
         all_class_infos,
         all_alias_infos,
         all_protocol_infos,
-        extension_index,
-        dependency_extensions_complete,
     )
 }
 
@@ -1283,8 +1236,6 @@ fn initialize_pipeline(
         all_class_infos,
         mut all_alias_infos,
         package_protocol_infos,
-        extension_index,
-        dependency_extensions_complete,
     ) = build_merged_class_indexes(&discovered_packages);
 
     // See `collect_sibling_src_alias_infos`'s doc: only engages when
@@ -1323,8 +1274,6 @@ fn initialize_pipeline(
         all_class_infos,
         all_alias_infos,
         protocol_infos: package_protocol_infos,
-        extension_index,
-        dependency_extensions_complete,
         fixture_protocol_defs: FixtureProtocolDefs::default(),
         fixture_class_index: HashMap::new(),
         precompiled_modules: HashSet::new(),
@@ -1392,7 +1341,6 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
         fixture_protocol_infos,
         fixture_alias_infos,
         fixture_protocol_defs,
-        fixture_extensions,
     ) = if fixtures_dir.is_dir() {
         let fixture_files = find_test_files(&fixtures_dir)?;
         build_fixture_class_indexes(&fixture_files)?
@@ -1404,11 +1352,9 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
             Vec::new(),
             Vec::new(),
             FixtureProtocolDefs::default(),
-            beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
         )
     };
     pipeline.fixture_protocol_defs = fixture_protocol_defs;
-    pipeline.extension_index.merge(&fixture_extensions);
     pipeline
         .class_module_index
         .extend(fixture_class_index.clone());
@@ -1437,8 +1383,6 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
         pre_loaded_protocol_defs: pipeline.fixture_protocol_defs.defs.clone(),
         pre_loaded_protocol_sources: pipeline.fixture_protocol_defs.sources.clone(),
         pre_loaded_aliases: pipeline.all_alias_infos.clone(),
-        extension_index: pipeline.extension_index.clone(),
-        dependency_extensions_complete: pipeline.dependency_extensions_complete,
     };
     let fixtures_package = pipeline.current_package_for(&fixtures_dir);
     let precompiled = compile_fixtures_directory(
@@ -1452,53 +1396,6 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     pipeline.fixture_class_index = fixture_class_index;
 
     Ok(())
-}
-
-/// The extension methods of the test files `beamtalk test` will compile and
-/// load: those with at least one test class, found by the same discovery
-/// `compile_single_test_file` uses (`test_class_in_module`, minus its
-/// warnings, which the compile pass reports). A helper-only file is never compiled or
-/// loaded, so its extensions must not hide a does-not-understand that would
-/// fail at runtime. A file that cannot be read or parsed fails its own
-/// compilation later.
-fn collect_test_file_extensions(
-    test_files: &[Utf8PathBuf],
-    pkg_class_indexes: &PkgClassIndexes,
-    fixture_class_index: &HashMap<String, String>,
-    class_module_index: &HashMap<String, String>,
-    class_superclass_index: &HashMap<String, String>,
-) -> beamtalk_core::compilation::extension_index::ExtensionIndex {
-    let mut extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
-    for test_file in test_files {
-        let (_, file_super_index) = class_index_for_file(
-            test_file,
-            pkg_class_indexes,
-            fixture_class_index,
-            class_module_index,
-            class_superclass_index,
-        );
-        let Ok(source) = fs::read_to_string(test_file) else {
-            continue;
-        };
-        let (module, _) = beamtalk_core::source_analysis::parse(
-            beamtalk_core::source_analysis::lex_with_eof(&source),
-        );
-        if test_class_in_module(&module, &file_super_index).is_some() {
-            extensions.add_module(&module, test_file.as_std_path());
-        }
-    }
-    extensions
-}
-
-/// Whether a test file's analysis may lift the dependency guard (ADR 0070
-/// WS3, BT-4608): every dependency's extensions were loaded, and the file
-/// has no deprecated `// @load` directives — those pull in arbitrary files
-/// whose extensions are not in the index.
-fn test_file_dependency_extensions_complete(
-    pipeline_complete: bool,
-    load_files: &[String],
-) -> bool {
-    pipeline_complete && load_files.is_empty()
 }
 
 /// Phase 1: Discover test classes, compile test files and doc tests.
@@ -1516,20 +1413,6 @@ fn discover_and_compile_tests(pipeline: &mut TestPipeline) -> Result<()> {
 
     // Clone test_files to avoid borrow conflict with pipeline fields.
     let test_files = pipeline.test_files.clone();
-
-    // The extensions of every test file that will be compiled and loaded,
-    // so a test calling a helper extension declared in a sibling test file
-    // is not reported once the dependency guard lifts (ADR 0070 WS3,
-    // BT-4608). Collected after the fixtures are merged, so a test class
-    // inheriting from a fixture class is recognised.
-    let test_file_extensions = collect_test_file_extensions(
-        &test_files,
-        &pipeline.pkg_class_indexes,
-        &pipeline.fixture_class_index,
-        &pipeline.class_module_index,
-        &pipeline.class_superclass_index,
-    );
-    pipeline.extension_index.merge(&test_file_extensions);
 
     for test_file in &test_files {
         compile_single_test_file(
@@ -1691,11 +1574,6 @@ fn compile_single_test_file(
         pre_loaded_protocol_defs: pipeline.fixture_protocol_defs.defs.clone(),
         pre_loaded_protocol_sources: pipeline.fixture_protocol_defs.sources.clone(),
         pre_loaded_aliases: pipeline.all_alias_infos.clone(),
-        extension_index: pipeline.extension_index.clone(),
-        dependency_extensions_complete: test_file_dependency_extensions_complete(
-            pipeline.dependency_extensions_complete,
-            &load_files,
-        ),
     };
 
     // Handle deprecated @load directives as fallback.
@@ -2116,91 +1994,6 @@ fn report_results(
 mod tests {
     use super::*;
 
-    /// Only test files that will be compiled and loaded (they define a test
-    /// class) contribute extensions; a helper-only file does not, so its
-    /// extension cannot hide a does-not-understand that fails at runtime.
-    #[test]
-    fn test_file_extensions_come_only_from_compiled_test_files() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let with_test = dir.join("shape_test.bt");
-        fs::write(
-            &with_test,
-            "TestCase subclass: ShapeTest\n  testShape => self assertShape: 1\n\n\
-             Object >> assertShape: x => x\n",
-        )
-        .unwrap();
-        let helper_only = dir.join("helpers.bt");
-        fs::write(&helper_only, "Object >> unloadedHelper => 1\n").unwrap();
-
-        let extensions = collect_test_file_extensions(
-            &[with_test, helper_only],
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-        );
-        let selectors: HashSet<String> = extensions
-            .entries()
-            .keys()
-            .map(|key| key.selector.to_string())
-            .collect();
-        assert!(selectors.contains("assertShape:"), "{selectors:?}");
-        assert!(!selectors.contains("unloadedHelper"), "{selectors:?}");
-    }
-
-    /// A test file with a deprecated `// @load` keeps the dependency guard
-    /// on: the loaded file's extensions are not in the index.
-    #[test]
-    fn load_directive_keeps_the_dependency_guard_on() {
-        assert!(test_file_dependency_extensions_complete(true, &[]));
-        assert!(!test_file_dependency_extensions_complete(
-            true,
-            &["examples/helper.bt".to_string()]
-        ));
-        assert!(!test_file_dependency_extensions_complete(false, &[]));
-    }
-
-    /// Fixture extension methods reach test files' hierarchies too, so a
-    /// test calling one is not reported once the dependency guard lifts.
-    #[test]
-    fn fixture_class_indexes_collect_fixture_extensions() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        fs::write(dir.join("helpers.bt"), "String >> slug -> String => self\n").unwrap();
-
-        let (_, _, _, _, _, _, extensions) =
-            build_fixture_class_indexes(&[dir.join("helpers.bt")]).unwrap();
-        assert!(
-            extensions
-                .entries()
-                .keys()
-                .any(|key| key.selector == "slug"),
-            "{extensions:?}"
-        );
-    }
-
-    /// The test pipeline scans only a package's `src/`; a package without
-    /// one keeps the dependency guard on, since its own extensions are not
-    /// in the index.
-    #[test]
-    fn package_without_src_keeps_the_dependency_guard_on() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let consumer = crate::commands::deps::test_support::consumer_with_fresh_path_dependency(
-            &root,
-            &[("ext.bt", "Object >> fromDependency -> Integer => 1\n")],
-            "",
-            &[],
-        );
-        let manifest = manifest::parse_manifest_full(&consumer.join("beamtalk.toml"))
-            .unwrap()
-            .package;
-
-        let (_, _, _, _, _, _, _, complete) = build_merged_class_indexes(&[(consumer, manifest)]);
-        assert!(!complete);
-    }
-
     /// Pins the summary line's display format. See [`summary_line`] for the
     /// format's history and why it's still worth pinning.
     #[test]
@@ -2372,7 +2165,7 @@ mod tests {
         .unwrap();
 
         let files = vec![dir.join("counter.bt")];
-        let (module_index, superclass_index, _class_infos, protocol_infos, _alias_infos, _defs, _) =
+        let (module_index, superclass_index, _class_infos, protocol_infos, _alias_infos, _defs) =
             build_fixture_class_indexes(&files).unwrap();
         assert_eq!(
             module_index.get("Counter").map(String::as_str),
@@ -2402,7 +2195,7 @@ mod tests {
 
         // fixture_module_name uses the file stem only, so scheme_env.bt → bt@scheme_env
         let files = vec![subdir.join("scheme_env.bt")];
-        let (module_index, superclass_index, _class_infos, protocol_infos, _alias_infos, _defs, _) =
+        let (module_index, superclass_index, _class_infos, protocol_infos, _alias_infos, _defs) =
             build_fixture_class_indexes(&files).unwrap();
         assert_eq!(
             module_index.get("SchemeEnv").map(String::as_str),
@@ -2900,7 +2693,7 @@ mod tests {
     fn test_compile_scope_matches_build() {
         use beamtalk_core::semantic_analysis::KnowledgeScope;
 
-        // A package file without dependencies: project-complete, no dep guard.
+        // A package file: project-complete knowledge, as `build` declares.
         let (_temp, dir) = temp_utf8_dir();
         fs::write(
             dir.join("beamtalk.toml"),
@@ -2911,35 +2704,18 @@ mod tests {
         fs::create_dir_all(&src_dir).unwrap();
         let file = src_dir.join("my_test.bt");
         fs::write(&file, "").unwrap();
-        let scope = test_compile_scope(&file);
-        let (scope, has_deps) = (scope.knowledge_scope, scope.has_package_dependencies);
-        assert_eq!(scope, KnowledgeScope::ProjectComplete);
-        assert!(!has_deps);
-
-        // A package file with dependencies: the pre-WS3 unknown-extension
-        // guard applies, exactly as `build` sets it.
-        let (_temp, dir) = temp_utf8_dir();
-        fs::write(
-            dir.join("beamtalk.toml"),
-            "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n\n[dependencies]\nfoo = { path = \"../foo\" }\n",
-        )
-        .unwrap();
-        let src_dir = dir.join("test");
-        fs::create_dir_all(&src_dir).unwrap();
-        let file = src_dir.join("my_test.bt");
-        fs::write(&file, "").unwrap();
-        let scope = test_compile_scope(&file);
-        let (scope, has_deps) = (scope.knowledge_scope, scope.has_package_dependencies);
-        assert_eq!(scope, KnowledgeScope::ProjectComplete);
-        assert!(has_deps);
+        assert_eq!(
+            test_compile_scope(&file).knowledge_scope,
+            KnowledgeScope::ProjectComplete
+        );
 
         // A manifest-less file keeps the conservative default.
         let (_temp, dir) = temp_utf8_dir();
         let file = dir.join("loose.bt");
         fs::write(&file, "").unwrap();
-        let scope = test_compile_scope(&file);
-        let (scope, has_deps) = (scope.knowledge_scope, scope.has_package_dependencies);
-        assert_eq!(scope, KnowledgeScope::ModuleOnly);
-        assert!(!has_deps);
+        assert_eq!(
+            test_compile_scope(&file).knowledge_scope,
+            KnowledgeScope::ModuleOnly
+        );
     }
 }

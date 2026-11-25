@@ -104,7 +104,6 @@ fn test_abstract_instantiation_in_standalone_method() {
 
     let standalone = StandaloneMethodDefinition {
         class_name: Identifier::new("Foo", test_span()),
-        package: None,
         is_class_method: false,
         method: MethodDefinition {
             body: vec![bare(make_spawn_expr("Shape"))],
@@ -157,7 +156,6 @@ fn test_actor_new_error_in_standalone_method() {
 
     let standalone = StandaloneMethodDefinition {
         class_name: Identifier::new("Foo", test_span()),
-        package: None,
         is_class_method: false,
         method: MethodDefinition {
             body: vec![bare(new_expr)],

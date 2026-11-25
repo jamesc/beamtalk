@@ -61,7 +61,6 @@ impl Backend {
             type_cache: Mutex::new(LoadedTypeCache::default()),
             preload_budget_remaining: Mutex::new(PRELOAD_MAX_FILES),
             preload_coverage_partial: std::sync::atomic::AtomicBool::new(false),
-            dependency_extensions_unknown: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             fail_next_root_walk: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
@@ -658,8 +657,7 @@ impl Backend {
     /// open files regardless. Non-`NotFound` I/O errors and parse failures are
     /// logged as `WARN` so the mismatch is discoverable. A multi-root workspace merges
     /// every root's table into one (later roots win on category collisions);
-    /// like the dependency guard (`dependency_extensions_unknown`), this is a whole-session
-    /// simplification, not a per-file lookup.
+    /// this is a whole-session simplification, not a per-file lookup.
     ///
     /// Loaded once at startup (mirrors [`Self::load_type_cache`]) —
     /// `beamtalk.toml` edits made while the server is running require an LSP
@@ -736,7 +734,6 @@ impl Backend {
                     .flat_map(|root| {
                         std::iter::once(root.clone()).chain(
                             super::config::root_dependencies(root)
-                                .found
                                 .into_iter()
                                 .map(|dep| dep.root.into_std_path_buf()),
                         )
@@ -799,14 +796,8 @@ impl Backend {
                     // Nothing was indexed: that is partial coverage, never a
                     // licence to claim completeness.
                     tracing::warn!(%e, "startup preload walk task failed");
-                    // Nor of dependency loading: keep the guard on.
                     PreloadedFiles {
                         budget_exhausted: true,
-                        dependencies: super::config::DependencyLoad {
-                            declared: true,
-                            loaded: false,
-                            src_dirs: Vec::new(),
-                        },
                         ..PreloadedFiles::default()
                     }
                 }
@@ -863,30 +854,6 @@ impl Backend {
         // ran first and exhausted the budget must not be overwritten to
         // complete by this walk over `config.roots` alone.
         svc.set_project_complete(!self.preload_coverage_is_partial());
-        // ADR 0100's pre-WS3 guard (BT-4611): on unless every declared
-        // dependency was loaded completely. Sticky, so a package root
-        // `did_open` loaded before this ran keeps its own verdict.
-        self.record_dependency_load(&mut svc, &loaded.dependencies);
-    }
-
-    /// Folds one preload walk's dependency loading into the session's sticky
-    /// pre-WS3 guard verdict and installs it (BT-4611). Called with the
-    /// walk's files already indexed, so a dependency file's parse errors are
-    /// known — the CLI's per-file completeness rule.
-    fn record_dependency_load(
-        &self,
-        svc: &mut beamtalk_language_service::SimpleLanguageService,
-        dependencies: &super::config::DependencyLoad,
-    ) {
-        let any_incomplete_file = svc.any_incomplete_file_under(&dependencies.src_dirs);
-        if dependencies.extensions_unknown(any_incomplete_file) {
-            self.dependency_extensions_unknown
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-        svc.set_dependency_extensions_unknown(
-            self.dependency_extensions_unknown
-                .load(std::sync::atomic::Ordering::SeqCst),
-        );
     }
 
     /// Per-open-file package root discovery (BT-4158).
@@ -998,7 +965,6 @@ impl Backend {
             if loaded.budget_exhausted {
                 svc.set_project_complete(false);
             }
-            self.record_dependency_load(&mut svc, &loaded.dependencies);
         }
         self.load_type_cache(&all_roots).await;
         self.load_diagnostics_table(&all_roots).await;

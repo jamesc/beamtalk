@@ -1150,7 +1150,6 @@ mod tests {
         );
         let standalone = StandaloneMethodDefinition {
             class_name: Identifier::new("Counter", ts()),
-            package: None,
             is_class_method: false,
             method,
             span: ts(),

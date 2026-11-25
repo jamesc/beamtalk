@@ -472,14 +472,10 @@ pub fn declared_shape_migrations(class: &ClassDefinition) -> Vec<(u32, EcoString
 ///
 /// Example: `Counter >> increment => self.value := self.value + 1`
 /// Example: `Counter class >> withInitial: n => self spawnWith: #{value => n}`
-/// Example: `json@Parser >> lenientParse: input => ...` (cross-package extension, ADR 0070)
 #[derive(Debug, Clone, PartialEq)]
 pub struct StandaloneMethodDefinition {
     /// The class this method belongs to.
     pub class_name: Identifier,
-    /// Optional package qualifier for cross-package extensions (ADR 0070).
-    /// E.g., `json` in `json@Parser >> lenientParse: input => ...`
-    pub package: Option<Identifier>,
     /// Whether this is a class-side method (`Counter class >> ...`).
     pub is_class_method: bool,
     /// The method definition.

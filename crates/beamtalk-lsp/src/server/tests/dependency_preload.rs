@@ -1,14 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0070 WS3 in the editor (BT-4611): the LSP preloads every declared
-//! dependency's source — path dependencies included — and lifts ADR 0100's
-//! pre-WS3 dependency guard only when that loading was complete, with the
-//! CLI's rule. A missing selector then reports does-not-understand. (ADR 0152
-//! removed cross-file extension methods, so a dependency contributes classes
-//! only.)
+//! Dependency source in the editor (BT-4611): the LSP preloads every declared
+//! dependency's source, path dependencies included, so a missing selector on a
+//! dependency's class reports does-not-understand. (ADR 0152 removed
+//! cross-file extension methods, so a dependency contributes classes only and
+//! nothing can add a selector from outside.)
 
-use super::super::config::{DependencyLoad, collect_preload_files, root_dependencies};
+use super::super::config::{collect_preload_files, root_dependencies};
 use super::*;
 
 /// The producer: one class.
@@ -91,8 +90,8 @@ fn dnu_for<'a>(messages: &'a [String], selector: &str) -> Vec<&'a String> {
 
 const USES_WHISPER: &str = "Object subclass: Main\n  run => Codec new whisper\n";
 
-async fn assert_guard_lifted(kind: DepKind, label: &str) {
-    let temp = unique_temp_dir(&format!("beamtalk_lsp_dep_guard_{label}"));
+async fn assert_missing_selector_reports_dnu(kind: DepKind, label: &str) {
+    let temp = unique_temp_dir(&format!("beamtalk_lsp_dep_preload_{label}"));
 
     let app =
         consumer_with_dependency(&temp.join("whisper"), kind, &[("codec.bt", PRODUCER_CLASS)]);
@@ -108,54 +107,13 @@ async fn assert_guard_lifted(kind: DepKind, label: &str) {
 }
 
 #[tokio::test]
-async fn path_dependency_lifts_the_guard() {
-    assert_guard_lifted(DepKind::Path, "path").await;
+async fn path_dependency_reports_a_missing_selector() {
+    assert_missing_selector_reports_dnu(DepKind::Path, "path").await;
 }
 
 #[tokio::test]
-async fn fetched_git_dependency_lifts_the_guard() {
-    assert_guard_lifted(DepKind::Git, "git").await;
-}
-
-#[tokio::test]
-async fn a_dependency_with_a_parse_error_keeps_the_guard_on() {
-    let temp = unique_temp_dir("beamtalk_lsp_dep_guard_parse_error");
-    let app = consumer_with_dependency(
-        &temp,
-        DepKind::Path,
-        &[
-            ("codec.bt", PRODUCER_CLASS),
-            ("broken.bt", "Object >> ((( =>\n"),
-        ],
-    );
-    let messages = diagnostics_for_main(&app, USES_WHISPER).await;
-    assert!(
-        dnu_for(&messages, "whisper").is_empty(),
-        "a dependency file that failed to parse may hide an extension, so the \
-         guard stays on, got {messages:?}"
-    );
-    let _ = fs::remove_dir_all(&temp);
-}
-
-#[tokio::test]
-async fn a_declared_dependency_missing_on_disk_keeps_the_guard_on() {
-    let temp = unique_temp_dir("beamtalk_lsp_dep_guard_missing");
-    let app = consumer_with_dependency(&temp, DepKind::Path, &[("codec.bt", PRODUCER_CLASS)]);
-    // A second, unfetched git dependency.
-    fs::write(
-        app.join("beamtalk.toml"),
-        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\
-         producer = { path = \"../producer\" }\n\
-         remote = { git = \"https://example.com/remote.git\", tag = \"v1\" }\n",
-    )
-    .expect("rewrite consumer manifest");
-    let messages = diagnostics_for_main(&app, USES_WHISPER).await;
-    assert!(
-        dnu_for(&messages, "whisper").is_empty(),
-        "an unfetched dependency's extensions are unknown, so the guard stays on, \
-         got {messages:?}"
-    );
-    let _ = fs::remove_dir_all(&temp);
+async fn fetched_git_dependency_reports_a_missing_selector() {
+    assert_missing_selector_reports_dnu(DepKind::Git, "git").await;
 }
 
 #[test]
@@ -177,9 +135,7 @@ fn root_dependencies_finds_path_dependencies_transitively() {
     .expect("write leaf manifest");
 
     let deps = root_dependencies(&app);
-    assert!(deps.declared);
-    assert!(deps.all_found);
-    let srcs: Vec<_> = deps.found.iter().map(|d| d.src.clone()).collect();
+    let srcs: Vec<_> = deps.iter().map(|d| d.src.clone()).collect();
     assert_eq!(
         srcs,
         [
@@ -207,46 +163,6 @@ fn collect_preload_files_preloads_path_dependency_sources() {
         "a path dependency's source must be preloaded, got {:?}",
         loaded.user_files
     );
-    assert_eq!(
-        loaded.dependencies,
-        DependencyLoad {
-            declared: true,
-            loaded: true,
-            src_dirs: vec![temp.join("producer").join("src")],
-        }
-    );
-    let _ = fs::remove_dir_all(&temp);
-}
-
-#[test]
-fn a_malformed_dependency_table_keeps_the_guard_on() {
-    let temp = unique_temp_dir("beamtalk_lsp_dep_guard_malformed");
-    fs::create_dir_all(temp.join("src")).expect("create src");
-    fs::write(
-        temp.join("beamtalk.toml"),
-        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nbad = 42\n",
-    )
-    .expect("write manifest");
-    let loaded = collect_preload_files(PreloadConfig {
-        roots: vec![temp.clone()],
-        stdlib_dirs: vec![],
-    });
-    assert!(loaded.dependencies.declared);
-    assert!(!loaded.dependencies.loaded);
-    assert!(loaded.dependencies.extensions_unknown(false));
-    let _ = fs::remove_dir_all(&temp);
-}
-
-#[test]
-fn a_package_without_dependencies_has_the_guard_off() {
-    let temp = unique_temp_dir("beamtalk_lsp_dep_guard_none");
-    write_manifest_with_git_deps(&temp, "app", &[]);
-    let loaded = collect_preload_files(PreloadConfig {
-        roots: vec![temp.clone()],
-        stdlib_dirs: vec![],
-    });
-    assert!(!loaded.dependencies.declared);
-    assert!(!loaded.dependencies.extensions_unknown(false));
     let _ = fs::remove_dir_all(&temp);
 }
 
@@ -256,7 +172,7 @@ fn a_package_without_dependencies_has_the_guard_off() {
 /// internal).
 #[tokio::test]
 async fn path_dependency_files_are_stamped_with_their_own_package() {
-    let temp = unique_temp_dir("beamtalk_lsp_dep_guard_stamping");
+    let temp = unique_temp_dir("beamtalk_lsp_dep_preload_stamping");
     let app = consumer_with_dependency(&temp, DepKind::Path, &[("codec.bt", PRODUCER_CLASS)]);
     let (service, _socket) = tower_lsp::LspService::new(Backend::new);
     let backend: &Backend = service.inner();

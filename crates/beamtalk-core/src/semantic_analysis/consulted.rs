@@ -17,9 +17,6 @@
 //!   records that name;
 //! - a whole-collection scan (`class_names`, iteration, "any class …" queries)
 //!   sets that store's `scanned_*` flag;
-//! - a read that depends on package-level state that is not fully loaded
-//!   (`dependency_extensions_unknown`) sets
-//!   [`ConsultedSurface::extensions_unknown`].
 //!
 //! The stores (`ClassHierarchy`'s class map, `ProtocolRegistry`,
 //! `AliasRegistry`) keep their maps private, so no *external* read can bypass
@@ -59,7 +56,7 @@ pub struct ConsultedSurface {
     /// Names looked up individually.
     pub names: BTreeSet<EcoString>,
     /// A whole-hierarchy scan of the class map happened: the file depends on
-    /// every class (and extension) signature.
+    /// every class signature.
     pub scanned_classes: bool,
     /// A scan of the protocol registry happened: the file depends on every protocol.
     pub scanned_protocols: bool,
@@ -71,19 +68,13 @@ pub struct ConsultedSurface {
     /// (BT-4791) — not on every alias. The build keys it on a digest of just
     /// those problems, which is constant while no alias collides or cycles.
     pub alias_seeding: bool,
-    /// An extension-related read happened while dependency extensions were
-    /// not all loaded: a later phase must treat the file as depending on everything.
-    pub extensions_unknown: bool,
 }
 
 impl ConsultedSurface {
     /// True when nothing cross-file was consulted.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.names.is_empty()
-            && !self.scanned_all()
-            && !self.alias_seeding
-            && !self.extensions_unknown
+        self.names.is_empty() && !self.scanned_all() && !self.alias_seeding
     }
 
     /// True when any store was scanned as a whole.
@@ -195,18 +186,6 @@ pub(crate) fn record_scan(kind: ScanKind) {
                     ScanKind::Aliases => s.scanned_aliases = true,
                     ScanKind::AliasSeeding => s.alias_seeding = true,
                 }
-            }
-        });
-    }
-}
-
-/// Record an extension-related read made while dependency extensions are unknown.
-#[inline]
-pub(crate) fn record_extensions_unknown() {
-    if ACTIVE.with(Cell::get) {
-        RECORDER.with(|r| {
-            if let Some(s) = r.borrow_mut().as_mut() {
-                s.extensions_unknown = true;
             }
         });
     }
@@ -335,10 +314,9 @@ mod tests {
     }
 
     #[test]
-    fn registry_scans_record_scanned_all_and_unknown_extensions_are_flagged() {
+    fn registry_scans_record_scanned_all() {
         let protocols = ProtocolRegistry::new();
         let aliases = AliasRegistry::new();
-        let mut hierarchy = ClassHierarchy::with_builtins();
         let scope = ConsultedScope::begin();
         let _ = protocols.protocols().count();
         let s = scope.finish();
@@ -346,15 +324,6 @@ mod tests {
         let scope = ConsultedScope::begin();
         let _ = aliases.aliases().count();
         assert!(scope.finish().scanned_aliases);
-
-        let scope = ConsultedScope::begin();
-        let _ = hierarchy.dependency_extensions_unknown();
-        assert!(scope.finish().is_empty(), "known extensions record nothing");
-        hierarchy.set_dependency_extensions_unknown(true);
-        let scope = ConsultedScope::begin();
-        let _ = hierarchy.dependency_extensions_unknown();
-        let s = scope.finish();
-        assert!(s.extensions_unknown, "{s:?}");
     }
 
     #[test]

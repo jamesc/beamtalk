@@ -472,63 +472,6 @@ fn diagnostics_applies_severity_overrides() {
     );
 }
 
-/// ADR 0100 Rule 2 WS1: a standalone extension defined in one
-/// file must be visible to another file's diagnostics — the false `Dnu`
-/// hint on a same-project cross-file extension disappears.
-#[test]
-fn diagnostics_resolve_cross_file_extension_via_project_index() {
-    let mut service = SimpleLanguageService::new();
-    let ext_file = Utf8PathBuf::from("src/StringShout.bt");
-    let use_file = Utf8PathBuf::from("src/UseShout.bt");
-
-    service.update_file(
-        ext_file.clone(),
-        "String >> shoutLouder => self\n".to_string(),
-    );
-    service.update_file(
-        use_file.clone(),
-        "Object subclass: UseShout\n  class demo =>\n    \"abc\" shoutLouder\n".to_string(),
-    );
-
-    let diags = service.diagnostics(&use_file);
-    let dnu: Vec<_> = diags
-        .iter()
-        .filter(|d| d.message.contains("shoutLouder"))
-        .collect();
-    assert!(
-        dnu.is_empty(),
-        "cross-file extension `String >> shoutLouder` should resolve, got: {dnu:?}"
-    );
-}
-
-/// Removing the defining file makes the extension unresolved again.
-#[test]
-fn diagnostics_cross_file_extension_gone_after_remove() {
-    let mut service = SimpleLanguageService::new();
-    let ext_file = Utf8PathBuf::from("src/StringShout.bt");
-    let use_file = Utf8PathBuf::from("src/UseShout.bt");
-
-    service.update_file(
-        ext_file.clone(),
-        "String >> shoutLouder => self\n".to_string(),
-    );
-    service.update_file(
-        use_file.clone(),
-        "Object subclass: UseShout\n  class demo =>\n    \"abc\" shoutLouder\n".to_string(),
-    );
-    service.remove_file(&ext_file);
-
-    let diags = service.diagnostics(&use_file);
-    let dnu: Vec<_> = diags
-        .iter()
-        .filter(|d| d.message.contains("shoutLouder"))
-        .collect();
-    assert!(
-        !dnu.is_empty(),
-        "after removing the defining file the extension should be unresolved again"
-    );
-}
-
 /// Opening a stdlib source file must not emit "conflicts with
 /// stdlib class" diagnostics for every class the file defines. The
 /// language service now sets `stdlib_mode = true` for files tracked as

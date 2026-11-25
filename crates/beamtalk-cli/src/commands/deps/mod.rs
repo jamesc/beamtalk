@@ -327,7 +327,6 @@ fn collect_fresh_deps(
             protocol_defs,
             alias_infos,
             protocol_sources,
-            extensions,
         ) = path::with_dependency_closure(&mut resolved, &dependencies, &dep.name, |prior| {
             path::build_dep_class_index(&dep.root, &dep.name, prior)
         })?;
@@ -352,7 +351,6 @@ fn collect_fresh_deps(
             is_direct: dep.is_direct,
             via_chain: dep.via_chain.clone(),
             stubs_dir: dep.stubs_dir.clone(),
-            extensions,
         });
     }
 
@@ -1551,7 +1549,6 @@ mod tests {
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
-            extensions: beamtalk_project::dependency_extensions::DependencyExtensions::default(),
         }];
 
         clean_stale_deps(&root, &resolved).unwrap();
@@ -1587,8 +1584,6 @@ mod tests {
                 is_direct: true,
                 via_chain: Vec::new(),
                 stubs_dir: None,
-                extensions: beamtalk_project::dependency_extensions::DependencyExtensions::default(
-                ),
             },
             path::ResolvedDependency {
                 name: "b".to_string(),
@@ -1603,8 +1598,6 @@ mod tests {
                 is_direct: true,
                 via_chain: Vec::new(),
                 stubs_dir: None,
-                extensions: beamtalk_project::dependency_extensions::DependencyExtensions::default(
-                ),
             },
         ];
 

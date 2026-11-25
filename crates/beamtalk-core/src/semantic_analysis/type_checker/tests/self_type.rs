@@ -637,7 +637,6 @@ fn infer_method_return_types_collects_standalone_methods() {
     let mut module = make_module(vec![]);
     module.method_definitions = vec![StandaloneMethodDefinition {
         class_name: ident("Widget"),
-        package: None,
         is_class_method: false,
         method: method_unannotated("label", vec![str_lit("ok")]),
         span: span(),

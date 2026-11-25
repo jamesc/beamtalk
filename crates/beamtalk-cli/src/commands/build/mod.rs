@@ -169,16 +169,9 @@ pub(crate) fn prepare_options(
     // a manifest-less directory build skips Pass 1 entirely — both keep the
     // conservative `ModuleOnly` default.
     let mut options = options.clone();
-    // Pre-WS3 dependency guard: until dependency extensions are loaded, a
-    // package with dependencies has no receiver whose method surface is
-    // provably complete. Start conservative (on whenever there are
-    // dependencies); analysis lifts it once Pass 1 has loaded every
-    // dependency's extensions (`ClassHierarchyContext::
-    // dependency_extensions_complete`; ADR 0070 WS3, BT-4608).
-    // Both flags come from the rule `lint`/`test` share.
+    // The scope comes from the rule `lint`/`test` share.
     let scope =
         beamtalk_package::manifest::PackageCheckerScope::for_manifest(env.full_manifest.as_ref());
-    options.dependency_extensions_unknown = scope.has_package_dependencies;
     // ADR 0070 Phase 2: a `pkg@Class` qualifier must name a declared
     // dependency, the package itself or the stdlib. `None` (no manifest)
     // skips the check.
@@ -275,8 +268,6 @@ pub(crate) fn new_compile_context<'a>(
             pre_loaded_protocol_defs: index.all_protocol_defs.clone(),
             pre_loaded_protocol_sources: index.all_protocol_sources.clone(),
             pre_loaded_aliases: index.all_alias_infos.clone(),
-            extension_index: index.extension_index.clone(),
-            dependency_extensions_complete: index.dependency_extensions_complete,
         },
         dep_registry: if index.dep_registry.is_empty() {
             None

@@ -45,17 +45,13 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
     };
 
     let options = crate::CompilerOptions::default();
-    let result =
-        analyse_full(
-            &module,
-            AnalysisContext::default()
-                .with_options(&options)
-                .with_pre_loaded_classes(vec![dummy_class])
-                .with_pre_loaded_protocols(vec![fixture_protocol])
-                .with_cross_file_extensions(
-                    &crate::compilation::extension_index::ExtensionIndex::new(),
-                ),
-        );
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default()
+            .with_options(&options)
+            .with_pre_loaded_classes(vec![dummy_class])
+            .with_pre_loaded_protocols(vec![fixture_protocol]),
+    );
 
     let unresolved: Vec<_> = result
         .diagnostics
@@ -119,17 +115,13 @@ fn pre_loaded_synthetic_protocol_class_entry_does_not_shadow_protocol() {
     );
 
     let options = crate::CompilerOptions::default();
-    let result =
-        analyse_full(
-            &module,
-            AnalysisContext::default()
-                .with_options(&options)
-                .with_pre_loaded_classes(vec![synthetic_entry])
-                .with_pre_loaded_protocols(protocol_infos)
-                .with_cross_file_extensions(
-                    &crate::compilation::extension_index::ExtensionIndex::new(),
-                ),
-        );
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default()
+            .with_options(&options)
+            .with_pre_loaded_classes(vec![synthetic_entry])
+            .with_pre_loaded_protocols(protocol_infos),
+    );
 
     let false_mismatches: Vec<_> = result
         .diagnostics
@@ -201,20 +193,16 @@ fn pre_loaded_alias_is_seeded_and_current_module_wins() {
         current_package: Some("app".to_string()),
         ..Default::default()
     };
-    let result =
-        analyse_full(
-            &module,
-            AnalysisContext::default()
-                .with_options(&options)
-                .with_pre_loaded_aliases(vec![
-                    cross_file_alias,
-                    shadowed_alias,
-                    foreign_internal_alias,
-                ])
-                .with_cross_file_extensions(
-                    &crate::compilation::extension_index::ExtensionIndex::new(),
-                ),
-        );
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default()
+            .with_options(&options)
+            .with_pre_loaded_aliases(vec![
+                cross_file_alias,
+                shadowed_alias,
+                foreign_internal_alias,
+            ]),
+    );
 
     assert!(
         result
@@ -271,16 +259,12 @@ fn pre_loaded_internal_alias_from_same_package_is_still_seeded() {
         current_package: Some("json".to_string()),
         ..Default::default()
     };
-    let result =
-        analyse_full(
-            &module,
-            AnalysisContext::default()
-                .with_options(&options)
-                .with_pre_loaded_aliases(vec![same_package_internal_alias])
-                .with_cross_file_extensions(
-                    &crate::compilation::extension_index::ExtensionIndex::new(),
-                ),
-        );
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default()
+            .with_options(&options)
+            .with_pre_loaded_aliases(vec![same_package_internal_alias]),
+    );
 
     assert!(
         result.alias_registry.has_alias("ParserState"),
@@ -338,16 +322,12 @@ fn referenced_aliases_records_a_seeded_cross_package_alias_and_excludes_a_foreig
         current_package: Some("app".to_string()),
         ..Default::default()
     };
-    let result =
-        analyse_full(
-            &module,
-            AnalysisContext::default()
-                .with_options(&options)
-                .with_pre_loaded_aliases(vec![public_dependency_alias, foreign_internal_alias])
-                .with_cross_file_extensions(
-                    &crate::compilation::extension_index::ExtensionIndex::new(),
-                ),
-        );
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default()
+            .with_options(&options)
+            .with_pre_loaded_aliases(vec![public_dependency_alias, foreign_internal_alias]),
+    );
 
     // (a) The public dependency alias is seeded and, once referenced by
     // `TimeoutUser`'s parameter, recorded as a dependency edge — exactly

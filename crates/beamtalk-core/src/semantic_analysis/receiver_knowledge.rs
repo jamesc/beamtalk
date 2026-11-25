@@ -11,8 +11,7 @@
 //! about the same call site (ADR 0100, "Implementation" section).
 //!
 //! [`KnowledgeScope`] tracks how far cross-file knowledge extends and guards
-//! against parse-error-degraded method surfaces; project-wide extensions are
-//! visible under it, completing ADR 0100 Rule 2. `has_cross_file_parent`
+//! against parse-error-degraded method surfaces, completing ADR 0100 Rule 2. `has_cross_file_parent`
 //! fires only when an ancestor is genuinely absent from project-complete
 //! knowledge (or in `ModuleOnly` contexts) — suppression replaced by
 //! resolution, staying conservative where knowledge is genuinely incomplete.
@@ -42,8 +41,8 @@ pub enum KnowledgeScope {
     #[default]
     ModuleOnly,
     /// The orchestrator walked the entire project: every project file's
-    /// classes are present in the hierarchy (extensions and protocols ride
-    /// the same channel as they land).
+    /// classes are present in the hierarchy (protocols ride the same channel as
+    /// they land).
     ProjectComplete,
 }
 
@@ -98,8 +97,6 @@ impl ReceiverKnowledge {
 ///   suppression (ADR 0100 Rule 2).
 /// - [`ClassHierarchy::has_incomplete_surface_in_chain`] — a chain class was
 ///   extracted from a file with parse errors.
-/// - The pre-WS3 dependency guard — `ProjectComplete` scope with
-///   `dependency_extensions_unknown` set (see `classify_receiver` body).
 ///
 /// **Not folded in here:** the "sealed value type dispatches class-side
 /// messages through instance dispatch" carve-out (`is_sealed_with_instance_dnu`)
@@ -142,20 +139,6 @@ pub fn classify_receiver(
     // to silence rather than emitting hints against a surface the checker
     // never fully saw.
     if hierarchy.has_incomplete_surface_in_chain(class_name) {
-        return ReceiverKnowledge::Open;
-    }
-
-    // ADR 0100 Rule 2, pre-WS3 guard: a dependency can extend *any*
-    // class — including `Object`, which every receiver's chain reaches — so
-    // while any dependency's extensions are not loaded (WS3, ADR 0070
-    // amendment; BT-4608) no receiver's surface is provably complete. Once
-    // the orchestrator has loaded every dependency's extensions into the
-    // cross-file extension index, the flag is clear and resolution replaces
-    // the suppression. Only applied under `ProjectComplete`: `ModuleOnly`
-    // contexts (REPL, isolated files) keep today's behaviour.
-    if hierarchy.knowledge_scope() == KnowledgeScope::ProjectComplete
-        && hierarchy.dependency_extensions_unknown()
-    {
         return ReceiverKnowledge::Open;
     }
 
@@ -309,52 +292,6 @@ mod tests {
         hierarchy.add_from_beam_meta(vec![parent, child]);
         assert_eq!(
             classify_receiver("CleanChild2", &hierarchy, false),
-            ReceiverKnowledge::ClosedComplete
-        );
-    }
-
-    #[test]
-    fn dependency_guard_opens_everything_under_project_complete() {
-        // Pre-WS3 guard: a dependency can extend any class
-        // (including Object), so while any dependency's extensions are
-        // unknown no receiver's surface is provably complete.
-        let mut hierarchy = ClassHierarchy::with_builtins();
-        hierarchy.add_from_beam_meta(vec![base_class_info("LocalThing", "Object")]);
-        hierarchy.set_knowledge_scope(KnowledgeScope::ProjectComplete);
-        hierarchy.set_dependency_extensions_unknown(true);
-        assert_eq!(
-            classify_receiver("LocalThing", &hierarchy, false),
-            ReceiverKnowledge::Open
-        );
-        assert_eq!(
-            classify_receiver("String", &hierarchy, false),
-            ReceiverKnowledge::Open
-        );
-    }
-
-    #[test]
-    fn no_dependencies_stays_closed_complete_under_project_complete() {
-        // Dependency-free packages — and packages whose every dependency's
-        // extensions were loaded (BT-4608), which leave the flag clear —
-        // get full Hint precision.
-        let mut hierarchy = ClassHierarchy::with_builtins();
-        hierarchy.add_from_beam_meta(vec![base_class_info("LocalThing", "Object")]);
-        hierarchy.set_knowledge_scope(KnowledgeScope::ProjectComplete);
-        assert_eq!(
-            classify_receiver("LocalThing", &hierarchy, false),
-            ReceiverKnowledge::ClosedComplete
-        );
-    }
-
-    #[test]
-    fn dependency_guard_not_applied_under_module_only() {
-        // ModuleOnly contexts (REPL, isolated files) keep today's
-        // behaviour — the ADR 0100 REPL example (`"hello" reverssed` hints)
-        // must survive even if a deps flag were somehow set.
-        let mut hierarchy = ClassHierarchy::with_builtins();
-        hierarchy.set_dependency_extensions_unknown(true);
-        assert_eq!(
-            classify_receiver("String", &hierarchy, false),
             ReceiverKnowledge::ClosedComplete
         );
     }

@@ -51,12 +51,6 @@ pub fn fold_same_file_extensions(module: &mut Module) -> Vec<Diagnostic> {
     }
     let defs = std::mem::take(&mut module.method_definitions);
     for def in defs {
-        // A package-qualified target (`pkg@Foo >> m`) names another package's
-        // class, even next to a local `Foo`: leave it for the cross-file error.
-        if def.package.is_some() {
-            module.method_definitions.push(def);
-            continue;
-        }
         let Some(class) = module
             .classes
             .iter_mut()
@@ -113,16 +107,12 @@ pub fn reject_cross_file_extensions(module: &Module) -> Vec<Diagnostic> {
         .method_definitions
         .iter()
         .map(|def| {
-            let target = match &def.package {
-                Some(pkg) => format!("{}@{}", pkg.name, def.class_name.name),
-                None => def.class_name.name.to_string(),
-            };
+            let target = def.class_name.name.as_str();
             let side = if def.is_class_method { " class" } else { "" };
-            if def.package.is_none()
-                && module
-                    .protocols
-                    .iter()
-                    .any(|p| p.name.name == def.class_name.name)
+            if module
+                .protocols
+                .iter()
+                .any(|p| p.name.name == def.class_name.name)
             {
                 return Diagnostic::error(
                     format!(
@@ -224,28 +214,6 @@ mod tests {
             !diags[0].message.contains("not defined in this file"),
             "{diags:?}"
         );
-    }
-
-    #[test]
-    fn package_qualified_target_next_to_a_protocol_gets_the_cross_file_message() {
-        let mut m = parse_ok("Protocol define: P\n  size -> Integer\n\nother@P >> extra => 1\n");
-        assert!(fold_same_file_extensions(&mut m).is_empty());
-        let diags = reject_cross_file_extensions(&m);
-        assert_eq!(diags.len(), 1, "{diags:?}");
-        assert!(
-            diags[0].message.contains("not defined in this file"),
-            "{diags:?}"
-        );
-    }
-
-    #[test]
-    fn package_qualified_target_next_to_a_local_class_is_not_folded() {
-        let mut m = parse_ok("Object subclass: Foo\n  foo => 1\n\nother@Foo >> bar => 2\n");
-        assert!(fold_same_file_extensions(&mut m).is_empty());
-        assert_eq!(m.classes[0].methods.len(), 1);
-        let diags = reject_cross_file_extensions(&m);
-        assert_eq!(diags.len(), 1, "{diags:?}");
-        assert!(diags[0].message.contains("other@Foo"), "{diags:?}");
     }
 
     #[test]

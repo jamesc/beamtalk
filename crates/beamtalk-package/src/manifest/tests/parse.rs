@@ -20,24 +20,12 @@ fn package_checker_scope_covers_every_manifest_state() {
     let root = write_manifest(&dir, "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n");
     let scope = package_checker_scope(Some(&root));
     assert_eq!(scope.knowledge_scope, KnowledgeScope::ProjectComplete);
-    assert!(!scope.has_package_dependencies);
     assert_eq!(scope.package_name.as_deref(), Some("my_pkg"));
-
-    let dir = TempDir::new().unwrap();
-    let root = write_manifest(
-        &dir,
-        "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n\n[dependencies]\nfoo = { path = \"../foo\" }\n",
-    );
-    assert!(package_checker_scope(Some(&root)).has_package_dependencies);
 
     let dir = TempDir::new().unwrap();
     let root = write_manifest(&dir, "[package\nnot toml");
     let scope = package_checker_scope(Some(&root));
     assert_eq!(scope.knowledge_scope, KnowledgeScope::ProjectComplete);
-    assert!(
-        scope.has_package_dependencies,
-        "a malformed manifest conservatively assumes dependencies"
-    );
     assert_eq!(scope.package_name, None);
 
     let dir = TempDir::new().unwrap();

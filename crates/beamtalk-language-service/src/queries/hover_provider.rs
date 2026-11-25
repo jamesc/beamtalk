@@ -325,7 +325,7 @@ fn find_hover_in_declarations(
         if offset >= smd.class_name.span.start() && offset < smd.class_name.span.end() {
             return Some(class_reference_hover_info(
                 &smd.class_name.name,
-                smd.package.as_ref().map(|p| &p.name),
+                None,
                 smd.class_name.span,
                 hierarchy,
             ));

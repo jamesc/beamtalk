@@ -955,52 +955,33 @@ fn parse_qualified_lowercase_after_at_is_error() {
 }
 
 // ========================================================================
-// Package-qualified standalone method definitions (ADR 0070 Phase 2)
+// Package-qualified standalone method definitions (removed, ADR 0152)
 // ========================================================================
 
 #[test]
-fn parse_qualified_standalone_method_definition() {
-    // `json@Parser >> lenient => 42` — cross-package extension method
-    let module = parse_ok("json@Parser >> lenient => 42");
-    assert_eq!(module.method_definitions.len(), 1);
-    let method_def = &module.method_definitions[0];
-    assert_eq!(method_def.class_name.name.as_str(), "Parser");
-    let pkg = method_def
-        .package
-        .as_ref()
-        .expect("expected package qualifier");
-    assert_eq!(pkg.name.as_str(), "json");
-    assert!(!method_def.is_class_method);
-}
-
-#[test]
-fn parse_qualified_standalone_class_method() {
-    // `json@Parser class >> fromString: s => 42` — cross-package class-side extension
-    let module = parse_ok("json@Parser class >> fromString: s => 42");
-    assert_eq!(module.method_definitions.len(), 1);
-    let method_def = &module.method_definitions[0];
-    assert_eq!(method_def.class_name.name.as_str(), "Parser");
-    assert_eq!(
-        method_def
-            .package
-            .as_ref()
-            .expect("expected package")
-            .name
-            .as_str(),
-        "json"
-    );
-    assert!(method_def.is_class_method);
-}
-
-#[test]
-fn parse_unqualified_standalone_method_has_no_package() {
-    // `Counter >> increment => 42` — no package qualifier
-    let module = parse_ok("Counter >> increment => 42");
-    assert_eq!(module.method_definitions.len(), 1);
-    assert!(
-        module.method_definitions[0].package.is_none(),
-        "unqualified standalone method should have package = None"
-    );
+fn package_qualified_standalone_method_is_a_parse_error() {
+    // `json@Parser >> lenient => 42` was a cross-package extension method
+    // (ADR 0070). It must stay an error, not parse silently.
+    for src in [
+        "json@Parser >> lenient => 42",
+        "json@Parser class >> fromString: s => 42",
+    ] {
+        let (module, diagnostics) = parse(lex_with_eof(src));
+        assert!(
+            diagnostics.iter().any(|d| d.severity == Severity::Error
+                && d.message
+                    .contains("package-qualified extension methods were removed")),
+            "{src}: expected the ADR 0152 parse error, got: {diagnostics:?}"
+        );
+        // The definition still parses (without its qualifier), so the rest of
+        // the file does not cascade into further errors.
+        assert_eq!(module.method_definitions.len(), 1, "{src}");
+        assert_eq!(
+            module.method_definitions[0].class_name.name.as_str(),
+            "Parser",
+            "{src}"
+        );
+    }
 }
 
 // ========================================================================
