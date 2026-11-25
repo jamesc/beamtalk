@@ -339,14 +339,12 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | `crates/beamtalk-codegen/src/core_erlang/intrinsics/object.rs` | 26 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/control_flow/exception_handling.rs` | 25 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/tests/gen_server/class_registration.rs` | 24 | edit | BT-5153 |
-| `crates/beamtalk-cli/tests/cli/cli_class_var_agreement.rs` | 24 | delete | BT-5151 |
 | `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/class_info.rs` | 23 | edit | BT-5154 |
 | `crates/beamtalk-codegen/src/core_erlang/class_builder_source.rs` | 23 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/class_method_codegen.rs` | 22 | edit | BT-5153 |
 | `crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs` | 21 | edit | BT-5153 |
 | `crates/beamtalk-language-service/src/queries/diagnostic_provider.rs` | 19 | edit | BT-5154 |
 | `crates/beamtalk-core/src/semantic_analysis/block_facts/tests/mutation.rs` | 19 | edit | BT-5153 |
-| `crates/beamtalk-codegen/tests/class_var_agreement.rs` | 19 | delete | BT-5151 |
 | `crates/beamtalk-codegen/src/core_erlang/expr_shape.rs` | 19 | edit | BT-5153 |
 | `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/mod.rs` | 18 | edit | BT-5154 |
 | `crates/beamtalk-codegen/src/core_erlang/threaded_ir/verify.rs` | 18 | edit | BT-5153 |
@@ -356,7 +354,6 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | `crates/beamtalk-codegen/src/core_erlang/class_registry.rs` | 16 | edit | BT-5153 |
 | `crates/beamtalk-core/src/source_analysis/parser/tests/expression_tests.rs` | 15 | edit | BT-5152 |
 | `crates/beamtalk-codegen/src/core_erlang/generator/mod.rs` | 15 | edit | BT-5153 |
-| `crates/beamtalk-core/src/test_helpers/class_var_program.rs` | 14 | delete | BT-5151 |
 | `crates/beamtalk-core/src/semantic_analysis/facts.rs` | 14 | edit | BT-5154 |
 | `crates/beamtalk-codegen/src/core_erlang/threaded_ir/ir.rs` | 14 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/tests/racing_operand_corpus.rs` | 14 | edit | BT-5153 |
@@ -426,7 +423,7 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | `crates/beamtalk-cli/src/commands/util.rs` | 4 | edit | BT-5149 |
 | `crates/beamtalk-cli/src/commands/build_stdlib/tests/generators.rs` | 4 | edit | BT-5154 |
 | `crates/beamtalk-language-service/src/tests/goto_definition_navigation.rs` | 3 | edit | BT-5154 |
-| `crates/beamtalk-core/src/test_helpers/statement_probes.rs` | 3 | edit | BT-5151 |
+| `crates/beamtalk-core/src/test_helpers/statement_probes.rs` | 3 | edit (the ADR 0131 probe matrix, not the fuzz harness; it compiles until the parser rejects `classState:`) | BT-5152 |
 | `crates/beamtalk-core/src/semantic_analysis/validators/native_validators.rs` | 3 | edit | BT-5154 |
 | `crates/beamtalk-core/src/semantic_analysis/validators/mod.rs` | 3 | edit | BT-5154 |
 | `crates/beamtalk-core/src/semantic_analysis/type_checker/tests/bt4043_metaclass_slot_assignment.rs` | 3 | edit | BT-5154 |
@@ -612,7 +609,7 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | `docs/beamtalk-language-features.md`, `beamtalk-native-erlang.md`, `beamtalk-packages.md`, `beamtalk-principles.md`, `beamtalk-syntax-rationale.md`, `beamtalk-tooling.md`, `stdlib-implementation-status.md` | prose | BT-5157 |
 | `docs/development/{erlang-guidelines,class-var-catcher-audit,actor-state-cell,benchmarks,environment-variables,debugging,surface-parity,testing-strategy}.md`, `docs/agents/expanded.md`, `AGENTS.md`, `CHANGELOG.md` | prose, rules | BT-5157 (`class-var-catcher-audit.md` is deleted by BT-5159) |
 | `docs/ADR/*.md` (49 files mention class variables) | annotate 0013, 0019, 0084, 0109, 0111, 0123, 0124, 0127, 0129, 0130, 0133, 0137, 0142 as the ADR lists | BT-5157 |
-| `.github/workflows/fuzz.yml` (job `class-var-corpus`), `fuzz-triage.yml`, `.github/claude-fuzz-triage-prompt.md`, `.github/scripts/repro-class-var.sh`, `ci-platforms.yml` | nightly job and triage path; `ci-platforms.yml` is not in the ADR's list: read it | BT-5151 |
+| `.github/workflows/fuzz.yml` (job `class-var-corpus`), `fuzz-triage.yml`, `.github/claude-fuzz-triage-prompt.md`, `ci-platforms.yml` | nightly job and triage path; `ci-platforms.yml` is not in the ADR's list: read it | BT-5151 |
 | `Justfile` (`test-class-var-corpus`, `lint-class-var-catchers`), `scripts/ci/lint-class-var-catchers.escript`, `scripts/ci/fixtures/lint-class-var-catchers/*`, `scripts/ci/lint-workaround-comments.sh` | recipes and lint | BT-5151 (corpus), BT-5159 (catcher lint) |
 | `editors/vscode/syntaxes/beamtalk.tmLanguage.json`, `editors/github-chrome/test/tokenize.test.js` | highlight `classState:` as a keyword | BT-5152 decides: the parser keeps the arm to emit the error, so the highlighter can too |
 | `stdlib/src/{behaviour,class_builder,system_navigation,process_dictionary,proto_object,block,telemetry}.bt` | `classVarNames`, `allClassVarNames`, `performLocally:`, class-side slot branches, doc comments | BT-5155 |

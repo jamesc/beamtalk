@@ -52,7 +52,7 @@ doctor:
 # `test-corpus`): in the three compiler packages only, the lib/unit tests whose
 # module path says agreement or corpus, and the integration binaries that are
 # nothing but such proofs. Scoped by package so that a same-named test in another
-# crate (beamtalk-examples' class_corpus, beamtalk-cli's cli_class_var_agreement)
+# crate (beamtalk-examples' class_corpus)
 # stays in the fast tier, where its own crate's changes run it; the gate that
 # decides when this tier runs (scripts/ci/corpus-gate.sh) watches these three
 # crates plus the stdlib/ and examples/ sources the corpora compile and the
@@ -1601,7 +1601,7 @@ test: test-rust test-stdlib test-bunit test-runtime test-metamorphic
 # Two tiers. `test-rust` is the fast tier: everything except `corpus_tests`.
 # `test-corpus` is the slow tier: the ADR 0111/0131 state-threading agreement
 # and corpus proofs (`local_producer_agreement*`, `*_corpus`,
-# `class_var_agreement`, `repl_local_producer`, ...), about 230 tests that
+# `repl_local_producer`, ...), about 230 tests that
 # enumerate frames x constructs x statements and compile every cell, split per
 # frame family so no test runs over a minute (BT-3888): roughly 10 of the
 # suite's 18 minutes on a 4-core runner. They only prove things
@@ -2344,28 +2344,6 @@ test-metamorphic *ARGS: build-stdlib
     @cargo run --bin beamtalk --quiet -- test-metamorphic --warnings-as-errors --quiet {{ ARGS }}
     @echo "✅ Metamorphic tests complete"
 
-# ADR 0130 (BT-3705, enabled by BT-3713): the class-variable agreement corpus.
-# Draws every generated shape (loops, on:do:/ensure:/tryDo:, stored closures,
-# writing and late-bound self-sends, `local_touch`, in open / sealed /
-# override spellings), runs each program on a BEAM and asserts all three
-# spellings answer the ADR 0130 §4 reference interpretation, then runs the
-# in-process codegen properties (verifier on, valid Core Erlang, catch-boundary
-# text check). Both are normal
-# tests, but a plain `cargo test` (`just test-rust`) runs a reduced draw (16
-# programs on a BEAM, 64 codegen cases; BT-3767); this recipe runs the full
-# budget and prints the failure report. Knobs (env vars):
-# CV_CORPUS_CASES (programs on a BEAM, default here 48),
-# PROPTEST_CASES (in-process codegen cases, default here 512),
-# CV_CORPUS_SHAPES (e.g. `do,cond,helper_send`; names in `Shapes::names`).
-# The nightly `class-var-corpus` job in .github/workflows/fuzz.yml runs this
-# recipe with a larger budget.
-# Measure the in-process failure rate with:
-#   cargo test -p beamtalk-codegen --test class_var_agreement measure_failure_rate -- --ignored --nocapture
-test-class-var-corpus $CV_CORPUS_CASES=env_var_or_default("CV_CORPUS_CASES", "48") $PROPTEST_CASES=env_var_or_default("PROPTEST_CASES", "512"): build-stdlib
-    @echo "🧬 Running the class-variable agreement corpus ({{ CV_CORPUS_CASES }} programs on a BEAM, {{ PROPTEST_CASES }} codegen cases)..."
-    cargo test -p beamtalk-cli --test cli class_var_agreement_enabled_shapes -- --nocapture
-    cargo test -p beamtalk-codegen --test class_var_agreement
-
 # ADR 0131 oracle (BT-3841; the check retired in BT-3913): compile every probe
 # cell, run it on a BEAM and compare with the checked-in measured table
 # (`semantic_analysis/tests/adr0131_statement_measured.tsv`,
@@ -2527,13 +2505,10 @@ llvm_cov_ignore := '(beamtalk-parity-tests/|beamtalk-build/|build-corpus/src/mai
 #   - live_front's suite: needs a real `dist-liveview` release + a running
 #     workspace, built only by manual setup (see the module doc comment in
 #     crates/beamtalk-desktop-broker/tests/live_front.rs) — never CI.
-#   - dump_program: an `#[ignore]`d reproduction aid that panics unless CV_SEED is
-#     set; it is run by hand to print a generated program (BT-3733).
 #   - adr0131_measure_*: the ADR 0131 oracle harness runs on a BEAM; it is run
 #     by `just measure-adr0131-statements` (BT-3841, BT-3913).
 coverage_rust_skip := "--skip valid_specs_pass_dialyzer_validation \
     --skip negative_test_invalid_spec_detected_by_dialyzer \
-    --skip dump_program \
     --skip adr0131_measure_ \
     --skip predict_node_name_matches_a_live_epmd_registration \
     --skip resolve_registered_node_name_matches_a_live_epmd_registration \

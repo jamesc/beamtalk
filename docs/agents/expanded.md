@@ -749,13 +749,9 @@ missing:
    state, counted loops, folds, `on:do:` or late-bound sends — and run the generated programs through debug codegen (verifier
    on), `erlc`, and execution against an oracle (for class-variable
    semantics: the direct-write spelling, the sealed spelling and the
-   late-bound spelling of one program must agree). For class variables the
-   generator and the ADR 0130 §4 reference interpreter already exist
-   (`arb_class_program`, `test_helpers/class_var_program.rs`; execution in
-   `beamtalk-cli/tests/cli/cli_class_var_agreement.rs`, in-process verifier
-   check in `beamtalk-codegen/tests/class_var_agreement.rs`,
-   `just test-class-var-corpus`): extend them with the new shape rather than
-   writing a second generator. Cite the run in the PR.
+   late-bound spelling of one program must agree). Extend the existing generators
+   (`arb_program` in `test_helpers.rs`, the corpus families) with the new shape
+   rather than writing a second generator. Cite the run in the PR.
    A differential run against `main` only shows the PR changed nothing; it
    cannot find a pre-existing bug, so it does not satisfy this point.
 5. **Known-wrong pins are debts, not documentation.** A test that pins a

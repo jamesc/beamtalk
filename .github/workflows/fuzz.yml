@@ -297,69 +297,6 @@ jobs:
           SEED_COUNT=$(ls -1 stdlib/test/*.bt tests/repl-protocol/cases/*.btscript 2>/dev/null | wc -l)
           echo "**Corpus size:** $SEED_COUNT files (stdlib/test + tests/repl-protocol/cases, live)" >> $GITHUB_STEP_SUMMARY
 
-  # BT-3767: the ADR 0130 class-variable agreement corpus at a nightly budget.
-  # PR CI runs a reduced draw inside plain `cargo test` (16 programs on a
-  # BEAM, 64 codegen cases); `just test-class-var-corpus` defaults to 48 and
-  # 512; this job runs 4x both.
-  class-var-corpus:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Beamtalk toolchain
-        uses: ./.github/actions/setup-beamtalk
-        with:
-          rust-cache-save-if: 'true'
-
-      # continue-on-error so the artifact step below runs (a plain failing step
-      # skips every later step that is not `if: always()`/`failure()`);
-      # "Fail on corpus failure" re-fails the job afterwards. The Linear issue is
-      # filed by fuzz-triage.yml, which runs when this workflow fails. The output
-      # is tee'd to a file so the report of failing (index, seed, size) pairs and
-      # program sources is also kept as a standalone artifact that is easy to
-      # download and search and survives log truncation (downloading it still
-      # needs a GitHub login, like the log).
-      - name: Run class-variable agreement corpus (192 programs, 2048 codegen cases)
-        id: corpus
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p target/class-var-corpus
-          just test-class-var-corpus 2>&1 | tee target/class-var-corpus/report.log
-        env:
-          CV_CORPUS_CASES: 192
-          PROPTEST_CASES: 2048
-
-      - name: Upload report on failure
-        if: steps.corpus.outcome == 'failure'
-        continue-on-error: true
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: class-var-corpus-report-${{ github.run_id }}
-          path: target/class-var-corpus/report.log
-          retention-days: 30
-
-      - name: Fail on corpus failure
-        if: steps.corpus.outcome == 'failure'
-        run: |
-          echo "class-var-corpus failed; see the uploaded report (fuzz-triage.yml files the Linear issue)"
-          exit 1
-
-      - name: Add to job summary
-        if: always()
-        run: |
-          echo "## Class-Variable Agreement Corpus Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ steps.corpus.outcome }}" = "success" ]; then
-            echo "✅ **Success:** 192 programs agreed on the BEAM; 2048 codegen cases verified" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ **Failure:** see the class-var-corpus-report-${{ github.run_id }} artifact (or the job log) for the per-program report (index, seed, size, cause, source)" >> $GITHUB_STEP_SUMMARY
-          fi
-
   extended-proptest:
     runs-on: ubuntu-latest
     timeout-minutes: 30

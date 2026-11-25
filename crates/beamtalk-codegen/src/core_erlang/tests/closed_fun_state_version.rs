@@ -8,9 +8,9 @@
 //! fold fun did not restore the generator's state version on exit, so inside a `StateAcc`
 //! loop the enclosing loop's next statement read (and rebound from) a `StateAcc1` that was
 //! only bound inside the fold fun: the `ThreadedIr` verifier's `UnboundVersion` /
-//! `NonLinearVersion` pair, found by the class-variable agreement corpus (seeds
-//! 4288439136652914866, 12525934088575929805 and 15420763691539516991 in
-//! `tests/class_var_agreement.rs`).
+//! `NonLinearVersion` pair, found by the since-removed class-variable agreement
+//! corpus (seeds 4288439136652914866, 12525934088575929805 and 15420763691539516991;
+//! the corpus was deleted in BT-5151).
 //!
 //! BT-3771 audited every other closed-`fun` lowering for the same shape. A closed `fun`
 //! restores the enclosing `state_version` in one of two shared places, never per call site:
