@@ -1,0 +1,10 @@
+# Build outputs
+/_build/
+*.beam
+*.core
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

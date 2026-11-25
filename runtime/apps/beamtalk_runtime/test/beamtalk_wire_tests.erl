@@ -101,9 +101,11 @@ test_value_instance_round_trip() ->
     ?assertEqual({beamtalk_shape, 'ShapePoint', 1, #{x => 3, y => 4}}, Encoded),
 
     {ok, Decoded} = beamtalk_wire:decode(Encoded),
-    ?assertEqual(
-        #{'$beamtalk_class' => 'ShapePoint', '__shape_version__' => 1, x => 3, y => 4}, Decoded
-    ).
+    %% A Value that crossed the wire equals the one that was sent: decoding
+    %% adds no '__shape_version__' (Values never carry it; BT-5143), so `=:=`
+    %% and `hash` agree with a freshly built equal instance.
+    ?assertEqual(Instance, Decoded),
+    ?assertNot(maps:is_key('__shape_version__', Decoded)).
 
 %%====================================================================
 %% Builtin collections — contents walked
@@ -127,7 +129,7 @@ test_builtin_collection_with_values() ->
         #{
             '$beamtalk_class' => 'Array',
             data => #{
-                0 => #{'$beamtalk_class' => 'ShapePoint', '__shape_version__' => 1, x => 1, y => 2}
+                0 => #{'$beamtalk_class' => 'ShapePoint', x => 1, y => 2}
             }
         },
         DecArray
@@ -150,7 +152,7 @@ test_dictionary_walks_keys_and_values() ->
     ?assertEqual(
         #{
             origin => #{
-                '$beamtalk_class' => 'ShapePoint', '__shape_version__' => 1, x => 5, y => 6
+                '$beamtalk_class' => 'ShapePoint', x => 5, y => 6
             },
             label => <<"hi">>
         },
@@ -260,8 +262,7 @@ test_nlr_tuple_walks_value_passes_state_raw() ->
 
     {ok, Decoded} = beamtalk_wire:decode(Encoded),
     ?assertEqual(
-        {'$bt_nlr', Token,
-            #{'$beamtalk_class' => 'ShapePoint', '__shape_version__' => 1, x => 7, y => 8}, State},
+        {'$bt_nlr', Token, #{'$beamtalk_class' => 'ShapePoint', x => 7, y => 8}, State},
         Decoded
     ).
 
@@ -278,7 +279,7 @@ test_nlr_legacy_3tuple() ->
     {ok, Decoded} = beamtalk_wire:decode(Encoded),
     ?assertEqual(
         {'$bt_nlr', Token, #{
-            '$beamtalk_class' => 'ShapePoint', '__shape_version__' => 1, x => 9, y => 10
+            '$beamtalk_class' => 'ShapePoint', x => 9, y => 10
         }},
         Decoded
     ).

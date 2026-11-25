@@ -553,12 +553,14 @@ test_pack_unpack_nested_value_round_trip() ->
 
     {ok, Unpacked} = beamtalk_shape_migration:unpack(Envelope),
     ?assertEqual('ShapeBox', maps:get('$beamtalk_class', Unpacked)),
-    ?assertEqual(1, maps:get('__shape_version__', Unpacked)),
+    %% Values never carry '__shape_version__' (BT-5143): an unpacked Value
+    %% must equal a freshly built one.
+    ?assertNot(maps:is_key('__shape_version__', Unpacked)),
     ?assertEqual(<<"hi">>, maps:get(label, Unpacked)),
     ?assertEqual(History, maps:get(history, Unpacked)),
     %% The nested envelope was unpacked back into a tagged instance map.
     ?assertEqual(
-        #{'$beamtalk_class' => 'ShapePoint', '__shape_version__' => 1, x => 3, y => 4},
+        #{'$beamtalk_class' => 'ShapePoint', x => 3, y => 4},
         maps:get(origin, Unpacked)
     ).
 

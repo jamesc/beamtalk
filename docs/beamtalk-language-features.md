@@ -7657,12 +7657,19 @@ Announcements (typed domain events you subscribe to in app logic):
 
 ## Distribution — Location-Transparent Actors (ADR 0126)
 
-Beamtalk actors are **location-transparent**: the same `.` (sync), `!`
-(cast), and `Future`-returning async sends that work between local actors
-work identically against an actor running on another BEAM node in the
-cluster. There is no special "remote actor" type — an `Actor` reference is
-an `Actor` reference, whether the process behind it lives here or across the
-network. Distribution builds directly on the supervision, announcement, and
+Beamtalk actors are **location-transparent**: the same `.` (sync) and `!`
+(cast) sends that work between local actors work identically against an actor
+running on another BEAM node in the cluster. (`Future`-returning async sends
+do **not** cross nodes: they raise `unsupported_operation` at once, ADR 0126
+amendment BT-4989.) There is no special "remote actor" type — an `Actor`
+reference is an `Actor` reference, whether the process behind it lives here or
+across the network.
+
+A runnable three-node example, with a CI end-to-end run, is
+[`examples/cluster`](../examples/cluster/README.md): a coordinator farms jobs
+out to two worker nodes, loses one mid-call, and reassigns the work.
+
+Distribution builds directly on the supervision, announcement, and
 value-object machinery described earlier in this document; see
 [ADR 0126](ADR/0126-distribution-location-transparent-actors.md) for the full
 design, including the failure-mode analysis and security model this section
@@ -7755,6 +7762,13 @@ real operational cost, not just a lookup convenience:
 > also inherits the full-mesh registry's known scaling limits (every node
 > locks the global name table during a registration) — reach for it
 > deliberately, not as the default choice for cluster-wide lookup.
+
+> **Sync after connecting.** OTP's `global` shares names with a newly connected
+> node in the background, so a name registered (or looked up from the peer) in
+> the first moments after `connect` may not be visible yet and answers
+> `name_not_registered` for a fraction of a second. Call `Erlang global sync`
+> after connecting and before relying on a cluster-wide name, as
+> [`examples/cluster`](../examples/cluster/README.md) does.
 
 When a netsplit heals and the same global name was registered on both sides,
 Beamtalk's own resolver keeps the *older* registrant (by start time) and

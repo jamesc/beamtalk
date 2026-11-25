@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ClusterMonitor — records NodeUp / NodeDown announcements.
+///
+/// Announcement handlers run in transient processes, so they report into
+/// this actor instead of mutating anything themselves.
+Actor subclass: ClusterMonitor
+  state: ups = #()
+  state: downs = #()
+
+  nodeUp: name => self.ups := self.ups add: name
+
+  nodeDown: name => self.downs := self.downs add: name
+
+  ups => self.ups
+
+  downs => self.downs
+
+  hasSeenUp: name => self.ups includes: name
+
+  hasSeenDown: name => self.downs includes: name

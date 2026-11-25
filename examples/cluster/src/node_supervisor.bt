@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// NodeSupervisor — root supervisor of every cluster node.
+///
+/// Each node runs one locally supervised `Worker`. Workers the coordinator
+/// spawns remotely are *not* children of this tree (no link, ADR 0126 §3).
+Supervisor subclass: NodeSupervisor
+
+  strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+
+  childSpecs => #(Worker)

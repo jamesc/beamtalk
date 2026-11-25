@@ -1,0 +1,12 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "cluster"
+version = "0.1.0"
+description = "Multi-node cluster — ADR 0126 distribution exercised end to end"
+
+[application]
+supervisor = "NodeSupervisor"
+
+[dependencies]
