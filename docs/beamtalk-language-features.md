@@ -7836,6 +7836,10 @@ SystemAnnouncer current when: NodeShapeSkew do: [:e |
   Transcript showCr: e node name asString, ": ", e className asString,
     " local v", e localVersion printString, " remote v", e remoteVersion printString
 ]
+SystemAnnouncer current when: NodeVersionSkew do: [:e |
+  Transcript showCr: e node name asString, " runs Beamtalk ",
+    e remoteBeamtalkVersion printString, " wire v", e remoteWireVersion printString
+]
 ```
 
 - **`NodeUp`** / **`NodeDown`** fire for every visible node join/leave
@@ -7852,7 +7856,17 @@ SystemAnnouncer current when: NodeShapeSkew do: [:e |
   visible before the first send actually fails on it (the per-message check
   above is the real safety net). `aNode shapeSkew` (below) surfaces the same
   information as a point-in-time, queryable snapshot rather than only a
-  live event stream.
+  live event stream. The count is kept on both sides: when one node reloads
+  a class, both it and the peer announce `NodeShapeSkew` and update their
+  counts. A peer that disconnects drops out of the count.
+- **`NodeVersionSkew`** is announced once per connect (best-effort) when
+  the peer runs a different wire-format version (`localWireVersion` /
+  `remoteWireVersion`) or Beamtalk version (`localBeamtalkVersion` /
+  `remoteBeamtalkVersion`). A peer that cannot report its versions (too
+  old, or too slow to answer) is announced too, with `nil` remote fields.
+  Like `NodeShapeSkew`, it **never refuses the connection**: a Beamtalk
+  version mismatch is the normal state of a rolling upgrade. The
+  per-message `wire_version_unsupported` check stays the safety net.
 
 **Supervision-tree introspection reaches across nodes too:**
 `ProcessNavigation on: aNode` snapshots the *target* node's `default`-scope
@@ -9003,6 +9017,8 @@ anything                    // any diagnostic suppressed (discouraged — use a 
 | `dead_assignment` | `beamtalk lint`'s "assignment inside an escaping block" check *(lint-only, see below)* |
 | `lint` | Style/redundancy findings: `beamtalk lint`'s unnecessary-parentheses, redundant trailing `^`, cascade-candidate, … passes, plus the unreachable-code / shadowed-variable / unattached-doc-comment advisories *(lint-only, see below)* |
 | `all` | Any diagnostic on the following expression *(discouraged — use a specific category)* |
+
+**Not suppressible:** no `@expect` category, not even `all`, suppresses the error for a misplaced `Foo >> sel` definition: one whose class is not defined in the same file (ADR 0152), one on a protocol, or an instance-side one on a same-file `native:` actor (BT-5184). The method would never be compiled, so the file cannot be reported clean.
 
 **Lint-only categories (`dead_assignment`, `lint`, `actor_state_abroad`):** the diagnostics these suppress are produced only by `beamtalk lint`'s dedicated passes, which `beamtalk build`/`beamtalk test`, the LSP, and the REPL never run. Those surfaces therefore leave such a directive alone — neither satisfied nor reported stale — and only `beamtalk lint` validates it (BT-3384). `@expect lint` exists for test fixtures that deliberately pin a codegen shape the style lint would otherwise tell you to rewrite (e.g. a trailing `^` whose explicit-return lowering is the thing under test); ordinary code should just take the lint's advice.
 

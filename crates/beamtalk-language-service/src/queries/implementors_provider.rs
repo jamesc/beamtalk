@@ -12,8 +12,11 @@
 //!
 //! # Design
 //!
-//! Walks every indexed file's `module.classes` and `module.method_definitions`
-//! and emits one [`Location`] per `MethodDefinition` whose selector matches.
+//! Walks every indexed file's `module.classes` and emits one [`Location`] per
+//! `MethodDefinition` whose selector matches. A same-file `Foo >> sel` is
+//! folded into `Foo`'s body before indexing; a cross-file one is a compile
+//! error (ADR 0152) and stays in `module.method_definitions`, which this
+//! provider does not walk, so it is never an implementor.
 //! Mirrors `SystemNavigation implementorsOf:` semantics:
 //!
 //! * **Local methods only.** Inherited (un-overridden) methods are *not*
@@ -37,15 +40,13 @@
 //! selector→sites index) and emits one row per implementing class with
 //! `method`/`line` populated. The cold-file AST walker here is the
 //! parity-preserving fallback used when no runtime is attached or the
-//! `delegateToRuntime` flag is off — the extension-method case (ADR 0066)
-//! is the documented divergence: open-class extensions installed at runtime
-//! aren't visible to the AST walker until the file backing the extension
-//! is also indexed, which is fine for source-tree extensions but not for
-//! REPL-defined ones.
+//! `delegateToRuntime` flag is off. The documented divergence is a method
+//! defined live (REPL or IDE, ADR 0082): the runtime sees it, the AST walker
+//! does not until its class's file is re-indexed.
 //!
 //! # References
 //!
-//! - ADR 0066 (open-class extension methods)
+//! - ADR 0152 (cross-file extension methods removed)
 
 use crate::Location;
 use beamtalk_core::ast::Module;
@@ -76,13 +77,6 @@ pub fn find_implementors<'a>(
                 if method.selector.name() == selector_name {
                     results.push(Location::new(file_path.clone(), method.span));
                 }
-            }
-        }
-
-        // Standalone `Class >> selector => ...` method definitions.
-        for smd in &module.method_definitions {
-            if smd.method.selector.name() == selector_name {
-                results.push(Location::new(file_path.clone(), smd.method.span));
             }
         }
     }
@@ -173,16 +167,5 @@ mod tests {
 
         let impls = find_implementors("nonExistent", [(&file, &module)]);
         assert!(impls.is_empty());
-    }
-
-    #[test]
-    fn finds_standalone_method_definitions() {
-        // `Class >> selector` form (open-class extension in source).
-        let file = Utf8PathBuf::from("ext.bt");
-        let module = parse_source("Integer >> double => self * 2");
-
-        let impls = find_implementors("double", [(&file, &module)]);
-        assert_eq!(impls.len(), 1);
-        assert_eq!(impls[0].span, module.method_definitions[0].method.span);
     }
 }

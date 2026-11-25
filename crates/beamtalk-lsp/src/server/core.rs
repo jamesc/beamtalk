@@ -250,8 +250,7 @@ impl Backend {
     ///   when the flag is on; falls back to the in-process
     ///   [`SimpleLanguageService::find_selector_declarations`] walker
     ///   otherwise. The runtime path picks up live-edited methods (ADR
-    ///   0082, `ChangeLog` patches) and extension methods (ADR 0066) that the
-    ///   AST walker can't see.
+    ///   0082, `ChangeLog` patches) that the AST walker can't see.
     /// * [`NavQuery::ReferencesTo`] (class) → always the AST
     ///   [`SimpleLanguageService::find_class_declarations`] walker.
     ///   `beamtalk_xref` does not currently expose a "declaration site for

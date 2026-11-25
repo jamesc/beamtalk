@@ -76,6 +76,7 @@
     'NodeDown',
     'NodeShapeSkew',
     'NodeUp',
+    'NodeVersionSkew',
     'Number',
     'OS',
     'Object',

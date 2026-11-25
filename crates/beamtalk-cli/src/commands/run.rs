@@ -379,21 +379,14 @@ fn forwarded_exit_code(status: std::process::ExitStatus) -> Option<i32> {
     if status.success() {
         return None;
     }
-    if let Some(code) = status.code() {
-        return Some(code);
-    }
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;
-        status
-            .signal()
-            .filter(|&sig| sig != libc::SIGINT)
-            .map(|sig| 128 + sig)
+        if status.signal() == Some(libc::SIGINT) {
+            return None;
+        }
     }
-    #[cfg(not(unix))]
-    {
-        None
-    }
+    beamtalk_process::exit_code::status_code(status)
 }
 
 /// Run a class entry method inside a live shared workspace (ADR 0099 §3).

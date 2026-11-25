@@ -1,0 +1,22 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-process"
+description = "Shared leaf: OS child-process helpers (Windows Job Objects, terminate-then-kill escalation, shell exit codes)"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["subprocess", "process", "beam"]
+categories = ["development-tools"]
+
+[target.'cfg(windows)'.dependencies]
+# why: Win32 Job Object, thread-snapshot and process APIs behind `winjob`
+windows-sys.workspace = true
+
+[lints]
+workspace = true

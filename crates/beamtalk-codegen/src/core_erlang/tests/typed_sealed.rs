@@ -1332,6 +1332,7 @@ const KNOWN_TAGGED_BUILTINS: &[&str] = &[
     "NodeDown",
     "NodeShapeSkew",
     "NodeUp",
+    "NodeVersionSkew",
     "OS",
     "ObjectStateChanged",
     "Package",
