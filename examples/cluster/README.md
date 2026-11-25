@@ -113,11 +113,6 @@ cookie is a shared secret: anyone holding it has full control of every node
 
 ## Things To Know
 
-- **`global` needs a moment after nodes connect.** OTP's `global` module syncs
-  names in the background after a connection is made, so a `scope: #global`
-  lookup from a peer straight after `connect` can answer `name_not_registered`
-  for a fraction of a second. `Demo` calls `Erlang global sync` first. See the
-  PR notes for BT-5143.
 - **`halt` is not a crash.** `Worker>>dieMidCall:` uses `System halt:` to take
   the node down with a call in flight: no `terminate:`, no reply. The caller
   sees `node_down`.

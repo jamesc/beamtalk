@@ -351,3 +351,32 @@ netsplit_heal_resolves_conflict(Peer, PeerNode) ->
     %% is reconnected to it now, so rpc:call/4 would also work, but the
     %% control channel is already at hand).
     ok = peer:call(Peer, gen_server, stop, [PeerPid]).
+
+%%====================================================================
+%% Register right after connect (BT-5156)
+%%====================================================================
+
+register_right_after_connect_test_() ->
+    {timeout, 60, fun() ->
+        {ok, Peer, PeerNode} = beamtalk_dist_test_helper:start_peer("bt5156_connect"),
+        try
+            %% Drop the connection, then reconnect through `Node connect`
+            %% and register at once, with no explicit `global:sync/0`.
+            true = erlang:disconnect_node(PeerNode),
+            ?assertMatch(
+                {ok, _},
+                beamtalk_result:to_tagged_tuple(
+                    beamtalk_node:connect(beamtalk_node:from_atom(PeerNode))
+                )
+            ),
+            Name = beamtalk_test_unique:atom("bt5156_afterconnect"),
+            {ok, Pid} = beamtalk_actor_registry:'spawnAsGlobal'(Name, test_counter, 0),
+            try
+                ?assertEqual(Pid, rpc:call(PeerNode, global, whereis_name, [Name]))
+            after
+                gen_server:stop(Pid)
+            end
+        after
+            beamtalk_dist_test_helper:stop_peer(Peer)
+        end
+    end}.
