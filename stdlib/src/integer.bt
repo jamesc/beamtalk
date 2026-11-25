@@ -328,10 +328,18 @@ sealed typed Number subclass: Integer
   /// 1 to: 3 do: [:i | Transcript show: i]
   /// ```
   to: end :: Integer do: block :: Block(Integer, Object) -> Nil =>
+    (end isKindOf: Number) ifFalse: [
+      ^TypeError signal: "Interval limit must be a number"
+    ]
+    self runTo: end do: block
+
+  /// The recursive loop of `to:do:`. The limit is validated once by `to:do:`
+  /// (BT-5175).
+  internal runTo: end :: Number do: block :: Block(Integer, Object) -> Nil =>
     self <= end
       ifTrue: [
         block value: self
-        (self + 1) to: end do: block
+        (self + 1) runTo: end do: block
       ]
       ifFalse: [nil]
 
@@ -357,20 +365,6 @@ sealed typed Number subclass: Integer
       runToBy: end
       step: step
       do: block
-
-  /// The recursive loop of `to:by:do:`. The arguments are validated once by
-  /// `to:by:do:`, so each step only compares and recurses (BT-5167).
-  internal runToBy: end :: Number step: step :: Number do: block :: Block(Integer, Object) -> Nil =>
-    cond := (step > 0 and: [self <= end]) or: [step < 0 and: [self >= end]]
-    cond
-      ifTrue: [
-        block value: self
-        (self + step)
-          runToBy: end
-          step: step
-          do: block
-      ]
-      ifFalse: [nil]
 
   // === Interval construction ===
 
