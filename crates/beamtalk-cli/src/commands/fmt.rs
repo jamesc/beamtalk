@@ -30,7 +30,7 @@ use crate::commands::erlfmt;
 use crate::commands::util::write_atomic;
 use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
-use beamtalk_core::unparse::format_source;
+use beamtalk_core::unparse::{FormatError, format_source};
 use beamtalk_package::lint_pipeline::find_package_root;
 use camino::Utf8PathBuf;
 use miette::{IntoDiagnostic, Result};
@@ -121,10 +121,23 @@ fn collect_fmt_files(paths: &[String]) -> Result<CollectedFiles> {
 /// `check_only` is `false` the command writes formatted output back to each
 /// file that has changed; files with parse errors are skipped with a warning.
 pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
+    run_fmt_with(paths, check_only, format_source)
+}
+
+/// [`run_fmt`] with the `.bt` formatter supplied by the caller, so tests can
+/// drive the refusal path (BT-5183) without depending on a live formatter bug.
+fn run_fmt_with(
+    paths: &[String],
+    check_only: bool,
+    format: fn(&str) -> std::result::Result<String, FormatError>,
+) -> Result<()> {
     let collected = collect_fmt_files(paths)?;
 
     let mut changed_files: Vec<Utf8PathBuf> = Vec::new();
     let mut skipped_files: Vec<Utf8PathBuf> = Vec::new();
+    // Files the formatter refused because its output would have lost
+    // comments, respelled literals or changed the program (BT-5183).
+    let mut refused_files: Vec<Utf8PathBuf> = Vec::new();
     let mut erlfmt_error_files: Vec<Utf8PathBuf> = Vec::new();
 
     for file in &collected.bt_files {
@@ -147,13 +160,23 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
             continue;
         }
 
-        // For .bt files, run the canonical format pipeline. Returns None if
-        // the source has parse errors — formatting a broken file could corrupt
-        // it (the unparser converts Error nodes to comments).
-        let Some(formatted) = format_source(&original) else {
-            eprintln!("warning: skipping '{file}' (has parse errors)");
-            skipped_files.push(file.clone());
-            continue;
+        // For .bt files, run the canonical format pipeline. It refuses a
+        // source with parse errors — formatting a broken file could corrupt
+        // it (the unparser converts Error nodes to comments) — and any result
+        // that fails its round-trip check (a formatter bug), so a lossy
+        // rewrite never reaches the disk.
+        let formatted = match format(&original) {
+            Ok(formatted) => formatted,
+            Err(FormatError::ParseErrors) => {
+                eprintln!("warning: skipping '{file}' (has parse errors)");
+                skipped_files.push(file.clone());
+                continue;
+            }
+            Err(e) => {
+                eprintln!("error: not formatting '{file}': {e}");
+                refused_files.push(file.clone());
+                continue;
+            }
         };
 
         if formatted == original {
@@ -191,6 +214,14 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
                 eprintln!("warning: erlfmt failed: {e}");
             }
         }
+    }
+
+    if !refused_files.is_empty() {
+        let count = refused_files.len();
+        let plural = if count == 1 { "" } else { "s" };
+        miette::bail!(
+            "{count} file{plural} could not be formatted without losing source (formatter bug; files left unchanged)"
+        );
     }
 
     if check_only {
@@ -261,6 +292,35 @@ mod tests {
     /// Helper to run `run_fmt` on a single path.
     fn run_fmt_single(path: &str, check_only: bool) -> Result<()> {
         run_fmt(&[path.to_string()], check_only)
+    }
+
+    /// A formatter that always reports a lost comment, standing in for a
+    /// printer bug the round-trip check catches.
+    fn lossy_formatter(_: &str) -> std::result::Result<String, FormatError> {
+        Err(FormatError::CommentsChanged {
+            missing: vec!["// c".to_string()],
+            added: Vec::new(),
+        })
+    }
+
+    /// BT-5183: when the formatter's round-trip check refuses a file, `fmt`
+    /// leaves it byte-for-byte unchanged and exits non-zero, in both write and
+    /// check mode, rather than skipping it silently.
+    #[test]
+    fn fmt_refused_by_round_trip_check_leaves_file_and_fails() {
+        let source = "x foo: 1 // c\n  bar: 2\n";
+        for check_only in [false, true] {
+            let (_dir, path) = write_temp_bt(source);
+            let result = run_fmt_with(&[path.to_string()], check_only, lossy_formatter);
+            let err = result.expect_err("a refused file must fail the run");
+            assert!(
+                err.to_string()
+                    .contains("could not be formatted without losing source"),
+                "unexpected error: {err}"
+            );
+            let after = std::fs::read_to_string(path.as_std_path()).expect("read");
+            assert_eq!(after, source, "a refused file must not be rewritten");
+        }
     }
 
     #[test]

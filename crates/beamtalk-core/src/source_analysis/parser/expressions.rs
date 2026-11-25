@@ -27,7 +27,7 @@ use ecow::EcoString;
 use super::{Diagnostic, Parser, binary_binding_power};
 
 /// Helper function for parsing integers with radix notation.
-pub(super) fn parse_integer(s: &str) -> Result<i64, String> {
+pub(crate) fn parse_integer(s: &str) -> Result<i64, String> {
     if let Some((radix_str, digits)) = s.split_once('r') {
         let radix = radix_str
             .parse::<u32>()
@@ -1201,7 +1201,10 @@ impl Parser {
             TokenKind::Integer(s) => {
                 // Parse integer (handle radix notation like 16rFF)
                 match parse_integer(&s) {
-                    Ok(val) => Literal::Integer(val),
+                    Ok(val) => {
+                        self.number_spellings.push((span, s));
+                        Literal::Integer(val)
+                    }
                     Err(e) => {
                         self.diagnostics.push(Diagnostic::error(e, span));
                         return Expression::Error {
@@ -1217,7 +1220,10 @@ impl Parser {
                     // or that parse to `NaN`. A non-finite literal would otherwise reach
                     // codegen and emit `inf.0` / `NaN.0`, which Core Erlang cannot parse,
                     // surfacing as a confusing `erlc` failure instead of a diagnostic here.
-                    Ok(val) if val.is_finite() => Literal::Float(val),
+                    Ok(val) if val.is_finite() => {
+                        self.number_spellings.push((span, s));
+                        Literal::Float(val)
+                    }
                     Ok(_) => {
                         self.diagnostics.push(Diagnostic::error(
                             format!("Float literal out of range: {s}"),

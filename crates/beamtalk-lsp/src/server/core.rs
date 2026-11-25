@@ -1140,7 +1140,8 @@ impl Backend {
             svc.file_source(&path)?
         };
 
-        let formatted = format_source(&source)?;
+        // A parse error or a failed round-trip check (BT-5183) yields no edits.
+        let formatted = format_source(&source).ok()?;
 
         if formatted == source {
             return Some(vec![]);

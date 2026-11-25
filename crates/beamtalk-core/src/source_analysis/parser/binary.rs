@@ -896,6 +896,9 @@ impl Parser {
         // precedes digits, so `raw` may itself be negative (e.g. the second
         // `-` in `<<- -5:8>>` double-negates). Negation must not overflow:
         // `- -9223372036854775808` exceeds `i64::MAX` (review finding 2).
+        if parse_integer(&raw).is_ok() {
+            self.number_spellings.push((span, raw.clone()));
+        }
         let value = match parse_integer(&raw) {
             Ok(val) if !negated => Pattern::Literal(Literal::Integer(val), span),
             Ok(val) => {
@@ -940,6 +943,7 @@ impl Parser {
         let value = match raw.parse::<f64>() {
             // Reject values that overflow `f64` — same rule as `parse_literal`.
             Ok(val) if val.is_finite() => {
+                self.number_spellings.push((span, raw.clone()));
                 let val = if negated { -val } else { val };
                 // Negating a finite float stays finite.
                 Pattern::Literal(Literal::Float(val), span)

@@ -27,13 +27,13 @@ pub(in crate::server) struct ByteEdit {
 /// the byte range `start..end` of `source`.
 ///
 /// Returns `None` when the source has parse errors (formatting a broken file
-/// could corrupt it).
+/// could corrupt it) or the formatter's round-trip check refuses its output.
 pub(in crate::server) fn format_range_edits(
     source: &str,
     start: usize,
     end: usize,
 ) -> Option<Vec<ByteEdit>> {
-    let formatted = format_source(source)?;
+    let formatted = format_source(source).ok()?;
     if formatted == source {
         return Some(vec![]);
     }

@@ -6,9 +6,9 @@
 use super::*;
 
 #[test]
-fn format_source_returns_none_for_parse_errors() {
+fn format_source_refuses_parse_errors() {
     let result = format_source("@@@invalid beamtalk@@@");
-    assert!(result.is_none(), "parse errors must suppress formatting");
+    assert!(result.is_err(), "parse errors must suppress formatting");
 }
 
 #[test]

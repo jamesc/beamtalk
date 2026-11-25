@@ -73,6 +73,7 @@ pub use method_category::{
     categorize_methods_in_source, parse_divider_name,
 };
 pub use method_span::{MethodSide, SpanResolveError, resolve_method_span};
+pub(crate) use parser::parse_integer;
 pub use parser::{
     Diagnostic, DiagnosticCategory, DiagnosticNote, ProvisionOrigin, Severity,
     equality_operator_is_negated, is_equality_operator, is_input_complete,
