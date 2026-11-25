@@ -8,7 +8,7 @@
   - Removed: `clone`. No client sent it, and sending it now answers "Unknown operation".
   - Changed: `:exit`, `:quit` and Ctrl-D in the CLI REPL end the session on the node (`close`) instead of leaving it resumable for 4 hours.
   - New: `close` takes an optional `session` field naming another session to end. An unknown id closes nothing. Like `interrupt`, any client with the workspace cookie can use it.
-  - Changed: `kill` replies only once the actor has exited, and refuses a pid that has stopped or is not an actor (`actor_not_alive` / `not_an_actor`).
+  - Changed: `kill` replies only once the actor has exited. A pid that is not a live actor is still refused with `unknown_actor`; one that stops or turns out not to be an actor between that check and the kill is refused with `actor_not_alive` / `not_an_actor` instead of being reported as killed.
   - New: VS Code ends its session (`unsubscribe-logs`, then `close`) when it disconnects, and closes the session of a REPL terminal it started once that REPL exits. `beamtalk.logs.level` has a new `off` value that stops log streaming.
   - New: "Kill Actor" in the VS Code inspector and "Kill actor" in the LiveView Inspector (Owner only), each with a confirmation, followed by a fresh actor list.
   - Changed: the LiveView IDE closes a tab's session through the `close` op instead of a direct supervisor call.
