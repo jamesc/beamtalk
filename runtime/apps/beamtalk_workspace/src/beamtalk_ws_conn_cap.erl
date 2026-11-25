@@ -77,8 +77,11 @@ acquire() ->
 -spec release() -> ok.
 release() ->
     case ets:whereis(?TABLE) of
-        undefined -> ok;
-        _ -> ets:delete(?TABLE, self()), ok
+        undefined ->
+            ok;
+        _ ->
+            ets:delete(?TABLE, self()),
+            ok
     end.
 
 prune_and_fits(Limit) ->
