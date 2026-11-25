@@ -194,6 +194,11 @@ optfile_test_() ->
                 " {client, [{verify, verify_peer}]},"
                 " {server, [{certfile, \"c.pem\"}]}]."
             ),
+            Improper = Write(
+                "improper.conf",
+                "[{server, [{verify, verify_peer}, {fail_if_no_peer_cert, true}]},"
+                " {client, [{verify, verify_peer}]} | x]."
+            ),
             Stray = Write(
                 "stray.conf",
                 "[{server, [{verify, verify_peer}, {fail_if_no_peer_cert, true}]},"
@@ -224,6 +229,10 @@ optfile_test_() ->
                 ?_assertEqual(
                     {error, {optfile_malformed, Stray, {not_a_side, {verify, verify_none}}}},
                     beamtalk_dist_tls:check_optfile(Stray, [])
+                ),
+                ?_assertEqual(
+                    {error, {optfile_malformed, Improper, {not_a_list, x}}},
+                    beamtalk_dist_tls:check_optfile(Improper, [])
                 ),
                 ?_assert(
                     has(

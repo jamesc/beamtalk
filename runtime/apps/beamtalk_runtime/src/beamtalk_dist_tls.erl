@@ -205,7 +205,7 @@ format_error({peer_verification, Problems}) ->
 %%% ============================================================================
 
 %% `none`, or the first entry that is not `{server | client, list()}` or
-%% repeats a side.
+%% repeats a side, or the tail of an improper list.
 sides_problem(Opts) ->
     sides_problem(Opts, []).
 
@@ -219,7 +219,10 @@ sides_problem([{Side, List} | Rest], Seen) when
         false -> sides_problem(Rest, [Side | Seen])
     end;
 sides_problem([Other | _], _Seen) ->
-    {not_a_side, Other}.
+    {not_a_side, Other};
+sides_problem(Tail, _Seen) ->
+    %% The tail of an improper list.
+    {not_a_list, Tail}.
 
 problem_fix(server_verify_peer) ->
     "add {verify, verify_peer} to the server list";
