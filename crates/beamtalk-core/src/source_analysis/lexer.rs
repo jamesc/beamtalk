@@ -26,6 +26,7 @@ use std::str::CharIndices;
 
 use ecow::EcoString;
 
+use super::parser::MAX_NESTING_DEPTH;
 use super::{Span, Token, TokenKind, Trivia};
 
 /// A lexer that tokenizes Beamtalk source code.
@@ -50,6 +51,10 @@ pub struct Lexer<'src> {
     pending_tokens: Vec<Token>,
     /// Override span for the current token (used for `StringStart`).
     override_span: Option<Span>,
+    /// How many string interpolations this lexer is nested inside: each
+    /// interpolation body is lexed by a sub-lexer, so it is bounded by
+    /// [`MAX_NESTING_DEPTH`] (BT-5181).
+    interpolation_depth: usize,
 }
 
 impl std::fmt::Debug for Lexer<'_> {
@@ -72,6 +77,7 @@ impl<'src> Lexer<'src> {
             pending_trivia: Vec::new(),
             pending_tokens: Vec::new(),
             override_span: None,
+            interpolation_depth: 0,
         }
     }
 
@@ -857,9 +863,19 @@ impl<'src> Lexer<'src> {
                     TokenKind::Error(EcoString::from(message)),
                     Span::new(brace_start, interp.0),
                 ));
+            } else if self.interpolation_depth >= MAX_NESTING_DEPTH {
+                // Too deep to lex recursively: report the body as one error
+                // token instead of sub-lexing it.
+                tokens.push(Token::new(
+                    TokenKind::Error(EcoString::from(format!(
+                        "string interpolation nesting is too deep (maximum {MAX_NESTING_DEPTH} levels)"
+                    ))),
+                    Span::new(interp.0, interp.1),
+                ));
             } else {
                 let expr_source = self.text_for(Span::new(interp.0, interp.1));
-                let sub_lexer = Lexer::new(expr_source);
+                let mut sub_lexer = Lexer::new(expr_source);
+                sub_lexer.interpolation_depth = self.interpolation_depth + 1;
                 for sub_token in sub_lexer {
                     let adjusted_span = Span::new(
                         sub_token.span().start() + interp.0,

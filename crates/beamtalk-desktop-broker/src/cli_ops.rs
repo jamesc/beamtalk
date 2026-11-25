@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Create/stop workspaces via the installed `beamtalk` CLI (ADR 0097 Broker
-//! §5, ADR constraint 1).
+//! Create workspaces via the installed `beamtalk` CLI (ADR 0097 Broker §5,
+//! ADR constraint 1).
 //!
 //! The desktop broker **never bundles or supervises** the Rust toolchain —
 //! workspace lifecycle happens by shelling out to whatever `beamtalk` binary
@@ -23,6 +23,14 @@ use crate::error::{BrokerError, Result};
 /// Env var that overrides CLI path resolution entirely, for configurations
 /// where neither `PATH` nor the standard install locations apply (ADR 0097
 /// Broker §1a: "configurable, with sane defaults").
+///
+/// **Trusted, and honoured in release builds** (BT-5194): it is the
+/// user-facing fix the picker's own "CLI not found" empty state tells the user
+/// to apply, so it cannot be debug-only. It grants nothing `PATH` does not:
+/// both come from the user's own environment, and the broker already runs
+/// whichever `beamtalk` the user's `PATH` names, with the user's privileges.
+/// Contrast the desktop app's `BEAMTALK_ATTACH_LAUNCHER`, a development-only
+/// override that release builds ignore.
 pub const CLI_PATH_OVERRIDE_ENV: &str = "BEAMTALK_CLI_PATH";
 
 /// The CLI's executable name, including the platform's extension.
@@ -174,23 +182,13 @@ pub fn create_workspace_args(workspace_id: &str) -> Vec<String> {
     ]
 }
 
-/// Args for `beamtalk workspace stop <id>`.
-#[must_use]
-pub fn stop_workspace_args(workspace_id: &str) -> Vec<String> {
-    vec![
-        "workspace".to_string(),
-        "stop".to_string(),
-        workspace_id.to_string(),
-    ]
-}
-
 /// Run the installed CLI with `args`, waiting for it to exit.
 ///
 /// Returns `Ok(())` on a zero exit status, or [`BrokerError::CliFailed`]
 /// with stderr (falling back to stdout if stderr is empty) on a non-zero
-/// exit — `workspace create --background` and `workspace stop` are both
-/// short-lived, synchronous invocations (the daemonization happens inside
-/// the CLI process before it exits), so waiting for completion is correct
+/// exit — `workspace create --background` is a short-lived, synchronous
+/// invocation (the daemonization happens inside the CLI process before it
+/// exits), so waiting for completion is correct
 /// here, unlike `spawn_front` in [`crate::spawn`], which intentionally does
 /// not wait.
 fn run_cli(cli_path: &Path, args: &[String]) -> Result<()> {
@@ -221,16 +219,6 @@ pub fn create_workspace(cli_path: &Path, workspace_id: &str) -> Result<()> {
     run_cli(cli_path, &create_workspace_args(workspace_id))
 }
 
-/// `beamtalk workspace stop <id>`.
-///
-/// # Errors
-///
-/// Returns [`BrokerError::CliFailed`] if the CLI exits non-zero, or
-/// [`BrokerError::Io`] if it can't be spawned at all.
-pub fn stop_workspace(cli_path: &Path, workspace_id: &str) -> Result<()> {
-    run_cli(cli_path, &stop_workspace_args(workspace_id))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,14 +234,6 @@ mod tests {
                 "--background",
                 "--persistent"
             ]
-        );
-    }
-
-    #[test]
-    fn stop_workspace_args_shape() {
-        assert_eq!(
-            stop_workspace_args("abc123"),
-            vec!["workspace", "stop", "abc123"]
         );
     }
 

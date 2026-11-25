@@ -2157,8 +2157,27 @@ or `{local | global, Atom}` (`withName:` / `startChild:name:`, through
 Both are the same linked, trap-exit, init-ack-awaited start
 (`beamtalk_actor:start_link_and_await/3`); the link is what lets the calling
 supervisor see the child's exit. The answer is `{ok, Pid}` or `{error,
-Reason}` — never `ignore`, which the actor start converts to `{error,
-ignore}`.
+Reason}`, with one exception: a `{global, Name}` start (BT-5231, ADR 0126
+BT-5193 amendment D1).
+
+A `{global, Name}` start that finds `Name` held by a pid **on another node**
+answers `ignore` and logs a warning naming the child and the holder's node.
+That is the netsplit-heal case: this node's child lost the name conflict and
+was stopped with `{shutdown, global_name_conflict}` (announced as the loser's
+`ActorStopped`, reason `#globalNameConflict`). Answering an error would
+restart-loop a `#permanent` child until the supervisor reached its restart
+intensity and died with its siblings. With `ignore`, OTP keeps the child
+spec with no pid, on the initial start and on restarts alike. Nothing
+watches the name: the child stays down until a later `restartChild:` finds
+it free; while the name is still held, `restartChild:` answers `Ok(nil)`.
+Under `one_for_all` / `rest_for_one` the loser's exit still restarts its
+siblings as the strategy says.
+If the holder is gone by the time the start looks (`global:whereis_name/1`
+answers `undefined`), the start is tried once more and otherwise keeps its
+error. A holder on the **same** node stays an error (a programming mistake).
+An unsupervised `spawnAs:scope: #global` keeps its `name_registered` error;
+only this supervised start answers `ignore`. An `{error, ignore}` from the
+actor's own start is still an error.
 
 A `native:` actor child (ADR 0056, BT-4577) goes through the same calls:
 `ChildModule` is then its facade, which has no `init/1`, and those
@@ -2172,7 +2191,7 @@ start_actor_child(ChildModule, Args) ->
     start_actor_child(ChildModule, Args, none).
 
 -spec start_actor_child(module(), term(), none | {local | global, atom()}) ->
-    {ok, pid()} | {error, term()}.
+    {ok, pid()} | ignore | {error, term()}.
 start_actor_child(ChildModule, Args, Name) ->
     Result =
         case Name of
@@ -2181,13 +2200,43 @@ start_actor_child(ChildModule, Args, Name) ->
             {local, LocalName} ->
                 beamtalk_actor_registry:'spawnAs'(LocalName, ChildModule, Args);
             {global, GlobalName} ->
-                beamtalk_actor_registry:'spawnAsGlobal'(GlobalName, ChildModule, Args)
+                start_global_actor_child(GlobalName, ChildModule, Args, 1)
         end,
     case Result of
+        ignore ->
+            ignore;
         {ok, Pid} ->
             {ok, Pid};
         {error, Reason} ->
             {error, beamtalk_supervisor_class_call:actor_child_start_error(ChildModule, Reason)}
+    end.
+
+%% A supervised `{global, Name}` start (BT-5231): `ignore` when `Name` is
+%% held on another node, one retry when the holder is already gone.
+-spec start_global_actor_child(atom(), module(), term(), non_neg_integer()) ->
+    {ok, pid()} | ignore | {error, term()}.
+start_global_actor_child(Name, ChildModule, Args, Retries) ->
+    case beamtalk_actor_registry:'spawnAsGlobal'(Name, ChildModule, Args) of
+        {error, #beamtalk_error{kind = name_registered}} = Error ->
+            case global:whereis_name(Name) of
+                Holder when is_pid(Holder), node(Holder) =/= node() ->
+                    ?LOG_WARNING(
+                        "Supervised #global child ~p (~p) not started: the name is held on ~p",
+                        [Name, ChildModule, node(Holder)],
+                        #{
+                            domain => [beamtalk, runtime],
+                            child => Name,
+                            holder_node => node(Holder)
+                        }
+                    ),
+                    ignore;
+                undefined when Retries > 0 ->
+                    start_global_actor_child(Name, ChildModule, Args, Retries - 1);
+                _ ->
+                    Error
+            end;
+        Other ->
+            Other
     end.
 
 -doc """

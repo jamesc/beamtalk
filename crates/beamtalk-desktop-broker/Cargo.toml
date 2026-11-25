@@ -18,6 +18,12 @@ categories = ["development-tools"]
 name = "beamtalk_desktop_broker"
 path = "src/lib.rs"
 
+[features]
+# Test-only constructors for downstream crates' tests (the desktop app's
+# `quit` test wraps a plain child as a tracked front). Never enabled by a
+# release build: the desktop app turns it on in `[dev-dependencies]` only.
+test = []
+
 [dependencies]
 beamtalk-workspace.workspace = true
 # why: BT-5033 — the broker refuses a workspace whose protocol version differs

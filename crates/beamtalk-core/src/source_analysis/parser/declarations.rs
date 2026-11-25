@@ -534,7 +534,10 @@ impl Parser {
         let span = self.current_token().span();
         self.advance(); // consume the integer literal
         let value = match super::expressions::parse_integer(&text) {
-            Ok(v) if v > 0 => v,
+            Ok(v) if v > 0 => {
+                self.number_spellings.push((span, text));
+                v
+            }
             Ok(_) => {
                 self.diagnostics.push(Diagnostic::error(
                     "'shapeVersion:' expects a positive integer literal (got a non-positive value)",
@@ -950,7 +953,10 @@ impl Parser {
                     ));
                     self.advance(); // consume `aliasing:`
                     end = if matches!(self.current_kind(), TokenKind::MapOpen) {
-                        self.parse_map_literal().span()
+                        let map = self.with_bracketed_nesting(Self::parse_map_literal);
+                        let span = map.span();
+                        self.discard_expression(map, span);
+                        span
                     } else {
                         kw_span
                     };
@@ -1007,7 +1013,7 @@ impl Parser {
     /// selector text and the source symbol's span) plus the whole list's
     /// span, for the caller's own span bookkeeping.
     fn parse_selector_symbol_list(&mut self) -> (Vec<Identifier>, Span) {
-        let expr = self.parse_list_literal();
+        let expr = self.with_bracketed_nesting(Self::parse_list_literal);
         let span = expr.span();
         let mut selectors = Vec::new();
         if let Expression::ListLiteral { elements, tail, .. } = expr {

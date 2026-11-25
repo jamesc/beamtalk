@@ -623,6 +623,8 @@ test-desktop:
     # desktop/src-tauri is outside the workspace, so `just clippy` skips it (BT-5087).
     cargo clippy --locked --all-targets -- -D warnings
     cargo test --locked
+    # The picker frontend's IPC bridge (BT-5194); node expands the glob itself.
+    node --test '../ui/test/*.test.mjs'
 
 [windows]
 test-desktop:
@@ -633,6 +635,8 @@ test-desktop:
     cargo clippy --locked --all-targets -- -D warnings
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     cargo test --locked
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    node --test '../ui/test/*.test.mjs'
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Ensure the loopback hex-bridge proxy is up before any rebar3/mix dep fetch.
@@ -1012,6 +1016,7 @@ lint-repo: \
     test-lint-stamp \
     test-publish-rolling-release \
     test-refresh-edge \
+    test-sign-macos-nested-binaries \
     test-vs-elixir-nightly \
     test-workflow-paths
 
@@ -1107,6 +1112,16 @@ test-install-script:
 [windows]
 test-install-script:
     @echo "test-install-script: skipped on Windows (covered by Linux CI)"
+
+# Test (BT-5194): sign-macos-nested-binaries.sh gives the BEAM entitlements to
+# beam*.smp only (stubbed `file`/`codesign`, so it runs on Linux).
+[unix]
+test-sign-macos-nested-binaries:
+    @bash scripts/ci/test-sign-macos-nested-binaries.sh
+
+[windows]
+test-sign-macos-nested-binaries:
+    @echo "test-sign-macos-nested-binaries: skipped on Windows (covered by Linux CI)"
 
 # Test (BT-4925): the `test-install` class-beam guard passes on a populated
 # ebin dir every time (no `find | grep -q` SIGPIPE under pipefail) and fails

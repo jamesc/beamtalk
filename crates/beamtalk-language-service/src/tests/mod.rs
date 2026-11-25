@@ -9,6 +9,7 @@
 //! adding tests rarely conflict on the same region.
 
 mod common;
+mod deep_input_stack_safety;
 
 mod adr0144_protocol_metatypes;
 mod alias_and_cross_file_diagnostics;

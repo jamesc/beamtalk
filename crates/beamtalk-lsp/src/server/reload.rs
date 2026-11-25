@@ -53,8 +53,10 @@ impl OpenPathsHandle {
 /// (BT-5080) — so they are only debug-logged. The task ends when the
 /// `JoinHandle` is aborted or the channel closes (`RuntimeClient` disconnect).
 pub(in crate::server) async fn class_changed_listener(
-    mut class_changed_rx: tokio::sync::mpsc::UnboundedReceiver<ClassChangedEvent>,
+    class_changed_rx: super::listeners::SharedReceiver<ClassChangedEvent>,
 ) {
+    // Held for this run; a panic releases it for the restarted run (BT-5188).
+    let mut class_changed_rx = class_changed_rx.lock().await;
     while let Some(event) = class_changed_rx.recv().await {
         tracing::debug!(
             class_name = %event.class_name,
@@ -243,9 +245,11 @@ pub(in crate::server) async fn reload_check_listener(
     workspace_roots: Vec<PathBuf>,
     service: Arc<Mutex<SimpleLanguageService>>,
     reload_diagnostics: Arc<std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>>,
-    mut reload_check_rx: tokio::sync::mpsc::UnboundedReceiver<ReloadCheckEvent>,
+    reload_check_rx: super::listeners::SharedReceiver<ReloadCheckEvent>,
     open_paths: OpenPathsHandle,
 ) {
+    // Held for this run; a panic releases it for the restarted run (BT-5188).
+    let mut reload_check_rx = reload_check_rx.lock().await;
     while let Some(event) = reload_check_rx.recv().await {
         // BT-5131: a panic handling one event must not silently end this
         // detached task (it would bypass `guard_*` otherwise); log it and
