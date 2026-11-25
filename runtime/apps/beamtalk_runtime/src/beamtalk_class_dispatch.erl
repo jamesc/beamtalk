@@ -90,7 +90,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 %% BT-4771: what the class-method memo records for a selector a class method
 %% in the chain answers but the class process must run (class variables in the
 %% chain): the positive verdict "ask the class process", so the caller does not
-%% walk the chain a second time (`class_chain_only_send/4`) just to learn that.
+%% walk the chain a second time (`class_chain_only_send/3`) just to learn that.
 -type verdict() :: owner() | process | decline.
 -export_type([owner/0]).
 %% What the class-side chain walk (`find_class_side_method/3`) finds first: a
@@ -624,7 +624,7 @@ A send to a class from inside that class's own process (BT-4262).
 
 When only the `Class` chain can answer `Selector` (no
 local, inherited or runtime-installed class method:
-`class_chain_only_send/3`, the external
+`class_chain_only_send/2`, the external
 send's own check), the class process's own lookup would miss and fall
 through to the class-object protocol (`Class -> Behaviour ->
 ...`). That protocol runs as instance methods of the class object, not as a
@@ -652,10 +652,10 @@ class_send_from_own_process(Selector, Args) ->
 
 %% Any other send: the same decision
 %% the external send makes before skipping the class process
-%% (`class_chain_only_send/3`), so the two cannot disagree.
+%% (`class_chain_only_send/2`), so the two cannot disagree.
 -spec class_send_from_own_process_lookup(selector(), list()) -> term() | no_return().
 class_send_from_own_process_lookup(Selector, Args) ->
-    case class_chain_only_send(self(), Selector, Args) of
+    case class_chain_only_send(self(), Selector) of
         {ok, ClassName, Module} ->
             %% This is the class's own process, so `self()` is its pid.
             ClassSelf = #beamtalk_object{
@@ -952,14 +952,14 @@ class_self_dispatch_local(ClassName, Selector, Args, #beamtalk_object{} = ClassS
 Dispatch a class method call (the main logic for the catch-all clause).
 
 A send that no class-side method can answer skips the class process (BT-4073):
-when `class_chain_only_send/3` finds no local or
+when `class_chain_only_send/2` finds no local or
 inherited class method and no runtime-installed class-method fun for the
 selector, the `Class`/`Behaviour` method runs in the caller straight away,
 exactly as it would after the gen_server replied `{error, not_found}`.
 """.
 -spec class_send_dispatch(pid(), selector(), list(), call_timeout(), boolean()) -> term().
 class_send_dispatch(ClassPid, Selector, Args, Timeout, Alive) ->
-    case class_chain_only_send(ClassPid, Selector, Args, Alive) of
+    case class_chain_only_send(ClassPid, Selector, Alive) of
         {ok, ClassName, Module} ->
             class_chain_send(ClassPid, ClassName, Module, Selector, Args);
         error ->
@@ -982,16 +982,16 @@ A class with no metadata row yet (still registering), a pid with no registered
 class, or a dead class process takes the gen_server path too, so registration
 races and crash recovery (`class_send_with_recovery/3`) are unchanged.
 """.
--spec class_chain_only_send(pid(), selector(), list()) ->
+-spec class_chain_only_send(pid(), selector()) ->
     {ok, class_name(), module()} | error.
-class_chain_only_send(ClassPid, Selector, Args) ->
-    class_chain_only_send(ClassPid, Selector, Args, local_class_alive(ClassPid)).
+class_chain_only_send(ClassPid, Selector) ->
+    class_chain_only_send(ClassPid, Selector, local_class_alive(ClassPid)).
 
-%% `class_chain_only_send/3` with the liveness probe (`local_class_alive/1`,
+%% `class_chain_only_send/2` with the liveness probe (`local_class_alive/1`,
 %% which includes the local-node test) already done by the caller.
--spec class_chain_only_send(pid(), selector(), list(), boolean()) ->
+-spec class_chain_only_send(pid(), selector(), boolean()) ->
     {ok, class_name(), module()} | error.
-class_chain_only_send(ClassPid, Selector, _Args, Alive) ->
+class_chain_only_send(ClassPid, Selector, Alive) ->
     case beamtalk_class_registry:class_name_for_pid(ClassPid) of
         {ok, ClassName} ->
             case beamtalk_class_metadata:lookup_methods(ClassName) of

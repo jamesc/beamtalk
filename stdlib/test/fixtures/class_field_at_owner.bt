@@ -8,10 +8,8 @@
 
 Object subclass: ClassFieldAtOwner
 
-  @expect class_var_reflection_shadowing "the class's own fieldAt: answers"
   class fieldAt: key => #(#own, key)
 
-  @expect class_var_reflection_shadowing "the class's own hasField: answers"
   class hasField: _key => true
 
   class viaSelf => self fieldAt: #k
