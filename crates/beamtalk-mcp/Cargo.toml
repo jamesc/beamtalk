@@ -82,6 +82,10 @@ beamtalk-examples.workspace = true
 # why: SHA-256 hashing for search telemetry query_hash field
 sha2.workspace = true
 
+# why: BT-5188 — a fresh random challenge per connection for the workspace
+# identity check (`handshake::identify_request`) made before the cookie is sent
+rand.workspace = true
+
 [dev-dependencies]
 # why: RAII temp-dir cleanup for test fixtures (auto-removes on panic, unlike
 # manual std::env::temp_dir() + remove_dir_all)

@@ -12,6 +12,7 @@ mod rename;
 mod symbols;
 mod watched_files;
 
+pub(super) use lifecycle::InterfaceBaseline;
 pub(super) use rename::RenameClientCaps;
 #[cfg(test)]
 pub(super) use rename::build_rename_edit;

@@ -34,5 +34,18 @@
     "frame": {"op": "session-started", "session": "sess-abc"},
     "dynamic_fields": ["session"],
     "why": "create_session/3 (and start_or_resume_session/3 on resume), sent right after auth_ok; `session` is a freshly generated or resumed session id"
+  },
+  {
+    "id": "identify_request",
+    "frame": {"type": "identify", "challenge": "00112233445566778899aabbccddeeff"},
+    "dynamic_fields": ["challenge"],
+    "why": "BT-5188: optional pre-auth frame a client that knows the port-file nonce sends before `auth`; `challenge` is fresh random hex per connection (16-256 bytes)"
+  },
+  {
+    "id": "identity_reply",
+    "frame": {"type": "identity", "proof": "0e25bb0372cedca842f0ee022ae83f63de6f985ba99732bc7dce39efebfc480e"},
+    "dynamic_fields": [],
+    "vector": {"nonce": "0123456789abcdef", "challenge": "00112233445566778899aabbccddeeff"},
+    "why": "BT-5188: the node's reply to `identify`; `proof` is hex SHA-256 of \"beamtalk-workspace-identity\\n<nonce>\\n<challenge>\" — this one for `vector`, which both the Erlang `identity_proof/2` and the Rust `identity_proof` must reproduce"
   }
 ]

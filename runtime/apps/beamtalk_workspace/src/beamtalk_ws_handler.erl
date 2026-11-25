@@ -26,6 +26,8 @@ accepting any protocol operations.
 ]).
 
 -export([check_upgrade_headers/3]).
+%% BT-5188: the pre-auth identity proof, shared with the Rust clients.
+-export([identity_proof/2]).
 
 -ifdef(TEST).
 -export([actor_snapshot_frames/0]).
@@ -545,6 +547,31 @@ decode_auth_frame(Data) ->
         error:_ -> error
     end.
 
+-doc """
+The identity proof for `Challenge` (BT-5188): lowercase hex SHA-256 of
+`beamtalk-workspace-identity`, the port-file `Nonce` and `Challenge`,
+newline-separated. Must match `beamtalk_repl_protocol::handshake::identity_proof`
+in Rust; both are pinned to the `identity_reply` vector in
+`ws_auth_handshake_wire_corpus.json`.
+""".
+-spec identity_proof(binary(), binary()) -> binary().
+identity_proof(Nonce, Challenge) ->
+    Digest = crypto:hash(
+        sha256, <<"beamtalk-workspace-identity\n", Nonce/binary, "\n", Challenge/binary>>
+    ),
+    binary:encode_hex(Digest, lowercase).
+
+%% The nonce this node wrote to its port file, or `error` while the REPL
+%% server is not running (the identify request then fails like a malformed
+%% one, and the client does not send its cookie).
+-spec current_nonce() -> {ok, binary()} | error.
+current_nonce() ->
+    try beamtalk_repl_server:get_nonce() of
+        {ok, Nonce} -> {ok, Nonce}
+    catch
+        exit:_ -> error
+    end.
+
 -doc "Reject an auth frame that did not parse: one generic reply, then close.".
 -spec auth_malformed(#ws_state{}) -> {list(), #ws_state{}}.
 auth_malformed(State) ->
@@ -560,6 +587,37 @@ auth_malformed(State) ->
     {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}.
 
 -spec handle_auth_message(term(), #ws_state{}) -> {list(), #ws_state{}}.
+handle_auth_message(
+    #{<<"type">> := <<"identify">>, <<"challenge">> := Challenge}, State
+) when
+    is_binary(Challenge), byte_size(Challenge) >= 16, byte_size(Challenge) =< 256
+->
+    %% BT-5188: prove, before any cookie is sent, that this node is the
+    %% workspace whose port file names this port. Only the node that wrote
+    %% the port file knows its nonce; the client's fresh challenge makes an
+    %% observed proof useless for a later connection. The connection stays
+    %% unauthenticated (the pre-auth deadline and frame cap still apply).
+    case current_nonce() of
+        {ok, Nonce} ->
+            Reply = iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"identity">>,
+                    <<"proof">> => identity_proof(Nonce, Challenge)
+                })
+            ),
+            {[{text, Reply}], State};
+        error ->
+            ?LOG_WARNING("WebSocket identify failed: REPL server nonce unavailable", #{
+                peer => State#ws_state.peer, domain => [beamtalk, runtime]
+            }),
+            Reply = iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"auth_error">>,
+                    <<"message">> => <<"Workspace identity unavailable">>
+                })
+            ),
+            {[{text, Reply}, {close, 1011, <<"Identity unavailable">>}], State}
+    end;
 handle_auth_message(Decoded, State) ->
     case Decoded of
         #{<<"type">> := <<"auth">>, <<"cookie">> := ProvidedCookie} = AuthMsg when

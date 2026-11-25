@@ -95,7 +95,7 @@ TestCase subclass: ArithmeticOperatorOverloadTest
     @expect type
     hint := [5 + w] on: RuntimeError do: [:e | e hint]
     self assert: (hint includesSubstring: "plusFromNumber:")
-    self assert: (hint includesSubstring: "implement it")
+    self assert: (hint includesSubstring: "'+' cannot combine a number with Widget")
 
   /// "Implement it anyway, to reject with intent" (ADR 0116 § Reflected
   /// method protocol): `Money>>divFromNumber:` exists but deliberately

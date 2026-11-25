@@ -87,10 +87,6 @@ pub fn parse_workspace_id(stdout: &str) -> Option<String> {
     beamtalk_workspace::parse_repl_workspace_id(stdout)
 }
 
-/// How long a candidate workspace has to accept a TCP connection before it
-/// is considered dead.
-const LIVENESS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
-
 /// Find the live workspace for the current project and return its port,
 /// cookie, and workspace ID.
 ///
@@ -108,7 +104,7 @@ const LIVENESS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_mi
 ///
 /// Returns a message naming the other running workspaces when the current
 /// project has none of its own.
-pub fn discover_any_port_cookie_and_id() -> Result<Option<(u16, String, String)>, String> {
+pub async fn discover_any_port_cookie_and_id() -> Result<Option<(u16, String, String)>, String> {
     tracing::debug!("scanning for a running workspace for the current project");
     let Ok(root) = beamtalk_workspace::workspaces_base_dir() else {
         return Ok(None);
@@ -116,32 +112,45 @@ pub fn discover_any_port_cookie_and_id() -> Result<Option<(u16, String, String)>
     let cwd_id = std::env::current_dir()
         .ok()
         .and_then(|cwd| generate_workspace_id(&cwd));
-    discover_any_in(&root, cwd_id.as_deref())
+    discover_any_in(&root, cwd_id.as_deref()).await
 }
 
 /// [`discover_any_port_cookie_and_id`] over an explicit workspaces root and
 /// current-directory workspace ID.
-fn discover_any_in(
+async fn discover_any_in(
     root: &Path,
     cwd_workspace_id: Option<&str>,
 ) -> Result<Option<(u16, String, String)>, String> {
     let Ok(entries) = std::fs::read_dir(root) else {
         return Ok(None);
     };
-    let mut live: Vec<(u16, String, String)> = entries
+    let candidates: Vec<(u16, String, String, Option<String>, std::path::PathBuf)> = entries
         .flatten()
         .filter(|entry| entry.file_type().is_ok_and(|ft| ft.is_dir()))
         .filter_map(|entry| {
             let id = entry.file_name().to_string_lossy().into_owned();
-            let port = beamtalk_workspace::read_port_file_under(root, &id)
+            let (port, nonce) = beamtalk_workspace::read_port_file_under(root, &id)
                 .ok()
-                .flatten()
-                .map(|(port, _nonce)| port)?;
+                .flatten()?;
             let cookie = beamtalk_workspace::read_cookie_file_under(root, &id)
                 .ok()
                 .flatten()?;
-            candidate_is_live(&entry.path(), port).then_some((port, cookie, id))
+            Some((port, cookie, id, nonce, entry.path()))
         })
+        .collect();
+    // BT-5188: probed concurrently, so one slow or starting candidate does
+    // not hold up the others.
+    let mut live: Vec<(u16, String, String)> =
+        futures_util::future::join_all(candidates.into_iter().map(
+            |(port, cookie, id, nonce, dir)| async move {
+                candidate_is_live(&dir, port, nonce.as_deref())
+                    .await
+                    .then_some((port, cookie, id))
+            },
+        ))
+        .await
+        .into_iter()
+        .flatten()
         .collect();
     // `read_dir` order is unspecified; sort so errors and tests are stable.
     live.sort_by(|a, b| a.2.cmp(&b.2));
@@ -178,30 +187,78 @@ fn discover_any_in(
     ))
 }
 
-/// Whether the workspace in `dir` is alive, not a crashed node's leftovers.
+/// How long each step of an identity probe may take (BT-5188): it includes
+/// a round trip through the node's REPL server, so it is longer than a bare
+/// TCP connect.
+const IDENTITY_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// How long a candidate whose recorded process is alive may take to start
+/// accepting connections before it counts as dead (BT-5188).
+const STARTING_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Whether `node.info` in `dir` records a process, and if so whether it is
+/// still the same one ([`beamtalk_workspace::pid_liveness`]). `None` when no
+/// pid is recorded.
+fn recorded_process_alive(dir: &Path) -> Option<bool> {
+    let content = std::fs::read_to_string(dir.join("node.info")).ok()?;
+    let info = serde_json::from_str::<serde_json::Value>(&content).ok()?;
+    let pid = info
+        .get("pid")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|p| u32::try_from(p).ok())?;
+    let start_time = info.get("start_time").and_then(serde_json::Value::as_u64);
+    Some(
+        beamtalk_workspace::pid_liveness::is_process_alive(pid)
+            && beamtalk_workspace::pid_liveness::still_same_process(pid, start_time),
+    )
+}
+
+/// Whether the workspace in `dir` is alive and is really the workspace its
+/// port file names — not a crashed node's leftovers, and not some other
+/// process that reused the port (BT-5188).
 ///
-/// Two checks, both must hold:
-/// - when `node.info` records the BEAM node's `pid` (and, where the platform
-///   provides one, its `start_time`), that process is still the same one
-///   ([`beamtalk_workspace::pid_liveness`]); and
-/// - something accepts a TCP connection on the recorded port.
-fn candidate_is_live(dir: &Path, port: u16) -> bool {
-    if let Ok(content) = std::fs::read_to_string(dir.join("node.info"))
-        && let Ok(info) = serde_json::from_str::<serde_json::Value>(&content)
-        && let Some(pid) = info
-            .get("pid")
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|p| u32::try_from(p).ok())
-    {
-        let start_time = info.get("start_time").and_then(serde_json::Value::as_u64);
-        if !beamtalk_workspace::pid_liveness::is_process_alive(pid)
-            || !beamtalk_workspace::pid_liveness::still_same_process(pid, start_time)
-        {
-            return false;
+/// - When `node.info` records the BEAM node's `pid`, that process must still
+///   be the same one.
+/// - The process on `port` must prove it knows the port file's `nonce`
+///   ([`crate::client::probe_workspace_identity`]); no cookie is sent. A
+///   port file without a nonce cannot be verified, so it is not attached to.
+/// - A workspace whose recorded process is alive but which does not accept
+///   connections yet is still starting: it gets [`STARTING_GRACE`] to come
+///   up rather than counting as dead.
+async fn candidate_is_live(dir: &Path, port: u16, nonce: Option<&str>) -> bool {
+    use crate::client::{ProbeOutcome, probe_workspace_identity};
+
+    let process = recorded_process_alive(dir);
+    if process == Some(false) {
+        return false;
+    }
+    let Some(nonce) = nonce else {
+        tracing::warn!(port, dir = %dir.display(), "port file has no nonce; cannot verify the workspace");
+        return false;
+    };
+    let deadline = tokio::time::Instant::now()
+        + if process == Some(true) {
+            STARTING_GRACE
+        } else {
+            std::time::Duration::ZERO
+        };
+    loop {
+        match probe_workspace_identity(port, nonce, IDENTITY_PROBE_TIMEOUT).await {
+            ProbeOutcome::Verified => return true,
+            ProbeOutcome::NotTheWorkspace => {
+                tracing::warn!(
+                    port,
+                    dir = %dir.display(),
+                    "the process on this workspace's port is not that workspace; skipping it"
+                );
+                return false;
+            }
+            ProbeOutcome::Unreachable if tokio::time::Instant::now() >= deadline => return false,
+            ProbeOutcome::Unreachable => {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
         }
     }
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    std::net::TcpStream::connect_timeout(&addr, LIVENESS_PROBE_TIMEOUT).is_ok()
 }
 
 #[cfg(test)]
@@ -403,21 +460,26 @@ mod tests {
     }
 
     // --- BT-5029: auto-discovery liveness / ambiguity (hermetic: a private
-    // workspaces root, no `~/.beamtalk`, listeners on ephemeral ports) ---
+    // workspaces root, no `~/.beamtalk`, fake workspaces on ephemeral ports).
+    // BT-5188: a live candidate must prove it knows its port file's nonce. ---
 
-    fn write_workspace(root: &Path, id: &str, port: u16, pid: Option<u32>) {
+    use beamtalk_repl_protocol::test_support::{self, FAKE_NONCE, FakeWsServer, HandshakeMode};
+
+    fn write_workspace_with_nonce(root: &Path, id: &str, port: u16, nonce: &str, pid: Option<u32>) {
         let dir = root.join(id);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("port"), format!("{port}\nnonce")).unwrap();
+        fs::write(dir.join("port"), format!("{port}\n{nonce}")).unwrap();
         fs::write(dir.join("cookie"), "cookie").unwrap();
         if let Some(pid) = pid {
             fs::write(dir.join("node.info"), format!("{{\"pid\": {pid}}}")).unwrap();
         }
     }
 
-    /// A bound port that nothing listens on: bind, record, drop would race
-    /// other tests, so use a listener we keep alive for the live case and a
-    /// port from a listener we have *closed* only for the dead case.
+    fn write_workspace(root: &Path, id: &str, port: u16, pid: Option<u32>) {
+        write_workspace_with_nonce(root, id, port, FAKE_NONCE, pid);
+    }
+
+    /// A port nothing listens on.
     fn dead_port() -> u16 {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = l.local_addr().unwrap().port();
@@ -425,66 +487,79 @@ mod tests {
         port
     }
 
-    fn live_listener() -> (std::net::TcpListener, u16) {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = l.local_addr().unwrap().port();
-        (l, port)
+    /// A fake workspace that proves it knows [`FAKE_NONCE`].
+    async fn live_workspace() -> (FakeWsServer, u16) {
+        fake(HandshakeMode::Ok).await
     }
 
-    #[test]
-    fn discovery_skips_dead_workspace_leftovers() {
+    async fn fake(mode: HandshakeMode) -> (FakeWsServer, u16) {
+        let server = test_support::spawn(mode, "sess", Box::new(|_| Vec::new())).await;
+        let port = server.port;
+        (server, port)
+    }
+
+    #[tokio::test]
+    async fn discovery_skips_dead_workspace_leftovers() {
         let root = tempfile::tempdir().unwrap();
-        let (_l, live) = live_listener();
+        let (_l, live) = live_workspace().await;
         write_workspace(root.path(), "aaaa_dead", dead_port(), None);
         write_workspace(root.path(), "zzzz_live", live, None);
         let found = discover_any_in(root.path(), Some("zzzz_live"))
+            .await
             .unwrap()
             .unwrap();
         assert_eq!(found.2, "zzzz_live");
         assert_eq!(found.0, live);
     }
 
-    #[test]
-    fn discovery_skips_workspace_whose_recorded_pid_is_gone() {
+    #[tokio::test]
+    async fn discovery_skips_workspace_whose_recorded_pid_is_gone() {
         let root = tempfile::tempdir().unwrap();
-        let (_l, port) = live_listener();
+        let (_l, port) = live_workspace().await;
         // Port answers (reused by someone else) but node.info names a pid
         // that cannot exist.
         write_workspace(root.path(), "stale", port, Some(u32::MAX - 1));
-        assert_eq!(discover_any_in(root.path(), None).unwrap(), None);
+        assert_eq!(discover_any_in(root.path(), None).await.unwrap(), None);
     }
 
-    #[test]
-    fn discovery_prefers_workspace_for_current_directory() {
+    #[tokio::test]
+    async fn discovery_prefers_workspace_for_current_directory() {
         let root = tempfile::tempdir().unwrap();
-        let (_l1, p1) = live_listener();
-        let (_l2, p2) = live_listener();
+        let (_l1, p1) = live_workspace().await;
+        let (_l2, p2) = live_workspace().await;
         write_workspace(root.path(), "other", p1, None);
         write_workspace(root.path(), "mine", p2, None);
-        let found = discover_any_in(root.path(), Some("mine")).unwrap().unwrap();
+        let found = discover_any_in(root.path(), Some("mine"))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(found.2, "mine");
     }
 
-    #[test]
-    fn discovery_with_several_live_workspaces_and_no_match_is_an_error() {
+    #[tokio::test]
+    async fn discovery_with_several_live_workspaces_and_no_match_is_an_error() {
         let root = tempfile::tempdir().unwrap();
-        let (_l1, p1) = live_listener();
-        let (_l2, p2) = live_listener();
+        let (_l1, p1) = live_workspace().await;
+        let (_l2, p2) = live_workspace().await;
         write_workspace(root.path(), "one", p1, None);
         write_workspace(root.path(), "two", p2, None);
-        let err = discover_any_in(root.path(), Some("neither")).unwrap_err();
+        let err = discover_any_in(root.path(), Some("neither"))
+            .await
+            .unwrap_err();
         assert!(err.contains("one") && err.contains("two"), "got: {err}");
         assert!(err.contains("--workspace-id"), "got: {err}");
     }
 
     /// BT-5080: one live workspace belonging to another project is NOT
     /// attached to; the error names it and says how to attach explicitly.
-    #[test]
-    fn discovery_with_one_other_live_workspace_is_an_error_naming_it() {
+    #[tokio::test]
+    async fn discovery_with_one_other_live_workspace_is_an_error_naming_it() {
         let root = tempfile::tempdir().unwrap();
-        let (_l, p) = live_listener();
+        let (_l, p) = live_workspace().await;
         write_workspace(root.path(), "solo", p, None);
-        let err = discover_any_in(root.path(), Some("not-it")).unwrap_err();
+        let err = discover_any_in(root.path(), Some("not-it"))
+            .await
+            .unwrap_err();
         assert!(err.contains("`solo`"), "names the other workspace: {err}");
         assert!(
             err.contains("--workspace-id solo"),
@@ -493,10 +568,112 @@ mod tests {
         assert!(err.contains("Not attaching"), "got: {err}");
     }
 
-    #[test]
-    fn discovery_with_no_live_workspace_is_none() {
+    #[tokio::test]
+    async fn discovery_with_no_live_workspace_is_none() {
         let root = tempfile::tempdir().unwrap();
         write_workspace(root.path(), "dead", dead_port(), None);
-        assert_eq!(discover_any_in(root.path(), Some("mine")).unwrap(), None);
+        assert_eq!(
+            discover_any_in(root.path(), Some("mine")).await.unwrap(),
+            None
+        );
+    }
+
+    /// BT-5188: a port reused by a process that is not the workspace (here a
+    /// bare TCP listener) must not count as live: the cookie would be sent
+    /// to it.
+    #[tokio::test]
+    async fn discovery_skips_a_reused_port_that_is_not_the_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Accept and hold connections, never speaking WebSocket.
+        let _impostor = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                held.push(sock);
+            }
+        });
+        write_workspace(root.path(), "reused", port, None);
+        assert_eq!(
+            discover_any_in(root.path(), Some("reused")).await.unwrap(),
+            None
+        );
+    }
+
+    /// BT-5188: a WebSocket server that answers the identity challenge
+    /// wrongly (another workspace now on this port) is skipped, and never
+    /// receives an `auth` frame.
+    #[tokio::test]
+    async fn discovery_skips_a_server_that_fails_the_identity_check() {
+        let root = tempfile::tempdir().unwrap();
+        let (server, port) = fake(HandshakeMode::WrongIdentity).await;
+        write_workspace(root.path(), "impostor", port, None);
+        assert_eq!(
+            discover_any_in(root.path(), Some("impostor"))
+                .await
+                .unwrap(),
+            None
+        );
+        let seen = server.seen.lock().await.clone();
+        assert!(
+            seen.iter().all(|f| f["type"] != "auth"),
+            "no cookie was sent: {seen:?}"
+        );
+        assert!(seen.iter().any(|f| f["type"] == "identify"), "{seen:?}");
+    }
+
+    /// BT-5188: a stale port file whose nonce no longer matches the node on
+    /// that port (it restarted) is skipped.
+    #[tokio::test]
+    async fn discovery_skips_a_port_file_with_a_stale_nonce() {
+        let root = tempfile::tempdir().unwrap();
+        let (_l, port) = live_workspace().await;
+        write_workspace_with_nonce(root.path(), "restarted", port, "old-nonce", None);
+        assert_eq!(
+            discover_any_in(root.path(), Some("restarted"))
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    /// BT-5188: a workspace whose process is alive but that is not accepting
+    /// connections yet is given time to start, not counted as dead.
+    #[tokio::test]
+    async fn discovery_waits_for_a_workspace_that_is_still_starting() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let root = tempfile::tempdir().unwrap();
+        // Bound now (so no other test can take the port) but not answering
+        // until later, like a node that is up but not serving yet.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        write_workspace(root.path(), "booting", port, Some(std::process::id()));
+        let _server = tokio::spawn(async move {
+            // sleep: the workspace starts serving after discovery has started.
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            while let Ok((sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let Ok(mut ws) = tokio_tungstenite::accept_async(sock).await else {
+                        return;
+                    };
+                    let _ = ws
+                        .send(Message::Text(r#"{"op":"auth-required"}"#.into()))
+                        .await;
+                    if let Some(Ok(Message::Text(body))) = ws.next().await {
+                        let req: serde_json::Value =
+                            serde_json::from_str(&body).unwrap_or_default();
+                        let challenge = req["challenge"].as_str().unwrap_or_default();
+                        let proof = beamtalk_repl_protocol::handshake::identity_proof(
+                            FAKE_NONCE, challenge,
+                        );
+                        let reply = serde_json::json!({"type": "identity", "proof": proof});
+                        let _ = ws.send(Message::Text(reply.to_string().into())).await;
+                    }
+                });
+            }
+        });
+        let found = discover_any_in(root.path(), Some("booting")).await.unwrap();
+        assert_eq!(found.map(|f| f.2), Some("booting".to_string()));
     }
 }

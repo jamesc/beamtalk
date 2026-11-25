@@ -434,6 +434,7 @@ dependencies = [
  "clap",
  "dirs",
  "futures-util",
+ "rand",
  "rmcp",
  "serde",
  "serde_json",
@@ -515,6 +516,7 @@ dependencies = [
  "insta",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-tungstenite",
 ]
