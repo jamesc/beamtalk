@@ -104,8 +104,6 @@ teardown(_) ->
             beamtalk_class_DocDefaultTest,
             beamtalk_class_DocSetGetTest,
             beamtalk_class_MethodDocTest,
-            beamtalk_class_ClassVarDefaultTest,
-            beamtalk_class_ClassVarSetGetTest,
             beamtalk_class_ConstructibleDefaultTest,
             beamtalk_class_HandleInfoTest,
             beamtalk_class_InstanceMethodsTest,
@@ -1728,111 +1726,6 @@ crash_recovery_restart_group() ->
             ?assertEqual(<<"Does something.">>, maps:get('__doc__', Result))
         end),
         %%% ============================================================================
-        ?_test(begin
-            ClassInfo = #{
-                name => 'ClassVarDefaultTest',
-                module => test_class,
-                superclass => 'Object',
-                instance_methods => #{},
-                class_methods => #{}
-            },
-            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-            ?assertEqual(nil, gen_server:call(Pid, {get_class_var, someVar}))
-        end),
-        %% BT-3807: the class-side `get_class_var` of an absent name follows the
-        %% method-body read rule: a class whose own declared set lacks the name replies
-        %% a safe `{error, undeclared_class_variable}` (process survives); a declared
-        %% name still answers nil; a class with no readable metadata (the test above)
-        %% stays lenient and answers nil.
-        ?_test(begin
-            Mod = beamtalk_test_module:meta_module(
-                bt3807_undeclared_classvar_mod,
-                #{class_field_kinds => #{count => eager}}
-            ),
-            try
-                ClassInfo = #{
-                    name => 'BT3807UndeclaredClassVar',
-                    module => Mod,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                ?assertMatch(
-                    {error, #beamtalk_error{kind = undeclared_class_variable}},
-                    gen_server:call(Pid, {get_class_var, typo})
-                ),
-                ?assert(is_process_alive(Pid)),
-                %% Declared but unassigned: nil, as before.
-                ?assertEqual(nil, gen_server:call(Pid, {get_class_var, count})),
-                ?assertEqual(3, gen_server:call(Pid, {set_class_var, count, 3})),
-                ?assertEqual(3, gen_server:call(Pid, {get_class_var, count}))
-            after
-                beamtalk_test_module:unload(Mod)
-            end
-        end),
-        ?_test(begin
-            ClassInfo = #{
-                name => 'ClassVarSetGetTest',
-                module => test_class,
-                superclass => 'Object',
-                instance_methods => #{},
-                class_methods => #{}
-            },
-            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-            ?assertEqual(42, gen_server:call(Pid, {set_class_var, count, 42})),
-            ?assertEqual(42, gen_server:call(Pid, {get_class_var, count}))
-        end),
-        %% ADR 0124 §1/§4i/B4: `get_class_var` on a declared-`late` unassigned class
-        %% variable replies `{error, #beamtalk_error{kind = uninitialized_state_error}}`
-        %% rather than answering `nil` — and, critically, the class gen_server
-        %% itself survives the call (a business error, not a crash): `get_class_var`
-        %% is a raw `handle_call` clause outside the
-        %% `dispatch_class_method`/`apply_class_method_in_context` machinery that
-        %% normally catches a `#beamtalk_error{}` raise from a class-method body, so
-        %% an uncaught `beamtalk_error:raise/1` here would take down the whole
-        %% class instead of just answering the caller.
-        %%
-        %% `class_var_declared_late/2` needs real `__beamtalk_meta/0` metadata
-        %% (`class_field_kinds => #{current => late}`) to take the "declared late"
-        %% branch — a bare `module => test_class` fixture (as every other test in
-        %% this section uses) has none and always degrades to `eager`/`nil`, so this
-        %% builds a real meta-carrying module via `beamtalk_test_module:meta_module/2`, mirroring
-        %% `bt1982_has_class_new_in_chain_test_` above.
-        ?_test(begin
-            Mod = beamtalk_test_module:meta_module(
-                bt3551_late_classvar_mod,
-                #{class_field_kinds => #{current => late}}
-            ),
-            try
-                ClassInfo = #{
-                    name => 'BT3551LateClassVar',
-                    module => Mod,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                %% Unassigned + declared late -> a safe {error, _} reply.
-                Result = gen_server:call(Pid, {get_class_var, current}),
-                ?assertMatch(
-                    {error, #beamtalk_error{kind = uninitialized_state_error}}, Result
-                ),
-                ?assert(is_process_alive(Pid)),
-                %% Assigned -> answers the value, same declared-late branch.
-                ?assertEqual(7, gen_server:call(Pid, {set_class_var, current, 7})),
-                ?assertEqual(7, gen_server:call(Pid, {get_class_var, current})),
-                %% BT-4061: a stored `nil` is present, so it answers
-                %% `nil` — agreeing with `beamtalk_class_vars:has_value/2`
-                %% (the presence test `hasField:` uses) — not an error.
-                ?assertEqual(nil, gen_server:call(Pid, {set_class_var, current, nil})),
-                ?assertEqual(nil, gen_server:call(Pid, {get_class_var, current}))
-            after
-                beamtalk_test_module:unload(Mod)
-            end
-        end),
-        %%% ============================================================================
-=======
         %%% is_constructible Tests
         %%% ============================================================================
         ?_test(begin

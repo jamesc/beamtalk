@@ -25,7 +25,7 @@ Tests cover:
 - root registry — nil, roundtrip, overwrite, clear_root
 - static_init/3, dynamic_init/3 — instance-side configuration, start args,
   calling_self hint, validator errors (ADR 0135 §2)
-- start_child_via_class_method/4: valid return, invalid return, read-only snapshot reads, write raises class_state_read_only
+- start_child_via_class_method/4: valid return, invalid return, no class-variable key installed, write raises class_state_unreachable
   unwrap, process dictionary cleanup, child linking, supervisor restart,
   supervisor tuple return
 - start_child_via_class_method/4 supervisor restart through the REAL compiled

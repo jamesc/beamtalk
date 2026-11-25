@@ -15,8 +15,7 @@ class variables or installs a class-variable home around a class method.
   `classClassVarNames` / `classAllClassVarNames` intrinsics.
 - A class method run in the class process sees no home: neither the
   receiver's class-variable key nor a live home key is set.
-- `ClassBuilder register` ignores a `classState` key: the class process's
-  classVars snapshot row stays empty.
+- `ClassBuilder register` ignores a `classState` key.
 - `is_field_reflection_selector/1` names exactly the four instance-field
   reflection selectors that a class object refuses (ADR 0153 decision 7).
 """.
