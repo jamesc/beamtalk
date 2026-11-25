@@ -512,7 +512,9 @@ Whether the stdlib's `Selector` on this class is a fold over `do:` (BT-5190),
 the only thing an in-place writing fold can stand in for: the class is a
 `Collection` (whose provisions are folds over `do:`), or its first definer of
 `Selector` on the chain is a stdlib trait provision such as `Enumerable`'s (a
-stdlib class that `uses: Enumerable`, `Ets`, included).
+stdlib class that `uses: Enumerable`, `Ets`, included). A stdlib `Enumerable`
+user is trusted to answer a selector it defines natively as the `do:` fold does,
+as every stdlib class was before this check.
 A stdlib class that defines the selector natively and is neither, a `Stream`,
 answers something the fold cannot: a lazy `Stream` from `select:`, a
 short-circuit from `detect:`. Forcing it through `do:` never ends on an
