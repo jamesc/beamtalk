@@ -182,17 +182,28 @@ fn threaded_locals_of_agrees_with_the_core_recognizer_over_the_program_corpus() 
     let mut compiled = 0;
     for (i, module) in draw_programs("Prog", 400).iter().enumerate() {
         let source = unparse_module(module);
-        match check_class("Prog", &source) {
-            Ok(Some(n)) => {
-                compiled += 1;
-                agreed += n;
+        // Instance-side and class-side: codegen scopes differ between the two.
+        for (side, source) in [("instance", source.clone()), ("class", class_side(&source))] {
+            match check_class("Prog", &source) {
+                Ok(Some(n)) => {
+                    compiled += 1;
+                    agreed += n;
+                }
+                Ok(None) => {}
+                Err(e) => panic!("program {i} ({side}): {e}"),
             }
-            Ok(None) => {}
-            Err(e) => panic!("program {i}: {e}"),
         }
     }
-    assert!(compiled > 50, "only {compiled} classes compiled");
-    assert!(agreed > 0, "only {agreed} non-empty threaded sets compared");
+    assert!(compiled > 700, "only {compiled} classes compiled");
+    assert!(
+        agreed >= 200,
+        "only {agreed} non-empty threaded sets compared"
+    );
+}
+
+/// The same class with its `run` method moved to the class side.
+fn class_side(source: &str) -> String {
+    source.replacen("\n  run", "\n  class run", 1)
 }
 
 /// Hand-written shapes for the constructs `arb_program` does not generate: the ones
@@ -219,23 +230,26 @@ fn threaded_locals_of_agrees_with_the_core_recognizer_over_block_param_construct
     let mut agreed = 0;
     let mut compiled = 0;
     for source in BLOCK_PARAM_SOURCES {
-        let name = source
-            .strip_prefix("Object subclass: ")
-            .and_then(|rest| rest.split_whitespace().next())
-            .expect("source names its class");
-        match check_class(name, source) {
-            Ok(Some(n)) => {
-                compiled += 1;
-                agreed += n;
+        let class_source = class_side(source);
+        for source in [*source, class_source.as_str()] {
+            let name = source
+                .strip_prefix("Object subclass: ")
+                .and_then(|rest| rest.split_whitespace().next())
+                .expect("source names its class");
+            match check_class(name, source) {
+                Ok(Some(n)) => {
+                    compiled += 1;
+                    agreed += n;
+                }
+                Ok(None) => {}
+                Err(e) => panic!("{name}: {e}"),
             }
-            Ok(None) => {}
-            Err(e) => panic!("{name}: {e}"),
         }
     }
     // Not vacuous: most shapes compile and each construct yields a non-empty set.
-    assert!(compiled >= 10, "only {compiled} classes compiled");
+    assert!(compiled >= 20, "only {compiled} classes compiled");
     assert!(
-        agreed >= 25,
+        agreed >= 50,
         "only {agreed} non-empty threaded sets compared"
     );
 }

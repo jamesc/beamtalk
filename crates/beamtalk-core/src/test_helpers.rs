@@ -1050,8 +1050,8 @@ pub mod test_support {
     }
 
     /// Draws `n` programs from [`arb_program`] with a fixed RNG, so a case
-    /// budget is the same corpus on every run and every machine. Every program is one `run` method on an
-    /// `Object subclass: <class_name>`.
+    /// budget is the same corpus on every run and every machine. Every program
+    /// is one `run` method on an `Object subclass: <class_name>`.
     ///
     /// # Panics
     ///
