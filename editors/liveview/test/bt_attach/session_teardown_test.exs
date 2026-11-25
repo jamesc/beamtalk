@@ -90,6 +90,21 @@ defmodule BtAttach.SessionTeardownTest do
     assert {:resumed, "s-open", ^open_session} = SessionRegistry.checkout(reg, "open")
   end
 
+  test "a graceful registry stop closes every live session before exit (BT-5129)" do
+    name = :"graceful_reg_#{System.unique_integer([:positive])}"
+    start_supervised!({SessionRegistry, name: name, reap_after_ms: 60_000}, id: :graceful)
+    a = session()
+    b = session()
+    lv = liveview()
+    :ok = via(lv, fn -> SessionRegistry.register(name, "a", "s-a", a) end)
+    :ok = via(lv, fn -> SessionRegistry.register(name, "b", "s-b", b) end)
+
+    :ok = stop_supervised(:graceful)
+
+    assert_receive {:stop_session, ^a}, 1_000
+    assert_receive {:stop_session, ^b}, 1_000
+  end
+
   test "a tab that reconnects within the grace window keeps its session", %{reg: reg} do
     sess = session()
     old_lv = liveview()

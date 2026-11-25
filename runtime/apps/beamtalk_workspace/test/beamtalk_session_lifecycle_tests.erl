@@ -32,6 +32,8 @@ lifecycle_test_() ->
         fun close_aborts_running_eval/1,
         fun attach_to_stopped_session_answers_gone/1,
         fun attach_after_queued_idle_timeout_answers_gone/1,
+        fun attach_to_busy_shell_answers_timeout_not_gone/1,
+        fun attach_twice_keeps_one_monitor/1,
         fun idle_period_is_settable_from_environment/1,
         fun close_stops_session_and_removes_row/1,
         fun sessions_op_lists_ids_that_resume_accepts/1,
@@ -232,6 +234,29 @@ attach_to_stopped_session_answers_gone(_) ->
         ok = beamtalk_repl_shell:stop(Session),
         Client = new_client(),
         ?assertEqual(gone, beamtalk_repl_shell:attach(Session, Client)),
+        disconnect(Client)
+    end}.
+
+attach_to_busy_shell_answers_timeout_not_gone(_) ->
+    {"BT-5129: a live shell that does not answer in time is `timeout`, not `gone`",
+        {timeout, 30, fun() ->
+            Session = new_session(<<"lc-busy">>),
+            Client = new_client(),
+            %% Suspended: alive but unable to answer the attach call.
+            ok = sys:suspend(Session),
+            ?assertEqual(timeout, beamtalk_repl_shell:attach(Session, Client)),
+            ok = sys:resume(Session),
+            disconnect(Client)
+        end}}.
+
+attach_twice_keeps_one_monitor(_) ->
+    {"BT-5129: attaching the same client twice monitors it once", fun() ->
+        Session = new_session(<<"lc-twice">>),
+        Client = new_client(),
+        ok = beamtalk_repl_shell:attach(Session, Client),
+        ok = beamtalk_repl_shell:attach(Session, Client),
+        {monitored_by, Monitors} = process_info(Client, monitored_by),
+        ?assertEqual(1, length([M || M <- Monitors, M =:= Session])),
         disconnect(Client)
     end}.
 

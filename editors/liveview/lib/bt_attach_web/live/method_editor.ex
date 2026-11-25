@@ -415,30 +415,32 @@ defmodule BtAttachWeb.Live.MethodEditor do
   end
 
   defp save_definition_eval(socket, tab, source, pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: source}, RequestContext.build(socket)) do
-      {:ok, _term, _output, _warnings} ->
-        socket
-        |> assign(
-          save_result: "Compiled #{tab.class}",
-          save_error: nil,
-          flush_result: nil,
-          flush_error: nil
-        )
-        |> compile_clean(tab.id, source)
-        |> WorkspaceLive.assign_changes()
-        # BT-2586/BT-2590: refresh the git panel when it is open AND
-        # autoflush is on — only then did the save write through to disk.
-        # With autoflush off the save patches the live image only, so the
-        # on-disk working tree is unchanged and the git shell-out is skipped
-        # (no redundant refresh).
-        |> WorkspaceLive.maybe_refresh_git_after_save()
+    BtAttachWeb.Live.Dock.eval_async(socket, pid, source, fn socket, result ->
+      case result do
+        {:ok, _term, _output, _warnings} ->
+          socket
+          |> assign(
+            save_result: "Compiled #{tab.class}",
+            save_error: nil,
+            flush_result: nil,
+            flush_error: nil
+          )
+          |> compile_clean(tab.id, source)
+          |> WorkspaceLive.assign_changes()
+          # BT-2586/BT-2590: refresh the git panel when it is open AND
+          # autoflush is on — only then did the save write through to disk.
+          # With autoflush off the save patches the live image only, so the
+          # on-disk working tree is unchanged and the git shell-out is skipped
+          # (no redundant refresh).
+          |> WorkspaceLive.maybe_refresh_git_after_save()
 
-      {:error, _, _, _} = err ->
-        assign(socket, save_result: nil, save_error: FacadeError.render_eval_error(err))
+        {:error, _, _, _} = err ->
+          assign(socket, save_result: nil, save_error: FacadeError.render_eval_error(err))
 
-      {:error, _} = err ->
-        assign(socket, save_result: nil, save_error: FacadeError.render_eval_error(err))
-    end
+        {:error, _} = err ->
+          assign(socket, save_result: nil, save_error: FacadeError.render_eval_error(err))
+      end
+    end)
   end
 
   # BT-2670: save (edit → compile → reload → write-back) the active native

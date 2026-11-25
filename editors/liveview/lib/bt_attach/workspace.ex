@@ -102,6 +102,9 @@ defmodule BtAttach.Workspace do
   @rpc_interactive_timeout 5_000
   @rpc_long_timeout 60_000
   @rpc_eval_timeout 35_000
+  # BT-5129: a whole test run is bounded by the suite, not by a lookup; the old
+  # unbounded call became a 60 s cut-off. Runs are off-process (`tests_running`).
+  @rpc_test_run_timeout 600_000
 
   @doc "The timeout (ms) an eval's workspace call waits."
   def rpc_eval_timeout, do: @rpc_eval_timeout
@@ -233,6 +236,9 @@ defmodule BtAttach.Workspace do
       # BT-5084: `attach` is a call; `gone` means the session stopped (its idle
       # period ran out) between the caller finding it and attaching.
       :gone -> {:error, :gone}
+      # BT-5129: a busy shell timed out answering; it is alive, so the caller
+      # must not treat it as gone and discard the live session.
+      :timeout -> {:error, :timeout}
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
       other -> {:error, {:unexpected_reply, other}}
     end
@@ -1089,13 +1095,24 @@ defmodule BtAttach.Workspace do
   # JSON edge): **callers own the op-specific term-shape match** (`list_tests/0`
   # matches `{:value, _}`, `run_tests/1` matches `{:test_results, _}`). A new
   # caller must match its op's own result tag, not assume browse-style normalising.
+  # A whole test run is bounded by the suite, not a lookup (BT-5129); the other
+  # simple ops (list/load) stay on the long tier.
+  defp simple_op_timeout(op) when op in ["test", "test-all"], do: @rpc_test_run_timeout
+  defp simple_op_timeout(_op), do: @rpc_long_timeout
+
   defp dispatch_simple(op, params) when is_binary(op) and is_map(params) do
     request = Map.put(params, "op", op)
 
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->
         decoded_params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-        rpc(:beamtalk_repl_ops, :dispatch, [op, decoded_params, msg, self()], @rpc_long_timeout)
+
+        rpc(
+          :beamtalk_repl_ops,
+          :dispatch,
+          [op, decoded_params, msg, self()],
+          simple_op_timeout(op)
+        )
 
       {:badrpc, reason} ->
         {:error, {:unreachable, reason}}
@@ -1299,8 +1316,21 @@ defmodule BtAttach.Workspace do
         Enum.map(jsons, &format_value/1)
 
       _failed ->
-        Enum.map(terms, &render_term/1)
+        render_terms_fallback(terms)
     end
+  end
+
+  # BT-5129: the per-term fallback used to cost up to one full RPC timeout per
+  # binding. Bound the whole fallback by one `@rpc_timeout` budget: once spent
+  # (an unreachable workspace), the rest degrade to `inspect/1` locally.
+  defp render_terms_fallback(terms) do
+    deadline = System.monotonic_time(:millisecond) + @rpc_timeout
+
+    Enum.map(terms, fn term ->
+      if System.monotonic_time(:millisecond) < deadline,
+        do: render_term(term),
+        else: inspect(term)
+    end)
   end
 
   @doc """
