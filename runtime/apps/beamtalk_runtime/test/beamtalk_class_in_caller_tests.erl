@@ -170,7 +170,9 @@ in_caller_test_() ->
                     class = tag('Bt5158NoHome'), class_mod = ?HELPER, pid = Pid
                 },
                 ?assertBtError(class_state_unreachable, beamtalk_class_vars:has(ClassSelf, count)),
-                ?assertBtError(class_state_unreachable, beamtalk_class_vars:clear(ClassSelf, count)),
+                ?assertBtError(
+                    class_state_unreachable, beamtalk_class_vars:clear(ClassSelf, count)
+                ),
                 ?assertBtError(
                     class_state_unreachable, beamtalk_class_vars:put(ClassSelf, count, 1)
                 )
