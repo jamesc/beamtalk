@@ -80,7 +80,7 @@ object does after its class-method lookup misses
 the runtime by construction — one lookup, no selector list. The exception is
 the instance-field reflection selectors (`fieldAt:` etc.): `Object` declares
 them, but `try_class_chain_fallthrough/3` refuses them for a class object
-(ADR 0153 decision 7), which the type checker does not yet model.
+(ADR 0153 decision 7), which the type checker does not yet model (BT-5241).
 
 The receiver is the calling method's own `ClassSelf`, so a subclass receiver
 answers for itself: `super name` from a `Base` class method inherited by `C`
