@@ -44,12 +44,11 @@ setup() ->
     ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
     ok.
 
-class_info(Superclass, ClassVars, Methods) ->
+class_info(Superclass, Methods) ->
     #{
         superclass => Superclass,
         module => ?HELPER,
         class_methods => Methods,
-        class_state => ClassVars,
         meta => ?META
     }.
 
@@ -68,8 +67,8 @@ outcome(Pid, Selector) ->
 strip_stacktrace(#{} = Wrapped) -> maps:remove(raw_stacktrace, Wrapped);
 strip_stacktrace(Other) -> Other.
 
-with_class(Name, Superclass, ClassVars, Fun) ->
-    Pid = beamtalk_test_class:start(Name, class_info(Superclass, ClassVars, ?METHODS)),
+with_class(Name, Superclass, Fun) ->
+    Pid = beamtalk_test_class:start(Name, class_info(Superclass, ?METHODS)),
     try
         Fun(Pid)
     after
@@ -79,7 +78,7 @@ with_class(Name, Superclass, ClassVars, Fun) ->
 in_caller_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
         {"a stateless class's method runs in the caller", fun() ->
-            with_class('Bt4300Stateless', none, #{}, fun(Pid) ->
+            with_class('Bt4300Stateless', none, fun(Pid) ->
                 ?assertEqual(self(), send(Pid, testSelf, [])),
                 ?assertEqual({with_arg, 7}, send(Pid, 'testWith:', [7])),
                 %% Memoised under the class object's pid.
@@ -93,7 +92,7 @@ in_caller_test_() ->
             end)
         end},
         {"the method receives the real class reference as ClassSelf", fun() ->
-            with_class('Bt4300ClassSelf', none, #{}, fun(Pid) ->
+            with_class('Bt4300ClassSelf', none, fun(Pid) ->
                 ?assertEqual(
                     #beamtalk_object{
                         class = tag('Bt4300ClassSelf'), class_mod = ?HELPER, pid = Pid
@@ -103,15 +102,15 @@ in_caller_test_() ->
             end)
         end},
         {"class-variable defaults no longer keep the class process (ADR 0153)", fun() ->
-            with_class('Bt5158Stateful', none, #{count => 0}, fun(Pid) ->
+            with_class('Bt5158Stateful', none, fun(Pid) ->
                 ?assertEqual(self(), send(Pid, testSelf, [])),
                 ?assertMatch({owner, 'Bt5158Stateful', _, _, _, _, _}, memo(Pid, testSelf))
             end)
         end},
         {"a subclass of a class with class-variable defaults runs in the caller", fun() ->
-            with_class('Bt5158Parent', none, #{count => 0}, fun(_ParentPid) ->
+            with_class('Bt5158Parent', none, fun(_ParentPid) ->
                 Child = beamtalk_test_class:start(
-                    'Bt5158Child', class_info('Bt5158Parent', #{}, #{})
+                    'Bt5158Child', class_info('Bt5158Parent', #{})
                 ),
                 try
                     ?assertEqual(self(), send(Child, testSelf, []))
@@ -121,8 +120,8 @@ in_caller_test_() ->
             end)
         end},
         {"an inherited method of a stateless chain runs in the caller", fun() ->
-            with_class('Bt4300Root', none, #{}, fun(_RootPid) ->
-                Leaf = beamtalk_test_class:start('Bt4300Leaf', class_info('Bt4300Root', #{}, #{})),
+            with_class('Bt4300Root', none, fun(_RootPid) ->
+                Leaf = beamtalk_test_class:start('Bt4300Leaf', class_info('Bt4300Root', #{})),
                 try
                     ?assertEqual(self(), send(Leaf, testSelf, [])),
                     %% `self` is the receiving subclass.
@@ -136,7 +135,7 @@ in_caller_test_() ->
             end)
         end},
         {"a process-bound selector keeps the class process", fun() ->
-            with_class('Bt4300Bound', none, #{}, fun(Pid) ->
+            with_class('Bt4300Bound', none, fun(Pid) ->
                 Fun = fun() -> self() end,
                 %% `run:` reaches 'class_run:' in the class process, which the
                 %% helper does not export: the structured DNU proves the hop.
@@ -150,7 +149,7 @@ in_caller_test_() ->
             end)
         end},
         {"an instance-field reflection selector a class does not define is DNU", fun() ->
-            with_class('Bt4300Reflect', none, #{}, fun(Pid) ->
+            with_class('Bt4300Reflect', none, fun(Pid) ->
                 %% ADR 0153 decision 7 (BT-5155): a class has no fields; no
                 %% class method answers it, so the owner memo declines and
                 %% the `Class` protocol fallthrough refuses it.
@@ -167,7 +166,7 @@ in_caller_test_() ->
             %% ADR 0153 Phase 3a: no per-chain class-variable fact lets a
             %% home-less read answer the empty map any more (BT-5160 deletes
             %% the access module).
-            with_class('Bt5158NoHome', none, #{}, fun(Pid) ->
+            with_class('Bt5158NoHome', none, fun(Pid) ->
                 ClassSelf = #beamtalk_object{
                     class = tag('Bt5158NoHome'), class_mod = ?HELPER, pid = Pid
                 },
@@ -193,7 +192,7 @@ in_caller_test_() ->
     ]}.
 
 errors_match() ->
-    with_class('Bt4300Errors', none, #{}, fun(Pid) ->
+    with_class('Bt4300Errors', none, fun(Pid) ->
         Selectors = [
             testRaise, testSignal, testDnu, testInternalUndef, testScriptExit, testNlrThrow
         ],
@@ -228,8 +227,8 @@ outcome_with(Pid, Selector, Args) ->
 static_guard_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
         {"the guard holds whatever an ancestor's class-variable defaults", fun() ->
-            with_class('Bt4301Root', none, #{}, fun(_RootPid) ->
-                Leaf = beamtalk_test_class:start('Bt4301Leaf', class_info('Bt4301Root', #{}, #{})),
+            with_class('Bt4301Root', none, fun(_RootPid) ->
+                Leaf = beamtalk_test_class:start('Bt4301Leaf', class_info('Bt4301Root', #{})),
                 try
                     ?assert(
                         beamtalk_class_shadow_flags:direct_call_ok(tag('Bt4301Leaf'), 'Bt4301Leaf')
@@ -238,9 +237,9 @@ static_guard_test_() ->
                     beamtalk_test_proc:stop(Leaf)
                 end
             end),
-            with_class('Bt4301StatefulRoot', none, #{count => 0}, fun(_RootPid) ->
+            with_class('Bt4301StatefulRoot', none, fun(_RootPid) ->
                 Leaf = beamtalk_test_class:start(
-                    'Bt4301StatefulLeaf', class_info('Bt4301StatefulRoot', #{}, #{})
+                    'Bt4301StatefulLeaf', class_info('Bt4301StatefulRoot', #{})
                 ),
                 try
                     ?assert(
@@ -254,10 +253,10 @@ static_guard_test_() ->
             end)
         end},
         {"re-parenting erases the descendant's derived flag (BT-4134)", fun() ->
-            with_class('Bt4301ReparentPlain', none, #{}, fun(_PlainPid) ->
-                with_class('Bt4301ReparentStateful', none, #{count => 0}, fun(_StatefulPid) ->
+            with_class('Bt4301ReparentPlain', none, fun(_PlainPid) ->
+                with_class('Bt4301ReparentStateful', none, fun(_StatefulPid) ->
                     Leaf = beamtalk_test_class:start(
-                        'Bt4301ReparentLeaf', class_info('Bt4301ReparentPlain', #{}, #{})
+                        'Bt4301ReparentLeaf', class_info('Bt4301ReparentPlain', #{})
                     ),
                     LeafTag = tag('Bt4301ReparentLeaf'),
                     try
@@ -310,7 +309,6 @@ static_guard_test_() ->
                 superclass => none,
                 module => ?HELPER,
                 class_methods => ?METHODS,
-                class_state => #{},
                 meta => #{direct_class_methods => #{testSelf => class_testSelf}}
             },
             {ok, Pid} = beamtalk_object_class:start_link('Bt4301Legacy', ClassInfo),
@@ -419,7 +417,7 @@ invalidation_test_() ->
             end
         end},
         {"put_process_bound_selectors drops derived facts only on a change", fun() ->
-            with_class('Bt4300Bound2', none, #{}, fun(Pid) ->
+            with_class('Bt4300Bound2', none, fun(Pid) ->
                 Key = {class_method_owner, Pid, testSelf},
                 Miss = fun() -> {nocache, miss} end,
                 ?assertEqual(self(), send(Pid, testSelf, [])),
@@ -445,7 +443,7 @@ invalidation_test_() ->
 owner_memo_invalidation_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
         {"a redefinition that removes the selector retires the owner", fun() ->
-            with_class('Bt4771Redefine', none, #{}, fun(Pid) ->
+            with_class('Bt4771Redefine', none, fun(Pid) ->
                 ?assertEqual(self(), send(Pid, testSelf, [])),
                 ?assertMatch({owner, _, _, _, _, _, _}, memo(Pid, testSelf)),
                 {ok, _} = beamtalk_object_class:update_class('Bt4771Redefine', #{

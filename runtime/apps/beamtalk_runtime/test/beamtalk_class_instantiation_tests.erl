@@ -420,7 +420,7 @@ test_kill_actor_spawned_via_class_survives_class() ->
     %% exact scenario the bug report describes. Before the fix, safe_spawn
     %% used gen_server:start_link, linking the new actor to the class
     %% process; exit(ActorPid, kill) then propagated over that link and
-    %% killed the class gen_server too (losing class vars / hot patches).
+    %% killed the class gen_server too (losing hot patches).
     ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     {ok, #beamtalk_object{pid = ActorPid} = Obj} = gen_server:call(CounterPid, {spawn, []}),
@@ -1425,7 +1425,7 @@ register_builder_class(ClassName, Superclass, FieldSpecs, MethodSpecs) ->
     Pid.
 
 %% Like register_builder_class/4 but also installs class-side method funs
-%% (selector => fun(ClassSelf, ClassVars, A1..An)). Used to exercise the
+%% (selector => fun(ClassSelf, A1..An)). Used to exercise the
 %% self-dispatch path: a class method that does `self new` then sends
 %% an instance message, all while inside the class gen_server.
 register_builder_class_with_class_methods(

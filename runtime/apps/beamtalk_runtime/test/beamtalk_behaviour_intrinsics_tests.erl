@@ -256,22 +256,6 @@ class_class_test_() ->
             end)
         end),
         %%% ============================================================================
-        %%% classClassVarNames/1 and classAllClassVarNames/1
-        %%% ============================================================================
-        %% Dynamic (ClassBuilder) classes carry no static __beamtalk_meta/0, so the
-        %% class-side field intrinsics return [] rather than crashing. The meta-reading
-        %% path (real class_fields) is covered by the BUnit suite against compiled
-        %% fixtures (stdlib/test/class_state_test.bt).
-        ?_test(begin
-            {ClassObj, Pid} = register_class('BT2238ClassVarsNoMeta', #{x => 0}, #{}),
-            beamtalk_test_class:with_class(Pid, fun() ->
-                Local = beamtalk_behaviour_intrinsics:classClassVarNames(ClassObj),
-                All = beamtalk_behaviour_intrinsics:classAllClassVarNames(ClassObj),
-                ?assertEqual([], Local),
-                ?assertEqual([], All)
-            end)
-        end),
-        %%% ============================================================================
         %%% classIncludesSelector/2
         %%% ============================================================================
         ?_test(begin
@@ -1374,7 +1358,7 @@ compile_source_non_binary_raises_type_error_test_() ->
 %%% ============================================================================
 
 %% A class backed by a module exporting __beamtalk_meta/0 takes the meta fast
-%% path in classFieldNames/1, classLocalMethods/1, classClassVarNames/1 and
+%% path in classFieldNames/1, classLocalMethods/1 and
 %% classIncludesSelector/2 instead of the gen_server fallback.
 meta_fast_path_reflection_test_() ->
     {foreach, fun setup/0, fun teardown/1, [
@@ -1383,8 +1367,7 @@ meta_fast_path_reflection_test_() ->
                 superclass => nil,
                 fields => [alpha, beta],
                 method_info => #{'doThing' => #{}, 'doOther' => #{}},
-                class_method_info => #{'factory' => #{}},
-                class_fields => [counter]
+                class_method_info => #{'factory' => #{}}
             }),
             ClassName = 'BTMetaFixtureA',
             ClassInfo = #{
@@ -1408,11 +1391,6 @@ meta_fast_path_reflection_test_() ->
                 LocalMethods = beamtalk_behaviour_intrinsics:classLocalMethods(ClassObj),
                 ?assert(lists:member('doThing', LocalMethods)),
                 ?assert(lists:member('doOther', LocalMethods)),
-                %% classClassVarNames -> maps:get(class_fields, Meta)
-                ?assertEqual(
-                    [counter],
-                    beamtalk_behaviour_intrinsics:classClassVarNames(ClassObj)
-                ),
                 %% classIncludesSelector -> maps:is_key(_, method_info)
                 ?assert(
                     beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'doThing')
@@ -1427,7 +1405,7 @@ meta_fast_path_reflection_test_() ->
             end
         end),
         %% BT-5154 (ADR 0153): the compiler no longer emits `class_fields`;
-        %% a meta map without the key reads as no class variables.
+        %% a meta map without the key reads as no class-variable kinds.
         ?_test(begin
             MetaMod = load_meta_module(bt_meta_fixture_no_class_fields, #{
                 superclass => nil,
@@ -1444,12 +1422,7 @@ meta_fast_path_reflection_test_() ->
                 class_methods => #{}
             },
             {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
-            ClassObj = #beamtalk_object{
-                class = 'BTMetaFixtureNoClassFields class', class_mod = MetaMod, pid = Pid
-            },
             try
-                ?assertEqual([], beamtalk_behaviour_intrinsics:classClassVarNames(ClassObj)),
-                ?assertEqual([], beamtalk_behaviour_intrinsics:classAllClassVarNames(ClassObj)),
                 ?assertEqual(#{}, beamtalk_class_metadata:class_var_kinds_or_unknown(ClassName))
             after
                 beamtalk_test_proc:stop(Pid),
@@ -1463,8 +1436,7 @@ meta_fast_path_reflection_test_() ->
                 superclass => nil,
                 fields => [],
                 method_info => #{},
-                class_method_info => #{'build' => #{}},
-                class_fields => []
+                class_method_info => #{'build' => #{}}
             }),
             ClassName = 'BTMetaFixtureB',
             ClassInfo = #{

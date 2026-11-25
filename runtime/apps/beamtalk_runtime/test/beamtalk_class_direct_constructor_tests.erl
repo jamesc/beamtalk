@@ -45,7 +45,6 @@ class_info_with_module(Module, Superclass, Meta) ->
         superclass => Superclass,
         module => Module,
         class_methods => #{},
-        class_state => #{},
         meta => Meta
     }.
 
