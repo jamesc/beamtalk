@@ -311,7 +311,7 @@ if not defined TLS_PROBE_DIR (
     exit /b 1
 )
 set "TLS_PROBE=!TLS_PROBE_DIR!\preflight.txt"
-"%ERL%" -noshell %BOOT_ARGS% %PA_ARGS% -args_file "%CONFIG_DIR%\vm.args" -eval "beamtalk_release_launcher:tls_preflight_main()." -extra %VERB% >"!TLS_PROBE!"
+"%ERL%" -noshell %BOOT_ARGS% %PA_ARGS% -args_file "%CONFIG_DIR%\vm.args" -beamtalk_launcher_verb %VERB% -eval "beamtalk_release_launcher:tls_preflight_main()." >"!TLS_PROBE!"
 set "TLS_RC=!errorlevel!"
 set "TLS_PROTO="
 set "TLS_INTERFACE="
@@ -379,6 +379,9 @@ if /I "%INCLUDE_ERTS%"=="true" if exist "%ROOT%\erts-%ERTS_VSN%\bin\start_clean.
 exit /b 0
 
 :foreground
+rem The dispatch above matched case-insensitively; name the verb canonically
+rem for the TLS check, which prints its notes only for foreground.
+set "VERB=foreground"
 call :check_otp_window
 if errorlevel 1 exit /b 1
 call :select_distribution

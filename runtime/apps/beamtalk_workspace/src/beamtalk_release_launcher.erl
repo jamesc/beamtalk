@@ -341,10 +341,12 @@ tls_preflight_main() ->
     case tls_preflight(fun os:getenv/1, Args) of
         {ok, #{proto := Proto, interface := Ip, host := Host, optfile := OptFile} = Result} ->
             %% Notes are for the operator starting the node; a health check's
-            %% `ping` every few seconds should not repeat them.
+            %% `ping` every few seconds should not repeat them. The launcher
+            %% names its verb with `-beamtalk_launcher_verb`.
             [
                 io:format(standard_error, "note: ~ts~n", [Note])
-             || init:get_plain_arguments() =:= ["foreground"], Note <- maps:get(notes, Result)
+             || init_words(beamtalk_launcher_verb) =:= ["foreground"],
+                Note <- maps:get(notes, Result)
             ],
             io:format(
                 "tls-proto=~ts~ntls-interface=~w~ntls-epmd=~ts~ntls-host=~ts~ntls-optfile=~ts~n",
@@ -547,14 +549,12 @@ tls_host(Host) ->
             end
     end.
 
-%% A name whose labels are all digits (`10.1`, `010.0.0.1`) is not an IP
-%% literal by the shared rule, but the resolver would still read it as one in
-%% legacy shorthand, so it is refused rather than passed to `-name`.
+%% A legacy IPv4 shorthand (`10.1`, octal `010.0.0.1`, hex `0x7f.1`) is not
+%% an IP literal by the shared rule, but the resolver still reads it as one,
+%% so it is refused rather than passed to `-name` as a host name.
 valid_host_name(Host) ->
     Labels = string:split(Host, ".", all),
-    not lists:all(
-        fun(L) -> L =/= "" andalso lists:all(fun(C) -> C >= $0 andalso C =< $9 end, L) end, Labels
-    ) andalso
+    element(1, inet:parse_ipv4_address(Host)) =:= error andalso
         length(Host) =< 253 andalso
         lists:all(
             fun(Label) ->
@@ -562,7 +562,7 @@ valid_host_name(Host) ->
                     hd(Label) =/= $- andalso lists:last(Label) =/= $- andalso
                     lists:all(fun host_char/1, Label)
             end,
-            string:split(Host, ".", all)
+            Labels
         ).
 
 host_char(C) ->

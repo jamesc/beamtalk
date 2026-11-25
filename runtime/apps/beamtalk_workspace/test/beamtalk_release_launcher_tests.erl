@@ -161,6 +161,9 @@ tls_preflight_test_() ->
                     ["RELEASE_HOST '010.0.0.1' is not" ++ _],
                     Problems(#{"RELEASE_HOST" => "010.0.0.1"})
                 ),
+                ?_assertMatch(
+                    ["RELEASE_HOST '0x7f.1' is not" ++ _], Problems(#{"RELEASE_HOST" => "0x7f.1"})
+                ),
                 ?_assertMatch({ok, _}, Preflight(#{"RELEASE_HOST" => "node1.123.example.com"})),
                 ?_assertMatch(
                     ["RELEASE_HOST 'bad host' is not" ++ _],

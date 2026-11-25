@@ -311,8 +311,8 @@ select_distribution() {
     [ "$DIST_MODE" = "tls" ] || return 0
     eval "set -- -noshell $(minimal_boot_args) $(lib_pa_args) \
         -args_file \"\$CONFIG_DIR/vm.args\" \
-        -eval \"beamtalk_release_launcher:tls_preflight_main().\" \
-        -extra \"\$VERB\""
+        -beamtalk_launcher_verb \"\$VERB\" \
+        -eval \"beamtalk_release_launcher:tls_preflight_main().\""
     preflight=$("$ERL" "$@") || exit $?
     TLS_PROTO=$(printf '%s\n' "$preflight" | sed -n 's/^tls-proto=//p')
     TLS_INTERFACE=$(printf '%s\n' "$preflight" | sed -n 's/^tls-interface=//p')
