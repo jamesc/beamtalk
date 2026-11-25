@@ -13,7 +13,7 @@ Tests class-side method dispatch, metaclass lookup, and class object behaviour.
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
--export([class_lcRead/1, class_lcWrite/1, class_lcSelf/1]).
+-export([class_lcSelf/1, class_lcKey/1]).
 
 %%====================================================================
 %% Setup/Teardown

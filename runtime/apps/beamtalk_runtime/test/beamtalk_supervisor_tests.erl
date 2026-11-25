@@ -68,8 +68,7 @@ Tests cover:
     class_returnInvalid/1,
     class_returnSupervisor/1,
     class_writeVar/1,
-    class_readVar/1,
-    class_readThenActor/1,
+    class_keyProbeThenActor/1,
     start_link_fake_child/0,
     start_link_fake_child/1,
     start_link_fake_child/2
