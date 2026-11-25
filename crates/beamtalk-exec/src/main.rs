@@ -23,6 +23,10 @@
 //!
 //! - `{stdout, ChildId, Data}`
 //! - `{stderr, ChildId, Data}`
+//! - `{stdin_queued, ChildId}` — a `write_stdin` for `ChildId` was accepted
+//!   into its stdin queue. Every well-formed `write_stdin` (one naming a
+//!   `child_id`) gets exactly one answer, this or an `error`, in command
+//!   order, so the BEAM can tell which write was dropped (BT-5248).
 //! - `{exit, ChildId, ExitCode}` — the last event for a child. A failed
 //!   `spawn` gets `{exit, ChildId, -1}` (unless the id belongs to a live child).
 //! - `{error, ChildId, Command, Reason}` — the `Command` (`spawn`,
@@ -152,6 +156,13 @@ fn stderr_event(child_id: u32, data: &[u8]) -> Term {
 
 fn exit_event(child_id: u32, code: i32) -> Term {
     tuple3(atom("exit"), child_id_term(child_id), int_term(code))
+}
+
+fn stdin_queued_event(child_id: u32) -> Term {
+    Term::from(eetf::Tuple::from(vec![
+        atom("stdin_queued"),
+        child_id_term(child_id),
+    ]))
 }
 
 fn error_event(child_id: u32, command: &str, reason: &str) -> Term {
@@ -1007,16 +1018,26 @@ fn run_command_loop(input: &mut impl Read, port: &Port) {
             }
         };
 
-        if let Err(e) = handle_command(&term, port) {
-            warn!("Command error: {e}");
-            if let Some(child_id) = command_child_id(&term) {
-                send_event(
-                    &port.writer,
-                    &error_event(child_id, command_name(&term), &e),
-                );
+        match handle_command(&term, port) {
+            Ok(()) if command_name(&term) == "write_stdin" => {
+                // Answer every accepted write so the BEAM learns which one
+                // is dropped, not just that one was (BT-5248).
+                if let Some(child_id) = command_child_id(&term) {
+                    send_event(&port.writer, &stdin_queued_event(child_id));
+                }
             }
-            if let Some(child_id) = failed_spawn_child_id(&term, &port.children) {
-                send_event(&port.writer, &exit_event(child_id, -1));
+            Ok(()) => {}
+            Err(e) => {
+                warn!("Command error: {e}");
+                if let Some(child_id) = command_child_id(&term) {
+                    send_event(
+                        &port.writer,
+                        &error_event(child_id, command_name(&term), &e),
+                    );
+                }
+                if let Some(child_id) = failed_spawn_child_id(&term, &port.children) {
+                    send_event(&port.writer, &exit_event(child_id, -1));
+                }
             }
         }
     }
@@ -1359,6 +1380,14 @@ mod tests {
                 atom("spawn"),
                 binary_term(b"bad")
             ]))
+        );
+    }
+
+    #[test]
+    fn stdin_queued_event_encodes_correctly() {
+        assert_eq!(
+            stdin_queued_event(3),
+            Term::from(eetf::Tuple::from(vec![atom("stdin_queued"), int_term(3)]))
         );
     }
 
