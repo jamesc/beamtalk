@@ -73,6 +73,7 @@ pub use method_category::{
     categorize_methods_in_source, parse_divider_name,
 };
 pub use method_span::{MethodSide, SpanResolveError, resolve_method_span};
+pub(crate) use parser::parse_integer;
 pub use parser::{
     Diagnostic, DiagnosticCategory, DiagnosticNote, ProvisionOrigin, Severity,
     equality_operator_is_negated, is_equality_operator, is_input_complete,
@@ -233,6 +234,17 @@ pub fn completion_word_start(text: &str) -> usize {
         .rev()
         .find(|&(_, c)| !is_completion_word_char(c))
         .map_or(0, |(i, c)| i + c.len_utf8())
+}
+
+/// The line ending a text file uses: `"\r\n"` if it contains one, else
+/// `"\n"`.
+///
+/// The one rule for "which line endings does this file use", shared by
+/// `beamtalk fmt` (which writes a CRLF file back with CRLF endings, BT-5183)
+/// and the CLI's surgical manifest edits.
+#[must_use]
+pub fn line_ending(text: &str) -> &'static str {
+    if text.contains("\r\n") { "\r\n" } else { "\n" }
 }
 
 #[cfg(test)]

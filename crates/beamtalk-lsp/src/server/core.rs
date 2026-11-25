@@ -11,7 +11,7 @@ use super::config::{
 use super::convert::{offset_to_position, position_to_offset, uri_to_path};
 use super::flush::flush_event_listener;
 use super::nav::{bt_locations_to_lsp, runtime_site_to_lsp_location};
-use super::range_format::format_range_edits;
+use super::range_format::{format_range_edits, log_format_refusal};
 use super::reload::{
     OpenPathsHandle, class_changed_listener, reload_check_listener, seed_reload_diagnostics,
 };
@@ -1117,7 +1117,10 @@ impl Backend {
             svc.file_source(&path)?
         };
 
-        let formatted = format_source(&source)?;
+        // A parse error or a failed round-trip check (BT-5183) yields no edits.
+        let formatted = format_source(&source)
+            .inspect_err(log_format_refusal)
+            .ok()?;
 
         if formatted == source {
             return Some(vec![]);
