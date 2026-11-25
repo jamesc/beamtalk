@@ -256,3 +256,20 @@ TestCase subclass: JsonMappingTest
     self assert: (m encode: (JsonMappedEvent eventType: #x seq: 3)) equals: #{
       "n" => 3
     }
+
+  testEntryWithoutUsingMeansNoConverter =>
+    m := JsonMapping new withEntries: #(#{#field => #seq, #key => "n"})
+    self assert: (m encode: (JsonMappedEvent eventType: #x seq: 5)) equals: #{
+      "n" => 5
+    }
+
+  testStringAndSymbolKeyWithSameNameAreDuplicates =>
+    m := JsonMapping new
+      withEntries: #(#{
+        #field => #seq,
+        #key => "id",
+        #using => nil
+      }, #{#field => #eventType, #key => #id, #using => nil})
+    self should: [
+      m encode: (JsonMappedEvent eventType: #x seq: 1)
+    ] raise: #user_error

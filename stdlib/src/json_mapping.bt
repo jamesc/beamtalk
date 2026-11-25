@@ -129,7 +129,8 @@ Value subclass: JsonMapping
                 ++ entry printString
                 ++ " (expected #field Symbol, #key String, #using Block or nil)"
           ]
-        key := entry at: #key
+        // Compare by wire name: #id and "id" are written as the same key.
+        key := (entry at: #key) asString
         (seen includes: key) ifTrue: [
           self error: "JsonMapping: duplicate wire key " ++ key printString
         ]
@@ -218,7 +219,7 @@ Value subclass: JsonMapping
                 ++ name printString
           ]
         raw := anObject perform: #fieldAt: withArguments: (#() add: name)
-        converter := entry at: #using
+        converter := entry at: #using ifAbsent: [nil]
         value := converter isNil
           ifTrue: [
             (secrets includes: name) ifTrue: [

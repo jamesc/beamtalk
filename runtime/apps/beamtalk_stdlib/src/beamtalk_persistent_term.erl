@@ -104,12 +104,13 @@ pt_key(Key) -> {?MODULE, Key}.
 
 -doc """
 The `beamtalk_fifo_lock` key that serialises misses on `Key` (exported for
-tests). The key is encoded with `term_to_binary/1` because the lock table
+tests). The key is encoded with `term_to_binary/2` (`deterministic`, so `=:=` keys
+holding maps encode alike) because the lock table
 orders keys with `==`: `1` and `1.0` are distinct `persistent_term` keys and
 must not share one lock.
 """.
 -spec lock_key(term()) -> {beamtalk_persistent_term, binary()}.
-lock_key(Key) -> {?MODULE, term_to_binary(Key)}.
+lock_key(Key) -> {?MODULE, term_to_binary(Key, [deterministic])}.
 
 %% The miss path of `getOrPut/2`, run under the per-key lock so the check,
 %% the block and the store are one step for every other caller of this key.
